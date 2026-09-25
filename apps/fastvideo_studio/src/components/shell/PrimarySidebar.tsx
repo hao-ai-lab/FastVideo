@@ -151,6 +151,14 @@ export default function PrimarySidebar({
             Datasets
           </Link>
           <Link
+            href="/scenes"
+            aria-current={pathname === '/scenes' ? 'page' : undefined}
+            onClick={onMobileClose}
+            className={cn(TAB_BASE, pathname === '/scenes' && TAB_ACTIVE)}
+          >
+            Scenes
+          </Link>
+          <Link
             href="/gallery"
             aria-current={pathname === '/gallery' ? 'page' : undefined}
             onClick={onMobileClose}

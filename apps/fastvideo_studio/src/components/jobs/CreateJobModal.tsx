@@ -49,8 +49,18 @@ import {
   parseH3Prompt,
   serializeH3Prompt,
   type H3PromptFields,
+  type H3PromptSection,
 } from '@/lib/h3Prompt';
+import { applyH3Tag, type H3Tag } from '@/lib/h3Tags';
+import { H3TagConsole } from '@/components/jobs/H3TagConsole';
+import { H3DialogueEditor } from '@/components/jobs/H3DialogueEditor';
+import { H3ShotListEditor } from '@/components/jobs/H3ShotListEditor';
 import { jobToFormFields, type JobLike } from '@/lib/jobToFields';
+import { readField, shotTarget, writeField, writeShotTarget } from '@/lib/h3PromptFields';
+import { toast } from 'sonner';
+
+/** Prompt fields the speech-tag console can insert into. */
+type TagTarget = 'prompt' | H3PromptSection;
 
 export interface CreateJobModalProps {
   isOpen: boolean;
@@ -60,6 +70,8 @@ export interface CreateJobModalProps {
   workloadType: string;
   /** When set, the modal edits this pending job instead of creating a new one. */
   editingJob?: JobLike | null;
+  /** Seed the form from this job (an imported job file) but still create a new job on submit. */
+  prefillJob?: JobLike | null;
   /** Show the configuration without allowing changes (started/finished jobs). */
   readOnly?: boolean;
 }
@@ -71,6 +83,7 @@ export default function CreateJobModal({
   jobType,
   workloadType,
   editingJob,
+  prefillJob,
   readOnly = false,
 }: CreateJobModalProps) {
   const { options } = useStore(defaultOptionsStore);
@@ -121,11 +134,85 @@ export default function CreateJobModal({
   // H3 is the only registered model with an end frame or references.
   const supportsLastImage = modelId.toLowerCase().includes('minimax-h3');
   const usingReferences = supportsLastImage && references.length > 0;
+  // Same check, named for where it gates H3-only prompt features (speech tags)
+  // rather than the end-frame/reference upload UI.
+  const isH3Model = supportsLastImage;
+
+  // Which prompt field the speech-tag console inserts into: whichever one is
+  // actually visible, tracked via each field's onFocus below.
+  const [activeTagField, setActiveTagField] = React.useState<TagTarget>('prompt');
+  const tagFieldRefs = React.useRef<Partial<Record<TagTarget, HTMLTextAreaElement | null>>>({});
+  const showGuidedFields = usingReferences && useGuidedPrompt;
+  React.useEffect(() => {
+    setActiveTagField(showGuidedFields ? 'detailed_description' : 'prompt');
+  }, [showGuidedFields]);
+
+  function getTagFieldValue(field: TagTarget): string {
+    return field === 'prompt' ? prompt : promptFields[field];
+  }
+  function setTagFieldValue(field: TagTarget, value: string) {
+    if (field === 'prompt') setPrompt(value);
+    else setPromptField(field, value);
+  }
+
+  function insertH3Tag(tag: H3Tag) {
+    const field = activeTagField;
+    const el = tagFieldRefs.current[field] ?? null;
+    const currentValue = getTagFieldValue(field);
+    const start = el?.selectionStart ?? currentValue.length;
+    const end = el?.selectionEnd ?? currentValue.length;
+    const result = applyH3Tag(currentValue, start, end, tag);
+    setTagFieldValue(field, result.value);
+    // The textarea re-renders with the new value before this runs; restore
+    // focus and the cursor position so tags can be chained without reaching
+    // for the mouse each time.
+    requestAnimationFrame(() => {
+      const node = tagFieldRefs.current[field];
+      if (node) {
+        node.focus();
+        node.setSelectionRange(result.start, result.end);
+      }
+    });
+  }
+
+  // Full-screen dialogue editor: opens with a copy of whichever field the
+  // speech-tag console would currently insert into, and on Apply overwrites
+  // that same field wholesale (not just an insertion at the cursor).
+  const [dialogueEditorOpen, setDialogueEditorOpen] = React.useState(false);
+  const dialogueEditorField = activeTagField;
+
+  // Shot list: writes into detailed_description AND retention_analysis
+  // together, so unlike the speech-tag console/dialogue editor it isn't
+  // scoped to "whichever field is focused" -- it's specific to those two.
+  const [shotListOpen, setShotListOpen] = React.useState(false);
+  // 'sections' edits the guided Detailed description; 'prompt' edits the shots
+  // inside the raw prompt (base format, or a plain prompt).
+  const [shotListMode, setShotListMode] = React.useState<'sections' | 'prompt'>('sections');
+  function applyShotList(detailedDescription: string, retentionAnalysis: string) {
+    setPromptFields((prev) => ({
+      ...prev,
+      detailed_description: detailedDescription,
+      retention_analysis: retentionAnalysis,
+    }));
+  }
+
+  const promptShots = React.useMemo(() => shotTarget(prompt), [prompt]);
+  const promptSubjects = React.useMemo(() => readField(prompt, 'subject_definitions') ?? '', [prompt]);
+  const promptRetention = React.useMemo(() => readField(prompt, 'retention_analysis'), [prompt]);
+  const promptSyncsRetention = promptShots.field === 'detailed_description' && promptRetention !== null;
+
+  function applyShotListToPrompt(shotText: string, retentionAnalysis: string) {
+    let next = writeShotTarget(prompt, promptShots, shotText);
+    if (promptSyncsRetention) next = writeField(next, 'retention_analysis', retentionAnalysis);
+    setPrompt(next);
+  }
 
   // JobCard re-renders on every job-list poll, so `editingJob` is a fresh
   // object each time. Effects must depend on these, never on the object.
-  const editingJobId = editingJob?.id ?? null;
-  const editingJobModelId = editingJob?.model_id ?? null;
+  const seedJob = editingJob ?? prefillJob ?? null;
+  const seedJobId = seedJob?.id ?? null;
+  const seedJobModelId = seedJob?.model_id ?? null;
+  const isPrefill = !editingJob && !!prefillJob;
 
   // Layerwise offload and FSDP compete for the DiT weights and FastVideoArgs
   // silently picks a winner (fastvideo_args.py:859); resolve it visibly here.
@@ -204,10 +291,10 @@ export default function CreateJobModal({
     const justOpened = isOpen && !justOpenedRef.current;
     justOpenedRef.current = isOpen;
     if (!justOpened) return;
-    if (editingJob) {
+    if (seedJob) {
       // Must not fall through to the defaults below: a partially-seeded
       // form silently edits values the user never saw.
-      const f = jobToFormFields(editingJob);
+      const f = jobToFormFields(seedJob);
       setModelId(f.modelId);
       setName(f.name);
       setPrompt(f.prompt);
@@ -296,7 +383,7 @@ export default function CreateJobModal({
       setRealScoreModelPath('');
       setFakeScoreModelPath('');
     }
-  }, [isOpen, workloadType, inferenceWorkload, options, editingJobId]);
+  }, [isOpen, workloadType, inferenceWorkload, options, seedJobId]);
 
   // Load the models available for this workload.
   React.useEffect(() => {
@@ -319,7 +406,7 @@ export default function CreateJobModal({
         // When editing, the job's own model wins over the workload default --
         // this resolves after the seeding effect, so choosing a default here
         // would silently swap the model out from under the user.
-        const editedId = editingJobModelId;
+        const editedId = seedJobModelId;
         const chosen =
           editedId && ids.includes(editedId)
             ? editedId
@@ -327,6 +414,11 @@ export default function CreateJobModal({
               ? defaultId
               : (list[0]?.id ?? '');
         setModelId(chosen);
+        if (isPrefill && editedId && chosen !== editedId) {
+          toast.warning(
+            `${editedId} isn't available for ${inferenceWorkload.toUpperCase()}${chosen ? `, so ${chosen} is selected instead` : ''}.`,
+          );
+        }
         if (workloadType === 'dmd_t2v') {
           setRealScoreModelPath(chosen);
           setFakeScoreModelPath(chosen);
@@ -347,7 +439,7 @@ export default function CreateJobModal({
     return () => {
       stale = true;
     };
-  }, [isOpen, inferenceWorkload, workloadType, editingJobModelId]);
+  }, [isOpen, inferenceWorkload, workloadType, seedJobModelId, isPrefill]);
 
   // Training jobs need a dataset; load the ready datasets when relevant.
   React.useEffect(() => {
@@ -857,6 +949,22 @@ export default function CreateJobModal({
             </FieldRow>
           )}
 
+          {isH3Model && isInference && workloadType !== 't2i' && (
+            <div className="flex flex-col gap-2">
+              <H3TagConsole onInsert={insertH3Tag} disabled={isSubmitting} />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={() => setDialogueEditorOpen(true)}
+                disabled={isSubmitting}
+              >
+                Open dialogue editor
+              </Button>
+            </div>
+          )}
+
           {usingReferences && useGuidedPrompt ? (
             /* Six-section format from the model's reference prompt guide. */
             <>
@@ -868,12 +976,31 @@ export default function CreateJobModal({
                 >
                   <Textarea
                     id={`modal-prompt-${section}`}
+                    ref={(el) => {
+                      tagFieldRefs.current[section] = el;
+                    }}
                     value={promptFields[section]}
                     onChange={(e) => setPromptField(section, e.target.value)}
+                    onFocus={() => setActiveTagField(section)}
                     rows={section === 'detailed_description' ? 5 : 2}
                     placeholder={H3_SECTION_HINTS[section]}
                     disabled={isSubmitting}
                   />
+                  {section === 'detailed_description' && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="self-start"
+                      onClick={() => {
+                        setShotListMode('sections');
+                        setShotListOpen(true);
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      Open shot list
+                    </Button>
+                  )}
                 </FieldRow>
               ))}
               <button
@@ -893,8 +1020,12 @@ export default function CreateJobModal({
               >
                 <Textarea
                   id="modal-prompt"
+                  ref={(el) => {
+                    tagFieldRefs.current.prompt = el;
+                  }}
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
+                  onFocus={() => setActiveTagField('prompt')}
                   rows={isInference ? 3 : 2}
                   placeholder={
                     isInference
@@ -904,6 +1035,21 @@ export default function CreateJobModal({
                   required={!(usingReferences && useGuidedPrompt)}
                   disabled={isSubmitting}
                 />
+                {isH3Model && isInference && workloadType !== 't2i' && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => {
+                      setShotListMode('prompt');
+                      setShotListOpen(true);
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    Open shot list
+                  </Button>
+                )}
               </FieldRow>
               {usingReferences && (
                 <button
@@ -1379,6 +1525,38 @@ export default function CreateJobModal({
             </Button>
           </div>
         </form>
+
+        {/* Nested in the React tree (still portaled to <body>) so Radix treats
+            clicks and focus inside these as inside this dialog. As siblings
+            they counted as "outside", and closing one could close this too. */}
+        <H3DialogueEditor
+          open={dialogueEditorOpen}
+          initialValue={getTagFieldValue(dialogueEditorField)}
+          onApply={(value) => setTagFieldValue(dialogueEditorField, value)}
+          onClose={() => setDialogueEditorOpen(false)}
+        />
+        <H3ShotListEditor
+          open={shotListOpen}
+          subjectDefinitions={shotListMode === 'sections' ? promptFields.subject_definitions : promptSubjects}
+          initialDetailedDescription={
+            shotListMode === 'sections' ? promptFields.detailed_description : promptShots.body
+          }
+          initialRetentionAnalysis={
+            shotListMode === 'sections' ? promptFields.retention_analysis : (promptRetention ?? '')
+          }
+          targetLabel={
+            shotListMode === 'sections'
+              ? undefined
+              : promptShots.field === 'integrated_multimodal_description'
+                ? 'integrated_multimodal_description'
+                : promptShots.field === 'detailed_description'
+                  ? 'Detailed description'
+                  : 'the prompt'
+          }
+          withRetention={shotListMode === 'sections' || promptSyncsRetention}
+          onApply={shotListMode === 'sections' ? applyShotList : applyShotListToPrompt}
+          onClose={() => setShotListOpen(false)}
+        />
       </DialogContent>
     </Dialog>
   );

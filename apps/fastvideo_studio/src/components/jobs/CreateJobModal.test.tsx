@@ -4,9 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CreateJobModal from './CreateJobModal';
+import { toast } from 'sonner';
 import { createJob, getDatasets, getModels, uploadImage } from '@/lib/api';
 import { defaultOptionsStore } from '@/stores/defaultOptions';
 import { DEFAULT_OPTIONS } from '@/lib/defaultOptions';
+
+vi.mock('sonner', () => ({ toast: { warning: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 
 vi.mock('@/lib/api', () => ({
   createJob: vi.fn(),
@@ -205,5 +208,180 @@ describe('CreateJobModal', () => {
     expect(payload).not.toHaveProperty('num_inference_steps');
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the H3 speech-tag console only for an H3 model and inserts at the prompt cursor', async () => {
+    vi.mocked(getModels).mockResolvedValue([
+      ...MODELS,
+      { id: 'minimax-h3/i2v', label: 'MiniMax H3', type: 'i2v' },
+    ]);
+    const user = userEvent.setup();
+    renderModal({ workloadType: 'i2v' });
+
+    await screen.findByRole('option', { name: 'Wan T2V (wan/t2v-1.3b)' });
+    expect(screen.queryByText(/Speech tags/)).not.toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByLabelText('Model'),
+      'minimax-h3/i2v',
+    );
+    expect(await screen.findByText(/Speech tags/)).toBeInTheDocument();
+
+    const promptField = screen.getByLabelText('Prompt') as HTMLTextAreaElement;
+    await user.type(promptField, 'Hello there.');
+    promptField.setSelectionRange(5, 5);
+
+    await user.click(screen.getByRole('button', { name: '<pause>' }));
+
+    expect(promptField.value).toBe('Hello <pause> there.');
+    // Focus and cursor return to the prompt field so tags can be chained.
+    await waitFor(() => expect(promptField).toHaveFocus());
+  });
+});
+
+const H3 = { id: 'minimax-h3/i2v', label: 'MiniMax H3', type: 'i2v' };
+
+const BASE_PROMPT = [
+  'For the target video, <Picture 1> is fully referenced.',
+  '',
+  'integrated_multimodal_description: [Shot 1] A close-up. He (S1) says: <d>[English] Sorry.</d> <cutoff>',
+  '',
+  'overall_soundscape: Room tone.',
+  '',
+  'non_diegetic_music: N/A',
+].join('\n');
+
+describe('CreateJobModal with a prefilled job', () => {
+  beforeEach(() => {
+    vi.mocked(getModels).mockResolvedValue([...MODELS, H3]);
+    vi.mocked(toast.warning).mockClear();
+  });
+
+  it('fills the form from the job and creates a new job on submit', async () => {
+    const user = userEvent.setup();
+    const { onSuccess } = renderModal({
+      workloadType: 'i2v',
+      prefillJob: {
+        id: 'imported-1',
+        model_id: H3.id,
+        name: 'from-file',
+        prompt: BASE_PROMPT,
+        workload_type: 'i2v',
+        references: [{ source: '/data/inputs/face.png', media_type: 'image' }],
+        num_frames: 243,
+        seed: 7,
+      },
+    });
+
+    await screen.findByRole('option', { name: /MiniMax H3/ });
+    await waitFor(() => expect(screen.getByLabelText('Model')).toHaveValue(H3.id));
+    expect(screen.getByLabelText('Name (optional)')).toHaveValue('from-file');
+    expect(screen.getByLabelText('Prompt')).toHaveValue(BASE_PROMPT);
+    expect(screen.getByText('face.png')).toBeInTheDocument();
+    expect(screen.getByText('New Inference Job (I2V)')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    const payload = vi.mocked(createJob).mock.calls[0][0] as unknown as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      model_id: H3.id,
+      name: 'from-file',
+      prompt: BASE_PROMPT,
+      num_frames: 243,
+      seed: 7,
+      references: [{ source: '/data/inputs/face.png', media_type: 'image' }],
+    });
+  });
+
+  it("warns when the file's model isn't offered for the workload", async () => {
+    renderModal({
+      workloadType: 't2v',
+      prefillJob: { id: 'imported-2', model_id: 'not/a-real-model', prompt: 'p' },
+    });
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(vi.mocked(toast.warning).mock.calls[0][0]).toContain('not/a-real-model');
+    expect(screen.getByLabelText('Model')).toHaveValue(MODELS[0].id);
+  });
+});
+
+describe('CreateJobModal shot list on a raw prompt', () => {
+  beforeEach(() => {
+    vi.mocked(getModels).mockResolvedValue([...MODELS, H3]);
+  });
+
+  async function openShotList(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'Open shot list' }));
+    return screen.findByRole('dialog', { name: 'Shot list' });
+  }
+
+  it('edits dialogue inside integrated_multimodal_description and leaves the rest of the prompt alone', async () => {
+    const user = userEvent.setup();
+    renderModal({
+      workloadType: 'i2v',
+      prefillJob: {
+        id: 'imported-3',
+        model_id: H3.id,
+        prompt: BASE_PROMPT,
+        references: [{ source: '/data/face.png', media_type: 'image' }],
+      },
+    });
+    await waitFor(() => expect(screen.getByLabelText('Model')).toHaveValue(H3.id));
+
+    const dialog = await openShotList(user);
+    expect(within(dialog).getAllByText(/integrated_multimodal_description/).length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText('Retention analysis')).not.toBeInTheDocument();
+
+    const line = within(dialog).getByPlaceholderText('What the speaker says') as HTMLTextAreaElement;
+    expect(line.value).toBe('Sorry.');
+    await user.type(line, ' Really.');
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Prompt')).toHaveValue(BASE_PROMPT.replace('Sorry.', 'Sorry. Really.')),
+    );
+  });
+
+  it('treats a plain prompt as the shot text and writes shot markers back over it', async () => {
+    const user = userEvent.setup();
+    renderModal({ workloadType: 't2v' });
+    await screen.findByRole('option', { name: /MiniMax H3/ });
+    await user.selectOptions(screen.getByLabelText('Model'), H3.id);
+    await user.type(screen.getByLabelText('Prompt'), 'A dock at dawn.');
+
+    const dialog = await openShotList(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(screen.getByLabelText('Prompt')).toHaveValue('[Shot 1] A dock at dawn.'));
+  });
+
+  it('keeps retention analysis in step when the raw prompt has a detailed_description and retention_analysis', async () => {
+    const user = userEvent.setup();
+    const sections = [
+      'subject_definitions:',
+      '<Subject 1> is the courier.',
+      '',
+      'retention_analysis:',
+      '<Subject 1> (appears in [Shot 1]): fully_preserved - jacket.',
+      '',
+      'detailed_description:',
+      '[Shot 1] Wide shot. A rooftop with <Subject 1>.',
+    ].join('\n');
+    renderModal({ workloadType: 't2v', prefillJob: { id: 'imported-4', model_id: H3.id, prompt: sections } });
+    await waitFor(() => expect(screen.getByLabelText('Model')).toHaveValue(H3.id));
+
+    const dialog = await openShotList(user);
+    expect(within(dialog).getByText('Retention analysis')).toBeInTheDocument();
+    await user.click(within(dialog).getAllByRole('button', { name: /Add shot/ })[0]);
+    await user.click(within(dialog).getAllByRole('button', { name: '<Subject 1>' })[1]);
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
+
+    const out = (screen.getByLabelText('Prompt') as HTMLTextAreaElement).value;
+    expect(out).toContain('<Subject 1> (appears in [Shot 1], [Shot 2]): fully_preserved - jacket.');
+    expect(out).toContain('subject_definitions:\n<Subject 1> is the courier.');
+  });
+
+  it('is not offered for a non-H3 model', async () => {
+    renderModal({ workloadType: 't2v' });
+    await screen.findByRole('option', { name: 'Wan T2V (wan/t2v-1.3b)' });
+    expect(screen.queryByRole('button', { name: 'Open shot list' })).not.toBeInTheDocument();
   });
 });

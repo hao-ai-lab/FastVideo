@@ -18,6 +18,8 @@ export interface Job {
 	log_file_path: string | null;
 	num_inference_steps: number;
 	num_frames: number;
+	/** frames per second; the API sends it, older cached objects may not have it */
+	fps?: number;
 	height: number;
 	width: number;
 	guidance_scale: number;

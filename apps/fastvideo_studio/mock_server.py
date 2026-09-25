@@ -4,8 +4,8 @@ In-memory mock of the FastVideo Studio API (``server.py``).
 
 This mock implements the same ``/api`` routes and response shapes as the real
 FastAPI server but keeps everything in memory and never touches the FastVideo
-library, a GPU, or a database. It is meant to back the Playwright e2e suite so
-the Next.js frontend can be exercised end-to-end without a real backend.
+library or a GPU. It is meant to back the Playwright e2e suite so the Next.js
+frontend can be exercised end-to-end without a real backend.
 
 Job lifecycle is simulated by recording a start timestamp and *computing* the
 status on read: a started job reports ``running`` for a few seconds and then
@@ -13,14 +13,24 @@ flips to ``completed`` with an ``output_path``, so polling the job list / logs
 shows progression. Generated media is a tiny 1s ``testsrc`` MP4 built lazily
 with ffmpeg and cached.
 
+Pass ``--data-dir`` to seed jobs/datasets/settings from a real server's
+persisted SQLite database instead of the built-in fake demo data, so you can
+browse real job history through the mock without a GPU. This is a read-only
+snapshot taken once at startup: nothing created or changed while the mock
+runs is ever written back to that database, so it's safe to point at the
+same ``--data-dir`` a real ``server.py`` is using.
+
 Usage (from the ``apps/`` directory)::
 
     PYTHONPATH=.. python -m fastvideo_studio.mock_server --port 8190
+    PYTHONPATH=.. python -m fastvideo_studio.mock_server --port 8190 --data-dir ../outputs/ui_data
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
+import logging
 import os
 import random
 import shutil
@@ -29,21 +39,30 @@ import tempfile
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from fastvideo_studio.database import default_settings_dict
+from fastvideo_studio.database import Database, default_settings_dict
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
                                      model_label)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("fastvideo.studio.mock")
 
 # --- Config -----------------------------------------------------------------
 
 # How long a started job stays "running" before it flips to "completed".
 COMPLETE_AFTER_SECONDS = 3.0
 FFMPEG_BIN = shutil.which(os.getenv("FASTVIDEO_FFMPEG_BIN", "ffmpeg"))
+
+# Marks a job dict as a frozen row loaded from a real --data-dir snapshot
+# (see _load_snapshot_from_db) rather than something this process is
+# simulating. Stripped from API responses by _public_job.
+_FROM_SNAPSHOT_KEY = "_from_db_snapshot"
 
 # A small catalogue of fake models keyed by workload type. Mirrors the real
 # server's {id, label} shape (label derived from the HF-style path).
@@ -54,6 +73,10 @@ _MODELS_BY_WORKLOAD: dict[str, list[str]] = {
     ],
     "i2v": [
         "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+        # Real registered id (fastvideo/registry.py) -- needed so the frontend's
+        # `modelId.toLowerCase().includes('minimax-h3')` gate (speech-tag
+        # console, references, last-frame upload) actually lights up in the mock.
+        "MiniMaxAI/MiniMax-H3",
     ],
     "t2i": [
         "black-forest-labs/FLUX.1-schnell",
@@ -98,16 +121,76 @@ _mock_media_cache: dict[str, str] = {}
 _mock_media_lock = threading.Lock()
 
 
+def _testsrc_frame(width: int, height: int, index: int):
+    """A cheap, dependency-light stand-in for ffmpeg's `testsrc` pattern:
+    a gradient that shifts over `index` so an encoded clip visibly animates."""
+    import numpy as np
+
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    frame[:, :, 0] = np.linspace(0, 255, width, dtype=np.uint8)[None, :]
+    frame[:, :, 1] = np.linspace(0, 255, height, dtype=np.uint8)[:, None]
+    frame[:, :, 2] = (index * 10) % 256
+    return frame
+
+
+def _build_mock_media_with_pyav(kind: str, path: str) -> None:
+    """ffmpeg isn't installed on every dev box; PyAV (a real FastVideo
+    dependency already, used for reference-video decoding) can encode the
+    same tiny clip directly via its bundled libav, no external binary."""
+    from PIL import Image
+
+    if kind == "png":
+        Image.fromarray(_testsrc_frame(320, 240, 0)).save(path)
+        return
+
+    import av as pyav
+
+    # h264 is what every browser's <video> element actually plays; mpeg4
+    # (MPEG-4 Part 2) is a PyAV-always-has-it fallback that no mainstream
+    # browser decodes, so gallery/job previews would just fail to load.
+    try:
+        pyav.codec.Codec("h264", "w")
+        codec_name = "h264"
+    except Exception:
+        logger.warning("PyAV has no h264 encoder available; falling back to mpeg4, which most "
+                        "browsers cannot play in <video>. Install ffmpeg for real preview playback.")
+        codec_name = "mpeg4"
+
+    container = pyav.open(path, mode="w")
+    try:
+        stream = container.add_stream(codec_name, rate=24)
+        stream.width = 320
+        stream.height = 240
+        stream.pix_fmt = "yuv420p"
+        for i in range(24):  # 1s at 24fps, matching the ffmpeg path's clip length
+            frame = pyav.VideoFrame.from_ndarray(_testsrc_frame(320, 240, i), format="rgb24")
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    finally:
+        container.close()
+
+
 def _build_mock_media(kind: str) -> str:
-    """Build (once) a tiny testsrc clip of the given ``kind`` with ffmpeg; cache the path."""
+    """Build (once) a tiny testsrc-like clip of the given ``kind``; cache the path."""
     with _mock_media_lock:
         cached = _mock_media_cache.get(kind)
         if cached and os.path.isfile(cached):
             return cached
-        if not FFMPEG_BIN:
-            raise HTTPException(status_code=500, detail="ffmpeg is required to build mock media")
         fd, path = tempfile.mkstemp(prefix="fvstudio_mock_", suffix=f".{kind}")
         os.close(fd)
+        if not FFMPEG_BIN:
+            try:
+                _build_mock_media_with_pyav(kind, path)
+            except Exception as exc:
+                with contextlib.suppress(OSError):
+                    os.remove(path)
+                raise HTTPException(status_code=500, detail=f"PyAV fallback failed to build mock {kind}: {exc}") from exc
+            if not os.path.isfile(path) or os.path.getsize(path) == 0:
+                raise HTTPException(status_code=500, detail=f"PyAV fallback produced no mock {kind} bytes")
+            _mock_media_cache[kind] = path
+            return path
         if kind == "png":
             command = [
                 FFMPEG_BIN,
@@ -166,15 +249,23 @@ def _build_mock_media(kind: str) -> str:
 
 
 def _new_job_dict(req: CreateJobRequest) -> dict[str, Any]:
-    """Build a job dict (mirrors job_runner.Job.to_dict()) in the pending state."""
+    """Build a job dict (mirrors job_runner.Job.to_dict()) in the pending state.
+
+    Starts from req.model_dump() rather than re-listing CreateJobRequest's
+    fields by hand -- the previous version silently dropped name,
+    last_image_path, references, and every offload/tuning flag because it
+    was never updated as CreateJobRequest grew those fields. Spreading the
+    request means new fields flow through automatically.
+    """
     job_id = str(uuid.uuid4())
     return {
+        **req.model_dump(),
         "id": job_id,
-        "model_id": req.model_id,
-        "prompt": req.prompt,
         "workload_type": req.workload_type or "t2v",
         "job_type": req.job_type or "inference",
         "image_path": req.image_path or "",
+        "negative_prompt": req.negative_prompt or "",
+        "data_path": req.data_path or "",
         "status": "pending",
         "created_at": time.time(),
         "started_at": None,
@@ -182,17 +273,6 @@ def _new_job_dict(req: CreateJobRequest) -> dict[str, Any]:
         "error": None,
         "output_path": None,
         "log_file_path": None,
-        "num_inference_steps": req.num_inference_steps,
-        "num_frames": req.num_frames,
-        "height": req.height,
-        "width": req.width,
-        "guidance_scale": req.guidance_scale,
-        "guidance_rescale": req.guidance_rescale,
-        "fps": req.fps,
-        "seed": req.seed,
-        "negative_prompt": req.negative_prompt or "",
-        "num_gpus": req.num_gpus,
-        "data_path": req.data_path or "",
         "progress": 0.0,
         "progress_msg": "",
         "phase": "pending",
@@ -204,8 +284,13 @@ def _advance_job(job: dict[str, Any]) -> None:
 
     Status is *computed on read* from the recorded start timestamp, so polling
     the job list / logs naturally shows pending -> running -> completed.
+
+    Jobs loaded from a persisted DB snapshot (``_FROM_SNAPSHOT_KEY``) are a
+    frozen historical record, not something this process is simulating — skip
+    them so a real "pending" or "running" row doesn't silently start ticking
+    toward a fake "completed" just because someone polled it.
     """
-    if job["status"] != "running" or not job.get("started_at"):
+    if job.get(_FROM_SNAPSHOT_KEY) or job["status"] != "running" or not job.get("started_at"):
         return
     elapsed = time.time() - job["started_at"]
     if elapsed >= COMPLETE_AFTER_SECONDS:
@@ -219,9 +304,9 @@ def _advance_job(job: dict[str, Any]) -> None:
 
 
 def _public_job(job: dict[str, Any]) -> dict[str, Any]:
-    """Advance + return a copy safe to serialize."""
+    """Advance + return a copy safe to serialize (internal-only keys stripped)."""
     _advance_job(job)
-    return dict(job)
+    return {k: v for k, v in job.items() if k != _FROM_SNAPSHOT_KEY}
 
 
 _LOG_TAIL = [
@@ -346,6 +431,84 @@ def _seed() -> None:
     }
 
 
+# --- DB snapshot (--data-dir) ------------------------------------------------
+
+
+def _decode_references(value: Any) -> list[dict[str, Any]]:
+    """Reference lists round-trip through the DB as JSON text."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return list(decoded) if isinstance(decoded, list) else []
+
+
+def _job_from_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    """Adapt a persisted job row into the mock's job dict shape.
+
+    Frozen as a read-only historical record (see _FROM_SNAPSHOT_KEY): the mock
+    never actually ran this job, so it doesn't get to simulate progress for
+    one. A row still marked "running" is orphaned -- the real JobRunner
+    reclassifies those as failed on its own restart, so mirror that here.
+    """
+    job = dict(row)
+    status = job["status"]
+    if status == "running":
+        status = "failed"
+        job["error"] = job.get("error") or "Server restarted (job was running)"
+        job["finished_at"] = job.get("finished_at") or time.time()
+    job["status"] = status
+    job["references"] = _decode_references(row.get("references"))
+    job["progress"] = 100.0 if status == "completed" else 0.0
+    job["progress_msg"] = "50/50 steps" if status == "completed" else ""
+    job["phase"] = "done" if status == "completed" else status
+    job[_FROM_SNAPSHOT_KEY] = True
+    return job
+
+
+def _load_snapshot_from_db(data_dir: Path) -> bool:
+    """Seed jobs/datasets/settings from a real server's persisted SQLite db.
+
+    Read-only: opens the db (Database.__init__ runs the same idempotent
+    schema migrations a real server startup would) and copies rows into the
+    mock's in-memory state; nothing the mock does afterward is written back.
+    Returns False (leaving the caller to fall back to _seed()) if no db file
+    is found at that path, rather than silently creating an empty one.
+    """
+    db_path = data_dir / "fastvideo_ui.db"
+    if not db_path.is_file():
+        logger.warning("--data-dir %s has no fastvideo_ui.db; falling back to fake demo data.", data_dir)
+        return False
+
+    db = Database(db_path)
+    settings = db.get_settings()
+    jobs = [_job_from_snapshot(row) for row in db.get_all_jobs()]
+    datasets = db.get_all_datasets()
+
+    with _state_lock:
+        _settings.update({k: v for k, v in settings.items() if v is not None})
+        _jobs.clear()
+        _jobs.update({j["id"]: j for j in jobs})
+        _datasets.clear()
+        _datasets.update({d["id"]: d for d in datasets})
+        _dataset_files.clear()
+        for d in datasets:
+            captions = db.get_dataset_captions(d["id"])
+            _dataset_files[d["id"]] = {"file_names": list(captions.keys()), "captions": captions}
+
+    logger.info(
+        "Loaded read-only snapshot from %s: %d job(s), %d dataset(s).",
+        db_path,
+        len(jobs),
+        len(datasets),
+    )
+    return True
+
+
 # --- App --------------------------------------------------------------------
 
 app = FastAPI(title="FastVideo Studio Mock API", version="0.1.0")
@@ -356,8 +519,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-_seed()
 
 
 @app.get("/api/__mock__")
@@ -423,6 +584,32 @@ async def upload_image(file: Annotated[UploadFile, File()]) -> dict[str, str]:
     return {"path": f"/mock/uploads/{uuid.uuid4().hex}_{os.path.basename(name)}"}
 
 
+ALLOWED_REFERENCE_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+ALLOWED_REFERENCE_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
+ALLOWED_REFERENCE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+@app.post("/api/upload-media")
+async def upload_media(file: Annotated[UploadFile, File()]) -> dict[str, str]:
+    """Ref2VA reference upload (image/video/audio) -- the real server's
+    counterpart to upload_image, which only ever handles images."""
+    name = file.filename or "reference"
+    ext = os.path.splitext(name)[1].lower()
+    allowed = ALLOWED_REFERENCE_IMAGE_EXTENSIONS | ALLOWED_REFERENCE_VIDEO_EXTENSIONS | ALLOWED_REFERENCE_AUDIO_EXTENSIONS
+    if ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(sorted(allowed))}")
+    if ext in ALLOWED_REFERENCE_VIDEO_EXTENSIONS:
+        media_type = "video"
+    elif ext in ALLOWED_REFERENCE_AUDIO_EXTENSIONS:
+        media_type = "audio"
+    else:
+        media_type = "image"
+    return {
+        "path": f"/mock/uploads/{uuid.uuid4().hex}_{os.path.basename(name)}",
+        "media_type": media_type,
+    }
+
+
 @app.post("/api/upload-raw-dataset")
 async def upload_raw_dataset(files: Annotated[list[UploadFile], File()]) -> dict[str, Any]:
     video_exts = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
@@ -473,6 +660,9 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
 
 
 def _start(job: dict[str, Any]) -> None:
+    # Once the mock is actually driving this job, it's no longer a frozen
+    # historical record -- let _advance_job simulate it like any other.
+    job.pop(_FROM_SNAPSHOT_KEY, None)
     job["status"] = "running"
     job["started_at"] = time.time()
     job["finished_at"] = None
@@ -552,6 +742,12 @@ def get_video(job_id: str) -> FileResponse:
         output_path = job.get("output_path")
         if job["status"] != "completed" or not output_path:
             raise HTTPException(status_code=404, detail="No output available for this job")
+    # A job loaded from a --data-dir snapshot may point at a real file this
+    # process never wrote, only reads -- serve it if it's actually there,
+    # otherwise fall back to the same synthetic clip every other job gets.
+    if os.path.isfile(output_path):
+        media_type = "video/mp4" if output_path.endswith(".mp4") else "image/png"
+        return FileResponse(output_path, media_type=media_type, filename=os.path.basename(output_path))
     # Mirror the real server: image workloads (t2i) output a .png served as an
     # image; everything else is a video.
     if output_path.endswith(".png"):
@@ -651,7 +847,17 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     # Default off the real server's 8189 so the mock never shadows a real API.
     parser.add_argument("--port", type=int, default=8190, help="Port number (default: 8190)")
+    parser.add_argument(
+        "--data-dir",
+        default=None,
+        help=("Read-only: seed jobs/datasets/settings from a real server's "
+              "fastvideo_ui.db under this directory (its --data-dir) instead "
+              "of fake demo data. Nothing the mock does is written back."),
+    )
     args = parser.parse_args()
+
+    if args.data_dir is None or not _load_snapshot_from_db(Path(args.data_dir).resolve()):
+        _seed()
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

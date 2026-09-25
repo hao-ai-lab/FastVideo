@@ -16,6 +16,23 @@ if (!globalThis.crypto?.randomUUID) {
   });
 }
 
+// jsdom's Blob/File predate Blob.text(); real browsers all have it.
+if (!Blob.prototype.text) {
+  Blob.prototype.text = function text(this: Blob) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this);
+    });
+  };
+}
+
+// jsdom doesn't implement scrollIntoView.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = vi.fn();
+}
+
 if (!URL.createObjectURL) {
   URL.createObjectURL = vi.fn(() => 'blob:mock-url');
 }

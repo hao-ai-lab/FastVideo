@@ -13,6 +13,7 @@ const TAB_TITLES: Record<string, string> = {
   '/distillation': 'Jobs',
   '/datasets': 'Datasets',
   '/gallery': 'Gallery',
+  '/scenes': 'Scenes',
   '/gpus': 'GPUs',
   '/settings': 'Settings',
 };
