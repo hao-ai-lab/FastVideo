@@ -81,7 +81,7 @@ class QuantizationConfig:
 @dataclass
 class EngineConfig:
     num_gpus: int = 1
-    execution_backend: Literal["mp", "ray"] = "mp"
+    execution_backend: Literal["mp", "uni", "ray"] = "mp"
     parallelism: ParallelismConfig = field(default_factory=ParallelismConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     compile: CompileConfig = field(default_factory=CompileConfig)

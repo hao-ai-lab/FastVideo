@@ -25,7 +25,6 @@ import torch
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
@@ -175,8 +174,7 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
     assert os.path.exists(output_dir), f"Output not generated at {output_dir}"
 

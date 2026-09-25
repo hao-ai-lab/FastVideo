@@ -153,6 +153,8 @@ if __name__ == '__main__':
     main()
 ```
 
+`num_gpus=1` runs the worker in-process (weights load once, no extra Python process). On Colab/Kaggle-style machines with ~16GB host RAM, keep `num_gpus=1`; free-tier system memory does not grow with extra T4s, so `num_gpus>1` is likely to OOM.
+
 Run the script with:
 
 ```bash

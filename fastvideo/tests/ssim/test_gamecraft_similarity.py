@@ -31,7 +31,6 @@ from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
     write_ssim_results,
 )
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
@@ -64,8 +63,7 @@ from fastvideo.models.camera import create_camera_trajectory as _create_camera_t
 def _shutdown_executor(generator: VideoGenerator | None) -> None:
     if generator is None:
         return
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
 
 # ---------------------------------------------------------------------------
