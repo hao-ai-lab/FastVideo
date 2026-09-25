@@ -84,6 +84,19 @@ MODEL_REGISTRY = {
         "num_inference_steps": 5,
         "seed": 1000,
     },
+    "full-h3": {
+        "name": "MiniMax H3 (Full)",
+        "generation_backend": "minimax_h3",
+        "default_sp_size": 4,
+        "model_path": "MiniMaxAI/MiniMax-H3",
+        "attention_backend": "FLASH_ATTN",
+        "height": 768,
+        "width": 1344,
+        "num_frames": 124,
+        "num_inference_steps": 50,
+        "seed": 1000,
+        "full_checkpoint": True,
+    },
 }
 
 DEFAULT_MODEL_ID = "fast-ltx2"
@@ -96,7 +109,10 @@ if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
 MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
 
 # Generation limits
-SESSION_TIMEOUT_SECONDS = 300
+# Full H3 loads and generates substantially longer than the Preview adapter.
+# This also covers a base/ref pipeline reload inside a retained session.
+SESSION_TIMEOUT_SECONDS = max(
+    60, int(os.getenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", "7200" if ACTIVE_MODEL_ID == "full-h3" else "300")))
 
 # Frame settings
 NUM_FRAMES = 121

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from dreamverse.generation_inputs import GenerationInputs
+
 
 @dataclass
 class StepResult:
@@ -36,6 +38,7 @@ class GenerationBackend(Protocol):
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        generation_inputs: GenerationInputs | None = None,
     ) -> StepResult:
         ...
 
