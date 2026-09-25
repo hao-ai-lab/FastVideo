@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -38,6 +39,87 @@ FAULT_CASES = [
     (2, 0, "lifecycle"),
     (4, 3, "lifecycle"),
 ]
+FAULT_CASES += [(world, fault_rank, stage)
+               for world, fault_rank in [(2, 1), (4, 0)]
+               for stage in ("constructor", "backend", "pynccl", "hostname", "late_layout", "late_capture",
+                             "late_configuration", "late_capacity", "late_lifecycle", "cached_shape", "cached_mode",
+                             "decline_then_recover", "late_real_capture", "late_mixed_capture")]
+
+
+def _check_after_warmup(helper, rank: int, fault_rank: int, stage: str, device: torch.device) -> None:
+    """Exercise divergence after an armed signature has already succeeded twice."""
+    from fastvideo.distributed.device_communicators import ulysses_a2a
+
+    assert helper is not None, "this regression must exercise an available fused helper"
+    x = torch.randn(3, 64, 8, 64, device=device, dtype=torch.bfloat16)
+    if stage == "decline_then_recover":
+        # Populate a declined contract before any window or successful call.
+        operand = torch.stack((x, x), dim=-1)[..., 0] if rank == fault_rank else x
+        assert helper.try_all_to_all_4D(operand, 2, 1) is None
+        assert helper._handle is None
+    for _ in range(3):
+        y = helper.try_all_to_all_4D(x, 2, 1)
+        assert y is not None
+        assert torch.equal(helper.try_all_to_all_4D(y, 1, 2), x)
+    alt = x.reshape(3, 32, 16, 64)
+    for _ in range(2):
+        assert helper.try_all_to_all_4D(alt, 2, 1) is not None
+
+    if stage in ("late_real_capture", "late_mixed_capture"):
+        capture_stream = torch.cuda.Stream(device=device)
+        graph = torch.cuda.CUDAGraph()
+        # Synchronize warmup before starting the real, default-global capture.
+        torch.cuda.synchronize(device)
+        if stage == "late_real_capture" or rank == fault_rank:
+            with torch.cuda.graph(graph, stream=capture_stream):
+                graph_output = x + 1
+                assert helper.try_all_to_all_4D(x, 2, 1) is None
+            graph.replay()
+            torch.cuda.synchronize(device)
+            assert torch.equal(graph_output, x + 1)
+        else:
+            assert helper.try_all_to_all_4D(x, 2, 1) is None
+        recovered = helper.try_all_to_all_4D(x, 2, 1)
+        assert recovered is not None
+        assert torch.equal(helper.try_all_to_all_4D(recovered, 1, 2), x)
+        print(f"RANK_DONE rank={rank} recovered=True", flush=True)
+        if rank == 0:
+            print(f"ALL_RANKS_COMPLETED world={helper.world_size} stage={stage}", flush=True)
+        return
+
+    dims = (2, 1)
+    operand = x
+    if rank == fault_rank:
+        if stage in ("late_layout", "decline_then_recover"):
+            operand = torch.stack((x, x), dim=-1)[..., 0]
+        elif stage == "cached_shape":
+            operand = alt
+        elif stage == "cached_mode":
+            operand, dims = y, (1, 2)
+        elif stage == "late_lifecycle":
+            helper._nbytes += 1
+
+    # Both the rank with the changed input and the ranks with familiar inputs
+    # must decline together. Calling NCCL with mismatched shapes/modes would
+    # itself be invalid, so check the helper result before the fallback path.
+    with patch.object(torch.cuda, "is_current_stream_capturing",
+                      return_value=rank == fault_rank and stage == "late_capture"), \
+            patch.object(ulysses_a2a, "is_enabled",
+                         return_value=not (rank == fault_rank and stage == "late_configuration")), \
+            patch.object(ulysses_a2a, "MAX_WINDOW_BYTES",
+                         1 if rank == fault_rank and stage == "late_capacity" else 1024**3):
+        assert helper.try_all_to_all_4D(operand, *dims) is None, "a peer entered the fused path alone"
+
+    if stage == "late_lifecycle":
+        assert helper._handle is None and helper._disabled_reason is not None
+    else:
+        # A transient decline must not poison a signature when peers recover.
+        recovered = helper.try_all_to_all_4D(x, 2, 1)
+        assert recovered is not None
+        assert torch.equal(helper.try_all_to_all_4D(recovered, 1, 2), x)
+    print(f"RANK_DONE rank={rank} recovered=True", flush=True)
+    if rank == 0:
+        print(f"ALL_RANKS_COMPLETED world={helper.world_size} stage={stage}", flush=True)
 
 
 def _worker() -> None:
@@ -66,6 +148,29 @@ def _worker() -> None:
             lambda self: (False, "injected capability failure"))
     elif rank == fault_rank and fault_stage == "configuration":
         os.environ["FASTVIDEO_ULYSSES_A2A"] = "off"
+    elif rank == fault_rank and fault_stage == "constructor":
+        from fastvideo.distributed.device_communicators.ulysses_a2a import UlyssesA2AHelper
+
+        def _fail_constructor(*args, **kwargs):
+            raise RuntimeError("injected helper constructor failure")
+
+        UlyssesA2AHelper.__init__ = _fail_constructor
+    elif rank == fault_rank and fault_stage == "backend":
+        from fastvideo_kernel import comm_ops
+
+        comm_ops.is_available = lambda: False
+    elif rank == fault_rank and fault_stage == "pynccl":
+        from fastvideo.distributed.device_communicators.pynccl import PyNcclCommunicator
+
+        real_init = PyNcclCommunicator.__init__
+
+        def _disable_pynccl(self, *args, **kwargs):
+            real_init(self, *args, **kwargs)
+            self.disabled = True
+
+        PyNcclCommunicator.__init__ = _disable_pynccl
+    elif rank == fault_rank and fault_stage == "hostname":
+        socket.gethostname = lambda: "injected-other-host"
 
     maybe_init_distributed_environment_and_model_parallel(1, world)
     communicator = get_sp_group().device_communicator
@@ -73,10 +178,14 @@ def _worker() -> None:
 
     try:
         if helper is None:
-            if fault_stage not in ("capability", "configuration"):
+            if fault_stage not in ("capability", "configuration", "constructor", "backend", "pynccl", "hostname"):
                 if rank == 0:
                     print("UNAVAILABLE helper not created", flush=True)
                 return
+
+        if fault_stage.startswith("late_") or fault_stage in ("cached_shape", "cached_mode", "decline_then_recover"):
+            _check_after_warmup(helper, rank, fault_rank, fault_stage, device)
+            return
 
         if helper is not None and rank == fault_rank and fault_stage == "allocation":
             helper._allocate = lambda nbytes: (_ for _ in ()).throw(
@@ -194,8 +303,11 @@ def test_rank_local_setup_failure_falls_back_group_wide(world: int, fault_rank: 
         pytest.skip(process.stdout.strip())
     assert process.returncode == 0 and "ALL_RANKS_COMPLETED" in process.stdout, (
         f"stdout:\n{process.stdout}\nstderr:\n{process.stderr[-6000:]}")
-    armed = dict(re.findall(r"RANK_DONE rank=(\d+) armed=(True|False)", process.stdout))
-    assert len(armed) == world and set(armed.values()) == {"False"}
+    if fault_stage.startswith("late_") or fault_stage in ("cached_shape", "cached_mode", "decline_then_recover"):
+        assert len(re.findall(r"RANK_DONE rank=\d+ recovered=True", process.stdout)) == world
+    else:
+        armed = dict(re.findall(r"RANK_DONE rank=(\d+) armed=(True|False)", process.stdout))
+        assert len(armed) == world and set(armed.values()) == {"False"}
 
 
 if __name__ == "__main__" and "--worker" in sys.argv:

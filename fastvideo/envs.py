@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     FASTVIDEO_VAE_PARALLEL_ENCODE: bool = False
     FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY: str | None = None
     FASTVIDEO_ULYSSES_A2A: str = "off"
+    FASTVIDEO_ULYSSES_A2A_LONG_TRAINING: str = "auto"
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
@@ -269,6 +270,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     #   mesh of 2/4/6/8 ranks in eager execution, else the NCCL path.
     "FASTVIDEO_ULYSSES_A2A":
     lambda: os.getenv("FASTVIDEO_ULYSSES_A2A", "off").strip().lower(),
+    # Keep the original long-training transport by default. Opt into bounded
+    # chunks after validating the training recipe's activation memory budget.
+    "FASTVIDEO_ULYSSES_A2A_LONG_TRAINING":
+    lambda: os.getenv("FASTVIDEO_ULYSSES_A2A_LONG_TRAINING", "auto").strip().lower(),
 
     # Use dedicated multiprocess context for workers.
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":
