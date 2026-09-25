@@ -1,0 +1,34 @@
+[project]
+name = "infinite-livestream"
+version = "0.1.0"
+description = "Chat-driven FastH3 infinite livestream: prompts in, continuous broadcast out."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "av>=17,<19",
+    "fastapi>=0.115,<1",
+    "fastvideo>=0.2.1",
+    "numpy>=1.24",
+    "openai>=1.40",
+    "pyyaml>=6.0",
+    "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+infinite-livestream-server = "infinite_livestream.server_entry:cli"
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+fastvideo = { workspace = true }
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: requires real GPU + model weights; skip in CI",
+]
