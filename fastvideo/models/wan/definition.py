@@ -29,10 +29,18 @@ class WanModelDefinition:
     match_model_index: tuple[tuple[str, str | bool], ...] = ()
 
     def matches_model_index(self, model_index: dict) -> bool:
-        """Match variant metadata before the generic pipeline-name fallback."""
-        return bool(self.match_model_index) and all(
-            model_index.get(key) is value if isinstance(value, bool) else str(model_index.get(key, "")).lower() ==
-            value.lower() for key, value in self.match_model_index)
+        """Match variant metadata before broad path and pipeline-name fallbacks."""
+        if not self.match_model_index:
+            return False
+        for key, expected in self.match_model_index:
+            actual = model_index.get(key, "")
+            if isinstance(expected, bool):
+                # A string or integer truth value is not a manifest boolean.
+                if actual is not expected:
+                    return False
+            elif str(actual).lower() != expected.lower():
+                return False
+        return True
 
     def matches(self, path_or_class: str) -> bool:
         """Preserve legacy substring detectors, including their broad matches."""

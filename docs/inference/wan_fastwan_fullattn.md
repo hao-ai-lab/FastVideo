@@ -35,5 +35,3 @@ heuristics.
 - No sparse (VSA) path for this inference config. The separate FullAttn-to-VSA
   LoRA training recipe uses the VSA-capable 5B training config for its student.
 - No TI2V or image-to-video workload on the FullAttn config class.
-- Teacher/critic loads during DMD distillation skip workload validation because
-  they are built under a narrowed dense scope.
