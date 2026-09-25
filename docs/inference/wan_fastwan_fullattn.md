@@ -9,7 +9,7 @@ the FastWan 5B checkpoint. It shares weights with the sparse TI2V alias
 - **Workload:** text-to-video (`t2v`) only. Image conditioning and TI2V are disabled.
 - **Attention:** dense backends (`TORCH_SDPA`, `FLASH_ATTN`, `SAGE_ATTN`, ...).
   `VIDEO_SPARSE_ATTN` is rejected at load time.
-- **Resolution:** 720P preset (`fastwan_5b_fullattn`).
+- **Resolution:** 720P registry preset (`fast_wan_2_2_ti2v_5b`).
 
 ## Example
 
