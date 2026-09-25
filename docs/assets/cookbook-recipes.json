@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -590,6 +590,10 @@
       "summary": "Run the eight-forward FastH3 8-Step V2 checkpoint (video/audio shifts 10/3, VSA 0.8, 64-token tiles) with the trained DMD ladder loaded from the checkpoint's fastvideo_inference.json.",
       "model": "FastVideo/FastVideo-FastH3-8-Step-V2",
       "source": "examples/inference/basic/basic_fasth3_8step.py",
+      "serving": {
+        "source": "examples/serving/openai_fasth3_8step.yaml",
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\""
+      },
       "command": "UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"\npython examples/inference/basic/basic_fasth3_8step.py --prompt \"(S1) A presenter says <d>[English] FastVideo runs FastH3.</d>\" --profile strict --no-inference-torch-compile --no-compile-vae",
       "gpu_types": ["NVIDIA"],
       "hardware": {
@@ -610,6 +614,45 @@
         "Nine sigma-grid points (eight transformer forwards) are fixed by the checkpoint's trained ladder; the example rejects any other --steps.",
         "Validated with the eager strict route (--profile strict --no-inference-torch-compile --no-compile-vae). The compiled all profile has not been measured for this checkpoint.",
         "T2AV only; no FL2VA/Ref2VA distillation and no matching LoRA. Quality and latency were not compared against the four-step preview in this PR."
+      ]
+    },
+    {
+      "id": "fasth3-8step-v2-mlx",
+      "serving": {
+        "source": "examples/serving/mlx_fasth3_8step.yaml",
+        "install": "uv pip install -e \".[mlx]\"",
+        "prepare": "hf download FastVideo/FastVideo-FastH3-8-Step-V2 --local-dir ./FastH3-8-Step-V2\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-8-Step-V2/transformer --out ./FastH3-8-Step-V2-MLX --formats \"int8\" --include-vsa"
+      },
+      "group": "fasth3-8step-v2",
+      "group_label": "FastH3 8-Step V2",
+      "group_task": "8-step text to video + audio",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Few-step text to video (with audio)",
+      "label": "FastH3 8-Step V2 on MLX",
+      "summary": "Run FastH3 8-Step V2 on Apple Silicon with a locally converted INT8 DiT, the checkpoint's DMD contract ladder, and trained VSA (sparsity 0.8, 64-token tiles).",
+      "model": "FastVideo/FastVideo-FastH3-8-Step-V2",
+      "source": "examples/inference/basic/mlx_fasth3_8step.py",
+      "command": "hf download FastVideo/FastVideo-FastH3-8-Step-V2 --local-dir ./FastH3-8-Step-V2\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-8-Step-V2/transformer --out ./FastH3-8-Step-V2-MLX --formats \"int8\" --include-vsa\npython examples/inference/basic/mlx_fasth3_8step.py --model-root ./FastH3-8-Step-V2 --mlx-checkpoint ./FastH3-8-Step-V2-MLX/int8 --prompt \"(S1) A presenter says <d>[English] FastVideo runs FastH3.</d>\" --height 480 --width 832 --num-frames 124 --seed 2026 --output-path ./outputs/fasth3_8step_int8.mp4",
+      "gpu_types": ["Apple Silicon"],
+      "hardware": {
+        "platform": "mlx",
+        "accelerator": "Apple M4 Max",
+        "system_memory": "36 GB unified memory",
+        "peak_memory": "27.39 GiB peak MLX memory during denoising",
+        "evidence": "validated",
+        "evidence_url": "https://github.com/hao-ai-lab/FastVideo/pull/1863"
+      },
+      "evidence": "Verified",
+      "expected_artifact": "MP4 with H.264 video and stereo AAC audio at outputs/fasth3_8step_int8.mp4",
+      "modes": ["T2VA", "8-step FastH3", "trained VSA"],
+      "knobs": [
+        {"key": "video_decode_backend", "label": "VAE decode", "hint": "Fidelity vs. speed", "flag": "--video-decode-backend", "options": [{"value": "h3-vae", "label": "Full H3 VAE"}, {"value": "taeh3", "label": "TAEH3 preview"}], "default": "h3-vae"}
+      ],
+      "limitations": [
+        "Convert with --include-vsa. mlx_fasth3_8step.py turns VSA on (sparsity 0.8, tile 64). A dense export fails at configure_vsa.",
+        "--steps 8 or 9 both run the eight trained forwards. Reuse the preview VAE, audio VAE, text encoder, and tokenizer if those directories already exist.",
+        "The MLX path supports T2VA only. FL2VA, Ref2VA, and two-pass refinement are not wired."
       ]
     },
     {

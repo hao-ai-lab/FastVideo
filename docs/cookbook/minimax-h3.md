@@ -11,7 +11,7 @@ checkpoint; its schedule contract is documented in
 [FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
 The four-forward FastH3 Preview recipes are unchanged.
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=9">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=10">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -22,7 +22,7 @@ The four-forward FastH3 Preview recipes are unchanged.
         <p class="cookbook-eyebrow">Primary focus · Inference</p>
         <h2>MiniMax H3 recipes</h2>
         <p>Generate video and audio with H3. Run a server on CUDA, one DGX Spark, or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
-        <span class="cookbook-count" data-cookbook-count>8 maintained recipes</span>
+        <span class="cookbook-count" data-cookbook-count>9 maintained recipes</span>
       </div>
     </div>
     <div class="cookbook-lifecycle" aria-label="Lifecycle stages">
@@ -47,9 +47,9 @@ The four-forward FastH3 Preview recipes are unchanged.
     <h2 id="h3-modes-heading">Supported modes</h2>
     <p>
       CUDA covers T2VA, FL2VA, and Ref2VA on the full checkpoint, plus FastH3
-      Preview and FastH3 LoRA. FastH3 Preview also has a DGX Spark runtime with
-      a 1-Spark or 2-Spark device row. MLX is T2VA only. Temporal <code>--fast</code>,
-      spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
+      Preview and FastH3 8-Step V2. FastH3 Preview also has a DGX Spark runtime with
+      a 1-Spark or 2-Spark device row. MLX is T2VA only: Preview and 8-Step V2.
+      Temporal <code>--fast</code>, spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
       MLX script, not extra recipes.
     </p>
     <div class="cookbook-modes__table-wrap">
@@ -64,8 +64,8 @@ The four-forward FastH3 Preview recipes are unchanged.
         <tbody>
           <tr>
             <td>T2VA</td>
-            <td>Full H3, FastH3 Preview, FastH3 LoRA</td>
-            <td>FastH3 Preview after a local DiT conversion</td>
+            <td>Full H3, FastH3 Preview, FastH3 LoRA, FastH3 8-Step V2</td>
+            <td>FastH3 Preview or FastH3 8-Step V2 after a local DiT conversion</td>
           </tr>
           <tr>
             <td>FL2VA</td>
@@ -272,7 +272,7 @@ cd FastVideo</code></pre>
       <ul>
         <li>The full CUDA H3 examples request four GPUs by default. Their sources do not claim a GPU model or memory minimum.</li>
         <li>The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.</li>
-        <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
+        <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FastH3 8-Step V2 MLX converts with <code>--include-vsa</code> and runs eight forwards. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
         <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 CUDA recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
         <li>DGX Spark is a runtime on FastH3 Preview, not a separate family card. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks. The CUDA GPU-count knob does not apply to Spark.</li>
         <li>GB10 has no FA4 / sm_100a VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_SM100A=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 362 (15.08 s). A 345-frame request on one Spark can OOM.</li>

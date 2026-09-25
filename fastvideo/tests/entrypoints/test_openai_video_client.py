@@ -23,7 +23,8 @@ from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.entrypoints.openai.api_server import create_app
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
 from fastvideo.api.compat import normalize_generation_request
-from fastvideo.entrypoints.openai.mlx_server import MLXH3Generator, create_mlx_app, load_config, validate_mlx_video_request
+from fastvideo.entrypoints.openai.mlx_server import (MLXH3Generator, create_mlx_app, load_config,
+                                                     mlx_num_steps, validate_mlx_video_request)
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -246,6 +247,22 @@ def test_mlx_rejects_unsupported_options_before_generation(fields):
         fields = {"image_reference": {"image_url": fields["image_reference"]}}
     with pytest.raises(ValueError):
         validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", **fields))
+
+
+def test_mlx_preview_and_8step_configs_map_sigma_points_to_forwards():
+    assert mlx_num_steps(5) == 4
+    assert mlx_num_steps(9) == 8
+    validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=5))
+    validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=9))
+    preview = load_config(str(ROOT / "examples/serving/mlx_fasth3.yaml"))
+    eight = load_config(str(ROOT / "examples/serving/mlx_fasth3_8step.yaml"))
+    assert preview.generator.model_path.endswith("FastH3-Preview-v0.2")
+    assert preview.generator.vsa is False
+    assert eight.generator.model_path.endswith("FastH3-8-Step-V2")
+    assert eight.generator.vsa is True
+    assert eight.generator.vsa_sparsity == 0.8
+    assert eight.default_request["sampling"]["num_inference_steps"] == 9
+    assert mlx_num_steps(eight.default_request["sampling"]["num_inference_steps"]) == 8
 
 
 def test_mlx_http_rejects_reference_media_and_image_routes(local_server):

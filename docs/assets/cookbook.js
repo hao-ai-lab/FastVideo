@@ -519,10 +519,10 @@
           option.setAttribute("aria-pressed", String(selected));
         });
         servingAvailability.textContent = profile
-          ? "The playground and API clients share one server process. Both workflows can run on your own machine."
+          ? "The playground and the OpenAI Python client share one server process. Both workflows can run on your own machine."
           : servingLoadFailed
             ? "Server examples could not be loaded. Open the H3 server guide below, or use Python directly."
-            : "This recipe uses Python directly. For the playground and API clients, choose FastH3 Preview with CUDA, MLX, or one Spark.";
+            : "This recipe uses Python directly. FastH3 Preview and FastH3 8-Step V2 can also run a local server for the playground and the OpenAI Python client.";
         servingPanel.hidden = !useServer;
         commandBlock.hidden = useServer;
         root.querySelector("[data-cookbook-python-note]").hidden = useServer;
@@ -574,7 +574,7 @@
       });
 
       description.textContent = useServer
-        ? `FastH3 Preview generates video with audio. This server profile uses the checked-in ${runtime.label} configuration.`
+        ? `${recipe.group_label || recipe.label} generates video with audio. Start the local server, then use the playground or the OpenAI Python client. This profile uses the checked-in ${runtime.label} configuration.`
         : recipe.summary;
       label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;

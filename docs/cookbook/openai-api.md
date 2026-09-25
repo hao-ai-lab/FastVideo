@@ -8,8 +8,9 @@ JavaScript client examples use that interface, but requests go to FastVideo.
 You do not need an OpenAI account or cloud key.
 
 The [H3 recipe selector](minimax-h3.md) provides the same workflow with runtime
-selection. This guide covers FastH3 Preview text-to-video/audio. Other H3
-recipes keep their direct Python commands.
+selection. This guide covers FastH3 Preview (four forwards) and FastH3 8-Step V2
+(eight forwards). Start a server, then iterate in the playground or with the
+OpenAI Python client. Other H3 recipes keep their direct Python commands.
 
 CUDA requests reuse one loaded `VideoGenerator`. The Python SDK can do the same
 when you reuse the generator across `generate()` calls. MLX keeps one
@@ -35,6 +36,14 @@ The configuration loads `FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2` and
 advertises it as `fasth3`. It configures four CUDA GPUs but does not record
 a GPU model or VRAM requirement. This is a source-backed server profile, not
 the measured GB200 Python performance profile. Compilation is disabled.
+
+For FastH3 8-Step V2, use the same install and the 8-step config (nine sigma
+points, eight DiT forwards, VSA sparsity 0.8):
+
+```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
+fastvideo serve --config examples/serving/openai_fasth3_8step.yaml --server.host 127.0.0.1
+```
 
 Keep the server running. In another terminal, check readiness:
 
@@ -111,6 +120,20 @@ The MLX server has no recorded device or unified-memory requirement. The
 direct Python recipe's M4 Max measurements are not a server benchmark or a
 minimum-memory claim.
 
+For FastH3 8-Step V2, convert that checkpoint's transformer with `--include-vsa`
+and start the 8-step config. Do not overwrite a four-step export:
+
+```bash
+hf download FastVideo/FastVideo-FastH3-8-Step-V2 --local-dir ./FastH3-8-Step-V2
+python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-8-Step-V2/transformer --out ./FastH3-8-Step-V2-MLX --formats "int8" --include-vsa
+python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3_8step.yaml
+```
+
+That adapter passes `num_steps=8` when the HTTP field is `num_inference_steps=9`,
+and it enables the trained VSA recipe (sparsity 0.8, 64-token tiles). Reuse the
+preview VAE, audio VAE, text encoder, and tokenizer if those directories already
+exist; edit the YAML paths if your files live elsewhere.
+
 ## Open the playground
 
 Open [the local H3 playground](http://127.0.0.1:8000/playground/) after startup.
@@ -136,9 +159,11 @@ or manage a GPU server for you.
 ## Generate with cURL or an SDK
 
 These examples use the server's resolution, frame count, and sampling defaults.
-Do not copy Sora-specific durations or resolutions onto H3. Both server configs
-use 124 frames, 24 fps, and the five-point distilled sigma schedule with four
-DiT forwards. CUDA and one Spark use 1344 × 768; MLX uses 832 × 480.
+Do not copy Sora-specific durations or resolutions onto H3. Preview configs use
+124 frames, 24 fps, and the five-point distilled sigma schedule with four DiT
+forwards. 8-Step V2 configs use nine sigma points and eight DiT forwards. CUDA
+and one Spark use 1344 × 768; MLX uses 832 × 480. The OpenAI Python client is
+the same for every FastH3 server that advertises `fasth3`.
 
 Each client submits a job, checks for completion or failure, and downloads an
 MP4 named after the job ID. Polling stops after 30 minutes; a timeout does not
