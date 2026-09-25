@@ -4,6 +4,7 @@ Simple test for attn_qat_train.
 Tests forward and backward passes with and without QAT enabled.
 """
 
+import pytest
 import torch
 from fastvideo_kernel.triton_kernels.attn_qat_train import _attention
 from fastvideo_kernel.triton_kernels.fused_attention import attention as fused_attention
@@ -11,6 +12,27 @@ from math import sqrt
 
 attention = _attention.apply
 DEVICE = torch.device("cuda")
+
+
+def test_smooth_q_fails_before_tensor_or_kernel_work():
+    dummy = torch.empty((1, 1, 1, 16))
+
+    with pytest.raises(NotImplementedError, match="smooth_q=True is not supported"):
+        attention(
+            dummy,
+            dummy,
+            dummy,
+            False,
+            1.0,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            False,
+            True,
+        )
 
 
 def attn_qat_train_wrapper(q_BLHD, k_BLHD, v_BLHD, is_causal=False, sm_scale=None):
