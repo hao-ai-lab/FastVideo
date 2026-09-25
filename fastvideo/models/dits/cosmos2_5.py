@@ -749,14 +749,15 @@ class Cosmos25Transformer3DModel(BaseDiT):
         self.adaln_lora_dim = getattr(config, "adaln_lora_dim", 256)
         self.extra_pos_embed_type = getattr(config, "extra_pos_embed_type", None)
         self.use_crossattn_projection = getattr(config, "use_crossattn_projection", False)
+        self.use_condition_mask = getattr(config, "use_condition_mask", True)
 
         # 1. Patch Embedding
-        # Account for: VAE channels + condition_mask (1) + padding_mask (1 if concat_padding_mask)
+        # Account for: VAE channels + condition_mask (1, optional) + padding_mask (1 if concat_padding_mask)
         patch_embed_in_channels = config.in_channels  # Base VAE channels (16)
-        patch_embed_in_channels += 1  # Always add 1 for condition_mask
+        if self.use_condition_mask:
+            patch_embed_in_channels += 1  # Add 1 for condition_mask
         if config.concat_padding_mask:
             patch_embed_in_channels += 1  # Add 1 for padding_mask
-        # Total: 16 + 1 + 1 = 18 (with concat_padding_mask=True)
 
         self.patch_embed = Cosmos25PatchEmbed(patch_embed_in_channels, inner_dim, config.patch_size)
 
@@ -845,11 +846,19 @@ class Cosmos25Transformer3DModel(BaseDiT):
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
 
-        # 1. Concatenate condition mask if provided
-        if condition_mask is not None:
-            hidden_states = torch.cat([hidden_states, condition_mask], dim=1)
+        # 1. Concatenate condition mask if provided and expected
+        if self.use_condition_mask:
+            if condition_mask is not None:
+                hidden_states = torch.cat([hidden_states, condition_mask], dim=1)
+            else:
+                # If not provided, create a dummy zero mask
+                dummy_mask = torch.zeros(
+                    batch_size, 1, num_frames, height, width,
+                    dtype=hidden_states.dtype, device=hidden_states.device
+                )
+                hidden_states = torch.cat([hidden_states, dummy_mask], dim=1)
 
-        # 2. Concatenate padding mask if needed
+        # 2. Concatenate padding mask if required
         if self.concat_padding_mask and padding_mask is not None:
             padding_mask = transforms.functional.resize(
                 padding_mask,
