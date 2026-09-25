@@ -25,7 +25,8 @@ _default_request: GenerationRequest | None = None
 
 
 def get_generator() -> ServingGenerator:
-    """Return the global VideoGenerator instance (set during startup)."""
+    """Return the global generator (set during startup).
+    """
     assert _generator is not None, "Server not initialized — generator is None"
     return _generator
 

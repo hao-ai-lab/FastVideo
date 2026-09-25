@@ -62,6 +62,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
 
     logger.info("Initializing %s generation runtime for %s ...", app.state.runtime, args.model_path)
+    # A non-CUDA runtime (e.g. MLX) supplies its own generator_factory instead
+    # of the default VideoGenerator/Executor path -- see MLXWanGenerator.
     factory = app.state.generator_factory
     generator = factory() if factory is not None else VideoGenerator.from_fastvideo_args(args)
     serving_engine = OpenAIServingEngine(generator, app.state.video_request_validator)
@@ -98,7 +100,13 @@ def create_app(
     video_request_validator: Callable[[VideoGenerationRequest], None] | None = None,
     runtime: str = "cuda",
 ) -> FastAPI:
-    """Build the FastAPI application with all routers mounted"""
+    """Build the FastAPI application with all routers mounted.
+
+    ``generator_factory``/``video_request_validator``/``runtime`` let a
+    non-CUDA backend (MLX) plug in its own generator and request rules
+    without a separate app-building path. Defaults reproduce the original
+    CUDA-only behavior exactly.
+    """
 
     app = FastAPI(
         title="FastVideo OpenAI-Compatible API",
@@ -158,6 +166,8 @@ def create_app(
 
     app.include_router(common_router)
     app.include_router(video_router)
+    # The MLX runtime only wires video-with-audio generation (see
+    # fastvideo/mlx_runtime/); image generation has no MLX backend yet.
     if runtime != "mlx":
         app.include_router(image_router)
     app.include_router(playground_router)
