@@ -507,11 +507,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
     def tile(self, x: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         """Scatter rows into the padded tile buffer (pad positions stay zero).
 
-        The returned tensor aliases the builder-owned buffer; callers must
-        consume it before the next ``tile()`` (both call sites in
-        ``forward()`` read it immediately). Odd tile-64 no-grad sm100a
-        requests carry one additional all-zero tile internally; metadata and
-        all observable outputs retain the logical geometry.
+        Without grad tracking the returned tensor aliases the builder-owned
+        buffer; callers must consume it before the next ``tile()`` (both call
+        sites in ``forward()`` read it immediately). A grad-tracking forward
+        instead receives a fresh buffer and leaves the holder untouched, so
+        the builder never retains autograd state across steps. Odd tile-64
+        no-grad sm100a requests carry one additional all-zero tile internally;
+        metadata and all observable outputs retain the logical geometry.
         """
         if x.shape[1] != attn_metadata.total_seq_length:
             raise ValueError(f"VSA-H3 metadata was built for sequence length {attn_metadata.total_seq_length}, "
@@ -531,6 +533,17 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         needs_sm100a_pair = (attn_metadata.tile_elems == 64 and n_tiles % 2 != 0 and not grad_mode and sm100a_requested)
         kernel_tiles = n_tiles + int(needs_sm100a_pair)
         target_shape = (x.shape[0], kernel_tiles * attn_metadata.tile_elems, x.shape[-2], x.shape[-1])
+
+        # A grad-tracking forward must not reuse the builder-owned buffer. The
+        # holder outlives the training step -- one builder serves the whole run,
+        # and every step's metadata references the same holder -- while every
+        # VSA layer writes this one buffer in place. A graph-tracked tiled
+        # tensor left on the holder therefore anchors the step's in-place
+        # autograd edges, and through them the activations they saved, for the
+        # rest of training. This is the VSA-H3 counterpart of the Wan tile-cache
+        # OOM (#1423), which training fixed with ``vsa_cache_tile_buf=False``.
+        if grad_mode:
+            return scatter_into_tile_buf(x, target_shape, attn_metadata.untile_combined_index, None)
 
         # ``untile_combined_index`` maps each packed row to a logical tile
         # slot. Different geometries can share one transport shape; clear a
