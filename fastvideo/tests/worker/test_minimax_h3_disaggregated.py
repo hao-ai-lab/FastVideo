@@ -30,6 +30,8 @@ import fastvideo.worker.minimax_h3_disaggregated as disaggregated_runtime
 from fastvideo.worker.minimax_h3_disaggregated import (
     MiniMaxH3DisaggregatedExecutor,
     RayMiniMaxH3DisaggregatedRuntime,
+    _MiniMaxH3DiTActor,
+    _MiniMaxH3EncoderDecoderActor,
     _node_resource,
     _resident_role_args,
     _validate_topology,
@@ -464,15 +466,18 @@ class _FakeRay:
         self.get_calls: list[_FakeRef] = []
         self.wait_calls: list[tuple[list[_FakeRef], int, bool]] = []
 
-    def get(self, ref: _FakeRef):
+    def get(self, ref: _FakeRef | list[_FakeRef]):
         self.get_calls.append(ref)
         self.events.append(("get", (ref, )))
-        return ref.value
+        return [item.value for item in ref] if isinstance(ref, list) else ref.value
 
     def wait(self, refs: list[_FakeRef], *, num_returns: int, fetch_local: bool):
         self.wait_calls.append((refs, num_returns, fetch_local))
         self.events.append(("wait", (refs[0], )))
         return refs[:num_returns], refs[num_returns:]
+
+    def kill(self, actor: Any, *, no_restart: bool) -> None:
+        self.events.append(("kill", (actor, no_restart)))
 
 
 def _fake_runtime(monkeypatch):
@@ -559,3 +564,88 @@ def test_iter_forward_async_exposes_the_same_bounded_pipeline(monkeypatch) -> No
     assert len(outputs) == 2
     assert [call[1] for call in runtime.encoder_decoder.encode.calls] == ["async-0", "async-1"]
     assert [ref.kind for ref in fake_ray.get_calls] == ["decode", "decode"]
+
+
+class _ActorHandle:
+    """Ray-faithful handle: only methods the actor class defines are callable."""
+
+    def __init__(self, actor_cls: type, events: list[tuple[str, tuple[Any, ...]]], results: dict[str, Any]) -> None:
+        self._actor_cls = actor_cls
+        self._events = events
+        self._results = results
+
+    def __getattr__(self, name: str) -> _RemoteMethod:
+        if name.startswith("_") or not callable(getattr(self._actor_cls, name, None)):
+            raise AttributeError(f"'{self._actor_cls.__name__}' actor has no method {name!r}")
+        return _RemoteMethod(name, self._events, lambda *args: self._results.get(name))
+
+
+def _real_interface_runtime(monkeypatch, results: dict[str, Any] | None = None):
+    events: list[tuple[str, tuple[Any, ...]]] = []
+    monkeypatch.setattr(disaggregated_runtime, "ray", _FakeRay(events))
+    runtime = RayMiniMaxH3DisaggregatedRuntime.__new__(RayMiniMaxH3DisaggregatedRuntime)
+    runtime._closed = False
+    runtime._profile_transfers = False
+    results = results or {}
+    runtime.encoder_decoder = _ActorHandle(_MiniMaxH3EncoderDecoderActor, events, results)
+    runtime.dit = _ActorHandle(_MiniMaxH3DiTActor, events, results)
+    return runtime, events
+
+
+def test_close_shuts_down_both_real_actor_interfaces_then_kills_them(monkeypatch) -> None:
+    runtime, events = _real_interface_runtime(monkeypatch)
+
+    runtime.close()
+    runtime.close()  # idempotent
+
+    names = [name for name, _ in events]
+    assert names == ["shutdown", "shutdown", "get", "kill", "kill"]
+
+
+def test_executor_lora_rpcs_reach_the_dit_actor_and_check_receipts(monkeypatch) -> None:
+    receipts = {
+        "set_lora_adapter": {"status": "lora_adapter_set"},
+        "unmerge_lora_weights": {"status": "lora_adapter_unmerged"},
+        "merge_lora_weights": {"status": "lora_adapter_merged"},
+    }
+    runtime, events = _real_interface_runtime(monkeypatch, receipts)
+    executor = MiniMaxH3DisaggregatedExecutor.__new__(MiniMaxH3DisaggregatedExecutor)
+    executor.runtime = runtime
+
+    executor.set_lora_adapter("fast", "adapter.safetensors", strength=0.5, accumulate=True)
+    executor.unmerge_lora_weights()
+    executor.merge_lora_weights()
+
+    calls = [(name, args) for name, args in events if name != "get"]
+    assert calls == [
+        ("set_lora_adapter", ("fast", "adapter.safetensors", 0.5, True)),
+        ("unmerge_lora_weights", ()),
+        ("merge_lora_weights", ()),
+    ]
+    receipts["merge_lora_weights"] = {"status": "failed"}
+    with pytest.raises(RuntimeError, match="lora_adapter_merged"):
+        executor.merge_lora_weights()
+    runtime._closed = True  # skip actor shutdown in __del__
+
+
+def test_dit_actor_lora_rpcs_delegate_to_the_resident_pipeline() -> None:
+    calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def record(name: str):
+        return lambda *args, **kwargs: calls.append((name, args, kwargs))
+
+    actor = _MiniMaxH3DiTActor.__new__(_MiniMaxH3DiTActor)
+    actor.pipeline = SimpleNamespace(
+        set_lora_adapter=record("set"),
+        unmerge_lora_weights=record("unmerge"),
+        merge_lora_weights=record("merge"),
+    )
+
+    assert actor.set_lora_adapter("fast", "adapter.safetensors", 0.5, True) == {"status": "lora_adapter_set"}
+    assert actor.unmerge_lora_weights() == {"status": "lora_adapter_unmerged"}
+    assert actor.merge_lora_weights() == {"status": "lora_adapter_merged"}
+    assert calls == [
+        ("set", ("fast", "adapter.safetensors"), {"strength": 0.5, "accumulate": True}),
+        ("unmerge", (), {}),
+        ("merge", (), {}),
+    ]

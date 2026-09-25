@@ -245,7 +245,31 @@ def _log_h3_worker_environment(role: str) -> None:
     )
 
 
-class _MiniMaxH3EncoderDecoderActor:
+class _MiniMaxH3ResidentActor:
+    """RPCs shared by both roles: readiness receipt and in-actor cleanup."""
+
+    _role: str
+    pipeline: Any
+
+    def health(self) -> dict[str, Any]:
+        modules = tuple(sorted(self.pipeline.modules))
+        return {
+            "ready": True,
+            "role": self._role,
+            "node_ip": get_ip(),
+            "modules": modules,
+            "all_resident": all(not is_lazy_module(module) for module in self.pipeline.modules.values()),
+        }
+
+    def shutdown(self) -> dict[str, str]:
+        self.pipeline = None
+        cleanup_dist_env_and_memory(shutdown_ray=False)
+        return {"status": "shutdown_complete"}
+
+
+class _MiniMaxH3EncoderDecoderActor(_MiniMaxH3ResidentActor):
+
+    _role = "encoder_decoder"
 
     def __init__(self, fastvideo_args: FastVideoArgs, profile_transfers: bool = False) -> None:
         self._profile_transfers = profile_transfers
@@ -265,23 +289,10 @@ class _MiniMaxH3EncoderDecoderActor:
         with _h3_stage_timer("decode", state.request_id, self._profile_transfers):
             return self.pipeline.decode(state)
 
-    def health(self) -> dict[str, Any]:
-        modules = tuple(sorted(self.pipeline.modules))
-        return {
-            "ready": True,
-            "role": "encoder_decoder",
-            "node_ip": get_ip(),
-            "modules": modules,
-            "all_resident": all(not is_lazy_module(module) for module in self.pipeline.modules.values()),
-        }
 
-    def shutdown(self) -> dict[str, str]:
-        self.pipeline = None
-        cleanup_dist_env_and_memory(shutdown_ray=False)
-        return {"status": "shutdown_complete"}
+class _MiniMaxH3DiTActor(_MiniMaxH3ResidentActor):
 
-
-class _MiniMaxH3DiTActor:
+    _role = "dit"
 
     def __init__(self, fastvideo_args: FastVideoArgs, profile_transfers: bool = False) -> None:
         self._profile_transfers = profile_transfers
@@ -292,23 +303,33 @@ class _MiniMaxH3DiTActor:
         self.pipeline = pipeline_cls(args.model_path, args)
         self.pipeline.post_init()
 
-    def health(self) -> dict[str, Any]:
-        modules = tuple(sorted(self.pipeline.modules))
-        return {
-            "ready": True,
-            "role": "dit",
-            "node_ip": get_ip(),
-            "modules": modules,
-            "all_resident": all(not is_lazy_module(module) for module in self.pipeline.modules.values()),
-        }
-
     def denoise(self, state: MiniMaxH3EncodedState | _H3TransferRef) -> MiniMaxH3DenoisedState:
         state = _receive_h3_state(state, "A_TO_B")
-        _log_h3_state("A_TO_B encoded", state)
+        if self._profile_transfers:
+            _log_h3_state("A_TO_B encoded", state)
         with _h3_stage_timer("denoise", state.request_id, self._profile_transfers):
             result = self.pipeline.denoise(state)
-        _log_h3_state("B_TO_A denoised", result)
+        if self._profile_transfers:
+            _log_h3_state("B_TO_A denoised", result)
         return result
+
+    # Adapters target the transformer, which lives only on this role. The
+    # receipts match GPU workers so the executor can check them the same way.
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None,
+                         strength: float = 1.0,
+                         accumulate: bool = False) -> dict[str, str]:
+        self.pipeline.set_lora_adapter(lora_nickname, lora_path, strength=strength, accumulate=accumulate)
+        return {"status": "lora_adapter_set"}
+
+    def unmerge_lora_weights(self) -> dict[str, str]:
+        self.pipeline.unmerge_lora_weights()
+        return {"status": "lora_adapter_unmerged"}
+
+    def merge_lora_weights(self) -> dict[str, str]:
+        self.pipeline.merge_lora_weights()
+        return {"status": "lora_adapter_merged"}
 
 
 class RayMiniMaxH3DisaggregatedRuntime:
@@ -459,6 +480,11 @@ class RayMiniMaxH3DisaggregatedRuntime:
                     ray.kill(actor, no_restart=True)
 
 
+def _check_receipt(receipt: dict[str, Any], expected: str) -> None:
+    if receipt.get("status") != expected:
+        raise RuntimeError(f"MiniMax-H3 DiT worker did not confirm {expected}: {receipt}.")
+
+
 class MiniMaxH3DisaggregatedExecutor(Executor):
     """VideoGenerator-compatible adapter over the two-role Ray runtime."""
 
@@ -492,15 +518,15 @@ class MiniMaxH3DisaggregatedExecutor(Executor):
                          lora_path: str | None = None,
                          strength: float = 1.0,
                          accumulate: bool = False) -> None:
-        receipt = ray.get(self.runtime.dit.set_lora_adapter.remote(lora_nickname, lora_path, strength, accumulate))
-        if receipt.get("status") != "lora_adapter_set":
-            raise RuntimeError(f"MiniMax-H3 DiT worker rejected the LoRA adapter: {receipt}.")
+        _check_receipt(
+            ray.get(self.runtime.dit.set_lora_adapter.remote(lora_nickname, lora_path, strength, accumulate)),
+            "lora_adapter_set")
 
     def unmerge_lora_weights(self) -> None:
-        ray.get(self.runtime.dit.unmerge_lora_weights.remote())
+        _check_receipt(ray.get(self.runtime.dit.unmerge_lora_weights.remote()), "lora_adapter_unmerged")
 
     def merge_lora_weights(self) -> None:
-        ray.get(self.runtime.dit.merge_lora_weights.remote())
+        _check_receipt(ray.get(self.runtime.dit.merge_lora_weights.remote()), "lora_adapter_merged")
 
     def collective_rpc(self,
                        method,
