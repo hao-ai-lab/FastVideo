@@ -389,7 +389,17 @@ method:
   fake_score_learning_rate: 8.0e-6
   fake_score_betas: [0.0, 0.999]
   fake_score_lr_scheduler: constant
+
+pipeline:
+  flow_shift: 8
+  # TDM labels are raw (< T), so the dense DMD validation sampler must
+  # apply its pinned flow shift; opt out of scheduler-space labels.
+  dmd_denoising_steps_are_scheduler_space: false
 ```
+
+Wan TDM requires this opt-out because `flow_shift: 8` matches the dense DMD
+validation sampler's pinned training-noise shift; the default scheduler-space
+labels only match a student flow shift of `1.0`.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
