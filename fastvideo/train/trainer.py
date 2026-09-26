@@ -231,7 +231,11 @@ class Trainer:
                 iteration=step,
             )
 
-            if checkpoint_manager is not None:
+            if checkpoint_manager is not None and step != max_steps:
+                # The final step is saved by ``save_final`` after validation
+                # so the terminal checkpoint captures the post-validation
+                # callback RNG state instead of being deduped against a
+                # pre-validation interval save at the same step.
                 checkpoint_manager.maybe_save(step)
 
             self.callbacks.on_validation_begin(
