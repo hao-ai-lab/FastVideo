@@ -43,6 +43,17 @@
   review/adjudication on committed code, pre-commit gate, then present the
   draft PR message. The open quality gap (no acceptable trained checkpoint,
   no branch-trained SSIM reference) must be stated in the PR body.
+- Pre-commit blocker (local macOS sandbox): `pre-commit` is not installed and
+  cannot be installed here. The sandbox blocks PyPI (`pypi.org`,
+  `files.pythonhosted.org` time out through the local proxy) while GitHub is
+  reachable; there is no Docker, no Modal CLI, and no internal pip mirror, and
+  `~/.cache`/`/tmp` are not writable. DGX Spark SSH (`mac@23.125.121.179:61676`)
+  also times out at banner exchange from this machine. Installing via uv was
+  prepared inside the approved temp dir (managed CPython 3.12 + venv) and only
+  the package download fails. The pre-commit gate therefore needs either an
+  environment with PyPI access (e.g. the authoring Linux sandbox or DGX Spark
+  Docker) or a sandbox allowlist entry for PyPI before this PR can be declared
+  ready. No pre-commit hook has been run on this branch yet.
 
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
