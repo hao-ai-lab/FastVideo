@@ -1,10 +1,11 @@
 #!/bin/bash
 # H3 TDM VSA payload: runs inside the FastVideo dev container on a Slurm node.
 #
-# Arguments: MODE MAX_STEPS SPARSITY HEIGHT WIDTH RUN_NAME [EXTRA_ARGS]
+# Arguments: MODE MAX_STEPS SPARSITY HEIGHT WIDTH RUN_NAME [BACKEND] [EXTRA_ARGS]
 # MODE=smoke runs a couple of steps with validation off; MODE=gate runs the
 # config's full step count, so the final-step validation fires and the run
-# yields acceptance samples.
+# yields acceptance samples. BACKEND defaults to the video-sparse backend;
+# pass TORCH_SDPA for the dense control at the same geometry.
 set -Eeuo pipefail
 
 MODE=${1:-smoke}
@@ -13,7 +14,8 @@ SPARSITY=${3:-0.5}
 HEIGHT=${4:-480}
 WIDTH=${5:-832}
 RUN_NAME=${6:-h3-tdm-vsa-${MODE}}
-EXTRA_ARGS=${7:-}
+BACKEND=${7:-VIDEO_SPARSE_ATTN_H3}
+EXTRA_ARGS=${8:-}
 
 CODE=/workspace/vlm-mal004/tdm-port/code
 # The shared /workspace/run tree was created by the Kubernetes jobs as root and
@@ -43,7 +45,7 @@ printf 'PAYLOAD_START %s mode=%s steps=%s geom=%sx%s sparsity=%s\n' \
 
 /opt/venv/bin/torchrun --standalone --nproc_per_node=4 -m fastvideo.train.entrypoint.train \
     --config examples/train/configs/distribution_matching/overfit_minimax_h3_t2va_tdm.yaml \
-    --models.student.attention_backend VIDEO_SPARSE_ATTN_H3 \
+    --models.student.attention_backend "${BACKEND}" \
     --vsa.sparsity "${SPARSITY}" \
     --training.data.num_height "${HEIGHT}" \
     --training.data.num_width "${WIDTH}" \
