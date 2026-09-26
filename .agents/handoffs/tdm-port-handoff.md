@@ -173,11 +173,20 @@
     site-specific overlay checkpoint; the docs already show the portable
     placeholder form. Relocating it is a maintainer follow-up, not a
     correctness fix.
-  - Next: fresh review-code round 8 on `d65400b92`; then rerun
-    `pre-commit run --all-files` on DGX against the final tip; then draft the
-    PR message. External validation still owed: H3 VSA `apply_to: all`
-    backward path on GB200 and an H3 gate re-run on the corrected ladder,
-    fp32+compile VSA-H3 route test, DMD stage unit lane
+- Stage 3 round 8 complete: **review/adjudication loop stopped.**
+  - Round-8 reviewer found no actionable findings (no Critical/High/Medium/Low).
+    It verified `sampling_steps: [5]`, the new H3 grid regression test, and the
+    docs paragraph as correct and complete, and found no concrete new evidence
+    to reopen any previously rejected finding. Spot checks of the wider diff
+    (checkpoint `.complete` marker logic, `synchronize_lora_gradients` reduction
+    call site, decode-on-all-ranks key participation, DMD scheduler-space
+    inversion math, flow-transition math) were internally consistent.
+  - Next: rerun `pre-commit run --all-files` on DGX against the final tip; if
+    green, present the draft PR message (Stage 3 step 16). No PR is opened until
+    the user explicitly requests Stage 4.
+  - External validation still owed: H3 VSA `apply_to: all` backward path on
+    GB200 and an H3 gate re-run on the corrected ladder, fp32+compile VSA-H3
+    route test, DMD stage unit lane
     (`fastvideo/tests/stages/test_wan_dmd_denoising.py`), the new TDM/H3 guard
     tests, and non-TDM DMD smoke runs.
 
