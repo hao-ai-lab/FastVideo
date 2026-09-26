@@ -28,6 +28,6 @@ setsid nohup srun --export=NONE -p all --gres=gpu:nvidia_gb200:4 -N1 -n1 \
     --container-image="${IMAGE}" \
     --container-mounts=/mnt/lustre:/workspace \
     --container-workdir="${CODE}" \
-    bash -lc "${CODE}/tests/local_tests/tdm/slurm/h3_tdm_vsa_run.sh ${MODE} ${MAX_STEPS} ${SPARSITY} ${HEIGHT} ${WIDTH} ${RUN_NAME} ${BACKEND} '${EXTRA_ARGS}'" \
+    bash -lc "bash ${CODE}/tests/local_tests/tdm/slurm/h3_tdm_vsa_run.sh ${MODE} ${MAX_STEPS} ${SPARSITY} ${HEIGHT} ${WIDTH} ${RUN_NAME} ${BACKEND} '${EXTRA_ARGS}'" \
     > "${LOG}" 2>&1 < /dev/null &
 echo "launched ${RUN_NAME} (log: ${LOG})"
