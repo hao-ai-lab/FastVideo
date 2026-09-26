@@ -524,7 +524,9 @@ autograd/CUDA stream state inconsistent, and the next training backward raises
 `opt_ready_stream && opt_parent_stream`. Validate once at the final step
 (`callbacks.validation.run_at_start: false`,
 `callbacks.validation.every_steps: <max_train_steps>`) or sample from
-checkpoints in a separate process.
+checkpoints in a separate process. Validation sets the
+`decode_on_all_ranks` batch flag, so every data-parallel rank decodes and saves
+the media for its own sample instead of only the global output rank.
 
 ### Self-Forcing (Causal DMD)
 
