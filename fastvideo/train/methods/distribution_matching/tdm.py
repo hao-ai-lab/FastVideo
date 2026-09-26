@@ -192,6 +192,10 @@ class TDMMethod(DMD2Method):
         self._modalities: tuple[str, ...] = tuple(self.student.tdm_modalities())
         self._denoising_step_list: torch.Tensor | None = None
         self._denoising_sigma_lists: dict[str, torch.Tensor] | None = None
+        # ``warp_denoising_step`` makes the trajectory labels scheduler-space
+        # timesteps rather than raw flow labels; the context sampler must use
+        # the matching label-to-sigma conversion to avoid shifting twice.
+        self._denoising_labels_are_scheduler_space = bool(mcfg.get("warp_denoising_step", False))
         self._step_schedules = self._parse_step_schedules()
         self._active_schedule_index = 0
         self._cached_schedule_index: int | None = None
@@ -787,9 +791,7 @@ class TDMMethod(DMD2Method):
             raise ValueError("method.tdm_denoising_steps must contain at least two steps for TDM")
         steps = raw_steps.to(dtype=torch.float32)
 
-        warp = self.method_config.get("warp_denoising_step", None)
-        if warp is None:
-            warp = False
+        warp = self._denoising_labels_are_scheduler_space
         if bool(warp):
             timesteps = torch.cat((
                 self.student.noise_scheduler.timesteps.to("cpu"),
@@ -970,6 +972,23 @@ class TDMMethod(DMD2Method):
             for name in self._modalities
         }
 
+    def _trajectory_label_to_sigma(
+        self,
+        label: torch.Tensor,
+        modality: str,
+    ) -> torch.Tensor:
+        """Map a trajectory label to a sigma in the label's own space.
+
+        With ``warp_denoising_step`` the rollout stores scheduler-space
+        timesteps, so the context sampler must resolve them directly on the
+        scheduler sigma grid. Applying ``tdm_sigma_grid`` would shift the
+        flow grid a second time and desynchronize the fake-score noise
+        levels from the student trajectory.
+        """
+        if self._denoising_labels_are_scheduler_space:
+            return self._timestep_to_sigma(label, scheduler_space=True)
+        return self.student.tdm_sigma_grid(label, modality)
+
     def _sample_tdm_context(
         self,
         trajectories: dict[str, TDMTrajectory],
@@ -1034,11 +1053,11 @@ class TDMMethod(DMD2Method):
             clean_latents = torch.stack(trajectory.clean_latents)[trajectory_indices, batch_indices].detach()
             noisy_source = torch.stack(trajectory.noisy_latents)[trajectory_indices, batch_indices].detach()
             sigma_source = trajectory.sigmas[trajectory_indices]
-            sigma_intermediate = self.student.tdm_sigma_grid(label_intermediate, name).to(
+            sigma_intermediate = self._trajectory_label_to_sigma(label_intermediate, name).to(
                 device=device,
                 dtype=torch.float32,
             )
-            sigma_target = self.student.tdm_sigma_grid(label_target, name).to(
+            sigma_target = self._trajectory_label_to_sigma(label_target, name).to(
                 device=device,
                 dtype=torch.float32,
             )
