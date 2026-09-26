@@ -157,12 +157,29 @@
     written, and `vae_parallel_decode=True` takes the SP-aware branch first, so
     the claimed corruption cannot occur; `sp_size: 2` is already documented
     unsupported and gating would be speculative defensive code.
-  - Next: fresh review-code round 7 on `067b20f16`; then rerun
+- Stage 3 round 7 complete (commit `d65400b92`, GPG-signed, pushed):
+  - Round-7 reviewer findings: Medium (H3 TDM validation ignored
+    `sampling_timesteps` and rebuilt a 3-forward off-ladder schedule from
+    `sampling_steps: [4]`, so the recorded VSA/dense acceptance numbers were
+    measured off the trained 4-step ladder); Low (the shipped H3 example config
+    hardcodes site-specific absolute paths).
+  - Adjudicator accepted the Medium and fixed it: `sampling_steps: [4]` → `[5]`
+    (the H3 scheduler expands N points into N-1 forwards), new CPU regression
+    `fastvideo/tests/train/methods/test_tdm_h3_config_path.py` asserting the
+    scheduler grid equals the trained model timesteps for video and audio, and a
+    docs paragraph explaining that H3 ignores `sampling_timesteps`.
+  - Adjudicator rejected the paths finding: the config is a marked Phase-4 gate
+    whose paths are load-bearing for the H3 k8s/Slurm gate scripts and the
+    site-specific overlay checkpoint; the docs already show the portable
+    placeholder form. Relocating it is a maintainer follow-up, not a
+    correctness fix.
+  - Next: fresh review-code round 8 on `d65400b92`; then rerun
     `pre-commit run --all-files` on DGX against the final tip; then draft the
     PR message. External validation still owed: H3 VSA `apply_to: all`
-    backward path on GB200, fp32+compile VSA-H3 route test, DMD stage unit
-    lane (`fastvideo/tests/stages/test_wan_dmd_denoising.py`), the new TDM
-    guard tests, and non-TDM DMD smoke runs.
+    backward path on GB200 and an H3 gate re-run on the corrected ladder,
+    fp32+compile VSA-H3 route test, DMD stage unit lane
+    (`fastvideo/tests/stages/test_wan_dmd_denoising.py`), the new TDM/H3 guard
+    tests, and non-TDM DMD smoke runs.
 
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
