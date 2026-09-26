@@ -392,7 +392,7 @@ method:
 
 pipeline:
   flow_shift: 8
-  # TDM labels are raw (< T), so the dense DMD validation sampler must
+  # TDM labels are raw timesteps, so the dense DMD validation sampler must
   # apply its pinned flow shift; opt out of scheduler-space labels.
   dmd_denoising_steps_are_scheduler_space: false
 ```
@@ -414,7 +414,7 @@ labels only match a student flow shift of `1.0`.
 | `importance_weight_clip` | `10.0` | Clip mixed-noise importance weights |
 | `normalize_generator_delta` | `true` | Divide each sample's generator loss by its teacher-guidance magnitude |
 | `tdm_vsa_apply_to` | `"student"` | Which roles run sparse attention when a sparse backend is configured: `"student"` (the validated H3 recipe) or `"all"` (critic and teacher sparse as well; their `models.<role>.attention_backend` must then be the matching sparse backend) |
-| `use_huber` | `false` | Use the reference pseudo-Huber expression for the generator loss; fake-score training remains MSE |
+| `use_huber` | `false` | Use the elementwise Huber form `sqrt(err^2 + c^2) - c` with the fixed `huber_c` for the generator loss; fake-score training remains MSE |
 | `huber_c` | `0.001` | Huber delta when `use_huber=true` |
 | `use_pseudo_huber` | `false` | Use the paper Eq. 11 pseudo-Huber surrogate (`sqrt(||pred - target||_2^2 + c^2) - c`, `c = 0.00054*sqrt(d)` with `d` the flattened per-sample latent size); skips DMD delta normalization; mutually exclusive with `use_huber` |
 | `max_grad_norm` | `1.0` | Clip student and critic gradients inside TDM's ordered optimizer phases; set to zero to disable |

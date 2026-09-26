@@ -124,6 +124,6 @@ callbacks:
 pipeline:
   flow_shift: 8
   dmd_sample_type: ode
-  # TDM labels are raw (< T), so the dense DMD validation sampler must
+  # TDM labels are raw timesteps, so the dense DMD validation sampler must
   # apply the flow shift to match the trained shifted sigma grid.
   dmd_denoising_steps_are_scheduler_space: false
