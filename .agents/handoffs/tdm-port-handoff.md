@@ -114,10 +114,24 @@
     default finding (the old hardcoded 3.0 role schedulers were inconsistent
     with the pipeline-shifted student; inheriting `pipeline.flow_shift` is the
     intended fix; non-TDM validation evidence belongs in the PR body).
-  - Next: fresh review-code round 3 on `2639d6809`, then rerun
-    `pre-commit run --all-files` on DGX against the final tip, then draft the
+- Stage 3 round 3 complete (commit `a0260909c`, GPG-signed, pushed):
+  - Round-3 reviewer finding (High): the new
+    `dmd_denoising_steps_are_scheduler_space` base default `False` silently
+    changed non-TDM DMD validation sigma grids (shift-8 applied to raw labels)
+    for existing recipes (`dmd2_t2v.yaml`, QAT DMD stage-2). Low: the TDM
+    shift guard skipped the scheduler-space branch entirely.
+  - Adjudicator accepted both: base default restored to `True` with a comment;
+    the three TDM Wan configs opt in explicitly with `false`; regression test
+    added in `fastvideo/tests/stages/test_wan_dmd_denoising.py` (also repaired
+    the fixture that the PR had left broken); the guard now requires
+    `student.noise_scheduler.shift == 1.0` in the scheduler-space branch with
+    tests.
+  - Next: fresh review-code round 4 on `a0260909c`; then rerun
+    `pre-commit run --all-files` on DGX against the final tip; then draft the
     PR message. External validation still owed: H3 VSA `apply_to: all`
-    backward path on GB200, the new guard tests, and non-TDM DMD smoke runs.
+    backward path on GB200, DMD stage unit lane
+    (`fastvideo/tests/stages/test_wan_dmd_denoising.py`), the new TDM guard
+    tests, and non-TDM DMD smoke runs.
 
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
