@@ -538,6 +538,13 @@ checkpoints in a separate process. Validation sets the
 `decode_on_all_ranks` batch flag, so every data-parallel rank decodes and saves
 the media for its own sample instead of only the global output rank.
 
+The H3 denoising stage rebuilds its schedule from
+`callbacks.validation.sampling_steps` and ignores `sampling_timesteps`, and the
+H3 scheduler expands N sigma points into N-1 denoising forwards. The shipped
+H3 TDM example therefore sets `sampling_steps: [5]` so its four forwards land on
+the trained `[1000, 750, 500, 250]` ladder; changing the ladder is a matching
+change to both `method` and `callbacks.validation`.
+
 ### Self-Forcing (Causal DMD)
 
 Extends DMD2 for **streaming / causal video generation**. The student processes
