@@ -1,5 +1,11 @@
 # TDM distillation: Wan 2.1 T2V 1.3B LoRA adaptation.
 #
+# Production-shaped baseline, NOT the validated TDM recipe: it keeps the
+# DMD2-inherited learning rates below, which Phase 3 measured to be a no-op
+# regime for TDM. The validated rates (student 1e-4 / fake score 1e-4) and the
+# regression warmup + step ladder live in
+# examples/train/configs/distribution_matching/wan/tdm_t2v_lora_fixed_recipe.yaml.
+#
 # This ports the Trajectory Distribution Matching objective from the
 # CogVideoX/diffusion reference to Wan's flow-matching noising family.
 #
