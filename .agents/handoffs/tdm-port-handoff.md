@@ -126,7 +126,14 @@
     the fixture that the PR had left broken); the guard now requires
     `student.noise_scheduler.shift == 1.0` in the scheduler-space branch with
     tests.
-  - Next: fresh review-code round 4 on `a0260909c`; then rerun
+- Stage 3 round 4 complete (commit `226e166a3`, GPG-signed, pushed):
+  - Round-4 reviewer found no Critical/High/Medium issues; one Low: the new
+    `dmd_denoising_steps_are_scheduler_space` field had no CLI registration, so
+    a raw-label schedule could not be reproduced via the inference CLI.
+  - Adjudicator accepted: registered
+    `--dmd-denoising-steps-are-scheduler-space` as a `StoreBoolean` on the
+    pipeline config and added a parser test.
+  - Next: fresh review-code round 5 on `226e166a3`; then rerun
     `pre-commit run --all-files` on DGX against the final tip; then draft the
     PR message. External validation still owed: H3 VSA `apply_to: all`
     backward path on GB200, DMD stage unit lane
