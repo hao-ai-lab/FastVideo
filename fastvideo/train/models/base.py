@@ -222,7 +222,7 @@ class ModelBase(ABC):
 
     def tdm_modalities(self) -> tuple[str, ...]:
         """Modalities TDM trains. Single-video models return one entry."""
-        return ("video",)
+        return ("video", )
 
     def tdm_clean_latents(self, batch: TrainingBatch) -> dict[str, torch.Tensor]:
         """Clean latents per modality for TDM trajectories."""
@@ -263,6 +263,8 @@ class ModelBase(ABC):
                                     and not bool(getattr(config, "use_exponential_sigmas", False))
                                     and not bool(getattr(config, "use_beta_sigmas", False)))
         if has_static_flow_schedule:
+            assert shift is not None
+            assert num_train_timesteps is not None
             u = t / float(num_train_timesteps)
             flow_shift = float(shift)
             return flow_shift * u / (1.0 + (flow_shift - 1.0) * u)
