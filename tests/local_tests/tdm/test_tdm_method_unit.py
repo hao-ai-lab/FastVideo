@@ -552,6 +552,41 @@ def test_tdm_warped_student_trajectory_uses_scheduler_sigmas_without_double_shif
         assert_close(trajectory.noisy_latents[index + 1], expected_next)
 
 
+def test_tdm_warped_context_resolves_labels_on_scheduler_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Warped trajectories store scheduler-space labels.
+
+    The context sampler must resolve them on the scheduler grid instead of
+    applying ``tdm_sigma_grid`` (which would shift the flow grid a second
+    time and desynchronize the fake-score noise levels).
+    """
+    method, student, _ = _build_method(method_overrides={
+        "warp_denoising_step": True,
+        "student_sample_type": "ode",
+    })
+    student.noise_scheduler = _ShiftedFlowScheduler()
+    batch = student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
+
+    trajectory = method._student_trajectory(batch)
+
+    labels = torch.tensor([960.0, 900.0])
+    resolved = method._trajectory_label_to_sigma(labels, "video")
+    assert_close(resolved, method._timestep_to_sigma(labels, scheduler_space=True))
+    assert not torch.allclose(resolved, student.tdm_sigma_grid(labels, "video"))
+
+    grid_calls: list[str] = []
+    original_grid = student.tdm_sigma_grid
+
+    def recording_grid(timesteps: torch.Tensor, modality: str) -> torch.Tensor:
+        grid_calls.append(modality)
+        return original_grid(timesteps, modality)
+
+    monkeypatch.setattr(student, "tdm_sigma_grid", recording_grid)
+    method._sample_tdm_context(trajectory)
+    assert grid_calls == []
+
+
 @pytest.mark.parametrize(
     ("steps", "match"),
     [
