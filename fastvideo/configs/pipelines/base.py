@@ -208,6 +208,15 @@ class PipelineConfig:
             default=PipelineConfig.dmd_sample_type,
             help="DMD trajectory update between explicit denoising steps",
         )
+        parser.add_argument(
+            f"--{prefix_with_dot}dmd-denoising-steps-are-scheduler-space",
+            action=StoreBoolean,
+            dest=f"{prefix_with_dot.replace('-', '_')}dmd_denoising_steps_are_scheduler_space",
+            default=PipelineConfig.dmd_denoising_steps_are_scheduler_space,
+            help="Read dmd-denoising-steps as scheduler-space timesteps (default; "
+            "sigma = label / num_train_timesteps). Set false for raw labels that "
+            "still need the flow shift applied (TDM's shifted grid).",
+        )
 
         # Add VAE configuration arguments
         from fastvideo.configs.models.vaes.base import VAEConfig

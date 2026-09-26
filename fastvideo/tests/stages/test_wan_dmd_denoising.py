@@ -89,6 +89,17 @@ def test_default_dmd_labels_match_dmd2_training_sigma_grid():
     assert not torch.allclose(scheduler.sigmas[:-1], shifted)
 
 
+def test_cli_exposes_dmd_scheduler_space_flag():
+    from fastvideo.configs.pipelines.base import PipelineConfig
+    from fastvideo.utils import FlexibleArgumentParser
+
+    parser = PipelineConfig.add_cli_args(FlexibleArgumentParser())
+    assert parser.parse_args([]).dmd_denoising_steps_are_scheduler_space is True
+    assert parser.parse_args(["--dmd-denoising-steps-are-scheduler-space"]).dmd_denoising_steps_are_scheduler_space is True
+    assert parser.parse_args(
+        ["--dmd-denoising-steps-are-scheduler-space", "false"]).dmd_denoising_steps_are_scheduler_space is False
+
+
 def test_legacy_sampling_exports_are_canonical():
     from fastvideo.pipelines import stages
     from fastvideo.pipelines.basic.wan.stages import causal_denoising, dmd
