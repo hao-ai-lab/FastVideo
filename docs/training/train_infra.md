@@ -509,13 +509,13 @@ teacher stay dense), so that recipe needs no extra knob. The kernel requires
 bf16 Q/K/V, and the H3 VSA backend casts at the kernel boundary because the
 training forward can carry fp32 through the QK-norm path.
 
-Measured on four GB200s at `480x832x124`, 200-step overfit, sparsity `0.5`:
-VSA reads `std 56.1 / sharpness 37.8` against a same-geometry dense control at
-`std 55.7 / sharpness 43.2`, with visually equivalent samples, so VSA holds the
-dense quality band at about 12 percent lower sharpness.
-`method.tdm_vsa_apply_to: all` extends sparse attention to the critic and
-teacher as well (set their `models.<role>.attention_backend` to the sparse
-backend too) for the standalone's aggressive sparsity-`0.9` corner.
+Measured on four GB200s at `480x832x124`, 200-step overfit: dense reads
+`std 55.7 / sharpness 43.2`; VSA sparsity `0.5` with a sparse student reads
+`std 56.1 / sharpness 37.8`; and the aggressive corner (sparsity `0.9` with a
+sparse critic and teacher via `tdm_vsa_apply_to: all`) reads
+`std 54.5 / sharpness 36.5`. All three produce coherent, prompt-matching joint
+samples, so the sparse recipes hold the dense quality band to within about 15
+percent sharpness (one sample per arm).
 
 #### In-process validation
 
