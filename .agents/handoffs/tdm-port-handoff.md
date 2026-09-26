@@ -595,9 +595,20 @@ Sub-steps and gates:
     `h3-tdm-vsa-t90-all` (200 steps, 480x832, sparsity 0.9, all roles sparse)
     queued as Slurm job 11148 for comparison against the sparsity-0.5
     student-only and dense controls.
-  - Remaining: read the sparsity-0.9 gate result, the 3-of-4
-    validation-rank empty-frame guard, and the eventual PR (only once a QA
-    story exists, per the standing direction).
+  - 2026-09-26: **VSA matrix complete at 480x832.** All three arms are 200-step
+    overfits with the final-step validation; one sample per arm:
+    | arm | std | sharpness |
+    |---|---|---|
+    | dense (`TORCH_SDPA` control) | 55.73 | 43.15 |
+    | VSA sparsity 0.5, student-only | 56.12 | 37.76 |
+    | VSA sparsity 0.9, `tdm_vsa_apply_to: all` | 54.49 | 36.53 |
+    All three are coherent, prompt-matching joint samples (124 frames at
+    480x832 with a 32 kHz stereo track); the aggressive corner is visibly
+    hazier around the subject, matching its lower sharpness. So the sparse
+    recipes hold the dense band to within about 15 percent sharpness. Evidence:
+    `artifacts/tdm-port/phase4/{dense,vsa-gate,vsa-t90-all}-480x832-*`.
+  - Remaining: the 3-of-4 validation-rank empty-frame guard, and the eventual
+    PR (only once a QA story exists, per the standing direction).
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
