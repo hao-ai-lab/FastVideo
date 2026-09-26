@@ -5,8 +5,10 @@ Local-only tests for the Trajectory Distribution Matching implementation under
 
 This is a Wan flow-matching adaptation of the original CogVideoX/diffusion TDM
 reference, not a checkpoint-compatible port of the reference training script.
-The tests in this directory focus on the math bridge and method wiring. Full
-Wan training validation must run on Modal L40S.
+The tests in this directory focus on the math bridge and method wiring; the
+method's behavior is documented in `docs/training/train_infra.md` (TDM and
+TDM-on-MiniMax-H3 sections). GPU validation runs on Slurm: one node with
+exactly four GPUs, no multi-node jobs.
 
 ## Reference Assets
 
@@ -150,12 +152,19 @@ pytest tests/local_tests/tdm/ -v -s
 | Method wiring | `test_tdm_method_unit.py` | Fake models exercise loss keys, faithful interval support, fake-score-before-generator optimizer ordering, and student/critic updates |
 | Upstream parity | `test_tdm_upstream_parity.py` | Assembled context identities plus critic/generator losses and gradients against the upstream-verified transcription |
 | Warmup and ladder | `test_tdm_warmup_and_ladder.py` | Wan-family warmup default, student-only gating, CFG teacher regression target, ladder stage resolution and validation, warmup-only versus TDM phase controls |
+| H3 joint math | `test_tdm_h3_joint.py` | H3 sigma shifts and grid endpoints, `1 - sigma` model time, and the data-ward velocity sign bridge |
+| H3 config | `test_tdm_h3_config_smoke.py` | H3 TDM YAML resolves roles/LoRA, guidance 1.0 with no `cfg_uncond`, ladder and LRs |
 | Metrics | `test_tdm_metrics.py` | Sharpness ordering, mode-tightening detection, overlap behaviour, and the documented paired-metric inversion |
 
 ## GPU Validation
 
-Runtime validation runs on one Kubernetes node with exactly four GPUs; do not
-use Modal or multi-node jobs for this workload.
+Runtime validation runs on Slurm (one node, four GB200 GPUs). Launch jobs from
+the Slinky login node through
+`tests/local_tests/tdm/slurm/launch_h3_tdm_vsa.sh`; `sbatch` is unusable on
+this site, so the launcher uses a detached `srun`. The older Kubernetes
+runners under `tests/local_tests/tdm/k8s/` are kept for the Wan recipes. Run
+outputs belong under an account-writable Lustre directory, not the shared
+`/workspace/run` tree.
 
 Suggested local-test command:
 

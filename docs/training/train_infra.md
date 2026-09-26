@@ -431,6 +431,97 @@ For classifier-free teacher guidance, the shipped Wan recipes encode the
 model's negative prompt and require it to be present. Zero text embeddings are
 not an equivalent unconditional condition.
 
+### TDM on MiniMax H3 (joint video + audio)
+
+MiniMax H3 denoises one packed video-and-audio sequence, and its TDM port
+trains both modalities in a single joint pass. The student and critic carry
+rank-16 LoRA adapters over the frozen base and the teacher runs the frozen base
+without adapters. H3 is guidance-distilled, so `real_score_guidance_scale`
+stays `1.0` and there is deliberately no `method.cfg_uncond` block: the model
+has no unconditional branch, and TDM uses the conditional teacher x0 directly.
+
+The plugin implements the per-modality contract the method loops over
+(`tdm_modalities`, `tdm_clean_latents`, `tdm_sigma_grid`, `tdm_predict_x0`,
+and friends). H3 conventions that differ from Wan:
+
+- **Sigma grid**: `shift * u / (1 + (shift - 1) * u)` with `u = label / 1000`,
+  video shift `12` and audio shift `3`; the same integer labels drive both
+  modalities, each mapped through its own shift.
+- **Model time** is `1 - sigma` (no scheduler sigma-table lookup).
+- **Velocity is data-ward**: the plugin negates the transformer output so the
+  base conversion `x0 = x_t - sigma * pred_noise` is exactly
+  `x0 = x_t + sigma * v`.
+- **Losses are summed per modality**; one joint transformer forward serves the
+  rollout, the fake-score update, and the generator update.
+
+```yaml
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
+    init_from: <MiniMax-H3 model dir>
+    trainable: true
+    attention_backend: TORCH_SDPA
+    enable_gradient_checkpointing_type: full
+    lora:
+      enable: true
+      rank: 16
+      alpha: 16
+      target_modules: [to_q, to_k, to_v, to_out]
+  # teacher: trainable false, no lora block
+  # critic:  trainable true, same lora block as the student
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  real_score_guidance_scale: 1.0
+  warmup_steps: 50
+  generator_update_interval: 1
+  tdm_denoising_steps: [1000, 750, 500, 250]
+  fake_score_learning_rate: 1.0e-4
+```
+
+The shipped example is
+`examples/train/configs/distribution_matching/overfit_minimax_h3_t2va_tdm.yaml`.
+The standalone H3 recipe used critic `1e-4` and generator `2e-5` (the critic
+rate times a `0.2` generator scale), which the example encodes as the training
+optimizer LR `2e-5` plus `fake_score_learning_rate: 1e-4`.
+
+#### Geometry and memory
+
+TDM prepares `latents_source="zeros"`, so the dataset's latent values and
+shapes are unused: the trajectory geometry comes from
+`training.data.num_height` / `num_width` / `num_latent_t` / `num_frames`, and
+changing the canvas is a config override rather than a new preprocessed asset.
+On four GB200s the joint stack fits at `480x832x124` (about 22-30 s per step);
+the dense path also fits at `768x1344x124` (about 95-130 s per step), while VSA
+at `768x1344` exceeds 184 GiB per GPU. Sequence parallelism is not a workaround
+for this loader (`sp_size: 2` fails in FSDP device-mesh setup).
+
+#### Video-sparse attention
+
+Set `models.student.attention_backend: VIDEO_SPARSE_ATTN_H3` and
+`vsa.sparsity` to run the student through H3's tile-64 Triton block-sparse
+kernels. The TDM call sites already produce the standalone-validated
+student-only split (the student uses `attn_kind="vsa"` while the critic and
+teacher stay dense), so that recipe needs no extra knob. The kernel requires
+bf16 Q/K/V, and the H3 VSA backend casts at the kernel boundary because the
+training forward can carry fp32 through the QK-norm path.
+
+Measured on four GB200s at `480x832x124`, 200-step overfit, sparsity `0.5`:
+VSA reads `std 56.1 / sharpness 37.8` against a same-geometry dense control at
+`std 55.7 / sharpness 43.2`, with visually equivalent samples, so VSA holds the
+dense quality band at about 12 percent lower sharpness. The aggressive corner
+(sparsity `0.9` with sparse critic and teacher forwards) needs a method-side
+`apply_to` knob and is not shipped.
+
+#### In-process validation
+
+Running the H3 validation pipeline between training steps leaves the
+autograd/CUDA stream state inconsistent, and the next training backward raises
+`opt_ready_stream && opt_parent_stream`. Validate once at the final step
+(`callbacks.validation.run_at_start: false`,
+`callbacks.validation.every_steps: <max_train_steps>`) or sample from
+checkpoints in a separate process.
+
 ### Self-Forcing (Causal DMD)
 
 Extends DMD2 for **streaming / causal video generation**. The student processes
