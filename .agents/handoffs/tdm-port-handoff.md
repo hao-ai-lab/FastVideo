@@ -566,8 +566,28 @@ Sub-steps and gates:
     - Evidence: `artifacts/tdm-port/phase4/vsa-gate-480x832-*` and
       `dense-480x832-*` (reports, frames). The Slurm runners now take a
       BACKEND argument, so dense controls are `... h3-tdm-dense-480 TORCH_SDPA`.
-  - Phase 4 (4A-4E) is complete. Next: Phase 5 docs/examples, or the
-    higher-sparsity VSA variant above.
+  - 2026-09-26: **Phase 5 docs done.** `docs/training/train_infra.md` gains a
+    "TDM on MiniMax H3 (joint video + audio)" subsection: the per-modality
+    contract, the H3 sigma grid (shifts 12/3), `1 - sigma` model time, the
+    data-ward velocity sign bridge, summed per-modality losses, the
+    guidance-1/no-`cfg_uncond` rule, the standalone-derived LRs (critic 1e-4 /
+    generator 2e-5), the geometry/memory levers (zeros latents mean the canvas
+    is a config override; VSA at 768x1344 exceeds 184 GiB), VSA usage and the
+    measured sparsity-0.5-vs-dense result, and the in-process validation
+    stream-state caveat. The TDM parameter table now lists `warmup_steps` and
+    `tdm_step_ladder`. The local-test README
+    (`tests/local_tests/tdm/README.md`) drops the stale Modal/Kubernetes
+    statements for the Slurm constraint, lists the H3 joint and H3 config
+    tests, and points at the docs page for behavior.
+  - Note for a follow-up: `pre-commit` could not run in this environment
+    (not installed locally, and `pipx` cannot write under the sandbox), so the
+    docs commits were checked by hand for non-ASCII characters, trailing
+    whitespace, and over-long lines instead. Run
+    `pre-commit run --files docs/training/train_infra.md tests/local_tests/tdm/README.md`
+    where the hooks are available before any PR.
+  - Remaining after Phase 5: the aggressive VSA corner (sparsity 0.9,
+    `apply_to: all`), the 3-of-4 validation-rank empty-frame guard, and the
+    eventual PR (only once a QA story exists, per the standing direction).
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
