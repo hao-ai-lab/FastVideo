@@ -189,6 +189,22 @@
     route test, DMD stage unit lane
     (`fastvideo/tests/stages/test_wan_dmd_denoising.py`), the new TDM/H3 guard
     tests, and non-TDM DMD smoke runs.
+- Final pre-PR gate: **PASS**. `pre-commit run --all-files` rerun on DGX in the
+  fastvideo-dev container at final tip `547e25da1`:
+  yapf, ruff, codespell, PyMarkdown, actionlint, mypy, and check-filenames all
+  pass (`EXIT=0`). One extra yapf reflow of the round-3 guard error message was
+  applied as `547e25da1` (`[style]: apply yapf formatting to TDM shift guard`);
+  the four original mypy errors were fixed during rounds 1-3.
+- Draft PR message prepared (Stage 3 step 16); **no PR opened**. Title:
+  `[feat]: add TDM (trajectory distribution matching) training for Wan and MiniMax H3`.
+  The body closes `#775`, records the 8 review rounds and their fixes, the green
+  pre-commit gate, the development gate numbers, GPU-memory notes, the open
+  limits (no trained checkpoint / no branch SSIM reference; H3 gate re-run owed
+  on the corrected ladder; `apply_to: all` GB200 validation; non-TDM DMD smokes;
+  unseeded FastWan SSIM references; new tests not wired into CI lanes), and the
+  required FastVideo checklist. The full message is also shown in the Stage 3
+  user-facing response. Await explicit user direction for Stage 4 (draft PR
+  creation); Stage 4 must `git rm` this handoff first.
 
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
