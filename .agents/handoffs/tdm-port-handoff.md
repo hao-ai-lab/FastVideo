@@ -133,12 +133,21 @@
   - Adjudicator accepted: registered
     `--dmd-denoising-steps-are-scheduler-space` as a `StoreBoolean` on the
     pipeline config and added a parser test.
-  - Next: fresh review-code round 5 on `226e166a3`; then rerun
+- Stage 3 round 5 complete (commit `cc8d9ba36`, GPG-signed, pushed):
+  - Round-5 reviewer found no Critical/High/Medium issues; two Low: the TDM Wan
+    docs omitted the guard-required `dmd_denoising_steps_are_scheduler_space:
+    false` opt-out; a `logger.warning_once` added by this branch on the
+    generic-compile tile-64 VSA-H3 route could graph-break compiled forwards.
+  - Adjudicator accepted both: added the `pipeline:` block to the Wan TDM doc
+    snippet with an explanatory note; guarded the VSA-H3 warning with
+    `if not compiling:` (cast unchanged; eager warning preserved); recommends
+    an external fp32+compile test case be added to the attention route test.
+  - Next: fresh review-code round 6 on `cc8d9ba36`; then rerun
     `pre-commit run --all-files` on DGX against the final tip; then draft the
     PR message. External validation still owed: H3 VSA `apply_to: all`
-    backward path on GB200, DMD stage unit lane
-    (`fastvideo/tests/stages/test_wan_dmd_denoising.py`), the new TDM guard
-    tests, and non-TDM DMD smoke runs.
+    backward path on GB200, fp32+compile VSA-H3 route test, DMD stage unit
+    lane (`fastvideo/tests/stages/test_wan_dmd_denoising.py`), the new TDM
+    guard tests, and non-TDM DMD smoke runs.
 
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
