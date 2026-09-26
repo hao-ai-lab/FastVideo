@@ -174,6 +174,7 @@ def _build_method(
     generator_update_interval: int = 1,
     method_overrides: dict[str, Any] | None = None,
     pipeline_config: Any | None = None,
+    student_shift: float | None = None,
 ) -> tuple[TDMMethod, _TinyRoleModel, _TinyRoleModel]:
     training = TrainingConfig(
         data=DataConfig(preprocessed_data_type="text_only", seed=0),
@@ -209,6 +210,8 @@ def _build_method(
     student = _TinyRoleModel(role="student", trainable=True)
     teacher = _TinyRoleModel(role="teacher", trainable=False)
     critic = _TinyRoleModel(role="critic", trainable=True)
+    if student_shift is not None:
+        student.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=float(student_shift))
     method = TDMMethod(
         cfg=cfg,
         role_models={
@@ -1054,3 +1057,34 @@ def test_tdm_accepts_wan_flow_shift_matching_dmd_training_shift(
     ))
 
     assert method._model_family() == "wan"
+
+
+def test_tdm_rejects_student_scheduler_shift_mismatching_dmd_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # models.student.flow_shift overrides pipeline.flow_shift, so the guard must
+    # read the student's resolved scheduler shift, not the pipeline field.
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "wan")
+
+    with pytest.raises(ValueError, match="flow_shift"):
+        _build_method(
+            pipeline_config=SimpleNamespace(
+                flow_shift=8.0,
+                dmd_denoising_steps_are_scheduler_space=False,
+            ),
+            student_shift=5.0,
+        )
+
+
+def test_tdm_rejects_unset_pipeline_flow_shift_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An unset pipeline shift resolves to the 3.0 fallback, which still cannot
+    # match the pinned shift-8 validation sampler, so it must not be skipped.
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "wan")
+
+    with pytest.raises(ValueError, match="flow_shift"):
+        _build_method(pipeline_config=SimpleNamespace(
+            flow_shift=None,
+            dmd_denoising_steps_are_scheduler_space=False,
+        ))
