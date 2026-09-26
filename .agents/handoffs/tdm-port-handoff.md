@@ -607,8 +607,21 @@ Sub-steps and gates:
     hazier around the subject, matching its lower sharpness. So the sparse
     recipes hold the dense band to within about 15 percent sharpness. Evidence:
     `artifacts/tdm-port/phase4/{dense,vsa-gate,vsa-t90-all}-480x832-*`.
-  - Remaining: the 3-of-4 validation-rank empty-frame guard, and the eventual
-    PR (only once a QA story exists, per the standing direction).
+  - 2026-09-26: **empty-frame validation guard fixed.** Root cause:
+    `MiniMaxH3VideoDecodingStage` and `MiniMaxH3AudioDecodingStage` default to
+    global-rank-zero output ownership unless the sequence-parallel decode path
+    is active, so with `sp_size: 1` ranks 1-3 held placeholders. The
+    validation callback's frame guard then logged `Validation media requires
+    at least one video frame` and skipped them, which is why every H3 gate
+    produced 1 mp4 instead of 4 - and a multi-prompt validation would have
+    silently lost three quarters of its prompts. Fix: a generic
+    `DECODE_ON_ALL_RANKS_KEY` batch flag in `pipeline_batch_info`, honoured by
+    both H3 decode stages and set by the validation callback. Check run
+    `h3-validate-ranks` (2 steps, validation at the final step):
+    **4 mp4s, 0 guard errors** (previously 1 and 3). Suites: **122 passed**,
+    including a new callback test pinning the flag.
+  - Remaining: the eventual PR (only once a QA story exists, per the standing
+    direction) and a pre-commit sweep where the hooks are available.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
