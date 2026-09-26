@@ -585,9 +585,19 @@ Sub-steps and gates:
     whitespace, and over-long lines instead. Run
     `pre-commit run --files docs/training/train_infra.md tests/local_tests/tdm/README.md`
     where the hooks are available before any PR.
-  - Remaining after Phase 5: the aggressive VSA corner (sparsity 0.9,
-    `apply_to: all`), the 3-of-4 validation-rank empty-frame guard, and the
-    eventual PR (only once a QA story exists, per the standing direction).
+  - 2026-09-26: **`apply_to: all` knob added; the sparsity-0.9 gate is
+    queued.** `method.tdm_vsa_apply_to` (`"student"` default, `"all"` optional)
+    routes the critic and teacher through the sparse metadata too; the config
+    must then set their `attention_backend` to the sparse backend. Three new
+    unit tests pin the per-role selection (default student-only, `all`, and
+    rejection of an unknown scope); the TDM suite is **74 passed**. Docs and
+    the parameter table describe the knob. Gate
+    `h3-tdm-vsa-t90-all` (200 steps, 480x832, sparsity 0.9, all roles sparse)
+    queued as Slurm job 11148 for comparison against the sparsity-0.5
+    student-only and dense controls.
+  - Remaining: read the sparsity-0.9 gate result, the 3-of-4
+    validation-rank empty-frame guard, and the eventual PR (only once a QA
+    story exists, per the standing direction).
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
