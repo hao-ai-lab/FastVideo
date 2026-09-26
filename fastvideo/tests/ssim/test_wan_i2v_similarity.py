@@ -9,7 +9,10 @@ from fastvideo.tests.ssim.inference_similarity_utils import (
     resolve_inference_device_reference_folder,
     run_image_to_video_similarity_test,
 )
-from fastvideo.tests.ssim.reference_utils import use_full_quality_configs
+from fastvideo.tests.ssim.reference_utils import (
+    build_reference_folder_path,
+    use_full_quality_configs,
+)
 
 logger = init_logger(__name__)
 
@@ -141,6 +144,14 @@ def test_fastwan_ti2v_inference_similarity(
 ) -> None:
     if use_full_quality_configs():
         pytest.skip("FastWan TI2V has default-tier reference coverage only")
+    reference_folder = build_reference_folder_path(
+        os.path.dirname(os.path.abspath(__file__)),
+        device_reference_folder,
+        model_id,
+        attention_backend_name,
+    )
+    if not os.path.exists(reference_folder):
+        pytest.skip(f"FastWan TI2V reference videos are not seeded for {device_reference_folder}: {reference_folder}")
     run_image_to_video_similarity_test(
         logger=logger,
         script_dir=os.path.dirname(os.path.abspath(__file__)),

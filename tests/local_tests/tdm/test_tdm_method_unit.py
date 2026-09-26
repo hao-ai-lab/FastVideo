@@ -173,6 +173,7 @@ def _build_method(
     *,
     generator_update_interval: int = 1,
     method_overrides: dict[str, Any] | None = None,
+    pipeline_config: Any | None = None,
 ) -> tuple[TDMMethod, _TinyRoleModel, _TinyRoleModel]:
     training = TrainingConfig(
         data=DataConfig(preprocessed_data_type="text_only", seed=0),
@@ -183,6 +184,7 @@ def _build_method(
             lr_scheduler="constant",
         ),
         loop=TrainingLoopConfig(max_train_steps=4),
+        pipeline_config=pipeline_config,
     )
     method_cfg = {
         "rollout_mode": "simulate",
@@ -981,3 +983,74 @@ def test_tdm_fake_score_weights_each_batch_element_at_its_target_sigma() -> None
         components["weights"],
         torch.tensor([1.0 / 576.0, 5.0], dtype=torch.float32),
     )
+
+
+def test_tdm_critic_backward_restores_forward_attention_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`tdm_vsa_apply_to: all` must restore the sparse metadata the forward used."""
+    method, student, critic = _build_method(method_overrides={"tdm_vsa_apply_to": "all"})
+    dense_metadata = object()
+    sparse_metadata = object()
+    original_prepare_batch = student.prepare_batch
+
+    def prepare_with_metadata(*args: Any, **kwargs: Any) -> TrainingBatch:
+        batch = original_prepare_batch(*args, **kwargs)
+        batch.attn_metadata = dense_metadata
+        batch.attn_metadata_vsa = sparse_metadata
+        return batch
+
+    captured: list[Any] = []
+    original_backward = critic.backward
+
+    def recording_backward(loss: torch.Tensor, ctx: Any, *, grad_accum_rounds: int) -> None:
+        captured.append(ctx)
+        original_backward(loss, ctx, grad_accum_rounds=grad_accum_rounds)
+
+    monkeypatch.setattr(student, "prepare_batch", prepare_with_metadata)
+    monkeypatch.setattr(critic, "backward", recording_backward)
+
+    method.managed_train_step(iter([{}]), iteration=0)
+
+    assert len(captured) == 1
+    assert captured[0][1] is sparse_metadata
+
+
+def test_tdm_rejects_nonunit_guidance_for_h3_family(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+
+    with pytest.raises(ValueError, match="real_score_guidance_scale"):
+        _build_method(method_overrides={"real_score_guidance_scale": 4.5})
+
+
+def test_tdm_accepts_unit_guidance_for_h3_family(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "minimax_h3")
+
+    method, _, _ = _build_method(method_overrides={"real_score_guidance_scale": 1.0})
+
+    assert method._real_score_guidance() == 1.0
+
+
+def test_tdm_rejects_wan_flow_shift_that_dmd_validation_cannot_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "wan")
+
+    with pytest.raises(ValueError, match="flow_shift"):
+        _build_method(pipeline_config=SimpleNamespace(
+            flow_shift=5.0,
+            dmd_denoising_steps_are_scheduler_space=False,
+        ))
+
+
+def test_tdm_accepts_wan_flow_shift_matching_dmd_training_shift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "wan")
+
+    method, _, _ = _build_method(pipeline_config=SimpleNamespace(
+        flow_shift=8.0,
+        dmd_denoising_steps_are_scheduler_space=False,
+    ))
+
+    assert method._model_family() == "wan"
