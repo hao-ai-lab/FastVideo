@@ -18,6 +18,147 @@
 - Open validation gaps: no acceptable trained checkpoint; no branch-trained SSIM reference; no student-side supervised reachability ceiling has isolated rank-16 student capacity from the learned critic or the four-step compression target; and acceptance criteria still rely heavily on paired student-vs-teacher MS-SSIM. The sample-target oracle is diagnostic rather than the exact conditional expectation. The full-weight critic ceiling was function-step calibrated in BF16 and is negative under that representation, but should not be generalized to every possible full-weight precision/optimizer recipe.
 - GitHub policy: use `gh` authenticated as `macthecadillac`; do not post comments or open a PR without a later explicit request.
 
+## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
+
+Scope for the first PR (user direction 2026-09-26): **TDM + H3 only**. Out of
+scope and explicitly not done: TDM coverage for other model families
+(Kandinsky5 is the only other family with a distribution-matching recipe, a
+DMD2 QAT config) and TDM on the Fast-distilled checkpoints (FastWan/FastH3).
+Every gate below trains LoRA adapters on the **base released checkpoints**
+(`Wan-AI/Wan2.1-T2V-1.3B-Diffusers`, `MiniMaxAI/MiniMax-H3`) with the base
+model as teacher.
+
+### What the deliverable is
+
+`TDMMethod` in FastVideo's modular trainer, modality-general, with:
+
+- a regression **warmup** (`method.warmup_steps`; default 200 for Wan, 0
+  otherwise) that fits the student to the guidance-combined teacher x0 at its
+  own rollout states, with the critic gated out of optimizers, LR schedulers,
+  and grad-clip targets;
+- a progressive **step ladder** (`method.tdm_step_ladder`) whose strictly
+  decreasing stages select the active denoising schedule and whose final stage
+  drives validation/inference (`dmd_denoising_steps`);
+- **reference-free acceptance**: frame sharpness/contrast and latent-cloud
+  diversity, because paired same-noise metrics rank blurry students above
+  coherent ones (three independent demonstrations);
+- **joint video+audio** support: per-modality trajectory/context dictionaries,
+  one joint transformer forward per rollout step, per-modality sigma grids and
+  model-time conversion, losses summed per modality, and guidance-1
+  short-circuiting for guidance-distilled H3 (no unconditional branch);
+- **H3 video-sparse attention** in training, with `method.tdm_vsa_apply_to`
+  (`"student"` default, `"all"` to make the critic and teacher sparse too).
+
+### Implementation inventory
+
+| File | Role |
+|---|---|
+| `fastvideo/train/methods/distribution_matching/tdm.py` | `TDMMethod`: warmup, ladder, modality-general trajectory/context, losses, `tdm_vsa_apply_to` |
+| `fastvideo/train/models/base.py` | TDM contract (`tdm_modalities`, `tdm_clean_latents`, `tdm_sigma_grid`, `tdm_terminal_sigma`, `tdm_max_trajectory_label`, `tdm_sigma_to_model_timestep`, `tdm_predict_x0`, `tdm_initial_noise`); defaults reproduce video-only behavior |
+| `fastvideo/train/models/minimax_h3/minimax_h3.py` | H3 joint overrides, LoRA enablement, VSA metadata (tile 64), `num_train_timesteps` = 1000 |
+| `fastvideo/attention/backends/video_sparse_attn_h3.py` | bf16 Q/K/V cast at the tile-64 Triton kernel boundary |
+| `fastvideo/train/callbacks/validation.py` | per-record validation seed; `decode_on_all_ranks` for every rank's own sample |
+| `fastvideo/pipelines/pipeline_batch_info.py` | `DECODE_ON_ALL_RANKS_KEY` batch contract |
+| `fastvideo/pipelines/basic/minimax_h3/stages/minimax_h3_decoding.py` | video and audio decode stages honour the decode flag |
+| `docs/training/train_infra.md` | TDM parameter table + "TDM on MiniMax H3 (joint video + audio)" section |
+| `tests/local_tests/tdm/` | suite, tools, k8s and Slurm runners, README |
+
+Assets and configs:
+
+- Wan TDM: `examples/train/configs/distribution_matching/wan/tdm_t2v_lora.yaml`,
+  `tdm_t2v_lora_overfit.yaml`, `tdm_t2v_lora_fixed_recipe.yaml`, plus
+  `tdm_overfit_prompts.txt`, `tdm_overfit_validation.json`,
+  `tdm_multiprompt_train_prompts.txt`, `tdm_multiprompt_validation.json`.
+- H3 TDM: `examples/train/configs/distribution_matching/overfit_minimax_h3_t2va_tdm.yaml`,
+  `tdm_h3_overfit_validation.json`.
+- Tools: `tests/local_tests/tdm/tools/tdm_video_report.py`,
+  `tdm_multiprompt_report.py`, metrics in
+  `fastvideo/train/utils/tdm_metrics.py`.
+- Tests: `test_tdm_upstream_parity.py`, `test_tdm_method_unit.py`,
+  `test_tdm_warmup_and_ladder.py`, `test_tdm_metrics.py`,
+  `test_tdm_scheduler_math.py`, `test_tdm_config_smoke.py`,
+  `test_tdm_h3_joint.py`, `test_tdm_h3_config_smoke.py`,
+  `test_jsonl_tracker.py`, plus H3 cases in
+  `fastvideo/tests/train/callbacks/test_validation.py`. Total **122 passing**
+  (74 in `tests/local_tests/tdm/`, 48 in the validation-callback file).
+- Runners: Wan Kubernetes scripts under `tests/local_tests/tdm/k8s/` (kept
+  for the recipes) and `tests/local_tests/tdm/slurm/{h3_tdm_vsa_run.sh,
+  launch_h3_tdm_vsa.sh,h3_tdm_vsa.sbatch}` for H3.
+
+### Validated results (all reference-free; one sample per arm where noted)
+
+| Gate | Result |
+|---|---|
+| Phase 0 parity vs the upstream transcription | 4 tests; mutation check fails exactly the CFG-combination test |
+| Phase 2 tool vs the standalone warmup-ladder | frame std `88.27` reproduced exactly; sharpness separates arms inversely to paired metrics |
+| Phase 3 Wan 1.3B modular (200 steps, 4 GPUs) | treatment sharpness `15 -> 230` (step 0 -> 200), control collapses to `5.1` |
+| Phase 3.1 multi-prompt + held-out (4 prompts, 4 seeds each) | within-caption spread `0.503` vs control `0.303` (1.66x); held-out sharpness `250.8` vs `42.7`; seeds produced distinct videos |
+| 4D H3 joint gate (200 steps, 768x1344) | `std 58.4 / sharpness 131.9`, 124 frames, 32 kHz stereo track; sharp studio scene matching the prompt |
+| 4E VSA matrix (200 steps, 480x832) | dense `std 55.7 / sharpness 43.2`; VSA 0.5 student-only `56.1 / 37.8`; VSA 0.9 all-roles `54.5 / 36.5`; all coherent, prompt-matching |
+| Empty-frame guard | validation now writes **4 mp4s, 0 errors** per event (was 1 and 3) |
+
+Two bugs worth naming: the H3 LoRA `predict_x0`/`forward_joint` model-time
+convention (`1 - sigma`) and the VSA tile-64 fp32 Q/K/V kernel boundary
+(`Both operands must be same dtype. Got bf16 and fp32`).
+
+### Evidence
+
+`artifacts/tdm-port/phase2/` (tool reproduction), `phase3/` (Wan video
+reports, metrics, frames), `phase3-multiprompt/` (diversity reports + frames),
+`phase4/` (H3 dense gate, VSA matrix, dense control, reports and frames).
+
+### Commit trail (branch `tdm-port`, tip at the summary commit)
+
+Phase 0-2: `620b74b34`, `0cd15a8d8`, `79eaa368f`, `f028aff75`, `74651bafc`.
+Phase 3: `1958dc122`, `b88ad86e7`, `e6c574a9f`, `37b088d5b`, `49908120a`.
+Phase 3.1: `d1ddd37d5`, `16ee46307`, `46c2e98ba`, `b79498e12`.
+Phase 4 design and 4A-4B: `f4201de7a`, `fe37d8cf9`, `86a006a49`, `c20c795dc`,
+`9f907bc5d`.
+4C-4D: `adea8a4b8`, `253017549`, `ee84473ee`, `6544c8340`, `3b6bc8899`,
+`ecf4f69e3`, `5ee8a0550`, `42d851777`, `4f43e5abe`.
+4E and the VSA follow-ups: `f94c06961`, `03bfad2ad`, `805b79b05`, `909ed72bb`,
+`916035256`, `8a696cbc9`, `4e89276a9`, `82384c8ea`, `f1caf84e8`, `20b735065`.
+Phase 5 docs: `01cd031cb`, `b5a8bd62f`, `8142e9535`.
+
+### Operating notes
+
+- Runtime validation now goes through **Slurm** (user direction): one node,
+  four GB200 GPUs, launched from the Slinky login node
+  (`vlm-mal004@100.73.17.13`) with a detached `srun` because `sbatch` fails
+  site-side (`user_env_retrieval_failed_requeued_held`). The dev image runs
+  via Pyxis/enroot with `/mnt/lustre` bind-mounted at `/workspace`, so config
+  paths resolve unchanged.
+- H3 needs a complete model directory: the `vlm-mal004` snapshot is missing
+  the `transformer_ref` folder its `model_index.json` declares, so the config
+  points at the sibling overlay
+  `.../models--MiniMaxAI--MiniMax-H3/snapshots/h3-tdm-overlay`.
+- TDM builds **zero latents from the config**, so the trajectory canvas is a
+  config override (`num_height`/`num_width`) and needs no new preprocessed
+  asset; 480x832 and 768x1344 were both exercised.
+- H3 in-process validation corrupts the autograd/CUDA stream state for the
+  next backward, so gates validate once at the final step
+  (`run_at_start: false`, `every_steps: <max_train_steps>`) or sample from
+  checkpoints out of process.
+
+### Limits and open items
+
+- **No acceptable trained checkpoint and no branch-trained SSIM reference.**
+  Every gate is a single-sample, 200-step overfit that proves the machinery and
+  the recipe, not model quality. A scaled run (critic `2e-5`, effective batch
+  >=32, generator interval 1, >=1000 generator updates, judged on
+  distributional quality) is the missing quality story; at 480x832 that is
+  roughly 8-9 h on the Slurm cluster.
+- No supervised student-side reachability ceiling; the sample-target oracle is
+  diagnostic rather than the exact conditional expectation.
+- `pre-commit run --all-files` has not run (hooks unavailable in the authoring
+  sandbox); the docs were hand-checked for non-ASCII, trailing whitespace, and
+  long lines.
+- PVC hygiene: `/workspace/issue-775/h3_model_teacher` is a broken early
+  overlay safe to delete; `/workspace/run` is root-owned and unwritable from
+  Slurm, so new runs go under `/workspace/vlm-mal004/tdm-port/runs`.
+- Deferred tooling (low value, never needed): the step-count preflight sampler
+  and a checkpoint rescorer from Phase 2.
+
 ## Phase 0 (2026-09-22): integration plan, branch rename, parity gate
 
 User decisions (2026-09-22):
