@@ -53,7 +53,26 @@
   the package download fails. The pre-commit gate therefore needs either an
   environment with PyPI access (e.g. the authoring Linux sandbox or DGX Spark
   Docker) or a sandbox allowlist entry for PyPI before this PR can be declared
-  ready. No pre-commit hook has been run on this branch yet.
+  ready.
+- Pre-commit gate executed on DGX Spark (Modal CLI exists locally but the
+  sandbox cannot read `~/.modal.toml`, so per the user's fallback the gate ran
+  on DGX in the approved dev image). Fresh clone of
+  `macthecadillac/FastVideo:tdm-port` at `21a9b9ba9` under
+  `/home/mac/tdm-port-precheck`; persistent hook cache
+  `/home/mac/tdm-precommit-home`; full log on DGX at `/tmp/pc.log`
+  (container `tdm-precommit`). Result: **FAIL**.
+  - yapf modifies 3 branch files:
+    `fastvideo/train/methods/distribution_matching/tdm.py`,
+    `fastvideo/train/models/base.py`,
+    `fastvideo/train/models/minimax_h3/minimax_h3.py`.
+  - mypy reports 4 errors: `fastvideo/train/models/base.py:266` and `:267`
+    (`float(Any | None)`), `tdm.py:376` (list append tuple type),
+    `tdm.py:399` (assignment type).
+  - ruff, codespell, pymarkdown, actionlint, check-filenames, and suggestion
+    all pass.
+  - The yapf diff is captured locally for reuse; these mechanical gate
+    failures and the Stage 3 review findings are the inputs to the
+    adjudicator/fixer before the gate is rerun.
 
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
