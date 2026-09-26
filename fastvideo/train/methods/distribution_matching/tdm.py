@@ -315,7 +315,10 @@ class TDMMethod(DMD2Method):
         ladder is read as raw labels (``dmd_denoising_steps_are_scheduler_space``
         false), the sampler shifts those labels by that fixed amount, so it
         matches TDM's student grid only when the student's *effective*
-        scheduler shift is the same value. The effective shift is resolved by
+        scheduler shift is the same value. When the labels are already
+        scheduler-space, the sampler reads them as raw sigmas (``label / T``)
+        and disregards its own shift, so the grid matches only an identity
+        student shift. The effective shift is resolved by
         ``WanModel._resolve_flow_shift`` from ``models.<role>.flow_shift``
         first, then ``pipeline.flow_shift``, then 3.0, so compare the resolved
         value rather than the pipeline field alone.
@@ -325,8 +328,6 @@ class TDMMethod(DMD2Method):
         pipeline_config = getattr(self.training_config, "pipeline_config", None)
         if pipeline_config is None:
             return
-        if bool(getattr(pipeline_config, "dmd_denoising_steps_are_scheduler_space", False)):
-            return
         scheduler = getattr(self.student, "noise_scheduler", None)
         shift = getattr(scheduler, "shift", None)
         if shift is None:
@@ -335,6 +336,17 @@ class TDMMethod(DMD2Method):
             pipeline_flow_shift = getattr(pipeline_config, "flow_shift", None)
             shift = 3.0 if pipeline_flow_shift is None else float(pipeline_flow_shift)
         from fastvideo.models.wan.definition import DMD_TRAINING_NOISE_SHIFT
+        if bool(getattr(pipeline_config, "dmd_denoising_steps_are_scheduler_space", True)):
+            if float(shift) != 1.0:
+                raise ValueError(
+                    "Wan TDM validation reads dmd_denoising_steps as scheduler-space "
+                    "labels (dmd_denoising_steps_are_scheduler_space=True), so the dense "
+                    "DMD sampler samples raw sigmas (label / T) and disregards its pinned "
+                    "training-noise shift. That matches TDM's shifted grid only when the "
+                    "student's resolved flow_shift is 1.0; got "
+                    f"{float(shift)}. Unset dmd_denoising_steps_are_scheduler_space so the "
+                    "training-noise shift is applied, or set the student's flow shift to 1.0.")
+            return
         if float(shift) != DMD_TRAINING_NOISE_SHIFT:
             raise ValueError("Wan TDM validation samples through the dense DMD sampler, whose "
                              f"training-noise shift is fixed at {DMD_TRAINING_NOISE_SHIFT}; "

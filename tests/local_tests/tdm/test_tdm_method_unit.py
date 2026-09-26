@@ -1088,3 +1088,34 @@ def test_tdm_rejects_unset_pipeline_flow_shift_fallback(
             flow_shift=None,
             dmd_denoising_steps_are_scheduler_space=False,
         ))
+
+
+def test_tdm_rejects_scheduler_space_labels_without_identity_shift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Scheduler-space labels make validation read raw sigmas and ignore the
+    # sampler's pinned shift, so a non-identity student shift cannot match the
+    # trained shifted grid and must be rejected instead of silently skipped.
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "wan")
+
+    with pytest.raises(ValueError, match="flow_shift"):
+        _build_method(pipeline_config=SimpleNamespace(
+            flow_shift=8.0,
+            dmd_denoising_steps_are_scheduler_space=True,
+        ))
+
+
+def test_tdm_accepts_scheduler_space_labels_with_identity_shift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(TDMMethod, "_model_family", lambda self: "wan")
+
+    method, _, _ = _build_method(
+        pipeline_config=SimpleNamespace(
+            flow_shift=8.0,
+            dmd_denoising_steps_are_scheduler_space=True,
+        ),
+        student_shift=1.0,
+    )
+
+    assert method._model_family() == "wan"
