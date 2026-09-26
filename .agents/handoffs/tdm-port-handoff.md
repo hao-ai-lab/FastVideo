@@ -73,6 +73,33 @@
   - The yapf diff is captured locally for reuse; these mechanical gate
     failures and the Stage 3 review findings are the inputs to the
     adjudicator/fixer before the gate is rerun.
+- Stage 3 round 1 complete (commit `92594a721`, GPG-signed, pushed; fork and
+  local tips verified identical at that SHA):
+  - Review-code sub-agent findings: 1 High (critic backward stored
+    `batch.attn_metadata` while the H3 `tdm_vsa_apply_to: all` forward used
+    `batch.attn_metadata_vsa`), 3 Medium (DMD validation ladder shifted by the
+    pinned shift-8 stage while training used `pipeline.flow_shift`; new FastWan
+    SSIM cases pointed at HF reference folders that do not exist; non-unit
+    `real_score_guidance_scale` on H3 failed with a cryptic error), 2 Low
+    (dead `TDMTrajectory.final_clean`; site-specific account paths in the
+    `tests/local_tests/tdm/{k8s,slurm}` runners).
+  - Adjudicator/fixer accepted and fixed: added `_attn_metadata_for(role, batch)`
+    used by all three role contexts plus a fake-model regression test; added a
+    fail-fast Wan guard rejecting `flow_shift != DMD_TRAINING_NOISE_SHIFT` when
+    the ladder is in label space (instead of threading flow_shift into the
+    stage, preserving the documented pinned-shift contract) with tests; added
+    an H3 init guard requiring guidance 1.0 with tests; removed the dead
+    `final_clean` property; added skip-when-reference-absent to the two FastWan
+    SSIM cases; applied the captured yapf diff; fixed the four mypy errors
+    (`base.py` None asserts, `tdm.py` trajectory list typing).
+  - Adjudicator rejected finding 6 (site-specific runner paths): they are
+    `tests/local_tests/` reproduction scripts tied to one documented
+    GB200/Slurm topology; a generic public replacement is a separate
+    maintainer decision.
+  - Next: fresh review-code round 2 on `92594a721`, then rerun
+    `pre-commit run --all-files` on DGX against the new tip, then draft the PR
+    message. External validation still owed: the H3 VSA `apply_to: all`
+    backward path on GB200 and the flow-shift guard.
 
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
