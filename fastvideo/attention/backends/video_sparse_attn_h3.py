@@ -743,8 +743,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 # dtype. Got bf16 and fp32". Cast at the kernel boundary, as
                 # the flash-attn-style dtype lesson requires.
                 if q_bhsd.dtype != torch.bfloat16:
-                    logger.warning_once(f"VSA-H3 tile-64 Triton kernel requires bf16 Q/K/V; casting from "
-                                        f"{q_bhsd.dtype} at the kernel boundary.")
+                    # Logging at trace time would break a ``fullgraph=True``
+                    # forward; match the sm100a branch and warn eagerly only.
+                    if not compiling:
+                        logger.warning_once(f"VSA-H3 tile-64 Triton kernel requires bf16 Q/K/V; casting from "
+                                            f"{q_bhsd.dtype} at the kernel boundary.")
                     q_bhsd = q_bhsd.to(torch.bfloat16)
                     k_bhsd = k_bhsd.to(torch.bfloat16)
                     v_bhsd = v_bhsd.to(torch.bfloat16)
