@@ -34,10 +34,6 @@ class TDMTrajectory:
     timesteps: torch.Tensor
     sigmas: torch.Tensor
 
-    @property
-    def final_clean(self) -> torch.Tensor:
-        return self.clean_latents[-1]
-
 
 @dataclass(slots=True)
 class TDMSampleContext:
@@ -306,6 +302,39 @@ class TDMMethod(DMD2Method):
         else:
             self.method_config.setdefault("dmd_denoising_steps", list(self._step_schedules[-1][0]))
 
+        if self._model_family() == "minimax_h3" and self._real_score_guidance() != 1.0:
+            raise ValueError("MiniMax H3 TDM requires method.real_score_guidance_scale == 1.0 "
+                             "because the model has no unconditional branch for CFG guidance")
+        self._validate_wan_validation_shift()
+
+    def _validate_wan_validation_shift(self) -> None:
+        """Reject a Wan config whose validation cannot match the trained grid.
+
+        Wan TDM validation runs the dense DMD sampler, whose training-noise
+        scheduler is pinned to ``DMD_TRAINING_NOISE_SHIFT``. When the DMD
+        ladder is read as raw labels (``dmd_denoising_steps_are_scheduler_space``
+        false), validation shifts those labels by that fixed amount, so it
+        matches TDM's student grid only when ``pipeline.flow_shift`` is the
+        same value.
+        """
+        if self._model_family() != "wan":
+            return
+        pipeline_config = getattr(self.training_config, "pipeline_config", None)
+        if pipeline_config is None:
+            return
+        if bool(getattr(pipeline_config, "dmd_denoising_steps_are_scheduler_space", False)):
+            return
+        flow_shift = getattr(pipeline_config, "flow_shift", None)
+        if flow_shift is None:
+            return
+        from fastvideo.models.wan.definition import DMD_TRAINING_NOISE_SHIFT
+        if float(flow_shift) != DMD_TRAINING_NOISE_SHIFT:
+            raise ValueError("Wan TDM validation samples through the dense DMD sampler, whose "
+                             f"training-noise shift is fixed at {DMD_TRAINING_NOISE_SHIFT}; "
+                             f"pipeline.flow_shift={float(flow_shift)} would make validation "
+                             f"disagree with the trained sigma grid. Set pipeline.flow_shift to "
+                             f"{DMD_TRAINING_NOISE_SHIFT}.")
+
     def manages_optimization(self) -> bool:
         return True
 
@@ -362,7 +391,7 @@ class TDMMethod(DMD2Method):
 
         fake_score_losses: list[torch.Tensor] = []
         fake_score_metric_maps: list[dict[str, LogScalar]] = []
-        prepared_trajectories: list[tuple[TrainingBatch, TDMTrajectory]] = []
+        prepared_trajectories: list[tuple[TrainingBatch, dict[str, TDMTrajectory]]] = []
         for raw_batch in raw_batches:
             training_batch = self.student.prepare_batch(
                 raw_batch,
@@ -462,10 +491,7 @@ class TDMMethod(DMD2Method):
             name: torch.stack(trajectory.noisy_latents)[trajectory_indices, batch_indices].detach()
             for name, trajectory in trajectories.items()
         }
-        sigma_source = {
-            name: trajectory.sigmas[trajectory_indices]
-            for name, trajectory in trajectories.items()
-        }
+        sigma_source = {name: trajectory.sigmas[trajectory_indices] for name, trajectory in trajectories.items()}
         return noisy_source, sigma_source, trajectory_indices
 
     def _tdm_warmup_loss(
@@ -518,8 +544,7 @@ class TDMMethod(DMD2Method):
                     name: real_uncond_x0[name] + (real_cond_x0[name] - real_uncond_x0[name]) * guidance
                     for name in real_cond_x0
                 }
-        loss = sum(
-            (pred_x0[name].float() - real_cfg_x0[name].float()).square().mean() for name in pred_x0)
+        loss = sum((pred_x0[name].float() - real_cfg_x0[name].float()).square().mean() for name in pred_x0)
         video_sigma = sigma_source["video"]
         metrics: dict[str, LogScalar] = {
             "tdm/warmup/loss": loss.detach(),
@@ -528,7 +553,7 @@ class TDMMethod(DMD2Method):
             "tdm/warmup/source_sigma": video_sigma.detach().float().mean(),
             "tdm/warmup/source_trajectory_index": trajectory_indices.detach().float().mean(),
         }
-        return loss, metrics, (student_timestep, batch.attn_metadata_vsa)
+        return loss, metrics, (student_timestep, self._attn_metadata_for("student", batch))
 
     def _managed_warmup_step(
         self,
@@ -615,6 +640,17 @@ class TDMMethod(DMD2Method):
         if role == "student" or self._vsa_apply_to == "all":
             return "vsa"
         return "dense"
+
+    def _attn_metadata_for(self, role: str, batch: TrainingBatch) -> Any:
+        """Metadata matching the forward ``_attn_kind_for(role)`` selects.
+
+        The backward context must restore the exact attention metadata the
+        forward used, because activation-checkpointed layers re-read it from
+        the forward context during the recompute.
+        """
+        if self._attn_kind_for(role) == "vsa":
+            return batch.attn_metadata_vsa
+        return batch.attn_metadata
 
     def _model_family(self) -> str:
         """Best-effort family name of the student plugin (``wan``, ...)."""
@@ -745,14 +781,14 @@ class TDMMethod(DMD2Method):
                 raise ValueError("method.tdm_denoising_steps contains values outside the scheduler training range")
             steps = timesteps[step_indices]
 
-        sigmas_by_modality = (
-            {
-                modality: self._timestep_to_sigma(steps, scheduler_space=True)
-                for modality in self._modalities
-            } if bool(warp) else {
-                modality: self.student.tdm_sigma_grid(steps, modality).to(device=device, dtype=torch.float32)
-                for modality in self._modalities
-            })
+        sigmas_by_modality = ({
+            modality: self._timestep_to_sigma(steps, scheduler_space=True)
+            for modality in self._modalities
+        } if bool(warp) else {
+            modality:
+            self.student.tdm_sigma_grid(steps, modality).to(device=device, dtype=torch.float32)
+            for modality in self._modalities
+        })
         for modality, sigmas in sigmas_by_modality.items():
             terminal_sigma = self.student.tdm_terminal_sigma(modality).to(device=device, dtype=torch.float32)
             if not bool(torch.isclose(
@@ -862,10 +898,7 @@ class TDMMethod(DMD2Method):
         sigmas: dict[str, list[torch.Tensor]] = {name: [] for name in self._modalities}
 
         for step_idx in range(len(step_list)):
-            step_sigmas = {
-                name: sigma_lists[name][step_idx].reshape(1)
-                for name in self._modalities
-            }
+            step_sigmas = {name: sigma_lists[name][step_idx].reshape(1) for name in self._modalities}
             with torch.no_grad():
                 pred_x0 = self.student.tdm_predict_x0(
                     current,
@@ -908,7 +941,8 @@ class TDMMethod(DMD2Method):
         timesteps = step_list.to(device=device)
         batch.dmd_latent_vis_dict["generator_timestep"] = timesteps[-1].float().detach()
         return {
-            name: TDMTrajectory(
+            name:
+            TDMTrajectory(
                 noisy_latents=noisy_latents[name],
                 clean_latents=clean_latents[name],
                 timesteps=timesteps,
@@ -1041,10 +1075,14 @@ class TDMMethod(DMD2Method):
             contexts = self._sample_tdm_context(trajectories)
 
         fake_x0 = self.critic.tdm_predict_x0(
-            {name: context.noisy_target
-             for name, context in contexts.items()},
-            {name: context.sigma_target
-             for name, context in contexts.items()},
+            {
+                name: context.noisy_target
+                for name, context in contexts.items()
+            },
+            {
+                name: context.sigma_target
+                for name, context in contexts.items()
+            },
             batch,
             conditional=True,
             cfg_uncond=self._cfg_uncond,
@@ -1079,7 +1117,7 @@ class TDMMethod(DMD2Method):
         )
         return (
             fake_score_loss,
-            (critic_timestep, batch.attn_metadata),
+            (critic_timestep, self._attn_metadata_for("critic", batch)),
             outputs,
             metrics,
         )
@@ -1185,10 +1223,14 @@ class TDMMethod(DMD2Method):
 
         contexts = self._sample_tdm_context(trajectories)
         generator_pred_x0 = self.student.tdm_predict_x0(
-            {name: context.noisy_source
-             for name, context in contexts.items()},
-            {name: context.sigma_source
-             for name, context in contexts.items()},
+            {
+                name: context.noisy_source
+                for name, context in contexts.items()
+            },
+            {
+                name: context.sigma_source
+                for name, context in contexts.items()
+            },
             batch,
             conditional=True,
             cfg_uncond=self._cfg_uncond,
@@ -1269,12 +1311,10 @@ class TDMMethod(DMD2Method):
                     )
                 denom_by_modality[name] = denom
                 target_by_modality[name] = prediction.detach() + delta_nan
-            raw_delta_abs_mean = sum(
-                (real_cfg_x0[name] - faker_x0[name]).detach().float().abs().mean() for name in real_cfg_x0) / len(
-                    real_cfg_x0)
-            target_delta_abs_mean = sum(
-                delta.detach().float().abs().mean() for delta in delta_nan_by_modality.values()) / len(
-                    delta_nan_by_modality)
+            raw_delta_abs_mean = sum((real_cfg_x0[name] - faker_x0[name]).detach().float().abs().mean()
+                                     for name in real_cfg_x0) / len(real_cfg_x0)
+            target_delta_abs_mean = sum(delta.detach().float().abs().mean()
+                                        for delta in delta_nan_by_modality.values()) / len(delta_nan_by_modality)
             normalization_denom = sum(denom.detach().float().mean()
                                       for denom in denom_by_modality.values()) / len(denom_by_modality)
 
@@ -1308,7 +1348,7 @@ class TDMMethod(DMD2Method):
             "tdm/generator/normalize_delta": float(self._normalize_generator_delta),
             "tdm/generator/use_pseudo_huber": float(self._use_pseudo_huber),
         }
-        return loss, metrics, (source_timestep, batch.attn_metadata_vsa)
+        return loss, metrics, (source_timestep, self._attn_metadata_for("student", batch))
 
     def _generator_pseudo_huber_loss(
         self,

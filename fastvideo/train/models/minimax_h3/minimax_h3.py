@@ -81,7 +81,6 @@ def _broadcast_sigma(sigma: torch.Tensor, latents: torch.Tensor) -> torch.Tensor
     return sigma.reshape(*sigma.shape, *([1] * (latents.ndim - sigma.ndim)))
 
 
-
 class MiniMaxH3Model(ModelBase):
     """Adapt the H3 joint transformer to the modular fine-tuning contract."""
 
