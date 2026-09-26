@@ -338,14 +338,13 @@ class TDMMethod(DMD2Method):
         from fastvideo.models.wan.definition import DMD_TRAINING_NOISE_SHIFT
         if bool(getattr(pipeline_config, "dmd_denoising_steps_are_scheduler_space", True)):
             if float(shift) != 1.0:
-                raise ValueError(
-                    "Wan TDM validation reads dmd_denoising_steps as scheduler-space "
-                    "labels (dmd_denoising_steps_are_scheduler_space=True), so the dense "
-                    "DMD sampler samples raw sigmas (label / T) and disregards its pinned "
-                    "training-noise shift. That matches TDM's shifted grid only when the "
-                    "student's resolved flow_shift is 1.0; got "
-                    f"{float(shift)}. Unset dmd_denoising_steps_are_scheduler_space so the "
-                    "training-noise shift is applied, or set the student's flow shift to 1.0.")
+                raise ValueError("Wan TDM validation reads dmd_denoising_steps as scheduler-space "
+                                 "labels (dmd_denoising_steps_are_scheduler_space=True), so the dense "
+                                 "DMD sampler samples raw sigmas (label / T) and disregards its pinned "
+                                 "training-noise shift. That matches TDM's shifted grid only when the "
+                                 "student's resolved flow_shift is 1.0; got "
+                                 f"{float(shift)}. Unset dmd_denoising_steps_are_scheduler_space so the "
+                                 "training-noise shift is applied, or set the student's flow shift to 1.0.")
             return
         if float(shift) != DMD_TRAINING_NOISE_SHIFT:
             raise ValueError("Wan TDM validation samples through the dense DMD sampler, whose "
