@@ -420,8 +420,13 @@ labels only match a student flow shift of `1.0`.
 | `max_grad_norm` | `1.0` | Clip student and critic gradients inside TDM's ordered optimizer phases; set to zero to disable |
 
 See `examples/train/configs/distribution_matching/wan/tdm_t2v_lora.yaml` for a
-complete Wan LoRA config. Treat this as a Wan adaptation of TDM, not exact
-CogVideoX reference parity. TDM follows the reference implementation's rollout
+complete Wan LoRA config. That production-shaped example keeps the
+DMD2-inherited learning rates (student `2e-6`, fake score `8e-6`), which the
+Phase 3 diagnostics measured to be a no-op regime for TDM; the validated TDM
+rates (student `1e-4`, fake score `1e-4`) ship in the fixed-recipe examples
+(`tdm_t2v_lora_fixed_recipe.yaml`, `tdm_t2v_lora_overfit.yaml`). Treat this as
+a Wan adaptation of TDM, not exact CogVideoX reference parity. TDM follows the
+reference implementation's rollout
 gradient behavior: generated rollout history is not backpropagated through, and
 only the student prediction used by the generator loss carries gradients. Each
 training step first backpropagates and applies the fake-score critic update,
