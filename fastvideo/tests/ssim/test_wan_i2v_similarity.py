@@ -5,6 +5,7 @@ import pytest
 
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.bootstrap_references import bootstrap_mode_enabled
 from fastvideo.tests.ssim.inference_similarity_utils import (
     resolve_inference_device_reference_folder,
     run_image_to_video_similarity_test,
@@ -150,7 +151,7 @@ def test_fastwan_ti2v_inference_similarity(
         model_id,
         attention_backend_name,
     )
-    if not os.path.exists(reference_folder):
+    if not os.path.exists(reference_folder) and not bootstrap_mode_enabled():
         pytest.skip(f"FastWan TI2V reference videos are not seeded for {device_reference_folder}: {reference_folder}")
     run_image_to_video_similarity_test(
         logger=logger,

@@ -6,6 +6,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 import torch
 from torch.testing import assert_close
 
@@ -84,6 +85,24 @@ def test_wan_tdm_example_builds_method_with_pipeline_scheduler_shift(monkeypatch
         8.0 * 0.25 / (1.0 + 7.0 * 0.25),
     ])
     assert_close(sigmas, expected)
+
+
+def test_wan_tdm_rejects_student_flow_shift_override_mismatching_validation(monkeypatch) -> None:
+    _patch_lightweight_wan(monkeypatch)
+    cfg = load_run_config(_TDM_CONFIG, ["--models.student.flow_shift", "5"])
+
+    with pytest.raises(ValueError, match="flow_shift"):
+        build_from_config(cfg)
+
+
+def test_wan_tdm_rejects_unset_flow_shift_fallback_mismatching_validation(monkeypatch) -> None:
+    _patch_lightweight_wan(monkeypatch)
+    cfg = load_run_config(_TDM_CONFIG, ["--pipeline.flow_shift", "null"])
+    assert cfg.training.pipeline_config is not None
+    assert cfg.training.pipeline_config.flow_shift is None
+
+    with pytest.raises(ValueError, match="flow_shift"):
+        build_from_config(cfg)
 
 
 def test_wan_tdm_overfit_example_uses_four_gpu_text_only_diagnostic() -> None:
