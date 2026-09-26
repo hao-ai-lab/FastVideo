@@ -422,6 +422,54 @@ def test_tdm_generator_reconstructs_intermediate_before_scoring_target(
     assert teacher.predict_timestep_shapes == [(2, ), (2, )]
 
 
+def test_tdm_sparse_attention_applies_to_student_only_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The student is sparse by default while the critic and teacher stay dense."""
+    method, student, critic = _build_method(method_overrides={"use_randmid": False})
+    teacher = method.teacher
+    batch = student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
+    trajectory = method._student_trajectory(batch)
+    context = method._sample_tdm_context(trajectory)["video"]
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda _: {"video": context})
+    for model in (student, critic, teacher):
+        model.predict_calls.clear()
+
+    method._tdm_generator_loss(trajectory, batch)
+
+    assert {call[1] for call in student.predict_calls} == {"vsa"}
+    assert {call[1] for call in critic.predict_calls} == {"dense"}
+    assert {call[1] for call in teacher.predict_calls} == {"dense"}
+
+
+def test_tdm_sparse_attention_apply_to_all_switches_every_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`tdm_vsa_apply_to: all` drives the critic and teacher sparse too."""
+    method, student, critic = _build_method(method_overrides={
+        "use_randmid": False,
+        "tdm_vsa_apply_to": "all",
+    })
+    teacher = method.teacher
+    batch = student.prepare_batch({}, generator=method.cuda_generator, latents_source="zeros")
+    trajectory = method._student_trajectory(batch)
+    context = method._sample_tdm_context(trajectory)["video"]
+    monkeypatch.setattr(method, "_sample_tdm_context", lambda _: {"video": context})
+    for model in (student, critic, teacher):
+        model.predict_calls.clear()
+
+    method._tdm_generator_loss(trajectory, batch)
+
+    assert {call[1] for call in student.predict_calls} == {"vsa"}
+    assert {call[1] for call in critic.predict_calls} == {"vsa"}
+    assert {call[1] for call in teacher.predict_calls} == {"vsa"}
+
+
+def test_tdm_rejects_unknown_sparse_attention_scope() -> None:
+    with pytest.raises(ValueError, match="tdm_vsa_apply_to"):
+        _build_method(method_overrides={"tdm_vsa_apply_to": "critic"})
+
+
 def test_tdm_sigma_lookup_treats_explicit_steps_as_raw_wan_timesteps() -> None:
     method, student, _ = _build_method()
     student.noise_scheduler = _ShiftedFlowScheduler()
