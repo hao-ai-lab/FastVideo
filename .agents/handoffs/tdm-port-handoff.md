@@ -96,10 +96,28 @@
     `tests/local_tests/` reproduction scripts tied to one documented
     GB200/Slurm topology; a generic public replacement is a separate
     maintainer decision.
-  - Next: fresh review-code round 2 on `92594a721`, then rerun
-    `pre-commit run --all-files` on DGX against the new tip, then draft the PR
-    message. External validation still owed: the H3 VSA `apply_to: all`
-    backward path on GB200 and the flow-shift guard.
+- Stage 3 round 2 complete (commit `2639d6809`, GPG-signed, pushed):
+  - Round-2 reviewer findings: Low–Medium (the new Wan validation-shift guard
+    compared `pipeline_config.flow_shift` instead of the student's resolved
+    scheduler shift, and skipped when the pipeline shift was explicitly null);
+    Low (docs `vsa.sparsity` config path claim); Low (the new `flow_shift=None`
+    default changes role-scheduler shifts for existing DMD2/Self-Forcing/AnyFlow
+    recipes); Low (FastWan SSIM skips fired before bootstrap mode could emit
+    draft references).
+  - Adjudicator accepted and fixed: the guard now compares the resolved
+    `student.noise_scheduler.shift` (with the 3.0 fallback) against
+    `DMD_TRAINING_NOISE_SHIFT`, with tests for `models.student.flow_shift 5`
+    and `pipeline.flow_shift null`; the FastWan SSIM cases now skip only when
+    bootstrap mode is off, preserving the seed-references path.
+  - Adjudicator rejected: the docs finding (the real nested key is
+    `training.vsa.sparsity`, which is what the docs show) and the flow_shift
+    default finding (the old hardcoded 3.0 role schedulers were inconsistent
+    with the pipeline-shifted student; inheriting `pipeline.flow_shift` is the
+    intended fix; non-TDM validation evidence belongs in the PR body).
+  - Next: fresh review-code round 3 on `2639d6809`, then rerun
+    `pre-commit run --all-files` on DGX against the final tip, then draft the
+    PR message. External validation still owed: H3 VSA `apply_to: all`
+    backward path on GB200, the new guard tests, and non-TDM DMD smoke runs.
 
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
