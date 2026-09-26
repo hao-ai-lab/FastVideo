@@ -66,7 +66,7 @@ class WanModel(ModelBase):
         training_config: TrainingConfig,
         trainable: bool = True,
         disable_custom_init_weights: bool = False,
-        flow_shift: float = 3.0,
+        flow_shift: float | None = None,
         enable_gradient_checkpointing_type: str
         | None = None,
         transformer_override_safetensor: str
@@ -91,7 +91,11 @@ class WanModel(ModelBase):
             attention_backend=self.attention_backend,
         )
 
-        self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
+        resolved_flow_shift = self._resolve_flow_shift(
+            flow_shift,
+            training_config,
+        )
+        self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=resolved_flow_shift))
 
         # Filled by init_preprocessors (student only).
         self.vae: Any = None
@@ -108,7 +112,7 @@ class WanModel(ModelBase):
         self._requires_negative_conditioning = True
 
         # Timestep mechanics.
-        self.timestep_shift: float = float(flow_shift)
+        self.timestep_shift: float = resolved_flow_shift
         self.num_train_timestep: int = int(self.noise_scheduler.num_train_timesteps)
         self.min_timestep: int = 0
         self.max_timestep: int = self.num_train_timestep
@@ -234,6 +238,21 @@ class WanModel(ModelBase):
     # ------------------------------------------------------------------
     # Runtime primitives
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_flow_shift(
+        flow_shift: float | None,
+        training_config: TrainingConfig,
+    ) -> float:
+        if flow_shift is not None:
+            return float(flow_shift)
+
+        pipeline_config = getattr(training_config, "pipeline_config", None)
+        pipeline_flow_shift = getattr(pipeline_config, "flow_shift", None)
+        if pipeline_flow_shift is not None:
+            return float(pipeline_flow_shift)
+
+        return 3.0
 
     def prepare_batch(
         self,
@@ -434,9 +453,7 @@ class WanModel(ModelBase):
 
     def _init_timestep_mechanics(self) -> None:
         assert self.training_config is not None
-        tc = self.training_config
-        self.timestep_shift = float(tc.pipeline_config.flow_shift  # type: ignore[union-attr]
-                                    )
+        self.timestep_shift = float(self.noise_scheduler.shift)
         self.num_train_timestep = int(self.noise_scheduler.num_train_timesteps)
         # min/max timestep ratios now come from method_config;
         # default to full range.

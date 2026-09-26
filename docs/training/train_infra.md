@@ -90,6 +90,7 @@ Which roles are needed depends on the training method:
 | Fine-tune (SFT) | `student` |
 | Diffusion-Forcing SFT | `student` |
 | DMD2 | `student`, `teacher`, `critic` |
+| TDM | `student`, `teacher`, `critic` |
 | Self-Forcing | `student` (causal), `teacher`, `critic` |
 
 ### `method` — Training algorithm
@@ -148,6 +149,7 @@ training:
     checkpoints_total_limit: 3                # 0 = keep all
 
   tracker:
+    trackers: []  # options: none, wandb, swanlab, jsonl
     project_name: my_project
     run_name: my_run
 
@@ -328,6 +330,221 @@ method:
 | `fake_score_betas` | *(required)* | Critic optimizer Adam betas |
 | `fake_score_lr_scheduler` | *(required)* | Critic LR scheduler type |
 
+### TDM (Trajectory Distribution Matching)
+
+Ports Trajectory Distribution Matching to FastVideo's modular trainer. The
+original TDM paper and demo target CogVideoX-2B with diffusion notation; the
+FastVideo implementation adapts the objective to Wan flow matching. Production
+code uses Wan's forward process:
+
+```text
+x_sigma = (1 - sigma) * x0 + sigma * eps
+x0_hat = x_sigma - sigma * model_output
+```
+
+It keeps the TDM role structure: a few-step trainable student generates a
+trajectory, a trainable fake-score critic learns from generated trajectory
+points, and a frozen teacher supplies real-score guidance for the generator
+target.
+
+```yaml
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+  teacher:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  critic:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    disable_custom_init_weights: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  rollout_mode: simulate
+  tdm_denoising_steps: [1000, 750, 500, 250]
+  generator_update_interval: 5
+  real_score_guidance_scale: 4.5
+  student_sample_type: sde
+  noise_interval_mode: separate
+  use_randmid: false
+  max_grad_norm: 1.0
+  cfg_uncond:
+    text: negative_prompt
+    on_missing: error
+
+  fake_score_learning_rate: 8.0e-6
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+
+pipeline:
+  flow_shift: 8
+  # TDM labels are raw timesteps, so the dense DMD validation sampler must
+  # apply its pinned flow shift; opt out of scheduler-space labels.
+  dmd_denoising_steps_are_scheduler_space: false
+```
+
+Wan TDM requires this opt-out because `flow_shift: 8` matches the dense DMD
+validation sampler's pinned training-noise shift; the default scheduler-space
+labels only match a student flow shift of `1.0`.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `rollout_mode` | *(required)* | Currently must be `"simulate"` |
+| `tdm_denoising_steps` | *(required)* | Few-step student trajectory schedule; mapped sigmas must start at scheduler terminal noise and strictly decrease |
+| `warmup_steps` | `200` for Wan, `0` otherwise | Regression-warmup updates that fit the student to the guidance-combined teacher x0 at its own rollout states before TDM starts; the critic takes no updates and stays out of the optimizers, LR schedulers, and grad-clip targets while warmup is active |
+| `tdm_step_ladder` | *(unset)* | Staged step counts, `[{denoising_steps: [...], until_iteration: N}]`; counts must strictly decrease, boundaries strictly increase, and only the last stage may omit `until_iteration`. Validation and inference adopt the final stage's schedule |
+| `student_sample_type` | `"sde"` | `"sde"` re-noises each predicted x0; `"ode"` carries effective flow noise |
+| `noise_interval_mode` | `"separate"` | Fake-score noising target selection mode; see note below |
+| `use_randmid` | `false` | Randomly sample the intermediate sigma between the source point and the next trajectory sigma when enabled |
+| `snr_clip` | `5.0` | Clip the flow-SNR fake-score weight |
+| `importance_weight_clip` | `10.0` | Clip mixed-noise importance weights |
+| `normalize_generator_delta` | `true` | Divide each sample's generator loss by its teacher-guidance magnitude |
+| `tdm_vsa_apply_to` | `"student"` | Which roles run sparse attention when a sparse backend is configured: `"student"` (the validated H3 recipe) or `"all"` (critic and teacher sparse as well; their `models.<role>.attention_backend` must then be the matching sparse backend) |
+| `use_huber` | `false` | Use the elementwise Huber form `sqrt(err^2 + c^2) - c` with the fixed `huber_c` for the generator loss; fake-score training remains MSE |
+| `huber_c` | `0.001` | Huber delta when `use_huber=true` |
+| `use_pseudo_huber` | `false` | Use the paper Eq. 11 pseudo-Huber surrogate (`sqrt(||pred - target||_2^2 + c^2) - c`, `c = 0.00054*sqrt(d)` with `d` the flattened per-sample latent size); skips DMD delta normalization; mutually exclusive with `use_huber` |
+| `max_grad_norm` | `1.0` | Clip student and critic gradients inside TDM's ordered optimizer phases; set to zero to disable |
+
+See `examples/train/configs/distribution_matching/wan/tdm_t2v_lora.yaml` for a
+complete Wan LoRA config. Treat this as a Wan adaptation of TDM, not exact
+CogVideoX reference parity. TDM follows the reference implementation's rollout
+gradient behavior: generated rollout history is not backpropagated through, and
+only the student prediction used by the generator loss carries gradients. Each
+training step first backpropagates and applies the fake-score critic update,
+then resamples the trajectory point and proposal noise from the same detached
+student trajectory and recomputes the generator loss against the updated critic
+before applying the student update.
+
+Fake-score training samples a source point from the generated trajectory. In
+`separate` and `to_terminal` modes, source points are sampled randomly and
+independently per batch element. With `use_randmid: true`, TDM then samples an
+intermediate sigma in
+`[sigma_next, sigma_source)`; otherwise the intermediate sigma is
+`sigma_next`. For `noise_interval_mode: separate`, the target is sampled in
+`[sigma_intermediate, sigma_source)`. For `noise_interval_mode: to_terminal`,
+the target is sampled in `[sigma_intermediate, sigma_terminal)`, so it may be
+any scheduler point in that interval. The exact terminal `sigma=1.0` endpoint
+is excluded because flow-SNR weighting gives it zero fake-score weight.
+
+For classifier-free teacher guidance, the shipped Wan recipes encode the
+model's negative prompt and require it to be present. Zero text embeddings are
+not an equivalent unconditional condition.
+
+### TDM on MiniMax H3 (joint video + audio)
+
+MiniMax H3 denoises one packed video-and-audio sequence, and its TDM port
+trains both modalities in a single joint pass. The student and critic carry
+rank-16 LoRA adapters over the frozen base and the teacher runs the frozen base
+without adapters. H3 is guidance-distilled, so `real_score_guidance_scale`
+stays `1.0` and there is deliberately no `method.cfg_uncond` block: the model
+has no unconditional branch, and TDM uses the conditional teacher x0 directly.
+
+The plugin implements the per-modality contract the method loops over
+(`tdm_modalities`, `tdm_clean_latents`, `tdm_sigma_grid`, `tdm_predict_x0`,
+and friends). H3 conventions that differ from Wan:
+
+- **Sigma grid**: `shift * u / (1 + (shift - 1) * u)` with `u = label / 1000`,
+  video shift `12` and audio shift `3`; the same integer labels drive both
+  modalities, each mapped through its own shift.
+- **Model time** is `1 - sigma` (no scheduler sigma-table lookup).
+- **Velocity is data-ward**: the plugin negates the transformer output so the
+  base conversion `x0 = x_t - sigma * pred_noise` is exactly
+  `x0 = x_t + sigma * v`.
+- **Losses are summed per modality**; one joint transformer forward serves the
+  rollout, the fake-score update, and the generator update.
+
+```yaml
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
+    init_from: <MiniMax-H3 model dir>
+    trainable: true
+    attention_backend: TORCH_SDPA
+    enable_gradient_checkpointing_type: full
+    lora:
+      enable: true
+      rank: 16
+      alpha: 16
+      target_modules: [to_q, to_k, to_v, to_out]
+  # teacher: trainable false, no lora block
+  # critic:  trainable true, same lora block as the student
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  real_score_guidance_scale: 1.0
+  warmup_steps: 50
+  generator_update_interval: 1
+  tdm_denoising_steps: [1000, 750, 500, 250]
+  fake_score_learning_rate: 1.0e-4
+```
+
+The shipped example is
+`examples/train/configs/distribution_matching/overfit_minimax_h3_t2va_tdm.yaml`.
+The standalone H3 recipe used critic `1e-4` and generator `2e-5` (the critic
+rate times a `0.2` generator scale), which the example encodes as the training
+optimizer LR `2e-5` plus `fake_score_learning_rate: 1e-4`.
+
+#### Geometry and memory
+
+TDM prepares `latents_source="zeros"`, so the dataset's latent values and
+shapes are unused: the trajectory geometry comes from
+`training.data.num_height` / `num_width` / `num_latent_t` / `num_frames`, and
+changing the canvas is a config override rather than a new preprocessed asset.
+On four GB200s the joint stack fits at `480x832x124` (about 22-30 s per step);
+the dense path also fits at `768x1344x124` (about 95-130 s per step), while VSA
+at `768x1344` exceeds 184 GiB per GPU. Sequence parallelism is not a workaround
+for this loader (`sp_size: 2` fails in FSDP device-mesh setup).
+
+#### Video-sparse attention
+
+Set `models.student.attention_backend: VIDEO_SPARSE_ATTN_H3` and
+`vsa.sparsity` to run the student through H3's tile-64 Triton block-sparse
+kernels. The TDM call sites already produce the standalone-validated
+student-only split (the student uses `attn_kind="vsa"` while the critic and
+teacher stay dense), so that recipe needs no extra knob. The kernel requires
+bf16 Q/K/V, and the H3 VSA backend casts at the kernel boundary because the
+training forward can carry fp32 through the QK-norm path.
+
+Measured on four GB200s at `480x832x124`, 200-step overfit: dense reads
+`std 55.7 / sharpness 43.2`; VSA sparsity `0.5` with a sparse student reads
+`std 56.1 / sharpness 37.8`; and the aggressive corner (sparsity `0.9` with a
+sparse critic and teacher via `tdm_vsa_apply_to: all`) reads
+`std 54.5 / sharpness 36.5`. All three produce coherent, prompt-matching joint
+samples, so the sparse recipes hold the dense quality band to within about 15
+percent sharpness (one sample per arm).
+
+#### In-process validation
+
+Running the H3 validation pipeline between training steps leaves the
+autograd/CUDA stream state inconsistent, and the next training backward raises
+`opt_ready_stream && opt_parent_stream`. Validate once at the final step
+(`callbacks.validation.run_at_start: false`,
+`callbacks.validation.every_steps: <max_train_steps>`) or sample from
+checkpoints in a separate process. Validation sets the
+`decode_on_all_ranks` batch flag, so every data-parallel rank decodes and saves
+the media for its own sample instead of only the global output rank.
+
+The H3 denoising stage rebuilds its schedule from
+`callbacks.validation.sampling_steps` and ignores `sampling_timesteps`, and the
+H3 scheduler expands N sigma points into N-1 denoising forwards. The shipped
+H3 TDM example therefore sets `sampling_steps: [5]` so its four forwards land on
+the trained `[1000, 750, 500, 250]` ladder; changing the ladder is a matching
+change to both `method` and `callbacks.validation`.
+
 ### Self-Forcing (Causal DMD)
 
 Extends DMD2 for **streaming / causal video generation**. The student processes
@@ -436,7 +653,9 @@ are saved and restored automatically on resume.
 ### ValidationCallback
 
 Runs inference with the trained model at regular intervals, saving generated
-videos and logging them to the tracker (W&B).
+videos and logging them to the configured tracker. With `jsonl`, metrics are
+written to `output_dir/tracker/metrics.jsonl` and artifact metadata to
+`output_dir/tracker/artifacts.jsonl`.
 
 ```yaml
 callbacks:
@@ -639,6 +858,7 @@ fastvideo/train/
     base.py                   # TrainingMethod ABC
     distribution_matching/
       dmd2.py                 # DMD2 distillation
+      tdm.py                  # Trajectory Distribution Matching
       self_forcing.py         # Self-Forcing (causal DMD)
     fine_tuning/
       finetune.py             # Supervised fine-tuning
@@ -655,7 +875,7 @@ fastvideo/train/
     optimizer.py              # Optimizer/scheduler construction
     checkpoint.py             # DCP save/resume
     dataloader.py             # Dataset/dataloader construction
-    tracking.py               # W&B tracker
+    tracking.py               # W&B / SwanLab / JSONL trackers
 ```
 
 ---

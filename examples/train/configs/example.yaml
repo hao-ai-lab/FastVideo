@@ -23,7 +23,7 @@ models:
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers     # required: HF repo or local path
     trainable: true                                   # default: true
     disable_custom_init_weights: false                # default: false
-    flow_shift: 3.0                                   # default: 3.0
+    flow_shift: null                                  # default: inherit training.pipeline.flow_shift, fallback 3.0
     enable_gradient_checkpointing_type: null           # default: null (falls back to training.model)
     attention_backend: null                            # default: null (global/default); role-local when set
 
@@ -126,7 +126,7 @@ training:
 
   # --- training.tracker [TYPED] -> TrackerConfig ---
   tracker:
-    trackers: []                      # default: [] (auto-adds "wandb" if project_name is set)
+    trackers: []                      # default: [] (auto-adds "wandb" if project_name is set); options: none, wandb, swanlab, jsonl
     project_name: my_project          # default: "fastvideo"
     run_name: my_run                  # default: ""
 

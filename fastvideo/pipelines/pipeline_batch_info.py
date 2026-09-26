@@ -58,6 +58,12 @@ class PipelineLoggingInfo:
         return sum(stage.get('execution_time', 0) for stage in self.stages.values())
 
 
+# Validation runs one sample per data-parallel rank. Pipelines that normally
+# decode only on the global output rank honour this batch flag so every rank
+# produces the media for its own sample instead of a placeholder.
+DECODE_ON_ALL_RANKS_KEY = "decode_on_all_ranks"
+
+
 @dataclass
 class ForwardBatch:
     """

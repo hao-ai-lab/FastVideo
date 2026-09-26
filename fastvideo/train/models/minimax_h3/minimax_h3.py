@@ -30,6 +30,7 @@ from fastvideo.train.utils.module_state import apply_trainable
 from fastvideo.train.utils.moduleloader import load_module_from_path
 
 if TYPE_CHECKING:
+    from fastvideo.train.utils.lora import LoraConfig
     from fastvideo.train.utils.training_config import TrainingConfig
 
 # H3 maps one shared denoising stage through modality-specific scheduler
@@ -38,6 +39,10 @@ _VIDEO_SCHEDULER_SHIFT = 12.0
 _AUDIO_SCHEDULER_SHIFT = 3.0
 _VIDEO_LATENT_CHANNELS = 24
 _AUDIO_LATENT_CHANNELS = 32
+# The H3 trajectory grid: integer labels 0..T, sigma = shift*u/(1+(shift-1)u)
+# with u = label/T. TDM's denoising steps are labels on this grid.
+_H3_TRAJECTORY_TIMESTEPS = 1000
+_H3_TDM_MODALITIES = ("video", "audio")
 
 
 def shift_noise_amount(base_noise_amount: torch.Tensor, shift: float) -> torch.Tensor:
@@ -45,6 +50,35 @@ def shift_noise_amount(base_noise_amount: torch.Tensor, shift: float) -> torch.T
     if shift <= 0:
         raise ValueError(f"shift must be positive, got {shift}")
     return shift * base_noise_amount / (1.0 + (shift - 1.0) * base_noise_amount)
+
+
+def tdm_h3_shift(modality: str) -> float:
+    """Scheduler shift for one H3 modality."""
+    if modality == "video":
+        return _VIDEO_SCHEDULER_SHIFT
+    if modality == "audio":
+        return _AUDIO_SCHEDULER_SHIFT
+    raise ValueError(f"unknown H3 TDM modality: {modality!r}")
+
+
+def tdm_h3_sigma_grid(timesteps: torch.Tensor, modality: str) -> torch.Tensor:
+    """Map integer H3 trajectory labels to sigmas for one modality."""
+    shift = tdm_h3_shift(modality)
+    u = timesteps.to(dtype=torch.float32) / float(_H3_TRAJECTORY_TIMESTEPS)
+    return shift * u / (1.0 + (shift - 1.0) * u)
+
+
+def tdm_h3_model_timestep(sigma: torch.Tensor) -> torch.Tensor:
+    """H3 model time is ``1 - sigma`` in ``[0, 1]`` (``1`` is clean)."""
+    return 1.0 - sigma.to(dtype=torch.float32)
+
+
+def _broadcast_sigma(sigma: torch.Tensor, latents: torch.Tensor) -> torch.Tensor:
+    """Broadcast a ``[B]``/scalar sigma to ``latents``' trailing dimensions."""
+    sigma = sigma.to(device=latents.device, dtype=latents.dtype)
+    if sigma.ndim >= latents.ndim:
+        return sigma
+    return sigma.reshape(*sigma.shape, *([1] * (latents.ndim - sigma.ndim)))
 
 
 class MiniMaxH3Model(ModelBase):
@@ -61,17 +95,20 @@ class MiniMaxH3Model(ModelBase):
         disable_custom_init_weights: bool = False,
         enable_gradient_checkpointing_type: str | None = None,
         transformer_override_safetensor: str | None = None,
+        lora: LoraConfig | dict[str, Any] | None = None,
         attention_backend: AttentionBackendEnum | str | None = AttentionBackendEnum.TORCH_SDPA,
     ) -> None:
         """Validate the single-document T2VA contract and load the transformer."""
         super().__init__(
             trainable=trainable,
+            lora=lora,
             attention_backend=attention_backend,
         )
-        # PyTorch scaled dot product attention (SDPA) provides dense attention
-        # without adding another attention-kernel dependency to H3 training.
-        if self.attention_backend != AttentionBackendEnum.TORCH_SDPA:
-            raise ValueError("MiniMaxH3Model requires the TORCH_SDPA attention backend")
+        # Dense PyTorch SDPA is the default. The H3 video-sparse backend is the
+        # validated training route (tile-64 Triton forward and backward), and
+        # the TDM method drives it per role through ``attn_kind``.
+        if self.attention_backend not in (AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3):
+            raise ValueError("MiniMaxH3Model requires the TORCH_SDPA or VIDEO_SPARSE_ATTN_H3 attention backend")
         if training_config.pipeline_config is None:
             raise ValueError("MiniMaxH3Model requires a resolved MiniMax H3 pipeline config")
         # Packed row indices describe one text-video-audio document without a
@@ -131,6 +168,8 @@ class MiniMaxH3Model(ModelBase):
                 transformer,
                 checkpointing_type=checkpointing_type,
             )
+        if self._enable_lora_if_configured(transformer):
+            return transformer
         return apply_trainable(transformer, trainable=trainable)
 
     def init_preprocessors(self, training_config: TrainingConfig) -> None:
@@ -293,7 +332,7 @@ class MiniMaxH3Model(ModelBase):
         training_batch.audio_timesteps = 1.0 - audio_noise_amount
         training_batch.minimax_h3_layout = layout
         training_batch.attn_metadata = None
-        training_batch.attn_metadata_vsa = None
+        training_batch.attn_metadata_vsa = self._build_tdm_vsa_metadata(layout)
         return training_batch
 
     def add_noise(
@@ -307,6 +346,31 @@ class MiniMaxH3Model(ModelBase):
         while clean_time.ndim < clean_latents.ndim:
             clean_time = clean_time.unsqueeze(-1)
         return clean_time * clean_latents + (1.0 - clean_time) * noise
+
+    def _build_tdm_vsa_metadata(self, layout: MiniMaxH3PackedLayout) -> Any:
+        """Build the H3 video-sparse metadata for the TDM student.
+
+        Returns ``None`` for the dense backend, in which case ``attn_kind``
+        selects ``batch.attn_metadata`` (also ``None``) and the transformer
+        falls back to dense attention. Tile 64 is the validated Triton
+        forward/backward geometry for H3 training.
+        """
+        if self.attention_backend_name != AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3.name:
+            return None
+        from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetadataBuilder
+        from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_denoising import _h3_vsa_prefix_segments
+
+        patch_size = self.transformer.patch_size
+        return MiniMaxH3VSAMetadataBuilder().build(
+            current_timestep=0,
+            raw_latent_shape=(layout.num_video_latent_frames, layout.latent_height, layout.latent_width),
+            patch_size=patch_size,
+            VSA_sparsity=float(self.training_config.vsa_sparsity),
+            prefix_segments=_h3_vsa_prefix_segments(layout, patch_size),
+            device=self.device,
+            exempt=True,
+            tile_size=64,
+        )
 
     def predict_noise(
         self,
@@ -322,8 +386,6 @@ class MiniMaxH3Model(ModelBase):
         del timestep
         if not conditional or cfg_uncond is not None:
             raise ValueError("MiniMaxH3Model predicts one conditional T2VA sample")
-        if attn_kind != "dense":
-            raise ValueError("MiniMaxH3Model supports dense attention for training")
         layout = batch.minimax_h3_layout
         if not isinstance(layout, MiniMaxH3PackedLayout):
             raise RuntimeError("prepare_batch() must set TrainingBatch.minimax_h3_layout")
@@ -352,9 +414,10 @@ class MiniMaxH3Model(ModelBase):
         unique_timesteps = unique_timesteps.to(device)
         timestep_indices = timestep_indices.to(device)
 
+        attn_metadata = batch.attn_metadata_vsa if attn_kind == "vsa" else batch.attn_metadata
         with torch.autocast(device.type, dtype=dtype), set_forward_context(
                 current_timestep=unique_timesteps,
-                attn_metadata=None,
+                attn_metadata=attn_metadata,
         ):
             video_velocity, audio_velocity = self.transformer(
                 hidden_states=video_rows[None],
@@ -396,5 +459,96 @@ class MiniMaxH3Model(ModelBase):
         ):
             (loss / max(1, int(grad_accum_rounds))).backward()
 
+    # ------------------------------------------------------------------
+    # TDM contract: one joint video+audio document
+    # ------------------------------------------------------------------
 
-__all__ = ["MiniMaxH3Model", "shift_noise_amount"]
+    @property
+    def num_train_timesteps(self) -> int:
+        """H3's trajectory grid runs over integer labels ``0..1000``.
+
+        The released scheduler exposes no training horizon, so the joint TDM
+        grid (the same range the standalone H3 recipe uses) supplies it.
+        """
+        return _H3_TRAJECTORY_TIMESTEPS
+
+    def tdm_modalities(self) -> tuple[str, ...]:
+        """H3 trains video and audio jointly on one packed sequence."""
+        return _H3_TDM_MODALITIES
+
+    def tdm_clean_latents(self, batch: TrainingBatch) -> dict[str, torch.Tensor]:
+        """Return the video and stereo-audio latents the trajectory shares."""
+        if batch.latents is None or batch.audio_latents is None:
+            raise RuntimeError("MiniMaxH3Model requires video and audio latents for TDM")
+        return {"video": batch.latents, "audio": batch.audio_latents}
+
+    def tdm_sigma_grid(
+        self,
+        timesteps: torch.Tensor,
+        modality: str,
+    ) -> torch.Tensor:
+        """Map integer H3 trajectory labels to one modality's sigmas."""
+        return tdm_h3_sigma_grid(timesteps, modality)
+
+    def tdm_terminal_sigma(self, modality: str) -> torch.Tensor:
+        """Pure noise sits at trajectory label ``T`` where sigma is ``1``."""
+        del modality
+        return torch.ones((), dtype=torch.float32)
+
+    def tdm_max_trajectory_label(self, modality: str) -> int:
+        """The H3 grid runs over integer labels ``0..T``."""
+        del modality
+        return _H3_TRAJECTORY_TIMESTEPS
+
+    def tdm_sigma_to_model_timestep(
+        self,
+        sigma: torch.Tensor,
+        modality: str,
+    ) -> torch.Tensor:
+        """H3 model time is ``1 - sigma``; the shift is already in the grid."""
+        del modality
+        return tdm_h3_model_timestep(sigma)
+
+    def tdm_predict_x0(
+        self,
+        noisy: dict[str, torch.Tensor],
+        sigmas: dict[str, torch.Tensor],
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> dict[str, torch.Tensor]:
+        """Run one packed transformer forward and convert both modalities to x0."""
+        if not conditional or cfg_uncond is not None:
+            raise ValueError("MiniMaxH3Model predicts one conditional T2VA sample")
+        video_sigma = sigmas["video"].to(dtype=torch.float32)
+        audio_sigma = sigmas["audio"].to(dtype=torch.float32)
+        batch.noisy_model_input = noisy["video"]
+        batch.audio_noisy_model_input = noisy["audio"]
+        batch.timesteps = tdm_h3_model_timestep(video_sigma)
+        batch.audio_timesteps = tdm_h3_model_timestep(audio_sigma)
+        video_prediction, audio_prediction = self.predict_noise(
+            noisy["video"],
+            batch.timesteps,
+            batch,
+            conditional=True,
+            cfg_uncond=None,
+            attn_kind=attn_kind,
+        )
+        # H3's transformer emits a data-ward velocity, so
+        # ``x0 = x_t - sigma * pred_noise`` with the negated prediction
+        # reconstructs ``x0 = x_t + sigma * velocity``.
+        return {
+            "video": noisy["video"] - _broadcast_sigma(video_sigma, noisy["video"]) * video_prediction,
+            "audio": noisy["audio"] - _broadcast_sigma(audio_sigma, noisy["audio"]) * audio_prediction,
+        }
+
+
+__all__ = [
+    "MiniMaxH3Model",
+    "shift_noise_amount",
+    "tdm_h3_model_timestep",
+    "tdm_h3_shift",
+    "tdm_h3_sigma_grid",
+]

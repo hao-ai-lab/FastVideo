@@ -1,0 +1,148 @@
+# Wan 2.1 T2V 1.3B TDM single-prompt overfit with the fixed recipe.
+#
+# The same protocol and assets as `tdm_t2v_lora_overfit.yaml`, plus the
+# two pieces the standalone experiments found load-bearing:
+#   - a regression warmup (method.warmup_steps: 100) that regresses the
+#     student onto the CFG-combined teacher x0 at its own rollout states
+#     with no critic updates, and
+#   - a progressive step ladder (8 steps through the warmup stage, then
+#     the 4-step deployment schedule).
+# Run the warmup-only control by overriding `--method.warmup_steps 200`
+# with everything else identical.
+#
+# Preprocess tdm_overfit_prompts.txt as text-only data into the path below.
+# The prompt is repeated four times so each data-parallel rank receives one
+# sample when this recipe runs on one node with four GPUs.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - to_q
+        - to_k
+        - to_v
+        - to_out
+  teacher:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  critic:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    disable_custom_init_weights: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - to_q
+        - to_k
+        - to_v
+        - to_out
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  rollout_mode: simulate
+  generator_update_interval: 1
+  real_score_guidance_scale: 6.0
+  # Regression warmup (standalone-validated recipe): 200 updates for Wan
+  # by default, 100 here to fit the short overfit protocol.
+  warmup_steps: 100
+  # Progressive ladder: 8 student steps during the warmup stage, then the
+  # 4-step deployment schedule. Counts must strictly decrease.
+  tdm_step_ladder:
+    - denoising_steps: [1000, 875, 750, 625, 500, 375, 250, 125]
+      until_iteration: 100
+    - denoising_steps: [1000, 750, 500, 250]
+  tdm_denoising_steps: [1000, 750, 500, 250]
+  warp_denoising_step: false
+  student_sample_type: ode
+  noise_interval_mode: separate
+  use_randmid: false
+  snr_clip: 5.0
+  importance_weight_clip: 10.0
+  normalize_generator_delta: true
+  use_huber: false
+  huber_c: 0.001
+  max_grad_norm: 1.0
+  fake_score_learning_rate: 1.0e-4
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+  cfg_uncond:
+    text: negative_prompt
+    on_missing: error
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: data/tdm_t2v_overfit_text_only
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 20
+    num_height: 448
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    # Validated TDM range. The DMD2-inherited 2e-6 student LR is a no-op
+    # regime for this objective (Phase 3 measured ~1e-4 total adapter
+    # movement over 200 steps and no visual change in either arm); at
+    # 1e-4 the warmup bakes guidance in and TDM sharpens to a coherent
+    # sample while the regression-only control stays blurred.
+    learning_rate: 1.0e-4
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 200
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan2.1_tdm_fixed_recipe
+    training_state_checkpointing_steps: 25
+    checkpoints_total_limit: 12
+
+  tracker:
+    trackers: [jsonl]
+    project_name: distillation_wan
+    run_name: wan2.1_tdm_lora_overfit
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_dmd_pipeline.WanDMDPipeline
+    offload_training_state: true
+    unload_pipeline_after_validation: true
+    dataset_file: examples/train/configs/distribution_matching/wan/tdm_overfit_validation.json
+    every_steps: 25
+    sampling_steps: [4]
+    sampling_timesteps: [1000, 750, 500, 250]
+    guidance_scale: 6.0
+
+pipeline:
+  flow_shift: 8
+  dmd_sample_type: ode
+  # TDM labels are raw timesteps, so the dense DMD validation sampler must
+  # apply the flow shift to match the trained shifted sigma grid.
+  dmd_denoising_steps_are_scheduler_space: false

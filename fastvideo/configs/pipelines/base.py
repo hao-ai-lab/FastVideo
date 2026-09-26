@@ -79,6 +79,13 @@ class PipelineConfig:
 
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
+    dmd_sample_type: str = "sde"
+    # Default preserves the historical meaning of `dmd_denoising_steps`:
+    # shipped recipes (FastWan presets, DMD2 validation) read them as
+    # scheduler-space timesteps, so sigma = label / num_train_timesteps.
+    # Set False for raw labels that must still have the flow shift applied
+    # (TDM's shifted grid).
+    dmd_denoising_steps_are_scheduler_space: bool = True
 
     # Wan2.2 task modifiers
     ti2v_task: bool = False
@@ -193,6 +200,22 @@ class PipelineConfig:
             type=parse_int_list,
             default=PipelineConfig.dmd_denoising_steps,
             help="Comma-separated list of denoising steps (e.g., '1000,757,522')",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}dmd-sample-type",
+            type=str,
+            choices=["sde", "ode"],
+            default=PipelineConfig.dmd_sample_type,
+            help="DMD trajectory update between explicit denoising steps",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}dmd-denoising-steps-are-scheduler-space",
+            action=StoreBoolean,
+            dest=f"{prefix_with_dot.replace('-', '_')}dmd_denoising_steps_are_scheduler_space",
+            default=PipelineConfig.dmd_denoising_steps_are_scheduler_space,
+            help="Read dmd-denoising-steps as scheduler-space timesteps (default; "
+            "sigma = label / num_train_timesteps). Set false for raw labels that "
+            "still need the flow shift applied (TDM's shifted grid).",
         )
 
         # Add VAE configuration arguments
