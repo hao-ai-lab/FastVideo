@@ -18,6 +18,32 @@
 - Open validation gaps: no acceptable trained checkpoint; no branch-trained SSIM reference; no student-side supervised reachability ceiling has isolated rank-16 student capacity from the learned critic or the four-step compression target; and acceptance criteria still rely heavily on paired student-vs-teacher MS-SSIM. The sample-target oracle is diagnostic rather than the exact conditional expectation. The full-weight critic ceiling was function-step calibrated in BF16 and is negative under that representation, but should not be generalized to every possible full-weight precision/optimizer recipe.
 - GitHub policy: use `gh` authenticated as `macthecadillac`; do not post comments or open a PR without a later explicit request.
 
+## PR preparation resume (2026-09-25): fix-issue Stage 3
+
+- User direction: prepare a PR for issue `#775` from branch `tdm-port` using
+  the `fix-issue` skill. Stage 4 (actually creating the draft PR) still needs a
+  separate explicit user request.
+- Branch state: `tdm-port` was copied from the private `FastVideo-internal`
+  repo to the public fork `macthecadillac/FastVideo:tdm-port` at `cc5746203`
+  (identical SHA verified on both remotes). PR base is
+  `hao-ai-lab/FastVideo:main`; merge-base is `37d06a832`, the branch is 76
+  ahead / 26 behind current `upstream/main` (`e90be598e`), and a local
+  `git merge-tree` check against `upstream/main` reports no conflicts. Diff vs
+  merge-base is 61 files, +8580/-41. No PR exists for the branch.
+- GitHub state re-checked this resume: issue 775 open/assigned to
+  `macthecadillac` with only the two historic comments (no proposed fix); no
+  open `775 OR TDM` PR. `gh` verified as `macthecadillac`.
+- Worktree: `/Users/maclee/Documents/Code/FastVideo/.worktrees/tdm-port`
+  (macOS sandbox refuses to create `.gitmodules` by name, so this worktree
+  excludes that one upstream file via a skip-worktree sparse exclusion; it is
+  not part of the PR diff and is never modified).
+- Resume stage: implementation is complete through Phase 5; the
+  review/adjudication loop (fix-issue Stage 3) has not been run and the
+  pre-PR `pre-commit run --all-files` gate has not run. Next: append-only
+  review/adjudication on committed code, pre-commit gate, then present the
+  draft PR message. The open quality gap (no acceptable trained checkpoint,
+  no branch-trained SSIM reference) must be stated in the PR body.
+
 ## Port summary (2026-09-26): TDM in FastVideo, validated on Wan and H3
 
 Scope for the first PR (user direction 2026-09-26): **TDM + H3 only**. Out of
