@@ -546,7 +546,28 @@ Sub-steps and gates:
     - VSA gate (`h3-tdm-vsa-gate`, 200 steps, same settings) launched and
       queued as Slurm job 11114; at ~35 s/it plus the final-step validation
       it is roughly 2.2 h once it starts.
-  - Then: read the VSA gate result and compare it with the dense 4D result.
+  - 2026-09-26: **4E complete: H3 VSA training is wired and validated.**
+    - VSA gate (`h3-tdm-vsa-gate`, 200 steps, 480x832, sparsity 0.5,
+      student-only): completed. Sample is 124 frames at 480x832 with a
+      32 kHz stereo track; frame statistics `std 56.12`, `sharpness 37.76`.
+    - Same-geometry dense control (`h3-tdm-dense-480`, 200 steps,
+      `TORCH_SDPA`): completed. `std 55.73`, `sharpness 43.15`. The
+      kernel-boundary cast warning appears 4 times in the VSA log and 0
+      times in the dense log, confirming the backends really differed.
+      Step time at this geometry: VSA ~30 s/it vs dense ~26 s/it.
+    - Reading: with sparsity 0.5 on the student only, VSA matches dense
+      within ~12 pct sharpness and identical std, and the frames are
+      visually equivalent (a red sports car on a wooden tabletop under
+      studio lighting). Both sit far above the collapse band the Wan
+      warmup-only control showed (~5). The H3 VSA training path is
+      therefore usable; the open question is whether the aggressive corner
+      (sparsity 0.9 with `apply_to: all`) holds quality, which needs the
+      critic/teacher to run sparse too (a method-side `apply_to` knob).
+    - Evidence: `artifacts/tdm-port/phase4/vsa-gate-480x832-*` and
+      `dense-480x832-*` (reports, frames). The Slurm runners now take a
+      BACKEND argument, so dense controls are `... h3-tdm-dense-480 TORCH_SDPA`.
+  - Phase 4 (4A-4E) is complete. Next: Phase 5 docs/examples, or the
+    higher-sparsity VSA variant above.
 
 - 2026-09-22: Branch renamed to `tdm-port` and pushed to the internal
   origin; stale `fork/issue-775-tdm` ref removed. Phase 0 plan recorded
