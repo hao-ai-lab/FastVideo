@@ -80,7 +80,12 @@ class PipelineConfig:
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
     dmd_sample_type: str = "sde"
-    dmd_denoising_steps_are_scheduler_space: bool = False
+    # Default preserves the historical meaning of `dmd_denoising_steps`:
+    # shipped recipes (FastWan presets, DMD2 validation) read them as
+    # scheduler-space timesteps, so sigma = label / num_train_timesteps.
+    # Set False for raw labels that must still have the flow shift applied
+    # (TDM's shifted grid).
+    dmd_denoising_steps_are_scheduler_space: bool = True
 
     # Wan2.2 task modifiers
     ti2v_task: bool = False

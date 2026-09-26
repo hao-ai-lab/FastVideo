@@ -78,6 +78,7 @@ def _tiny_args():
             embedded_cfg_scale=None,
             ti2v_task=False,
             lucy_edit_task=False,
+            dmd_denoising_steps_are_scheduler_space=True,
             dit_config=SimpleNamespace(boundary_ratio=None, patch_size=(1, 1, 1)),
         ),
     )
