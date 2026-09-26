@@ -142,7 +142,22 @@
     snippet with an explanatory note; guarded the VSA-H3 warning with
     `if not compiling:` (cast unchanged; eager warning preserved); recommends
     an external fp32+compile test case be added to the attention route test.
-  - Next: fresh review-code round 6 on `cc8d9ba36`; then rerun
+- Stage 3 round 6 complete (commit `067b20f16`, GPG-signed, pushed):
+  - Round-6 reviewer found no Critical/High/Medium issues; four Low:
+    `decode_all_ranks` output-rank selection under `sp_size > 1`; `use_huber`
+    doc row conflated with `use_pseudo_huber`; "raw (< T)" label gloss;
+    redundant `dmd_denoising_steps_are_scheduler_space` overrides on the two
+    FastWan config classes.
+  - Adjudicator accepted and fixed: clarified the `use_huber` row (elementwise
+    fixed-`huber_c` form) versus `use_pseudo_huber` (paper Eq. 11); changed the
+    gloss to "raw timesteps" in the doc and all three config copies; removed the
+    two redundant FastWan overrides (inheritance unchanged).
+  - Adjudicator rejected the `decode_all_ranks` finding: the H3 transformer
+    all-gathers video/audio outputs to full sequence length before latents are
+    written, and `vae_parallel_decode=True` takes the SP-aware branch first, so
+    the claimed corruption cannot occur; `sp_size: 2` is already documented
+    unsupported and gating would be speculative defensive code.
+  - Next: fresh review-code round 7 on `067b20f16`; then rerun
     `pre-commit run --all-files` on DGX against the final tip; then draft the
     PR message. External validation still owed: H3 VSA `apply_to: all`
     backward path on GB200, fp32+compile VSA-H3 route test, DMD stage unit
