@@ -219,6 +219,17 @@ class TDMMethod(DMD2Method):
             default=False,
             where="method.use_randmid",
         )
+        # Sparse-attention scope for the roles TDM drives. The standalone H3
+        # recipe validated sparse attention on the student only; "all" runs the
+        # critic and teacher through the sparse metadata too (their attention
+        # backends must then be the matching sparse backend).
+        self._vsa_apply_to: Literal["student", "all"] = require_choice(
+            mcfg,
+            "tdm_vsa_apply_to",
+            {"student", "all"},
+            default="student",
+            where="method.tdm_vsa_apply_to",
+        )  # type: ignore[assignment]
 
         self._use_huber = require_bool(
             mcfg,
@@ -480,7 +491,7 @@ class TDMMethod(DMD2Method):
             batch,
             conditional=True,
             cfg_uncond=self._cfg_uncond,
-            attn_kind="vsa",
+            attn_kind=self._attn_kind_for("student"),
         )
         student_timestep = batch.timesteps
         with torch.no_grad():
@@ -490,7 +501,7 @@ class TDMMethod(DMD2Method):
                 batch,
                 conditional=True,
                 cfg_uncond=self._cfg_uncond,
-                attn_kind="dense",
+                attn_kind=self._attn_kind_for("teacher"),
             )
             if guidance == 1.0:
                 real_cfg_x0 = real_cond_x0
@@ -501,7 +512,7 @@ class TDMMethod(DMD2Method):
                     batch,
                     conditional=False,
                     cfg_uncond=self._cfg_uncond,
-                    attn_kind="dense",
+                    attn_kind=self._attn_kind_for("teacher"),
                 )
                 real_cfg_x0 = {
                     name: real_uncond_x0[name] + (real_cond_x0[name] - real_uncond_x0[name]) * guidance
@@ -598,6 +609,12 @@ class TDMMethod(DMD2Method):
             else:
                 averaged[key] = sum(float(value) for value in values) / len(values)
         return averaged
+
+    def _attn_kind_for(self, role: str) -> Literal["dense", "vsa"]:
+        """Attention kind TDM uses for one role's forward passes."""
+        if role == "student" or self._vsa_apply_to == "all":
+            return "vsa"
+        return "dense"
 
     def _model_family(self) -> str:
         """Best-effort family name of the student plugin (``wan``, ...)."""
@@ -856,7 +873,7 @@ class TDMMethod(DMD2Method):
                     batch,
                     conditional=True,
                     cfg_uncond=self._cfg_uncond,
-                    attn_kind="vsa",
+                    attn_kind=self._attn_kind_for("student"),
                 )
             for name in self._modalities:
                 noisy_latents[name].append(current[name])
@@ -1031,7 +1048,7 @@ class TDMMethod(DMD2Method):
             batch,
             conditional=True,
             cfg_uncond=self._cfg_uncond,
-            attn_kind="dense",
+            attn_kind=self._attn_kind_for("critic"),
         )
         critic_timestep = batch.timesteps
         per_sample_by_modality: dict[str, torch.Tensor] = {}
@@ -1175,7 +1192,7 @@ class TDMMethod(DMD2Method):
             batch,
             conditional=True,
             cfg_uncond=self._cfg_uncond,
-            attn_kind="vsa",
+            attn_kind=self._attn_kind_for("student"),
         )
         source_timestep = batch.timesteps
         target_timestep = contexts["video"].timestep_target
@@ -1210,7 +1227,7 @@ class TDMMethod(DMD2Method):
                 batch,
                 conditional=True,
                 cfg_uncond=self._cfg_uncond,
-                attn_kind="dense",
+                attn_kind=self._attn_kind_for("critic"),
             )
             real_cond_x0 = self.teacher.tdm_predict_x0(
                 target_noisy_latents,
@@ -1218,7 +1235,7 @@ class TDMMethod(DMD2Method):
                 batch,
                 conditional=True,
                 cfg_uncond=self._cfg_uncond,
-                attn_kind="dense",
+                attn_kind=self._attn_kind_for("teacher"),
             )
             if float(guidance_scale) == 1.0:
                 real_cfg_x0 = real_cond_x0
@@ -1229,7 +1246,7 @@ class TDMMethod(DMD2Method):
                     batch,
                     conditional=False,
                     cfg_uncond=self._cfg_uncond,
-                    attn_kind="dense",
+                    attn_kind=self._attn_kind_for("teacher"),
                 )
                 real_cfg_x0 = {
                     name: real_uncond_x0[name] + (real_cond_x0[name] - real_uncond_x0[name]) * float(guidance_scale)

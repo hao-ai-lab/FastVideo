@@ -403,6 +403,7 @@ method:
 | `snr_clip` | `5.0` | Clip the flow-SNR fake-score weight |
 | `importance_weight_clip` | `10.0` | Clip mixed-noise importance weights |
 | `normalize_generator_delta` | `true` | Divide each sample's generator loss by its teacher-guidance magnitude |
+| `tdm_vsa_apply_to` | `"student"` | Which roles run sparse attention when a sparse backend is configured: `"student"` (the validated H3 recipe) or `"all"` (critic and teacher sparse as well; their `models.<role>.attention_backend` must then be the matching sparse backend) |
 | `use_huber` | `false` | Use the reference pseudo-Huber expression for the generator loss; fake-score training remains MSE |
 | `huber_c` | `0.001` | Huber delta when `use_huber=true` |
 | `use_pseudo_huber` | `false` | Use the paper Eq. 11 pseudo-Huber surrogate (`sqrt(||pred - target||_2^2 + c^2) - c`, `c = 0.00054*sqrt(d)` with `d` the flattened per-sample latent size); skips DMD delta normalization; mutually exclusive with `use_huber` |
@@ -511,9 +512,10 @@ training forward can carry fp32 through the QK-norm path.
 Measured on four GB200s at `480x832x124`, 200-step overfit, sparsity `0.5`:
 VSA reads `std 56.1 / sharpness 37.8` against a same-geometry dense control at
 `std 55.7 / sharpness 43.2`, with visually equivalent samples, so VSA holds the
-dense quality band at about 12 percent lower sharpness. The aggressive corner
-(sparsity `0.9` with sparse critic and teacher forwards) needs a method-side
-`apply_to` knob and is not shipped.
+dense quality band at about 12 percent lower sharpness.
+`method.tdm_vsa_apply_to: all` extends sparse attention to the critic and
+teacher as well (set their `models.<role>.attention_backend` to the sparse
+backend too) for the standalone's aggressive sparsity-`0.9` corner.
 
 #### In-process validation
 
