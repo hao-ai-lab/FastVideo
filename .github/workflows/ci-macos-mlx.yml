@@ -92,6 +92,7 @@ jobs:
             fastvideo/tests/mlx/test_frame_upsample.py \
             fastvideo/tests/mlx/test_mlx_fast_spatial.py \
             fastvideo/tests/mlx/test_mlx_refine.py \
+            fastvideo/tests/mlx/test_mlx_prompt_enhance.py \
             fastvideo/tests/mlx/test_mlx_prompt_to_video_decode.py \
             fastvideo/tests/mlx/test_mlx_wan22_prompt_cache_fingerprint.py \
             fastvideo/tests/mlx/test_wan22_sample.py \
@@ -156,6 +157,7 @@ jobs:
             fastvideo/tests/mlx/test_frame_upsample.py \
             fastvideo/tests/mlx/test_mlx_fast_spatial.py \
             fastvideo/tests/mlx/test_mlx_refine.py \
+            fastvideo/tests/mlx/test_mlx_prompt_enhance.py \
             fastvideo/tests/mlx/test_mlx_prompt_to_video_decode.py \
             fastvideo/tests/mlx/test_mlx_wan22_prompt_cache_fingerprint.py \
             fastvideo/tests/mlx/test_wan22_sample.py \
