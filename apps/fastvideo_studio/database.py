@@ -110,6 +110,7 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "jobs", "generator_update_interval", "INTEGER", "5")
     _add_column_if_missing(conn, "jobs", "real_score_model_path", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "fake_score_model_path", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "queued_at", "REAL", "NULL")
     # Settings table
     _add_column_if_missing(conn, "settings", "vae_cpu_offload", "INTEGER", "0")
     _add_column_if_missing(conn, "settings", "image_encoder_cpu_offload", "INTEGER", "0")
@@ -326,6 +327,7 @@ class Database:
             return
         allowed = {
             "status",
+            "queued_at",
             "started_at",
             "finished_at",
             "error",
@@ -343,6 +345,42 @@ class Database:
         vals.append(job_id)
         sql = f"UPDATE jobs SET {', '.join(cols)} WHERE id = ?"
         self._execute(sql, tuple(vals))
+        self._commit()
+
+    #: Job fields stored under a different column name, and how they are encoded.
+    _CONFIG_COLUMNS = {"references": "references_json"}
+    _BOOL_CONFIG_FIELDS = {
+        "dit_cpu_offload",
+        "text_encoder_cpu_offload",
+        "vae_cpu_offload",
+        "image_encoder_cpu_offload",
+        "use_fsdp_inference",
+        "enable_torch_compile",
+        "dmd_use_vsa",
+    }
+
+    def update_job_config(self, job_id: str, updates: dict[str, Any]) -> None:
+        """Persist edits to a job's configuration (prompt, references, sizes...).
+
+        Fields the table has no column for are skipped, as they are on insert.
+        """
+        columns = _get_table_columns(self._conn(), "jobs")
+        cols = []
+        vals: list[Any] = []
+        for key, value in updates.items():
+            column = self._CONFIG_COLUMNS.get(key, key)
+            if column not in columns or column == "id":
+                continue
+            if key == "references":
+                value = json.dumps(value or [])
+            elif key in self._BOOL_CONFIG_FIELDS:
+                value = 1 if value else 0
+            cols.append(f"{column} = ?")
+            vals.append(value)
+        if not cols:
+            return
+        vals.append(job_id)
+        self._execute(f"UPDATE jobs SET {', '.join(cols)} WHERE id = ?", tuple(vals))
         self._commit()
 
     def delete_job(self, job_id: str) -> bool:
@@ -537,8 +575,31 @@ def _row_to_dataset(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
+class _ColumnRow:
+    """A sqlite3.Row whose ``in`` tests column names.
+
+    sqlite3.Row's own ``in`` tests *values*, so ``"fps" in row`` is always False
+    and a job restored from the database silently lost fps, negative_prompt and
+    the other optional columns.
+    """
+
+    def __init__(self, row: sqlite3.Row):
+        self._row = row
+        self._columns = set(row.keys())
+
+    def __getitem__(self, key: str) -> Any:
+        return self._row[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._columns
+
+    def keys(self) -> list[str]:
+        return self._row.keys()
+
+
+def _row_to_job(sqlite_row: sqlite3.Row) -> dict[str, Any]:
     """Convert a DB row to job dict (snake_case, matching Job.to_dict)."""
+    row = _ColumnRow(sqlite_row)
     int_defaults = {
         "max_train_steps": 1000,
         "train_batch_size": 1,
@@ -562,6 +623,7 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "job_type": _sqlite_row_get(row, "job_type", "inference"),
         "status": row["status"],
         "created_at": row["created_at"],
+        "queued_at": row["queued_at"] if "queued_at" in row else None,
         "started_at": row["started_at"],
         "finished_at": row["finished_at"],
         "error": row["error"],

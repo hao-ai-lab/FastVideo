@@ -5,7 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JobCard from '@/components/jobs/JobCard';
 import {
   deleteJob,
+  dequeueJob,
   downloadJobVideo,
+  queueJobs,
   startJob,
   stopJob,
 } from '@/lib/api';
@@ -18,6 +20,8 @@ vi.mock('@/lib/api', () => ({
   stopJob: vi.fn(),
   deleteJob: vi.fn(),
   downloadJobVideo: vi.fn(),
+  queueJobs: vi.fn(),
+  dequeueJob: vi.fn(),
 }));
 
 vi.mock('@/lib/utils', async (importOriginal) => {
@@ -47,6 +51,8 @@ beforeEach(() => {
   setActiveJobId(null);
   vi.mocked(startJob).mockResolvedValue({} as Job);
   vi.mocked(stopJob).mockResolvedValue({} as Job);
+  vi.mocked(queueJobs).mockResolvedValue([]);
+  vi.mocked(dequeueJob).mockResolvedValue({} as Job);
   vi.mocked(deleteJob).mockResolvedValue(undefined);
   vi.mocked(downloadJobVideo).mockResolvedValue(new Blob());
   vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -89,6 +95,46 @@ describe('JobCard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => expect(startJob).toHaveBeenCalledWith('job-1'));
     expect(onJobUpdated).toHaveBeenCalled();
+  });
+
+  it.each(['pending', 'failed', 'stopped'])('queues a %s job and notifies the parent', async (status) => {
+    const onJobUpdated = vi.fn();
+    render(<JobCard job={makeJob({ status })} onJobUpdated={onJobUpdated} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Queue' }));
+    await waitFor(() => expect(queueJobs).toHaveBeenCalledWith(['job-1']));
+    expect(onJobUpdated).toHaveBeenCalled();
+    expect(startJob).not.toHaveBeenCalled();
+  });
+
+  it('reports a job that cannot be queued', async () => {
+    vi.mocked(queueJobs).mockRejectedValue(new Error('Jobs would wait on each other'));
+    render(<JobCard job={makeJob({ status: 'pending' })} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Queue' }));
+    await waitFor(() => expect(window.alert).toHaveBeenCalledWith('Jobs would wait on each other'));
+  });
+
+  it('shows a queued job as queued, and takes it back out of the queue', async () => {
+    const onJobUpdated = vi.fn();
+    render(<JobCard job={makeJob({ status: 'queued' })} onJobUpdated={onJobUpdated} />);
+
+    expect(screen.getByText('queued')).toBeInTheDocument();
+    // nothing to start or queue again; it can't be edited either
+    for (const name of ['Start', 'Restart', 'Queue', 'Stop', 'Edit']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove from queue' }));
+    await waitFor(() => expect(dequeueJob).toHaveBeenCalledWith('job-1'));
+    expect(onJobUpdated).toHaveBeenCalled();
+  });
+
+  it('does not offer to queue a running or completed job', () => {
+    for (const status of ['running', 'completed']) {
+      const { unmount } = render(<JobCard job={makeJob({ status, started_at: Date.now() })} />);
+      expect(screen.queryByRole('button', { name: 'Queue' })).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('stops a running job', async () => {

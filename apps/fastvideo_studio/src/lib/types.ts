@@ -11,6 +11,8 @@ export interface Job {
 	workload_type?: string;
 	status: string;
 	created_at: number;
+	/** when the job joined the queue; null unless it is queued */
+	queued_at?: number | null;
 	started_at: number | null;
 	finished_at: number | null;
 	error: string | null;
@@ -20,6 +22,8 @@ export interface Job {
 	num_frames: number;
 	/** frames per second; the API sends it, older cached objects may not have it */
 	fps?: number;
+	/** reference media (image/video/audio) attached to the job, as saved on the server */
+	references?: { source: string; media_type: string }[] | null;
 	height: number;
 	width: number;
 	guidance_scale: number;

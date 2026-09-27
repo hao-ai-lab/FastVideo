@@ -10,7 +10,9 @@ import { useStore } from '@/hooks/useStore';
 import {
   deleteJob,
   duplicateJob,
+  dequeueJob,
   downloadJobVideo,
+  queueJobs,
   startJob,
   stopJob,
 } from '@/lib/api';
@@ -51,6 +53,7 @@ function computeElapsed(job: Job, currentTime: number): string | null {
 
 const BADGE_VARIANTS: Record<string, BadgeProps['variant']> = {
   pending: 'secondary',
+  queued: 'default',
   running: 'warning',
   completed: 'success',
   ready: 'success',
@@ -87,6 +90,36 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       onJobUpdated?.();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to start job');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleQueue(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isLoading) return;
+    setIsLoading(true);
+    try {
+      await queueJobs([job.id]);
+      onJobUpdated?.();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to queue job');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleDequeue(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isLoading) return;
+    setIsLoading(true);
+    try {
+      await dequeueJob(job.id);
+      onJobUpdated?.();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to remove job from the queue');
     } finally {
       setIsLoading(false);
     }
@@ -238,7 +271,30 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           >
             Start
           </Button>
+        ) : job.status === 'queued' ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleDequeue}
+            disabled={isLoading}
+            title="Take this job out of the queue"
+          >
+            Remove from queue
+          </Button>
         ) : null}
+        {(job.status === 'pending' ||
+          job.status === 'failed' ||
+          job.status === 'stopped') && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleQueue}
+            disabled={isLoading}
+            title="Run this job when the ones queued before it have finished"
+          >
+            Queue
+          </Button>
+        )}
         {job.status === 'completed' &&
           job.output_path &&
           job.job_type === 'inference' && (

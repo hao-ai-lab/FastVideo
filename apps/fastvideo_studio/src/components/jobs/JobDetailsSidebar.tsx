@@ -77,7 +77,7 @@ export default function JobDetailsSidebar({
     const isRestarting =
       previousJobId.current === job.id &&
       wasTerminal &&
-      (job.status === 'pending' || job.status === 'running');
+      (job.status === 'pending' || job.status === 'queued' || job.status === 'running');
 
     if (previousJobId.current !== job.id || isRestarting) {
       stateRef.current.text = '';
@@ -89,7 +89,10 @@ export default function JobDetailsSidebar({
   }, [job.id, job.status]);
 
   React.useEffect(() => {
-    const shouldPoll = job.status === 'running' || job.status === 'pending';
+    const shouldPoll =
+      job.status === 'running' ||
+      job.status === 'pending' ||
+      job.status === 'queued';
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let mounted = true;
     // Effect-local lock so this job's first fetch is never blocked by a

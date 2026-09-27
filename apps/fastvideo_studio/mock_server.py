@@ -40,6 +40,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -47,7 +48,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from fastvideo_studio.database import Database, default_settings_dict
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
+from fastvideo_studio.job_queue import circular_dependency, dependencies, plan_dispatch
+from fastvideo_studio.merge import MergeError, merge_jobs, merged_path
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, MergeSceneRequest, QueueJobsRequest,
+                                     SettingsUpdate, UpdateCaptionRequest,
                                      model_label)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -268,6 +272,7 @@ def _new_job_dict(req: CreateJobRequest) -> dict[str, Any]:
         "data_path": req.data_path or "",
         "status": "pending",
         "created_at": time.time(),
+        "queued_at": None,
         "started_at": None,
         "finished_at": None,
         "error": None,
@@ -337,8 +342,8 @@ def _compute_logs(job: dict[str, Any]) -> dict[str, Any]:
     """Return JobLogs-shaped data, growing the visible lines as time passes."""
     seq = _log_sequence(job)
     status = job["status"]
-    if status == "pending":
-        return {"lines": [], "progress": 0.0, "progress_msg": "", "phase": "pending"}
+    if status in ("pending", "queued"):
+        return {"lines": [], "progress": 0.0, "progress_msg": "", "phase": status}
     if status == "completed":
         return {"lines": seq, "progress": 100.0, "progress_msg": "50/50 steps", "phase": "done"}
     if status in ("failed", "stopped"):
@@ -461,6 +466,11 @@ def _job_from_snapshot(row: dict[str, Any]) -> dict[str, Any]:
         status = "failed"
         job["error"] = job.get("error") or "Server restarted (job was running)"
         job["finished_at"] = job.get("finished_at") or time.time()
+    elif status == "queued":
+        # The real server resumes its queue on restart; the mock never runs
+        # snapshot jobs, so leave it as something the user can queue again.
+        status = "pending"
+        job["queued_at"] = None
     job["status"] = status
     job["references"] = _decode_references(row.get("references"))
     job["progress"] = 100.0 if status == "completed" else 0.0
@@ -633,6 +643,7 @@ def list_jobs(job_type: str | None = None) -> list[dict[str, Any]]:
     # _public_job mutates the shared job dict via _advance_job, so it must run
     # under the lock (matching every other job route) to avoid racing start/stop.
     with _state_lock:
+        _drain_queue()
         jobs = list(_jobs.values())
         if job_type:
             jobs = [j for j in jobs if j.get("job_type") == job_type]
@@ -643,6 +654,7 @@ def list_jobs(job_type: str | None = None) -> list[dict[str, Any]]:
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict[str, Any]:
     with _state_lock:
+        _drain_queue()
         job = _jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -653,18 +665,20 @@ def get_job(job_id: str) -> dict[str, Any]:
 def create_job(req: CreateJobRequest) -> dict[str, Any]:
     job = _new_job_dict(req)
     with _state_lock:
+        _drain_queue()
         _jobs[job["id"]] = job
         if _settings.get("autoStartJob"):
             _start(job)
         return _public_job(job)
 
 
-def _start(job: dict[str, Any]) -> None:
+def _start(job: dict[str, Any], at: float | None = None) -> None:
     # Once the mock is actually driving this job, it's no longer a frozen
     # historical record -- let _advance_job simulate it like any other.
     job.pop(_FROM_SNAPSHOT_KEY, None)
     job["status"] = "running"
-    job["started_at"] = time.time()
+    job["queued_at"] = None
+    job["started_at"] = at if at is not None else time.time()
     job["finished_at"] = None
     job["error"] = None
     job["output_path"] = None
@@ -676,17 +690,185 @@ def _start(job: dict[str, Any]) -> None:
     job["phase"] = "starting"
 
 
-@app.post("/api/jobs/{job_id}/start")
-def start_job(job_id: str) -> dict[str, Any]:
+class _QueueView:
+    """The scheduler's view of a mock job dict (it reads attributes, not keys)."""
+
+    def __init__(self, job: dict[str, Any]):
+        self.id = job["id"]
+        self.name = job.get("name", "")
+        self.status = job["status"]
+        self.references = job.get("references")
+        self.queued_at = job.get("queued_at")
+
+
+def _drain_queue() -> None:
+    """Run the queue up to now. Call with ``_state_lock`` held.
+
+    Like everything else in the mock this is computed on read: each pass
+    finishes jobs whose time is up, then starts whatever the queue allows.
+    A job takes over the slot at the moment the previous job *finished* (not at
+    the moment someone happened to poll), so a queue that has been sitting for
+    a minute shows every clip already done rather than advancing one per poll.
+    Same rules as the real runner: one at a time, oldest first, and a clip that
+    takes another's last frame waits for it -- see job_queue.plan_dispatch.
+    """
+    while True:
+        for job in _jobs.values():
+            _advance_job(job)
+        plan = plan_dispatch({jid: _QueueView(j) for jid, j in _jobs.items()}, max_concurrent=1)
+        now = time.time()
+        for job_id, reason in plan.fail.items():
+            job = _jobs[job_id]
+            job["status"] = "failed"
+            job["error"] = reason
+            job["finished_at"] = now
+            job["queued_at"] = None
+            job["phase"] = "failed"
+        if not plan.start:
+            if plan.fail:
+                continue  # a failure can free a slot or fail more jobs
+            return
+        for job_id in plan.start:
+            job = _jobs[job_id]
+            finished = [j["finished_at"] for j in _jobs.values() if j.get("finished_at")]
+            # The slot came free when the last job finished, if that was after the job was queued.
+            slot_free = max([job.get("queued_at") or 0.0, *[f for f in finished if f <= now]])
+            _start(job, at=min(now, slot_free))
+
+
+def _check_dependencies_finished(job: dict[str, Any]) -> None:
+    for dep_id in dependencies(job.get("references")):
+        dep = _jobs.get(dep_id)
+        if dep is None:
+            raise HTTPException(status_code=409,
+                                detail="This job starts from the last frame of a job that no longer exists.")
+        if dep["status"] != "completed":
+            label = f"'{dep['name']}'" if dep.get("name") else dep["id"]
+            raise HTTPException(
+                status_code=409,
+                detail=(f"This job starts from the last frame of {label}, which hasn't finished "
+                        f"(it is {dep['status']}). Queue it to run after that job."),
+            )
+
+
+# Mirrors JobRunner.EDITABLE_STATUSES: exactly the jobs that can still be started.
+_EDITABLE_STATUSES = ("pending", "failed", "stopped")
+
+
+@app.patch("/api/jobs/{job_id}")
+def update_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    """Edit a job's configuration; only jobs that have not produced a result."""
     with _state_lock:
+        _drain_queue()
         job = _jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         _advance_job(job)
-        if job["status"] == "running":
-            raise HTTPException(status_code=409, detail="Job is already running")
-        if job["status"] == "completed":
-            raise HTTPException(status_code=409, detail="Job already completed. Delete and re-create to run again.")
+        if job["status"] not in _EDITABLE_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Job is {job['status']}; only {', '.join(_EDITABLE_STATUSES)} jobs can be edited. "
+                        "Duplicate it instead."),
+            )
+        unknown = set(updates) - set(CreateJobRequest.model_fields)
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Not editable: {', '.join(sorted(unknown))}")
+        job.update(updates)
+        return _public_job(job)
+
+
+@app.post("/api/jobs/{job_id}/last-frame")
+def extract_last_frame(job_id: str) -> dict[str, str]:
+    """Stand-in for the real route: there is no video to read, so hand back a made-up path."""
+    with _state_lock:
+        _drain_queue()
+        job = _jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        _advance_job(job)
+        if job["status"] != "completed" or not job.get("output_path"):
+            raise HTTPException(status_code=404, detail="No output available for this job")
+    return {"path": f"/mock/last_frames/last_frame_{job_id}.png", "media_type": "image"}
+
+
+def _check_startable(job: dict[str, Any]) -> None:
+    if job["status"] == "running":
+        raise HTTPException(status_code=409, detail="Job is already running")
+    if job["status"] == "queued":
+        raise HTTPException(status_code=409, detail="Job is already queued")
+    if job["status"] == "completed":
+        raise HTTPException(status_code=409, detail="Job already completed. Delete and re-create to run again.")
+
+
+def _enqueue(job_ids: list[str]) -> list[dict[str, Any]]:
+    """Queue jobs in order, all-or-nothing (mirrors JobRunner.enqueue_jobs). Lock held."""
+    if len(set(job_ids)) != len(job_ids):
+        raise HTTPException(status_code=409, detail="A job was listed more than once.")
+    jobs = []
+    for job_id in job_ids:
+        job = _jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        _check_startable(job)
+        jobs.append(job)
+    views = {jid: _QueueView(j) for jid, j in _jobs.items()}
+    for job in jobs:
+        loop = circular_dependency(views, job["id"])
+        if loop:
+            raise HTTPException(
+                status_code=409,
+                detail="Jobs would wait on each other's last frames in a loop: " + " -> ".join(loop),
+            )
+    for job in jobs:
+        job.pop(_FROM_SNAPSHOT_KEY, None)
+        job.update(status="queued", queued_at=time.time(), error=None, output_path=None, log_file_path=None,
+                   started_at=None, finished_at=None, progress=0.0, progress_msg="", phase="queued")
+        # Strictly increasing, so jobs queued together keep their order.
+        others = [j["queued_at"] for j in _jobs.values() if j.get("queued_at") and j is not job]
+        job["queued_at"] = max([job["queued_at"], *[o + 1e-6 for o in others]])
+    _drain_queue()
+    return [_public_job(j) for j in jobs]
+
+
+@app.post("/api/jobs/queue")
+def queue_jobs(req: QueueJobsRequest) -> list[dict[str, Any]]:
+    with _state_lock:
+        _drain_queue()
+        return _enqueue(req.job_ids)
+
+
+@app.post("/api/jobs/{job_id}/queue")
+def queue_job(job_id: str) -> dict[str, Any]:
+    with _state_lock:
+        _drain_queue()
+        return _enqueue([job_id])[0]
+
+
+@app.post("/api/jobs/{job_id}/dequeue")
+def dequeue_job(job_id: str) -> dict[str, Any]:
+    with _state_lock:
+        _drain_queue()
+        job = _jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        if job["status"] != "queued":
+            raise HTTPException(status_code=409, detail=f"Job is not queued (status={job['status']})")
+        job["status"] = "pending"
+        job["queued_at"] = None
+        _drain_queue()
+        return _public_job(job)
+
+
+@app.post("/api/jobs/{job_id}/start")
+def start_job(job_id: str) -> dict[str, Any]:
+    with _state_lock:
+        _drain_queue()
+        job = _jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        _advance_job(job)
+        _check_startable(job)
+        _check_dependencies_finished(job)
         _start(job)
         return _public_job(job)
 
@@ -694,10 +876,16 @@ def start_job(job_id: str) -> dict[str, Any]:
 @app.post("/api/jobs/{job_id}/stop")
 def stop_job(job_id: str) -> dict[str, Any]:
     with _state_lock:
+        _drain_queue()
         job = _jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         _advance_job(job)
+        if job["status"] == "queued":
+            job["status"] = "pending"
+            job["queued_at"] = None
+            _drain_queue()
+            return _public_job(job)
         if job["status"] != "running":
             raise HTTPException(status_code=409, detail=f"Job is not running (status={job['status']})")
         job["status"] = "stopped"
@@ -709,14 +897,17 @@ def stop_job(job_id: str) -> dict[str, Any]:
 @app.delete("/api/jobs/{job_id}")
 def delete_job(job_id: str) -> dict[str, str]:
     with _state_lock:
+        _drain_queue()
         if _jobs.pop(job_id, None) is None:
             raise HTTPException(status_code=404, detail="Job not found")
+        _drain_queue()  # clips waiting on this one's last frame can no longer run
     return {"detail": f"Job {job_id} deleted"}
 
 
 @app.get("/api/jobs/{job_id}/logs")
 def get_job_logs(job_id: str, after: int = 0) -> dict[str, Any]:
     with _state_lock:
+        _drain_queue()
         job = _jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
@@ -735,6 +926,7 @@ def get_job_logs(job_id: str, after: int = 0) -> dict[str, Any]:
 @app.get("/api/jobs/{job_id}/video")
 def get_video(job_id: str) -> FileResponse:
     with _state_lock:
+        _drain_queue()
         job = _jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -755,9 +947,59 @@ def get_video(job_id: str) -> FileResponse:
     return FileResponse(_build_mock_media("mp4"), media_type="video/mp4", filename=f"job_{job_id}.mp4")
 
 
+_MERGED_DIR = tempfile.mkdtemp(prefix="fvstudio_merged_")
+
+
+@app.post("/api/scenes/merge")
+def merge_scene(req: MergeSceneRequest) -> dict[str, Any]:
+    """Real merge (same code as the real server) of whatever videos the jobs have.
+
+    Jobs whose video only exists in the mock get the stand-in clip, so the
+    flow can be tried end to end without generating anything.
+    """
+    with _state_lock:
+        _drain_queue()
+        picked = []
+        for job_id in req.job_ids:
+            job = _jobs.get(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+            picked.append(dict(job))
+    all_real = all(j.get("output_path") and os.path.isfile(j["output_path"]) for j in picked)
+    stand_in = None if all_real else _build_mock_media("mp4")
+    jobs = [
+        SimpleNamespace(
+            id=j["id"],
+            name=j.get("name", ""),
+            status=j["status"],
+            output_path=(j["output_path"] if all_real else (stand_in if j["status"] == "completed" else None)),
+        ) for j in picked
+    ]
+    try:
+        result = merge_jobs(jobs, _MERGED_DIR, req.name)
+    except MergeError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    return {
+        "filename": result.filename,
+        "url": f"/api/merged/{result.filename}",
+        "clips": result.clips,
+        "seconds": result.seconds,
+    }
+
+
+@app.get("/api/merged/{filename}")
+def get_merged_video(filename: str) -> FileResponse:
+    try:
+        path = merged_path(_MERGED_DIR, filename)
+    except MergeError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    return FileResponse(path, media_type="video/mp4", filename=filename)
+
+
 @app.get("/api/jobs/{job_id}/download_log")
 def download_log(job_id: str) -> PlainTextResponse:
     with _state_lock:
+        _drain_queue()
         job = _jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")

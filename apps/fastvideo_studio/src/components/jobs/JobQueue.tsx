@@ -108,7 +108,8 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
 
   // Poll every second while any job is running/pending; stop otherwise.
   const hasActive = jobs.some(
-    (j) => j.status === 'running' || j.status === 'pending',
+    (j) =>
+      j.status === 'running' || j.status === 'pending' || j.status === 'queued',
   );
   React.useEffect(() => {
     if (!hasActive) return;

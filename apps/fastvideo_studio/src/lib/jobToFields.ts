@@ -72,6 +72,7 @@ export interface JobFormFields {
 
 /** Uploads keep their original basename, so this is the display name. */
 export function referenceFileName(source: string): string {
+	if (source.startsWith("job-last-frame:")) return `Last frame of job ${source.slice(15, 23)}`;
 	return source.split("/").filter(Boolean).pop() ?? source;
 }
 

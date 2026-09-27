@@ -194,6 +194,20 @@ export async function updateJob(
 	return response.json();
 }
 
+/**
+ * Ask the server to save the last frame of a finished clip and return its path,
+ * ready to attach to another job as an image reference.
+ */
+export async function extractLastFrame(jobId: string): Promise<{ path: string; media_type: MediaType }> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${jobId}/last-frame`, { method: "POST" });
+	if (!response.ok) {
+		const err = await response.json().catch(() => ({ detail: "Could not get the last frame" }));
+		throw new Error(err.detail || "Could not get the last frame");
+	}
+	return response.json();
+}
+
 export async function uploadMedia(
 	file: File,
 ): Promise<{ path: string; media_type: MediaType }> {
@@ -311,6 +325,80 @@ export async function startJob(id: string): Promise<Job> {
 		throw new Error(error.detail || "Failed to start job");
 	}
 	return response.json();
+}
+
+/**
+ * Queue jobs, in the order given, to run one after another as the server has room.
+ * A job that starts from another job's last frame waits for that job to finish.
+ * All-or-nothing: if any job can't be queued, none are.
+ */
+export async function queueJobs(ids: string[]): Promise<Job[]> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/queue`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ job_ids: ids }),
+	});
+	if (!response.ok) {
+		const error = await response
+			.json()
+			.catch(() => ({ detail: "Failed to queue jobs" }));
+		throw new Error(error.detail || "Failed to queue jobs");
+	}
+	return response.json();
+}
+
+/** Take a queued job out of the queue; it goes back to pending. */
+export async function dequeueJob(id: string): Promise<Job> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${id}/dequeue`, {
+		method: "POST",
+	});
+	if (!response.ok) {
+		const error = await response
+			.json()
+			.catch(() => ({ detail: "Failed to remove job from the queue" }));
+		throw new Error(error.detail || "Failed to remove job from the queue");
+	}
+	return response.json();
+}
+
+export interface MergedScene {
+	/** file name on the server; pass to getMergedVideoUrl / downloadMergedVideo */
+	filename: string;
+	clips: number;
+	/** length of the merged video */
+	seconds: number;
+}
+
+/**
+ * Join the finished clips of a scene, in the order given, into one video. Fails,
+ * making nothing, if any clip hasn't finished.
+ */
+export async function mergeScene(jobIds: string[], name: string): Promise<MergedScene> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/scenes/merge`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ job_ids: jobIds, name }),
+	});
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({ detail: "Failed to merge the scene" }));
+		throw new Error(error.detail || "Failed to merge the scene");
+	}
+	return response.json();
+}
+
+export function getMergedVideoUrl(filename: string): string {
+	return `${getApiBaseUrl()}/merged/${encodeURIComponent(filename)}`;
+}
+
+export async function downloadMergedVideo(filename: string): Promise<Blob> {
+	const response = await fetch(getMergedVideoUrl(filename));
+	if (!response.ok) {
+		throw new Error("Failed to download the merged video");
+	}
+	return response.blob();
 }
 
 export async function stopJob(id: string): Promise<Job> {

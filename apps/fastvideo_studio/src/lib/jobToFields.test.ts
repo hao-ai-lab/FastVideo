@@ -71,4 +71,8 @@ describe("referenceFileName", () => {
 		expect(referenceFileName("/a/b/c.mp4")).toBe("c.mp4");
 		expect(referenceFileName("c.mp4")).toBe("c.mp4");
 	});
+
+	it("names a last-frame reference by the job it comes from, not its internal id", () => {
+		expect(referenceFileName("job-last-frame:0a1b2c3d-1111-2222-3333-444455556666")).toBe("Last frame of job 0a1b2c3d");
+	});
 });

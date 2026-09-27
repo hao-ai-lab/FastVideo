@@ -94,6 +94,21 @@ describe("buildClips", () => {
 		expect(first.subjectIds).toEqual(["<Subject 1>", "<Subject 2>"]);
 	});
 
+	it("never adds camera movement, however long the shot runs", () => {
+		const long = "We keep the clients on the wheel and the wheel keeps turning, every day of the week. ".repeat(4).trim();
+		const clips = buildClips(
+			[
+				{ speaker: "CAPTAIN", text: long },
+				{ speaker: "CLERK", text: long },
+				{ speaker: "CAPTAIN", text: "Yes." },
+			],
+			{ speakers: SPEAKERS, targetSeconds: 60 },
+		);
+		const shots = clips.flatMap((c) => c.shots);
+		expect(shots.length).toBeGreaterThan(2);
+		expect(shots.every((s) => s.movement === "static")).toBe(true);
+	});
+
 	it("uses a close-up when only one person speaks in a shot", () => {
 		const [clip] = buildClips([{ speaker: "CAPTAIN", text: "Nobody leaves until the count is done." }], {
 			speakers: SPEAKERS,

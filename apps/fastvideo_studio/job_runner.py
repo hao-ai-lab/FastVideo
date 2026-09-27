@@ -17,6 +17,7 @@ import logging
 import logging.handlers
 import multiprocessing as mp
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -29,6 +30,14 @@ import yaml
 
 from fastvideo.utils import get_mp_context
 from fastvideo_studio.database import Database
+from fastvideo_studio.frames import last_frame_for_job
+from fastvideo_studio.job_queue import (
+    UnresolvedReference,
+    circular_dependency,
+    dependencies,
+    plan_dispatch,
+    resolve_references,
+)
 from fastvideo_studio.training_config import (
     build_training_config,
     get_training_env,
@@ -46,6 +55,7 @@ _MAX_LOG_LINES = 2000  # ring-buffer cap per job
 
 class JobStatus(str, enum.Enum):
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -138,6 +148,7 @@ class Job:
     finished_at: float | None = None
     error: str | None = None
     output_path: str | None = None
+    queued_at: float | None = None
     log_file_path: str | None = None  # Path to the job's log file
     num_inference_steps: int = 50
     num_frames: int = 81
@@ -195,6 +206,7 @@ class Job:
             "references": self.references,
             "status": self.status.value,
             "created_at": self.created_at,
+            "queued_at": self.queued_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
@@ -320,6 +332,8 @@ class JobRunner:
         log_dir: str,
         database: Database,
         verbose: bool = False,
+        max_concurrent_jobs: int = 1,
+        upload_dir: str = "",
     ):
         """Initialize the job runner.
 
@@ -328,19 +342,38 @@ class JobRunner:
             log_dir: Directory where job log files are saved
             verbose: Whether to print full tracebacks in error messages
             database: Optional SQLite database for job persistence
+            max_concurrent_jobs: How many *queued* jobs may run at once. Jobs
+                started directly with start_job() run immediately regardless
+                (but count toward the limit, so the queue waits for them).
+            upload_dir: Where extracted last frames are saved.
         """
         self.output_dir = output_dir
         self.log_dir = log_dir
         self.verbose = verbose
         self._db = database
+        self.max_concurrent_jobs = max(max_concurrent_jobs, 1)
+        self.upload_dir = upload_dir or os.path.join(output_dir, "uploads")
 
         self._jobs: dict[str, Job] = {}
         self._jobs_lock = threading.Lock()
+        # Serializes queue decisions (enqueue / dequeue / dispatch) so two
+        # finishing jobs can't both take the same free slot.
+        self._queue_lock = threading.RLock()
+        self._last_queued_at = 0.0
         self._load_jobs()
 
         # Cache of loaded generators keyed by model config so that we only pay
         # the model-loading cost once per model configuration.
         self._generators: dict[tuple, Any] = {}
+        # Cached generators are keyed by (owning thread, config). The model's GPU
+        # worker processes are killed (PR_SET_PDEATHSIG) when the *thread* that
+        # started them exits, so a generator is only safe for that thread to reuse
+        # -- which is why inference jobs run on long-lived worker threads (below)
+        # rather than a new thread each.
+        self._generator_threads: dict[tuple, threading.Thread] = {}
+        # Inference jobs are handed to these threads through one shared queue.
+        self._work: queue.Queue[Job | None] = queue.Queue()
+        self._workers: list[threading.Thread] = []
         self._generators_lock = threading.Lock()
 
         # Shared Manager for log queues (avoids spawning a new process per job)
@@ -350,6 +383,14 @@ class JobRunner:
         # Ensure directories exist
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
+
+        for i in range(self.max_concurrent_jobs):
+            worker = threading.Thread(target=self._worker_loop, name=f"inference-worker-{i}", daemon=True)
+            worker.start()
+            self._workers.append(worker)
+
+        # Jobs that were queued when the server last stopped carry on.
+        self._dispatch()
 
     def _load_logs(self, job: Job) -> None:
         """Populate job's log buffer from its log file if it exists."""
@@ -416,6 +457,7 @@ class JobRunner:
                     fake_score_model_path=row.get("fake_score_model_path", "") or "",
                     status=JobStatus(status),
                     created_at=row["created_at"],
+                    queued_at=row.get("queued_at"),
                     started_at=row.get("started_at"),
                     finished_at=row.get("finished_at"),
                     error=row.get("error"),
@@ -456,6 +498,7 @@ class JobRunner:
             self._db.update_job(
                 job.id, {
                     "status": job.status.value,
+                    "queued_at": job.queued_at,
                     "started_at": job.started_at,
                     "finished_at": job.finished_at,
                     "error": job.error,
@@ -466,7 +509,9 @@ class JobRunner:
             logger.warning("Failed to persist job %s: %s", job.id, exc)
 
     def _shutdown(self) -> None:
-        """Shutdown the shared multiprocessing manager on exit."""
+        """Stop the inference workers and the shared multiprocessing manager on exit."""
+        for _ in self._workers:
+            self._work.put(None)
         try:
             self._mp_manager.shutdown()
         except Exception as exc:
@@ -610,6 +655,9 @@ class JobRunner:
         except Exception as exc:
             logger.warning("Failed to delete job %s from database: %s", job_id, exc)
         logger.info("Deleted job %s", job.id)
+        # Anything queued behind this job's last frame can no longer run, and a
+        # freed queue slot may let the next job start.
+        self._dispatch()
         return True
 
     CONFIG_FIELDS: tuple[str, ...] = (
@@ -688,24 +736,30 @@ class JobRunner:
         for field_name, value in updates.items():
             setattr(job, field_name, value)
         self._save_job(job)
+        try:
+            self._db.update_job_config(job.id, updates)
+        except Exception as exc:
+            logger.warning("Failed to persist edits to job %s: %s", job.id, exc)
         return job
 
-    def start_job(self, job_id: str) -> Job:
-        """Start (or restart) a pending / stopped / failed job.
-        
-        Raises:
-            ValueError: If job not found or cannot be started
-        """
+    #: Statuses a job can be started or queued from.
+    STARTABLE_STATUSES = (JobStatus.PENDING, JobStatus.FAILED, JobStatus.STOPPED)
+
+    def _startable_job(self, job_id: str) -> Job:
         with self._jobs_lock:
             job = self._jobs.get(job_id)
         if job is None:
             raise ValueError(f"Job {job_id} not found")
         if job.status == JobStatus.RUNNING:
             raise ValueError("Job is already running")
+        if job.status == JobStatus.QUEUED:
+            raise ValueError("Job is already queued")
         if job.status == JobStatus.COMPLETED:
             raise ValueError("Job already completed. Delete and re-create to run again.")
-        # Reset state for re-run
-        job.status = JobStatus.PENDING
+        return job
+
+    def _reset_for_run(self, job: Job) -> None:
+        """Clear the previous attempt's state so the job starts clean."""
         job.error = None
         job.output_path = None
         job.log_file_path = None  # Will be set when job starts
@@ -716,25 +770,188 @@ class JobRunner:
         job.log_file_handler = None  # Reset file handler
         job._process = None  # Reset subprocess handle
 
-        # Wrap _run_job in an additional safety layer to catch any exceptions
-        # that might escape (though they shouldn't with our comprehensive handling)
-        def safe_run_job(job: Job):
-            """Wrapper to ensure _run_job never raises an unhandled exception."""
-            try:
-                self._run_job(job)
-            except BaseException as exc:
-                # This should never happen, but if it does, we catch it here
-                logger.critical("Unhandled exception escaped from _run_job for job %s: %s", job.id, exc, exc_info=True)
-                with contextlib.suppress(Exception):
-                    job.status = JobStatus.FAILED
-                    job.error = (f"Unhandled exception: {type(exc).__name__}: {str(exc)}")
-                    job.finished_at = time.time()
+    def _launch(self, job: Job) -> None:
+        """Start ``job``; when it ends, look for more queued work.
 
-        thread = threading.Thread(target=safe_run_job, args=(job, ), daemon=True)
+        Inference jobs go to a long-lived worker thread so the loaded model
+        survives from one job to the next. Training jobs only babysit a
+        subprocess, so they get a thread of their own.
+        """
+        # Marked running now, not when the job gets going, so the queue counts it
+        # immediately and can't start one job too many.
+        job.status = JobStatus.RUNNING
+        job.started_at = time.time()
+        self._save_job(job)
+
+        if job.job_type == "inference":
+            self._work.put(job)
+            logger.info("Sent job %s to an inference worker", job.id)
+            return
+
+        def run_training_job(job: Job):
+            self._run_job_safely(job)
+            self._dispatch_after_exit(threading.current_thread())
+
+        thread = threading.Thread(target=run_training_job, args=(job, ), daemon=True)
         job._thread = thread
         thread.start()
         logger.info("Started job %s", job.id)
+
+    def _run_job_safely(self, job: Job) -> None:
+        """Run a job, turning anything that escapes into a failed job."""
+        try:
+            self._run_job(job)
+        except BaseException as exc:
+            # This should never happen, but if it does, we catch it here
+            logger.critical("Unhandled exception escaped from _run_job for job %s: %s", job.id, exc, exc_info=True)
+            with contextlib.suppress(Exception):
+                job.status = JobStatus.FAILED
+                job.error = (f"Unhandled exception: {type(exc).__name__}: {str(exc)}")
+                job.finished_at = time.time()
+                self._save_job(job)
+
+    def _worker_loop(self) -> None:
+        """Run inference jobs one after another on this thread, for the life of the server.
+
+        The thread never exits between jobs. That matters: it started the model's
+        GPU processes, which are killed when it exits, so staying alive is what
+        lets the next job find the model already loaded.
+        """
+        while True:
+            job = self._work.get()
+            if job is None:
+                return
+            self._run_job_safely(job)
+            # The slot is free; dependents may now be runnable (or impossible).
+            with contextlib.suppress(Exception):
+                self._dispatch()
+
+    def start_job(self, job_id: str) -> Job:
+        """Start (or restart) a pending / stopped / failed job right now.
+
+        Refused if every inference worker is already busy; use enqueue_job() to
+        wait for a free one. A job that takes another job's last frame can only
+        start once that job has completed.
+
+        Raises:
+            ValueError: If job not found or cannot be started
+        """
+        with self._queue_lock:
+            job = self._startable_job(job_id)
+            # Fail here, before touching the job, rather than as a failed run.
+            self._check_dependencies_finished(job)
+            if job.job_type == "inference":
+                busy = self._running_inference_jobs()
+                if busy >= self.max_concurrent_jobs:
+                    raise ValueError(f"{busy} inference job(s) already running and the model workers are busy. "
+                                     "Queue this job to run next.")
+            self._reset_for_run(job)
+            job.queued_at = None
+            self._launch(job)
         return job
+
+    def _running_inference_jobs(self) -> int:
+        with self._jobs_lock:
+            return sum(1 for j in self._jobs.values() if j.job_type == "inference" and j.status == JobStatus.RUNNING)
+
+    def _check_dependencies_finished(self, job: Job) -> None:
+        for dep_id in dependencies(job.references):
+            dep = self.get_job(dep_id)
+            if dep is None:
+                raise ValueError("This job starts from the last frame of a job that no longer exists.")
+            if dep.status != JobStatus.COMPLETED:
+                label = f"'{dep.name}'" if dep.name else dep.id
+                raise ValueError(f"This job starts from the last frame of {label}, which hasn't finished "
+                                 f"(it is {dep.status.value}). Queue it to run after that job.")
+
+    # -- queue ---------------------------------------------------------------
+
+    def _next_queued_at(self) -> float:
+        """A strictly increasing timestamp, so jobs queued together keep their order."""
+        self._last_queued_at = max(time.time(), self._last_queued_at + 1e-6)
+        return self._last_queued_at
+
+    def enqueue_jobs(self, job_ids: list[str]) -> list[Job]:
+        """Queue jobs, in the given order, to run as slots free up.
+
+        All-or-nothing: if any job can't be queued, none are.
+
+        Raises:
+            ValueError: If a job is missing, not startable, or waits on itself.
+        """
+        if len(set(job_ids)) != len(job_ids):
+            raise ValueError("A job was listed more than once.")
+        with self._queue_lock:
+            jobs = [self._startable_job(job_id) for job_id in job_ids]
+            with self._jobs_lock:
+                snapshot = dict(self._jobs)
+            for job in jobs:
+                loop = circular_dependency(snapshot, job.id)
+                if loop:
+                    raise ValueError("Jobs would wait on each other's last frames in a loop: " + " -> ".join(loop))
+            for job in jobs:
+                self._reset_for_run(job)
+                job.status = JobStatus.QUEUED
+                job.queued_at = self._next_queued_at()
+                self._save_job(job)
+                logger.info("Queued job %s", job.id)
+        self._dispatch()
+        return jobs
+
+    def enqueue_job(self, job_id: str) -> Job:
+        return self.enqueue_jobs([job_id])[0]
+
+    def dequeue_job(self, job_id: str) -> Job:
+        """Take a queued job out of the queue, back to pending.
+
+        Raises:
+            ValueError: If the job is missing or isn't queued.
+        """
+        with self._queue_lock:
+            job = self.get_job(job_id)
+            if job is None:
+                raise ValueError(f"Job {job_id} not found")
+            if job.status != JobStatus.QUEUED:
+                raise ValueError(f"Job is not queued (status={job.status.value})")
+            job.status = JobStatus.PENDING
+            job.queued_at = None
+            self._save_job(job)
+            logger.info("Dequeued job %s", job.id)
+        # Anything queued behind this one's frame keeps waiting; a slot it held
+        # in line may now go to another job.
+        self._dispatch()
+        return job
+
+    def _dispatch_after_exit(self, finished: threading.Thread) -> None:
+        """Wait for a job's thread to end, then start whatever is next in the queue."""
+        finished.join()
+        with contextlib.suppress(Exception):
+            self._dispatch()
+
+    def _dispatch(self) -> None:
+        """Launch queued jobs that are ready, and fail those that can never be."""
+        with self._queue_lock:
+            with self._jobs_lock:
+                snapshot = dict(self._jobs)
+            plan = plan_dispatch(snapshot, self.max_concurrent_jobs)
+            for job_id, reason in plan.fail.items():
+                job = snapshot[job_id]
+                job.status = JobStatus.FAILED
+                job.error = reason
+                job.finished_at = time.time()
+                self._save_job(job)
+                logger.warning("Queued job %s can't run: %s", job_id, reason)
+            for job_id in plan.start:
+                job = snapshot[job_id]
+                job.queued_at = None
+                try:
+                    self._launch(job)
+                except Exception as exc:  # e.g. the OS refused a thread
+                    logger.exception("Could not launch queued job %s", job_id)
+                    job.status = JobStatus.FAILED
+                    job.error = f"Could not start: {exc}"
+                    job.finished_at = time.time()
+                    self._save_job(job)
 
     def stop_job(self, job_id: str) -> Job:
         """Request a running job to stop.
@@ -749,6 +966,8 @@ class JobRunner:
             job = self._jobs.get(job_id)
         if job is None:
             raise ValueError(f"Job {job_id} not found")
+        if job.status == JobStatus.QUEUED:
+            return self.dequeue_job(job_id)
         if job.status != JobStatus.RUNNING:
             raise ValueError(f"Job is not running (status={job.status.value})")
 
@@ -785,6 +1004,22 @@ class JobRunner:
             "progress_msg": job._log_buf.progress_msg,
             "phase": job._log_buf.phase,
         }
+
+    def _discard_generators(self) -> None:
+        """Unload this thread's models so the next job on it starts from a clean load."""
+        with self._generators_lock:
+            for key in [k for k in self._generators if k[0] == threading.current_thread().ident]:
+                self._drop_generator(key)
+
+    def _drop_generator(self, key: tuple) -> None:
+        """Forget a cached generator and shut it down. Call with ``_generators_lock`` held."""
+        gen = self._generators.pop(key, None)
+        self._generator_threads.pop(key, None)
+        if gen is not None:
+            try:
+                gen.shutdown()
+            except Exception:
+                logger.debug("Shutdown of a cached generator failed", exc_info=True)
 
     def _get_or_create_generator(
         self,
@@ -823,23 +1058,27 @@ class JobRunner:
             sp_size,
         )
 
-        # Generators are cached by model_id and configuration parameters
+        # Generators are cached per thread and configuration. Only the thread that
+        # built one may reuse it: its GPU processes die with that thread.
+        thread = threading.current_thread()
+        entry_key = (thread.ident, cache_key)
         with self._generators_lock:
-            cached = self._generators.get(cache_key)
+            # Generators whose thread has exited have dead workers already.
+            for key, owner in list(self._generator_threads.items()):
+                if not owner.is_alive():
+                    self._drop_generator(key)
+            cached = self._generators.get(entry_key)
             if cached is not None:
                 if _generator_is_alive(cached):
                     return cached
-                # Workers can exit while a generator sits idle in the cache;
-                # reusing it fails every later job with the same config.
-                logger.warning(
-                    "Cached generator for %s has dead workers; reloading.",
-                    model_id,
-                )
-                self._generators.pop(cache_key, None)
-                try:
-                    cached.shutdown()
-                except Exception:
-                    logger.debug("Shutdown of the dead generator failed", exc_info=True)
+                # Workers can exit while a generator sits idle in the cache.
+                logger.warning("Cached generator for %s has dead workers; reloading.", model_id)
+                self._drop_generator(entry_key)
+            # A worker keeps one model resident. A different configuration replaces
+            # it, freeing its GPU memory first, rather than loading beside it.
+            for key in [k for k in self._generators if k[0] == thread.ident]:
+                logger.info("Unloading the previous model to load %s.", model_id)
+                self._drop_generator(key)
 
         # Import lazily so starting the server is fast even without a GPU.
         from fastvideo import VideoGenerator
@@ -883,11 +1122,8 @@ class JobRunner:
         )
 
         with self._generators_lock:
-            if cache_key not in self._generators:
-                self._generators[cache_key] = gen
-            else:  # Another thread may have created it while we were loading.
-                gen.shutdown()
-                gen = self._generators[cache_key]
+            self._generators[entry_key] = gen
+            self._generator_threads[entry_key] = thread
         return gen
 
     def _run_job(self, job: Job):
@@ -1064,6 +1300,14 @@ class JobRunner:
                 logger.warning("Job stopped before execution started")
                 return
 
+            # Frames borrowed from other clips are extracted now, when they exist.
+            # Done before loading the model so a missing frame fails fast.
+            resolved_references = resolve_references(
+                job.references,
+                self.get_job,
+                lambda source: last_frame_for_job(source, self.upload_dir),
+            )
+
             buf.phase = "loading model"
             logger.info("Loading model...")
 
@@ -1121,7 +1365,7 @@ class JobRunner:
             if job.image_path:
                 gen_kwargs["image_path"] = job.image_path
             if job.references:
-                gen_kwargs["references"] = _build_h3_references(job.references)
+                gen_kwargs["references"] = _build_h3_references(resolved_references)
             if job.last_image_path:
                 # _prepare_fl2va requires a PIL image, not a path.
                 from PIL import Image as _PILImage
@@ -1148,6 +1392,7 @@ class JobRunner:
             if job._stop_event.is_set():
                 job.status = JobStatus.STOPPED
                 logger.warning("Job was stopped during execution")
+                self._discard_generators()
             else:
                 job.status = JobStatus.COMPLETED
                 buf.progress = 100.0
@@ -1156,9 +1401,19 @@ class JobRunner:
             self._save_job(job)
             buf.phase = "done"
 
+        except UnresolvedReference as exception:
+            logger.error("Job %s can't get its reference frame: %s", job.id, exception)
+            job.status = JobStatus.FAILED
+            job.error = str(exception)
+            job.finished_at = time.time()
+            self._save_job(job)
+            buf.phase = "failed"
+
         except Exception as exception:
             error_msg = str(exception)
             logger.exception("Critical error in job thread: %s", error_msg)
+            # The model may be mid-request. Reload rather than trust it for the next job.
+            self._discard_generators()
             job.status = JobStatus.FAILED
             job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
             job.finished_at = time.time()

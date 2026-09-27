@@ -7,13 +7,16 @@ import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
 import { getJobVideoUrl } from '@/lib/api';
+import { attachedLastFrames, whyCannotAttach } from '@/lib/continuation';
 import { formatCutTime } from '@/lib/h3Shots';
+import { QUEUEABLE_STATUSES } from '@/lib/sceneQueue';
 import { formatClock, type Scene, type SceneClip } from '@/lib/scenes';
 import type { Job } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 const BADGE_VARIANTS: Record<string, BadgeProps['variant']> = {
   pending: 'secondary',
+  queued: 'default',
   running: 'warning',
   completed: 'success',
   failed: 'destructive',
@@ -23,6 +26,7 @@ const BADGE_VARIANTS: Record<string, BadgeProps['variant']> = {
 const SEGMENT_TONE: Record<string, string> = {
   completed: 'bg-emerald-500/70',
   running: 'bg-amber-500/70',
+  queued: 'bg-sky-500/60',
   failed: 'bg-rose-500/70',
 };
 
@@ -91,19 +95,65 @@ function ClipPreview({ job }: { job: Job }) {
 
 function ClipRow({
   clip,
+  previous,
   firstShotNumber,
   onOpenJob,
   onChooseTake,
+  onUseLastFrame,
+  onDetachLastFrame,
+  onQueueClip,
+  onDequeueClip,
 }: {
   clip: SceneClip;
+  /** the clip before this one in the scene, if any */
+  previous: SceneClip | undefined;
   firstShotNumber: number;
   onOpenJob: (job: Job) => void;
   onChooseTake: (takeKey: string, jobId: string) => void;
+  onUseLastFrame: (clip: SceneClip, previous: SceneClip) => Promise<void>;
+  onDetachLastFrame: (clip: SceneClip) => Promise<void>;
+  onQueueClip: (clip: SceneClip) => Promise<void>;
+  onDequeueClip: (clip: SceneClip) => Promise<void>;
 }) {
   const [previewing, setPreviewing] = React.useState(false);
+  const [attaching, setAttaching] = React.useState(false);
+  const [queueing, setQueueing] = React.useState(false);
   const { job } = clip;
   const canPreview = job.status === 'completed' && !!job.output_path;
   const editable = EDITABLE_STATUSES.includes(job.status);
+
+  const queued = job.status === 'queued';
+  const canQueue = QUEUEABLE_STATUSES.includes(job.status);
+
+  // Starting from the previous clip's last frame: offered on clips that can still be
+  // edited. The frame is taken when this clip runs, so the previous clip needn't be done yet.
+  const frames = attachedLastFrames(job.references);
+  const fromPrevious = previous && frames.some((f) => f.jobId === previous.job.id);
+  const fromAnotherTake = frames.some((f) => f.jobId !== previous?.job.id);
+  const previousDone = !!previous && previous.job.status === 'completed';
+  const cannotUseFrame = previous ? whyCannotAttach(job.prompt, job.references) : null;
+
+  const usingLastFrame = frames.length > 0;
+  const lastFrameBlocked = attaching || (!usingLastFrame && !!cannotUseFrame);
+
+  async function toggleLastFrame() {
+    if (!previous) return;
+    setAttaching(true);
+    try {
+      await (usingLastFrame ? onDetachLastFrame(clip) : onUseLastFrame(clip, previous));
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  async function queueOrDequeue(action: (clip: SceneClip) => Promise<void>) {
+    setQueueing(true);
+    try {
+      await action(clip);
+    } finally {
+      setQueueing(false);
+    }
+  }
 
   return (
     <li id={`clip-${job.id}`} className="scroll-mt-32 rounded-xl border border-border bg-card p-3">
@@ -121,7 +171,48 @@ function ClipRow({
             continues previous shot
           </Badge>
         )}
-        <span className="ml-auto flex items-center gap-2">
+        <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {previous && queued && fromPrevious && (
+            <Badge variant="outline" className="normal-case tracking-normal">
+              starts from clip {previous.position}&apos;s last frame
+            </Badge>
+          )}
+          {previous && queued && fromPrevious && !previousDone && (
+            <Badge variant="outline" className="normal-case tracking-normal">
+              waiting for clip {previous.position}
+            </Badge>
+          )}
+          {previous && editable && (
+            <label
+              className={cn(
+                'flex items-center gap-1.5 text-xs text-foreground',
+                lastFrameBlocked && 'text-muted-foreground',
+              )}
+              title={
+                usingLastFrame
+                  ? "Stop starting this clip from the previous clip's last frame"
+                  : (cannotUseFrame ??
+                    `Attach the last frame of clip ${previous.position} as this clip's opening frame${
+                      previousDone ? '' : ` (taken when this clip runs, after clip ${previous.position} has finished)`
+                    }`)
+              }
+            >
+              <input
+                type="checkbox"
+                checked={usingLastFrame}
+                onChange={toggleLastFrame}
+                disabled={lastFrameBlocked}
+                className="size-4"
+              />
+              {attaching
+                ? usingLastFrame
+                  ? 'Removing…'
+                  : 'Attaching…'
+                : fromPrevious || !usingLastFrame
+                  ? `Use last frame of clip ${previous.position}`
+                  : "Starts from another take's last frame"}
+            </label>
+          )}
           {clip.takeKey && clip.takes.length > 1 && (
             <NativeSelect
               aria-label={`Take for clip ${clip.position}`}
@@ -139,6 +230,29 @@ function ClipRow({
           {canPreview && (
             <Button type="button" size="sm" variant="outline" onClick={() => setPreviewing((p) => !p)}>
               {previewing ? 'Hide video' : 'Preview'}
+            </Button>
+          )}
+          {canQueue && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => queueOrDequeue(onQueueClip)}
+              disabled={queueing}
+              title="Run this clip when the ones queued before it have finished"
+            >
+              Queue
+            </Button>
+          )}
+          {queued && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => queueOrDequeue(onDequeueClip)}
+              disabled={queueing}
+            >
+              Remove from queue
             </Button>
           )}
           <Button type="button" size="sm" variant="outline" onClick={() => onOpenJob(job)}>
@@ -180,14 +294,48 @@ function ClipRow({
 export interface SceneBoardProps {
   scene: Scene;
   onOpenJob: (job: Job) => void;
+  /** start a clip from the last frame of the one before it; resolves when done (errors are reported by the caller) */
+  onUseLastFrame: (clip: SceneClip, previous: SceneClip) => Promise<void>;
   /** pick which re-run of a clip number to show */
   onChooseTake: (takeKey: string, jobId: string) => void;
+  /** open the confirmation for queueing every runnable clip of the scene */
+  onQueueScene: (scene: Scene) => void;
+  /** join the scene's finished clips into one video; resolves when done (errors are reported by the caller) */
+  onMergeScene: (scene: Scene) => Promise<void>;
+  /** stop starting a clip from a previous clip's last frame; resolves when done */
+  onDetachLastFrame: (clip: SceneClip) => Promise<void>;
+  /** queue / unqueue one clip; resolve when done (errors are reported by the caller) */
+  onQueueClip: (clip: SceneClip) => Promise<void>;
+  onDequeueClip: (clip: SceneClip) => Promise<void>;
 }
 
 /** One scene: a timeline of its clips, then every clip's shots in order, numbered straight through. */
-export function SceneBoard({ scene, onOpenJob, onChooseTake }: SceneBoardProps) {
+export function SceneBoard({
+  scene,
+  onOpenJob,
+  onChooseTake,
+  onUseLastFrame,
+  onDetachLastFrame,
+  onQueueScene,
+  onMergeScene,
+  onQueueClip,
+  onDequeueClip,
+}: SceneBoardProps) {
   let shotNumber = 1;
   const statuses = Object.entries(scene.statusCounts);
+  const anythingToQueue = scene.clips.some((c) => QUEUEABLE_STATUSES.includes(c.job.status));
+
+  // Merging needs every clip's video, so a scene missing one can't pass for the whole thing.
+  const unfinished = scene.clips.filter((c) => c.job.status !== 'completed' || !c.job.output_path).length;
+  const [merging, setMerging] = React.useState(false);
+  async function merge() {
+    setMerging(true);
+    try {
+      await onMergeScene(scene);
+    } finally {
+      setMerging(false);
+    }
+  }
 
   // The header stays where it is until it reaches the top of the scrolling area,
   // then sticks there. A 1px sentinel sitting just above it tells us which: once
@@ -225,21 +373,51 @@ export function SceneBoard({ scene, onOpenJob, onChooseTake }: SceneBoardProps) 
               </Badge>
             ))}
           </span>
+          <span className="ml-auto flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={merge}
+              disabled={unfinished > 0 || merging}
+              title={
+                unfinished > 0
+                  ? `${unfinished} clip${unfinished === 1 ? " hasn't" : "s haven't"} finished yet`
+                  : 'Join all the clips, in order, into one video'
+              }
+            >
+              {merging ? 'Merging…' : 'Merge scene'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => onQueueScene(scene)}
+              disabled={!anythingToQueue}
+              title={anythingToQueue ? 'Queue every clip that has not run yet' : 'Every clip has already run or is queued'}
+            >
+              Queue scene
+            </Button>
+          </span>
         </div>
         <Timeline scene={scene} />
       </div>
 
       <ol className="flex list-none flex-col gap-3 p-0">
-        {scene.clips.map((clip) => {
+        {scene.clips.map((clip, index) => {
           const first = shotNumber;
           shotNumber += clip.shots.length;
           return (
             <ClipRow
               key={clip.takeKey ?? clip.job.id}
               clip={clip}
+              previous={scene.clips[index - 1]}
               firstShotNumber={first}
               onOpenJob={onOpenJob}
               onChooseTake={onChooseTake}
+              onUseLastFrame={onUseLastFrame}
+              onDetachLastFrame={onDetachLastFrame}
+              onQueueClip={onQueueClip}
+              onDequeueClip={onDequeueClip}
             />
           );
         })}

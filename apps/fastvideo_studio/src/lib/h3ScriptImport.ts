@@ -205,13 +205,7 @@ function joinNatural(items: string[]): string {
 	return items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
-function shotFromBeat(
-	beat: Beat,
-	opts: ImportOptions,
-	totalSeconds: number,
-	continued = false,
-	truncated = false,
-): Shot {
+function shotFromBeat(beat: Beat, opts: ImportOptions, continued = false, truncated = false): Shot {
 	const speakers = [...new Set(beat.lines.map((l) => l.speaker))];
 	const subjectIds = [
 		...new Set(speakers.map((s) => opts.speakers[s]?.subject).filter((s): s is string => Boolean(s))),
@@ -231,7 +225,9 @@ function shotFromBeat(
 
 	const shot = makeShot({
 		type: speakers.length > 1 ? "medium" : "close-up",
-		movement: totalSeconds >= 5 ? "dolly" : "static",
+		// A static camera: added movement (a dolly on every long shot) showed up as
+		// unwanted panning. Movement can still be set per shot in the shot editor.
+		movement: "static",
 		subjectIds,
 		description,
 		lines: beat.lines.map((l) => newLine({ speaker: opts.speakers[l.speaker]?.tag ?? "", text: l.text })),
@@ -308,7 +304,7 @@ export function buildClips(turns: ScriptTurn[], opts: ImportOptions): ImportClip
 
 		if (total <= opts.targetSeconds) {
 			if (hasDialogue() && seconds + total > opts.targetSeconds) close(false);
-			current.shots.push(shotFromBeat(beat, opts, total));
+			current.shots.push(shotFromBeat(beat, opts));
 			seconds += total;
 			continue;
 		}
@@ -321,7 +317,7 @@ export function buildClips(turns: ScriptTurn[], opts: ImportOptions): ImportClip
 			if (k > 0) close(true);
 			const lines = [{ ...main, text: part }, ...(k === parts.length - 1 ? reactions : [])];
 			const pieceBeat: Beat = { lines, directions: k === 0 ? beat.directions : [] };
-			current.shots.push(shotFromBeat(pieceBeat, opts, total, k > 0, k < parts.length - 1));
+			current.shots.push(shotFromBeat(pieceBeat, opts, k > 0, k < parts.length - 1));
 			seconds += beatSeconds(pieceBeat);
 		});
 	}

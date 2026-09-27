@@ -6,6 +6,8 @@ from fastvideo_studio.models.create_job_request import CreateJobRequest
 from fastvideo_studio.models.settings_update import SettingsUpdate
 from fastvideo_studio.models.create_dataset_request import CreateDatasetRequest
 from fastvideo_studio.models.update_caption_request import UpdateCaptionRequest
+from fastvideo_studio.models.queue_jobs_request import QueueJobsRequest
+from fastvideo_studio.models.merge_scene_request import MergeSceneRequest
 
 
 def model_label(model_path: str) -> str:
@@ -18,5 +20,7 @@ __all__ = [
     "SettingsUpdate",
     "CreateDatasetRequest",
     "UpdateCaptionRequest",
+    "QueueJobsRequest",
+    "MergeSceneRequest",
     "model_label",
 ]

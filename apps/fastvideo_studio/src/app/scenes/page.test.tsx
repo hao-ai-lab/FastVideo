@@ -3,12 +3,27 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ScenesPage from './page';
-import { getJobsList } from '@/lib/api';
+import { toast } from 'sonner';
+import { dequeueJob, downloadMergedVideo, getJobsList, mergeScene, queueJobs, updateJob } from '@/lib/api';
+import { downloadBlob } from '@/lib/utils';
 import { makeJob } from '@/test/factories';
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock('@/lib/api', () => ({
   getJobsList: vi.fn(),
+  queueJobs: vi.fn(),
+  dequeueJob: vi.fn(),
+  mergeScene: vi.fn(),
+  downloadMergedVideo: vi.fn(),
+  getMergedVideoUrl: (name: string) => `http://test.local/api/merged/${name}`,
+  updateJob: vi.fn(),
   getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
+}));
+
+vi.mock('@/lib/utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils')>()),
+  downloadBlob: vi.fn(),
 }));
 
 vi.mock('@/components/jobs/CreateJobModal', () => ({
@@ -34,6 +49,40 @@ const wolf = (n: number, over: Parameters<typeof makeJob>[0] = {}) =>
     ].join('\n'),
     ...over,
   });
+
+import { attachLastFrame } from '@/lib/continuation';
+
+const sixSection = (n: number) =>
+  [
+    'subject_definitions:',
+    '<Subject 1> is a man.',
+    '',
+    'summary:',
+    '[reference generation] A man.',
+    '',
+    'retention_analysis:',
+    '<Subject 1> (appears in [Shot 1]): fully_preserved - suit.',
+    '',
+    'detailed_description:',
+    `[Shot 1] Wide shot. Clip ${n}.`,
+    '',
+    'overall_soundscape:',
+    'Quiet.',
+    '',
+    'non_diegetic_music:',
+    'N/A',
+  ].join('\n');
+
+/** Clip n's prompt after 'Use last frame' rewrote it (built by the same function the page uses). */
+const attachedPrompt = (n: number) => {
+  const images = [
+    { source: '/refs/veteran.png', media_type: 'image' },
+    { source: '/refs/young.png', media_type: 'image' },
+  ];
+  const r = attachLastFrame(sixSection(n), images, 'job-last-frame:wolf-1');
+  if (!r.ok) throw new Error(r.error);
+  return r.prompt;
+};
 
 beforeEach(() => {
   vi.mocked(getJobsList).mockReset();
@@ -241,6 +290,8 @@ describe('ScenesPage', () => {
     afterEach(() => vi.unstubAllGlobals());
 
     const header = () => screen.getByRole('heading', { name: 'wolf-lunch' }).closest('[data-stuck]') as HTMLElement;
+    // The observer is created in an effect, which can land just after the heading does.
+    const observerReady = () => waitFor(() => expect(callback).not.toBeNull());
 
     it('is sticky to the top of the scrolling area', async () => {
       vi.mocked(getJobsList).mockResolvedValue([wolf(1), wolf(2)]);
@@ -257,6 +308,7 @@ describe('ScenesPage', () => {
       render(<ScenesPage />);
       await screen.findByRole('heading', { name: 'wolf-lunch' });
 
+      await observerReady();
       expect(header()).toHaveAttribute('data-stuck', 'false');
       expect(header()).not.toHaveClass('shadow-md');
 
@@ -275,8 +327,600 @@ describe('ScenesPage', () => {
       vi.mocked(getJobsList).mockResolvedValue([wolf(1)]);
       const { unmount } = render(<ScenesPage />);
       await screen.findByRole('heading', { name: 'wolf-lunch' });
+      await observerReady();
       unmount();
       expect(disconnect).toHaveBeenCalled();
+    });
+  });
+
+  describe('using the last frame of the previous clip', () => {
+    const FRAME = 'job-last-frame:wolf-1';
+    const IMAGES = [
+      { source: '/refs/veteran.png', media_type: 'image' },
+      { source: '/refs/young.png', media_type: 'image' },
+    ];
+    const done = (over: Parameters<typeof wolf>[1] = {}) =>
+      wolf(1, { status: 'completed', output_path: '/out/a.mp4', prompt: sixSection(1), ...over });
+    const next = (over: Parameters<typeof wolf>[1] = {}) =>
+      wolf(2, { status: 'pending', prompt: sixSection(2), references: IMAGES, ...over });
+    const button = () => screen.getByRole('checkbox', { name: /Use last frame of clip 1/ });
+
+    beforeEach(() => {
+      vi.mocked(updateJob).mockReset().mockResolvedValue({});
+      vi.mocked(toast.success).mockClear();
+      vi.mocked(toast.error).mockClear();
+    });
+
+    it('is offered on a clip that can still be edited', async () => {
+      vi.mocked(getJobsList).mockResolvedValue([done(), next()]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      expect(button()).toBeEnabled();
+      // the first clip has nothing before it
+      expect(screen.getAllByRole('checkbox', { name: /Use last frame/ })).toHaveLength(1);
+      expect(button()).not.toBeChecked();
+    });
+
+    it('is not offered on a clip that has already run', async () => {
+      vi.mocked(getJobsList).mockResolvedValue([done(), next({ status: 'completed', output_path: '/out/b.mp4' })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(screen.queryByRole('checkbox', { name: /Use last frame/ })).not.toBeInTheDocument();
+    });
+
+    it("attaches the frame as a reference the server resolves, rewrites the prompt, and reloads", async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([done(), next()]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      await user.click(button());
+
+      await waitFor(() => expect(updateJob).toHaveBeenCalledTimes(1));
+      const [jobId, updates] = vi.mocked(updateJob).mock.calls[0] as [string, { references: unknown[]; prompt: string }];
+      expect(jobId).toBe('wolf-2');
+      expect(updates.references).toEqual([...IMAGES, { source: FRAME, media_type: 'image' }]);
+      expect(updates.prompt).toContain('[reference generation + keyframe completion]');
+      expect(updates.prompt).toContain('<Picture 3> is the first frame of [Shot 1]');
+      expect(updates.prompt).toContain('[Shot 1] Wide shot. The shot begins from <Picture 3>. Clip 2.');
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+      expect(vi.mocked(toast.success).mock.calls[0][0]).toContain('last frame of clip 1');
+      await waitFor(() => expect(getJobsList).toHaveBeenCalledTimes(2));
+    });
+
+    it('works before the previous clip has finished', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([done({ status: 'pending', output_path: null }), next()]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      expect(button()).toBeEnabled();
+      expect(button().closest('label')?.getAttribute('title')).toMatch(/after clip 1 has finished/);
+      await user.click(button());
+      await waitFor(() => expect(updateJob).toHaveBeenCalled());
+    });
+
+    it('shows progress while the job is being updated', async () => {
+      const user = userEvent.setup();
+      let release: (v: unknown) => void = () => {};
+      vi.mocked(updateJob).mockReturnValue(new Promise((r) => (release = r)));
+      vi.mocked(getJobsList).mockResolvedValue([done(), next()]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      await user.click(button());
+      expect(screen.getByRole('checkbox', { name: 'Attaching…' })).toBeDisabled();
+
+      release({});
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    });
+
+    it("explains why it is unavailable for a prompt it can't rewrite", async () => {
+      vi.mocked(getJobsList).mockResolvedValue([done(), next({ prompt: 'A plain prompt.' })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(button()).toBeDisabled();
+      expect(button().closest('label')?.getAttribute('title')).toMatch(/six-section/);
+    });
+
+    it.each([
+      ['a reference the server resolves', FRAME],
+      ['a frame already saved to disk', '/data/uploads/last_frames/last_frame_wolf-1.png'],
+    ])('shows the box checked when the frame is attached (%s)', async (_label, source) => {
+      vi.mocked(getJobsList).mockResolvedValue([done(), next({ references: [...IMAGES, { source, media_type: 'image' }] })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(button()).toBeChecked();
+    });
+
+    it("shows a frame from another take as attached instead of stacking a second one", async () => {
+      const other = 'job-last-frame:some-other-take';
+      vi.mocked(getJobsList).mockResolvedValue([done(), next({ references: [...IMAGES, { source: other, media_type: 'image' }] })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(screen.getByRole('checkbox', { name: "Starts from another take's last frame" })).toBeChecked();
+    });
+
+    describe('unchecking it', () => {
+      const attached = (source = FRAME, extra: { source: string; media_type: string }[] = []) =>
+        next({
+          prompt: attachedPrompt(2),
+          references: [...IMAGES, { source, media_type: 'image' }, ...extra],
+        });
+      const updates = () => vi.mocked(updateJob).mock.calls[0][1] as { references: unknown[]; prompt: string };
+
+      it('removes the frame and restores the prompt', async () => {
+        const user = userEvent.setup();
+        vi.mocked(getJobsList).mockResolvedValue([done(), attached()]);
+        render(<ScenesPage />);
+        await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+        await user.click(button());
+
+        await waitFor(() => expect(updateJob).toHaveBeenCalledTimes(1));
+        expect(vi.mocked(updateJob).mock.calls[0][0]).toBe('wolf-2');
+        expect(updates().references).toEqual(IMAGES);
+        expect(updates().prompt).toBe(sixSection(2));
+        await waitFor(() => expect(toast.success).toHaveBeenCalled());
+        await waitFor(() => expect(getJobsList).toHaveBeenCalledTimes(2));
+      });
+
+      it('also removes a frame saved to disk', async () => {
+        const user = userEvent.setup();
+        vi.mocked(getJobsList).mockResolvedValue([done(), attached('/data/uploads/last_frames/last_frame_wolf-1.png')]);
+        render(<ScenesPage />);
+        await screen.findByRole('heading', { name: 'wolf-lunch' });
+        await user.click(button());
+        await waitFor(() => expect(updateJob).toHaveBeenCalled());
+        expect(updates().references).toEqual(IMAGES);
+      });
+
+      it("removes another take's frame too", async () => {
+        const user = userEvent.setup();
+        vi.mocked(getJobsList).mockResolvedValue([done(), attached('job-last-frame:some-other-take')]);
+        render(<ScenesPage />);
+        await screen.findByRole('heading', { name: 'wolf-lunch' });
+        await user.click(screen.getByRole('checkbox', { name: "Starts from another take's last frame" }));
+        await waitFor(() => expect(updateJob).toHaveBeenCalled());
+        expect(updates().references).toEqual(IMAGES);
+      });
+
+      it('is undone exactly by checking it and then unchecking it', async () => {
+        const user = userEvent.setup();
+        vi.mocked(getJobsList).mockResolvedValue([done(), next()]);
+        render(<ScenesPage />);
+        await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+        // Once saved, the reload shows the clip as the first click left it.
+        const attachedClip = attached();
+        vi.mocked(getJobsList).mockResolvedValue([done(), attachedClip]);
+        await user.click(button());
+        await waitFor(() => expect(updateJob).toHaveBeenCalledTimes(1));
+        expect(updates().prompt).toBe(attachedClip.prompt); // same rewrite the page's own helper produces
+
+        await user.click(await screen.findByRole('checkbox', { name: /Use last frame of clip 1/, checked: true }));
+        await waitFor(() => expect(updateJob).toHaveBeenCalledTimes(2));
+        const restored = vi.mocked(updateJob).mock.calls[1][1] as { prompt: string; references: unknown[] };
+        expect(restored.prompt).toBe(sixSection(2));
+        expect(restored.references).toEqual(IMAGES);
+      });
+
+      it('says why when other images were added after the frame, and changes nothing', async () => {
+        const user = userEvent.setup();
+        vi.mocked(getJobsList).mockResolvedValue([
+          done(),
+          attached(FRAME, [{ source: '/refs/extra.png', media_type: 'image' }]),
+        ]);
+        render(<ScenesPage />);
+        await screen.findByRole('heading', { name: 'wolf-lunch' });
+        await user.click(button());
+        await waitFor(() => expect(toast.error).toHaveBeenCalled());
+        expect(vi.mocked(toast.error).mock.calls[0][0]).toMatch(/Other images were added/);
+        expect(updateJob).not.toHaveBeenCalled();
+      });
+    });
+
+    it('reports a failure to update the job', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateJob).mockRejectedValue(new Error('Job is running; only pending jobs can be edited.'));
+      vi.mocked(getJobsList).mockResolvedValue([done(), next()]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      await user.click(button());
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Job is running; only pending jobs can be edited.'));
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+
+    it('uses the clip that is shown when a different take is chosen', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([
+        done({ id: 'take-a', created_at: 1 }),
+        done({ id: 'take-b', created_at: 2 }),
+        next(),
+      ]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      await user.selectOptions(screen.getByLabelText('Take for clip 1'), 'take-a');
+      await user.click(button());
+      await waitFor(() => expect(updateJob).toHaveBeenCalled());
+      const updates = vi.mocked(updateJob).mock.calls[0][1] as { references: { source: string }[] };
+      expect(updates.references.at(-1)?.source).toBe('job-last-frame:take-a');
+    });
+  });
+
+  describe('queueing', () => {
+    const clip = (n: number, over: Parameters<typeof wolf>[1] = {}) =>
+      wolf(n, { status: 'pending', prompt: sixSection(n), ...over });
+    const openDialog = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(screen.getByRole('button', { name: 'Queue scene' }));
+      return screen.findByRole('dialog');
+    };
+
+    beforeEach(() => {
+      vi.mocked(updateJob).mockReset().mockResolvedValue({});
+      vi.mocked(queueJobs).mockReset().mockResolvedValue([]);
+      vi.mocked(dequeueJob).mockReset().mockResolvedValue(makeJob());
+      vi.mocked(toast.success).mockClear();
+      vi.mocked(toast.error).mockClear();
+    });
+
+    it('queues the whole scene in order and leaves the clips as they are', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([clip(3), clip(1), clip(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const dialog = await openDialog(user);
+      expect(within(dialog).getByText('3 clips will be queued and run one at a time, in order.')).toBeInTheDocument();
+      expect(within(dialog).getByRole('checkbox')).not.toBeChecked();
+      await user.click(within(dialog).getByRole('button', { name: 'Queue 3 clips' }));
+
+      await waitFor(() => expect(queueJobs).toHaveBeenCalledWith(['wolf-1', 'wolf-2', 'wolf-3']));
+      expect(updateJob).not.toHaveBeenCalled();
+      expect(toast.success).toHaveBeenCalledWith('Queued 3 clips.');
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    });
+
+    it('links each clip to the frame before it when asked to, before queueing', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([clip(3), clip(1), clip(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const dialog = await openDialog(user);
+      await user.click(within(dialog).getByRole('checkbox'));
+      await user.click(within(dialog).getByRole('button', { name: 'Queue 3 clips' }));
+
+      await waitFor(() => expect(queueJobs).toHaveBeenCalledWith(['wolf-1', 'wolf-2', 'wolf-3']));
+      expect(updateJob).toHaveBeenCalledTimes(2);
+      const refs = (n: number) =>
+        (vi.mocked(updateJob).mock.calls.find((c) => c[0] === `wolf-${n}`)?.[1] as { references: { source: string }[] })
+          .references.map((r) => r.source);
+      expect(refs(2)).toEqual(['job-last-frame:wolf-1']);
+      expect(refs(3)).toEqual(['job-last-frame:wolf-2']);
+      // linked before queued, so the server never sees a queued clip without its link
+      expect(vi.mocked(updateJob).mock.invocationCallOrder.at(-1)!).toBeLessThan(
+        vi.mocked(queueJobs).mock.invocationCallOrder[0],
+      );
+    });
+
+    it('keeps the links you set on individual clips, and adds no others unless asked', async () => {
+      const user = userEvent.setup();
+      const link = [{ source: 'job-last-frame:wolf-1', media_type: 'image' }];
+      vi.mocked(getJobsList).mockResolvedValue([clip(1), clip(2, { references: link }), clip(3)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const dialog = await openDialog(user);
+      expect(within(dialog).getByText(/Clip 2 already starts from a previous frame/)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: 'Queue 3 clips' }));
+
+      await waitFor(() => expect(queueJobs).toHaveBeenCalledWith(['wolf-1', 'wolf-2', 'wolf-3']));
+      expect(updateJob).not.toHaveBeenCalled();
+    });
+
+    it('skips clips that already ran and says so', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([
+        clip(1, { status: 'completed', output_path: '/o/1.mp4' }),
+        clip(2),
+        clip(3, { status: 'running' }),
+      ]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const dialog = await openDialog(user);
+      await user.click(within(dialog).getByRole('checkbox'));
+      expect(within(dialog).getByText(/Skipping clip 1 \(already finished\), clip 3 \(already running\)/)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: 'Queue 1 clip' }));
+
+      await waitFor(() => expect(queueJobs).toHaveBeenCalledWith(['wolf-2']));
+      // clip 2 still follows the finished clip 1's last frame
+      expect(vi.mocked(updateJob).mock.calls[0][0]).toBe('wolf-2');
+    });
+
+    it("mentions clips whose prompt can't be linked once linking is on, and still queues them", async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([clip(1), clip(2), clip(3, { prompt: 'A plain prompt.' })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const dialog = await openDialog(user);
+      expect(within(dialog).queryByText(/can't be linked automatically/)).not.toBeInTheDocument();
+      await user.click(within(dialog).getByRole('checkbox'));
+      expect(within(dialog).getByText(/Clip 3 can't be linked automatically/)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: 'Queue 3 clips' }));
+      await waitFor(() => expect(queueJobs).toHaveBeenCalledWith(['wolf-1', 'wolf-2', 'wolf-3']));
+      expect(updateJob).toHaveBeenCalledTimes(1); // only clip 2
+    });
+
+    it('queues nothing, and says which clip, when a link cannot be saved', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateJob).mockRejectedValue(new Error('Job is running'));
+      vi.mocked(getJobsList).mockResolvedValue([clip(1), clip(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const dialog = await openDialog(user);
+      await user.click(within(dialog).getByRole('checkbox'));
+      await user.click(within(dialog).getByRole('button', { name: 'Queue 2 clips' }));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(vi.mocked(toast.error).mock.calls[0][0]).toContain('Clip 2: Job is running. Nothing was queued.');
+      expect(queueJobs).not.toHaveBeenCalled();
+    });
+
+    it("reports the server's refusal", async () => {
+      const user = userEvent.setup();
+      vi.mocked(queueJobs).mockRejectedValue(new Error('Job already completed. Delete and re-create to run again.'));
+      vi.mocked(getJobsList).mockResolvedValue([clip(1)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const dialog = await openDialog(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Queue 1 clip' }));
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith('Job already completed. Delete and re-create to run again.'),
+      );
+    });
+
+    it('changes nothing when cancelled', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([clip(1), clip(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const dialog = await openDialog(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(queueJobs).not.toHaveBeenCalled();
+      expect(updateJob).not.toHaveBeenCalled();
+    });
+
+    it('is unavailable when every clip has already run or is queued', async () => {
+      vi.mocked(getJobsList).mockResolvedValue([
+        clip(1, { status: 'completed', output_path: '/o/1.mp4' }),
+        clip(2, { status: 'queued' }),
+      ]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(screen.getByRole('button', { name: 'Queue scene' })).toBeDisabled();
+    });
+
+    it('queues a single clip', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([clip(1), clip(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      await user.click(within(document.getElementById('clip-wolf-2') as HTMLElement).getByRole('button', { name: 'Queue' }));
+
+      await waitFor(() => expect(queueJobs).toHaveBeenCalledWith(['wolf-2']));
+      await waitFor(() => expect(getJobsList).toHaveBeenCalledTimes(2));
+    });
+
+    it('takes a queued clip back out of the queue', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([clip(1, { status: 'running' }), clip(2, { status: 'queued' })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const row = document.getElementById('clip-wolf-2') as HTMLElement;
+      expect(within(row).queryByRole('button', { name: 'Queue' })).not.toBeInTheDocument();
+      await user.click(within(row).getByRole('button', { name: 'Remove from queue' }));
+      await waitFor(() => expect(dequeueJob).toHaveBeenCalledWith('wolf-2'));
+    });
+
+    it('shows what a queued clip is waiting for', async () => {
+      vi.mocked(getJobsList).mockResolvedValue([
+        clip(1, { status: 'running' }),
+        clip(2, { status: 'queued', references: [{ source: 'job-last-frame:wolf-1', media_type: 'image' }] }),
+      ]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(screen.getByText('waiting for clip 1')).toBeInTheDocument();
+      expect(screen.getByText("starts from clip 1's last frame")).toBeInTheDocument();
+    });
+
+    it('stops waiting once the previous clip has finished', async () => {
+      vi.mocked(getJobsList).mockResolvedValue([
+        clip(1, { status: 'completed', output_path: '/o/1.mp4' }),
+        clip(2, { status: 'queued', references: [{ source: 'job-last-frame:wolf-1', media_type: 'image' }] }),
+      ]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(screen.queryByText('waiting for clip 1')).not.toBeInTheDocument();
+    });
+
+    it('refreshes on its own while something is queued or running', async () => {
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+      vi.mocked(getJobsList).mockResolvedValue([clip(1, { status: 'running' }), clip(2, { status: 'queued' })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      const poll = setIntervalSpy.mock.calls.find(([, ms]) => ms === 3000)?.[0] as () => void;
+      expect(poll).toBeTypeOf('function');
+      vi.mocked(getJobsList).mockResolvedValue([
+        clip(1, { status: 'completed', output_path: '/o/1.mp4' }),
+        clip(2, { status: 'running' }),
+      ]);
+      await act(async () => poll());
+      await waitFor(() => expect(within(document.getElementById('clip-wolf-2') as HTMLElement).getByText('running')).toBeInTheDocument());
+      setIntervalSpy.mockRestore();
+    });
+
+    it("doesn't poll when nothing is in progress", async () => {
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+      vi.mocked(getJobsList).mockResolvedValue([clip(1), clip(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(setIntervalSpy.mock.calls.some(([, ms]) => ms === 3000)).toBe(false);
+      setIntervalSpy.mockRestore();
+    });
+  });
+
+  describe('merging a scene', () => {
+    const finished = (n: number, over: Parameters<typeof wolf>[1] = {}) =>
+      wolf(n, { status: 'completed', output_path: `/o/${n}.mp4`, ...over });
+    const mergeButton = () => screen.getByRole('button', { name: /Merge scene|Merging/ });
+
+    beforeEach(() => {
+      vi.mocked(mergeScene).mockReset().mockResolvedValue({ filename: 'wolf-lunch-20260927-100000.mp4', clips: 3, seconds: 33 });
+      vi.mocked(downloadMergedVideo).mockReset().mockResolvedValue(new Blob(['x']));
+      vi.mocked(downloadBlob).mockReset();
+      vi.mocked(toast.error).mockClear();
+    });
+
+    it('joins the clips in scene order and shows the result', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([finished(3), finished(1), finished(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      expect(mergeButton()).toBeEnabled();
+      await user.click(mergeButton());
+
+      await waitFor(() => expect(mergeScene).toHaveBeenCalledWith(['wolf-1', 'wolf-2', 'wolf-3'], 'wolf-lunch'));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText('wolf-lunch merged')).toBeInTheDocument();
+      expect(within(dialog).getByText('3 clips joined in order · 0:33')).toBeInTheDocument();
+      expect(within(dialog).getByLabelText('Merged video of wolf-lunch')).toHaveAttribute(
+        'src',
+        'http://test.local/api/merged/wolf-lunch-20260927-100000.mp4',
+      );
+    });
+
+    it('merges the take that is shown for a clip', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([
+        finished(1, { id: 'take-a', created_at: 1 }),
+        finished(1, { id: 'take-b', created_at: 2 }),
+        finished(2),
+      ]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      await user.selectOptions(screen.getByLabelText('Take for clip 1'), 'take-a');
+      await user.click(mergeButton());
+      await waitFor(() => expect(mergeScene).toHaveBeenCalledWith(['take-a', 'wolf-2'], 'wolf-lunch'));
+    });
+
+    it('waits until every clip has finished, and says how many have not', async () => {
+      vi.mocked(getJobsList).mockResolvedValue([finished(1), wolf(2, { status: 'running' }), wolf(3, { status: 'queued' })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(mergeButton()).toBeDisabled();
+      expect(mergeButton()).toHaveAttribute('title', "2 clips haven't finished yet");
+    });
+
+    it('says so for a single unfinished clip', async () => {
+      vi.mocked(getJobsList).mockResolvedValue([finished(1), wolf(2, { status: 'failed' })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(mergeButton()).toHaveAttribute('title', "1 clip hasn't finished yet");
+    });
+
+    it('needs a video on every clip, not just a completed status', async () => {
+      vi.mocked(getJobsList).mockResolvedValue([finished(1), finished(2, { output_path: null })]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      expect(mergeButton()).toBeDisabled();
+    });
+
+    it("reports the server's refusal and shows nothing", async () => {
+      const user = userEvent.setup();
+      vi.mocked(mergeScene).mockRejectedValue(new Error("'wolf-lunch-clip-02' hasn't finished (running), so the scene can't be merged yet."));
+      vi.mocked(getJobsList).mockResolvedValue([finished(1), finished(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      await user.click(mergeButton());
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("hasn't finished (running)")));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(mergeButton()).toBeEnabled(); // can try again
+    });
+
+    it('shows progress while merging', async () => {
+      const user = userEvent.setup();
+      let release: (v: { filename: string; clips: number; seconds: number }) => void = () => {};
+      vi.mocked(mergeScene).mockReturnValue(new Promise((r) => (release = r)));
+      vi.mocked(getJobsList).mockResolvedValue([finished(1), finished(2)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+      await user.click(mergeButton());
+      expect(screen.getByRole('button', { name: 'Merging…' })).toBeDisabled();
+      release({ filename: 'a.mp4', clips: 2, seconds: 22 });
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('downloads the merged video', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([finished(1), finished(2), finished(3)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      await user.click(mergeButton());
+
+      await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Download' }));
+      await waitFor(() => expect(downloadBlob).toHaveBeenCalled());
+      expect(downloadMergedVideo).toHaveBeenCalledWith('wolf-lunch-20260927-100000.mp4');
+      expect(vi.mocked(downloadBlob).mock.calls[0][1]).toBe('wolf-lunch-20260927-100000.mp4');
+    });
+
+    it('reports a failed download', async () => {
+      const user = userEvent.setup();
+      vi.mocked(downloadMergedVideo).mockRejectedValue(new Error('Failed to download the merged video'));
+      vi.mocked(getJobsList).mockResolvedValue([finished(1), finished(2), finished(3)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      await user.click(mergeButton());
+
+      await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Download' }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to download the merged video'));
+      expect(downloadBlob).not.toHaveBeenCalled();
+    });
+
+    it('closes', async () => {
+      const user = userEvent.setup();
+      vi.mocked(getJobsList).mockResolvedValue([finished(1), finished(2), finished(3)]);
+      render(<ScenesPage />);
+      await screen.findByRole('heading', { name: 'wolf-lunch' });
+      await user.click(mergeButton());
+
+      // the footer button and the corner X both close it
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getAllByRole('button', { name: 'Close' })[0]);
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+      await user.click(mergeButton());
+      await user.click(within(await screen.findByRole('dialog')).getAllByRole('button', { name: 'Close' }).at(-1)!);
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     });
   });
 });
