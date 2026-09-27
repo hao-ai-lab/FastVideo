@@ -969,6 +969,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "MiniMaxAI/MiniMax-H3",
             "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2",
+            "FastVideo/FastVideo-FastH3-8-Step-V2",
         ],
         model_detectors=[
             lambda path: any(token in path.lower() for token in (

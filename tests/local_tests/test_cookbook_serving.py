@@ -105,19 +105,31 @@ def test_fasth3_8step_cuda_and_mlx_share_the_openai_client():
 
 
 def test_mlx_preview_and_8step_yaml_map_sigma_points_to_forwards():
-    from fastvideo.entrypoints.openai.mlx_server import load_config, mlx_num_steps, validate_mlx_video_request
+    from fastvideo.entrypoints.openai.mlx_server import (EIGHT_STEP_MODEL, PREVIEW_MODEL, load_config, mlx_num_steps,
+                                                         validate_mlx_video_request)
     from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
+    from fastvideo.registry import get_preset_selection
 
-    assert mlx_num_steps(5) == 4
-    assert mlx_num_steps(9) == 8
-    validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=5))
-    validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=9))
+    assert mlx_num_steps(5, model_path=PREVIEW_MODEL) == 4
+    assert mlx_num_steps(None, model_path=PREVIEW_MODEL) == 4
+    assert mlx_num_steps(9, model_path=EIGHT_STEP_MODEL) == 8
+    with pytest.raises(ValueError, match="5 sigma points"):
+        mlx_num_steps(9, model_path=PREVIEW_MODEL)
+    with pytest.raises(ValueError, match="9 sigma points"):
+        mlx_num_steps(5, model_path=EIGHT_STEP_MODEL)
+    validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=5), model_path=PREVIEW_MODEL)
+    validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=9),
+                               model_path=EIGHT_STEP_MODEL)
+    with pytest.raises(ValueError, match="9 sigma points"):
+        validate_mlx_video_request(VideoGenerationRequest(prompt="a fox", num_inference_steps=5),
+                                   model_path=EIGHT_STEP_MODEL)
     preview = load_config(str(ROOT / "examples/serving/mlx_fasth3.yaml"))
     eight = load_config(str(ROOT / "examples/serving/mlx_fasth3_8step.yaml"))
     assert preview.generator.vsa is False
     assert eight.generator.vsa is True
     assert eight.generator.vsa_sparsity == 0.8
     assert eight.default_request["sampling"]["num_inference_steps"] == 9
+    assert get_preset_selection(EIGHT_STEP_MODEL) == ("minimax_h3_t2va", "minimax_h3")
 
 
 @pytest.mark.parametrize("field,value", [("model", "wrong-checkpoint"), ("hardware", {"platform": "mlx"})])

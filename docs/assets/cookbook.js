@@ -537,7 +537,9 @@
             ? "Start once, then change prompts in the playground or your app. On a DGX Spark, lazy module load still reloads Qwen3-VL and the DiT between phases of each request, so later prompts are not a free hot cache."
             : "Start once, then change prompts in the playground or your app. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.";
         servingPanel.querySelector("[data-cookbook-install-guide]").href = isMLX
-          ? "../../getting_started/installation/mps/#run-fasth3-preview"
+          ? (String(recipe.id).includes("8step")
+            ? "../../getting_started/installation/mps/"
+            : "../../getting_started/installation/mps/#run-fasth3-preview")
           : isSpark
             ? "../../getting_started/installation/spark/"
             : "../../getting_started/installation/gpu/";
