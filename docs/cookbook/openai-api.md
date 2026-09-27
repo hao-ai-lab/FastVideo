@@ -8,7 +8,7 @@ JavaScript client examples use that interface, but requests go to FastVideo.
 You do not need an OpenAI account or cloud key.
 
 The [H3 recipe selector](minimax-h3.md) provides the same workflow with runtime
-selection. This guide covers FastH3 Preview (four forwards) and FastH3 8-Step V2
+selection. This guide covers FastH3 V1 (four forwards) and FastH3 V2
 (eight forwards). Start a server, then iterate in the playground or with the
 OpenAI Python client. Other H3 recipes keep their direct Python commands.
 
@@ -37,7 +37,7 @@ advertises it as `fasth3`. It configures four CUDA GPUs but does not record
 a GPU model or VRAM requirement. This is a source-backed server profile, not
 the measured GB200 Python performance profile. Compilation is disabled.
 
-For FastH3 8-Step V2, use the same install and the 8-step config (nine sigma
+For FastH3 V2, use the same install and the 8-step config (nine sigma
 points, eight DiT forwards, VSA sparsity 0.8):
 
 ```bash
@@ -81,7 +81,7 @@ After model loading completes, the response is `{"status":"ok"}`.
 
 ### Apple Silicon MLX
 
-Complete the [Apple Silicon installation](../getting_started/installation/mps.md#run-fasth3-preview),
+Complete the [MLX install](../getting_started/installation/mlx.md),
 including `ffmpeg`. From your FastVideo clone, install the MLX extra:
 
 ```bash
@@ -120,8 +120,10 @@ The MLX server has no recorded device or unified-memory requirement. The
 direct Python recipe's M4 Max measurements are not a server benchmark or a
 minimum-memory claim.
 
-For FastH3 8-Step V2, convert that checkpoint's transformer with `--include-vsa`
-and start the 8-step config. Do not overwrite a four-step export:
+For FastH3 V2, convert that checkpoint's transformer with `--include-vsa`
+and start the 8-step config. Do not overwrite a V1 export. The
+[MiniMax H3 cookbook](minimax-h3.md) has the same download and convert
+commands as the Python recipe.
 
 ```bash
 hf download FastVideo/FastVideo-FastH3-8-Step-V2 --local-dir ./FastH3-8-Step-V2
@@ -159,9 +161,9 @@ or manage a GPU server for you.
 ## Generate with cURL or an SDK
 
 These examples use the server's resolution, frame count, and sampling defaults.
-Do not copy Sora-specific durations or resolutions onto H3. Preview configs use
+Do not copy Sora-specific durations or resolutions onto H3. V1 configs use
 124 frames, 24 fps, and the five-point distilled sigma schedule with four DiT
-forwards. 8-Step V2 configs use nine sigma points and eight DiT forwards. CUDA
+forwards. V2 configs use nine sigma points and eight DiT forwards. CUDA
 and one Spark use 1344 × 768; MLX uses 832 × 480. The OpenAI Python client is
 the same for every FastH3 server that advertises `fasth3`.
 

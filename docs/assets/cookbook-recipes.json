@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -445,13 +445,13 @@
     {
       "id": "fasth3-preview-cuda",
       "group": "fasth3-preview",
-      "group_label": "FastH3 Preview",
+      "group_label": "FastH3 V1",
       "group_task": "4-step text to video + audio",
       "family": "minimax_h3",
       "stage": "inference",
       "task": "Few-step text to video (with audio)",
-      "label": "FastH3 Preview on CUDA",
-      "summary": "Run the DMD2-distilled FastH3 Preview with four DiT forwards, trained H3 sparse attention, compiled decode, and synchronized audio.",
+      "label": "FastH3 V1 on CUDA",
+      "summary": "Run FastH3 V1 with four DiT forwards, trained H3 sparse attention, compiled decode, and synchronized audio.",
       "model": "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2",
       "source": "examples/inference/basic/basic_fasth3.py",
       "serving": {
@@ -484,13 +484,13 @@
         "prepare": "hf download FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2 --local-dir ./FastH3-Preview-v0.2\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-Preview-v0.2/transformer --out ./FastH3-MLX --formats \"int6\""
       },
       "group": "fasth3-preview",
-      "group_label": "FastH3 Preview",
+      "group_label": "FastH3 V1",
       "group_task": "4-step text to video + audio",
       "family": "minimax_h3",
       "stage": "inference",
       "task": "Few-step text to video (with audio)",
-      "label": "FastH3 Preview on MLX",
-      "summary": "Run FastH3 Preview on Apple Silicon with a locally converted INT6 DiT, streamed Qwen3-VL conditioning, and native MLX video and audio VAEs.",
+      "label": "FastH3 V1 on MLX",
+      "summary": "Run FastH3 V1 on Apple Silicon with a locally converted INT6 DiT, streamed Qwen3-VL conditioning, and native MLX video and audio VAEs.",
       "model": "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2",
       "source": "examples/inference/basic/mlx_fasth3.py",
       "command": "hf download FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2 --local-dir ./FastH3-Preview-v0.2\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-Preview-v0.2/transformer --out ./FastH3-MLX --formats \"int6\"\npython examples/inference/basic/mlx_fasth3.py --model-root ./FastH3-Preview-v0.2 --mlx-checkpoint ./FastH3-MLX/int6 --prompt \"(S1) A presenter says <d>[English] FastVideo runs FastH3.</d>\" --height 480 --width 832 --num-frames 124 --seed 2026 --output-path ./outputs/fasth3_int6.mp4",
@@ -516,13 +516,13 @@
     {
       "id": "fasth3-preview-spark",
       "group": "fasth3-preview",
-      "group_label": "FastH3 Preview",
+      "group_label": "FastH3 V1",
       "group_task": "4-step text to video + audio",
       "family": "minimax_h3",
       "stage": "inference",
       "task": "Few-step text to video (with audio)",
-      "label": "FastH3 Preview on one DGX Spark",
-      "summary": "Run FastH3 Preview on one GB10 with Triton VSA, FA4 off, and lazy module load. Height, width, frames, and steps in the YAML are examples.",
+      "label": "FastH3 V1 on one DGX Spark",
+      "summary": "Run FastH3 V1 on one GB10 with Triton VSA, FA4 off, and lazy module load. Height, width, frames, and steps in the YAML are examples.",
       "model": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree",
       "source": "examples/inference/basic/basic_fasth3_spark.yaml",
       "serving": {
@@ -551,12 +551,12 @@
     {
       "id": "fasth3-spark-pair",
       "group": "fasth3-preview",
-      "group_label": "FastH3 Preview",
+      "group_label": "FastH3 V1",
       "group_task": "4-step text to video + audio",
       "family": "minimax_h3",
       "stage": "inference",
       "task": "Few-step text to video (with audio)",
-      "label": "FastH3 Preview on two DGX Sparks",
+      "label": "FastH3 V1 on two DGX Sparks",
       "summary": "Run one FastH3 clip across two GB10s with Ray sequence parallel over QSFP RoCE. Sequential load and lazy module load stay on because SP replicates the DiT on each node.",
       "model": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree",
       "source": "examples/inference/basic/basic_fasth3_spark_pair.yaml",
@@ -581,13 +581,13 @@
     {
       "id": "fasth3-8step-v2-cuda",
       "group": "fasth3-8step-v2",
-      "group_label": "FastH3 8-Step V2",
+      "group_label": "FastH3 V2",
       "group_task": "8-step text to video + audio",
       "family": "minimax_h3",
       "stage": "inference",
       "task": "Few-step text to video (with audio)",
-      "label": "FastH3 8-Step V2 on CUDA",
-      "summary": "Run the eight-forward FastH3 8-Step V2 checkpoint (video/audio shifts 10/3, VSA 0.8, 64-token tiles) with the trained DMD ladder loaded from the checkpoint's fastvideo_inference.json.",
+      "label": "FastH3 V2 on CUDA",
+      "summary": "Run FastH3 V2, the eight-forward checkpoint (video/audio shifts 10/3, VSA 0.8, 64-token tiles) with the trained DMD ladder loaded from the checkpoint's fastvideo_inference.json.",
       "model": "FastVideo/FastVideo-FastH3-8-Step-V2",
       "source": "examples/inference/basic/basic_fasth3_8step.py",
       "serving": {
@@ -613,7 +613,7 @@
       "limitations": [
         "Nine sigma-grid points (eight transformer forwards) are fixed by the checkpoint's trained ladder; the example rejects any other --steps.",
         "Validated with the eager strict route (--profile strict --no-inference-torch-compile --no-compile-vae). The compiled all profile has not been measured for this checkpoint.",
-        "T2AV only; no FL2VA/Ref2VA distillation and no matching LoRA. Quality and latency were not compared against the four-step preview in this PR."
+        "T2AV only; no FL2VA/Ref2VA distillation and no matching LoRA. V2 uses eight forwards rather than V1's four."
       ]
     },
     {
@@ -624,13 +624,13 @@
         "prepare": "hf download FastVideo/FastVideo-FastH3-8-Step-V2 --local-dir ./FastH3-8-Step-V2\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-8-Step-V2/transformer --out ./FastH3-8-Step-V2-MLX --formats \"int8\" --include-vsa"
       },
       "group": "fasth3-8step-v2",
-      "group_label": "FastH3 8-Step V2",
+      "group_label": "FastH3 V2",
       "group_task": "8-step text to video + audio",
       "family": "minimax_h3",
       "stage": "inference",
       "task": "Few-step text to video (with audio)",
-      "label": "FastH3 8-Step V2 on MLX",
-      "summary": "Run FastH3 8-Step V2 on Apple Silicon with a locally converted INT8 DiT, the checkpoint's DMD contract ladder, and trained VSA (sparsity 0.8, 64-token tiles).",
+      "label": "FastH3 V2 on MLX",
+      "summary": "Run FastH3 V2 on Apple Silicon with a locally converted INT8 DiT, the checkpoint's DMD contract ladder, and trained VSA (sparsity 0.8, 64-token tiles).",
       "model": "FastVideo/FastVideo-FastH3-8-Step-V2",
       "source": "examples/inference/basic/mlx_fasth3_8step.py",
       "command": "hf download FastVideo/FastVideo-FastH3-8-Step-V2 --local-dir ./FastH3-8-Step-V2\npython scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-8-Step-V2/transformer --out ./FastH3-8-Step-V2-MLX --formats \"int8\" --include-vsa\npython examples/inference/basic/mlx_fasth3_8step.py --model-root ./FastH3-8-Step-V2 --mlx-checkpoint ./FastH3-8-Step-V2-MLX/int8 --prompt \"(S1) A presenter says <d>[English] FastVideo runs FastH3.</d>\" --height 480 --width 832 --num-frames 124 --seed 2026 --output-path ./outputs/fasth3_8step_int8.mp4",

@@ -21,7 +21,7 @@ python examples/inference/basic/basic.py
 ### Apple Silicon (FastMetal-QAD)
 
 Use the MLX runtime with FastMetal-QAD. See the
-[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+[MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
 
 ```bash
 hf download FastVideo/FastMetal-1.3B-QAD --local-dir ./FastMetal-1.3B-QAD
@@ -39,7 +39,7 @@ with
 
 `examples/inference/basic/basic_mps.py` is the older PyTorch MPS demo.
 
-FastH3 Preview T2VA also runs through the native MLX runtime. Convert the DiT
+FastH3 V1 T2VA also runs through the native MLX runtime. Convert the DiT
 to INT8, INT6, or INT4 first, then run:
 
 ```bash
@@ -51,17 +51,21 @@ python examples/inference/basic/mlx_fasth3.py \
   --output-path ./outputs/fasth3_int6.mp4
 ```
 
+FastH3 V2 is a separate checkpoint and script. Convert with
+`--include-vsa` and run `mlx_fasth3_8step.py`. Do not reuse a V1 DiT.
+
 Pass `--fast` for temporal RIFE fast mode and `--fast-spatial` for spatial
 fast mode (reduced-canvas denoise + pixel-space upsample); the two compose.
-VSA is opt-in: convert with `--include-vsa` and pass `--vsa` (see the
-[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/)).
-This MLX entrypoint currently supports T2VA only; FL2VA, Ref2VA, and
+V1 VSA is opt-in: convert with `--include-vsa` and pass `--vsa`. V2
+turns VSA on by default. See the
+[MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
+This MLX entrypoint supports T2VA only; FL2VA, Ref2VA, and
 two-pass refinement remain follow-up work. INT6/INT8/INT4 are
-weight-only; VSA attention activations stay BF16. Dense-only checkpoints keep
-working for dense inference.
+weight-only; VSA attention activations stay BF16. Dense-only V1
+checkpoints keep working for dense inference.
 
 The complete setup and conversion commands are in the
-[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+[MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
 
 For an example running DMD+VSA inference:
 ```

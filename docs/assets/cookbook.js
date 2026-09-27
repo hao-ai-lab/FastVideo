@@ -136,7 +136,7 @@
     if (platform === "mps") {
       return {
         id: "mps",
-        label: "Apple Silicon · MPS",
+        label: "Apple Silicon · PyTorch MPS",
         hint: recipe.hardware?.minimum_memory || recipe.hardware?.system_memory || "Memory not recorded",
       };
     }
@@ -522,7 +522,7 @@
           ? "The playground and the OpenAI Python client share one server process. Both workflows can run on your own machine."
           : servingLoadFailed
             ? "Server examples could not be loaded. Open the H3 server guide below, or use Python directly."
-            : "This recipe uses Python directly. FastH3 Preview and FastH3 8-Step V2 can also run a local server for the playground and the OpenAI Python client.";
+            : "This recipe uses Python directly. FastH3 V1 and FastH3 V2 can also run a local server for the playground and the OpenAI Python client.";
         servingPanel.hidden = !useServer;
         commandBlock.hidden = useServer;
         root.querySelector("[data-cookbook-python-note]").hidden = useServer;
@@ -537,9 +537,7 @@
             ? "Start once, then change prompts in the playground or your app. On a DGX Spark, lazy module load still reloads Qwen3-VL and the DiT between phases of each request, so later prompts are not a free hot cache."
             : "Start once, then change prompts in the playground or your app. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.";
         servingPanel.querySelector("[data-cookbook-install-guide]").href = isMLX
-          ? (String(recipe.id).includes("8step")
-            ? "../../getting_started/installation/mps/"
-            : "../../getting_started/installation/mps/#run-fasth3-preview")
+          ? "../../getting_started/installation/mlx/"
           : isSpark
             ? "../../getting_started/installation/spark/"
             : "../../getting_started/installation/gpu/";

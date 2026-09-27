@@ -5,7 +5,7 @@ hide:
 
 # Wan recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="wan" data-recipes="../../assets/cookbook-recipes.json?v=10">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="wan" data-recipes="../../assets/cookbook-recipes.json?v=11">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -186,7 +186,7 @@ cd FastVideo</code></pre>
       <ul>
         <li>Out of memory on the A14B recipes: the checked-in sources already enable CPU offload; see <a href="../../inference/configuration/">Configuration</a> for the offload surface before reducing resolution or frames.</li>
         <li>The FastWan2.1 recipe requires <code>VIDEO_SPARSE_ATTN</code>; confirm the environment variable in the command was set in the same shell.</li>
-        <li>FastMetal MLX: install with <code>uv pip install -e ".[mlx]"</code>, then follow the <a href="../../getting_started/installation/mps/">Apple Silicon guide</a>. CUDA FastWan-QAD checkpoints are refused on the MLX runtime.</li>
+        <li>FastMetal MLX: install with the <a href="../../getting_started/installation/mlx/">MLX install guide</a>, then pick a FastMetal recipe in the builder. CUDA FastWan-QAD checkpoints are refused on the MLX runtime.</li>
         <li>FastMetal 5B uses <code>mlx_wan22_generate.py</code>. 1.3B and 14B use <code>mlx_wan_prompt_to_video.py</code>.</li>
         <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
       </ul>

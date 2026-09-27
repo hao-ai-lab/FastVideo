@@ -5,13 +5,13 @@ hide:
 
 # MiniMax H3 recipes
 
-The **FastH3 8-Step V2** recipe below runs the eight-forward
-[`FastVideo/FastVideo-FastH3-8-Step-V2`](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2)
-checkpoint; its schedule contract is documented in
+FastH3 is two distilled MiniMax-H3 checkpoints. **V1** is the four-step
+launch. Some Hub repo names still say Preview. That name is historical. V1 is
+a full model, not a demo. **V2** is the eight-step checkpoint. More forwards
+is why V2 is the higher-quality FastH3. The V2 schedule contract is in
 [FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
-The four-forward FastH3 Preview recipes are unchanged.
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=10">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=11">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -47,8 +47,8 @@ The four-forward FastH3 Preview recipes are unchanged.
     <h2 id="h3-modes-heading">Supported modes</h2>
     <p>
       CUDA covers T2VA, FL2VA, and Ref2VA on the full checkpoint, plus FastH3
-      Preview and FastH3 8-Step V2. FastH3 Preview also has a DGX Spark runtime with
-      a 1-Spark or 2-Spark device row. MLX is T2VA only: Preview and 8-Step V2.
+      V1 and FastH3 V2. FastH3 V1 also has a DGX Spark runtime with
+      a 1-Spark or 2-Spark device row. MLX is T2VA only: V1 and V2.
       Temporal <code>--fast</code>, spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
       MLX script, not extra recipes.
     </p>
@@ -64,8 +64,8 @@ The four-forward FastH3 Preview recipes are unchanged.
         <tbody>
           <tr>
             <td>T2VA</td>
-            <td>Full H3, FastH3 Preview, FastH3 LoRA, FastH3 8-Step V2</td>
-            <td>FastH3 Preview or FastH3 8-Step V2 after a local DiT conversion</td>
+            <td>Full H3, FastH3 V1, FastH3 LoRA, FastH3 V2</td>
+            <td>FastH3 V1 or FastH3 V2 after a local DiT conversion</td>
           </tr>
           <tr>
             <td>FL2VA</td>
@@ -99,7 +99,7 @@ The four-forward FastH3 Preview recipes are unchanged.
           </tr>
           <tr>
             <td>DGX Spark</td>
-            <td>FastH3 Preview on one GB10, or two Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks.</td>
+            <td>FastH3 V1 on one GB10, or two Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks.</td>
             <td>Not wired</td>
           </tr>
         </tbody>
@@ -257,7 +257,7 @@ cd FastVideo</code></pre>
       <pre><code>UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"</code></pre>
       <p class="cookbook-eyebrow">Apple Silicon</p>
       <pre><code>uv pip install -e ".[mlx]"</code></pre>
-      <p>Follow the <a href="../../getting_started/installation/mps/#run-fasth3-preview">Apple Silicon guide</a> for the download, conversion, and storage requirements.</p>
+      <p>Follow the <a href="../../getting_started/installation/mlx/">MLX install guide</a> for the extra, <code>ffmpeg</code>, and a clone. Then pick FastH3 V1 or V2 in the builder above.</p>
       <p class="cookbook-eyebrow">NVIDIA DGX Spark</p>
       <pre><code>UV_TORCH_BACKEND=cu130 uv pip install -e .</code></pre>
       <p>Follow the <a href="../../getting_started/installation/spark/">DGX Spark install guide</a> for ARM64 CUDA 13. One Spark is a local process. Two Sparks need Ray on the QSFP link:</p>
@@ -272,9 +272,9 @@ cd FastVideo</code></pre>
       <ul>
         <li>The full CUDA H3 examples request four GPUs by default. Their sources do not claim a GPU model or memory minimum.</li>
         <li>The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.</li>
-        <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FastH3 8-Step V2 MLX converts with <code>--include-vsa</code> and runs eight forwards. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
+        <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FastH3 V2 MLX converts with <code>--include-vsa</code> and runs eight forwards. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
         <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 CUDA recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
-        <li>DGX Spark is a runtime on FastH3 Preview, not a separate family card. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks. The CUDA GPU-count knob does not apply to Spark.</li>
+        <li>DGX Spark is a runtime on FastH3 V1, not a separate family card. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks. The CUDA GPU-count knob does not apply to Spark.</li>
         <li>GB10 has no FA4 / sm_100a VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_SM100A=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 362 (15.08 s). A 345-frame request on one Spark can OOM.</li>
         <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
       </ul>

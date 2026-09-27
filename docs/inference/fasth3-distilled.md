@@ -76,10 +76,15 @@ prompts before adopting it.
 
 ## Apple Silicon
 
-`examples/inference/basic/mlx_fasth3.py` stays on the four-step preview and its
-uniform AdaLN cache. `mlx_fasth3_8step.py` is the eight-forward MLX recipe. It
+`mlx_fasth3.py` stays on FastH3 V1 and its uniform AdaLN cache.
+`mlx_fasth3_8step.py` is the eight-forward MLX recipe for FastH3 V2. It
 reads the same `fastvideo_inference.json` rungs and shifts, and it expects an
-MLX DiT whose AdaLN cache was converted from that contract. Reuse the preview
+MLX DiT whose AdaLN cache was converted from that contract. Reuse the V1
 snapshot's VAE, audio VAE, text encoder, and tokenizer; only the DiT and the
 sidecar change. Rank-reduced AdaLN checkpoints are unchanged and are not
 produced by the MLX converter.
+
+Install is in the
+[MLX install guide](../getting_started/installation/mlx.md). Generation and
+serving are in the [MiniMax H3 cookbook](../cookbook/minimax-h3.md) and the
+[H3 server guide](../cookbook/openai-api.md).
