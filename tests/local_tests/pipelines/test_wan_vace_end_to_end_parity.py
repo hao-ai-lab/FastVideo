@@ -166,11 +166,22 @@ def test_wan_vace_pipeline_matches_diffusers(size, mode, env_name, tmp_path, par
     assert_bf16_bitwise_equal(actual["control"], official_control, "control_hidden_states")
     assert_close(actual["timesteps"], official_timesteps, rtol=0, atol=0)
     assert_close(actual["initial_latents"], latents, rtol=0, atol=0)
+    print(f"VACE_PARITY size={size} mode={mode} conditioning=bitwise_equal", flush=True)
 
     assert len(actual["noise_preds"]) == len(official_calls["noise_preds"]) == NUM_INFERENCE_STEPS
+    step0_stats = compute_parity_stats(actual["noise_preds"][0], official_calls["noise_preds"][0],
+                                       "step0 prediction")
+    print(f"VACE_PARITY size={size} mode={mode} {step0_stats.as_row()}", flush=True)
     assert_dit_parity(actual["noise_preds"][0], official_calls["noise_preds"][0], label="step0 prediction")
 
     final_official_latents = official_latents[:, :, num_refs:]
     final_stats = compute_parity_stats(actual["latents"], final_official_latents, "final latents")
+    strict_matches = torch.isclose(actual["latents"].float(),
+                                   final_official_latents.float(),
+                                   rtol=1e-2,
+                                   atol=1e-2)
+    strict_mismatches = strict_matches.numel() - int(strict_matches.sum().item())
+    print(f"VACE_PARITY size={size} mode={mode} {final_stats.as_row()} "
+          f"strict_1e-2_mismatches={strict_mismatches}/{strict_matches.numel()}", flush=True)
     assert final_stats.abs_mean_drift_ratio < VACE_E2E_MAX_ABS_MEAN_DRIFT, (
         f"{final_stats.as_row()}; max abs={final_stats.max_abs:.6g}")
