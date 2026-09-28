@@ -32,6 +32,9 @@ class Executor(ABC):
 
     @staticmethod
     def get_class(fastvideo_args: FastVideoArgs) -> type["Executor"]:
+        if fastvideo_args.h3_disaggregated:
+            from fastvideo.worker.minimax_h3_disaggregated import MiniMaxH3DisaggregatedExecutor
+            return cast(type["Executor"], MiniMaxH3DisaggregatedExecutor)
         if fastvideo_args.distributed_executor_backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)

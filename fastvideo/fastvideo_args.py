@@ -184,6 +184,16 @@ class FastVideoArgs:
     # keeps every component resident.
     lazy_module_load: bool | None = None
 
+    # Component-disaggregated MiniMax-H3 inference. The encoder/decoder and
+    # DiT roles are each pinned to one Ray node and keep their component set
+    # resident for the lifetime of the worker. ``num_gpus`` remains one here:
+    # it describes each role, while the runtime reserves one GPU on each of
+    # the two named nodes.
+    h3_disaggregated: bool = False
+    h3_encoder_node_ip: str | None = None
+    h3_dit_node_ip: str | None = None
+    h3_ray_address: str | None = None
+
     # Sequence-parallel MiniMax-H3 VAE (opt-in, default off). With SP > 1 the
     # video VAE's temporal chunks (decode) and clips (reference encode) are
     # round-robined across the sequence-parallel ranks and reassembled
@@ -488,7 +498,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp"],
+            choices=["mp", "ray"],
             default=FastVideoArgs.distributed_executor_backend,
             help="The distributed executor backend to use",
         )
@@ -757,6 +767,30 @@ class FastVideoArgs:
             "Pass --no-h3-sequential-load to keep the encoder resident for later generate() calls.",
         )
         parser.add_argument(
+            "--h3-disaggregated",
+            action=StoreBoolean,
+            default=FastVideoArgs.h3_disaggregated,
+            help="Run MiniMax-H3 as persistent encoder/decoder and DiT workers on two Ray nodes.",
+        )
+        parser.add_argument(
+            "--h3-encoder-node-ip",
+            type=str,
+            default=FastVideoArgs.h3_encoder_node_ip,
+            help="Ray node IP for the persistent MiniMax-H3 encoder/decoder worker.",
+        )
+        parser.add_argument(
+            "--h3-dit-node-ip",
+            type=str,
+            default=FastVideoArgs.h3_dit_node_ip,
+            help="Ray node IP for the persistent MiniMax-H3 DiT worker.",
+        )
+        parser.add_argument(
+            "--h3-ray-address",
+            type=str,
+            default=FastVideoArgs.h3_ray_address,
+            help="Ray cluster address for MiniMax-H3 disaggregation. Unset uses RAY_ADDRESS, then auto.",
+        )
+        parser.add_argument(
             "--video-decode-backend",
             type=str,
             choices=("h3-vae", "taeh3"),
@@ -968,6 +1002,8 @@ class FastVideoArgs:
         if self.hsdp_shard_dim == -1:
             self.hsdp_shard_dim = self.num_gpus
 
+        self._check_h3_disaggregated_args()
+
         assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
@@ -989,6 +1025,56 @@ class FastVideoArgs:
             if not self.pipeline_config.vae_config.load_encoder:
                 self.pipeline_config.vae_config.load_encoder = True
             self.preprocess_config.check_preprocess_config()
+
+    def _check_h3_disaggregated_args(self) -> None:
+        """Fail early on topology settings incompatible with role isolation."""
+        if not self.h3_disaggregated:
+            return
+        if self.mode != ExecutionMode.INFERENCE:
+            raise ValueError("MiniMax-H3 component disaggregation supports inference mode only, not preprocessing "
+                             "or training modes.")
+        if self.distributed_executor_backend != "ray":
+            raise ValueError("MiniMax-H3 component disaggregation requires distributed_executor_backend='ray'.")
+
+        supported_overrides = {None, "MiniMaxH3ModularPipeline", "MiniMaxH3Ref2VAModularPipeline"}
+        if self.override_pipeline_cls_name not in supported_overrides:
+            raise ValueError("MiniMax-H3 component disaggregation does not support pipeline override "
+                             f"{self.override_pipeline_cls_name!r}.")
+        # A bare PipelineConfig is unresolved (common for the direct legacy
+        # constructor), so leave model-family resolution to the H3 workers.
+        # A concrete config subclass, however, is an unambiguous early signal.
+        if type(self.pipeline_config) is not PipelineConfig:
+            from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+            if not isinstance(self.pipeline_config, MiniMaxH3PipelineConfig):
+                raise ValueError("MiniMax-H3 component disaggregation requires MiniMaxH3PipelineConfig, got "
+                                 f"{type(self.pipeline_config).__name__}.")
+
+        encoder_ip = (self.h3_encoder_node_ip or "").strip()
+        dit_ip = (self.h3_dit_node_ip or "").strip()
+        if not encoder_ip or not dit_ip:
+            raise ValueError("MiniMax-H3 component disaggregation requires h3_encoder_node_ip and h3_dit_node_ip.")
+        if encoder_ip == dit_ip:
+            raise ValueError("MiniMax-H3 encoder/decoder and DiT workers must use different Ray node IPs.")
+        self.h3_encoder_node_ip = encoder_ip
+        self.h3_dit_node_ip = dit_ip
+
+        if self.h3_ray_address is not None:
+            self.h3_ray_address = self.h3_ray_address.strip()
+            if not self.h3_ray_address:
+                raise ValueError("h3_ray_address must be non-empty when provided.")
+        if self.num_gpus != 1 or self.tp_size != 1 or self.sp_size != 1:
+            raise ValueError("MiniMax-H3 component disaggregation requires num_gpus=1, tp_size=1, and sp_size=1 "
+                             "per worker; it reserves one GPU on each of the two Ray nodes.")
+        if self.use_fsdp_inference:
+            raise ValueError("MiniMax-H3 component disaggregation does not support FSDP inference.")
+        if self.h3_sequential_load is True or self.lazy_module_load is True:
+            raise ValueError("MiniMax-H3 component disaggregation keeps role components resident; sequential and "
+                             "lazy module loading must be disabled.")
+        if self.vae_parallel_encode or self.vae_parallel_decode:
+            raise ValueError("MiniMax-H3 component disaggregation does not support sequence-parallel VAE execution.")
+        if self.video_decode_backend != "h3-vae":
+            raise ValueError("MiniMax-H3 component disaggregation requires video_decode_backend='h3-vae' so the "
+                             "encoder/decoder worker owns the resident video VAE.")
 
     def _resolve_device_offload_conflicts(self) -> None:
         """Resolve offload modes after device-local policy has been applied."""

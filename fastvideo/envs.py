@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     FASTVIDEO_TRACE_STEPS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
+    FASTVIDEO_H3_PROFILE_TRANSFERS: bool = False
     FASTVIDEO_CFG_GATE_STEP: float = 1.0
     FASTVIDEO_HOST_IP: str = ""
     FASTVIDEO_LOOPBACK_IP: str = ""
@@ -342,6 +343,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # taken for each stage
     "FASTVIDEO_STAGE_LOGGING":
     lambda: bool(int(os.getenv("FASTVIDEO_STAGE_LOGGING", "0"))),
+
+    # Opt-in receiver-side Ray fetch/materialization and synchronized stage
+    # timings for component-disaggregated H3. This changes prefetch overlap.
+    "FASTVIDEO_H3_PROFILE_TRANSFERS":
+    lambda: bool(int(os.getenv("FASTVIDEO_H3_PROFILE_TRANSFERS", "0"))),
 
     # CFG gating fraction for stale-uncond reuse (Adaptive Guidance / LinearAG
     # variant — Castillo et al. 2023, arXiv:2312.12487).  Float in [0, 1].
