@@ -36,6 +36,7 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of HunyuanGameCraft support.")
 
 # ---------------------------------------------------------------------------
 # Device-dependent reference folder

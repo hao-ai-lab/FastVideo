@@ -43,7 +43,7 @@ from fastvideo.training.trackers import (DummyTracker, TrackerType, initialize_t
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases,
                                                compute_density_for_timestep_sampling, count_trainable, get_scheduler,
                                                get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
-from fastvideo.utils import (is_vmoba_available, is_vsa_available, set_random_seed, shallow_asdict)
+from fastvideo.utils import (is_vmoba_available, is_vsa_available, pixels_to_uint8, set_random_seed, shallow_asdict)
 
 try:
     vsa_available = is_vsa_available()
@@ -784,7 +784,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 for x in video:
                     x = torchvision.utils.make_grid(x, nrow=6)
                     x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
+                    frames.append(pixels_to_uint8(x).numpy())
                 step_videos.append(frames)
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their

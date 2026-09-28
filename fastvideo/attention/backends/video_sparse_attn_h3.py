@@ -31,11 +31,11 @@ already at the kernels' native 64-token granularity, so both forward and
 backward run the Triton block-sparse kernels directly (no expansion,
 ``FASTVIDEO_VSA_CUTEDSL`` does not apply). A third, opt-in route exists
 for the tile-64 FORWARD only: ``FASTVIDEO_VSA_SM100A=1`` sends no-grad
-forwards through the sm_100a CUDA block-sparse kernel
+forwards through the data-center Blackwell CUDA block-sparse kernel
 (``fastvideo_kernel.block_sparse_attn_sm100a``, upstream PR #1719 plus
 our per-q-tile ``q2k_num`` fix) when the extension is built, the device
-is sm_100, and the geometry qualifies. The CUDA kernel assigns adjacent
-pairs of query tiles to CTAs, so an odd logical tile count receives one
+is sm_100 or sm_103, and the geometry qualifies. The CUDA kernel assigns
+adjacent pairs of query tiles to CTAs, so an odd logical tile count receives one
 internal, zero-valid partner tile for the no-grad call only. Score search,
 the trained mask, gate-compress, and the returned packed sequence remain on
 the original logical tiles. Grad-tracking forwards and every backward stay
@@ -61,8 +61,8 @@ except ImportError:
     map_to_index = None
 
 try:
-    # Optional: only present in fastvideo_kernel builds that carry the sm_100a
-    # CUDA block-sparse forward (upstream PR #1719). The module itself imports
+    # Optional: only present in fastvideo_kernel builds that carry the
+    # sm_100a/sm_103a CUDA block-sparse forward (upstream PR #1719). The module itself imports
     # fine without the compiled symbols (`_HAS_VSA_SM100A` is then False and
     # `is_supported` says no), so this only guards *module* availability.
     from fastvideo_kernel import block_sparse_attn_sm100a as _sm100a
@@ -79,7 +79,7 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-# Opt-in switch for the sm_100a CUDA forward on the tile-64 no-grad path.
+# Opt-in switch for the data-center Blackwell CUDA forward on the tile-64 no-grad path.
 VSA_SM100A_ENV = "FASTVIDEO_VSA_SM100A"
 
 VSA_H3_TILE_SIZE = (4, 8, 8)  # 256 elements -> FA4 CuTe fastpath on sm10.x (default)
@@ -411,7 +411,7 @@ def _build_block_mask(
 
 def _sm100a_unavailable_reason(sm100a_mod: Any, query_bhsd: torch.Tensor, variable_block_sizes: torch.Tensor,
                                grad_mode: bool) -> str | None:
-    """Why the opt-in sm_100a forward route cannot run here, or None if it can.
+    """Why the opt-in data-center Blackwell route cannot run here, or None if it can.
 
     Pure decision logic, split out so the routing is unit-testable without a
     GPU or the compiled extension (tests substitute ``sm100a_mod``). Order
@@ -420,9 +420,9 @@ def _sm100a_unavailable_reason(sm100a_mod: Any, query_bhsd: torch.Tensor, variab
     if sm100a_mod is None:
         return "fastvideo_kernel.block_sparse_attn_sm100a is not installed"
     if grad_mode:
-        return "inputs require grad and the sm_100a kernel is forward-only; grad paths keep Triton"
+        return "inputs require grad and the sm_100a/sm_103a kernel is forward-only; grad paths keep Triton"
     if not sm100a_mod.is_supported(query_bhsd, variable_block_sizes):
-        return ("block_sparse_attn_sm100a.is_supported returned False (needs an sm_100 device, a built "
+        return ("block_sparse_attn_sm100a.is_supported returned False (needs an sm_100 or sm_103 device, a built "
                 "extension, bf16, head_dim 128, an even tile count, and integer tile sizes)")
     return None
 
@@ -442,12 +442,20 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         self.prefix = prefix
         self.layer_idx = layer_idx_from_prefix(prefix, default=-1)
         self.head_size = head_size
+        # Generic torch.compile must not specialize the shared VSA forward on
+        # the Python ``layer_idx`` value of each of H3's 50 blocks. This
+        # tensor is prepared after weights load and drives only the compiled
+        # dense-layer decision; it does not opt the module into sm_100a.
+        self._compile_layer_idx: torch.Tensor | None = None
         # None means the regional-compile preparation hook has not run.  The
         # eager path deliberately ignores this cache and preserves its
         # request-time env/probe/fallback behavior; only Dynamo capture reads
         # the prepared, static route.
         self._regional_compile_sm100a_enabled: bool | None = None
-        self._regional_compile_layer_idx: torch.Tensor | None = None
+
+    def prepare_for_compile(self, device: torch.device) -> None:
+        """Tensorize per-layer state shared by every torch.compile route."""
+        self._compile_layer_idx = torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
 
     def prepare_for_regional_compile(self, device: torch.device) -> str | None:
         """Resolve the inference-only sm_100a route before fullgraph capture.
@@ -459,6 +467,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         the loaded model's device now, then let ``forward`` specialize on the
         resulting plain bool while Dynamo is compiling.
         """
+        if self._compile_layer_idx is None:
+            self.prepare_for_compile(device)
         requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
         enabled = False
         reason = None if requested else f"{VSA_SM100A_ENV}=1 is required for compile-safe VSA-H3 attention"
@@ -485,10 +495,6 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 enabled = reason is None
 
         self._regional_compile_sm100a_enabled = enabled
-        # Keep this marker unset when preparation fails. Generic/training
-        # torch.compile must retain the established Triton attention route.
-        self._regional_compile_layer_idx = (torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
-                                            if enabled else None)
         if enabled:
             route = ("native fastvideo-kernel mask entry" if callable(
                 getattr(_sm100a, "block_sparse_attn_sm100a_from_mask", None)) else
@@ -501,11 +507,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
     def tile(self, x: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         """Scatter rows into the padded tile buffer (pad positions stay zero).
 
-        The returned tensor aliases the builder-owned buffer; callers must
-        consume it before the next ``tile()`` (both call sites in
-        ``forward()`` read it immediately). Odd tile-64 no-grad sm100a
-        requests carry one additional all-zero tile internally; metadata and
-        all observable outputs retain the logical geometry.
+        Without grad tracking the returned tensor aliases the builder-owned
+        buffer; callers must consume it before the next ``tile()`` (both call
+        sites in ``forward()`` read it immediately). A grad-tracking forward
+        instead receives a fresh buffer and leaves the holder untouched, so
+        the builder never retains autograd state across steps. Odd tile-64
+        no-grad sm100a requests carry one additional all-zero tile internally;
+        metadata and all observable outputs retain the logical geometry.
         """
         if x.shape[1] != attn_metadata.total_seq_length:
             raise ValueError(f"VSA-H3 metadata was built for sequence length {attn_metadata.total_seq_length}, "
@@ -514,7 +522,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         n_tiles = attn_metadata.variable_block_sizes.numel()
         grad_mode = torch.is_grad_enabled() and x.requires_grad
         compiling = torch.compiler.is_compiling()
-        regional_compiling = compiling and self._regional_compile_layer_idx is not None
+        regional_compiling = compiling and self._regional_compile_sm100a_enabled is True
         if regional_compiling:
             sm100a_requested = bool(self._regional_compile_sm100a_enabled)
         elif compiling:
@@ -525,6 +533,17 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         needs_sm100a_pair = (attn_metadata.tile_elems == 64 and n_tiles % 2 != 0 and not grad_mode and sm100a_requested)
         kernel_tiles = n_tiles + int(needs_sm100a_pair)
         target_shape = (x.shape[0], kernel_tiles * attn_metadata.tile_elems, x.shape[-2], x.shape[-1])
+
+        # A grad-tracking forward must not reuse the builder-owned buffer. The
+        # holder outlives the training step -- one builder serves the whole run,
+        # and every step's metadata references the same holder -- while every
+        # VSA layer writes this one buffer in place. A graph-tracked tiled
+        # tensor left on the holder therefore anchors the step's in-place
+        # autograd edges, and through them the activations they saved, for the
+        # rest of training. This is the VSA-H3 counterpart of the Wan tile-cache
+        # OOM (#1423), which training fixed with ``vsa_cache_tile_buf=False``.
+        if grad_mode:
+            return scatter_into_tile_buf(x, target_shape, attn_metadata.untile_combined_index, None)
 
         # ``untile_combined_index`` maps each packed row to a logical tile
         # slot. Different geometries can share one transport shape; clear a
@@ -560,7 +579,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         attn_metadata: MiniMaxH3VSAMetadata,
     ) -> torch.Tensor:
         compiling = torch.compiler.is_compiling()
-        regional_compiling = compiling and self._regional_compile_layer_idx is not None
+        regional_compiling = compiling and self._regional_compile_sm100a_enabled is True
 
         tile_elems = attn_metadata.tile_elems
         if regional_compiling and tile_elems != 64:
@@ -603,13 +622,14 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         logical_gate = gate_compress[:, :logical_seq_len] if gate_compress is not None else None
 
         # Probe-guided per-layer opt-out: diffuse layers run dense (all-True
-        # mask) while the rest keep the configured sparsity. During regional
-        # capture, keep the layer decision tensor-valued so the 50 block
-        # instances reuse one graph instead of specializing on layer_idx.
+        # mask) while the rest keep the configured sparsity. During any
+        # prepared capture, keep the layer decision tensor-valued so the 50
+        # block instances reuse one graph instead of specializing on the
+        # Python layer_idx attribute.
         force_dense = None
-        if regional_compiling:
-            assert self._regional_compile_layer_idx is not None
-            force_dense = (attn_metadata.dense_layers_tensor == self._regional_compile_layer_idx).any()
+        compile_layer_idx = self._compile_layer_idx if compiling else None
+        if compile_layer_idx is not None:
+            force_dense = (attn_metadata.dense_layers_tensor == compile_layer_idx).any()
             layer_sparsity = attn_metadata.VSA_sparsity
         else:
             layer_sparsity = 0.0 if self.layer_idx in attn_metadata.dense_layers else attn_metadata.VSA_sparsity
@@ -696,7 +716,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 # capture. Logging from this branch would itself break a
                 # ``fullgraph=True`` forward.
                 if not compiling:
-                    logger.info_once("MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel")
+                    logger.info_once("MiniMax-H3 VSA tile-64 forward: using the sm100a/sm103a CUDA block-sparse kernel")
                 if regional_compiling:
                     # The compile-safe wrapper keeps both Triton mask
                     # compaction and the raw pybind launch behind one

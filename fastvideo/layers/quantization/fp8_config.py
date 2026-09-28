@@ -43,11 +43,25 @@ _FP8_SUFFIXES = (
     "feed_forward.mlp.fc_out",
 )
 
+# ROCm parts whose hipBLASLt exposes an OCP ``float8_e4m3fn`` scaled GEMM. CDNA3
+# (MI300, gfx942) only has the ``fnuz`` FP8 formats, which this module does not
+# produce, so it takes the bf16 dequant fallback like a pre-sm89 CUDA GPU.
+_ROCM_FP8_ARCHES = frozenset({"gfx950"})
+
 
 def _supports_fp8_compute() -> bool:
-    """Whether the active device supports FP8 ``_scaled_mm`` (sm89+)."""
+    """Whether the active device supports FP8 ``_scaled_mm``.
+
+    CUDA needs sm89+. On ROCm ``torch.cuda.get_device_capability`` reports the
+    GFX generation (gfx942 -> (9, 4), gfx950 -> (9, 5)), so the sm89 test would
+    admit every CDNA part; the e4m3fn ``_scaled_mm`` only runs on CDNA4.
+    """
     if not torch.cuda.is_available():
         return False
+    if getattr(torch.version, "hip", None):
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        arch = str(getattr(props, "gcnArchName", "")).split(":", 1)[0]
+        return arch in _ROCM_FP8_ARCHES
     cap = torch.cuda.get_device_capability()
     return cap[0] > 8 or (cap[0] == 8 and cap[1] >= 9)
 

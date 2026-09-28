@@ -183,9 +183,9 @@ optimizations: absence means **untested**, not incompatible.
 | Release path | Model | Mode | Validated hardware | Status |
 | --- | --- | --- | --- | --- |
 | MLX FastMetal T2V 1.3B | [`FastVideo/FastMetal-1.3B-QAD`](https://huggingface.co/FastVideo/FastMetal-1.3B-QAD) | 480x832, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 16 GB+ unified memory | Released |
-| MLX FastMetal TI2V 5B | [`FastVideo/FastMetal-5B-QAD`](https://huggingface.co/FastVideo/FastMetal-5B-QAD) | 480p / 720p, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 16 GB+ unified memory | Released |
+| MLX FastMetal T2V 5B | [`FastVideo/FastMetal-5B-QAD`](https://huggingface.co/FastVideo/FastMetal-5B-QAD) | 480p / 720p, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode; optional `--fast`, `--fast-spatial`, `--refine`. The checked-in example is T2V. CUDA Wan2.2 TI2V 5B is the image-capable path. | Apple M4 Max, 16 GB+ unified memory | Released |
 | MLX FastMetal T2V 14B | [`FastVideo/FastMetal-14B-QAD`](https://huggingface.co/FastVideo/FastMetal-14B-QAD) | 480p / 720p, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 36 GB+ unified memory | Released |
-| MLX FastH3 Preview T2VA | [`FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2`](https://huggingface.co/FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2) + locally converted DiT | 480p / 720p, 124 frames, 4-step DMD2, INT8/INT6/INT4 DiT, native video + audio VAE; optional temporal RIFE fast mode | Apple M4 Max, 36 GB unified memory | Source runtime; T2VA only |
+| MLX FastH3 Preview T2VA | [`FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2`](https://huggingface.co/FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2) + locally converted DiT | 480p / 720p, 124 frames, 4-step DMD2, INT8/INT6/INT4 **weight-only** DiT, native video + audio VAE; optional temporal RIFE fast mode; optional spatial fast mode; optional VSA (tile 64/256, exempt/compete) on `--include-vsa` checkpoints | Apple M4 Max, 36 GB unified memory | Source runtime; T2VA only |
 
 Apple Silicon uses the native MLX runtime. FastMetal-QAD is the packaged Wan
 release, while FastH3 Preview currently uses a source checkout and local DiT
@@ -221,6 +221,8 @@ Per the installation guides:
   [GPU install guide](../getting_started/installation/gpu.md).
 - **NVIDIA DGX Spark (GB10, aarch64)** — CUDA 13, from-source kernel build; see
   the [DGX Spark install guide](../getting_started/installation/spark.md).
+  Two Sparks over QSFP use Ray sequence parallel; see
+  [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
 - **Apple silicon** — macOS 14 or newer; FastMetal-QAD via the MLX runtime. See the
   [Apple Silicon guide](../getting_started/installation/mps.md). The older
   [`basic_mps.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mps.py)

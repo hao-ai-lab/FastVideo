@@ -3,6 +3,7 @@
 
 import asyncio
 from collections import defaultdict
+from queue import Queue
 import os
 import cloudpickle
 
@@ -11,7 +12,7 @@ from dataclasses import dataclass
 
 from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
-from fastvideo.utils import get_ip, get_distributed_init_method, get_open_port
+from fastvideo.utils import get_ip, get_distributed_init_method, get_open_port, get_loopback_ip
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.executor import Executor
@@ -33,6 +34,18 @@ if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
 
 logger = init_logger(__name__)
+
+
+def should_use_gloo_loopback(worker_ips: list[str]) -> bool:
+    """Loopback is only safe when every worker shares one host IP.
+
+    Single-node Ray (one or many GPUs on the same box) can dial the Gloo store
+    on loopback. Two Sparks already have distinct worker IPs, so this returns
+    False and Gloo stays on the fabric address. Per-node NIC names are a
+    separate issue: do not copy ``NCCL_SOCKET_IFNAME`` / ``GLOO_SOCKET_IFNAME``
+    from the driver onto those workers.
+    """
+    return len(set(worker_ips)) <= 1
 
 
 @dataclass
@@ -60,8 +73,27 @@ class RayDistributedExecutor(Executor):
         "CUDA_VISIBLE_DEVICES",
     }
 
-    # These non-vLLM env vars are copied from the driver to workers
-    ADDITIONAL_ENV_VARS = {"HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"}
+    # Per-node fabric names. spark_pair_env.sh / ibdev2netdev can differ across
+    # boxes; pushing the driver's value overwrites the export set before ray start.
+    WORKER_LOCAL_NIC_ENV_VARS = {
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_IB_HCA",
+        "GLOO_SOCKET_IFNAME",
+    }
+
+    # These non-vLLM env vars are copied from the driver to workers.
+    # NCCL_* knobs present on the driver are added dynamically in
+    # ``_env_vars_to_copy_from_driver``, except the per-node NIC trio above.
+    ADDITIONAL_ENV_VARS = {
+        "HF_TOKEN",
+        "HUGGING_FACE_HUB_TOKEN",
+        "NCCL_IB_DISABLE",
+        "NCCL_P2P_DISABLE",
+        "NCCL_CUMEM_ENABLE",
+        "NCCL_NVLS_ENABLE",
+        "NCCL_DEBUG",
+        "NCCL_DEBUG_SUBSYS",
+    }
 
     def _init_executor(self) -> None:
         initialize_ray_cluster(self.fastvideo_args)
@@ -196,9 +228,10 @@ class RayDistributedExecutor(Executor):
         } for (node_id, _) in worker_node_and_gpu_ids]
 
         # Environment variables to copy from driver to workers
+        extra_nccl = {k for k in os.environ if k.startswith("NCCL_") and k not in self.WORKER_LOCAL_NIC_ENV_VARS}
         env_vars_to_copy = get_env_vars_to_copy(
-            exclude_vars=self.WORKER_SPECIFIC_ENV_VARS,
-            additional_vars=set(current_platform.additional_env_vars).union(self.ADDITIONAL_ENV_VARS),
+            exclude_vars=self.WORKER_SPECIFIC_ENV_VARS | self.WORKER_LOCAL_NIC_ENV_VARS,
+            additional_vars=set(current_platform.additional_env_vars).union(self.ADDITIONAL_ENV_VARS).union(extra_nccl),
             destination="workers",
         )
 
@@ -213,16 +246,8 @@ class RayDistributedExecutor(Executor):
 
         self._run_ray_workers("update_environment_variables", self._get_env_vars_to_be_updated())
 
-        if len(node_gpus) == 1:
-            # in single node case, we don't need to get the IP address.
-            # the loopback address is sufficient
-            # NOTE: a node may have several IP addresses, one for each
-            # network interface. `get_ip()` might return any of them,
-            # while they might not work for communication inside the node
-            # if the network setup is complicated. Using the loopback address
-            # solves this issue, as it always works for communication inside
-            # the node.
-            driver_ip = "127.0.0.1"
+        if should_use_gloo_loopback(worker_ips):
+            driver_ip = get_loopback_ip()
         distributed_init_method = get_distributed_init_method(driver_ip, get_open_port())
 
         # Initialize the actual workers inside worker wrapper.
@@ -340,6 +365,17 @@ class RayDistributedExecutor(Executor):
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_merged":
                 raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
+
+    def set_log_queue(self, log_queue: Queue | None) -> None:
+        """Keep the driver-side queue locally.
+
+        ``multiprocessing.Queue`` is not picklable across Ray nodes, so worker
+        logs stay in the Ray session log dir instead of being forwarded.
+        """
+        self._log_queue = log_queue
+
+    def clear_log_queue(self) -> None:
+        self._log_queue = None
 
     def collective_rpc(self,
                        method: str | Callable,

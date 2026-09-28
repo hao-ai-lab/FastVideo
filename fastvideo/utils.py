@@ -1021,6 +1021,20 @@ def best_output_size(w, h, dw, dh, expected_area):
         return ow2, oh2
 
 
+def pixels_to_uint8(pixels: torch.Tensor) -> torch.Tensor:
+    """Return decoded pixels as uint8 bytes.
+
+    Decode stages hand back either normalized float pixels in [0, 1] or uint8
+    that a worker already quantized before the executor boundary (the
+    MiniMax-H3 video decode stage does). uint8 passes through untouched;
+    scaling it by 255 again would wrap modulo 256. Float pixels are clamped so
+    VAE output slightly outside [0, 1] saturates instead of wrapping.
+    """
+    if pixels.dtype == torch.uint8:
+        return pixels
+    return (pixels * 255).clamp_(0, 255).to(torch.uint8)
+
+
 def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor], output_path: str, fps: int):
     # Process outputs
     videos = rearrange(decoded_latents, "b c t h w -> t b c h w")
@@ -1306,3 +1320,35 @@ def _cached_pin_memory_available(pid: int) -> bool:
 
 def is_pin_memory_available() -> bool:
     return _cached_pin_memory_available(os.getpid())
+
+
+def allocate_cpu_tensor_with_pin_fallback(
+    size: tuple[int, ...] | torch.Size,
+    *,
+    dtype: torch.dtype | None = None,
+    pin_memory: bool = False,
+) -> torch.Tensor:
+    """Allocate a CPU tensor, retrying pageable memory if pinning fails.
+
+    ``is_pin_memory_available`` intentionally uses a small capability probe.
+    Large decoded-video buffers can still exhaust the CUDA host allocator after
+    that probe succeeds, especially on unified-memory systems. Treat pinning as
+    a performance preference: preserve the requested shape and dtype by
+    retrying the allocation without pinning.
+    """
+    kwargs: dict[str, object] = {"device": "cpu"}
+    if dtype is not None:
+        kwargs["dtype"] = dtype
+
+    if not pin_memory or not is_pin_memory_available():
+        return torch.empty(size, **kwargs)
+
+    try:
+        return torch.empty(size, pin_memory=True, **kwargs)
+    except RuntimeError as exc:
+        logger.warning(
+            "Pinned CPU allocation failed for shape %s; retrying with pageable memory: %s",
+            tuple(size),
+            exc,
+        )
+        return torch.empty(size, **kwargs)

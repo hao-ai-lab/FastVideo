@@ -7,7 +7,8 @@ This page describes the various options for speeding up generation times in Fast
     Several options on this page behave differently on the GB10's unified-memory
     hardware — some give little or nothing there. See
     [DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
-    for what actually helps on that platform and why.
+    for what actually helps on that platform and why. Two Sparks, one clip:
+    [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
 
 ## Table of Contents
 
@@ -293,6 +294,9 @@ automatically.
 ### Requirements
 
 - **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- **ROCm**: CDNA4 (MI350X / MI355X, gfx950) runs the FP8 `_scaled_mm` path through
+  hipBLASLt (OCP e4m3fn). MI300X (gfx942) only exposes the `fnuz` FP8 formats and
+  takes the bf16 dequant fallback like a pre-sm89 GPU.
 - No additional packages required beyond the base FastVideo install
 
 ### Usage

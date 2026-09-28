@@ -144,6 +144,12 @@ for which models are practical on the GB10, what makes them faster, and what
 won't help on this hardware (and why) — so you don't spend a night tuning knobs
 that can't move here.
 
+Two Sparks with QSFP cables: [Pair two NVIDIA DGX Sparks](spark_pair.md) for
+one FastH3 clip across both GPUs (`sp_size=2` over Ray). Copy-paste commands
+for one or two Sparks also live on the
+[MiniMax H3 cookbook](../../cookbook/minimax-h3.md): pick FastH3 Preview,
+then NVIDIA DGX Spark, then 1 Spark or 2 Sparks.
+
 ## Development Environment Setup
 
 If you're planning to contribute to FastVideo please see the

@@ -15,6 +15,7 @@ import torch
 import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.pipelines.lazy_module import LazyModule
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.validators import VerificationResult
 
@@ -35,6 +36,12 @@ class PipelineStage(ABC):
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
     performance_component_metric: str | None = None
+    # Deferred modules this stage is the last user of, installed by the
+    # pipeline under ``lazy_module_load``. Released once __call__ returns.
+    # Living here rather than in the pipeline's stage loop means a pipeline
+    # that overrides forward still frees, since __call__ is the one entry
+    # point subclasses are told not to override.
+    _lazy_modules_to_release: tuple[LazyModule, ...] = ()
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """
@@ -143,7 +150,34 @@ class PipelineStage(ABC):
                 logger.error("Input verification failed for %s: %s", stage_name, str(e))
                 raise
 
-        # Execute the actual stage logic
+        # Execute the actual stage logic, then optional output verification.
+        # One BaseException net: KeyboardInterrupt inside verify_output must
+        # still free this stage's deferred modules (OOM is already an Exception).
+        try:
+            result = self._execute(batch, fastvideo_args, stage_key, stage_class_name, stage_name)
+            if enable_verification:
+                try:
+                    output_result = self.verify_output(result, fastvideo_args)
+                    self._run_verification(output_result, stage_name, "output")
+                except Exception as e:
+                    logger.error("Output verification failed for %s: %s", stage_name, str(e))
+                    raise
+        except BaseException:
+            self._release_deferred_modules(stage_name)
+            raise
+
+        self._release_deferred_modules(stage_name)
+        return result
+
+    def _execute(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+        stage_key: str,
+        stage_class_name: str,
+        stage_name: str,
+    ) -> ForwardBatch:
+        """Run forward, with the optional timing and logging wrapper."""
         if envs.FASTVIDEO_STAGE_LOGGING:
             logger.info("[%s] Starting execution", stage_name)
             torch.cuda.synchronize()
@@ -169,16 +203,23 @@ class PipelineStage(ABC):
             # Direct execution (current behavior)
             result = self.forward(batch, fastvideo_args)
 
-        if enable_verification:
-            # Post-execution output verification
-            try:
-                output_result = self.verify_output(result, fastvideo_args)
-                self._run_verification(output_result, stage_name, "output")
-            except Exception as e:
-                logger.error("Output verification failed for %s: %s", stage_name, str(e))
-                raise
-
         return result
+
+    def _release_deferred_modules(self, stage_name: str) -> None:
+        """Free the deferred components this stage is the last user of.
+
+        Called on the way out whether or not the stage succeeded. A stage that
+        raises after materializing a multi-gigabyte component would otherwise
+        keep it for the life of the generator, and the retry that a
+        memory-constrained caller is most likely to attempt would start from a
+        worse position than the request that just failed.
+        """
+        for lazy_module in self._lazy_modules_to_release:
+            try:
+                lazy_module.release()
+            except Exception:
+                # Never let cleanup replace the exception being propagated.
+                logger.exception("Failed to release deferred module after %s", stage_name)
 
     @abstractmethod
     def forward(

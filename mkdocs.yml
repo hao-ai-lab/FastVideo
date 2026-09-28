@@ -152,9 +152,32 @@ nav:
   - Getting Started:
     - Installation: getting_started/installation.md
     - Apple Silicon FastWan: getting_started/installation/mps.md
+    - NVIDIA DGX Spark: getting_started/installation/spark.md
+    - Pair two DGX Sparks: getting_started/installation/spark_pair.md
     - Quick Start: getting_started/quick_start.md
     - V1 API: getting_started/v1_api.md
-  - Cookbook: cookbook/index.md
+  - Cookbook:
+    - Overview: cookbook/index.md
+    - H3 server and playground: cookbook/openai-api.md
+    - Video:
+      - MiniMax H3: cookbook/minimax-h3.md
+      - Wan: cookbook/wan.md
+      - LTX: cookbook/ltx.md
+      - Hunyuan: cookbook/hunyuan.md
+      - Kandinsky 5: cookbook/kandinsky5.md
+      - LongCat: cookbook/longcat.md
+      - TurboDiffusion: cookbook/turbodiffusion.md
+    - Image:
+      - FLUX: cookbook/flux.md
+      - GLM-Image: cookbook/glm-image.md
+      - Z-Image: cookbook/z-image.md
+      - Stable Diffusion: cookbook/stable-diffusion.md
+    - Audio:
+      - Stable Audio: cookbook/stable-audio.md
+      - MMAudio: cookbook/mmaudio.md
+    - World:
+      - Cosmos: cookbook/cosmos.md
+      - Matrix Game: cookbook/matrix-game.md
   - Inference:
     - Quick Start: inference/inference_quick_start.md
     - Configuration: inference/configuration.md

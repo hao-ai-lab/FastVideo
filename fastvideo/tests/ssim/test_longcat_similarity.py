@@ -34,6 +34,7 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of LongCat support.")
 
 # Device-specific reference folder
 device_reference_folder = resolve_device_reference_folder(

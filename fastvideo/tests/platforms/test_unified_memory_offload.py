@@ -104,6 +104,7 @@ def test_discrete_device_finalization_retains_layerwise_precedence(monkeypatch) 
     assert args.text_encoder_cpu_offload is True
     assert args.image_encoder_cpu_offload is True
     assert args.vae_cpu_offload is True
+    assert args.lazy_module_load is False
 
 
 def test_workers_classify_their_own_device(monkeypatch) -> None:
@@ -189,3 +190,18 @@ def test_platform_without_device_name_uses_generic_name(monkeypatch, name_error:
 
     assert args.disable_offload_on_unified_memory() is True
     assert args.text_encoder_cpu_offload is False
+
+
+def test_unified_device_auto_enables_lazy_module_load(as_unified_cuda) -> None:
+    args = FastVideoArgs(model_path="unused/for-this-test")
+
+    assert args.lazy_module_load is None
+    assert args.finalize_device_offload_policy(device_id=6) is True
+    assert args.lazy_module_load is True
+
+
+def test_explicit_false_lazy_module_load_stays_off_on_unified(as_unified_cuda) -> None:
+    args = FastVideoArgs(model_path="unused/for-this-test", lazy_module_load=False)
+
+    args.finalize_device_offload_policy(device_id=6)
+    assert args.lazy_module_load is False

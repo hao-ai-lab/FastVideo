@@ -24,6 +24,7 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of Matrix Game 2.0 support.")
 
 device_reference_folder = resolve_device_reference_folder(
     (

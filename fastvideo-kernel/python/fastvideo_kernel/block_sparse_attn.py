@@ -50,9 +50,9 @@ def _force_tk() -> bool:
 
 
 def _force_sm100a() -> bool:
-    """True iff the sm_100a (Blackwell) forward is explicitly opted into.
+    """True iff the data-center Blackwell forward is explicitly opted into.
 
-    Opt-in only (same env the H3 backend honors): the sm_100a extension is
+    Opt-in only (same legacy-named env the H3 backend honors): the extension is
     forward-only, so this routing pairs it with the Triton backward -- its lse
     is already in Triton's M format. Honored only when
     ``block_sparse_attn_sm100a.is_supported`` passes. Unsupported 64-token
@@ -370,13 +370,65 @@ def _backward_sm90(ctx, grad_o, grad_lse):
 block_sparse_attn_sm90.register_autograd(_backward_sm90, setup_context=_setup_context_sm90)
 
 # ---------------------------------------------------------------------------
-# SM100A backend custom op (index-native)
+# Data-center Blackwell backend custom op (index-native; legacy sm100a API name)
 #
-# Forward runs the sm_100a CUDA extension; backward reuses the Triton kernels.
-# The sm_100a forward emits lse in exactly Triton's M format (max*log2e +
-# log2(l)), so the pairing needs no conversion. The Triton backward is
+# Forward runs the sm_100a/sm_103a CUDA extension. Backward runs the sm_100a CUDA
+# backward when block_sparse_attn_bwd_sm100a.is_supported passes (64-token blocks,
+# sm_100a device, extension built with the op) and the Triton kernels otherwise.
+# The native forward emits lse in exactly Triton's M format (max*log2e +
+# log2(l)), so either pairing needs no conversion. Both backwards are
 # hardcoded to 64-token blocks, hence the block-size assert below.
 # ---------------------------------------------------------------------------
+
+
+@torch.library.custom_op(
+    "fastvideo_kernel::block_sparse_attn_backward_sm100a",
+    mutates_args=(),
+    device_types="cuda",
+)
+def block_sparse_attn_backward_sm100a(
+    grad_o: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    o: torch.Tensor,
+    lse: torch.Tensor,
+    q2k_idx: torch.Tensor,
+    q2k_num: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    from fastvideo_kernel.block_sparse_attn_bwd_sm100a import (
+        block_sparse_attn_backward_sm100a_from_k2q, )
+
+    num_kv_blocks = variable_block_sizes.numel()
+    k2q_idx, k2q_num = _invert_indices_for_backward(q2k_idx, q2k_num, num_kv_blocks)
+    dq, dk, dv = block_sparse_attn_backward_sm100a_from_k2q(
+        grad_o.contiguous(), q.contiguous(), k.contiguous(), v.contiguous(), o.contiguous(),
+        lse.contiguous(), k2q_idx, k2q_num, variable_block_sizes)
+    return dq, dk, dv
+
+
+@torch.library.register_fake("fastvideo_kernel::block_sparse_attn_backward_sm100a")
+def _block_sparse_attn_backward_sm100a_fake(
+    grad_o: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    o: torch.Tensor,
+    lse: torch.Tensor,
+    q2k_idx: torch.Tensor,
+    q2k_num: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    return torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
+
+
+def _sm100a_backward_is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
+    try:
+        from fastvideo_kernel import block_sparse_attn_bwd_sm100a as vsa_bwd_sm100a
+    except ImportError:  # pragma: no cover - extension not built
+        return False
+    return vsa_bwd_sm100a.is_supported(q, variable_block_sizes)
 
 
 @torch.library.custom_op(
@@ -428,11 +480,15 @@ def _backward_sm100a(ctx, grad_o, grad_M):
     block = q.shape[2] // variable_block_sizes.numel()
     if block != 64:
         raise RuntimeError(
-            "block_sparse_attn_sm100a backward pairs the sm_100a forward with the "
-            f"Triton backward, which is hardcoded to 64-token blocks; got {block}. "
+            "block_sparse_attn_sm100a backward pairs the sm_100a/sm_103a forward with a "
+            f"backward that is hardcoded to 64-token blocks; got {block}. "
             "Run 128-token-block metadata without grad, or use the Triton forward.")
-    dq, dk, dv = block_sparse_attn_backward_triton(grad_o, q, k, v, o, M, q2k_idx,
-                                                   q2k_num, variable_block_sizes)
+    if _sm100a_backward_is_supported(q, variable_block_sizes):
+        dq, dk, dv = block_sparse_attn_backward_sm100a(grad_o, q, k, v, o, M, q2k_idx,
+                                                       q2k_num, variable_block_sizes)
+    else:
+        dq, dk, dv = block_sparse_attn_backward_triton(grad_o, q, k, v, o, M, q2k_idx,
+                                                       q2k_num, variable_block_sizes)
     return dq, dk, dv, None, None, None
 
 
@@ -464,7 +520,8 @@ def block_sparse_attn_from_indices(
 
     # Backend resolution:
     # - FASTVIDEO_VSA_TRITON forces Triton everywhere.
-    # - FASTVIDEO_VSA_SM100A opts into the sm_100a forward (Triton backward).
+    # - FASTVIDEO_VSA_SM100A opts into the data-center Blackwell forward
+    #   (Triton backward). The environment name is retained for compatibility.
     #   Unsupported 64-token metadata falls through; unsupported 128-token
     #   metadata raises because Triton cannot consume it.
     # - FASTVIDEO_VSA_TK requests sm_90 TK; honored only when it's actually
@@ -478,9 +535,9 @@ def block_sparse_attn_from_indices(
                                                variable_block_sizes)
         if _infer_block_size(q, variable_block_sizes) == 128:
             raise NotImplementedError(
-                "128-token block-sparse attention requires the sm_100a forward; "
+                "128-token block-sparse attention requires the sm_100a/sm_103a forward; "
                 "the Triton fallback only supports 64-token blocks, and the "
-                "sm_100a route is unavailable for this input.")
+                "native data-center Blackwell route is unavailable for this input.")
         use_sm90 = sm90_available
     elif _force_tk():
         use_sm90 = sm90_available

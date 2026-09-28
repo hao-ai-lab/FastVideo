@@ -1,6 +1,6 @@
 # `fastvideo/attention/` — Attention Backends
 
-**Generated:** 2026-05-02
+**Generated:** 2026-09-14
 
 Backend registry + selector wrapping FlashAttn / SageAttn / SageAttn3 / SDPA / VSA / VMoBA / SLA / BSA.
 
@@ -18,11 +18,17 @@ attention/
 │   ├── sage_attn3.py      #   SageAttention v3
 │   ├── sdpa.py            #   torch SDPA fallback
 │   ├── video_sparse_attn.py  # VSA (paper: Video Sparse Attention)
+│   ├── video_sparse_attn_h3.py  # VSA for MiniMax H3 packed mixed-modality attention
+│   ├── video_sparse_attn_h3_probe.py  # Attention-mass probe for VSA-H3 selection
 │   ├── vmoba.py           #   Video-MoBA
 │   ├── sla.py             #   Sliding-window (STA)
-│   └── bsa_attn.py        #   Block-sparse
+│   ├── bsa_attn.py        #   Block-sparse
+│   ├── nabla.py           #   NABLA block-sparse flex attention (Kandinsky5)
+│   ├── attn_qat_train.py  #   QAT training attention path
+│   └── attn_qat_infer.py  #   QAT inference attention path
 └── utils/
     ├── flash_attn_cute.py
+    ├── flash_attn_default.py
     └── flash_attn_no_pad.py
 ```
 

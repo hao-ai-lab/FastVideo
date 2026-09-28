@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from fastvideo.dataset.dataloader.record_schema import (
     basic_t2v_record_creator,
@@ -49,11 +50,13 @@ def test_basic_t2v_record_creator_fields():
         assert rec["num_frames"] == batch.latents[i].shape[1]
 
 
-def test_i2v_record_creator_additional_fields():
+@pytest.mark.parametrize("has_clip", [True, False], ids=["wan21_clip", "wan22_no_clip"])
+def test_i2v_record_creator_additional_fields(has_clip):
     N = 3
     batch = _mk_basic_batch(N)
     # image_embeds is a list of length 1, with an array of shape [N, D]
-    batch.image_embeds = [np.ones((N, 32), dtype=np.float32)]
+    # Wan2.2 I2V uses VAE conditioning without CLIP embeddings.
+    batch.image_embeds = [np.ones((N, 32), dtype=np.float32)] if has_clip else []
     # first frame latent per record
     batch.image_latent = np.zeros((N, 4, 1, 8, 8), dtype=np.float32)
     # pil image per record
@@ -64,15 +67,20 @@ def test_i2v_record_creator_additional_fields():
 
     for i, rec in enumerate(records):
         # clip feature
-        assert isinstance(rec["clip_feature_bytes"], (bytes, bytearray))
-        assert rec["clip_feature_shape"] == list(batch.image_embeds[0][i].shape)
-        assert rec["clip_feature_dtype"] == str(batch.image_embeds[0][i].dtype)
+        if has_clip:
+            assert rec["clip_feature_bytes"] == batch.image_embeds[0][i].tobytes()
+            assert rec["clip_feature_shape"] == list(batch.image_embeds[0][i].shape)
+            assert rec["clip_feature_dtype"] == str(batch.image_embeds[0][i].dtype)
+        else:
+            assert rec["clip_feature_bytes"] == b""
+            assert rec["clip_feature_shape"] == []
+            assert rec["clip_feature_dtype"] == ""
         # first frame latent
-        assert isinstance(rec["first_frame_latent_bytes"], (bytes, bytearray))
+        assert rec["first_frame_latent_bytes"] == batch.image_latent[i].tobytes()
         assert rec["first_frame_latent_shape"] == list(batch.image_latent[i].shape)
         assert rec["first_frame_latent_dtype"] == str(batch.image_latent[i].dtype)
         # pil image
-        assert isinstance(rec["pil_image_bytes"], (bytes, bytearray))
+        assert rec["pil_image_bytes"] == batch.pil_image[i].tobytes()
         assert rec["pil_image_shape"] == list(batch.pil_image[i].shape)
         assert rec["pil_image_dtype"] == str(batch.pil_image[i].dtype)
 

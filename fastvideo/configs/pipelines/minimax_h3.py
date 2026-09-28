@@ -32,7 +32,8 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
     def check_pipeline_config(self) -> None:
         super().check_pipeline_config()
         if self.flow_shift is not None:
-            raise ValueError("MiniMax-H3 uses fixed video/audio scheduler shifts; flow_shift must remain unset.")
+            raise ValueError("MiniMax-H3 uses separate checkpoint-defined video/audio scheduler shifts; "
+                             "flow_shift must remain unset.")
 
 
 __all__ = ["MiniMaxH3PipelineConfig"]

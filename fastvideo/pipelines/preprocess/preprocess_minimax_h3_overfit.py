@@ -238,7 +238,7 @@ def build_parquet_record(
     """Serialize one synchronized H3 sample for the Parquet schema collator.
 
     ``collate_rows_from_parquet_schema`` reconstructs every tensor from a
-    bytes/shape/dtype triplet and reads the byte payload as float32, so this
+    bytes/shape/dtype triplet and decodes it with the serialized dtype, so this
     boundary stores contiguous float32 tensors for lossless reconstruction.
     """
     tensors = {

@@ -7,12 +7,11 @@ complete diffusion pipelines.
 """
 
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.causal_denoising import (CausalDMDDenosingStage, CausalDenoisingStage)
 from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (Cosmos25AutoDenoisingStage, Cosmos25DenoisingStage,
                                                   Cosmos25V2WDenoisingStage, Cosmos25T2WDenoisingStage,
-                                                  CosmosDenoisingStage, DenoisingStage, DmdDenoisingStage)
+                                                  CosmosDenoisingStage, DenoisingStage)
 from fastvideo.pipelines.stages.sr_denoising import SRDenoisingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGame2ImageEncodingStage,
@@ -102,3 +101,15 @@ __all__ = [
     "LongCatKVCacheInitStage",
     "LongCatVCDenoisingStage",
 ]
+
+
+def __getattr__(name):
+    # Family stages depend on shared stages. Resolve compatibility exports only
+    # when requested, so importing the canonical Wan modules cannot form a cycle.
+    if name == "DmdDenoisingStage":
+        from fastvideo.pipelines.basic.wan.stages.dmd import DmdDenoisingStage
+        return DmdDenoisingStage
+    if name in {"CausalDMDDenosingStage", "CausalDenoisingStage"}:
+        from fastvideo.pipelines.basic.wan.stages import causal_denoising
+        return getattr(causal_denoising, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -303,34 +303,102 @@ def quantize_matrix(weight, spec: MLXQuantizationSpec | None):
     )
 
 
-def linear(x, weight, bias=None):
+# Affine quantized_matmul is slower than dequantize + steel GEMM at H3's packed
+# token width. Measured on Apple M4 Max / MLX 0.32.2, INT6 group 64, BF16 acts,
+# Q 5376→7168: M=256 qmm is faster; M=512 dequant+GEMM is +6.4%; M≥1024 ~10%.
+# 832×480×124 packed M is ~14862–14994. H3 opts into this path explicitly;
+# shared FastWan and Wan 2.2 linears stay on quantized_matmul. Do not cache
+# dequantized weights. Override: FASTVIDEO_MLX_DQ_GEMM=0 off, =1 measured
+# floor, =<int> explicit floor.
+_AFFINE_DQ_GEMM_BITS = frozenset({2, 3, 4, 5, 6, 8})
+MLX_AFFINE_DQ_GEMM_DEFAULT_MIN_M = 768
+_dq_gemm_engaged = 0
+_dq_gemm_logged = False
+
+
+def reset_dq_gemm_telemetry() -> None:
+    global _dq_gemm_engaged
+    _dq_gemm_engaged = 0
+
+
+def dq_gemm_engaged() -> int:
+    return _dq_gemm_engaged
+
+
+def affine_dq_gemm_min_m() -> int | None:
+    raw = os.environ.get("FASTVIDEO_MLX_DQ_GEMM", "1").strip().lower()
+    if raw in {"", "0", "off", "false", "no"}:
+        return None
+    if raw in {"1", "on", "true", "yes"}:
+        return MLX_AFFINE_DQ_GEMM_DEFAULT_MIN_M
+    try:
+        value = int(raw)
+    except ValueError:
+        return MLX_AFFINE_DQ_GEMM_DEFAULT_MIN_M
+    if value <= 0:
+        return None
+    return value
+
+
+def _matmul_leading_rows(x) -> int:
+    last = int(x.shape[-1]) if x.ndim else 0
+    if last <= 0:
+        return 0
+    return int(x.size) // last
+
+
+def _quantized_linear(x, weight: QuantizedMatrix, *, use_affine_dq_gemm: bool = False):
     import mlx.core as mx
 
-    if isinstance(weight, QuantizedMatrix):
-        y = mx.quantized_matmul(
-            x,
+    global _dq_gemm_engaged, _dq_gemm_logged
+    spec = weight.spec
+    min_m = affine_dq_gemm_min_m() if use_affine_dq_gemm else None
+    rows = _matmul_leading_rows(x)
+    if (min_m is not None and spec.mode == "affine" and spec.bits in _AFFINE_DQ_GEMM_BITS
+            and spec.group_size is not None and rows >= min_m):
+        dequantized = mx.dequantize(
             weight.weight,
             weight.scales,
             weight.biases,
-            transpose=True,
-            group_size=weight.spec.group_size,
-            bits=weight.spec.bits,
-            mode=weight.spec.mode,
-        ).astype(x.dtype)
-    else:
-        y = x @ weight.T
+            group_size=spec.group_size,
+            bits=spec.bits,
+            mode=spec.mode,
+            dtype=x.dtype,
+        )
+        y = (x @ dequantized.T).astype(x.dtype)
+        _dq_gemm_engaged += 1
+        if not _dq_gemm_logged:
+            _dq_gemm_logged = True
+            logger.info("affine dequant+GEMM engaged (rows=%d, floor=%d, bits=%s)", rows, min_m, spec.bits)
+        return y
+    return mx.quantized_matmul(
+        x,
+        weight.weight,
+        weight.scales,
+        weight.biases,
+        transpose=True,
+        group_size=spec.group_size,
+        bits=spec.bits,
+        mode=spec.mode,
+    ).astype(x.dtype)
+
+
+def linear(x, weight, bias=None, *, use_affine_dq_gemm: bool = False):
+    y = (_quantized_linear(x, weight, use_affine_dq_gemm=use_affine_dq_gemm)
+         if isinstance(weight, QuantizedMatrix) else x @ weight.T)
     if bias is not None:
         y = y + bias
     return y
 
 
 def _use_fast_norm() -> bool:
-    """Opt-in to MLX's fused ``mx.fast`` normalization kernels.
+    """Opt-in to MLX's fused ``mx.fast`` normalization kernels for Wan.
 
     Off by default so the numerically-explicit reference path stays the
     baseline. Set ``FASTVIDEO_MLX_FAST_NORM=1`` to route LayerNorm/RMSNorm
     through single fused Metal kernels (fewer intermediates, less memory
     traffic) and benchmark the speedup.
+    H3 uses its own fused RMSNorm default and does not consult this toggle.
     """
     import os
 

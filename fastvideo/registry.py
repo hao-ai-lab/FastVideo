@@ -47,21 +47,8 @@ from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionT2V_14B_Config,
     TurboDiffusionT2V_1_3B_Config,
 )
-from fastvideo.configs.pipelines.wan import (
-    FastWan2_1_T2V_480P_Config,
-    FastWan2_2_TI2V_5B_Config,
-    LucyEditDevConfig,
-    SelfForcingWan2_2_T2V480PConfig,
-    SelfForcingWanT2V480PConfig,
-    WANV2VConfig,
-    Wan2_2_I2V_A14B_Config,
-    Wan2_2_T2V_A14B_Config,
-    Wan2_2_TI2V_5B_Config,
-    WanI2V480PConfig,
-    WanI2V720PConfig,
-    WanT2V480PConfig,
-    WanT2V720PConfig,
-)
+from fastvideo.models.wan import pipeline_config as wan_pipeline_config
+from fastvideo.models.wan.definition import WAN_MODEL_DEFINITION_GROUPS, WanModelDefinition
 from fastvideo.configs.pipelines.glm_image import GlmImageConfig
 from fastvideo.configs.pipelines.flux import FluxPipelineConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
@@ -237,6 +224,19 @@ def _get_config_info(
     if raise_on_missing:
         raise RuntimeError(f"No model info found for model path: {model_path}")
     return None
+
+
+def _register_wan_configs(definitions: tuple[WanModelDefinition, ...]) -> None:
+    for definition in definitions:
+        register_configs(
+            sampling_param_cls=None,
+            pipeline_config_cls=getattr(wan_pipeline_config, definition.pipeline_config),
+            workload_types=tuple(WorkloadType(value) for value in definition.workload_types),
+            hf_model_paths=list(definition.hf_model_paths),
+            model_detectors=[definition.matches] if definition.match_any else None,
+            model_family="wan",
+            default_preset=definition.preset,
+        )
 
 
 def _register_configs() -> None:
@@ -923,92 +923,8 @@ def _register_configs() -> None:
         default_preset="turbo_i2v_a14b",
     )
 
-    # Wan — defaults provided by presets (no sampling_param_cls needed)
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=WanT2V480PConfig,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        ],
-        model_detectors=[lambda path: "wanpipeline" in path.lower()],
-        model_family="wan",
-        default_preset="wan_t2v_1_3b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=WanT2V720PConfig,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-            "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="wan_t2v_14b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=WanI2V480PConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
-        ],
-        model_detectors=[lambda path: "wanimagetovideo" in path.lower()],
-        model_family="wan",
-        default_preset="wan_i2v_14b_480p",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=WanI2V720PConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="wan_i2v_14b_720p",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=WanI2V480PConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="wan_fun_1_3b_inp",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=WANV2VConfig,
-        workload_types=(),
-        hf_model_paths=[
-            "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="wan_fun_1_3b_control",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=FastWan2_1_T2V_480P_Config,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-            "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers",
-        ],
-        model_detectors=[lambda path: "wandmdpipeline" in path.lower()],
-        model_family="wan",
-        default_preset="fast_wan_t2v_480p",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=Wan2_2_TI2V_5B_Config,
-        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
-        hf_model_paths=[
-            "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="wan_2_2_ti2v_5b",
-    )
+    # Preserve first-match ordering around the DreamX registrations below.
+    _register_wan_configs(WAN_MODEL_DEFINITION_GROUPS[0])
 
     register_configs(
         sampling_param_cls=None,
@@ -1043,83 +959,7 @@ def _register_configs() -> None:
         model_family="dreamx_world",
         default_preset="dreamx_world_5b_ar",
     )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
-        workload_types=(WorkloadType.T2V, WorkloadType.I2V),
-        hf_model_paths=[
-            "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
-            "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="fast_wan_2_2_ti2v_5b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LucyEditDevConfig,
-        workload_types=(),
-        hf_model_paths=[
-            "decart-ai/Lucy-Edit-Dev",
-            "decart-ai/Lucy-Edit-1.1-Dev",
-        ],
-        model_detectors=[lambda path: "lucy-edit" in path.lower()],
-        model_family="wan",
-        default_preset="lucy_edit_dev",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=Wan2_2_T2V_A14B_Config,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="wan_2_2_t2v_a14b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=Wan2_2_I2V_A14B_Config,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
-        ],
-        model_family="wan",
-        default_preset="wan_2_2_i2v_a14b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=SelfForcingWanT2V480PConfig,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
-        ],
-        model_detectors=[lambda path: "wancausaldmdpipeline" in path.lower()],
-        model_family="wan",
-        default_preset="sf_wan_t2v_1_3b",
-    )
-    # SFWan2.2: T2V and I2V variants by path
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=SelfForcingWan2_2_T2V480PConfig,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=["rand0nmr/SFWan2.2-T2V-A14B-Diffusers"],
-        model_detectors=[
-            lambda path: ("sfwan2.2" in path.lower() or "sfwan2_2" in path.lower()) and "i2v" not in path.lower(),
-        ],
-        model_family="wan",
-        default_preset="sf_wan_2_2_t2v_a14b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=SelfForcingWan2_2_T2V480PConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=["FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers"],
-        model_detectors=[
-            lambda path: ("sfwan2.2" in path.lower() or "sfwan2_2" in path.lower()) and "i2v" in path.lower(),
-        ],
-        model_family="wan",
-        default_preset="sf_wan_2_2_i2v_a14b",
-    )
+    _register_wan_configs(WAN_MODEL_DEFINITION_GROUPS[1])
 
     # MiniMax H3
     register_configs(

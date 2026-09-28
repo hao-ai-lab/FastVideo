@@ -56,6 +56,7 @@ _DEVICE_MAPPINGS: tuple[tuple[str, str], ...] = (
     ("GB200", "GB200"),
     ("B200", "GB200"),  # same Blackwell arch as GB200
     ("H200", "H200"),
+    ("NVIDIA GB10", "GB10"),
 )
 
 

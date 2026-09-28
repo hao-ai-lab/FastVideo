@@ -17,6 +17,7 @@ from fastvideo.tests.ssim.inference_similarity_utils import (
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of DreamX World support.")
 
 device_reference_folder = resolve_inference_device_reference_folder(logger)
 

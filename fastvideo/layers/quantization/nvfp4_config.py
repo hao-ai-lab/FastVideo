@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LTX-2 NVFP4 quantization (FlashInfer-backed).
+"""NVFP4 linear quantization for supported transformer layer sets.
 
 NVFP4 is NVIDIA's block-scaled FP4 format (e2m1 mantissa, fp32 alpha,
 ``layout_128x4`` scale layout, group size 16) — distinct from
@@ -8,9 +8,8 @@ explicitly so downstream callers don't conflate it with other FP4
 variants that may land later (e.g. AMD's MX-FP4 or vendor-neutral
 e3m0).
 
-Upstreamed from ``FastVideo-internal`` so consumers that load LTX-2
-weights with NVFP4 quantization can drive the public package
-end-to-end.
+The registered config targets the curated LTX-2 deployment set and the
+main MiniMax-H3 transformer-block FFN linears.
 
 `flashinfer` is imported lazily inside the call paths that need it.
 This keeps ``import fastvideo`` cheap on hosts where flashinfer is
@@ -20,6 +19,7 @@ use time, with a clear error.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import torch
@@ -75,11 +75,17 @@ _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES = (
 _LTX2_NVFP4_LINEAR_PREFIXES = frozenset(f"ltx2.blocks.{block_idx}.{suffix}" for block_idx in range(48)
                                         for suffix in _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES) | frozenset(
                                             ("ltx2.adaln_single.linear", ))
+_MINIMAX_H3_NVFP4_FF_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.ff\.(?:fc_in|fc_out)$")
 
 
 def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
     """Return whether *prefix* belongs to the LTX-2 NVFP4 deployment set."""
     return prefix in _LTX2_NVFP4_LINEAR_PREFIXES
+
+
+def is_minimax_h3_nvfp4_linear_prefix(prefix: str) -> bool:
+    """Return whether *prefix* is a main MiniMax-H3 transformer-block FFN linear."""
+    return _MINIMAX_H3_NVFP4_FF_PREFIX.search(prefix) is not None
 
 
 def _is_ltx2_refine_only_prefix(prefix: str) -> bool:
@@ -421,13 +427,12 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
 
 
 class NVFP4Config(QuantizationConfig):
-    """LTX-2-specific NVFP4 quantization configuration.
+    """Select NVFP4 for the supported LTX-2 and MiniMax-H3 linear sets.
 
     NVFP4 is NVIDIA's block-scaled FP4 (e2m1 mantissa, fp32 alpha,
-    ``layout_128x4`` scale layout, group size 16). Today this class
-    hardcodes the LTX-2 layer paths it covers. When a second model
-    wants NVFP4, lift the layer-path list into a config field
-    instead of hardcoding it here.
+    ``layout_128x4`` scale layout, group size 16). LTX-2 uses its curated
+    attention and FFN deployment set. MiniMax-H3 uses only ``fc_in`` and
+    ``fc_out`` in each main transformer-block FFN.
     """
 
     def __init__(self, layer_profile: str = "refine", retain_original_weights: bool | None = None):
@@ -468,9 +473,10 @@ class NVFP4Config(QuantizationConfig):
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
 
-        # Use the superset at build/load time, then switch active subset
-        # dynamically in NVFP4QuantizeMethod.apply based on stage profile.
-        if isinstance(layer, LinearBase) and is_ltx2_nvfp4_linear_prefix(prefix):
+        # LTX-2 switches its active subset by stage at runtime. MiniMax-H3
+        # uses the fixed main-transformer FFN set selected by its prefix.
+        if isinstance(layer, LinearBase) and (is_ltx2_nvfp4_linear_prefix(prefix)
+                                              or is_minimax_h3_nvfp4_linear_prefix(prefix)):
             method = NVFP4QuantizeMethod(layer_prefix=prefix)
             method._retain_original_weights = self.retain_original_weights
             return method
@@ -552,4 +558,5 @@ __all__ = [
     "NVFP4QuantizeMethod",
     "convert_model_to_nvfp4",
     "is_ltx2_nvfp4_linear_prefix",
+    "is_minimax_h3_nvfp4_linear_prefix",
 ]

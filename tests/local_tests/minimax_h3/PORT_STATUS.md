@@ -12,7 +12,7 @@
 
 | Scope | Evidence | State |
 |---|---|---|
-| Qwen3-VL encoder | exact text/image/video hidden states through the production loader | complete |
+| Qwen3-VL encoder | exact text/image/video hidden states through the production loader; bounded exact vision interpolation | complete |
 | FL2VA and Ref2VA DiTs | exact video/audio heads for both model partitions | complete |
 | Video VAE | exact encode, normalization, and decode through the production loader | complete |
 | Video VAE streaming | exact chunked encode/decode and output-rank-only distributed decode | complete |
@@ -36,6 +36,11 @@ The single-rank real-checkpoint gate strictly loaded the 33.30B-parameter
 trainable DTensor adapters, and recorded 62.08 GiB peak CUDA allocation. It did
 not run a forward pass. The added training contracts do not claim an official
 full training, export, reload, or inference run.
+T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly. On 2026-08-26, the Qwen3-VL production loader
+also matched Transformers 5.15.1 exactly for text, image, and video layer-50 hidden states on GB10. Its production
+`[15, 42, 74] x 1152` vision interpolation matched the official helper bit-exactly while reducing incremental CUDA
+allocation from `1,291,986,432` to `284,866,048` bytes relative to the unbounded float32 implementation. A packed
+production image/video grid reduced the same metric from `2,086,086,144` to `418,362,880` bytes.
 
 ## Decisions
 
@@ -55,6 +60,8 @@ full training, export, reload, or inference run.
 - Emit H3 weights with Diffusers' conventional safetensors names and 5 GB
   shards; keep the converter's legacy `model.safetensors` contract for model
   plugins that have not opted into this layout.
+- Preserve Qwen3-VL's float32 vision interpolation through accumulation, bound its four-tap temporary workspace, and
+  cast the completed positions only at the vision residual-add boundary.
 
 ## Evidence boundary
 

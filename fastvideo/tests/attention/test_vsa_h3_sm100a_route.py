@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Checks for the VSA-H3 tile-64 sm_100a route and odd-tile transport.
+"""Checks for the VSA-H3 tile-64 sm_100a/sm_103a route and odd-tile transport.
 
 The opt-in third kernel route (``FASTVIDEO_VSA_SM100A=1``) must (a) stay off by
 default, (b) engage only when the extension is present, the device qualifies,
@@ -142,8 +142,8 @@ def test_prepare_for_regional_compile_resolves_supported_route(monkeypatch):
     assert probe_q.dtype == torch.bfloat16
     assert probe_vbs.dtype == torch.int32
     assert probe_vbs.tolist() == [64, 64]
-    assert impl._regional_compile_layer_idx is not None
-    assert impl._regional_compile_layer_idx.item() == -1
+    assert impl._compile_layer_idx is not None
+    assert impl._compile_layer_idx.item() == -1
 
 
 def test_prepare_for_regional_compile_env_off_skips_probe(monkeypatch):
@@ -156,8 +156,8 @@ def test_prepare_for_regional_compile_env_off_skips_probe(monkeypatch):
 
     assert unsupported is not None
     assert VSA_SM100A_ENV in unsupported
+    assert impl._compile_layer_idx is not None
     assert impl._regional_compile_sm100a_enabled is False
-    assert impl._regional_compile_layer_idx is None
     assert fake_sm.support_calls == []
 
 
@@ -177,8 +177,8 @@ def test_prepare_for_regional_compile_requires_mask_entry(monkeypatch):
     unsupported = impl.prepare_for_regional_compile(torch.device("cpu"))
 
     assert unsupported is not None
+    assert impl._compile_layer_idx is not None
     assert impl._regional_compile_sm100a_enabled is False
-    assert impl._regional_compile_layer_idx is None
     assert len(warnings) == 1
     assert "compatibility route" in warnings[0]
 
@@ -308,6 +308,61 @@ def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_ov
         torch._dynamo.reset()
 
 
+def test_generic_compile_reuses_graph_across_layer_indices_and_stays_on_triton(monkeypatch):
+    """Pipeline compile must share one graph without selecting sm_100a."""
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setenv(VSA_SM100A_ENV, "1")
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    meta = _build_meta(sparsity=0.5, dense_layers=(0, 17), prefix_segments=(64, 64))
+    q, k, v = _tiled_qkv(meta)
+
+    def fake_triton(q, k, v, block_map, variable_block_sizes):
+        del k, v, variable_block_sizes
+        return q + block_map.all().to(q.dtype), None
+
+    def fail_sm100a(*args, **kwargs):
+        raise AssertionError("generic torch.compile unexpectedly selected sm_100a")
+
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fake_triton)
+    monkeypatch.setattr(fake_sm, "is_supported", fail_sm100a)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a", fail_sm100a)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask", fail_sm100a)
+    monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_sm100a)
+
+    implementations = []
+    for layer_idx in range(20):
+        impl = MiniMaxH3VSAImpl(
+            num_heads=_HEADS,
+            head_size=_DIM,
+            causal=False,
+            softmax_scale=_DIM**-0.5,
+            prefix=f"transformer_blocks.{layer_idx}.attn",
+        )
+        impl.prepare_for_compile(torch.device("cpu"))
+        implementations.append(impl)
+
+    compiled_graphs = []
+
+    def recording_backend(graph_module, _example_inputs):
+        compiled_graphs.append(graph_module)
+        return graph_module.forward
+
+    torch._dynamo.reset()
+    try:
+        compiled = [torch.compile(impl.forward, backend=recording_backend, fullgraph=True)
+                    for impl in implementations]
+        with torch.inference_mode():
+            for layer_idx, run in enumerate(compiled):
+                actual = run(q, k, v, None, meta)
+                expected_delta = 1.0 if layer_idx in meta.dense_layers else 0.0
+                torch.testing.assert_close(actual, q + expected_delta, atol=0, rtol=0)
+    finally:
+        torch._dynamo.reset()
+
+    assert len(compiled_graphs) == 1
+
+
 def test_default_off_routes_triton(routed, monkeypatch):
     fake_sm, fake_triton, run, _ = routed
     monkeypatch.delenv(VSA_SM100A_ENV, raising=False)
@@ -342,7 +397,7 @@ def test_env_on_routes_sm100a_with_index_metadata(routed, monkeypatch):
     assert call["q2k_idx"].shape[-1] == n_tiles and call["q2k_idx"].dtype == torch.int32
     assert call["vbs"].dtype == torch.int32
     assert call["need_lse"] is False
-    assert messages == ["MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel"]
+    assert messages == ["MiniMax-H3 VSA tile-64 forward: using the sm100a/sm103a CUDA block-sparse kernel"]
     # BHSD kernel result comes back in the backend's BSHD layout
     assert out.shape == (1, n_tiles * 64, _HEADS, _DIM)
 
@@ -365,7 +420,8 @@ def test_sm100a_engagement_receipt_logs_once_without_stacklevel_conflict(routed,
 
     assert fake_triton.calls == 0
     assert len(fake_sm.calls) == 2
-    assert records == [(logging.INFO, "MiniMax-H3 VSA tile-64 forward: using the sm100a CUDA block-sparse kernel", (),
+    assert records == [(logging.INFO,
+                        "MiniMax-H3 VSA tile-64 forward: using the sm100a/sm103a CUDA block-sparse kernel", (),
                         {"stacklevel": 2})]
 
 
@@ -550,11 +606,11 @@ def test_forward_rejects_non_contract_transport_shapes(routed):
 
 
 def test_real_sm100a_odd_route_matches_triton_oracle(monkeypatch):
-    """Exercise the padded route through the actual GB200 extension."""
-    if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (10, 0):
-        pytest.skip("requires a GB200 (sm_100a) compute node")
+    """Exercise the padded route through the actual data-center Blackwell extension."""
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
+        pytest.skip("requires a GB200/B300 (sm_100a/sm_103a) compute node")
     if vsa_h3._sm100a is None or not vsa_h3._sm100a._HAS_VSA_SM100A:
-        pytest.skip("requires a fastvideo_kernel build containing sm_100a VSA")
+        pytest.skip("requires a fastvideo_kernel build containing data-center Blackwell VSA")
 
     device = torch.device("cuda")
     meta = _build_meta(device=device, sparsity=0.5)
@@ -588,10 +644,10 @@ def test_real_sm100a_odd_route_matches_triton_oracle(monkeypatch):
 
 def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(monkeypatch):
     """Capture #1745's odd transport buffer mutation with real Inductor."""
-    if not torch.cuda.is_available() or torch.cuda.get_device_capability() != (10, 0):
-        pytest.skip("requires a GB200 (sm_100a) compute node")
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
+        pytest.skip("requires a GB200/B300 (sm_100a/sm_103a) compute node")
     if vsa_h3._sm100a is None or not vsa_h3._sm100a._HAS_VSA_SM100A:
-        pytest.skip("requires a fastvideo_kernel build containing sm_100a VSA")
+        pytest.skip("requires a fastvideo_kernel build containing data-center Blackwell VSA")
 
     device = torch.device("cuda")
     monkeypatch.setenv(VSA_SM100A_ENV, "1")

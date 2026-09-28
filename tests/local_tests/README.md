@@ -30,7 +30,9 @@ tests/local_tests/<family>/
 | LTX-2 | T2V (+ audio) | [`ltx2/`](./ltx2/) |
 | Stable Diffusion 3.5 | T2I | [`sd35/`](./sd35/) |
 | Stable Audio Open 1.0 | T2A | [`stable_audio/`](./stable_audio/) |
-| Wan2.2 | I2V | [`wan22/`](./wan22/) |
+
+Wan2.2 I2V record-schema checks live in the
+[package dataset tests](../../fastvideo/tests/dataset/test_schema_record_creator.py).
 
 ## Running a family
 

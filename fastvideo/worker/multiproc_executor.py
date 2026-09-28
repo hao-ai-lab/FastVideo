@@ -46,6 +46,16 @@ def _raise_for_rpc_errors(method: str | Callable, responses: list[Any]) -> None:
         raise RuntimeError(f"RPC {method!r} failed: " + "; ".join(errors))
 
 
+class _WorkerSignalExit(SystemExit):
+    """Carry the signal that requested worker shutdown through ``SystemExit``."""
+
+    def __init__(self, signum: int) -> None:
+        # Keep the original argument-less SystemExit semantics while retaining
+        # the signal identity for diagnostics.
+        super().__init__()
+        self.signum = signum
+
+
 def _make_queue_log_handler(log_queue: Queue) -> logging.Handler:
     """Create a QueueHandler that forwards fastvideo logs to a multiprocessing queue."""
     return logging.handlers.QueueHandler(log_queue)
@@ -552,20 +562,24 @@ class WorkerMultiprocProc:
             nonlocal shutdown_requested
             if not shutdown_requested:
                 shutdown_requested = True
-                raise SystemExit()
-
-        # Either SIGTERM or SIGINT will terminate the worker
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-        kill_itself_when_parent_died()
-        faulthandler.enable()
-        parent_process = psutil.Process().parent()
+                raise _WorkerSignalExit(signum)
 
         worker = None
         ready_pipe = kwargs.pop("ready_pipe")
         rank = kwargs.get("rank")
+        parent_process = None
 
         try:
+            # Keep all setup after handler installation inside this guarded
+            # region. The parent may terminate peer workers as soon as one
+            # worker fails, including while another peer is still starting.
+            # Either SIGTERM or SIGINT will terminate the worker.
+            signal.signal(signal.SIGTERM, signal_handler)
+            signal.signal(signal.SIGINT, signal_handler)
+            kill_itself_when_parent_died()
+            faulthandler.enable()
+            parent_process = psutil.Process().parent()
+
             worker = WorkerMultiprocProc(*args, **kwargs)
 
             # Send READY once we know everything is loaded
@@ -577,6 +591,31 @@ class WorkerMultiprocProc:
             ready_pipe = None
 
             worker.worker_busy_loop()
+
+        except _WorkerSignalExit as exc:
+            # Raised by the SIGTERM/SIGINT handler installed above, so it is a
+            # BaseException and not an Exception: without this clause it walks
+            # straight past the handler below and the worker dies having reported
+            # nothing at all. The parent then sees only a closed pipe and raises
+            # "See stack trace for root cause" with no stack trace attached.
+            #
+            # Log with the traceback rather than a bare message. A signal handler
+            # runs on top of whatever the process was executing, so the frames
+            # here are the frames that were interrupted, which is the only clue
+            # to what the worker was doing when it was told to stop.
+            signal_name = signal.Signals(exc.signum).name
+            if exc.signum == signal.SIGINT:
+                logger.exception(
+                    "Worker %d received %s (%d) while running. This normally means the user interrupted "
+                    "the parent process. The stack below is where execution was interrupted, not the cause.", rank,
+                    signal_name, exc.signum)
+            else:
+                logger.exception(
+                    "Worker %d received %s (%d) while running. This can come from an external process, "
+                    "such as an out-of-memory daemon, or from the parent cleaning up workers, including "
+                    "after another worker failed. The stack below is where execution was interrupted, not "
+                    "the cause.", rank, signal_name, exc.signum)
+            raise
 
         except Exception as exc:
             if ready_pipe is not None:

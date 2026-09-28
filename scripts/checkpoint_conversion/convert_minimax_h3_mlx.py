@@ -13,6 +13,16 @@ Usage (on the target Mac):
         --out ~/models/FastH3-MLX \\
         --formats "int8 int6 int4"
 
+Dense conversion drops the 50 ``attn.to_gate_compress`` matrices (~3.6 GiB BF16).
+Add ``--include-vsa`` to keep them, quantize them with the selected affine
+INT8/INT6/INT4 grid, and record ``vsa.capable`` in the manifest. Write VSA
+checkpoints to a new directory — do not overwrite an existing dense export.
+
+    python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \\
+        --model-root ~/models/FastH3-Preview-v0.2/transformer \\
+        --out ~/models/FastH3-MLX-vsa \\
+        --formats int6 --include-vsa
+
 Output layout: `~/models/FastH3-MLX/<format>/mlx_h3_dit.safetensors` + manifest.
 """
 
@@ -32,6 +42,10 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     H3_WEIGHTS_FILENAME,
     MINIMAX_H3_AUDIO_SHIFT,
     MINIMAX_H3_VIDEO_SHIFT,
+    MiniMaxH3SchedulerState,
+    adaln_timestep_union,
+    load_fasth3_inference_contract,
+    mlx_h3_checkpoint_vsa_capable,
     mlx_h3_dit_from_diffusers_safetensors,
     minimax_h3_sigmas,
     save_mlx_h3_checkpoint,
@@ -43,10 +57,26 @@ SUPPORTED_FORMATS = ("int8", "int6", "int4")
 DEFAULT_FORMATS = " ".join(SUPPORTED_FORMATS)
 
 
-def _adaln_cache_timesteps() -> np.ndarray:
-    video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
-    audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
-    return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+def _adaln_cache_timesteps(model_root: str | Path | None = None) -> np.ndarray:
+    """Four-step uniform grid, unless the snapshot declares its own shifts.
+
+    FastH3 8-Step V2 carries ``video_scheduler_shift`` / ``audio_scheduler_shift``.
+    Four-step sidecars do not, so those conversions keep the existing cache.
+    A shifted contract that fails to parse aborts conversion.
+    """
+    contract = load_fasth3_inference_contract(model_root)
+    if contract is None:
+        video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
+        audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
+        return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+    video_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["video_scheduler_shift"],
+                                                         contract["dmd_denoising_steps"])
+    audio_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["audio_scheduler_shift"],
+                                                         contract["dmd_denoising_steps"])
+    logger.info("FastH3 shifted schedule contract: %d DMD forwards, video/audio shift=%g/%g",
+                len(contract["dmd_denoising_steps"]), contract["video_scheduler_shift"],
+                contract["audio_scheduler_shift"])
+    return adaln_timestep_union(video_state, audio_state)
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,6 +84,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-root", required=True, help="transformer/ dir of the diffusers snapshot")
     parser.add_argument("--out", required=True, help="base dir for the per-format MLX checkpoints")
     parser.add_argument("--formats", default=DEFAULT_FORMATS)
+    parser.add_argument(
+        "--include-vsa",
+        action="store_true",
+        help=("retain and quantize transformer_blocks.*.attn.to_gate_compress.weight "
+              "(required for MLX VSA inference; omitted by dense conversion)"),
+    )
     return parser.parse_args()
 
 
@@ -67,7 +103,7 @@ def main() -> None:
         raise ValueError(f"Unsupported H3 MLX formats: {unsupported}. Choose from {SUPPORTED_FORMATS}.")
     out_base = Path(args.out)
     out_base.mkdir(parents=True, exist_ok=True)
-    cache_timesteps = _adaln_cache_timesteps()
+    cache_timesteps = _adaln_cache_timesteps(args.model_root)
 
     for fmt in formats:
         spec = MLXQuantizationSpec.from_name(fmt)
@@ -76,10 +112,19 @@ def main() -> None:
         ensure_quantization_supported(spec)
         dtype = "bf16"
         out_dir = out_base / fmt
-        if (out_dir / H3_MANIFEST_FILENAME).exists() and (out_dir / H3_WEIGHTS_FILENAME).exists():
-            print(f"[skip] {fmt} already converted at {out_dir}", flush=True)
+        already = (out_dir / H3_MANIFEST_FILENAME).exists() and (out_dir / H3_WEIGHTS_FILENAME).exists()
+        if already:
+            capable = mlx_h3_checkpoint_vsa_capable(out_dir)
+            if bool(capable) == bool(args.include_vsa):
+                print(f"[skip] {fmt} already converted at {out_dir} (vsa.capable={capable})", flush=True)
+                continue
+            logger.warning(
+                "Skipping %s: existing checkpoint has vsa.capable=%s, requested include_vsa=%s. "
+                "Use a new output directory to convert this format in the requested mode.",
+                out_dir, capable, args.include_vsa,
+            )
             continue
-        print(f"[convert] {fmt} (dtype={dtype}, spec={spec})", flush=True)
+        print(f"[convert] {fmt} (dtype={dtype}, spec={spec}, include_vsa={args.include_vsa})", flush=True)
         if hasattr(mx, "reset_peak_memory"):
             mx.reset_peak_memory()
         t0 = time.perf_counter()
@@ -88,6 +133,7 @@ def main() -> None:
             quantization=spec,
             dtype=dtype,
             adaln_cache_timesteps=cache_timesteps,
+            include_vsa=args.include_vsa,
         )
         mx.eval()
         save_mlx_h3_checkpoint(dit, out_dir)

@@ -36,14 +36,14 @@ def _summarize_param_names(names: set[str]) -> str:
     return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
 
 
-def _maybe_quantize_model(model: nn.Module) -> None:
-    """Quantize NVFP4- or FP8-tagged linear layers in-place after weights are loaded.
+def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lora_merge: bool = False) -> None:
+    """Quantize inference linear weights after checkpoint loading.
 
-    Walks the module tree once, looking for layers whose ``quant_method``
-    is an :class:`NVFP4QuantizeMethod` or :class:`FP8QuantizeMethod` (attached
-    at construction time by the respective ``get_quant_method``). When at least
+    Walks the module tree once, looking for layers whose ``quant_method`` is an
+    inference quantization method attached at construction time. When at least
     one such layer exists, calls the matching conversion function to register
-    quantized weight buffers on each targeted layer.
+    quantized weight buffers on each targeted layer. NVFP4 and MXFP8 conversion
+    can be deferred until a configured inference LoRA is merged.
 
     The walk returns on the first quantized layer found so unquantized callers
     pay only an ``isinstance`` check per module. Both imports are deferred so
@@ -70,12 +70,19 @@ def _maybe_quantize_model(model: nn.Module) -> None:
         FP8QuantizeMethod,
         convert_model_to_fp8,
     )
+    from fastvideo.layers.quantization.mxfp8_config import (
+        MXFP8QuantizeMethod,
+        convert_model_to_mxfp8,
+    )
 
     qat_train_attached = 0
     qat_train_skipped = 0
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QuantizeMethod):
+            if defer_weight_conversion_until_lora_merge:
+                logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
+                return
             logger.info("Converting loaded model weights for NVFP4 linear layers")
             convert_model_to_nvfp4(model)
             return
@@ -86,6 +93,13 @@ def _maybe_quantize_model(model: nn.Module) -> None:
         if isinstance(qm, FP8QuantizeMethod):
             logger.info("Converting loaded model weights for FP8 linear layers")
             convert_model_to_fp8(model)
+            return
+        if isinstance(qm, MXFP8QuantizeMethod):
+            if defer_weight_conversion_until_lora_merge:
+                logger.info("Deferring MXFP8 weight conversion until the inference LoRA merge completes")
+                return
+            logger.info("Converting loaded model weights for MXFP8 linear layers")
+            convert_model_to_mxfp8(model)
             return
         # QAT-train configs are mutually exclusive with the inference schemes
         # above (one quant_config per model), so when they're active the loop
@@ -144,6 +158,26 @@ def _prepare_model_for_compile(model: nn.Module, *, regional: bool) -> str | Non
     return unsupported if isinstance(unsupported, str) and unsupported else None
 
 
+def _validate_fsdp_inference_quantization(init_params: dict[str, Any], fsdp_inference: bool) -> None:
+    """Enforce the transformer-quantization allowlist for FSDP inference."""
+    transformer_config = init_params.get("config")
+    quant_config = getattr(transformer_config, "quant_config", None)
+    if not fsdp_inference or quant_config is None:
+        return
+
+    from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+        NVFP4QATTrainConfig, )
+
+    if isinstance(quant_config, NVFP4QATTrainConfig):
+        return
+
+    # TODO: (David) Currently reject every FSDP inference quantization config except NVFP4QATTrainConfig.
+    # Support FSDP inference with precomputed quantized weights.
+    raise NotImplementedError(
+        "FSDP inference supports unquantized transformers and NVFP4QATTrainConfig only; "
+        f"got {type(quant_config).__name__}.")
+
+
 # Supports optional torch.compile for FSDP-wrapped models during training
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],
@@ -183,6 +217,8 @@ def maybe_load_fsdp_model(
     is established and before checkpoint weights are loaded. Training uses it to
     install adapter parameters that must participate in FSDP from the outset.
     """
+    _validate_fsdp_inference_quantization(init_params, fsdp_inference)
+
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
     mp_policy = MixedPrecisionPolicy(param_dtype, reduce_dtype, output_dtype, cast_forward_inputs=False)
@@ -248,7 +284,11 @@ def maybe_load_fsdp_model(
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
                     pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=True)
+    # Host offload is already disabled on unified memory (GB10). Staging the
+    # 35B FastH3 DiT on CPU and then copying to CUDA doubled that working set
+    # and took minutes. Follow cpu_offload: read onto the accelerator.
+    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=cpu_offload)
+    logger.info("Loading transformer weights with to_cpu=%s", cpu_offload)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
     dense_lora_patch = DenseLoRAPatch.from_adapter(
         lora_path,
@@ -292,7 +332,7 @@ def maybe_load_fsdp_model(
     # responsibility is just to materialize the quantized weight buffers
     # from the freshly-loaded bf16 weights. No-op when no quantized layers
     # are present (lazy imports inside the helper).
-    _maybe_quantize_model(model)
+    _maybe_quantize_model(model, defer_weight_conversion_until_lora_merge=lora_path is not None)
 
     compile_in_loader = enable_torch_compile and training_mode
     if compile_in_loader:
