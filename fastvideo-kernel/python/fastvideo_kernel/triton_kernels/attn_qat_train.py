@@ -40,6 +40,31 @@ def _sm100_optimization_enabled():
     return os.environ.get("FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED", "1") != "0"
 
 
+def _sm100_wide_backward_enabled():
+    return os.environ.get("FASTVIDEO_ATTN_QAT_SM100_WIDE_BWD", "1") != "0"
+
+
+_SM100_LONG_SEQ_MIN = 16_384
+
+
+def _sm100_long_sequence_route(n_ctx_q: int, n_ctx_kv: int, dtype, optimized: bool, mode: str) -> bool:
+    return (optimized and mode == "fast" and dtype == torch.bfloat16 and n_ctx_q == n_ctx_kv
+            and n_ctx_q >= _SM100_LONG_SEQ_MIN and not _sm100_exact_m_enabled())
+
+
+def _select_sm100_backward_blocks(n_ctx_q: int, n_ctx_kv: int):
+    if n_ctx_q == n_ctx_kv and n_ctx_q >= _SM100_LONG_SEQ_MIN and _sm100_wide_backward_enabled():
+        return 64, 128
+    return 64, 64
+
+
+def _sm100_backward_launch_config(block_n: int, dtype):
+    # dQ and dK/dV retain separate launch configurations on the wide long-seq path.
+    if block_n == 128 and dtype == torch.bfloat16:
+        return ((4, 2), (8, 3))
+    return (8, 2), (8, 3)
+
+
 def _sm100_exact_m_enabled():
     return os.environ.get("FASTVIDEO_ATTN_QAT_FWD_EXACT_M", "0") != "0"
 
@@ -198,6 +223,54 @@ def _attn_fwd_inner(acc,
         return acc, acc, l_i, m_i
 
 
+@triton.jit
+def _sm100_qat_fwd_step(acc, high_prec_acc, l_i, m_i, q, desc_k, desc_v, offset_y, start_n,
+                        offs_n, qk_scale, N_CTX, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+                        TAIL: tl.constexpr):
+    k = desc_k.load([offset_y + start_n, 0])
+    if TAIL:
+        valid = start_n + offs_n < N_CTX
+        k = tl.where(valid[:, None], k, 0.0)
+    qk = tl.dot(q, tl.trans(k))
+    if TAIL:
+        qk = tl.where(valid[None, :], qk, -1.0e6)
+    m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+    qk = qk * qk_scale - m_ij[:, None]
+    p = tl.math.exp2(qk)
+    p, high_prec_p = fake_quantize(src_tensor=p,
+                                   valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
+                                   BLOCK_SIZE_OUT_DIM=BLOCK_M, BLOCK_SIZE_QUANT_DIM=BLOCK_N,
+                                   dst_dtype=tl.bfloat16, two_level_quant_P=False, use_global_sf=False)
+    l_ij = tl.sum(high_prec_p, 1)
+    alpha = tl.math.exp2(m_i - m_ij)
+    acc = acc * alpha[:, None]
+    high_prec_acc = high_prec_acc * alpha[:, None]
+    v = desc_v.load([offset_y + start_n, 0])
+    if TAIL:
+        v = tl.where(valid[:, None], v, 0.0)
+    acc = tl.dot(p.to(tl.bfloat16), v.to(tl.bfloat16), acc)
+    high_prec_acc = tl.dot(high_prec_p, v, high_prec_acc)
+    l_i = l_i * alpha + l_ij
+    return acc, high_prec_acc, l_i, m_ij
+
+
+@triton.jit
+def _sm100_qat_fwd_inner(acc, high_prec_acc, l_i, m_i, q, desc_k, desc_v, offset_y,
+                          offs_n, qk_scale, N_CTX, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+    # Compile complete tiles without per-element bounds masks. Keep the one
+    # partial tail tile in its own specialization to preserve QAT arithmetic.
+    full_end = (N_CTX // BLOCK_N) * BLOCK_N
+    for start_n in tl.range(0, full_end, BLOCK_N, disallow_acc_multi_buffer=True):
+        acc, high_prec_acc, l_i, m_i = _sm100_qat_fwd_step(
+            acc, high_prec_acc, l_i, m_i, q, desc_k, desc_v, offset_y, start_n,
+            offs_n, qk_scale, N_CTX, BLOCK_M, BLOCK_N, TAIL=False)
+    if full_end < N_CTX:
+        acc, high_prec_acc, l_i, m_i = _sm100_qat_fwd_step(
+            acc, high_prec_acc, l_i, m_i, q, desc_k, desc_v, offset_y, full_end,
+            offs_n, qk_scale, N_CTX, BLOCK_M, BLOCK_N, TAIL=True)
+    return acc, high_prec_acc, l_i, m_i
+
+
 def _host_descriptor_pre_hook(nargs):
     BLOCK_M = nargs["BLOCK_M"]
     BLOCK_N = nargs["BLOCK_N"]
@@ -283,6 +356,7 @@ def _attn_fwd(
     two_level_quant_P: tl.constexpr = False,
     use_global_sf_P: tl.constexpr = True,
     JOIN_QAT_PV: tl.constexpr = False,
+    SM100_SPLIT_FULL_TILES: tl.constexpr = False,
 ):
     dtype = tl.float8e5 if FP8_OUTPUT else tl.bfloat16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
@@ -347,11 +421,16 @@ def _attn_fwd(
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
     if STAGE & 1:
-        acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, desc_k, desc_v,
-                                                       offset_y_kv, dtype, start_m, qk_scale, BLOCK_M, HEAD_DIM,
-                                                       BLOCK_N, 4 - STAGE, offs_m, offs_n, N_CTX_KV, warp_specialize,
-                                                       IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P,
-                                                       use_global_sf_P, JOIN_QAT_PV)
+        if SM100_SPLIT_FULL_TILES:
+            acc, high_prec_acc, l_i, m_i = _sm100_qat_fwd_inner(
+                acc, high_prec_acc, l_i, m_i, q, desc_k, desc_v, offset_y_kv, offs_n, qk_scale,
+                N_CTX_KV, BLOCK_M, BLOCK_N)
+        else:
+            acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, desc_k, desc_v,
+                                                           offset_y_kv, dtype, start_m, qk_scale, BLOCK_M, HEAD_DIM,
+                                                           BLOCK_N, 4 - STAGE, offs_m, offs_n, N_CTX_KV,
+                                                           warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P,
+                                                           two_level_quant_P, use_global_sf_P, JOIN_QAT_PV)
     # stage 2: on-band
     if STAGE & 2:
         acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, desc_k, desc_v,
@@ -603,6 +682,78 @@ def _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_k
 
 
 @triton.jit
+def _attn_bwd_dq_full_tile(dq, q, do, m, Di, K, V, k_m, qk_scale,
+                           stride_tok_kv, stride_d_kv, N_CTX_KV, start_n,
+                           HEAD_DIM: tl.constexpr, BLOCK_N2: tl.constexpr,
+                           MASK_KV: tl.constexpr, SMOOTH_K: tl.constexpr):
+    offs_k = tl.arange(0, HEAD_DIM)
+    offs_n = start_n + tl.arange(0, BLOCK_N2)
+    if MASK_KV:
+        kv_valid = offs_n < N_CTX_KV
+    else:
+        kv_valid = tl.full((BLOCK_N2,), True, tl.int1)
+
+    k = tl.load(K + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None])
+    v = tl.load(V + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None])
+
+    qk = tl.dot(q, tl.trans(k))
+    qk = qk * qk_scale
+    p = tl.math.exp2(qk - m)
+
+    dp = tl.dot(do, tl.trans(v))
+    ds = p * (dp - Di[:, None])
+    ds = ds.to(tl.bfloat16)
+    dq += tl.dot(ds, k)
+
+    if SMOOTH_K:
+        dq += tl.sum(ds, axis=1, keep_dims=True) * k_m[None, :]
+
+    return dq
+
+
+@triton.jit
+def _attn_bwd_dkdv_full_tile(dk, dv, k_block, v_block, Q, DO, M, D, qk_scale,
+                             stride_tok_q, stride_d_q, N_CTX_Q, start_m,
+                             HEAD_DIM: tl.constexpr, BLOCK_M1: tl.constexpr, BLOCK_N1: tl.constexpr,
+                             MASK_Q: tl.constexpr, IS_QAT: tl.constexpr,
+                             fake_quant_P: tl.constexpr, two_level_quant_P: tl.constexpr,
+                             use_global_sf_P: tl.constexpr):
+    offs_k = tl.arange(0, HEAD_DIM)
+    offs_m = start_m + tl.arange(0, BLOCK_M1)
+    if MASK_Q:
+        q_valid = offs_m < N_CTX_Q
+    else:
+        q_valid = tl.full((BLOCK_M1,), True, tl.int1)
+
+    q = tl.load(Q + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
+    do = tl.load(DO + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
+    m = tl.load(M + offs_m, mask=q_valid)
+
+    qk = tl.dot(q, tl.trans(k_block))
+    # Apply scale AFTER dot product (matches forward pass, better precision)
+    qk = qk * qk_scale
+    p = tl.math.exp2(qk - m[:, None])
+    p_quant = p
+    if IS_QAT and fake_quant_P:
+        p_quant, _ = fake_quantize(src_tensor=p,
+                                   valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
+                                   BLOCK_SIZE_OUT_DIM=BLOCK_M1,
+                                   BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
+                                   dst_dtype=p.dtype,
+                                   two_level_quant_P=two_level_quant_P,
+                                   use_global_sf=use_global_sf_P)
+    dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
+
+    dp = tl.dot(do, tl.trans(v_block))
+    Di = tl.load(D + offs_m, mask=q_valid)
+    ds = p * (dp - Di[:, None])
+    ds = ds.to(tl.bfloat16)
+    dk += tl.dot(tl.trans(ds), q)
+
+    return dk, dv
+
+
+@triton.jit
 def _attn_bwd_dq_cross(Q,
                        K,
                        V,
@@ -627,7 +778,8 @@ def _attn_bwd_dq_cross(Q,
                        BLOCK_N2: tl.constexpr,
                        HEAD_DIM: tl.constexpr,
                        SMOOTH_K: tl.constexpr,
-                       warp_specialize: tl.constexpr = False):
+                       warp_specialize: tl.constexpr = False,
+                       SPLIT_FULL_TILES: tl.constexpr = False):
     # Apply scale AFTER dot product for better precision
     RCP_LN2: tl.constexpr = 1.4426950408889634  # = 1.0 / ln(2)
     qk_scale = sm_scale * RCP_LN2
@@ -659,25 +811,41 @@ def _attn_bwd_dq_cross(Q,
     num_steps = (N_CTX_KV + BLOCK_N2 - 1) // BLOCK_N2
     if SMOOTH_K:
         k_m = tl.load(K_MEAN + offs_k)
-    for step in range(num_steps):
-        start_n = step * BLOCK_N2
-        offs_n = start_n + tl.arange(0, BLOCK_N2)
-        kv_valid = offs_n < N_CTX_KV
+    if SPLIT_FULL_TILES:
+        tl.static_assert(not SMOOTH_K)
+        k_m = None
+        for step in range(N_CTX_KV // BLOCK_N2):
+            start_n = step * BLOCK_N2
+            dq = _attn_bwd_dq_full_tile(
+                dq, q, do, m, Di, K, V, k_m, qk_scale,
+                stride_tok_kv, stride_d_kv, N_CTX_KV, start_n,
+                HEAD_DIM=HEAD_DIM, BLOCK_N2=BLOCK_N2, MASK_KV=False, SMOOTH_K=False)
+        if N_CTX_KV % BLOCK_N2:
+            start_n = (N_CTX_KV // BLOCK_N2) * BLOCK_N2
+            dq = _attn_bwd_dq_full_tile(
+                dq, q, do, m, Di, K, V, k_m, qk_scale,
+                stride_tok_kv, stride_d_kv, N_CTX_KV, start_n,
+                HEAD_DIM=HEAD_DIM, BLOCK_N2=BLOCK_N2, MASK_KV=True, SMOOTH_K=False)
+    else:
+        for step in range(num_steps):
+            start_n = step * BLOCK_N2
+            offs_n = start_n + tl.arange(0, BLOCK_N2)
+            kv_valid = offs_n < N_CTX_KV
 
-        k = tl.load(K + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None])
-        v = tl.load(V + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None])
+            k = tl.load(K + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None])
+            v = tl.load(V + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None])
 
-        qk = tl.dot(q, tl.trans(k))
-        qk = qk * qk_scale
-        p = tl.math.exp2(qk - m)
+            qk = tl.dot(q, tl.trans(k))
+            qk = qk * qk_scale
+            p = tl.math.exp2(qk - m)
 
-        dp = tl.dot(do, tl.trans(v))
-        ds = p * (dp - Di[:, None])
-        ds = ds.to(tl.bfloat16)
-        dq += tl.dot(ds, k)
+            dp = tl.dot(do, tl.trans(v))
+            ds = p * (dp - Di[:, None])
+            ds = ds.to(tl.bfloat16)
+            dq += tl.dot(ds, k)
 
-        if SMOOTH_K:
-            dq += tl.sum(ds, axis=1, keep_dims=True) * k_m[None, :]
+            if SMOOTH_K:
+                dq += tl.sum(ds, axis=1, keep_dims=True) * k_m[None, :]
 
     # NOTE: dq is scaled by sm_scale since K is not pre-scaled
     dq *= sm_scale
@@ -715,7 +883,8 @@ def _attn_bwd_dkdv_cross(Q,
                          fake_quant_P: tl.constexpr = True,
                          SMOOTH_Q: tl.constexpr = False,
                          use_global_sf_P: tl.constexpr = True,
-                         warp_specialize: tl.constexpr = False):
+                         warp_specialize: tl.constexpr = False,
+                         SPLIT_FULL_TILES: tl.constexpr = False):
     # Apply scale AFTER dot product for better precision
     RCP_LN2: tl.constexpr = 1.4426950408889634  # = 1.0 / ln(2)
     qk_scale = sm_scale * RCP_LN2
@@ -749,39 +918,58 @@ def _attn_bwd_dkdv_cross(Q,
     v_block = tl.load(V + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None])
 
     num_q_steps = (N_CTX_Q + BLOCK_M1 - 1) // BLOCK_M1
-    for step in range(num_q_steps):
-        start_m = step * BLOCK_M1
-        offs_m = start_m + tl.arange(0, BLOCK_M1)
-        q_valid = offs_m < N_CTX_Q
+    if SPLIT_FULL_TILES:
+        tl.static_assert(not SMOOTH_Q)
+        for step in range(N_CTX_Q // BLOCK_M1):
+            start_m = step * BLOCK_M1
+            dk, dv = _attn_bwd_dkdv_full_tile(
+                dk, dv, k_block, v_block, Q, DO, M, D, qk_scale,
+                stride_tok_q, stride_d_q, N_CTX_Q, start_m,
+                HEAD_DIM=HEAD_DIM, BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1, MASK_Q=False,
+                IS_QAT=IS_QAT, fake_quant_P=fake_quant_P, two_level_quant_P=two_level_quant_P,
+                use_global_sf_P=use_global_sf_P)
+        if N_CTX_Q % BLOCK_M1:
+            start_m = (N_CTX_Q // BLOCK_M1) * BLOCK_M1
+            dk, dv = _attn_bwd_dkdv_full_tile(
+                dk, dv, k_block, v_block, Q, DO, M, D, qk_scale,
+                stride_tok_q, stride_d_q, N_CTX_Q, start_m,
+                HEAD_DIM=HEAD_DIM, BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1, MASK_Q=True,
+                IS_QAT=IS_QAT, fake_quant_P=fake_quant_P, two_level_quant_P=two_level_quant_P,
+                use_global_sf_P=use_global_sf_P)
+    else:
+        for step in range(num_q_steps):
+            start_m = step * BLOCK_M1
+            offs_m = start_m + tl.arange(0, BLOCK_M1)
+            q_valid = offs_m < N_CTX_Q
 
-        q = tl.load(Q + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
-        do = tl.load(DO + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
-        m = tl.load(M + offs_m, mask=q_valid)
+            q = tl.load(Q + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
+            do = tl.load(DO + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
+            m = tl.load(M + offs_m, mask=q_valid)
 
-        qk = tl.dot(q, tl.trans(k_block))
-        # Apply scale AFTER dot product (matches forward pass, better precision)
-        qk = qk * qk_scale
-        p = tl.math.exp2(qk - m[:, None])
-        p_quant = p
-        if IS_QAT and fake_quant_P:
-            p_quant, _ = fake_quantize(src_tensor=p,
-                                       valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
-                                       BLOCK_SIZE_OUT_DIM=BLOCK_M1,
-                                       BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
-                                       dst_dtype=p.dtype,
-                                       two_level_quant_P=two_level_quant_P,
-                                       use_global_sf=use_global_sf_P)
-        dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
+            qk = tl.dot(q, tl.trans(k_block))
+            # Apply scale AFTER dot product (matches forward pass, better precision)
+            qk = qk * qk_scale
+            p = tl.math.exp2(qk - m[:, None])
+            p_quant = p
+            if IS_QAT and fake_quant_P:
+                p_quant, _ = fake_quantize(src_tensor=p,
+                                           valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
+                                           BLOCK_SIZE_OUT_DIM=BLOCK_M1,
+                                           BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
+                                           dst_dtype=p.dtype,
+                                           two_level_quant_P=two_level_quant_P,
+                                           use_global_sf=use_global_sf_P)
+            dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
 
-        dp = tl.dot(do, tl.trans(v_block))
-        Di = tl.load(D + offs_m, mask=q_valid)
-        ds = p * (dp - Di[:, None])
-        ds = ds.to(tl.bfloat16)
-        dk += tl.dot(tl.trans(ds), q)
+            dp = tl.dot(do, tl.trans(v_block))
+            Di = tl.load(D + offs_m, mask=q_valid)
+            ds = p * (dp - Di[:, None])
+            ds = ds.to(tl.bfloat16)
+            dk += tl.dot(tl.trans(ds), q)
 
-        if SMOOTH_Q:
-            q_m = tl.load(Q_MEAN + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
-            dk += tl.sum(ds, axis=1, keep_dims=True) * q_m
+            if SMOOTH_Q:
+                q_m = tl.load(Q_MEAN + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
+                dk += tl.sum(ds, axis=1, keep_dims=True) * q_m
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
     tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
@@ -1287,6 +1475,8 @@ class _attention(torch.autograd.Function):
                         two_level_quant_P=two_level_quant_P,
                         use_global_sf_P=use_global_sf_P,
                         JOIN_QAT_PV=(consumer_blackwell and _consumer_blackwell_join_qat_pv_enabled()),
+                        SM100_SPLIT_FULL_TILES=_sm100_long_sequence_route(
+                            N_CTX_Q, N_CTX_KV, q.dtype, sm100_optimized, fwd_mode),
                         num_warps=fwd_num_warps,
                         num_stages=fwd_num_stages,
                         **extra_kern_args)
@@ -1379,11 +1569,13 @@ class _attention(torch.autograd.Function):
         sm100_optimized_backward = (getattr(ctx, "sm100_optimized", False) and ctx.use_qat_qkv_backward
                                     and not ctx.smooth_k and not ctx.smooth_q and N_CTX_KV % 16 == 0)
         if sm100_optimized_backward:
-            # Keeping dQ and dK/dV in separate programs allows 64x64 tiles
+            # Keeping dQ and dK/dV in separate programs allows larger tiles
             # without carrying all three fp32 accumulators at once. On SM100
             # this is substantially faster than the legacy 32x32 combined
             # self-attention program with the same math and BF16 parity bounds.
-            block_m, block_n = 64, 64
+            block_m, block_n = _select_sm100_backward_blocks(N_CTX_Q, N_CTX_KV)
+            split_full_backward = block_n == 128
+            dq_launch, dkdv_launch = _sm100_backward_launch_config(block_n, q.dtype)
             grid_dq = ((N_CTX_Q + block_m - 1) // block_m, 1, BATCH * N_HEAD)
             _attn_bwd_dq_cross[grid_dq](
                 q,
@@ -1411,8 +1603,9 @@ class _attention(torch.autograd.Function):
                 HEAD_DIM=ctx.HEAD_DIM,
                 SMOOTH_K=False,
                 warp_specialize=False,
-                num_warps=8,
-                num_stages=2,
+                SPLIT_FULL_TILES=split_full_backward,
+                num_warps=dq_launch[0],
+                num_stages=dq_launch[1],
             )
             grid_dkdv = ((N_CTX_KV + block_n - 1) // block_n, 1, BATCH * N_HEAD)
             _attn_bwd_dkdv_cross[grid_dkdv](
@@ -1446,8 +1639,9 @@ class _attention(torch.autograd.Function):
                 SMOOTH_Q=False,
                 use_global_sf_P=False,
                 warp_specialize=False,
-                num_warps=8,
-                num_stages=3,
+                SPLIT_FULL_TILES=split_full_backward,
+                num_warps=dkdv_launch[0],
+                num_stages=dkdv_launch[1],
             )
         elif N_CTX_Q == N_CTX_KV:
             # Use existing kernel for self-attention (same sequence lengths)
