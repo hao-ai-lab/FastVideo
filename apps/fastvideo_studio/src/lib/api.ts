@@ -50,8 +50,15 @@ function stripTrailingSlash(url: string): string {
 }
 
 /** Full URL for streaming a job's video/image output (for &lt;video&gt; or &lt;img&gt; src). */
-export function getJobVideoUrl(jobId: string): string {
-	return `${getApiBaseUrl()}/jobs/${jobId}/video`;
+/**
+ * `version` busts the browser's cache after editing a job's video in place
+ * (Trim/Edit video): the URL is otherwise identical before and after an edit,
+ * even though the file on disk changed, so without this the same cached
+ * response keeps showing. Omit it where staleness doesn't matter.
+ */
+export function getJobVideoUrl(jobId: string, version?: number): string {
+	const base = `${getApiBaseUrl()}/jobs/${jobId}/video`;
+	return version ? `${base}?v=${version}` : base;
 }
 
 export interface CreateJobRequest {
@@ -204,6 +211,71 @@ export async function extractLastFrame(jobId: string): Promise<{ path: string; m
 	if (!response.ok) {
 		const err = await response.json().catch(() => ({ detail: "Could not get the last frame" }));
 		throw new Error(err.detail || "Could not get the last frame");
+	}
+	return response.json();
+}
+
+export interface EditVideoParams {
+	startSeconds: number;
+	/** omitted (or undefined) keeps to the end of the video */
+	endSeconds?: number;
+	/** added directly to 0-255 pixel values; 0 = unchanged */
+	brightness?: number;
+	/** 1 = unchanged, 0 = flat gray, >1 = more contrast */
+	contrast?: number;
+	/** 1 = unchanged, 0 = grayscale, >1 = more saturated */
+	saturation?: number;
+}
+
+/**
+ * Cut a completed job's video to a range and/or adjust its color, in place.
+ * The untouched original is kept server-side, so this always renders fresh
+ * from it with the *given* parameters -- pass every value you want kept, not
+ * just the one you changed, or the others reset to their neutral defaults.
+ * Can be undone with restoreJobVideo.
+ */
+export async function trimJob(jobId: string, params: EditVideoParams): Promise<Job> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${jobId}/trim`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			start_seconds: params.startSeconds,
+			end_seconds: params.endSeconds ?? null,
+			brightness: params.brightness ?? 0,
+			contrast: params.contrast ?? 1,
+			saturation: params.saturation ?? 1,
+		}),
+	});
+	if (!response.ok) {
+		const err = await response.json().catch(() => ({ detail: "Could not edit the clip" }));
+		throw new Error(err.detail || "Could not edit the clip");
+	}
+	return response.json();
+}
+
+/** Undo every trim and color adjustment on a job's video, back to what it originally generated. */
+export async function restoreJobVideo(jobId: string): Promise<Job> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${jobId}/restore-video`, { method: "POST" });
+	if (!response.ok) {
+		const err = await response.json().catch(() => ({ detail: "Could not restore the original video" }));
+		throw new Error(err.detail || "Could not restore the original video");
+	}
+	return response.json();
+}
+
+/**
+ * Ask the server to save the last second or so of a finished clip and return its
+ * path, ready to attach to another job as a video reference -- so the next
+ * clip continues with real motion instead of guessing it from a single frame.
+ */
+export async function extractLastClip(jobId: string): Promise<{ path: string; media_type: MediaType }> {
+	const baseApiUrl = getApiBaseUrl();
+	const response = await fetch(`${baseApiUrl}/jobs/${jobId}/last-clip`, { method: "POST" });
+	if (!response.ok) {
+		const err = await response.json().catch(() => ({ detail: "Could not get the end of the clip" }));
+		throw new Error(err.detail || "Could not get the end of the clip");
 	}
 	return response.json();
 }

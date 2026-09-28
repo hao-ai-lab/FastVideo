@@ -9,6 +9,7 @@ import pytest
 
 from fastvideo_studio.job_queue import (
     circular_dependency,
+    deferred_last_clip_source,
     deferred_last_frame_source,
     dependencies,
     dependency_of,
@@ -219,3 +220,59 @@ class TestResolveReferences:
 
         with pytest.raises(UnresolvedReference, match="no frames"):
             resolve_references(after("one"), self._jobs(one="completed").get, fail)
+
+
+def after_clip(job_id: str) -> list[dict[str, str]]:
+    return [{"source": deferred_last_clip_source(job_id), "media_type": "video"}]
+
+
+class TestResolveClipReferences:
+    """The same resolution, but for a trailing-clip (job-last-clip:) reference."""
+
+    def _jobs(self, **statuses: str) -> dict[str, J]:
+        return {k: J(k, v, name=f"Clip {k}") for k, v in statuses.items()}
+
+    def test_uses_the_clip_resolver_not_the_frame_one(self):
+        jobs = self._jobs(one="completed")
+        stored = after_clip("one")
+        resolved = resolve_references(
+            stored, jobs.get,
+            last_frame=lambda job: f"/frames/{job.id}.png",
+            last_clip=lambda job: f"/clips/{job.id}.mp4",
+        )
+        assert resolved == [{"source": "/clips/one.mp4", "media_type": "video"}]
+
+    def test_a_mix_of_frame_and_clip_references_each_use_their_own_resolver(self):
+        jobs = self._jobs(a="completed", b="completed")
+        stored = [*after("a"), *after_clip("b"), {"source": "/x.png", "media_type": "image"}]
+        resolved = resolve_references(
+            stored, jobs.get,
+            last_frame=lambda job: f"/frames/{job.id}.png",
+            last_clip=lambda job: f"/clips/{job.id}.mp4",
+        )
+        assert resolved == [
+            {"source": "/frames/a.png", "media_type": "image"},
+            {"source": "/clips/b.mp4", "media_type": "video"},
+            {"source": "/x.png", "media_type": "image"},
+        ]
+
+    def test_refuses_an_unfinished_source(self):
+        jobs = self._jobs(one="running")
+        with pytest.raises(UnresolvedReference, match="hasn't finished.*running"):
+            resolve_references(after_clip("one"), jobs.get, last_frame=lambda j: "", last_clip=lambda j: "/c.mp4")
+
+    def test_refuses_a_deleted_source(self):
+        with pytest.raises(UnresolvedReference, match="no longer exists"):
+            resolve_references(after_clip("gone"), {}.get, last_frame=lambda j: "", last_clip=lambda j: "/c.mp4")
+
+    def test_without_a_clip_resolver_a_clip_reference_is_refused_not_ignored(self):
+        jobs = self._jobs(one="completed")
+        with pytest.raises(UnresolvedReference, match="can't resolve"):
+            resolve_references(after_clip("one"), jobs.get, last_frame=lambda j: "/f.png")
+
+    def test_dependencies_and_circular_checks_see_clip_references_too(self):
+        jobs = self._jobs(a="pending")
+        jobs["a"].references = after_clip("a")
+        assert dependency_of(after_clip("x")[0]) == "x"
+        assert dependencies(after_clip("a") + after("a")) == ["a"]
+        assert circular_dependency(jobs, "a") is not None

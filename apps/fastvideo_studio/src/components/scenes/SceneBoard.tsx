@@ -73,19 +73,28 @@ function Timeline({ scene }: { scene: Scene }) {
   );
 }
 
-function ClipPreview({ job }: { job: Job }) {
+function ClipPreview({ job, videoVersion }: { job: Job; videoVersion: number }) {
   const isImage = job.output_path?.toLowerCase().endsWith('.png') ?? false;
-  const src = getJobVideoUrl(job.id);
+  const src = getJobVideoUrl(job.id, videoVersion);
+  // Sets the *initial* muted state only, imperatively, so it doesn't fight the
+  // user's own unmute via the native controls: `muted` as a plain JSX prop is
+  // controlled, and React re-applies it on every re-render of this component
+  // (e.g. the scene board's poll while a job is queued/running), silently
+  // re-muting a video the user just unmuted.
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  React.useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = true;
+  }, []);
   return isImage ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={src} alt={job.name ?? 'Generated output'} className="max-h-56 rounded-md border border-border" />
   ) : (
     <video
+      ref={videoRef}
       src={src}
       aria-label={`Generated video for ${job.name ?? job.id}`}
       className="max-h-56 rounded-md border border-border bg-black"
       controls
-      muted
       loop
       playsInline
       preload="metadata"
@@ -103,6 +112,8 @@ function ClipRow({
   onDetachLastFrame,
   onQueueClip,
   onDequeueClip,
+  onTrimClip,
+  videoVersionFor,
 }: {
   clip: SceneClip;
   /** the clip before this one in the scene, if any */
@@ -114,6 +125,8 @@ function ClipRow({
   onDetachLastFrame: (clip: SceneClip) => Promise<void>;
   onQueueClip: (clip: SceneClip) => Promise<void>;
   onDequeueClip: (clip: SceneClip) => Promise<void>;
+  onTrimClip: (clip: SceneClip) => void;
+  videoVersionFor: (jobId: string) => number;
 }) {
   const [previewing, setPreviewing] = React.useState(false);
   const [attaching, setAttaching] = React.useState(false);
@@ -232,6 +245,11 @@ function ClipRow({
               {previewing ? 'Hide video' : 'Preview'}
             </Button>
           )}
+          {canPreview && (
+            <Button type="button" size="sm" variant="outline" onClick={() => onTrimClip(clip)}>
+              Edit video
+            </Button>
+          )}
           {canQueue && (
             <Button
               type="button"
@@ -263,7 +281,7 @@ function ClipRow({
 
       {previewing && canPreview && (
         <div className="mb-2">
-          <ClipPreview job={job} />
+          <ClipPreview job={job} videoVersion={videoVersionFor(job.id)} />
         </div>
       )}
 
@@ -307,6 +325,10 @@ export interface SceneBoardProps {
   /** queue / unqueue one clip; resolve when done (errors are reported by the caller) */
   onQueueClip: (clip: SceneClip) => Promise<void>;
   onDequeueClip: (clip: SceneClip) => Promise<void>;
+  /** open the trim dialog for one clip's video */
+  onTrimClip: (clip: SceneClip) => void;
+  /** cache-busting version for a job's video preview, bumped after each edit */
+  videoVersionFor: (jobId: string) => number;
 }
 
 /** One scene: a timeline of its clips, then every clip's shots in order, numbered straight through. */
@@ -320,6 +342,8 @@ export function SceneBoard({
   onMergeScene,
   onQueueClip,
   onDequeueClip,
+  onTrimClip,
+  videoVersionFor,
 }: SceneBoardProps) {
   let shotNumber = 1;
   const statuses = Object.entries(scene.statusCounts);
@@ -418,6 +442,8 @@ export function SceneBoard({
               onDetachLastFrame={onDetachLastFrame}
               onQueueClip={onQueueClip}
               onDequeueClip={onDequeueClip}
+              onTrimClip={onTrimClip}
+              videoVersionFor={videoVersionFor}
             />
           );
         })}

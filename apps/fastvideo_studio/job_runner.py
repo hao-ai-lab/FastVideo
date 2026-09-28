@@ -30,7 +30,8 @@ import yaml
 
 from fastvideo.utils import get_mp_context
 from fastvideo_studio.database import Database
-from fastvideo_studio.frames import last_frame_for_job
+from fastvideo_studio.frames import last_clip_for_job, last_frame_for_job
+from fastvideo_studio.trim import restore_original, trim_video
 from fastvideo_studio.job_queue import (
     UnresolvedReference,
     circular_dependency,
@@ -858,10 +859,10 @@ class JobRunner:
         for dep_id in dependencies(job.references):
             dep = self.get_job(dep_id)
             if dep is None:
-                raise ValueError("This job starts from the last frame of a job that no longer exists.")
+                raise ValueError("This job starts from the ending of a job that no longer exists.")
             if dep.status != JobStatus.COMPLETED:
                 label = f"'{dep.name}'" if dep.name else dep.id
-                raise ValueError(f"This job starts from the last frame of {label}, which hasn't finished "
+                raise ValueError(f"This job starts from the ending of {label}, which hasn't finished "
                                  f"(it is {dep.status.value}). Queue it to run after that job.")
 
     # -- queue ---------------------------------------------------------------
@@ -976,6 +977,62 @@ class JobRunner:
             with contextlib.suppress(Exception):
                 job._process.terminate()
         logger.info("Stop requested for job %s", job.id)
+        return job
+
+    # -- trimming --------------------------------------------------------------
+
+    def _set_output(self, job: Job, output_path: str, num_frames: int) -> None:
+        """Point a completed job at a different output file, e.g. after trimming.
+
+        Bypasses update_job_config()'s pending/failed/stopped gate on purpose:
+        a completed job's *generation* config stays fixed, but which cut of its
+        own video is showing is not a generation setting.
+        """
+        job.output_path = output_path
+        job.num_frames = num_frames
+        self._save_job(job)
+        try:
+            self._db.update_job_config(job.id, {"num_frames": num_frames})
+        except Exception as exc:
+            logger.warning("Failed to persist trimmed frame count for job %s: %s", job.id, exc)
+
+    def trim_job(
+        self,
+        job_id: str,
+        start_seconds: float = 0.0,
+        end_seconds: float | None = None,
+        brightness: float = 0.0,
+        contrast: float = 1.0,
+        saturation: float = 1.0,
+    ) -> Job:
+        """Cut a completed job's video to [start_seconds, end_seconds) and adjust its color, in place.
+
+        The untouched original is kept, so this can be called again with a
+        different range and/or color -- it always renders from that original
+        with the full set of parameters given, never compounding quality loss
+        or discarding one edit by changing the other -- or undone with
+        restore_job_video().
+        """
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Job {job_id} not found")
+        path, kept = trim_video(job, start_seconds, end_seconds, brightness, contrast, saturation)
+        self._set_output(job, path, kept)
+        logger.info("Edited job %s: %.2f-%s s, brightness=%.0f contrast=%.2f saturation=%.2f (%d frames)", job.id,
+                   start_seconds, f"{end_seconds:.2f}" if end_seconds is not None else "end", brightness, contrast,
+                   saturation, kept)
+        return job
+
+    def restore_job_video(self, job_id: str) -> Job:
+        """Undo every trim on a job's video, back to what it originally generated."""
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+        if job is None:
+            raise ValueError(f"Job {job_id} not found")
+        path, kept = restore_original(job)
+        self._set_output(job, path, kept)
+        logger.info("Restored job %s to its original video", job.id)
         return job
 
     def get_job_logs(self, job_id: str, after: int = 0) -> dict[str, Any]:
@@ -1300,12 +1357,13 @@ class JobRunner:
                 logger.warning("Job stopped before execution started")
                 return
 
-            # Frames borrowed from other clips are extracted now, when they exist.
-            # Done before loading the model so a missing frame fails fast.
+            # Frames and trailing clips borrowed from other jobs are extracted now,
+            # when they exist. Done before loading the model so a missing one fails fast.
             resolved_references = resolve_references(
                 job.references,
                 self.get_job,
-                lambda source: last_frame_for_job(source, self.upload_dir),
+                last_frame=lambda source: last_frame_for_job(source, self.upload_dir),
+                last_clip=lambda source: last_clip_for_job(source, self.upload_dir),
             )
 
             buf.phase = "loading model"

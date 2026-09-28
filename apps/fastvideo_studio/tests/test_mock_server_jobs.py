@@ -236,3 +236,109 @@ def test_merge_of_an_unknown_job_and_of_nothing(client):
 @pytest.mark.parametrize("filename", ["nope.mp4", "..%2Fetc%2Fpasswd", "x.txt"])
 def test_an_unknown_merged_file_is_not_found(client, filename):
     assert client.get(f"/api/merged/{filename}").status_code == 404
+
+
+# --- trimming ------------------------------------------------------------------
+
+
+def test_trims_a_completed_jobs_video_by_resizing_its_frame_count(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240  # 10s @ 24fps
+    mock_server._jobs[job["id"]]["fps"] = 24
+
+    res = client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 1.0, "end_seconds": 3.0})
+
+    assert res.status_code == 200
+    assert res.json()["num_frames"] == 48  # 2s @ 24fps
+
+
+def test_an_open_end_keeps_to_the_original_end(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+
+    res = client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 8.0})
+    assert res.json()["num_frames"] == 48  # 10s source, 8-10s kept = 2s remaining
+
+
+def test_trimming_again_is_relative_to_the_original_length_not_the_last_trim(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+
+    client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 1.0, "end_seconds": 3.0})
+    res = client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 0.0, "end_seconds": 10.0})
+    assert res.json()["num_frames"] == 240
+
+
+def test_restore_undoes_a_trim(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 1.0, "end_seconds": 3.0})
+
+    res = client.post(f"/api/jobs/{job['id']}/restore-video")
+
+    assert res.status_code == 200
+    assert res.json()["num_frames"] == 240
+    assert client.get(f"/api/jobs/{job['id']}").json()["num_frames"] == 240
+
+
+def test_restore_refuses_a_job_that_was_never_edited(client):
+    job = _completed(client, "clip")
+    res = client.post(f"/api/jobs/{job['id']}/restore-video")
+    assert res.status_code == 404 and "not been edited" in res.json()["detail"]
+
+
+def test_trim_refuses_an_invalid_range(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    assert client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": -1.0}).status_code == 400
+    assert client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 5.0, "end_seconds": 5.0}).status_code == 400
+
+
+def test_trim_accepts_color_parameters(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    res = client.post(
+        f"/api/jobs/{job['id']}/trim",
+        json={"start_seconds": 0.0, "end_seconds": 5.0, "brightness": 20.0, "contrast": 1.5, "saturation": 0.5},
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"start_seconds": 0.0, "brightness": 200.0},
+        {"start_seconds": 0.0, "contrast": -1.0},
+        {"start_seconds": 0.0, "saturation": 10.0},
+    ],
+)
+def test_trim_refuses_an_out_of_range_color_value(client, body):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    assert client.post(f"/api/jobs/{job['id']}/trim", json=body).status_code == 400
+
+
+def test_trim_refuses_an_unfinished_job(client):
+    job = _create(client, name="pending")
+    res = client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 0.0, "end_seconds": 1.0})
+    assert res.status_code == 404
+
+
+def test_trim_and_restore_of_an_unknown_job(client):
+    assert client.post("/api/jobs/nope/trim", json={"start_seconds": 0.0}).status_code == 404
+    assert client.post("/api/jobs/nope/restore-video").status_code == 404
+
+
+def test_trimmed_frame_count_does_not_leak_the_internal_backup_key(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    res = client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 1.0, "end_seconds": 3.0})
+    assert not any(k.startswith("_") for k in res.json())
+    assert not any(k.startswith("_") for k in client.get(f"/api/jobs/{job['id']}").json())

@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from fastvideo_studio.database import Database
+from fastvideo_studio.frames import FrameError
 from fastvideo_studio.job_queue import deferred_last_frame_source
 
 RUNNER_PATH = Path(__file__).resolve().parents[1] / "job_runner.py"
@@ -558,3 +559,126 @@ class TestRestart:
         assert restored.references == frame_of(job)
         assert restored.fps == 12
         assert restored.negative_prompt == "neg"
+
+
+class TestTrimming:
+    """trim_job/restore_job_video against a real (small, synthetic) video file."""
+
+    FPS = 24
+
+    def _write_video(self, path, n=48):
+        import av
+        import numpy as np
+
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        container = av.open(path, mode="w")
+        try:
+            stream = container.add_stream("h264", rate=self.FPS)
+            stream.width, stream.height, stream.pix_fmt = 64, 48, "yuv420p"
+            for i in range(n):
+                array = np.full((48, 64, 3), min(i * 5, 255), dtype=np.uint8)
+                for packet in stream.encode(av.VideoFrame.from_ndarray(array, format="rgb24")):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+        finally:
+            container.close()
+
+    def _completed(self, h, r, n=48):
+        job = h.make(r, "clip")
+        r.start_job(job.id)
+        h.finish(job)
+        assert wait_for(lambda: r.get_job(job.id).status.value == "completed")
+        live = r.get_job(job.id)
+        path = str(h.tmp_path / "videos" / f"{job.id}.mp4")
+        self._write_video(path, n)
+        live.output_path = path
+        live.num_frames = n
+        return live
+
+    def test_trim_updates_output_path_and_frame_count(self, h):
+        r = h.runner()
+        job = self._completed(h, r)  # 2s @ 24fps
+        original_path = job.output_path
+        trimmed = r.trim_job(job.id, start_seconds=0.5, end_seconds=1.5)
+        assert trimmed.output_path != original_path
+        assert trimmed.output_path.endswith("edited.mp4")
+        assert trimmed.num_frames == self.FPS  # 1s kept
+
+    def test_grading_updates_output_path_without_changing_frame_count(self, h):
+        r = h.runner()
+        job = self._completed(h, r)
+        graded = r.trim_job(job.id, start_seconds=0.0, end_seconds=None, brightness=40.0)
+        assert graded.output_path.endswith("edited.mp4")
+        assert graded.num_frames == self.FPS * 2  # full length kept, only color changed
+
+    def test_grading_and_a_trim_requested_together_both_take_effect(self, h):
+        import av
+
+        r = h.runner()
+        job = self._completed(h, r)
+        edited = r.trim_job(job.id, start_seconds=0.5, end_seconds=1.5, brightness=80.0)
+        assert edited.num_frames == self.FPS  # the range applied
+        with av.open(edited.output_path) as c:
+            frame = next(c.decode(c.streams.video[0]))
+        # Source frame at 0.5s (index 12) is level 60; +80 brightness should clearly lighten it.
+        assert int(frame.to_ndarray(format="rgb24")[0, 0, 0]) > 60 + 40
+
+    def test_trim_persists_across_a_restart(self, h):
+        first = h.runner()
+        job = self._completed(h, first)
+        trimmed = first.trim_job(job.id, start_seconds=0.5, end_seconds=1.5)
+
+        second = h.runner()
+        restored = second.get_job(job.id)
+        assert restored.output_path == trimmed.output_path
+        assert restored.num_frames == trimmed.num_frames
+
+    def test_trimming_again_is_relative_to_the_original_not_the_last_trim(self, h):
+        r = h.runner()
+        job = self._completed(h, r)
+        r.trim_job(job.id, start_seconds=0.5, end_seconds=1.5)
+        again = r.trim_job(job.id, start_seconds=0.0, end_seconds=2.0)
+        assert again.num_frames == self.FPS * 2
+
+    def test_restore_undoes_a_trim(self, h):
+        r = h.runner()
+        job = self._completed(h, r)
+        r.trim_job(job.id, start_seconds=0.5, end_seconds=1.5)
+        restored = r.restore_job_video(job.id)
+        # Points at the untouched backup, not literally the job's original path --
+        # trim_job() never overwrites or renames what H3 actually generated.
+        assert restored.output_path.endswith("original.mp4")
+        assert restored.num_frames == self.FPS * 2
+
+    def test_restore_refuses_a_job_never_edited(self, h):
+        r = h.runner()
+        job = self._completed(h, r)
+        with pytest.raises(FrameError, match="not been edited"):
+            r.restore_job_video(job.id)
+
+    def test_restore_undoes_a_grade_too(self, h):
+        import av
+
+        r = h.runner()
+        job = self._completed(h, r)
+        graded = r.trim_job(job.id, start_seconds=0.0, end_seconds=None, brightness=80.0)
+        with av.open(graded.output_path) as c:
+            graded_level = int(next(c.decode(c.streams.video[0])).to_ndarray(format="rgb24")[0, 0, 0])
+        assert graded_level > 60  # the grade visibly lightened the first frame (source level 0)
+
+        restored = r.restore_job_video(job.id)
+        with av.open(restored.output_path) as c:
+            restored_level = int(next(c.decode(c.streams.video[0])).to_ndarray(format="rgb24")[0, 0, 0])
+        assert restored_level == 0  # back to the source's actual first-frame level
+
+    def test_trim_refuses_an_unknown_job(self, h):
+        r = h.runner()
+        with pytest.raises(ValueError, match="not found"):
+            r.trim_job("nope", 0.0, 1.0)
+
+    def test_trim_refuses_a_pending_job(self, h):
+        r = h.runner()
+        job = h.make(r, "pending")
+        with pytest.raises(FrameError, match="No output"):
+            r.trim_job(job.id, 0.0, 1.0)

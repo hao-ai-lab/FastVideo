@@ -18,6 +18,7 @@ apps/fastvideo_studio/
 ├── server.py / job_runner.py / database.py   # FastAPI backend + job lifecycle
 ├── job_queue.py                              # Queue scheduling rules + last-frame references (GPU-free)
 ├── merge.py                                  # Join a scene's clips into one video (ffmpeg stream copy, GPU-free)
+├── trim.py                                   # Cut a clip to an in/out range, non-destructively (GPU-free)
 ├── mock_server.py                            # In-memory API mock for e2e tests
 ├── models/                                   # Pydantic request models (shared with the mock)
 ├── training_config.py                        # Studio workloads → fastvideo/train YAML configs
@@ -104,13 +105,23 @@ once, not per job). A worker holds one model at a time: a job with a different
 model or settings replaces it, and a failed or stopped job unloads it so the next
 one starts clean. Each extra worker loads its own copy of the model.
 
-A job can start from another job's last frame by holding a reference whose
-source is `job-last-frame:<job id>`. The frame is extracted when the job runs,
-so the reference can be added before that job has finished, and the queue holds
-the job until it has. If that job fails, is stopped, or is deleted, the waiting
-job fails with a message saying so (and so does anything waiting on *it*); fix
-the earlier job and queue them again. Starting such a job directly while its
-source is unfinished is refused with a 409.
+A job can start from how another job's video ended, two ways:
+
+* **Last frame** -- a reference whose source is `job-last-frame:<job id>`. A
+  hard, exact opening frame: the prompt is rewritten to say the shot begins
+  from it.
+* **Last clip** -- a reference whose source is `job-last-clip:<job id>`, and
+  `media_type: "video"`. The trailing ~1s of the source job's video instead of
+  a single still, so the model has real motion to continue rather than a pose
+  to guess it from. Costs one of H3's 3 video-reference slots instead of one
+  of its 9 image slots.
+
+Either is extracted when the job runs, so the reference can be added before
+that job has finished, and the queue holds the job until it has. If that job
+fails, is stopped, or is deleted, the waiting job fails with a message saying
+so (and so does anything waiting on *it*); fix the earlier job and queue them
+again. Starting such a job directly while its source is unfinished is refused
+with a 409.
 
 ### Merging a scene
 
@@ -126,6 +137,29 @@ last video frame, because H3's audio runs a few milliseconds longer and would
 otherwise leave a small gap at every join. It uses `ffmpeg` from `PATH`,
 `$FASTVIDEO_FFMPEG_BIN`, or the copy bundled with `imageio-ffmpeg`.
 
+### Editing a clip's video
+
+**Edit video** on a finished clip in Scenes cuts it to a chosen in/out range and
+adjusts its brightness, contrast and saturation, in place -- other jobs'
+last-frame/last-clip references, and a later merge, all just read the job's
+`output_path`, so nothing else needs to know a clip was edited. Frame-accurate
+(re-encoded, not stream-copied), so the cut isn't limited to the source's
+keyframes. Audio is cut to the same range and carried over too (re-encoded to
+AAC regardless of the source's codec), unless the source has none.
+
+The untouched original is always kept alongside it the first time a clip is
+edited, and **every edit always re-renders from that original** with the full
+set of values shown in the dialog -- range and color together, in one pass.
+That's what lets adjusting either one leave the other in place instead of each
+one silently discarding the other, and it's also why color always reopens at
+neutral (0 brightness, 1 contrast, 1 saturation): nothing is stored server-side
+about which values produced the current video, only the video itself. The range
+fields do reopen at the clip's current length, so leaving color alone and
+re-applying keeps a previous trim -- unless that trim didn't start at 0, in
+which case reopening shows `0` to the current length rather than the original
+window, and re-applying would shift it. **Restore original** undoes every edit
+in one step and is the reliable way to start over.
+
 ### API Endpoints
 
 | Method   | Path                          | Description                                |
@@ -139,7 +173,11 @@ otherwise leave a small gap at every join. It uses `ffmpeg` from `PATH`,
 | `POST`   | `/api/jobs/queue`             | Queue jobs (`{"job_ids": [...]}`), in order |
 | `POST`   | `/api/jobs/{id}/queue`        | Queue one job                              |
 | `POST`   | `/api/jobs/{id}/dequeue`      | Take a queued job back out of the queue    |
+| `POST`   | `/api/jobs/{id}/last-frame`   | Save the job's last frame, for another job to start from |
+| `POST`   | `/api/jobs/{id}/last-clip`    | Save the job's trailing ~1s, for another job to continue from |
 | `POST`   | `/api/scenes/merge`           | Join finished jobs' videos (`{"job_ids": [...], "name": ""}`) in order |
+| `POST`   | `/api/jobs/{id}/trim`         | Cut a job's video to a range and/or adjust its color (`{"start_seconds": 0, "end_seconds": null, "brightness": 0, "contrast": 1, "saturation": 1}`), in place |
+| `POST`   | `/api/jobs/{id}/restore-video`| Undo every edit, back to the original video |
 | `GET`    | `/api/merged/{filename}`      | Stream a merged scene video                |
 | `DELETE` | `/api/jobs/{id}`              | Delete a job                               |
 | `GET`    | `/api/jobs/{id}/video`        | Stream the generated video/image           |

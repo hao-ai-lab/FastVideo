@@ -50,8 +50,9 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastvideo_studio.database import Database, default_settings_dict
 from fastvideo_studio.job_queue import circular_dependency, dependencies, plan_dispatch
 from fastvideo_studio.merge import MergeError, merge_jobs, merged_path
+from fastvideo_studio.trim import BRIGHTNESS_RANGE, CONTRAST_RANGE, SATURATION_RANGE
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, MergeSceneRequest, QueueJobsRequest,
-                                     SettingsUpdate, UpdateCaptionRequest,
+                                     SettingsUpdate, TrimRequest, UpdateCaptionRequest,
                                      model_label)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -311,7 +312,7 @@ def _advance_job(job: dict[str, Any]) -> None:
 def _public_job(job: dict[str, Any]) -> dict[str, Any]:
     """Advance + return a copy safe to serialize (internal-only keys stripped)."""
     _advance_job(job)
-    return {k: v for k, v in job.items() if k != _FROM_SNAPSHOT_KEY}
+    return {k: v for k, v in job.items() if not k.startswith("_")}
 
 
 _LOG_TAIL = [
@@ -741,12 +742,12 @@ def _check_dependencies_finished(job: dict[str, Any]) -> None:
         dep = _jobs.get(dep_id)
         if dep is None:
             raise HTTPException(status_code=409,
-                                detail="This job starts from the last frame of a job that no longer exists.")
+                                detail="This job starts from the ending of a job that no longer exists.")
         if dep["status"] != "completed":
             label = f"'{dep['name']}'" if dep.get("name") else dep["id"]
             raise HTTPException(
                 status_code=409,
-                detail=(f"This job starts from the last frame of {label}, which hasn't finished "
+                detail=(f"This job starts from the ending of {label}, which hasn't finished "
                         f"(it is {dep['status']}). Queue it to run after that job."),
             )
 
@@ -789,6 +790,73 @@ def extract_last_frame(job_id: str) -> dict[str, str]:
         if job["status"] != "completed" or not job.get("output_path"):
             raise HTTPException(status_code=404, detail="No output available for this job")
     return {"path": f"/mock/last_frames/last_frame_{job_id}.png", "media_type": "image"}
+
+
+@app.post("/api/jobs/{job_id}/last-clip")
+def extract_last_clip(job_id: str) -> dict[str, str]:
+    """Stand-in for the real route: there is no video to read, so hand back a made-up path."""
+    with _state_lock:
+        _drain_queue()
+        job = _jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        _advance_job(job)
+        if job["status"] != "completed" or not job.get("output_path"):
+            raise HTTPException(status_code=404, detail="No output available for this job")
+    return {"path": f"/mock/last_clips/last_clip_{job_id}.mp4", "media_type": "video"}
+
+
+#: Key holding a trimmed job's frame count before any trim, so it can be restored.
+_ORIGINAL_NUM_FRAMES_KEY = "_original_num_frames"
+
+
+def _trimmable_job(job_id: str) -> dict[str, Any]:
+    """Look up a completed job with an output, or raise. Call with _state_lock held."""
+    _drain_queue()
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _advance_job(job)
+    if job["status"] != "completed" or not job.get("output_path"):
+        raise HTTPException(status_code=404, detail="No output available for this job")
+    return job
+
+
+def _check_grade_range(name: str, value: float, bounds: tuple[float, float]) -> None:
+    low, high = bounds
+    if not (low <= value <= high):
+        raise HTTPException(status_code=400, detail=f"{name} must be between {low:g} and {high:g}, got {value:g}.")
+
+
+@app.post("/api/jobs/{job_id}/trim")
+def trim_job(job_id: str, req: TrimRequest) -> dict[str, Any]:
+    """Stand-in for the real route: no video to cut or grade, so just resize num_frames to match."""
+    with _state_lock:
+        job = _trimmable_job(job_id)
+        if req.start_seconds < 0:
+            raise HTTPException(status_code=400, detail="The start of the range can't be negative.")
+        _check_grade_range("brightness", req.brightness, BRIGHTNESS_RANGE)
+        _check_grade_range("contrast", req.contrast, CONTRAST_RANGE)
+        _check_grade_range("saturation", req.saturation, SATURATION_RANGE)
+        fps = job.get("fps") or 24
+        original_frames = job.setdefault(_ORIGINAL_NUM_FRAMES_KEY, job["num_frames"])
+        duration = original_frames / fps
+        end = duration if req.end_seconds is None else min(req.end_seconds, duration)
+        if end <= req.start_seconds:
+            raise HTTPException(status_code=400, detail="The end of the range must come after the start.")
+        job["num_frames"] = max(1, round((end - req.start_seconds) * fps))
+        return _public_job(job)
+
+
+@app.post("/api/jobs/{job_id}/restore-video")
+def restore_job_video(job_id: str) -> dict[str, Any]:
+    """Stand-in for the real route: undo the simulated edit by restoring num_frames."""
+    with _state_lock:
+        job = _trimmable_job(job_id)
+        if _ORIGINAL_NUM_FRAMES_KEY not in job:
+            raise HTTPException(status_code=404, detail="This job has not been edited.")
+        job["num_frames"] = job.pop(_ORIGINAL_NUM_FRAMES_KEY)
+        return _public_job(job)
 
 
 def _check_startable(job: dict[str, Any]) -> None:

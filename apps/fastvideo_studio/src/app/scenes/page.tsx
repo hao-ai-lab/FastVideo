@@ -7,6 +7,7 @@ import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { EDITABLE_STATUSES, SceneBoard } from '@/components/scenes/SceneBoard';
 import { MergedSceneDialog } from '@/components/scenes/MergedSceneDialog';
 import { SceneQueueDialog } from '@/components/scenes/SceneQueueDialog';
+import { TrimClipDialog } from '@/components/scenes/TrimClipDialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -30,6 +31,15 @@ export default function ScenesPage() {
   const [choices, setChoices] = React.useState<Record<string, string>>({});
   const [queueTarget, setQueueTarget] = React.useState<Scene | null>(null);
   const [merged, setMerged] = React.useState<(MergedScene & { title: string }) | null>(null);
+  const [trimTarget, setTrimTarget] = React.useState<Job | null>(null);
+  // Bumped per job id whenever its video is edited in place, to cache-bust every
+  // <video> for that job (the dialog's own preview and the scene board's). Owned
+  // here, not by the dialog, so it survives the dialog re-rendering with a fresh
+  // job object after each edit -- a per-dialog counter got reset by that same
+  // re-render before the browser ever saw the new URL.
+  const [videoVersions, setVideoVersions] = React.useState<Record<string, number>>({});
+  const bumpVideoVersion = (jobId: string) =>
+    setVideoVersions((v) => ({ ...v, [jobId]: (v[jobId] ?? 0) + 1 }));
 
   React.useEffect(() => {
     let cancelled = false;
@@ -226,7 +236,9 @@ export default function ScenesPage() {
               onMergeScene={mergeSceneClips}
               onQueueClip={queueClip}
               onDequeueClip={dequeueClip}
+              onTrimClip={(clip) => setTrimTarget(clip.job)}
               onChooseTake={(takeKey, jobId) => setChoices((c) => ({ ...c, [takeKey]: jobId }))}
+              videoVersionFor={(jobId) => videoVersions[jobId] ?? 0}
             />
           </div>
         )}
@@ -234,6 +246,16 @@ export default function ScenesPage() {
 
       <MergedSceneDialog merged={merged} onClose={() => setMerged(null)} />
       <SceneQueueDialog scene={queueTarget} onConfirm={queueScene} onClose={() => setQueueTarget(null)} />
+      <TrimClipDialog
+        clip={trimTarget}
+        videoVersion={trimTarget ? (videoVersions[trimTarget.id] ?? 0) : 0}
+        onChanged={(job) => {
+          setTrimTarget(job);
+          bumpVideoVersion(job.id);
+          getJobsList('inference').then(setJobs).catch(() => {});
+        }}
+        onClose={() => setTrimTarget(null)}
+      />
 
       {openJob && (
         <CreateJobModal

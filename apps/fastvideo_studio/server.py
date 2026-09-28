@@ -33,12 +33,12 @@ from fastapi.responses import FileResponse
 
 from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
 from fastvideo_studio.database import Database, _get_db_path
-from fastvideo_studio.frames import FrameError, last_frame_for_job
+from fastvideo_studio.frames import FrameError, last_clip_for_job, last_frame_for_job
 from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
 from fastvideo_studio.merge import MergeError, merge_jobs, merged_path
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, MergeSceneRequest, QueueJobsRequest,
-                                     SettingsUpdate, UpdateCaptionRequest, model_label)
+                                     SettingsUpdate, TrimRequest, UpdateCaptionRequest, model_label)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -719,6 +719,57 @@ def extract_last_frame(job_id: str) -> dict[str, str]:
             logger.warning("Last-frame extraction failed for job %s: %s", job_id, e.detail)
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     return {"path": path, "media_type": "image"}
+
+
+@app.post("/api/jobs/{job_id}/last-clip")
+def extract_last_clip(job_id: str) -> dict[str, str]:
+    """Save the trailing second of a completed job's video and return its path.
+
+    The path is meant to be attached to another job as a video reference, so
+    the next clip continues with real motion instead of guessing it from a
+    single still frame.
+    """
+    job = job_runner.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    try:
+        path = last_clip_for_job(job, upload_dir)
+    except FrameError as e:
+        if e.status_code >= 500:
+            logger.warning("Last-clip extraction failed for job %s: %s", job_id, e.detail)
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    return {"path": path, "media_type": "video"}
+
+
+def _trim_error(e: Exception) -> HTTPException:
+    if isinstance(e, FrameError):
+        return HTTPException(status_code=e.status_code, detail=e.detail)
+    return HTTPException(status_code=404 if "not found" in str(e) else 400, detail=str(e))
+
+
+@app.post("/api/jobs/{job_id}/trim")
+def trim_job(job_id: str, req: TrimRequest) -> dict[str, Any]:
+    """Cut a completed job's video to [start_seconds, end_seconds) and adjust its color, in place.
+
+    The untouched original is kept, so this can be called again with a
+    different range and/or color, or undone with POST .../restore-video.
+    """
+    try:
+        job = job_runner.trim_job(job_id, req.start_seconds, req.end_seconds, req.brightness, req.contrast,
+                                  req.saturation)
+    except (ValueError, FrameError) as e:
+        raise _trim_error(e) from e
+    return job.to_dict()
+
+
+@app.post("/api/jobs/{job_id}/restore-video")
+def restore_job_video(job_id: str) -> dict[str, Any]:
+    """Undo every trim on a job's video, back to what it originally generated."""
+    try:
+        job = job_runner.restore_job_video(job_id)
+    except (ValueError, FrameError) as e:
+        raise _trim_error(e) from e
+    return job.to_dict()
 
 
 @app.post("/api/scenes/merge")

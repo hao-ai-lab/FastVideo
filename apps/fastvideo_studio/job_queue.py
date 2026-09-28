@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Scheduling rules for queued jobs, and last-frame references between them.
+"""Scheduling rules for queued jobs, and references to another job's ending.
 
 Kept apart from ``job_runner.py`` because it is pure -- it works on plain
 snapshots and needs neither FastVideo nor a GPU -- so it can be tested anywhere.
 
-A job can start from the last frame of another job's video. That frame doesn't
-exist until the other job finishes, so the reference is *deferred*: its source
-is ``job-last-frame:<job id>`` and it is resolved to a real image only when the
-job runs. That link is also the queue's dependency graph: a queued job waits
-until every job it takes a frame from has completed.
+A job can start from how another job's video ended -- either its last frame (a
+still, for a hard "opens on this exact picture" continuation) or its last
+second or so (a short video, so the model has actual motion to continue, not
+just a pose to guess motion from). Neither exists until the other job
+finishes, so the reference is *deferred*: its source is ``job-last-frame:<job
+id>`` or ``job-last-clip:<job id>``, resolved to a real file only when the job
+runs. That link is also the queue's dependency graph: a queued job waits until
+every job it takes an ending from has completed.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 DEFERRED_LAST_FRAME_PREFIX = "job-last-frame:"
+DEFERRED_LAST_CLIP_PREFIX = "job-last-clip:"
+_DEFERRED_PREFIXES = (DEFERRED_LAST_FRAME_PREFIX, DEFERRED_LAST_CLIP_PREFIX)
 
 QUEUED = "queued"
 RUNNING = "running"
@@ -31,11 +36,18 @@ def deferred_last_frame_source(job_id: str) -> str:
     return f"{DEFERRED_LAST_FRAME_PREFIX}{job_id}"
 
 
+def deferred_last_clip_source(job_id: str) -> str:
+    return f"{DEFERRED_LAST_CLIP_PREFIX}{job_id}"
+
+
 def dependency_of(reference: Mapping[str, Any] | None) -> str | None:
-    """The job a deferred reference takes its frame from, or None for any other."""
+    """The job a deferred reference takes its ending from, or None for any other."""
     source = (reference or {}).get("source")
-    if isinstance(source, str) and source.startswith(DEFERRED_LAST_FRAME_PREFIX):
-        return source[len(DEFERRED_LAST_FRAME_PREFIX):] or None
+    if not isinstance(source, str):
+        return None
+    for prefix in _DEFERRED_PREFIXES:
+        if source.startswith(prefix):
+            return source[len(prefix):] or None
     return None
 
 
@@ -127,10 +139,10 @@ def plan_dispatch(jobs: Mapping[str, JobView], max_concurrent: int) -> Plan:
             for dep_id in dependencies(job.references):
                 dep = jobs.get(dep_id)
                 if dep is None:
-                    plan.fail[job.id] = "Waiting on the last frame of a job that was deleted."
+                    plan.fail[job.id] = "Waiting on the ending of a job that was deleted."
                 elif dep_id in plan.fail or status[dep_id] in (FAILED, STOPPED):
                     reason = "failed" if dep_id in plan.fail or status[dep_id] == FAILED else "was stopped"
-                    plan.fail[job.id] = f"Needs the last frame of {_label(dep)}, which {reason}."
+                    plan.fail[job.id] = f"Needs the ending of {_label(dep)}, which {reason}."
                 else:
                     continue
                 status[job.id] = FAILED
@@ -150,35 +162,46 @@ def plan_dispatch(jobs: Mapping[str, JobView], max_concurrent: int) -> Plan:
 
 
 class UnresolvedReference(ValueError):
-    """A deferred reference can't be turned into an image."""
+    """A deferred reference can't be turned into a real file."""
 
 
 def resolve_references(
     references: list[dict[str, Any]] | None,
     get_job: Callable[[str], Any],
     last_frame: Callable[[Any], str],
+    last_clip: Callable[[Any], str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Copy of ``references`` with each deferred last-frame reference made real.
+    """Copy of ``references`` with each deferred reference made real.
 
-    ``last_frame(job)`` returns the path of an extracted frame and may raise
-    (see ``frames.FrameError``); its message is passed on. Other references are
-    returned unchanged, and the stored list is never modified, so a re-run
-    resolves again against the source job's current output.
+    ``last_frame(job)`` and ``last_clip(job)`` each return the path of an
+    extracted file and may raise (see ``frames.FrameError``); the message is
+    passed on. ``last_clip`` is optional so callers that never attach a
+    trailing-clip reference (e.g. the mock server) don't need to supply one --
+    it is only required if a ``job-last-clip:`` reference is actually present.
+    Other references are returned unchanged, and the stored list is never
+    modified, so a re-run resolves again against the source job's current
+    output.
     """
     resolved: list[dict[str, Any]] = []
     for ref in references or []:
-        dep_id = dependency_of(ref)
-        if dep_id is None:
+        source = (ref or {}).get("source")
+        prefix = next((p for p in _DEFERRED_PREFIXES if isinstance(source, str) and source.startswith(p)), None)
+        if prefix is None:
             resolved.append(ref)
             continue
-        dep = get_job(dep_id)
+        dep_id = source[len(prefix):] or None
+        extract = last_frame if prefix == DEFERRED_LAST_FRAME_PREFIX else last_clip
+        what = "the last frame of" if prefix == DEFERRED_LAST_FRAME_PREFIX else "the ending of"
+        if extract is None:
+            raise UnresolvedReference("This server can't resolve a trailing-clip reference yet.")
+        dep = get_job(dep_id) if dep_id else None
         if dep is None:
-            raise UnresolvedReference("A reference needs the last frame of a job that no longer exists.")
+            raise UnresolvedReference(f"A reference needs {what} a job that no longer exists.")
         if _status(dep) != COMPLETED:
-            raise UnresolvedReference(f"A reference needs the last frame of {_label(dep)}, which hasn't finished "
+            raise UnresolvedReference(f"A reference needs {what} {_label(dep)}, which hasn't finished "
                                   f"(it is {_status(dep)}).")
         try:
-            path = last_frame(dep)
+            path = extract(dep)
         except Exception as exc:  # FrameError carries a readable .detail
             raise UnresolvedReference(str(getattr(exc, "detail", None) or exc)) from exc
         resolved.append({**ref, "source": path})

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ScenesPage from './page';
 import { toast } from 'sonner';
-import { dequeueJob, downloadMergedVideo, getJobsList, mergeScene, queueJobs, updateJob } from '@/lib/api';
+import { dequeueJob, downloadMergedVideo, getJobsList, mergeScene, queueJobs, restoreJobVideo, trimJob, updateJob } from '@/lib/api';
 import { downloadBlob } from '@/lib/utils';
 import { makeJob } from '@/test/factories';
 
@@ -19,6 +19,8 @@ vi.mock('@/lib/api', () => ({
   getMergedVideoUrl: (name: string) => `http://test.local/api/merged/${name}`,
   updateJob: vi.fn(),
   getJobVideoUrl: (id: string) => `http://test.local/api/jobs/${id}/video`,
+  trimJob: vi.fn(),
+  restoreJobVideo: vi.fn(),
 }));
 
 vi.mock('@/lib/utils', async (importOriginal) => ({
@@ -922,5 +924,191 @@ describe('ScenesPage', () => {
       await user.click(within(await screen.findByRole('dialog')).getAllByRole('button', { name: 'Close' }).at(-1)!);
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     });
+  });
+});
+
+describe('editing a clip\'s video', () => {
+  const finished = (n: number, over: Parameters<typeof wolf>[1] = {}) =>
+    wolf(n, { status: 'completed', output_path: `/o/${n}.mp4`, num_frames: 240, fps: 24, ...over });
+  const openEdit = async (user: ReturnType<typeof userEvent.setup>, id = 'wolf-1') => {
+    await user.click(within(document.getElementById(`clip-${id}`) as HTMLElement).getByRole('button', { name: 'Edit video' }));
+    return screen.findByRole('dialog');
+  };
+  const applyButton = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: /Apply|Applying/ });
+
+  beforeEach(() => {
+    vi.mocked(trimJob).mockReset();
+    vi.mocked(restoreJobVideo).mockReset();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  it('is only offered on a clip with a finished video', async () => {
+    vi.mocked(getJobsList).mockResolvedValue([finished(1), wolf(2, { status: 'running' })]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+    expect(within(document.getElementById('clip-wolf-1') as HTMLElement).getByRole('button', { name: 'Edit video' })).toBeInTheDocument();
+    expect(within(document.getElementById('clip-wolf-2') as HTMLElement).queryByRole('button', { name: 'Edit video' })).not.toBeInTheDocument();
+  });
+
+  it('opens with the full current range and neutral color, and shows the current duration', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    expect(within(dialog).getByText(/Currently 0:10\./)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Start (seconds)')).toHaveValue(0);
+    expect(within(dialog).getByLabelText('End (seconds, optional)')).toHaveValue(10);
+    expect(within(dialog).getByLabelText('Brightness')).toHaveValue(0);
+    expect(within(dialog).getByLabelText('Contrast')).toHaveValue(1);
+    expect(within(dialog).getByLabelText('Saturation')).toHaveValue(1);
+  });
+
+  it('applies the chosen range and reports it', async () => {
+    const user = userEvent.setup();
+    vi.mocked(trimJob).mockResolvedValue({ ...finished(1), output_path: '/o/edited.mp4', num_frames: 48 });
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText('Start (seconds)'));
+    await user.type(within(dialog).getByLabelText('Start (seconds)'), '1');
+    await user.clear(within(dialog).getByLabelText('End (seconds, optional)'));
+    await user.type(within(dialog).getByLabelText('End (seconds, optional)'), '3');
+    await user.click(applyButton(dialog));
+
+    await waitFor(() =>
+      expect(trimJob).toHaveBeenCalledWith('wolf-1', { startSeconds: 1, endSeconds: 3, brightness: 0, contrast: 1, saturation: 1 }),
+    );
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Applied: 0:01–0:03.'));
+  });
+
+  it('applies chosen color values alongside the range, in one call', async () => {
+    const user = userEvent.setup();
+    vi.mocked(trimJob).mockResolvedValue(finished(1));
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText('Brightness'));
+    await user.type(within(dialog).getByLabelText('Brightness'), '20');
+    await user.clear(within(dialog).getByLabelText('Contrast'));
+    await user.type(within(dialog).getByLabelText('Contrast'), '1.4');
+    await user.clear(within(dialog).getByLabelText('Saturation'));
+    await user.type(within(dialog).getByLabelText('Saturation'), '0.5');
+    await user.click(applyButton(dialog));
+
+    await waitFor(() =>
+      expect(trimJob).toHaveBeenCalledWith('wolf-1', { startSeconds: 0, endSeconds: 10, brightness: 20, contrast: 1.4, saturation: 0.5 }),
+    );
+  });
+
+  it('leaving the end blank keeps to the end of the clip', async () => {
+    const user = userEvent.setup();
+    vi.mocked(trimJob).mockResolvedValue(finished(1));
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText('Start (seconds)'));
+    await user.type(within(dialog).getByLabelText('Start (seconds)'), '2');
+    await user.clear(within(dialog).getByLabelText('End (seconds, optional)'));
+    await user.click(applyButton(dialog));
+
+    await waitFor(() =>
+      expect(trimJob).toHaveBeenCalledWith('wolf-1', { startSeconds: 2, endSeconds: undefined, brightness: 0, contrast: 1, saturation: 1 }),
+    );
+  });
+
+  it('disables Apply for an invalid range and explains why', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText('Start (seconds)'));
+    await user.type(within(dialog).getByLabelText('Start (seconds)'), '5');
+    await user.clear(within(dialog).getByLabelText('End (seconds, optional)'));
+    await user.type(within(dialog).getByLabelText('End (seconds, optional)'), '3');
+
+    expect(within(dialog).getByText('The end must come after the start.')).toBeInTheDocument();
+    expect(applyButton(dialog)).toBeDisabled();
+    expect(trimJob).not.toHaveBeenCalled();
+  });
+
+  it('reports a negative start instead of the generic message', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText('Start (seconds)'));
+    await user.type(within(dialog).getByLabelText('Start (seconds)'), '-1');
+    expect(within(dialog).getByText('The start must be 0 or later.')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['Brightness', '150', 'Brightness must be between -100 and 100.'],
+    ['Contrast', '5', 'Contrast must be between 0 and 3.'],
+    ['Saturation', '-1', 'Saturation must be between 0 and 3.'],
+  ])('disables Apply for an out-of-range %s and explains why', async (label, value, message) => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.clear(within(dialog).getByLabelText(label));
+    await user.type(within(dialog).getByLabelText(label), value);
+
+    expect(within(dialog).getByText(message)).toBeInTheDocument();
+    expect(applyButton(dialog)).toBeDisabled();
+  });
+
+  it('restores the original video and reports it', async () => {
+    const user = userEvent.setup();
+    vi.mocked(restoreJobVideo).mockResolvedValue(finished(1));
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Restore original' }));
+
+    await waitFor(() => expect(restoreJobVideo).toHaveBeenCalledWith('wolf-1'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Restored the original video.'));
+  });
+
+  it('reports a failed edit and leaves the dialog open to retry', async () => {
+    const user = userEvent.setup();
+    vi.mocked(trimJob).mockRejectedValue(new Error('That range keeps no frames.'));
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.click(applyButton(dialog));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('That range keeps no frames.'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('closes, and refetches jobs after a change but not after just closing', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.click(within(dialog).getAllByRole('button', { name: 'Close' })[0]);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(getJobsList).toHaveBeenCalledTimes(1); // just the initial load
   });
 });
