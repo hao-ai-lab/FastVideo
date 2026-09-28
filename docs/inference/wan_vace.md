@@ -189,7 +189,9 @@ Set `WAN_VACE_SP_TRACE=1` to print per-layer SP divergence stats (read-only hook
 - Weighted BF16 short-pipeline SP2 remains `xfail`; no production compensation landed.
 - `WanVACETransformer3DModel.forward` duplicates much of `WanTransformer3DModel.forward`.
 - Video+mask control path not covered by `scripts/run_vace_matrix.py`.
-- Worker startup semaphore ENOENT on one Slurm node is under investigation; see
+- Slurm worker semaphore ENOENT traced to logind RemoveIPC plus unused streaming
+  `mp.Queue` semaphores; standard inference omits those queues since `feb9b289`.
+  Streaming queue mode still needs `RemoveIPC=no` or linger — see
   `.agents/lessons/wan_vace_semaphore_removeipc.md`.
 
 ## References
