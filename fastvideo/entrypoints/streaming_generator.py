@@ -81,6 +81,7 @@ class StreamingVideoGenerator(VideoGenerator):
                  executor_class: type[Executor],
                  log_stats: bool,
                  use_queue_mode: bool = True):
+        fastvideo_args.enable_streaming_ipc_queues = True
         super().__init__(fastvideo_args, executor_class, log_stats)
         self.accumulated_frames: list[np.ndarray] = []
         self.sampling_param: SamplingParam | None = None
