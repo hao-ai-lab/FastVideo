@@ -469,7 +469,13 @@ class TextEncoderLoader(ComponentLoader):
 
             from fastvideo.platforms import current_platform
 
-            if use_cpu_offload:
+            if use_cpu_offload and checkpoint_quant_config is not None:
+                logger.info(
+                    "Skipping FSDP CPU offload for serialized %s text encoder; "
+                    "packed uint8 weights are not FSDP-shardable",
+                    checkpoint_quant_config.get_name(),
+                )
+            elif use_cpu_offload:
                 pin_cpu_memory = fastvideo_args.pin_cpu_memory and is_pin_memory_available()
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():
@@ -876,6 +882,14 @@ class VAELoader(ComponentLoader):
 
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
+        int8_convrot_path = None
+        if class_name == "AutoencoderKLMiniMaxH3":
+            from fastvideo.models.vaes.minimax_h3_int8_convrot import (
+                dense_vae_safetensors,
+                find_int8_convrot_vae_path,
+            )
+            int8_convrot_path = find_int8_convrot_vae_path(model_path)
+            safetensors_list = dense_vae_safetensors(safetensors_list)
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
         # Common case: a single `.safetensors` checkpoint file.
@@ -911,6 +925,9 @@ class VAELoader(ComponentLoader):
         # strictly so missing/unexpected keys are surfaced early.
         strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3"}
         vae.load_state_dict(loaded, strict=strict_load)
+        if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:
+            from fastvideo.models.vaes.minimax_h3_int8_convrot import overlay_minimax_h3_int8_convrot_decoder
+            overlay_minimax_h3_int8_convrot_decoder(vae, int8_convrot_path)
         if (class_name == "AutoencoderKLWan" and getattr(vae.config, "use_light_vae", False)
                 and target_device.type == "cuda" and hasattr(vae, "optimize_memory_format")):
             vae.optimize_memory_format()
@@ -1068,6 +1085,8 @@ class TransformerLoader(ComponentLoader):
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
+        from fastvideo.layers.quantization.nvfp4_config import dense_transformer_safetensors
+        safetensors_list = dense_transformer_safetensors(safetensors_list)
 
         # arch_config can infer architecture from weight keys (e.g. Flux2 layer counts)
         update_fn = getattr(dit_config.arch_config, "update_from_weight_keys", None)

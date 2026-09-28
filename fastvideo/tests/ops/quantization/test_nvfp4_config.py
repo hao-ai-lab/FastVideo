@@ -35,8 +35,16 @@ def test_nvfp4config_layer_profile_round_trips_from_dict():
     from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
     config = NVFP4Config.from_config({"layer_profile": "base"})
     assert config.layer_profile == "base"
+    config = NVFP4Config.from_config({"layer_profile": "h3_dit"})
+    assert config.layer_profile == "h3_dit"
     config = NVFP4Config.from_config({})
     assert config.layer_profile == "refine"
+
+
+def test_nvfp4config_rejects_unknown_layer_profile():
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
+    with pytest.raises(ValueError, match="h3_dit"):
+        NVFP4Config(layer_profile="h3-dit")
 
 
 def test_nvfp4_kernel_call_raises_clear_error_without_flashinfer(monkeypatch):
