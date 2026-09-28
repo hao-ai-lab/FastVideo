@@ -14,13 +14,16 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines.basic.ltx2.ltx2_pipeline import LTX2Pipeline
-from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.trackers import (DummyTracker, TrackerType, Trackers, initialize_trackers)
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler)
 from fastvideo.utils import set_random_seed
 
 logger = init_logger(__name__)
+
+# Preset fps of the LTX-2 checkpoints, used when a batch carries no fps.
+_DEFAULT_ROPE_FPS = 24.0
 
 
 class LTX2TrainingPipeline(TrainingPipeline):
@@ -38,6 +41,8 @@ class LTX2TrainingPipeline(TrainingPipeline):
     text_encoder: torch.nn.Module
     with_audio: bool = False
     tracker: TrackerType
+    # fps of the current batch; the DiT divides temporal RoPE positions by it.
+    _rope_fps: float = _DEFAULT_ROPE_FPS
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         # TODO (David): Change to port LTX2 scheduler into self.modules["scheduler"]
@@ -246,6 +251,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
         training_batch.encoder_attention_mask = attention_mask.to(device, dtype=torch.bfloat16)
         training_batch.infos = []
         training_batch.raw_latent_shape = latents.shape
+        self._rope_fps = _DEFAULT_ROPE_FPS
         return training_batch
 
     def _get_next_batch_pt(
@@ -286,7 +292,19 @@ class LTX2TrainingPipeline(TrainingPipeline):
         else:
             training_batch.infos = []
         training_batch.raw_latent_shape = latents.shape
+        self._rope_fps = self._batch_fps(batch["latents"].get("fps"))
         return training_batch
+
+    @staticmethod
+    def _batch_fps(fps: torch.Tensor | list[float] | float | None) -> float:
+        if fps is None:
+            return _DEFAULT_ROPE_FPS
+        values = [float(v) for v in torch.as_tensor(fps).flatten().tolist()]
+        if not values or values[0] <= 0:
+            return _DEFAULT_ROPE_FPS
+        if any(v != values[0] for v in values):
+            logger.warning("Batch mixes fps %s; using %s for RoPE", values, values[0])
+        return values[0]
 
     def _normalize_dit_input(self, training_batch: TrainingBatch) -> TrainingBatch:
         return training_batch
@@ -421,8 +439,12 @@ class LTX2TrainingPipeline(TrainingPipeline):
         assert training_batch.noisy_model_input is not None
         assert training_batch.noise is not None
 
+        # Without fps in the forward context the DiT leaves temporal RoPE positions in
+        # frames, while inference divides them by the preset fps into seconds.
         with self.tracker.timed("timing/forward_backward"), set_forward_context(
-                current_timestep=training_batch.current_timestep, attn_metadata=training_batch.attn_metadata):
+                current_timestep=training_batch.current_timestep,
+                attn_metadata=training_batch.attn_metadata,
+                forward_batch=ForwardBatch(data_type="video", fps=self._rope_fps)):
             with torch.autocast("cuda", dtype=training_batch.latents.dtype), torch.autograd.set_detect_anomaly(True):
                 outputs = self.transformer(**input_kwargs)
 
