@@ -16,10 +16,12 @@ from fastvideo.configs.configs import VideoLoaderType
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.forward_context import get_forward_context
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
+from fastvideo.pipelines.preprocess.ltx2.ltx2_preprocess_pipelines import LTX2AudioEncodingStage
 from fastvideo.pipelines.preprocess.preprocess_stages import VideoTransformStage
 from fastvideo.training import ltx2_training_pipeline as ltx2_module
 from fastvideo.training.ltx2_training_pipeline import LTX2TrainingPipeline
 from fastvideo.training.trackers import DummyTracker
+from fastvideo.workflow.preprocess.preprocess_workflow_ltx2_t2v import LTX2PrecomputedSaver
 
 
 class _FpsRecordingDiT(torch.nn.Module):
@@ -91,28 +93,42 @@ def test_mixed_fps_batch_uses_the_first_sample(monkeypatch: pytest.MonkeyPatch) 
     assert _train_step_fps(pipeline, _pt_batch(torch.tensor([25.0, 30.0]))) == 25.0
 
 
-class _FrameSource:
+class _Clip(str):
+    """A 60-frame video path whose frames read like a torchcodec decoder's."""
 
-    def __init__(self, num_frames: int) -> None:
-        self.frames = torch.zeros(num_frames, 3, 16, 16, dtype=torch.uint8)
+    frames = torch.zeros(60, 3, 16, 16, dtype=torch.uint8)
 
     def get_frames_at(self, indices) -> SimpleNamespace:
         return SimpleNamespace(data=self.frames[list(indices)])
 
 
-def test_video_transform_records_the_resampled_fps() -> None:
-    stage = VideoTransformStage(train_fps=24, num_frames=9, max_height=16, max_width=16, do_temporal_sample=False)
+def test_resampled_clip_keeps_train_fps_for_audio_and_saving(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    requested_audio_seconds: list[float] = []
+
+    def extract_audio(video_path: str, target_duration: float) -> None:
+        requested_audio_seconds.append(target_duration)
+
+    monkeypatch.setattr(LTX2AudioEncodingStage, "_extract_audio", staticmethod(extract_audio))
     batch = SimpleNamespace(data_type="video",
-                            video_loader=[_FrameSource(60)],
+                            video_loader=[_Clip("clip.mp4")],
+                            video_file_name=["clip.mp4"],
                             fps=[30.0],
                             num_frames=[60],
                             height=[16],
-                            width=[16])
+                            width=[16],
+                            prompt_embeds=[torch.zeros(1, 3, 8)],
+                            prompt_attention_mask=[torch.ones(1, 3)],
+                            extra={})
     args = SimpleNamespace(preprocess_config=SimpleNamespace(video_loader_type=VideoLoaderType.TORCHCODEC),
                            workload_type=WorkloadType.T2V)
 
-    stage.forward(batch, args)
+    VideoTransformStage(train_fps=24, num_frames=9, max_height=16, max_width=16,
+                        do_temporal_sample=False).forward(batch, args)
+    LTX2AudioEncodingStage(torch.nn.Linear(1, 1), audio_processor=None, fallback_fps=24).forward(batch, args)
+    LTX2PrecomputedSaver(tmp_path).save_batch(batch)
 
-    # 9 frames sampled at 24 fps span 9 / 24 s of the source, so the clip is a 24 fps clip.
+    # 9 frames sampled at 24 fps from a 30 fps source cover 9 / 24 s.
+    assert requested_audio_seconds == [pytest.approx(9 / 24)]
+    assert torch.load(tmp_path / "latents" / "clip.pt")["fps"] == 24.0
     assert batch.num_frames == [9]
     assert batch.fps == [24]
