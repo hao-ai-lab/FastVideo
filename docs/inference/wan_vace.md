@@ -64,6 +64,8 @@ Defined in:
 - `fastvideo/models/wan/pipeline_config.py` (`WanVACE1_3B_Config`, `WanVACE14B_Config`)
 - `fastvideo/pipelines/basic/wan/presets.py` (`WAN_VACE_1_3B`, `WAN_VACE_14B`)
 
+Checked-in presets use `fps=16`.
+
 ## Pipeline Architecture
 
 ```
@@ -112,6 +114,15 @@ WAN_VACE_MODEL_DIR=/path/to/Wan2.1-VACE-1.3B-diffusers \
 WAN_VACE_14B_MODEL_DIR=/path/to/Wan2.1-VACE-14B-diffusers \
   pytest tests/local_tests/pipelines/test_wan_vace_end_to_end_parity.py -v -s
 
+# SP2 forward parity (two GPUs, no weights)
+pytest fastvideo/tests/distributed/test_sp_wan_vace.py -v -s
+
+# Local SP2 pipeline comparison (two GPUs + cached weights; cases xfail)
+WAN_VACE_SP_E2E=1 \
+WAN_VACE_MODEL_DIR=/path/to/Wan2.1-VACE-1.3B-diffusers \
+WAN_VACE_14B_MODEL_DIR=/path/to/Wan2.1-VACE-14B-diffusers \
+  pytest tests/local_tests/pipelines/test_wan_vace_sp_pipeline.py -v -s
+
 # End-to-end load/generate smoke (GPU + weights)
 WAN_VACE_MODEL_DIR=/path/to/Wan2.1-VACE-1.3B-diffusers \
   pytest tests/local_tests/pipelines/test_wan_vace_pipeline_smoke.py -v -s -k load_generate
@@ -124,27 +135,62 @@ End-to-end gates (`test_wan_vace_end_to_end_parity.py`):
 | Gate | Check |
 |------|-------|
 | Conditioning inputs | bf16 bitwise vs Diffusers |
-| Step0 noise prediction | `assert_dit_parity` (atol/rtol 0.1) |
+| Step0 noise prediction | `assert_dit_parity` (atol/rtol 0.1 and abs-mean drift &lt; 5%) |
 | Final latent | abs-mean drift &lt; 5% after 2 denoise steps |
 
 Coverage: 1.3B t2v, reference, video+mask; 14B reference.
 
-14B reference step0 block hooks (aligned inputs, real reference image) show
-accumulating per-block bf16 drift while the overall noise prediction still passes
-the DiT gate. No VACE-only wiring bug or shared Wan DiT regression was observed.
+Offline B200 rerun: 5 frames at 64×64, 2 denoising steps, fixed initial latents,
+`TORCH_SDPA`. All four cases passed the gates above. Strict final-latent
+`rtol=atol=1e-2` was diagnostic only and failed in every case.
+
+| Case | Step0 max abs | Final max abs | Final abs-mean drift | Strict `1e-2` mismatches |
+|------|--------------:|--------------:|---------------------:|------------------------:|
+| 1.3B t2v | 0.015625 | 0.539263 | 2.44% | 874/2048 |
+| 1.3B reference | 0.015625 | 0.210877 | 3.00% | 1041/2048 |
+| 1.3B video+mask | 0.015625 | 0.595765 | 3.27% | 925/2048 |
+| 14B reference | 0.15625 | 0.210167 | 3.85% | 1331/2048 |
+
+"Hierarchical gates pass" does **not** mean strict `1e-2` bitwise parity.
+
+## Sequence Parallel Status
+
+**FP32 weight-free SP2** (`fastvideo/tests/distributed/test_sp_wan_vace.py`) passes
+single-GPU versus SP2 at `atol=rtol=1e-5`, including odd-token padding, shorter
+control sequences, gather/unpad, and both ranks.
+
+**Weighted BF16 short pipeline** (`test_wan_vace_sp_pipeline.py`, 5 frames at 64×64,
+two steps, fixed latents) is marked `xfail(strict=True)`. Gates per step:
+`atol=rtol=0.02`, final latent drift &lt; 1%, decoded-frame SSIM ≥ 0.99. All three
+cases fail on the unmodified path:
+
+| Case | Step0 max abs | Step1 max abs | Final latent drift | Frame SSIM |
+|------|--------------:|--------------:|-------------------:|-----------:|
+| 1.3B reference | 0.255859 | 0.1875 | 3.78% | 0.94534 |
+| 1.3B video+mask | 0.148438 | 0.726562 | 3.48% | 0.97844 |
+| 14B reference | 0.125 | 0.15625 | 2.00% | 0.98123 |
+
+Conditioning inputs match exactly between single-GPU and SP2; both SP ranks agree.
+The first traced difference is VACE block 0's FFN output projection after
+bitwise-equal Q/K/V and attention outputs. Root cause: BF16 `F.linear` results
+depend on GEMM row count (full M versus two M/2 shards on the same GPU).
+
+**Production-size video**: 1.3B/14B 480p and 14B 720p SP2 videos matched corresponding
+single-GPU MP4 hashes (81 frames). This is repeatability evidence, not a substitute
+for the short numeric gates above.
+
+Set `WAN_VACE_SP_TRACE=1` to print per-layer SP divergence stats (read-only hooks).
 
 ## Known Gaps
 
-- No SSIM regression baseline yet. The matrix verifies runnable outputs and frame
-  counts, not pixel-level quality against an HF reference video.
-- End-to-end numerics use the VACE gates above. Tight `1e-2` latent parity across
-  all steps is not expected because bf16 attention drift compounds over the
-  denoising loop.
-- `WanVACETransformer3DModel.forward` still duplicates much of
-  `WanTransformer3DModel.forward`; consolidating would require shared forward
-  hooks and is deferred.
-- Sequence parallelism (`sp_size > 1`) not validated for VACE.
-- Video+mask control path not covered by the official matrix script.
+- No L40S CI SSIM reference seeded; local B200 video comparisons are drafts only.
+- Full-video human review not completed.
+- 14B 720p SP2 matched single-GPU draft MP4 hash locally (MS-SSIM compare in private validation).
+- Weighted BF16 short-pipeline SP2 remains `xfail`; no production compensation landed.
+- `WanVACETransformer3DModel.forward` duplicates much of `WanTransformer3DModel.forward`.
+- Video+mask control path not covered by `scripts/run_vace_matrix.py`.
+- Worker startup semaphore ENOENT on one Slurm node is under investigation; see
+  `.agents/lessons/wan_vace_semaphore_removeipc.md`.
 
 ## References
 
