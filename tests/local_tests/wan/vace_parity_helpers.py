@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 import torch
@@ -153,12 +153,36 @@ def register_transformer_capture(transformer: Any, captured: dict[str, Any]) -> 
     ]
 
 
-def run_fastvideo_stages(worker_wrapper: Any, model_path: str, request: dict[str, Any]) -> dict[str, Any]:
+def register_sp_layer_capture(transformer: Any, captured: dict[str, Any]) -> list[Any]:
+    """Capture VACE/main block boundaries for local SP divergence diagnosis."""
+    names = ("patch_embedding", "vace_patch_embedding", "condition_embedder", "norm_out", "proj_out")
+    first_block_parts = ("proj_in", "norm1", "to_q", "to_k", "to_v", "norm_q", "norm_k", "attn1",
+                         "to_out", "attn2", "ffn.fc_in", "ffn.act", "ffn.fc_out", "ffn", "proj_out")
+    detailed = {f"{block}.{part}" for block in ("vace_blocks.0", "blocks.0") for part in first_block_parts}
+    selected = [(name, module) for name, module in transformer.named_modules()
+                if name in names or name in detailed or
+                (name.startswith(("vace_blocks.", "blocks.")) and name.count(".") == 1)]
+    captured["layers"] = {}
+    handles = []
+    for name, module in selected:
+        def capture(_module: Any, _inputs: tuple[Any, ...], output: Any, layer_name: str = name) -> None:
+            value = output[0] if isinstance(output, tuple) else output
+            captured["layers"].setdefault(layer_name, []).append(value.detach().cpu())
+
+        handles.append(module.register_forward_hook(capture))
+    return handles
+
+
+def run_fastvideo_stages(worker_wrapper: Any,
+                         model_path: str,
+                         request: dict[str, Any],
+                         capture_decoded: bool = False,
+                         trace_sp_layers: bool = False) -> dict[str, Any]:
     from fastvideo.api.sampling_param import SamplingParam
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
     from fastvideo.utils import shallow_asdict
 
-    set_parity_cuda_flags()
+    previous_cuda_flags = set_parity_cuda_flags()
     worker = worker_wrapper.worker
     pipeline = worker.pipeline
     args = worker.fastvideo_args
@@ -176,6 +200,8 @@ def run_fastvideo_stages(worker_wrapper: Any, model_path: str, request: dict[str
     captured: dict[str, Any] = {"model_inputs": [], "noise_preds": []}
     transformer = pipeline.get_module("transformer")
     capture_handles = register_transformer_capture(transformer, captured)
+    if trace_sp_layers:
+        capture_handles.extend(register_sp_layer_capture(transformer, captured))
     try:
         with torch.no_grad():
             for stage in pipeline.stages:
@@ -193,8 +219,11 @@ def run_fastvideo_stages(worker_wrapper: Any, model_path: str, request: dict[str
                     captured["control"] = batch.vace_control_latents.detach().cpu()
                 elif name == "latent_preparation_stage":
                     captured["initial_latents"] = batch.latents.detach().cpu()
+                elif name == "denoising_stage" and capture_decoded:
+                    captured["denoised_latents"] = batch.latents.detach().cpu()
             captured["latents"] = batch.output.detach().cpu()
     finally:
         for capture_handle in capture_handles:
             capture_handle.remove()
+        restore_parity_cuda_flags(previous_cuda_flags)
     return captured
