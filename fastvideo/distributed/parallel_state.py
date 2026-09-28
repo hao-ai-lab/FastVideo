@@ -793,6 +793,8 @@ def initialize_model_parallel(
     sequence_model_parallel_size: int = 1,
     data_parallel_size: int = 1,
     backend: str | None = None,
+    sp_group_ranks: list[list[int]] | None = None,
+    dp_group_ranks: list[list[int]] | None = None,
 ) -> None:
     """
     Initialize model parallel groups.
@@ -802,6 +804,11 @@ def initialize_model_parallel(
             parallelism (used for language encoder).
         sequence_model_parallel_size: number of GPUs used for sequence model
             parallelism (used for DiT).
+        sp_group_ranks: explicit SP group layout, overriding the default
+            consecutive-rank groups (MiniMax-H3 encoder split: encoder ranks
+            hold singletons and the denoise ranks form one group). Every rank
+            must still belong to exactly one group.
+        dp_group_ranks: explicit DP group layout, same contract.
     """
     # Get world size and rank. Ensure some consistencies.
     assert _WORLD is not None, "world group is not initialized, please call init_distributed_environment first"
@@ -829,11 +836,19 @@ def initialize_model_parallel(
     assert _SP is None, ("sequence model parallel group is already initialized")
     group_ranks = []
 
-    # Since SP is incompatible with TP and PP, we can use a simpler group creation logic
-    for i in range(num_sequence_model_parallel_groups):
-        # Create groups of consecutive ranks
-        ranks = list(range(i * sequence_model_parallel_size, (i + 1) * sequence_model_parallel_size))
-        group_ranks.append(ranks)
+    if sp_group_ranks is not None:
+        # Explicit layout (MiniMax-H3 encoder split): every rank must appear
+        # exactly once; GroupCoordinator rejects ranks without a group.
+        flat = [rank for ranks in sp_group_ranks for rank in ranks]
+        assert sorted(flat) == list(range(world_size)), (
+            f"sp_group_ranks must cover world ranks 0..{world_size - 1} exactly once, got {sp_group_ranks}")
+        group_ranks = [list(ranks) for ranks in sp_group_ranks]
+    else:
+        # Since SP is incompatible with TP and PP, we can use a simpler group creation logic
+        for i in range(num_sequence_model_parallel_groups):
+            # Create groups of consecutive ranks
+            ranks = list(range(i * sequence_model_parallel_size, (i + 1) * sequence_model_parallel_size))
+            group_ranks.append(ranks)
 
     _SP = init_model_parallel_group(group_ranks, get_world_group().local_rank, backend, group_name="sp")
 
@@ -843,9 +858,15 @@ def initialize_model_parallel(
     assert _DP is None, ("data parallel group is already initialized")
     group_ranks = []
 
-    for i in range(num_data_parallel_groups):
-        ranks = list(range(i, world_size, num_data_parallel_groups))
-        group_ranks.append(ranks)
+    if dp_group_ranks is not None:
+        flat = [rank for ranks in dp_group_ranks for rank in ranks]
+        assert sorted(flat) == list(range(world_size)), (
+            f"dp_group_ranks must cover world ranks 0..{world_size - 1} exactly once, got {dp_group_ranks}")
+        group_ranks = [list(ranks) for ranks in dp_group_ranks]
+    else:
+        for i in range(num_data_parallel_groups):
+            ranks = list(range(i, world_size, num_data_parallel_groups))
+            group_ranks.append(ranks)
 
     _DP = init_model_parallel_group(group_ranks, get_world_group().local_rank, backend, group_name="dp")
 
@@ -894,7 +915,9 @@ def get_local_torch_device() -> torch.device:
 
 def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                                           sp_size: int,
-                                                          distributed_init_method: str = "env://"):
+                                                          distributed_init_method: str = "env://",
+                                                          sp_group_ranks: list[list[int]] | None = None,
+                                                          dp_group_ranks: list[list[int]] | None = None):
     if _WORLD is not None and model_parallel_is_initialized():
         # make sure the tp and sp sizes are correct
         assert get_tp_world_size(
@@ -916,7 +939,10 @@ def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                  local_rank=local_rank,
                                  distributed_init_method=distributed_init_method,
                                  device_id=device)
-    initialize_model_parallel(tensor_model_parallel_size=tp_size, sequence_model_parallel_size=sp_size)
+    initialize_model_parallel(tensor_model_parallel_size=tp_size,
+                              sequence_model_parallel_size=sp_size,
+                              sp_group_ranks=sp_group_ranks,
+                              dp_group_ranks=dp_group_ranks)
 
     # set device if we're on a CUDA/NPU platform
     from fastvideo.platforms import current_platform
