@@ -33,7 +33,8 @@ through `WanVACEConfig.param_names_mapping`.
 
 | Item | Status |
 |---|---|
-| SSIM test | deferred_with_reason: no L40S reference videos seeded; component and pipeline parity cover correctness |
+| SSIM test | written (fastvideo/tests/ssim/test_wan_vace_similarity.py; 1.3B reference-image case, 1 GPU) |
+| Reference videos | pending: seeded as drafts by CI SSIM bootstrap on the `[new-model]` PR, then promoted by a maintainer |
 
 ## Known Blockers
 
