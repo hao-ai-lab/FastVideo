@@ -7,7 +7,6 @@ from PIL import Image
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.wan.stages.vace_input import preprocess_vace_reference_images
-from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage, WanDenoisingState
 from fastvideo.pipelines.basic.wan.stages.vace_denoising import WanVACEDenoisingStage
 from fastvideo.pipelines.basic.wan.stages.vace_input import WanVACEInputStage
 from fastvideo.pipelines.basic.wan.stages.vace_latent_preparation import WanVACELatentPreparationStage
@@ -106,6 +105,13 @@ def test_vace_mask_and_video_frame_count_must_match(monkeypatch, vace_args):
         WanVACEInputStage().forward(batch, vace_args)
 
 
+def test_vace_short_control_video_is_rejected(vace_args):
+    batch = _batch(video_path="video.mp4", video_latent=torch.zeros(1, 3, 3, 32, 32))
+
+    with pytest.raises(ValueError, match="control video has 3 frames.*num_frames=5"):
+        WanVACEInputStage().forward(batch, vace_args)
+
+
 def test_vace_input_stage_does_not_leak_references_between_requests(monkeypatch, vace_args):
     monkeypatch.setattr("fastvideo.pipelines.basic.wan.stages.vace_input.preprocess_vace_reference_images",
                         lambda *args, **kwargs: [torch.zeros(3, 32, 32)])
@@ -133,16 +139,14 @@ def test_vace_reference_frame_padding_restores_request_on_failure(monkeypatch, v
     assert batch.num_frames == 5
 
 
-def test_vace_denoising_preserves_wan_request_state(monkeypatch, vace_args):
-    latents = torch.zeros(1, 16, 2, 4, 4)
+def test_vace_denoising_forwards_control_kwargs(vace_args):
     control = torch.zeros(1, 96, 2, 4, 4)
-    batch = _batch(latents=latents, vace_control_latents=control, conditioning_scale=0.5)
-    monkeypatch.setattr(WanDenoisingStage, "prepare_denoising",
-                        lambda self, *args: WanDenoisingState(latents=latents, boundary_timestep=42))
+    batch = _batch(vace_control_latents=control, conditioning_scale=0.5)
     stage = WanVACEDenoisingStage.__new__(WanVACEDenoisingStage)
 
-    state = stage.prepare_denoising(batch, vace_args, torch.float32)
+    kwargs = stage.prepare_family_transformer_kwargs(batch, None, torch.bfloat16)
 
-    assert state.boundary_timestep == 42
-    assert state.control_hidden_states is control
-    assert state.control_hidden_states_scale == 0.5
+    assert kwargs["control_hidden_states"].dtype == torch.bfloat16
+    assert kwargs["control_hidden_states_scale"] == 0.5
+    assert stage.prepare_family_transformer_kwargs(_batch(), None, torch.bfloat16) == {}
+
