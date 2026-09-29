@@ -15,6 +15,7 @@ import torch
 import torch.distributed as dist
 from torch.testing import assert_close
 
+from fastvideo import envs
 from fastvideo.attention.selector import _component_attention_backend_scope
 from fastvideo.distributed import (
     cleanup_dist_env_and_memory,
@@ -122,9 +123,8 @@ def _torchrun(mode: str, processes: int, output_path: Path) -> None:
         "--master_port", str(_free_port()), str(Path(__file__).resolve()), "--sp-worker", "--mode", mode,
         "--output", str(output_path),
     ]
-    environment = os.environ.copy()
-    environment["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
-    process = subprocess.run(command, capture_output=True, text=True, env=environment)
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"):
+        process = subprocess.run(command, capture_output=True, text=True)
     if process.returncode:
         raise RuntimeError(f"{mode} worker exited {process.returncode}\n{process.stdout}\n{process.stderr}")
 
