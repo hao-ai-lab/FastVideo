@@ -9,40 +9,61 @@ severity: important
 
 ## What Happened
 
-Standard `VideoGenerator` runs with the `mp` executor sometimes failed during
-worker startup: a spawn child raised `FileNotFoundError` from
-`multiprocessing.synchronize.SemLock._rebuild` while unpickling its arguments.
-The failures appeared on several Slurm nodes and were intermittent. The parent
-process still held its Queue objects.
+On Slurm nodes, standard `VideoGenerator` runs with the `mp` executor sometimes
+failed during worker startup. A spawn child raised `FileNotFoundError` from
+`multiprocessing.synchronize.SemLock._rebuild` while unpickling its arguments,
+even though the parent still held its Queue objects. Failures showed up on
+several nodes and looked intermittent.
 
 ## Root Cause
 
-`MultiprocExecutor` always created two streaming `multiprocessing.Queue`s and
-passed them to every worker. They are backed by six POSIX named semaphores
-(`/dev/shm/sem.*`). If something deletes those names before a spawn child
-deserializes them, `SemLock._rebuild` fails with ENOENT. A test can reproduce
-this by holding the child at the import barrier and unlinking the semaphores.
+The cluster's Slurm epilog `80-epilog-cleanup-shm-tmp.sh` runs
+`find /dev/shm -maxdepth 2 -user "$SLURM_JOB_USER" -delete` at the end of
+**every** job. When one of a user's jobs ends, the epilog deletes that user's
+`/dev/shm` files on the node, including those that the user's *other* running
+jobs are still using. Python's POSIX named semaphores (`/dev/shm/sem.mp-*`) are
+among them. If the deletion lands between queue creation and a spawn child
+unpickling it, the child fails with ENOENT.
 
-The external deleter was not identified. RemoveIPC and session teardown are
-still hypotheses. Also note that these are POSIX named semaphores, not
-System V ones.
+Evidence:
+
+- **Timing.** Three deletion bursts during a probe job each matched, to the
+  second, the end of another job by the same user on the same node:
+  - 21:03:16: job 947243 ended.
+  - 21:04:36: job 947244 ended.
+  - 21:12:12: job 947246 ended.
+  - The window of an earlier failure (946438) also contains same-user job ends.
+- **Controlled reproduction.**
+  - Job A held a spawn `Lock` semaphore and a marker file in `/dev/shm`.
+  - Job B, on the same node, started and then ended.
+  - Job B's start deleted nothing.
+  - Within 1 s of job B's end, both of job A's objects were gone, and job A's
+    finalizer then hit the same ENOENT.
+- **Still unexplained.** One historical failure (946472) has no same-user job
+  end in its window, so another deleter cannot be ruled out for it. logind
+  `RemoveIPC` was the earlier hypothesis; it is not needed to explain the other
+  cases.
 
 ## Fix / Workaround
 
-The queues are needed only for streaming, so standard inference no longer
-creates them. `FastVideoArgs.enable_streaming_ipc_queues` defaults to `False`,
-and `StreamingVideoGenerator` sets it to `True` before workers spawn.
-`MultiprocExecutor.enable_streaming()` raises when the queues are missing.
-This removes the exposure for standard inference. It does not stop an external
-process from deleting IPC objects, so streaming runs remain exposed.
+- **FastVideo hardening.** Standard inference no longer creates the two
+  streaming queues it never uses. `FastVideoArgs.enable_streaming_ipc_queues`
+  defaults to `False`, and `StreamingVideoGenerator` sets it to `True`. This
+  removes the exposure for standard inference only.
+- **Still exposed.** Streaming queues, NCCL shared-memory segments, and
+  DataLoader shared memory on the same node can still be deleted by the epilog.
+- **Cluster fix (administrators).** Clean `/dev/shm` only when the user has no
+  other job on the node, or give each job a private `/dev/shm` with
+  `JobContainerType=job_container/tmpfs`.
+- **User workaround.** Don't co-locate your own jobs on one node
+  (`--exclusive=user`), or avoid ending short jobs next to long-running ones.
 
 ## Prevention
 
+- Before blaming an application for `/dev/shm` ENOENT on Slurm, read the
+  node-local prolog/epilog hooks (`/cm/local/apps/slurm/var/{prologs,epilogs}`).
+  Then correlate the failure window with `sacct -u $USER -N <node>` job end
+  times.
 - Do not pass IPC primitives to spawn workers unless the worker needs them.
 - `fastvideo/tests/worker/test_multiproc_executor.py` checks that standard
   workers survive semaphore removal during spawn.
-- Treat a passing stress run as evidence for the mitigation only, not as a
-  confirmed root cause. `inotify` names the deleted object, not the deleter.
-  Blame a process only after its unlink call is observed to succeed.
-- Make failed tests fail the job: a trailing `|| echo` in a Slurm script hides
-  non-zero exits.
