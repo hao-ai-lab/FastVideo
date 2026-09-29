@@ -52,6 +52,10 @@ class WanVACEContextStage(PipelineStage):
         # Match Diffusers WanVACEPipeline: keep packed control in VAE fp32 until the
         # denoising stage casts once to DiT dtype immediately before transformer.
         batch.vace_control_latents = torch.cat([conditioning_latents, mask_latents], dim=1).to(device=device)
+        # The pixels are fully encoded into the control latents; drop them so the
+        # Wan denoising stage does not keep them or allocate ``video_padding``.
+        batch.video_latent = None
+        batch.mask_video = None
         if fastvideo_args.vae_cpu_offload:
             self.vae = self.vae.to(original_device)
         return batch

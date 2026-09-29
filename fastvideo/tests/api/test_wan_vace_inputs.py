@@ -12,7 +12,6 @@ from fastvideo.pipelines.basic.wan.stages.vace_input import WanVACEInputStage
 from fastvideo.pipelines.basic.wan.stages.vace_latent_preparation import WanVACELatentPreparationStage
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
-from fastvideo.pipelines.stages.latent_preparation import LatentPreparationStage
 
 
 @pytest.fixture(params=("Wan-AI/Wan2.1-VACE-1.3B-diffusers", "Wan-AI/Wan2.1-VACE-14B-diffusers"))
@@ -125,19 +124,28 @@ def test_vace_input_stage_does_not_leak_references_between_requests(monkeypatch,
     assert second.vace_reference_images is None
 
 
-def test_vace_reference_frame_padding_restores_request_on_failure(monkeypatch, vace_args):
-    def fail_after_recording_frames(self, batch, fastvideo_args):
-        assert batch.num_frames == 9
-        raise RuntimeError("synthetic preparation failure")
-
-    monkeypatch.setattr(LatentPreparationStage, "forward", fail_after_recording_frames)
-    batch = _batch(vace_num_reference_frames=1)
+def test_vace_reference_frames_extend_latent_length_without_mutating_request(vace_args):
+    batch = _batch(vace_num_reference_frames=2)
     stage = WanVACELatentPreparationStage(scheduler=object(), transformer=object())
 
-    with pytest.raises(RuntimeError, match="synthetic preparation failure"):
-        stage.forward(batch, vace_args)
+    # 5 pixel frames -> 2 latent frames, plus one leading latent frame per reference.
+    assert stage.latent_num_frames(batch, vace_args) == 4
     assert batch.num_frames == 5
 
+
+def test_vace_decoding_strips_reference_frames_from_trajectory(monkeypatch, vace_args):
+    from fastvideo.pipelines.basic.wan.stages.vace_decoding import WanVACEDecodingStage
+    from fastvideo.pipelines.stages.decoding import DecodingStage
+
+    monkeypatch.setattr(DecodingStage, "forward", lambda self, batch, args: batch)
+    batch = _batch(vace_num_reference_frames=1,
+                   latents=torch.zeros(1, 16, 3, 4, 4),
+                   trajectory_latents=torch.zeros(1, 2, 16, 3, 4, 4))
+
+    WanVACEDecodingStage.__new__(WanVACEDecodingStage).forward(batch, vace_args)
+
+    assert batch.latents.shape[2] == 2
+    assert batch.trajectory_latents.shape[3] == 2
 
 def test_vace_denoising_forwards_control_kwargs(vace_args):
     control = torch.zeros(1, 96, 2, 4, 4)

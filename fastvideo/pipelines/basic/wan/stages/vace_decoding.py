@@ -10,6 +10,10 @@ class WanVACEDecodingStage(DecodingStage):
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         num_ref = batch.vace_num_reference_frames
-        if num_ref > 0 and batch.latents is not None:
-            batch.latents = batch.latents[:, :, num_ref:]
+        if num_ref > 0:
+            if batch.latents is not None:
+                batch.latents = batch.latents[:, :, num_ref:]
+            # Trajectory latents are [B, steps, C, T, H, W].
+            if batch.trajectory_latents is not None:
+                batch.trajectory_latents = batch.trajectory_latents[:, :, :, num_ref:]
         return super().forward(batch, fastvideo_args)
