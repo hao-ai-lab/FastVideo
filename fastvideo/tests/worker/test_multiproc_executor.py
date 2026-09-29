@@ -2,6 +2,7 @@ import multiprocessing as mp
 from multiprocessing import resource_tracker, util
 import os
 from pathlib import Path
+import shutil
 import sys
 import time
 from types import SimpleNamespace
@@ -366,12 +367,11 @@ def test_streaming_queues_survive_real_spawn(captured_worker_kwargs, spawn_probe
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inspects POSIX semaphores under /dev/shm")
-def test_standard_workers_survive_semaphore_removal_during_spawn(captured_worker_kwargs, spawn_probe, monkeypatch,
-                                                                 tmp_path) -> None:
+def test_standard_workers_survive_semaphore_removal_during_spawn(captured_worker_kwargs, spawn_probe) -> None:
     """Regression for SemLock._rebuild ENOENT: standard workers must not unpickle streaming semaphores.
 
     Workers are held at an import barrier while the parent unlinks a live semaphore
-    from /dev/shm, mimicking a system cleaner. Without streaming queues, the workers
+    from /dev/shm, as a Slurm epilog cleaning the user's /dev/shm does. Without streaming queues, the workers
     have nothing to rebuild and must still start and reply.
     """
     executor = MultiprocExecutor(FastVideoArgs(model_path="test/model", num_gpus=2))
@@ -381,8 +381,10 @@ def test_standard_workers_survive_semaphore_removal_during_spawn(captured_worker
     sentinel = context.Lock()  # Not passed to children; proves deletion really happens.
     name = sentinel._semlock.name
     path = "/dev/shm/sem." + name.lstrip("/")
-    monkeypatch.setenv("FASTVIDEO_TEST_IPC_GATE", str(tmp_path))
-    monkeypatch.setenv("FASTVIDEO_TEST_IPC_PARENT", str(os.getpid()))
+    from spawn_ipc_probe import gate_dir  # importable once spawn_probe has extended sys.path
+
+    gate = gate_dir(os.getpid())
+    gate.mkdir()
     children, pipes = [], []
     try:
         for call in captured_worker_kwargs:
@@ -394,7 +396,7 @@ def test_standard_workers_survive_semaphore_removal_during_spawn(captured_worker
             child.start()
             send.close()
         deadline = time.monotonic() + 60
-        while not all((tmp_path / f"{child.pid}.ready").exists() for child in children):
+        while not all((gate / f"{child.pid}.ready").exists() for child in children):
             assert all(child.exitcode is None for child in children), "Worker exited before import barrier"
             assert time.monotonic() < deadline, "Worker did not reach import barrier"
             time.sleep(.01)
@@ -405,14 +407,14 @@ def test_standard_workers_survive_semaphore_removal_during_spawn(captured_worker
             if getattr(finalizer, "_args", ()) == (name,):
                 finalizer.cancel()
         assert not os.path.exists(path)
-        (tmp_path / "release").touch()
+        (gate / "release").touch()
 
         for child, (receive, _) in zip(children, pipes):
             assert receive.poll(30), "Worker failed to start after semaphore removal"
             assert receive.recv() == "disabled"
             child.join(timeout=30)
             assert child.exitcode == 0
-            assert not (tmp_path / f"{child.pid}.stderr").read_text()
+            assert not (gate / f"{child.pid}.stderr").read_text()
     finally:
         for child in children:
             if child.pid:
@@ -420,3 +422,4 @@ def test_standard_workers_survive_semaphore_removal_during_spawn(captured_worker
         for receive, send in pipes:
             receive.close()
             send.close()
+        shutil.rmtree(gate, ignore_errors=True)
