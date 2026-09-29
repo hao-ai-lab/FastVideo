@@ -989,23 +989,35 @@ def set_random_seed(seed: int) -> None:
     current_platform.seed_everything(seed)
 
 
+def _kernel_submodule_exists(submodule: str) -> bool:
+    """Whether ``fastvideo_kernel.<submodule>`` is installed, without importing the package.
+
+    Looking up a dotted name with util.find_spec imports its parent package,
+    and kernel package initialization may require a visible GPU driver.
+    """
+    package = importlib.util.find_spec("fastvideo_kernel")
+    # A single-file module has no search locations; PathFinder would then
+    # search sys.path for an unrelated top-level module of the same name.
+    if package is None or package.submodule_search_locations is None:
+        return False
+    try:
+        spec = importlib.machinery.PathFinder.find_spec(f"fastvideo_kernel.{submodule}",
+                                                        package.submodule_search_locations)
+    except (ImportError, KeyError):
+        # A namespace-package portion looks up its parent in sys.modules,
+        # which is deliberately absent here.
+        return False
+    return spec is not None
+
+
 @lru_cache(maxsize=1)
 def is_vsa_available() -> bool:
-    # Looking up a dotted name with util.find_spec imports its parent package.
-    # Kernel package initialization may require a visible GPU driver.
-    package = importlib.util.find_spec("fastvideo_kernel")
-    if package is None:
-        return False
-    return importlib.machinery.PathFinder.find_spec("fastvideo_kernel.ops",
-                                                    package.submodule_search_locations) is not None
+    return _kernel_submodule_exists("ops")
 
 
 @lru_cache(maxsize=1)
 def is_vmoba_available() -> bool:
-    package = importlib.util.find_spec("fastvideo_kernel")
-    if package is None:
-        return False
-    if importlib.machinery.PathFinder.find_spec("fastvideo_kernel.vmoba", package.submodule_search_locations) is None:
+    if not _kernel_submodule_exists("vmoba"):
         return False
     try:
         import flash_attn
