@@ -7,7 +7,6 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA, LocalAttention)
 from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
@@ -625,8 +624,11 @@ class WanTransformer3DModel(BaseDiT):
         )
 
         # 3. Transformer blocks
-        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
-        transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
+        # The loader records this component's attention backend on its config
+        # before construction (see fastvideo/attention/AGENTS.md).
+        attn_backend = config._resolved_attention_backend
+        transformer_block = (WanTransformerBlock_VSA
+                             if attn_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN else WanTransformerBlock)
         self.blocks = nn.ModuleList([
             transformer_block(inner_dim,
                               config.ffn_dim,

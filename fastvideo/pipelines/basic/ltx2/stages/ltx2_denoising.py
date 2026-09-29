@@ -14,8 +14,8 @@ from pathlib import Path
 import torch
 from tqdm.auto import tqdm
 
-import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionMetadataBuilder)
+from fastvideo.attention.selector import component_attention_backend
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -28,6 +28,7 @@ from fastvideo.pipelines.basic.ltx2.stages.ltx2_image_conditioning import (LTX2_
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.logger import init_logger
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.models.dits.ltx2 import (AudioLatentShape, DEFAULT_LTX2_AUDIO_CHANNELS, DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
                                         DEFAULT_LTX2_AUDIO_HOP_LENGTH, DEFAULT_LTX2_AUDIO_MEL_BINS,
                                         DEFAULT_LTX2_AUDIO_SAMPLE_RATE, VideoLatentShape)
@@ -459,16 +460,16 @@ class LTX2DenoisingStage(PipelineStage):
         # Hint runtime FP4 layer gating (single shared transformer path):
         # stage-1 denoising uses "base", stage-2 refine uses "refine".
         batch.extra["ltx2_fp4_stage_profile"] = ("refine" if self.sigmas_override is not None else "base")
-        attention_backend = os.getenv("FASTVIDEO_ATTENTION_BACKEND", envs.FASTVIDEO_ATTENTION_BACKEND)
+        attention_backend = component_attention_backend(self.transformer)
         wants_vsa_metadata = attention_backend in (
-            "VIDEO_SPARSE_ATTN",
-            "SAGE_ATTN_THREE",
+            AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+            AttentionBackendEnum.SAGE_ATTN_THREE,
         )
         # VIDEO_SPARSE_ATTN requires the fastvideo-kernel VSA op.
         # SAGE_ATTN_THREE VSA+QAT only needs VSA metadata and its own kernel path.
-        use_vsa = wants_vsa_metadata and (attention_backend != "VIDEO_SPARSE_ATTN" or vsa_available)
-        if attention_backend == "VIDEO_SPARSE_ATTN" and not vsa_available:
-            logger.warning("FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN but VSA kernel "
+        use_vsa = wants_vsa_metadata and (attention_backend != AttentionBackendEnum.VIDEO_SPARSE_ATTN or vsa_available)
+        if attention_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN and not vsa_available:
+            logger.warning("The transformer uses VIDEO_SPARSE_ATTN but the VSA kernel "
                            "is unavailable; disabling VSA metadata for this run.")
         vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder() if use_vsa else None)
 

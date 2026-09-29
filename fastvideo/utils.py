@@ -747,20 +747,30 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
         raise ValueError(f"Failed to download or parse a Diffusers manifest for {model_name_or_path}: {e}") from e
 
 
-_HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
+# Token variables that `huggingface_hub` itself reads, in its priority order.
+HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+# FastVideo-specific token names, kept as deprecated aliases until the next
+# minor release.
+DEPRECATED_HF_TOKEN_ENV_VARS = ("HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
 
 
 def resolve_hf_token() -> str | None:
-    """Return the first non-empty HF token from the standard env vars.
+    """Return the first non-empty Hugging Face token from the environment.
 
-    Order: `HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`, `HF_API_KEY` (the last is
-    a FastVideo convention; `huggingface_hub` itself doesn't read it).
-    Does not mutate `os.environ`.
+    Reads `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`, then the deprecated
+    FastVideo-specific aliases `HUGGINGFACE_HUB_TOKEN` and `HF_API_KEY`,
+    which log a deprecation warning. Does not mutate `os.environ`.
     """
-    for src in _HF_TOKEN_ENV_VARS:
-        v = os.environ.get(src)
-        if v:
-            return v
+    for name in HF_TOKEN_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            return value
+    for name in DEPRECATED_HF_TOKEN_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            logger.warning_once(f"{name} is deprecated and will be removed in the next minor release; "
+                                f"set HF_TOKEN instead.")
+            return value
     return None
 
 

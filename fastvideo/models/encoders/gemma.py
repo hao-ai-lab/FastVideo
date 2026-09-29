@@ -25,19 +25,6 @@ from fastvideo.distributed import get_local_torch_device
 import math
 
 
-def _debug_log_line(message: str) -> None:
-    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1":
-        return
-    log_path = os.getenv("LTX2_PIPELINE_DEBUG_PATH", "")
-    if not log_path:
-        return
-    log_dir = os.path.dirname(log_path)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(message + "\n")
-
-
 def _debug_gemma_log_line(message: str) -> None:
     log_path = os.getenv("LTX2_FASTVIDEO_GEMMA_LOG", "")
     if not log_path:
@@ -451,7 +438,7 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             # Note: torch.backends.cuda.enable_*_sdp() settings should be configured
             # at application/pipeline initialization level, not here, to avoid
             # unexpected side effects across the application.
-            if os.getenv("FASTVIDEO_ATTENTION_BACKEND") == "TORCH_SDPA":
+            if self.config._resolved_attention_backend == AttentionBackendEnum.TORCH_SDPA:
                 if hasattr(self._gemma_model.config, "attn_implementation"):
                     self._gemma_model.config.attn_implementation = "sdpa"
                 if hasattr(self._gemma_model.config, "_attn_implementation"):
@@ -621,19 +608,8 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             attention_mask,
             padding_side=self.padding_side,
         )
-        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-            _debug_log_line("fastvideo:gemma_feature"
-                            f":sum={encoded_video.float().sum().item():.6f} "
-                            f"shape={tuple(encoded_video.shape)}")
         video_encoding, audio_encoding, attention_mask = self._run_connectors(encoded_video, encoded_audio,
                                                                               attention_mask)
-        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-            _debug_log_line("fastvideo:gemma_video_encoding"
-                            f":sum={video_encoding.float().sum().item():.6f} "
-                            f"shape={tuple(video_encoding.shape)}")
-            _debug_log_line("fastvideo:gemma_audio_encoding"
-                            f":sum={audio_encoding.float().sum().item():.6f} "
-                            f"shape={tuple(audio_encoding.shape)}")
 
         hidden_states = (audio_encoding, ) if output_hidden_states else None
         return BaseEncoderOutput(

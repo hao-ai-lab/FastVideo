@@ -14,7 +14,6 @@ on top — the pipeline prompt-preprocessing stage handles pad-or-trim to
 """
 from __future__ import annotations
 
-import os
 from typing import Iterable
 
 import torch
@@ -70,7 +69,7 @@ class T5GemmaEncoderModel(TextEncoder):
             is_encoder_decoder=False,
             dtype=dtype,
         )
-        if os.getenv("FASTVIDEO_ATTENTION_BACKEND") == "TORCH_SDPA":
+        if self.config._resolved_attention_backend == AttentionBackendEnum.TORCH_SDPA:
             if hasattr(model.config, "attn_implementation"):
                 model.config.attn_implementation = "sdpa"
             if hasattr(model.config, "_attn_implementation"):

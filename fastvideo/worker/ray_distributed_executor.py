@@ -12,7 +12,8 @@ from dataclasses import dataclass
 
 from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
-from fastvideo.utils import get_ip, get_distributed_init_method, get_open_port, get_loopback_ip
+from fastvideo.utils import (DEPRECATED_HF_TOKEN_ENV_VARS, HF_TOKEN_ENV_VARS, get_ip, get_distributed_init_method,
+                             get_open_port, get_loopback_ip)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.executor import Executor
@@ -85,8 +86,8 @@ class RayDistributedExecutor(Executor):
     # NCCL_* knobs present on the driver are added dynamically in
     # ``_env_vars_to_copy_from_driver``, except the per-node NIC trio above.
     ADDITIONAL_ENV_VARS = {
-        "HF_TOKEN",
-        "HUGGING_FACE_HUB_TOKEN",
+        *HF_TOKEN_ENV_VARS,
+        *DEPRECATED_HF_TOKEN_ENV_VARS,
         "NCCL_IB_DISABLE",
         "NCCL_P2P_DISABLE",
         "NCCL_CUMEM_ENABLE",
