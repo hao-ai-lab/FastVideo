@@ -94,6 +94,7 @@ class RayDistributedExecutor(Executor):
         "NCCL_NVLS_ENABLE",
         "NCCL_DEBUG",
         "NCCL_DEBUG_SUBSYS",
+        "LD_LIBRARY_PATH",
     }
 
     def _init_executor(self) -> None:
@@ -103,7 +104,7 @@ class RayDistributedExecutor(Executor):
         # Disable Ray usage stats collection.
         ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
         if ray_usage != "1":
-            os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
+            envs.set_external("RAY_USAGE_STATS_ENABLED", "0")
 
         self._init_workers_ray(placement_group)
 

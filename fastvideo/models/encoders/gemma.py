@@ -9,6 +9,7 @@ import torch
 from torch import nn
 from transformers import AutoTokenizer, Gemma3ForConditionalGeneration
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders import BaseEncoderOutput, TextEncoderConfig
 from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.dits.ltx2 import (
@@ -27,7 +28,7 @@ import math
 
 
 def _debug_gemma_log_line(message: str) -> None:
-    log_path = os.getenv("LTX2_FASTVIDEO_GEMMA_LOG", "")
+    log_path = envs.FASTVIDEO_LTX2_GEMMA_LOG.get()
     if not log_path:
         return
     log_dir = os.path.dirname(log_path)
@@ -459,7 +460,7 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
         padding_side: str,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         encoded_text_features = torch.stack(hidden_states, dim=-1)
-        if os.getenv("LTX2_FASTVIDEO_GEMMA_LOG", ""):
+        if envs.FASTVIDEO_LTX2_GEMMA_LOG.get():
             for idx, layer in enumerate(hidden_states):
                 _debug_gemma_log_line(f"fastvideo:gemma_hidden_state_{idx}"
                                       f":sum={layer.float().sum().item():.6f}")

@@ -82,9 +82,9 @@ def download_data():
 def run_preprocessing(case: dict):
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = env.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
-    env["LTX2_OVERFIT_DATA_DIR"] = str(LOCAL_RAW_DATA_DIR)
-    env["LTX2_OVERFIT_OUTPUT_DIR"] = str(case["prep_dir"])
-    env["LTX2_OVERFIT_MODEL"] = case["model"]
+    env["FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR"] = str(LOCAL_RAW_DATA_DIR)
+    env["FASTVIDEO_TEST_LTX2_OVERFIT_OUTPUT_DIR"] = str(case["prep_dir"])
+    env["FASTVIDEO_TEST_LTX2_OVERFIT_MODEL"] = case["model"]
     cmd = [sys.executable, PREPROCESSING_SCRIPT]
     print(f"Running preprocessing: {cmd} (model={case['model']})")
     subprocess.run(cmd, check=True, env=env)

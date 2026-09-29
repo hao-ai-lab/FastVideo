@@ -12,6 +12,7 @@ The policy for environment variables is in ``docs/contributing/env_vars.md``,
 and ``fastvideo/tests/contract/test_env_policy.py`` enforces it.
 """
 
+import logging
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -24,11 +25,22 @@ S = TypeVar("S", str, str | None)
 POLICY_DOC = "docs/contributing/env_vars.md"
 
 # Allowed values of EnvField.category.
-CATEGORIES = ("build", "path", "distributed", "external", "logging", "attention", "performance", "profiling", "debug",
-              "sampling")
+CATEGORIES = ("path", "distributed", "logging", "attention", "performance", "output", "profiling", "debug", "sampling",
+              "eval", "test")
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
+
+# fastvideo.logger imports this module, so warnings go through the standard
+# logging module; the "fastvideo" logger configuration still applies.
+_logger = logging.getLogger(__name__)
+_warned_messages: set[str] = set()
+
+
+def _warn_once(message: str) -> None:
+    if message not in _warned_messages:
+        _warned_messages.add(message)
+        _logger.warning(message)
 
 
 class EnvVarError(ValueError):
@@ -39,16 +51,20 @@ class EnvField(Generic[T]):
     """One registered environment variable: its type, default, category, and description.
 
     ``default`` is either the value itself or a zero-argument function that
-    computes it on each read while the variable is unset.
+    computes it on each read while the variable is unset. ``deprecated_names``
+    lists earlier names of a renamed variable; they are read, with a warning,
+    only when the variable itself is unset.
     """
 
     type_name = ""
 
-    def __init__(self, default: T | Callable[[], T], *, category: str, doc: str) -> None:
+    def __init__(self, default: T | Callable[[], T], *, category: str, doc: str,
+                 deprecated_names: tuple[str, ...] = ()) -> None:
         self.name = ""  # Set by _register_fields() from the module attribute name.
         self.default = default
         self.category = category
         self.doc = doc
+        self.deprecated_names = deprecated_names
 
     def parse(self, raw: str) -> T:
         raise NotImplementedError
@@ -56,40 +72,55 @@ class EnvField(Generic[T]):
     def format(self, value: T) -> str:
         return str(value)
 
+    def _read_raw(self) -> tuple[str, str] | None:
+        """Return (name, raw value) from the variable or its first set deprecated name."""
+        raw = os.environ.get(self.name)
+        if raw is not None:
+            return self.name, raw
+        for old_name in self.deprecated_names:
+            raw = os.environ.get(old_name)
+            if raw is not None:
+                _warn_once(f"{old_name} is deprecated and will be removed in the next minor release; "
+                           f"set {self.name} instead.")
+                return old_name, raw
+        return None
+
     def get(self) -> T:
         """Return the parsed value, or the default when the variable is unset."""
-        raw = os.environ.get(self.name)
-        if raw is None:
+        found = self._read_raw()
+        if found is None:
             return self.default() if callable(self.default) else self.default
+        name, raw = found
         try:
             return self.parse(raw)
         except ValueError as exc:
-            raise EnvVarError(f"Invalid value {raw!r} for {self.name}: {exc}. See {POLICY_DOC}.") from None
+            raise EnvVarError(f"Invalid value {raw!r} for {name}: {exc}. See {POLICY_DOC}.") from None
 
     def is_set(self) -> bool:
-        return self.name in os.environ
+        return any(name in os.environ for name in (self.name, *self.deprecated_names))
 
     def set(self, value: T) -> None:
         os.environ[self.name] = self.format(value)
 
     def clear(self) -> None:
-        os.environ.pop(self.name, None)
+        for name in (self.name, *self.deprecated_names):
+            os.environ.pop(name, None)
 
     @contextmanager
     def override(self, value: T | None) -> Iterator[None]:
-        """Set the variable, or unset it when ``value`` is None, and restore the previous value on exit."""
-        previous = os.environ.get(self.name)
-        if value is None:
-            self.clear()
-        else:
+        """Set the variable, or unset it when ``value`` is None, and restore the previous values on exit."""
+        previous = {name: os.environ.get(name) for name in (self.name, *self.deprecated_names)}
+        self.clear()
+        if value is not None:
             self.set(value)
         try:
             yield
         finally:
-            if previous is None:
-                self.clear()
-            else:
-                os.environ[self.name] = previous
+            for name, old_value in previous.items():
+                if old_value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = old_value
 
     def __bool__(self) -> bool:
         raise TypeError(f"Use envs.{self.name}.get() to read {self.name}.")
@@ -171,20 +202,25 @@ def get_default_config_root() -> str:
     )
 
 
-# ================== Installation ==================
+# Variables that other tools read (CUDA, NCCL, PyTorch, launchers) are written
+# only through these helpers. The contract test checks each name against its
+# write allowlist.
 
-FASTVIDEO_TARGET_DEVICE = EnvStr("cuda",
-                                 category="build",
-                                 doc="Target device of FastVideo: cuda, rocm, neuron, cpu, or openvino.")
-MAX_JOBS = EnvStr(None,
-                  category="build",
-                  doc="Maximum number of parallel compilation jobs. Defaults to the number of CPUs.")
-NVCC_THREADS = EnvStr(None,
-                      category="build",
-                      doc="Number of nvcc threads. When set, MAX_JOBS is reduced to avoid oversubscribing the CPU.")
-FASTVIDEO_USE_PRECOMPILED = EnvBool(False, category="build", doc="Use precompiled binaries (*.so).")
-CMAKE_BUILD_TYPE = EnvStr(None, category="build", doc="CMake build type: Debug, Release, or RelWithDebInfo.")
-VERBOSE = EnvBool(False, category="build", doc="Print verbose logs during installation.")
+
+def set_external(name: str, value: str) -> None:
+    """Set an environment variable that another tool reads."""
+    os.environ[name] = value
+
+
+def setdefault_external(name: str, value: str) -> None:
+    """Set an environment variable that another tool reads, unless it is already set."""
+    os.environ.setdefault(name, value)
+
+
+def unset_external(name: str) -> None:
+    """Remove an environment variable that another tool reads."""
+    os.environ.pop(name, None)
+
 
 # ================== Paths ==================
 
@@ -198,6 +234,10 @@ FASTVIDEO_CACHE_ROOT = EnvPath(
     category="path",
     doc="Root directory for FastVideo cache files. "
     "Defaults to ~/.cache/fastvideo, or $XDG_CACHE_HOME/fastvideo when XDG_CACHE_HOME is set.")
+FASTVIDEO_REASON1_WEIGHTS_PATH = EnvStr(None,
+                                        category="path",
+                                        doc="Local path or Hugging Face id of Reason1 weights to load instead of the "
+                                        "checkpoint's own.")
 
 # ================== Distributed ==================
 
@@ -214,18 +254,15 @@ FASTVIDEO_RAY_PER_WORKER_GPUS = EnvFloat(
     category="distributed",
     doc="GPUs per Ray worker. A fraction lets Ray schedule several actors on one GPU, so other actors can share "
     "the GPUs with FastVideo.")
-FASTVIDEO_RINGBUFFER_WARNING_INTERVAL = EnvInt(60,
-                                               category="distributed",
-                                               doc="Seconds between warnings while the ring buffer is full.")
 FASTVIDEO_NCCL_SO_PATH = EnvStr(
     None,
     category="distributed",
     doc="Path to the NCCL library file. Needed because the nccl>=2.19 that PyTorch ships has a bug "
     "(https://github.com/NVIDIA/nccl/issues/1234).")
-HCCL_SO_PATH = EnvStr(None, category="distributed", doc="Path to the HCCL library file on Ascend NPUs.")
-FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S = EnvInt(60,
-                                              category="distributed",
-                                              doc="Timeout in seconds for each engine iteration.")
+FASTVIDEO_HCCL_SO_PATH = EnvStr(None,
+                                category="distributed",
+                                doc="Path to the HCCL library file on Ascend NPUs.",
+                                deprecated_names=("HCCL_SO_PATH", ))
 FASTVIDEO_WORKER_MULTIPROC_METHOD = EnvChoice("spawn",
                                               choices=("spawn", "fork", "forkserver"),
                                               category="distributed",
@@ -237,18 +274,6 @@ FASTVIDEO_ULYSSES_A2A = EnvChoice(
     doc="Sequence-parallel all-to-all backend. off uses the NCCL path in DistributedAutograd.AllToAll4D. auto uses "
     "the fused NVLink kernel when the group is a load-store accessible mesh of 2, 4, 6, or 8 ranks in eager "
     "execution, and the NCCL path otherwise.")
-
-# ================== External variables ==================
-# Variables that other tools set. They stay registered so that Ray copies them
-# to its workers until the external-variable allowlist replaces them.
-
-LD_LIBRARY_PATH = EnvStr(None,
-                         category="external",
-                         doc="Searched for the NCCL library when FASTVIDEO_NCCL_SO_PATH is unset.")
-LOCAL_RANK = EnvInt(0,
-                    category="external",
-                    doc="Local rank of the process in a distributed run; selects the GPU device id.")
-CUDA_VISIBLE_DEVICES = EnvStr(None, category="external", doc="Visible devices in a distributed run.")
 
 # ================== Logging ==================
 
@@ -285,6 +310,22 @@ FASTVIDEO_VSA_SM100A = EnvBool(
     category="attention",
     doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a) kernel. "
     "fastvideo-kernel reads the same variable with the same rule.")
+FASTVIDEO_NVFP4_FA4 = EnvBool(
+    False,
+    category="attention",
+    doc="FlashAttention-4 quantizes Q and K to NVFP4. An explicit nvfp4_fa4 attention implementation argument "
+    "takes precedence.")
+FASTVIDEO_DISABLE_ATTENTION_COMPILE = EnvBool(
+    True,
+    category="attention",
+    doc="Keep attention forward out of torch.compile graphs (torch.compiler.disable). Set it to 0 to let attention "
+    "constructed under that setting be traced. Setting it explicitly to true also blocks regional compile.")
+FASTVIDEO_MLX_WINDOW = EnvInt(0,
+                              category="attention",
+                              doc="MLX FastWan windowed attention size in tokens. 0 uses full attention.")
+FASTVIDEO_MLX_WINDOW_SINK = EnvInt(0,
+                                   category="attention",
+                                   doc="Number of sink tokens that MLX windowed attention always attends to.")
 
 # ================== Performance ==================
 
@@ -316,7 +357,44 @@ FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     category="performance",
     doc="MiniMax-H3 inference-only Triton fusions: all, 1, or a comma-separated subset of "
     "modulate,qknorm_rope,swiglu. Empty, 0, or none keeps the eager implementation.")
-FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE = EnvBool(True, category="debug", doc="Enable Dynamo fullgraph capture.")
+FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
+                                   category="performance",
+                                   doc="FSDP2 shards modules by parameter count instead of the model's shard "
+                                   "conditions. Not supported by self-forcing distillation.")
+FASTVIDEO_FSDP2_MIN_PARAMS = EnvInt(10000000,
+                                    category="performance",
+                                    doc="Minimum parameter count of a module that FASTVIDEO_FSDP2_AUTOWRAP shards.")
+FASTVIDEO_MLX_COMPILE = EnvBool(False, category="performance", doc="Compile the MLX DiT forward with mx.compile.")
+FASTVIDEO_MLX_FAST_NORM = EnvBool(False, category="performance", doc="Use MLX fast normalization kernels.")
+FASTVIDEO_MLX_DQ_GEMM = EnvStr(
+    "1",
+    category="performance",
+    doc="MLX dequantized GEMM for affine-quantized weights: 0 turns it off, 1 uses the measured minimum row count, "
+    "and an integer sets the minimum row count.")
+FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D = EnvBool(True,
+                                              category="performance",
+                                              doc="LTX-2 VAE uses the channels_last_3d memory format.")
+FASTVIDEO_LTX2_DISABLE_AUDIO_AUTOCAST = EnvBool(True,
+                                                category="performance",
+                                                doc="LTX-2 audio decoding runs without CUDA autocast.",
+                                                deprecated_names=("LTX2_DISABLE_AUDIO_AUTOCAST", ))
+FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
+    False,
+    category="performance",
+    doc="Flux denoising disables reduced-precision reductions in bf16 matmuls, which tightens accumulation for "
+    "the 4-step Klein model.")
+
+# ================== Output encoding ==================
+
+FASTVIDEO_FFMPEG_BIN = EnvStr("ffmpeg", category="output", doc="ffmpeg executable used to save video with audio.")
+FASTVIDEO_VIDEO_CODEC = EnvStr("libx264", category="output", doc="ffmpeg video codec for saved videos.")
+FASTVIDEO_NVENC_PRESET = EnvStr("p1", category="output", doc="NVENC preset when the codec is an *_nvenc codec.")
+FASTVIDEO_NVENC_TUNE = EnvStr("ull", category="output", doc="NVENC tune option.")
+FASTVIDEO_NVENC_RC = EnvStr("constqp", category="output", doc="NVENC rate-control mode.")
+FASTVIDEO_NVENC_QP = EnvStr("28", category="output", doc="NVENC quantization parameter.")
+FASTVIDEO_NVENC_BF = EnvStr("0", category="output", doc="NVENC number of B-frames.")
+FASTVIDEO_X264_PRESET = EnvStr("ultrafast", category="output", doc="x264 preset for non-NVENC codecs.")
+FASTVIDEO_OUTPUT_PIX_FMT = EnvStr("yuv420p", category="output", doc="ffmpeg pixel format for saved videos.")
 
 # ================== Profiling ==================
 
@@ -341,10 +419,6 @@ FASTVIDEO_TORCH_PROFILE_REGIONS = EnvStr(
 
 # ================== Debug ==================
 
-FASTVIDEO_SERVER_DEV_MODE = EnvBool(False,
-                                    category="debug",
-                                    doc="Run the server in development mode with extra debugging endpoints.")
-FASTVIDEO_TRACE_FUNCTION = EnvBool(False, category="debug", doc="Trace function calls.")
 FASTVIDEO_TRACE_ACTIVATIONS = EnvBool(False, category="debug", doc="Enable activation trace hooks.")
 FASTVIDEO_TRACE_LAYERS = EnvStr("", category="debug", doc="Regex filter for traced module names. Empty means all.")
 FASTVIDEO_TRACE_STATS = EnvStr("abs_mean,sum",
@@ -354,6 +428,18 @@ FASTVIDEO_TRACE_OUTPUT = EnvStr("/tmp/fv_trace_<pid>.jsonl",
                                 category="debug",
                                 doc="JSONL path for activation traces. The literal <pid> is replaced at runtime.")
 FASTVIDEO_TRACE_STEPS = EnvStr("", category="debug", doc="Comma-separated denoising step indices. Empty means all.")
+FASTVIDEO_H3_VSA_PROBE = EnvStr(
+    None,
+    category="debug",
+    doc="Output directory for the VSA-H3 attention-mass probe, which writes one .pt file per step, layer, and rank. "
+    "Keeps the model out of regional compile.")
+FASTVIDEO_LTX2_GEMMA_LOG = EnvStr("",
+                                  category="debug",
+                                  doc="Log file for LTX-2 Gemma text-encoder hidden states, used by parity tests.",
+                                  deprecated_names=("LTX2_FASTVIDEO_GEMMA_LOG", ))
+FASTVIDEO_COSMOS25_LOG_KNOBS = EnvBool(False,
+                                       category="debug",
+                                       doc="Log the Cosmos 2.5 latent-preparation conditioning inputs.")
 
 # ================== Sampling ==================
 
@@ -385,6 +471,84 @@ FASTVIDEO_CFG_GATE_STEP = EnvFloat(
     category="sampling",
     doc="CFG gating fraction in [0, 1]. Steps before len(timesteps) * X run the conditional and unconditional "
     "forwards; later steps reuse the cached difference. 1.0 disables gating.")
+FASTVIDEO_LTX2_USE_DISTILLED_SIGMAS = EnvBool(
+    True,
+    category="sampling",
+    doc="LTX-2 uses the distilled sigma schedule when FastVideoArgs.ltx2_use_distilled_sigmas is also true.",
+    deprecated_names=("LTX2_USE_DISTILLED_SIGMAS", ))
+
+# ================== Evaluation ==================
+
+FASTVIDEO_EVAL_CACHE = EnvPath(lambda: os.path.join(FASTVIDEO_CACHE_ROOT.get(), "eval"),
+                               category="eval",
+                               doc="Cache directory for evaluation models and datasets. Defaults to "
+                               "$FASTVIDEO_CACHE_ROOT/eval.")
+FASTVIDEO_PHYSICS_IQ_BUCKET_URL = EnvStr("https://storage.googleapis.com/physics-iq-benchmark",
+                                         category="eval",
+                                         doc="Base URL of the Physics-IQ benchmark bucket.")
+FASTVIDEO_VBENCH_FULL_INFO_JSON = EnvStr(None,
+                                         category="eval",
+                                         doc="Path to VBench_full_info.json, used instead of the vendored copy.",
+                                         deprecated_names=("VBENCH_FULL_INFO_JSON", ))
+FASTVIDEO_FVD_REF_FEATURES = EnvStr(None, category="eval", doc="Cached reference-feature file for the FVD metric.")
+FASTVIDEO_FAD_REF_FEATURES = EnvStr(None,
+                                    category="eval",
+                                    doc="Cached reference-feature file for the audio Frechet distance metric.")
+
+# ================== Tests ==================
+
+FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR = EnvStr("data/cats",
+                                              category="test",
+                                              doc="Raw data directory for preprocess_ltx2_overfit.py.",
+                                              deprecated_names=("LTX2_OVERFIT_DATA_DIR", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_CAPTION_JSON = EnvStr("videos2caption_1_sample.json",
+                                                  category="test",
+                                                  doc="Caption file, relative to the raw data directory.",
+                                                  deprecated_names=("LTX2_OVERFIT_CAPTION_JSON", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_VIDEO_SUBDIR = EnvStr("video",
+                                                  category="test",
+                                                  doc="Video subdirectory, relative to the raw data directory.",
+                                                  deprecated_names=("LTX2_OVERFIT_VIDEO_SUBDIR", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_OUTPUT_DIR = EnvStr("data/ltx2_overfit_preprocessed",
+                                                category="test",
+                                                doc="Output directory for preprocess_ltx2_overfit.py.",
+                                                deprecated_names=("LTX2_OVERFIT_OUTPUT_DIR", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_MODEL = EnvStr("FastVideo/LTX2-Distilled-Diffusers",
+                                           category="test",
+                                           doc="Model repository whose encoders preprocess_ltx2_overfit.py uses.",
+                                           deprecated_names=("LTX2_OVERFIT_MODEL", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_NUM_COPIES = EnvInt(4,
+                                                category="test",
+                                                doc="Number of copies of the overfit sample in the parquet file.",
+                                                deprecated_names=("LTX2_OVERFIT_NUM_COPIES", ))
+FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR = EnvStr("data/kandinsky5_overfit",
+                                                    category="test",
+                                                    doc="Raw data directory for preprocess_kandinsky5_overfit.py.",
+                                                    deprecated_names=("KANDINSKY5_OVERFIT_DATA_DIR", ))
+FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR = EnvStr("data/kandinsky5_overfit_preprocessed",
+                                                      category="test",
+                                                      doc="Output directory for preprocess_kandinsky5_overfit.py.",
+                                                      deprecated_names=("KANDINSKY5_OVERFIT_OUTPUT_DIR", ))
+
+# Variables that FastVideo no longer reads. Setting one logs a warning; delete
+# the entries in the next minor release.
+DEPRECATED_VARIABLES = {
+    "FASTVIDEO_TARGET_DEVICE": "no code reads it",
+    "FASTVIDEO_USE_PRECOMPILED": "no code reads it",
+    "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL": "no code reads it",
+    "FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S": "no code reads it",
+    "FASTVIDEO_SERVER_DEV_MODE": "no code reads it",
+    "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE": "no code reads it",
+    "FASTVIDEO_TRACE_FUNCTION": "no code reads it",
+}
+
+
+def warn_deprecated_variables() -> None:
+    """Log a warning for each variable in DEPRECATED_VARIABLES that is set."""
+    for name, reason in DEPRECATED_VARIABLES.items():
+        if name in os.environ:
+            _warn_once(f"{name} is deprecated and has no effect ({reason}); it will be removed in the next minor "
+                       "release.")
 
 
 def _register_fields() -> dict[str, EnvField]:

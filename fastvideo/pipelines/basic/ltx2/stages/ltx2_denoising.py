@@ -8,12 +8,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 from itertools import combinations
 import math
-import os
 from pathlib import Path
 
 import torch
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn import (VideoSparseAttentionMetadataBuilder)
 from fastvideo.attention.selector import component_attention_backend
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -54,7 +54,7 @@ except ImportError:
 
 @contextmanager
 def _nvtx_range(name: str):
-    if os.getenv("FASTVIDEO_NVTX_PROFILE", "0") == "1" and torch.cuda.is_available():
+    if envs.FASTVIDEO_NVTX_PROFILE.get() and torch.cuda.is_available():
         torch.cuda.nvtx.range_push(name)
         try:
             yield
@@ -245,7 +245,7 @@ class LTX2DenoisingStage(PipelineStage):
         else:
             # Use distilled hardcoded schedule (or subsets) when enabled.
             use_distilled_sigmas = (fastvideo_args.ltx2_use_distilled_sigmas
-                                    and os.getenv("LTX2_USE_DISTILLED_SIGMAS", "1") == "1")
+                                    and envs.FASTVIDEO_LTX2_USE_DISTILLED_SIGMAS.get())
             max_distilled_steps = len(DISTILLED_SIGMA_VALUES) - 1
             if use_distilled_sigmas and num_inference_steps <= max_distilled_steps:
                 sigmas, distilled_indices = _distilled_subset_sigmas(

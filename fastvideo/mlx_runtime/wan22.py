@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from collections.abc import Callable
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.mlx_runtime.fastwan import (
     MLXWanT2VCrossAttention,
@@ -132,7 +133,6 @@ class MLXWan22DiT:
         *,
         compile: bool = False,
     ) -> None:
-        import os
 
         self.weights = weights
         self.blocks = blocks
@@ -144,7 +144,7 @@ class MLXWan22DiT:
         self.patch_size = tuple(config["patch_size"])
         self.out_channels = int(config["out_channels"])
         self.eps = float(config.get("eps", 1e-6))
-        self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
+        self._enable_compile = compile or envs.FASTVIDEO_MLX_COMPILE.get()
         self._compiled_forward: Callable[..., Any] | None = None
         self._compiled_signature: tuple | None = None
 

@@ -361,6 +361,8 @@ class FastVideoArgs:
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
         self._fold_vae_parallel_env()
+        import fastvideo.envs as envs
+        envs.warn_deprecated_variables()
         self.check_fastvideo_args()
 
     def _fold_vae_parallel_env(self) -> None:

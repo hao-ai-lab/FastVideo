@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 import copy
-import os
 import time
 from collections import deque
 from typing import Any
@@ -47,7 +46,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the self-forcing training pipeline."""
         # Check if FSDP2 auto wrap is enabled - not supported for self-forcing distillation
-        if os.environ.get("FASTVIDEO_FSDP2_AUTOWRAP", "0") == "1":
+        if envs.FASTVIDEO_FSDP2_AUTOWRAP.get():
             raise NotImplementedError("FASTVIDEO_FSDP2_AUTOWRAP is not implemented for self-forcing distillation. "
                                       "Please set FASTVIDEO_FSDP2_AUTOWRAP=0 or unset the environment variable.")
 

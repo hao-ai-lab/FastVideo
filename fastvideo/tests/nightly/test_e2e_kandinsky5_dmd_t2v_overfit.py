@@ -84,7 +84,7 @@ NUM_GPUS = os.environ.get("KANDINSKY5_E2E_NUM_GPUS", "1")
 # with their real videos/captions for the actual recipe:
 # _clean_previous_artifacts() deletes this root wholesale on every run,
 # and the preprocess subprocess is pointed here via the
-# KANDINSKY5_OVERFIT_DATA_DIR / KANDINSKY5_OVERFIT_OUTPUT_DIR env
+# FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR / FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR env
 # overrides instead of the script's user-facing defaults.
 E2E_ROOT = Path("data") / "kandinsky5_e2e"
 RAW_DATA_DIR = E2E_ROOT / "raw"
@@ -223,8 +223,8 @@ def _run_preprocessing() -> None:
     # (data/kandinsky5_overfit{,_preprocessed}) -- the very directories a
     # user populates for the real recipe, which this test must never touch.
     env = dict(os.environ)
-    env["KANDINSKY5_OVERFIT_DATA_DIR"] = str(RAW_DATA_DIR)
-    env["KANDINSKY5_OVERFIT_OUTPUT_DIR"] = str(PREPROCESSED_DIR)
+    env["FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR"] = str(RAW_DATA_DIR)
+    env["FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR"] = str(PREPROCESSED_DIR)
     cmd = [
         sys.executable,
         "-m",

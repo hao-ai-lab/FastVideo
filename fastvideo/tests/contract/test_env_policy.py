@@ -6,7 +6,9 @@ The test parses every Python file under fastvideo/ (except fastvideo/third_party
 and the registry fastvideo/envs.py) with ``ast`` and reports code that:
 
 - reads the environment directly for a name outside EXTERNAL_ALLOWLIST;
-- writes the environment directly (os.environ, os.putenv, monkeypatch.setenv);
+- writes the environment directly (os.environ, os.putenv, monkeypatch.setenv),
+  or through the envs.*_external helpers for a name outside
+  EXTERNAL_WRITE_ALLOWLIST;
 - uses the whole environment (os.environ.copy(), dict(os.environ), patch.dict);
 - uses a registry field without calling one of its methods (``envs.X == "a"``,
   ``getter = envs.X.get``);
@@ -61,7 +63,32 @@ EXTERNAL_ALLOWLIST = {
     "PATH": "Executable search path.",
     "HF_TOKEN": "Token variable that huggingface_hub reads.",
     "HUGGING_FACE_HUB_TOKEN": "Token variable that huggingface_hub reads.",
+    "GEMINI_API_KEY": "Gemini API key for the judge metrics.",
+    "GOOGLE_API_KEY": "Google API key, which the Gemini SDK also accepts.",
+    "CEREBRAS_API_KEY": "Cerebras API key for the streaming prompt provider.",
+    "GROQ_API_KEY": "Groq API key for the streaming prompt provider.",
+    "RAY_USAGE_STATS_ENABLED": "Ray usage-statistics switch.",
 }
+
+# Variables that FastVideo sets for other tools. Code writes them only through
+# envs.set_external, envs.setdefault_external, or envs.unset_external, with a
+# literal name.
+EXTERNAL_WRITE_ALLOWLIST = {
+    "RANK": "torch.distributed rendezvous for single-process runs and workers.",
+    "LOCAL_RANK": "torch.distributed rendezvous for single-process runs and workers.",
+    "WORLD_SIZE": "torch.distributed rendezvous for single-process runs and workers.",
+    "MASTER_ADDR": "torch.distributed rendezvous for single-process runs.",
+    "MASTER_PORT": "torch.distributed rendezvous for single-process runs.",
+    "CUDA_VISIBLE_DEVICES": "Pins a streaming worker process to its GPU.",
+    "TORCH_NCCL_AVOID_RECORD_STREAMS": "Avoids NCCL record-stream memory growth in workers.",
+    "NCCL_ASYNC_ERROR_HANDLING": "Unset in workers because the value that Ray sets breaks graph building.",
+    "TORCH_HOME": "Points torch.hub at the evaluation cache.",
+    "HF_TOKEN": "Passes the resolved Hugging Face token to huggingface_hub.",
+    "VIDEO_MAX_PIXELS": "Pixel budget that qwen_vl_utils reads for Qwen2.5-Omni.",
+    "RAY_USAGE_STATS_ENABLED": "Turns off Ray usage statistics unless the user turned them on.",
+    "CUTE_DSL_ENABLE_TVM_FFI": "CUTLASS DSL switch that the NVFP4 FlashAttention-4 path needs.",
+}
+EXTERNAL_WRITE_HELPERS = {"set_external", "setdefault_external", "unset_external"}
 
 # Methods that registry fields expose; ``get`` and ``is_set`` count as reads.
 REGISTRY_METHODS = {"get", "set", "override", "is_set", "clear"}
@@ -72,111 +99,17 @@ REGISTRY_READ_METHODS = {"get", "is_set"}
 # its violations are fixed; never add one. Kinds are described in
 # docs/contributing/env_vars.md.
 KNOWN_VIOLATIONS: dict[str, int] = {
-    'fastvideo/attention/backends/flash_attn.py: read FASTVIDEO_NVFP4_FA4': 1,
-    'fastvideo/attention/backends/video_sparse_attn_h3_probe.py: read FASTVIDEO_H3_VSA_PROBE': 1,
-    'fastvideo/attention/layer.py: read FASTVIDEO_DISABLE_ATTENTION_COMPILE': 2,
-    'fastvideo/attention/selector.py: read <dynamic>': 1,
     'fastvideo/attention/utils/flash_attn_default.py: import-time-read FASTVIDEO_FA4': 1,
     'fastvideo/benchmarks/eval_metalfx_rife.py: write FASTVIDEO_MLX_COMPILE': 1,
-    'fastvideo/benchmarks/mlx_fastwan_bench.py: read FASTVIDEO_MLX_COMPILE': 1,
-    'fastvideo/benchmarks/mlx_fastwan_bench.py: read FASTVIDEO_MLX_FAST_NORM': 1,
     'fastvideo/benchmarks/mlx_fastwan_bench.py: write FASTVIDEO_MLX_COMPILE': 1,
     'fastvideo/distributed/device_communicators/cpu_communicator.py: read VLLM_DIST_IDENT': 1,
     'fastvideo/entrypoints/cli/utils.py: whole-environ': 1,
     'fastvideo/entrypoints/openai/api_server.py: write FASTVIDEO_STAGE_LOGGING': 1,
-    'fastvideo/entrypoints/streaming/prompt/providers/cerebras.py: read <dynamic>': 1,
-    'fastvideo/entrypoints/streaming/prompt/providers/groq.py: read <dynamic>': 1,
-    'fastvideo/entrypoints/streaming/worker.py: write CUDA_VISIBLE_DEVICES': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_FFMPEG_BIN': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_NVENC_BF': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_NVENC_PRESET': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_NVENC_QP': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_NVENC_RC': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_NVENC_TUNE': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_OUTPUT_PIX_FMT': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_VIDEO_CODEC': 1,
-    'fastvideo/entrypoints/video_generator.py: read FASTVIDEO_X264_PRESET': 1,
-    'fastvideo/entrypoints/video_generator.py: write CUTE_DSL_ENABLE_TVM_FFI': 1,
     'fastvideo/entrypoints/video_generator.py: write FASTVIDEO_NVFP4_FA4': 1,
-    'fastvideo/envs.py: prefix CMAKE_BUILD_TYPE': 1,
-    'fastvideo/envs.py: prefix CUDA_VISIBLE_DEVICES': 1,
-    'fastvideo/envs.py: prefix HCCL_SO_PATH': 1,
-    'fastvideo/envs.py: prefix LD_LIBRARY_PATH': 1,
-    'fastvideo/envs.py: prefix LOCAL_RANK': 1,
-    'fastvideo/envs.py: prefix MAX_JOBS': 1,
-    'fastvideo/envs.py: prefix NVCC_THREADS': 1,
-    'fastvideo/envs.py: prefix VERBOSE': 1,
-    'fastvideo/envs.py: unread CMAKE_BUILD_TYPE': 1,
-    'fastvideo/envs.py: unread CUDA_VISIBLE_DEVICES': 1,
-    'fastvideo/envs.py: unread FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S': 1,
-    'fastvideo/envs.py: unread FASTVIDEO_RINGBUFFER_WARNING_INTERVAL': 1,
-    'fastvideo/envs.py: unread FASTVIDEO_SERVER_DEV_MODE': 1,
-    'fastvideo/envs.py: unread FASTVIDEO_TARGET_DEVICE': 1,
-    'fastvideo/envs.py: unread FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE': 1,
-    'fastvideo/envs.py: unread FASTVIDEO_TRACE_FUNCTION': 1,
-    'fastvideo/envs.py: unread FASTVIDEO_USE_PRECOMPILED': 1,
-    'fastvideo/envs.py: unread LD_LIBRARY_PATH': 1,
-    'fastvideo/envs.py: unread MAX_JOBS': 1,
-    'fastvideo/envs.py: unread NVCC_THREADS': 1,
-    'fastvideo/envs.py: unread VERBOSE': 1,
-    'fastvideo/eval/__init__.py: write TORCH_HOME': 1,
-    'fastvideo/eval/datasets/physics_iq.py: read FASTVIDEO_PHYSICS_IQ_BUCKET_URL': 1,
-    'fastvideo/eval/datasets/vbench.py: read VBENCH_FULL_INFO_JSON': 1,
-    'fastvideo/eval/metrics/audio/frechet_distance/metric.py: read <dynamic>': 1,
-    'fastvideo/eval/metrics/common/fvd/metric.py: read <dynamic>': 1,
-    'fastvideo/eval/metrics/judge/third_person_separation/metric.py: read <dynamic>': 1,
-    'fastvideo/eval/metrics/vbench/scene/metric.py: write VIDEO_MAX_PIXELS': 1,
-    'fastvideo/eval/models.py: read FASTVIDEO_EVAL_CACHE': 1,
-    'fastvideo/logger.py: import-time-read FASTVIDEO_CONFIGURE_LOGGING': 1,
-    'fastvideo/logger.py: import-time-read FASTVIDEO_LOGGING_CONFIG_PATH': 1,
-    'fastvideo/logger.py: import-time-read FASTVIDEO_LOGGING_LEVEL': 1,
-    'fastvideo/logger.py: import-time-read FASTVIDEO_LOGGING_PREFIX': 1,
-    'fastvideo/mlx_runtime/fastwan.py: read FASTVIDEO_MLX_COMPILE': 1,
-    'fastvideo/mlx_runtime/fastwan.py: read FASTVIDEO_MLX_DQ_GEMM': 1,
-    'fastvideo/mlx_runtime/fastwan.py: read FASTVIDEO_MLX_FAST_NORM': 1,
-    'fastvideo/mlx_runtime/fastwan.py: read FASTVIDEO_MLX_WINDOW': 1,
-    'fastvideo/mlx_runtime/fastwan.py: read FASTVIDEO_MLX_WINDOW_SINK': 1,
     'fastvideo/mlx_runtime/memory.py: write <dynamic>': 1,
-    'fastvideo/mlx_runtime/wan22.py: read FASTVIDEO_MLX_COMPILE': 1,
-    'fastvideo/models/encoders/gemma.py: read LTX2_FASTVIDEO_GEMMA_LOG': 2,
-    'fastvideo/models/encoders/reason1.py: read FASTVIDEO_REASON1_WEIGHTS_PATH': 1,
-    'fastvideo/models/loader/benchmarks/benchmark_weight_loading.py: write MASTER_ADDR': 1,
-    'fastvideo/models/loader/benchmarks/benchmark_weight_loading.py: write MASTER_PORT': 1,
-    'fastvideo/models/loader/benchmarks/benchmark_weight_loading.py: write RANK': 1,
-    'fastvideo/models/loader/benchmarks/benchmark_weight_loading.py: write WORLD_SIZE': 1,
-    'fastvideo/models/loader/fsdp_load.py: read FASTVIDEO_FSDP2_AUTOWRAP': 1,
-    'fastvideo/models/loader/fsdp_load.py: read FASTVIDEO_FSDP2_MIN_PARAMS': 1,
-    'fastvideo/models/loader/fsdp_load.py: read FASTVIDEO_H3_VSA_PROBE': 1,
-    'fastvideo/models/vaes/ltx2vae.py: read <dynamic>': 1,
     'fastvideo/performance/hf_store.py: read HF_REPO_ID': 1,
     'fastvideo/performance/hf_store.py: read PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS': 1,
     'fastvideo/performance_dashboard/api.py: read PERFORMANCE_TRACKING_ROOT': 1,
-    'fastvideo/pipelines/basic/ltx2/stages/ltx2_audio_decoding.py: read LTX2_DISABLE_AUDIO_AUTOCAST': 1,
-    'fastvideo/pipelines/basic/ltx2/stages/ltx2_denoising.py: read FASTVIDEO_NVTX_PROFILE': 1,
-    'fastvideo/pipelines/basic/ltx2/stages/ltx2_denoising.py: read LTX2_USE_DISTILLED_SIGMAS': 1,
-    'fastvideo/pipelines/basic/magi_human/magi_human_pipeline.py: write HF_TOKEN': 1,
-    'fastvideo/pipelines/preprocess/preprocess_kandinsky5_overfit.py: read KANDINSKY5_OVERFIT_DATA_DIR': 1,
-    'fastvideo/pipelines/preprocess/preprocess_kandinsky5_overfit.py: read KANDINSKY5_OVERFIT_OUTPUT_DIR': 1,
-    'fastvideo/pipelines/preprocess/preprocess_kandinsky5_overfit.py: write MASTER_ADDR': 1,
-    'fastvideo/pipelines/preprocess/preprocess_kandinsky5_overfit.py: write MASTER_PORT': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: read LTX2_OVERFIT_CAPTION_JSON': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: read LTX2_OVERFIT_DATA_DIR': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: read LTX2_OVERFIT_MODEL': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: read LTX2_OVERFIT_NUM_COPIES': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: read LTX2_OVERFIT_OUTPUT_DIR': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: read LTX2_OVERFIT_VIDEO_SUBDIR': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: write LOCAL_RANK': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: write MASTER_ADDR': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: write MASTER_PORT': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: write RANK': 1,
-    'fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py: write WORLD_SIZE': 1,
-    'fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py: write LOCAL_RANK': 1,
-    'fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py: write MASTER_ADDR': 1,
-    'fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py: write MASTER_PORT': 1,
-    'fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py: write RANK': 1,
-    'fastvideo/pipelines/preprocess/preprocess_minimax_h3_overfit.py: write WORLD_SIZE': 1,
-    'fastvideo/pipelines/stages/denoising.py: read FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION': 1,
-    'fastvideo/pipelines/stages/latent_preparation.py: read FASTVIDEO_COSMOS25_LOG_KNOBS': 1,
     'fastvideo/tests/api/test_attention_selector_resolution.py: write FASTVIDEO_ATTENTION_BACKEND': 17,
     'fastvideo/tests/attention/test_flash_attn_no_pad_resolver.py: write FASTVIDEO_FA4': 3,
     'fastvideo/tests/attention/test_flash_attn_nvfp4_opt_out.py: write FASTVIDEO_NVFP4_FA4': 4,
@@ -345,8 +278,8 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/tests/modal/test_pr_test.py: write BUILDKITE_REPO': 2,
     'fastvideo/tests/nightly/test_e2e_dmd_t2v_crush_smol.py: write WANDB_MODE': 1,
     'fastvideo/tests/nightly/test_e2e_i2v_overfit_single_sample.py: write WANDB_MODE': 1,
-    'fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py: read <dynamic>': 1,
     'fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py: read KANDINSKY5_E2E_NUM_GPUS': 1,
+    'fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py: read KANDINSKY5_E2E_WRITE_REFERENCE': 1,
     'fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py: whole-environ': 3,
     'fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py: write WANDB_MODE': 1,
     'fastvideo/tests/nightly/test_e2e_ltx2_overfit_new_stack.py: read FASTVIDEO_NIGHTLY': 1,
@@ -420,8 +353,10 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/tests/ssim/conftest.py: write <dynamic>': 3,
     'fastvideo/tests/ssim/inference_similarity_utils.py: read FASTVIDEO_ATTENTION_BACKEND': 1,
     'fastvideo/tests/ssim/inference_similarity_utils.py: write FASTVIDEO_ATTENTION_BACKEND': 3,
-    'fastvideo/tests/ssim/reference_utils.py: read <dynamic>': 1,
-    'fastvideo/tests/ssim/reference_videos_cli.py: read <dynamic>': 3,
+    'fastvideo/tests/ssim/reference_utils.py: read FASTVIDEO_SSIM_FULL_QUALITY': 1,
+    'fastvideo/tests/ssim/reference_videos_cli.py: read <dynamic>': 1,
+    'fastvideo/tests/ssim/reference_videos_cli.py: read FASTVIDEO_SSIM_REFERENCE_HF_REPO': 1,
+    'fastvideo/tests/ssim/reference_videos_cli.py: read FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE': 1,
     'fastvideo/tests/ssim/test_dreamx_world_similarity.py: read DREAMX_WORLD_AR_SSIM_MODEL_PATH': 1,
     'fastvideo/tests/ssim/test_dreamx_world_similarity.py: read DREAMX_WORLD_SSIM_MODEL_PATH': 1,
     'fastvideo/tests/ssim/test_flux_t2i_similarity.py: read FLUX_T2I_MODEL_DIR': 1,
@@ -444,7 +379,7 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/tests/stages/_denoising_fixtures.py: write FASTVIDEO_CFG_GATE_STEP': 2,
     'fastvideo/tests/stages/test_kandinsky5_dmd_stage_backend_engages.py: write FASTVIDEO_ATTENTION_BACKEND': 1,
     'fastvideo/tests/stages/test_minimax_h3_encoding_offload.py: write FASTVIDEO_ATTENTION_BACKEND': 1,
-    'fastvideo/tests/train/methods/grad_norm_regression.py: read <dynamic>': 1,
+    'fastvideo/tests/train/methods/grad_norm_regression.py: read FASTVIDEO_GRADNORM_UPDATE': 1,
     'fastvideo/tests/train/methods/test_cosmos_finetune.py: write MASTER_ADDR': 1,
     'fastvideo/tests/train/methods/test_cosmos_finetune.py: write MASTER_PORT': 1,
     'fastvideo/tests/train/methods/test_ltx2_finetune.py: write MASTER_ADDR': 1,
@@ -534,23 +469,11 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/tests/vaes/test_wan_vae.py: write MASTER_PORT': 1,
     'fastvideo/tests/worker/test_gpu_worker.py: write FASTVIDEO_NVTX_PROFILE': 2,
     'fastvideo/tests/worker/test_gpu_worker.py: write LOCAL_RANK': 1,
-    'fastvideo/train/entrypoint/dcp_to_diffusers.py: write <dynamic>': 1,
     'fastvideo/train/entrypoint/train.py: write FASTVIDEO_ATTENTION_BACKEND': 2,
-    'fastvideo/training/self_forcing_distillation_pipeline.py: read FASTVIDEO_FSDP2_AUTOWRAP': 1,
     'fastvideo/utils.py: read <dynamic>': 5,
-    'fastvideo/utils.py: read FASTVIDEO_WORKER_MULTIPROC_METHOD': 1,
     'fastvideo/utils.py: write <dynamic>': 1,
-    'fastvideo/utils.py: write FASTVIDEO_WORKER_MULTIPROC_METHOD': 1,
-    'fastvideo/worker/gpu_worker.py: write LOCAL_RANK': 1,
-    'fastvideo/worker/gpu_worker.py: write NCCL_ASYNC_ERROR_HANDLING': 1,
-    'fastvideo/worker/gpu_worker.py: write RANK': 1,
-    'fastvideo/worker/gpu_worker.py: write TORCH_NCCL_AVOID_RECORD_STREAMS': 1,
-    'fastvideo/worker/gpu_worker.py: write WORLD_SIZE': 1,
     'fastvideo/worker/ray_distributed_executor.py: read <dynamic>': 2,
-    'fastvideo/worker/ray_distributed_executor.py: read RAY_USAGE_STATS_ENABLED': 1,
     'fastvideo/worker/ray_distributed_executor.py: whole-environ': 1,
-    'fastvideo/worker/ray_distributed_executor.py: write RAY_USAGE_STATS_ENABLED': 1,
-    'fastvideo/worker/ray_env.py: import-time-read FASTVIDEO_CONFIG_ROOT': 1,
     'fastvideo/worker/ray_env.py: read <dynamic>': 1,
     'fastvideo/worker/ray_utils.py: whole-environ': 1,
     'fastvideo/worker/worker_base.py: read <dynamic>': 1,
@@ -576,12 +499,6 @@ def is_allowlisted(name: str) -> bool:
     return False
 
 
-def _literal(node: ast.AST | None) -> str:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return "<dynamic>"
-
-
 class EnvAccessScanner:
     """Find environment accesses and registry-field uses in one module.
 
@@ -604,6 +521,13 @@ class EnvAccessScanner:
         self.getenv_names: set[str] = set()
         self.setenv_names: set[str] = set()
         self.envs_module_names: set[str] = set()
+        # Module-level string constants, so that os.environ.get(NAME_ENV) resolves to the name.
+        self.constants: dict[str, str] = {}
+        for statement in tree.body:
+            if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name) and isinstance(statement.value, ast.Constant)
+                    and isinstance(statement.value.value, str)):
+                self.constants[statement.targets[0].id] = statement.value.value
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -623,6 +547,14 @@ class EnvAccessScanner:
                             self.setenv_names.add(local)
                     elif node.module == "fastvideo" and alias.name == "envs":
                         self.envs_module_names.add(local)
+
+    def _literal(self, node: ast.AST | None) -> str:
+        """Return the variable name that a call argument spells, or "<dynamic>"."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name) and node.id in self.constants:
+            return self.constants[node.id]
+        return "<dynamic>"
 
     def _is_os_attr(self, node: ast.AST, attrs: tuple[str, ...]) -> bool:
         return (isinstance(node, ast.Attribute) and node.attr in attrs and isinstance(node.value, ast.Name)
@@ -670,30 +602,33 @@ class EnvAccessScanner:
             call = self.parents[parent]
             assert isinstance(call, ast.Call)
             if call.func is parent and parent.attr == "get":
-                self.violations.append(("read", _literal(call.args[0] if call.args else None), line))
+                self.violations.append(("read", self._literal(call.args[0] if call.args else None), line))
                 return
             if call.func is parent and parent.attr in ("setdefault", "pop"):
-                self.violations.append(("write", _literal(call.args[0] if call.args else None), line))
+                self.violations.append(("write", self._literal(call.args[0] if call.args else None), line))
                 return
         if isinstance(parent, ast.Subscript) and parent.value is node:
             kind = "read" if isinstance(parent.ctx, ast.Load) else "write"
-            self.violations.append((kind, _literal(parent.slice), line))
+            self.violations.append((kind, self._literal(parent.slice), line))
             return
         if (isinstance(parent, ast.Compare) and len(parent.ops) == 1 and isinstance(parent.ops[0], (ast.In, ast.NotIn))
                 and parent.comparators[0] is node):
-            self.violations.append(("read", _literal(parent.left), line))
+            self.violations.append(("read", self._literal(parent.left), line))
             return
         self.violations.append(("whole-environ", "", line))
 
     def _check_call(self, node: ast.Call) -> None:
         func = node.func
-        name = _literal(node.args[0] if node.args else None)
+        name = self._literal(node.args[0] if node.args else None)
         if self._is_os_attr(func, ("getenv", "getenvb")) or (isinstance(func, ast.Name)
                                                                and func.id in self.getenv_names):
             self.violations.append(("read", name, node.lineno))
         elif (self._is_os_attr(func, ("putenv", "unsetenv"))
               or (isinstance(func, ast.Name) and func.id in self.setenv_names)
               or (isinstance(func, ast.Attribute) and func.attr in ("setenv", "delenv"))):
+            self.violations.append(("write", name, node.lineno))
+        elif (isinstance(func, ast.Attribute) and func.attr in EXTERNAL_WRITE_HELPERS
+              and self._is_envs_module(func.value) and name not in EXTERNAL_WRITE_ALLOWLIST):
             self.violations.append(("write", name, node.lineno))
 
     def _check_registry_use(self, node: ast.Attribute, parent: ast.AST | None, in_function: bool) -> None:
@@ -715,11 +650,21 @@ def scanned_files() -> list[Path]:
                   if path != REGISTRY_PATH and not any(excluded in path.parents for excluded in EXCLUDED_DIRS))
 
 
+def registry_internal_reads(registry_names: set[str]) -> Counter[str]:
+    """Count registry reads inside fastvideo/envs.py itself, such as a computed default that reads another field."""
+    reads: Counter[str] = Counter()
+    for node in ast.walk(ast.parse(REGISTRY_PATH.read_text(encoding="utf-8"))):
+        if (isinstance(node, ast.Attribute) and node.attr in REGISTRY_READ_METHODS and isinstance(node.value, ast.Name)
+                and node.value.id in registry_names):
+            reads[node.value.id] += 1
+    return reads
+
+
 def collect_violations(registry: ModuleType) -> tuple[dict[str, list[int]], Counter[str]]:
     """Return every violation key with its line numbers, plus registry read counts."""
     registry_names = set(registry.environment_variables)
     found: dict[str, list[int]] = {}
-    reads: Counter[str] = Counter()
+    reads: Counter[str] = registry_internal_reads(registry_names)
     for path in scanned_files():
         relative = path.relative_to(REPO_ROOT).as_posix()
         scanner = EnvAccessScanner(ast.parse(path.read_text(encoding="utf-8"), filename=relative), registry_names)
@@ -793,10 +738,21 @@ def _escape(text: str) -> str:
 
 
 def render_env_table(registry: ModuleType) -> str:
-    """Render the registry as an aligned Markdown table, in declaration order."""
+    """Render the registry and the deprecation table as aligned Markdown tables, in declaration order."""
     rows = [["Variable", "Type", "Default", "Category", "Description"]]
     for name, field in registry.environment_variables.items():
-        rows.append([f"`{name}`", field.type_name, _render_default(field), field.category, _escape(field.doc)])
+        doc = _escape(field.doc)
+        if field.deprecated_names:
+            doc += " Deprecated names: " + ", ".join(f"`{old}`" for old in field.deprecated_names) + "."
+        rows.append([f"`{name}`", field.type_name, _render_default(field), field.category, doc])
+    deprecated_rows = [["Deprecated variable", "Reason"]]
+    deprecated_rows.extend([f"`{name}`", reason] for name, reason in registry.DEPRECATED_VARIABLES.items())
+    return (_render_table(rows) + "\n\nVariables that FastVideo no longer reads; setting one logs a warning:\n\n" +
+            _render_table(deprecated_rows))
+
+
+def _render_table(rows: list[list[str]]) -> str:
+    """Render rows as a Markdown table whose pipes line up."""
     widths = [max(len(row[column]) for row in rows) for column in range(len(rows[0]))]
 
     def render_row(cells: list[str]) -> str:

@@ -34,10 +34,15 @@ on a summary here.
 1. **Declare or edit the variable in `fastvideo/envs.py`.**
    - Pick the field type and category that the policy doc lists.
    - Write a description that states what the variable does and its units.
+   - To rename, keep the old name in `deprecated_names`. To remove, add the
+     name to `DEPRECATED_VARIABLES`. Update the uses in `examples/`,
+     `scripts/`, `docs/`, `apps/`, and the tests.
 2. **Read the variable with `envs.NAME.get()` inside a function.**
    - In tests, change the value with `envs.NAME.override(value)`.
    - Do not call `os.environ`, `os.getenv`, or `monkeypatch.setenv` for a
      FastVideo variable.
+   - To set a variable that another tool reads, call `envs.set_external`,
+     `envs.setdefault_external`, or `envs.unset_external`.
 3. **Regenerate the table in the policy doc.**
    - Run `python fastvideo/tests/contract/test_env_policy.py`.
 4. **Run the contract test.**

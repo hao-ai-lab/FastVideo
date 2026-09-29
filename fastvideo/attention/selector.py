@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/attention/selector.py
 
-import os
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -15,7 +14,7 @@ import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import AttentionBackend
 from fastvideo.logger import init_logger
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import STR_BACKEND_ENV_VAR, resolve_obj_by_qualname
+from fastvideo.utils import resolve_obj_by_qualname
 
 logger = init_logger(__name__)
 
@@ -65,7 +64,7 @@ def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
     * _Backend enum value if an override is specified
     * None otherwise
     '''
-    backend_name = os.environ.get(STR_BACKEND_ENV_VAR)
+    backend_name = envs.FASTVIDEO_ATTENTION_BACKEND.get()
     return (None if backend_name is None else backend_name_to_enum(backend_name))
 
 

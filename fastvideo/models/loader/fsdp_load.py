@@ -5,7 +5,6 @@
 # Copyright 2025 The FastVideo Authors.
 
 from __future__ import annotations
-import os
 import contextlib
 import re
 from collections.abc import Callable, Generator
@@ -392,7 +391,7 @@ def _regional_compile_unsupported_reason(
     resolved = getattr(config, "_resolved_attention_backend", None)
     resolved_name = getattr(resolved, "name", "")
     if resolved_name == "VIDEO_SPARSE_ATTN_H3":
-        if os.environ.get("FASTVIDEO_H3_VSA_PROBE"):
+        if envs.FASTVIDEO_H3_VSA_PROBE.get():
             return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
                     "regional fullgraph compile cannot capture; this model stays eager")
         if not envs.FASTVIDEO_VSA_SM100A.get():
@@ -508,7 +507,7 @@ def shard_model(
         ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
     """
     # Check if we should use size-based filtering
-    use_size_filtering = os.environ.get("FASTVIDEO_FSDP2_AUTOWRAP", "0") == "1"
+    use_size_filtering = envs.FASTVIDEO_FSDP2_AUTOWRAP.get()
 
     if not fsdp_shard_conditions:
         logger.warning("No FSDP shard conditions provided; nothing will be sharded.")
@@ -543,7 +542,7 @@ def shard_model(
 
     if use_size_filtering:
         # Size-based filtering mode
-        min_params = int(os.environ.get("FASTVIDEO_FSDP2_MIN_PARAMS", "10000000"))
+        min_params = envs.FASTVIDEO_FSDP2_MIN_PARAMS.get()
         logger.info("Using size-based filtering with threshold: %.2fM", min_params / 1e6)
 
         for n, m in reversed(named_modules):

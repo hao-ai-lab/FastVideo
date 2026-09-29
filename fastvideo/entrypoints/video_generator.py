@@ -26,6 +26,7 @@ import torch
 import torchvision
 from einops import rearrange
 
+import fastvideo.envs as envs
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     expand_request_prompt_batch,
@@ -200,7 +201,7 @@ class VideoGenerator:
         if kwargs.pop("nvfp4_fa4", False):
             import os
             os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
-            os.environ.setdefault("CUTE_DSL_ENABLE_TVM_FFI", "1")
+            envs.setdefault_external("CUTE_DSL_ENABLE_TVM_FFI", "1")
         typed_config = kwargs.pop("config", None)
         if typed_config is not None:
             if model_path is not None:
@@ -1191,7 +1192,7 @@ class VideoGenerator:
         sample_rate: int,
     ) -> bool:
         """Encode video+audio using ffmpeg via rawvideo stdin + WAV input."""
-        ffmpeg_bin = shutil.which(os.getenv("FASTVIDEO_FFMPEG_BIN", "ffmpeg"))
+        ffmpeg_bin = shutil.which(envs.FASTVIDEO_FFMPEG_BIN.get())
         if ffmpeg_bin is None:
             logger.warning("ffmpeg not found; cannot use ffmpeg pipe save.")
             return False
@@ -1201,7 +1202,7 @@ class VideoGenerator:
 
         height = int(frames[0].shape[0])
         width = int(frames[0].shape[1])
-        codec = os.getenv("FASTVIDEO_VIDEO_CODEC", "libx264")
+        codec = envs.FASTVIDEO_VIDEO_CODEC.get()
 
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -1236,23 +1237,23 @@ class VideoGenerator:
 
                 if codec.endswith("_nvenc"):
                     nvenc_options = [
-                        ("preset", os.getenv("FASTVIDEO_NVENC_PRESET", "p1")),
-                        ("tune", os.getenv("FASTVIDEO_NVENC_TUNE", "ull")),
-                        ("rc", os.getenv("FASTVIDEO_NVENC_RC", "constqp")),
-                        ("qp", os.getenv("FASTVIDEO_NVENC_QP", "28")),
-                        ("bf", os.getenv("FASTVIDEO_NVENC_BF", "0")),
+                        ("preset", envs.FASTVIDEO_NVENC_PRESET.get()),
+                        ("tune", envs.FASTVIDEO_NVENC_TUNE.get()),
+                        ("rc", envs.FASTVIDEO_NVENC_RC.get()),
+                        ("qp", envs.FASTVIDEO_NVENC_QP.get()),
+                        ("bf", envs.FASTVIDEO_NVENC_BF.get()),
                     ]
                     for option_name, option_value in nvenc_options:
                         if cls._ffmpeg_encoder_supports_option(ffmpeg_bin, codec, option_name):
                             cmd += [f"-{option_name}", option_value]
                 else:
-                    cmd += ["-preset", os.getenv("FASTVIDEO_X264_PRESET", "ultrafast")]
+                    cmd += ["-preset", envs.FASTVIDEO_X264_PRESET.get()]
 
                 cmd += [
                     "-c:a",
                     "aac",
                     "-pix_fmt",
-                    os.getenv("FASTVIDEO_OUTPUT_PIX_FMT", "yuv420p"),
+                    envs.FASTVIDEO_OUTPUT_PIX_FMT.get(),
                     # Audio and video decoders may produce different durations.
                     # Preserve every video frame and pad/trim audio to match.
                     "-af",

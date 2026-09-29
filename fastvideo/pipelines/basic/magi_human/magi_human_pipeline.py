@@ -29,6 +29,7 @@ from typing import Any
 
 from transformers import AutoTokenizer
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders.t5gemma import T5GemmaEncoderConfig
 from fastvideo.configs.models.vaes import OobleckVAEConfig
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -71,7 +72,7 @@ def _ensure_hf_token_env() -> str | None:
     """
     token = resolve_hf_token()
     if token:
-        os.environ.setdefault("HF_TOKEN", token)
+        envs.setdefault_external("HF_TOKEN", token)
     return token
 
 

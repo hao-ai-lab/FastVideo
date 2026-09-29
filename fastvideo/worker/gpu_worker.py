@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import os
 from typing import Any, cast
 
 import torch
@@ -50,9 +49,9 @@ class Worker:
         # this behavior.
         # Related issue:
         # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
-        os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
+        envs.set_external("TORCH_NCCL_AVOID_RECORD_STREAMS", "1")
         # This env var set by Ray causes exceptions with graph building.
-        os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
+        envs.unset_external("NCCL_ASYNC_ERROR_HANDLING")
 
         # Set environment variables BEFORE calling get_local_torch_device()
         # so that each worker uses the correct device
@@ -60,9 +59,9 @@ class Worker:
         # Ray deliberately excludes LOCAL_RANK from the copied driver
         # environment and exposes all GPUs assigned to the node, so leaving an
         # inherited or missing value here would bind every Ray actor to cuda:0.
-        os.environ["LOCAL_RANK"] = str(self.local_rank)
-        os.environ["RANK"] = str(self.rank)
-        os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
+        envs.set_external("LOCAL_RANK", str(self.local_rank))
+        envs.set_external("RANK", str(self.rank))
+        envs.set_external("WORLD_SIZE", str(self.fastvideo_args.num_gpus))
 
         # Platform-agnostic device initialization
         self.device = get_local_torch_device()

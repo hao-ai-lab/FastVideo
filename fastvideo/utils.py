@@ -82,16 +82,16 @@ def find_nccl_library() -> str:
 
 def find_hccl_library() -> str:
     """
-    We either use the library file specified by the `HCCL_SO_PATH`
+    We either use the library file specified by the `FASTVIDEO_HCCL_SO_PATH`
     environment variable, or we find the library file brought by PyTorch.
     After importing `torch`, `libhccl.so` can be
     found by `ctypes` automatically.
     """
-    so_file = envs.HCCL_SO_PATH.get()
+    so_file = envs.FASTVIDEO_HCCL_SO_PATH.get()
 
     # manually load the nccl library
     if so_file:
-        logger.info("Found hccl from environment variable HCCL_SO_PATH=%s", so_file)
+        logger.info("Found hccl from environment variable FASTVIDEO_HCCL_SO_PATH=%s", so_file)
     else:
         if torch.version.cann is not None:  # codespell:ignore cann
             so_file = "libhccl.so"
@@ -1240,9 +1240,9 @@ def xpu_is_initialized() -> bool:
 
 
 def force_spawn() -> None:
-    if os.environ.get("FASTVIDEO_WORKER_MULTIPROC_METHOD") == "fork":
+    if envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.get() == "fork":
         logger.warning("We must use the `spawn` multiprocessing start method.")
-        os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
+        envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.set("spawn")
 
 
 def get_mp_context() -> BaseContext:

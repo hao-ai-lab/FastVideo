@@ -27,7 +27,7 @@ layout) with:
 ```bash
 # from the repo root; reads data/kandinsky5_overfit and writes
 # data/kandinsky5_overfit_preprocessed by default -- override with
-# KANDINSKY5_OVERFIT_DATA_DIR / KANDINSKY5_OVERFIT_OUTPUT_DIR env vars
+# FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR / FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR env vars
 python -m fastvideo.pipelines.preprocess.preprocess_kandinsky5_overfit
 ```
 
