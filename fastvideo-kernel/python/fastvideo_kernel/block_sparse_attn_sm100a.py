@@ -43,9 +43,10 @@ BHSD = True
 
 
 def _block_size(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> int:
+    # A plain int: dynamic-shape torch.compile hands SymInt shapes, which cannot key _FWD_BY_BLOCK.
     num_blocks = variable_block_sizes.numel()
     seqlen = q.shape[2] if BHSD else q.shape[1]
-    return 0 if num_blocks == 0 or seqlen % num_blocks else seqlen // num_blocks
+    return 0 if num_blocks == 0 or seqlen % num_blocks else int(seqlen // num_blocks)
 
 
 def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:

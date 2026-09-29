@@ -57,10 +57,14 @@ def _seqlen(q: torch.Tensor) -> int:
 
 
 def _block_size(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> int:
-    """The block size the metadata implies (seqlen / num_blocks), 0 when it is not integral."""
+    """The block size the metadata implies (seqlen / num_blocks), 0 when it is not integral.
+
+    A plain int: under dynamic-shape torch.compile the shapes are SymInts, which cannot key
+    ``_BWD_BY_BLOCK``; ``int()`` specializes the value with a shape guard.
+    """
     num_blocks = variable_block_sizes.numel()
     seqlen = _seqlen(q)
-    return 0 if num_blocks == 0 or seqlen % num_blocks else seqlen // num_blocks
+    return 0 if num_blocks == 0 or seqlen % num_blocks else int(seqlen // num_blocks)
 
 
 def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:
