@@ -13,12 +13,11 @@ from fastvideo.distributed.communication_op import (sequence_model_parallel_all_
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.layernorm import LayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
-from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import PatchEmbed
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.wan.transformer import WanTimeTextImageEmbedding, WanTransformerBlock
+from fastvideo.models.wan.transformer import WanTimeTextImageEmbedding, WanTransformerBlock, wan_rope_freqs
 from fastvideo.models.wan.vace_config import WanVACEVideoConfig
-from fastvideo.platforms import AttentionBackendEnum, current_platform
+from fastvideo.platforms import AttentionBackendEnum
 
 
 class WanVACEMainBlock(WanTransformerBlock):
@@ -203,6 +202,7 @@ class WanVACETransformer3DModel(BaseDiT):
             text_embed_dim=arch.text_dim,
             image_embed_dim=arch.image_dim,
             cast_temb_to_context_dtype=True,
+            timestep_freqs_on_input_device=True,
         )
 
         self.blocks = nn.ModuleList([
@@ -265,15 +265,8 @@ class WanVACETransformer3DModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        d = self.hidden_size // self.num_attention_heads
-        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames, post_patch_height, post_patch_width),
-                                                    self.hidden_size,
-                                                    self.num_attention_heads,
-                                                    rope_dim_list,
-                                                    dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-                                                    rope_theta=10000)
-        freqs_cis = (freqs_cos.to(hidden_states.device).float(), freqs_sin.to(hidden_states.device).float())
+        freqs_cis = wan_rope_freqs((post_patch_num_frames, post_patch_height, post_patch_width), self.hidden_size,
+                                   self.num_attention_heads, hidden_states.device)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
