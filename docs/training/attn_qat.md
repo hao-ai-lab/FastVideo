@@ -123,7 +123,7 @@ cross-attention; key and value must have the same sequence length.
 
 | Hardware/configuration | Route |
 |---|---|
-| SM100, validated non-causal BF16 QAT configuration with head dimension 128 | Large-tile forward and split backward. Long equal-length sequences (at least 16,384 tokens) use complete forward tiles without bounds masks, accumulator lifetime tuning, 64x128 backward tiles, and tuned backward launch parameters; other optimized cases use the masked forward loop and 64x64 backward. Optimized backward requires a 16-aligned KV length |
+| SM100, validated non-causal BF16 QAT configuration with head dimension 128 | Large-tile forward and split backward. Long equal-length sequences (at least 16,384 tokens) use 64x128 backward tiles with tuned launch parameters in every forward mode; in `fast` mode without exact-M they also use complete forward tiles without bounds masks and accumulator lifetime tuning. Other optimized cases use the masked forward loop and 64x64 backward. Optimized backward requires a 16-aligned KV length |
 | SM120, including RTX 5090 | Previous forward tiling with joined quantized/STE P@V operations and a shallower backward pipeline for long sequences |
 | Unsupported configurations | Previous Triton implementation |
 
