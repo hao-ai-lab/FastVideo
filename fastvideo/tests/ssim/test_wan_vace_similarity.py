@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 
+import numpy as np
 import pytest
 
 from fastvideo.api.sampling_param import SamplingParam
@@ -93,4 +94,58 @@ def test_wan_vace_inference_similarity(
         full_quality_params_map=FULL_QUALITY_WAN_VACE_MODEL_TO_PARAMS,
         min_acceptable_ssim=0.97,
         generation_kwargs_override={"references": [reference_image]},
+    )
+
+
+VIDEO_MASK_PROMPT = ("An astronaut stands on the moon next to a small silver lunar rover, the darkness and depth of "
+                     "space realised in the background. High quality, ultrarealistic detail.")
+VIDEO_MASK_SOURCE_IMAGE = WAN_VACE_TEST_CASES[0][1]
+
+
+def _write_video(path: str, frames: np.ndarray) -> None:
+    import imageio
+
+    # Lossless H.264 keeps the control video identical across runs.
+    imageio.mimwrite(path, frames, fps=16, codec="libx264", output_params=["-qp", "0"])
+
+
+@pytest.fixture(scope="module")
+def video_mask_inputs(tmp_path_factory) -> tuple[str, str]:
+    """A slow pan over a still photo as control video, with a centre box to regenerate."""
+    from fastvideo.models.vision_utils import load_image
+
+    # The loader truncates to num_frames, so cover the longer (full-quality) setting.
+    num_frames = max(int(WAN_VACE_PARAMS["num_frames"]), int(WAN_VACE_FULL_QUALITY_PARAMS["num_frames"]))
+    height, width = int(WAN_VACE_PARAMS["height"]), int(WAN_VACE_PARAMS["width"])
+    pan = 64
+    image = np.asarray(load_image(VIDEO_MASK_SOURCE_IMAGE).resize((width + pan, height)))
+    video = np.stack([image[:, i * pan // (num_frames - 1):][:, :width] for i in range(num_frames)])
+    mask = np.zeros((num_frames, height, width, 3), dtype=np.uint8)
+    mask[:, height // 4:3 * height // 4, width // 4:3 * width // 4] = 255
+    root = tmp_path_factory.mktemp("wan_vace_video_mask")
+    video_path, mask_path = str(root / "video.mp4"), str(root / "mask.mp4")
+    _write_video(video_path, video)
+    _write_video(mask_path, mask)
+    return video_path, mask_path
+
+
+@pytest.mark.parametrize("attention_backend_name", ["FLASH_ATTN"])
+@pytest.mark.parametrize("model_id", list(WAN_VACE_MODEL_TO_PARAMS.keys()))
+def test_wan_vace_video_mask_inference_similarity(
+    attention_backend_name: str,
+    model_id: str,
+    video_mask_inputs: tuple[str, str],
+) -> None:
+    video_path, mask_path = video_mask_inputs
+    run_text_to_video_similarity_test(
+        logger=logger,
+        script_dir=os.path.dirname(os.path.abspath(__file__)),
+        device_reference_folder=device_reference_folder,
+        prompt=VIDEO_MASK_PROMPT,
+        attention_backend_name=attention_backend_name,
+        model_id=model_id,
+        default_params_map=WAN_VACE_MODEL_TO_PARAMS,
+        full_quality_params_map=FULL_QUALITY_WAN_VACE_MODEL_TO_PARAMS,
+        min_acceptable_ssim=0.97,
+        generation_kwargs_override={"video_path": video_path, "mask_path": mask_path},
     )

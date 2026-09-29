@@ -5,11 +5,11 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 from fastvideo import VideoGenerator
@@ -20,20 +20,20 @@ ROOT = Path(__file__).resolve().parents[1]
 MATRIX_DIR = ROOT / "outputs" / "vace_matrix"
 ASSETS_DIR = MATRIX_DIR / "assets"
 RESULTS_JSON = MATRIX_DIR / "results.json"
-WAN21_EXAMPLES_BASE = "https://raw.githubusercontent.com/Wan-Video/Wan2.1/main/examples"
+
+# Reuse the example's prompt and reference-asset download so both stay in sync.
+_EXAMPLE_SPEC = importlib.util.spec_from_file_location("basic_wan_vace",
+                                                       ROOT / "examples/inference/basic/basic_wan_vace.py")
+assert _EXAMPLE_SPEC is not None and _EXAMPLE_SPEC.loader is not None
+_EXAMPLE = importlib.util.module_from_spec(_EXAMPLE_SPEC)
+_EXAMPLE_SPEC.loader.exec_module(_EXAMPLE)
 
 PRESET_1_3B = get_preset("wan_vace_1_3b", "wan")
 PRESET_14B = get_preset("wan_vace_14b", "wan")
 CONFIG_1_3B = WanVACE1_3B_Config()
 CONFIG_14B = WanVACE14B_Config()
 
-PROMPT = (
-    "在一个欢乐而充满节日气氛的场景中，穿着鲜艳红色春服的小女孩正与她的可爱卡通蛇嬉戏。"
-    "她的春服上绣着金色吉祥图案，散发着喜庆的气息，脸上洋溢着灿烂的笑容。"
-    "蛇身呈现出亮眼的绿色，形状圆润，宽大的眼睛让它显得既友善又幽默。"
-    "小女孩欢快地用手轻轻抚摸着蛇的头部，共同享受着这温馨的时刻。"
-    "周围五彩斑斓的灯笼和彩带装饰着环境，阳光透过洒在她们身上，营造出一个充满友爱与幸福的新年氛围。"
-)
+PROMPT = _EXAMPLE.PROMPT
 NEGATIVE_PROMPT = PRESET_1_3B.defaults["negative_prompt"]
 MATRIX_SEED = 0
 
@@ -72,19 +72,6 @@ RUNS = (
         "vae_cpu_offload": False,
     },
 )
-
-
-def _ensure_reference_assets() -> list[str]:
-    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-    paths: list[str] = []
-    for name in ("girl.png", "snake.png"):
-        dest = ASSETS_DIR / name
-        if not dest.is_file():
-            url = f"{WAN21_EXAMPLES_BASE}/{name}"
-            print(f"Downloading {url} -> {dest}", flush=True)
-            urllib.request.urlretrieve(url, dest)
-        paths.append(str(dest))
-    return paths
 
 
 def _count_frames(video_path: Path) -> int:
@@ -172,7 +159,7 @@ def main() -> int:
     args = parser.parse_args()
 
     MATRIX_DIR.mkdir(parents=True, exist_ok=True)
-    references = _ensure_reference_assets()
+    references = _EXAMPLE._ensure_reference_assets(ASSETS_DIR)
     if RESULTS_JSON.is_file():
         prior = json.loads(RESULTS_JSON.read_text()).get("runs", [])
     else:
