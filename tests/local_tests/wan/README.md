@@ -31,6 +31,7 @@ export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 | SP2 pipeline | `tests/local_tests/pipelines/test_wan_vace_sp_pipeline.py` | 2 | Weighted BF16 single/SP2 gates (`WAN_VACE_SP_E2E=1`); cases `xfail` |
 | Shared helpers | `tests/local_tests/wan/vace_parity_helpers.py` | — | Official fp32 VAE/T5 reload, FV transformer load |
 | Repro matrix | `scripts/run_vace_matrix.py` | yes | Official reference-image case |
+| SSIM regression | `fastvideo/tests/ssim/test_wan_vace_similarity.py` | 1 | Reference-image case; CI SSIM lane |
 | Port status | `tests/local_tests/wan/PORT_STATUS.md` | — | add-model handoff state |
 
 ## Parity Gates
@@ -46,7 +47,7 @@ End-to-end tests in `test_wan_vace_end_to_end_parity.py` use VACE-specific gates
 Cases: 1.3B t2v / reference / video+mask, plus 14B reference.
 
 All four cases passed these gates offline (B200, cached weights). Final latent
-abs-mean drift ranged from 2.44% to 3.85%. Strict `rtol=atol=1e-2` failed in
+abs-mean drift ranged from 2.30% to 3.52%. Strict `rtol=atol=1e-2` failed in
 all four cases (diagnostic only). See
 [parity evidence](../../../docs/inference/wan_vace.md#parity-evidence).
 
