@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
+import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +23,6 @@ CALL_ARG_KEYS = (
 
 
 def resolve_model_dir(env_name: str) -> Path:
-    import os
-
     raw = os.getenv(env_name)
     if raw is None:
         pytest.skip(f"Set {env_name} to a local Wan-VACE snapshot")
@@ -127,8 +128,6 @@ def _serialize_call_arg(value: Any) -> Any:
         return [_serialize_call_arg(item) for item in value]
     if torch.is_tensor(value):
         return value.detach().cpu()
-    if isinstance(value, (int, float, str, bool)) or value is None:
-        return value
     return value
 
 
@@ -227,3 +226,50 @@ def run_fastvideo_stages(worker_wrapper: Any,
             capture_handle.remove()
         restore_parity_cuda_flags(previous_cuda_flags)
     return captured
+
+
+@contextlib.contextmanager
+def single_gpu_parity_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Single-rank distributed env with SDPA attention and strict CUDA matmul flags."""
+    from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
+    from fastvideo.utils import get_open_port
+
+    monkeypatch.setenv("MASTER_ADDR", "localhost")
+    monkeypatch.setenv("MASTER_PORT", str(get_open_port()))
+    monkeypatch.setenv("DISABLE_SP", "1")
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    tf32_previous = set_parity_cuda_flags()
+    maybe_init_distributed_environment_and_model_parallel(1, 1)
+    try:
+        yield
+    finally:
+        restore_parity_cuda_flags(tf32_previous)
+        cleanup_dist_env_and_memory()
+
+
+def prepare_vace_inputs(mode: str, tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], int]:
+    """Write tiny VACE inputs; return (FastVideo kwargs, Diffusers kwargs, reference count)."""
+    import imageio
+    import numpy as np
+    from PIL import Image
+
+    if mode == "t2v":
+        return {}, {}, 0
+    if mode == "reference":
+        image_path = tmp_path / "reference.png"
+        Image.new("RGB", (64, 32), (240, 32, 24)).save(image_path)
+        return {"references": [str(image_path)]}, {"reference_images": [Image.open(image_path).convert("RGB")]}, 1
+
+    video_path = tmp_path / "video.mp4"
+    mask_path = tmp_path / "mask.mp4"
+    video_frames = np.stack([np.full((64, 64, 3), (i * 24, 64, 160), dtype=np.uint8) for i in range(5)])
+    mask_frames = np.zeros((5, 64, 64, 3), dtype=np.uint8)
+    mask_frames[:, :, 32:] = 255
+    imageio.mimwrite(video_path, video_frames, fps=16, codec="libx264")
+    imageio.mimwrite(mask_path, mask_frames, fps=16, codec="libx264")
+    from fastvideo.models.vision_utils import load_video
+
+    decoded_video, _ = load_video(str(video_path), return_fps=True)
+    decoded_mask, _ = load_video(str(mask_path), return_fps=True)
+    return ({"video_path": str(video_path), "mask_path": str(mask_path)},
+            {"video": decoded_video, "mask": decoded_mask}, 0)

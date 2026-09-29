@@ -15,9 +15,9 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-from tests.local_tests.pipelines.test_wan_vace_end_to_end_parity import _prepare_inputs
 from tests.local_tests.wan.parity_stats import compute_parity_stats
 from tests.local_tests.wan.vace_parity_helpers import (
+    prepare_vace_inputs,
     resolve_model_dir,
     run_fastvideo_stages,
     video_generator_kwargs,
@@ -97,7 +97,7 @@ def test_wan_vace_sp2_matches_single_pipeline(size: str, mode: str, env_name: st
     if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
         pytest.skip("Wan-VACE SP2 requires two CUDA devices")
     model_dir = resolve_model_dir(env_name)
-    fastvideo_inputs, _, num_refs = _prepare_inputs(mode, tmp_path)
+    fastvideo_inputs, _, num_refs = prepare_vace_inputs(mode, tmp_path)
     latent_frames = (5 - 1) // 4 + 1 + num_refs
     latents = torch.randn((1, 16, latent_frames, 8, 8), generator=torch.Generator().manual_seed(42))
     request = dict(

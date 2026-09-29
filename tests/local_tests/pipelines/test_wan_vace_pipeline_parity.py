@@ -6,31 +6,18 @@ from __future__ import annotations
 import pytest
 import torch
 
-from fastvideo.utils import get_open_port
 from tests.local_tests.wan.parity_stats import assert_dit_parity
 from tests.local_tests.wan.vace_parity_helpers import (
     load_fv_transformer,
     resolve_model_dir,
-    set_parity_cuda_flags,
-    restore_parity_cuda_flags,
+    single_gpu_parity_runtime,
 )
 
 
 @pytest.fixture
 def parity_runtime(monkeypatch):
-    from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
-
-    monkeypatch.setenv("DISABLE_SP", "1")
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-    monkeypatch.setenv("MASTER_ADDR", "localhost")
-    monkeypatch.setenv("MASTER_PORT", str(get_open_port()))
-    tf32_previous = set_parity_cuda_flags()
-    maybe_init_distributed_environment_and_model_parallel(1, 1)
-    try:
+    with single_gpu_parity_runtime(monkeypatch):
         yield
-    finally:
-        restore_parity_cuda_flags(tf32_previous)
-        cleanup_dist_env_and_memory()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Wan-VACE parity requires CUDA")

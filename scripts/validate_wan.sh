@@ -9,7 +9,8 @@ case "$component" in all|vae|dense|causal) ;; *) echo 'component: all | vae | de
 case "$level" in golden|parity|default) ;; *) echo 'level: golden | parity | default' >&2; exit 2;; esac
 
 pytest fastvideo/tests/api/test_wan_definitions.py \
-  fastvideo/tests/api/test_wan_vace_definitions.py \
+  fastvideo/tests/api/test_wan_vace_definitions.py fastvideo/tests/api/test_wan_vace_inputs.py \
+  fastvideo/tests/api/test_wan_vace_backend.py \
   fastvideo/tests/loader/test_wan_family_imports.py \
   fastvideo/tests/stages/test_cfg_gating.py fastvideo/tests/stages/test_wan_denoising.py \
   fastvideo/tests/stages/test_wan_dmd_denoising.py fastvideo/tests/stages/test_wan_causal_denoising.py \

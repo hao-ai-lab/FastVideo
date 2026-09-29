@@ -31,6 +31,7 @@ export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 | SP2 pipeline | `tests/local_tests/pipelines/test_wan_vace_sp_pipeline.py` | 2 | Weighted BF16 single/SP2 gates (`WAN_VACE_SP_E2E=1`); cases `xfail` |
 | Shared helpers | `tests/local_tests/wan/vace_parity_helpers.py` | — | Official fp32 VAE/T5 reload, FV transformer load |
 | Repro matrix | `scripts/run_vace_matrix.py` | yes | Official reference-image case |
+| Port status | `tests/local_tests/wan/PORT_STATUS.md` | — | add-model handoff state |
 
 ## Parity Gates
 
@@ -59,7 +60,7 @@ but do not replace the short numeric gates. See
 [sequence parallel status](../../../docs/inference/wan_vace.md#sequence-parallel-status).
 Set `WAN_VACE_SP_TRACE=1` for read-only per-layer divergence prints.
 
-### 14B block trace (2026-09-24)
+### 14B block trace
 
 Real-shape 14B reference step0 with aligned transformer inputs:
 
