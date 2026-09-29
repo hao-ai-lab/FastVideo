@@ -147,7 +147,7 @@ def test_vace_context_stage_builds_96_channel_control(monkeypatch):
         latents_std = [1.0] * 16
 
         def parameters(self):
-            return iter(())
+            return iter((torch.zeros(1), ))
 
         def to(self, device):
             return self
