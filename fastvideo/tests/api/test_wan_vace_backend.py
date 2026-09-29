@@ -4,6 +4,8 @@
 import pytest
 import torch
 
+from fastvideo import envs
+
 from fastvideo.attention.selector import _component_attention_backend_scope
 from fastvideo.models.wan.vace_config import WanVACEArchConfig, WanVACEVideoConfig
 from fastvideo.models.wan.vace_transformer import WanVACETransformer3DModel
@@ -29,33 +31,33 @@ def _tiny_config(backend):
     return config
 
 
-def test_vace_explicit_dense_overrides_sparse_environment(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
-    config = _tiny_config(AttentionBackendEnum.TORCH_SDPA)
-    with _component_attention_backend_scope(AttentionBackendEnum.TORCH_SDPA, component="transformer"):
-        model = WanVACETransformer3DModel(config, hf_config={})
+def test_vace_explicit_dense_overrides_sparse_environment():
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override("VIDEO_SPARSE_ATTN"):
+        config = _tiny_config(AttentionBackendEnum.TORCH_SDPA)
+        with _component_attention_backend_scope(AttentionBackendEnum.TORCH_SDPA, component="transformer"):
+            model = WanVACETransformer3DModel(config, hf_config={})
 
-    stage = WanVACEDenoisingStage(transformer=model, scheduler=object())
-    assert AttentionBackendEnum.VIDEO_SPARSE_ATTN not in model.supported_attention_backends
-    assert AttentionBackendEnum.TORCH_SDPA in model.supported_attention_backends
-    assert type(model.blocks[0]).__name__ == "WanVACEMainBlock"
-    assert not hasattr(model.blocks[0], "to_gate_compress")
-    assert model.blocks[0].attn1.backend is AttentionBackendEnum.TORCH_SDPA
-    assert model.blocks[0].attn2.attn.backend is AttentionBackendEnum.TORCH_SDPA
-    assert model.vace_blocks[0].attn1.backend is AttentionBackendEnum.TORCH_SDPA
-    assert model.vace_blocks[0].attn2.attn.backend is AttentionBackendEnum.TORCH_SDPA
-    assert stage.attn_backend.get_name() == "TORCH_SDPA"
+        stage = WanVACEDenoisingStage(transformer=model, scheduler=object())
+        assert AttentionBackendEnum.VIDEO_SPARSE_ATTN not in model.supported_attention_backends
+        assert AttentionBackendEnum.TORCH_SDPA in model.supported_attention_backends
+        assert type(model.blocks[0]).__name__ == "WanVACEMainBlock"
+        assert not hasattr(model.blocks[0], "to_gate_compress")
+        assert model.blocks[0].attn1.backend is AttentionBackendEnum.TORCH_SDPA
+        assert model.blocks[0].attn2.attn.backend is AttentionBackendEnum.TORCH_SDPA
+        assert model.vace_blocks[0].attn1.backend is AttentionBackendEnum.TORCH_SDPA
+        assert model.vace_blocks[0].attn2.attn.backend is AttentionBackendEnum.TORCH_SDPA
+        assert stage.attn_backend.get_name() == "TORCH_SDPA"
 
 
 def test_vace_sparse_request_fails_before_layer_construction(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-    monkeypatch.setattr("fastvideo.models.wan.vace_transformer.PatchEmbed",
-                        lambda *args, **kwargs: pytest.fail("layer construction reached"))
-    config = _tiny_config(AttentionBackendEnum.VIDEO_SPARSE_ATTN)
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"):
+        monkeypatch.setattr("fastvideo.models.wan.vace_transformer.PatchEmbed",
+                            lambda *args, **kwargs: pytest.fail("layer construction reached"))
+        config = _tiny_config(AttentionBackendEnum.VIDEO_SPARSE_ATTN)
 
-    with _component_attention_backend_scope(AttentionBackendEnum.VIDEO_SPARSE_ATTN, component="transformer"):
-        with pytest.raises(ValueError, match="Wan-VACE.*VIDEO_SPARSE_ATTN.*TORCH_SDPA"):
-            WanVACETransformer3DModel(config, hf_config={})
+        with _component_attention_backend_scope(AttentionBackendEnum.VIDEO_SPARSE_ATTN, component="transformer"):
+            with pytest.raises(ValueError, match="Wan-VACE.*VIDEO_SPARSE_ATTN.*TORCH_SDPA"):
+                WanVACETransformer3DModel(config, hf_config={})
 
 
 def test_vace_does_not_change_regular_wan_backend_support():
