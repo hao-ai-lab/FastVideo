@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Optional fastvideo_kernel must not be imported at module import time."""
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,12 +21,9 @@ print("ok")
 """
 
 
-def test_pipeline_and_sparse_backends_import_without_kernel_package():
-    environment = os.environ.copy()
-    environment.update(CUDA_VISIBLE_DEVICES="", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+def test_pipeline_and_sparse_backends_import_without_kernel_package(cuda_hidden):
     completed = subprocess.run(
         [sys.executable, "-c", _IMPORT_SCRIPT],
-        env=environment,
         capture_output=True,
         text=True,
         timeout=120,
