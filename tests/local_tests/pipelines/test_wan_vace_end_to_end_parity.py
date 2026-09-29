@@ -7,25 +7,20 @@ Set WAN_VACE_MODEL_DIR (1.3B) and WAN_VACE_14B_MODEL_DIR (14B) to local snapshot
 from __future__ import annotations
 
 import gc
-import os
-from pathlib import Path
 from typing import Any, cast
 
-import imageio
-import numpy as np
 import pytest
 import torch
-from PIL import Image
 from torch.testing import assert_close
 
 from tests.local_tests.wan.parity_stats import assert_dit_parity, compute_parity_stats
 from tests.local_tests.wan.vace_parity_helpers import (
     assert_bf16_bitwise_equal,
     prepare_official_pipeline,
+    prepare_vace_inputs,
     resolve_model_dir,
     run_fastvideo_stages,
-    set_parity_cuda_flags,
-    restore_parity_cuda_flags,
+    single_gpu_parity_runtime,
     video_generator_kwargs,
 )
 
@@ -46,50 +41,15 @@ CASES = (
 
 @pytest.fixture
 def parity_runtime(monkeypatch):
-    from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
-    from fastvideo.utils import get_open_port
-
-    monkeypatch.setenv("MASTER_ADDR", "localhost")
-    monkeypatch.setenv("MASTER_PORT", str(get_open_port()))
-    monkeypatch.setenv("DISABLE_SP", "1")
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-    tf32_previous = set_parity_cuda_flags()
-    maybe_init_distributed_environment_and_model_parallel(1, 1)
-    try:
+    with single_gpu_parity_runtime(monkeypatch):
         yield
-    finally:
-        restore_parity_cuda_flags(tf32_previous)
-        cleanup_dist_env_and_memory()
-
-
-def _prepare_inputs(mode: str, tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], int]:
-    if mode == "t2v":
-        return {}, {}, 0
-    if mode == "reference":
-        image_path = tmp_path / "reference.png"
-        Image.new("RGB", (64, 32), (240, 32, 24)).save(image_path)
-        return {"references": [str(image_path)]}, {"reference_images": [Image.open(image_path).convert("RGB")]}, 1
-
-    video_path = tmp_path / "video.mp4"
-    mask_path = tmp_path / "mask.mp4"
-    video_frames = np.stack([np.full((64, 64, 3), (i * 24, 64, 160), dtype=np.uint8) for i in range(5)])
-    mask_frames = np.zeros((5, 64, 64, 3), dtype=np.uint8)
-    mask_frames[:, :, 32:] = 255
-    imageio.mimwrite(video_path, video_frames, fps=16, codec="libx264")
-    imageio.mimwrite(mask_path, mask_frames, fps=16, codec="libx264")
-    from fastvideo.models.vision_utils import load_video
-
-    decoded_video, _ = load_video(str(video_path), return_fps=True)
-    decoded_mask, _ = load_video(str(mask_path), return_fps=True)
-    return ({"video_path": str(video_path), "mask_path": str(mask_path)},
-            {"video": decoded_video, "mask": decoded_mask}, 0)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Wan-VACE end-to-end parity requires CUDA")
 @pytest.mark.parametrize("size,mode,env_name", CASES)
 def test_wan_vace_pipeline_matches_diffusers(size, mode, env_name, tmp_path, parity_runtime):
     model_dir = resolve_model_dir(env_name)
-    fastvideo_inputs, official_inputs, num_refs = _prepare_inputs(mode, tmp_path)
+    fastvideo_inputs, official_inputs, num_refs = prepare_vace_inputs(mode, tmp_path)
     latent_frames = (5 - 1) // 4 + 1 + num_refs
     latents = torch.randn((1, 16, latent_frames, 8, 8), generator=torch.Generator().manual_seed(42))
     prompt = "a red panda reading a book"
