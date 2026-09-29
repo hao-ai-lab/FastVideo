@@ -146,10 +146,10 @@ Offline B200 rerun: 5 frames at 64×64, 2 denoising steps, fixed initial latents
 
 | Case | Step0 max abs | Final max abs | Final abs-mean drift | Strict `1e-2` mismatches |
 |------|--------------:|--------------:|---------------------:|------------------------:|
-| 1.3B t2v | 0.015625 | 0.539263 | 2.44% | 874/2048 |
-| 1.3B reference | 0.015625 | 0.210877 | 3.00% | 1041/2048 |
-| 1.3B video+mask | 0.015625 | 0.595765 | 3.27% | 925/2048 |
-| 14B reference | 0.15625 | 0.210167 | 3.85% | 1331/2048 |
+| 1.3B t2v | 0.015625 | 0.155267 | 2.30% | 888/2048 |
+| 1.3B reference | 0.015625 | 0.101291 | 2.65% | 974/2048 |
+| 1.3B video+mask | 0.015625 | 0.637095 | 3.06% | 814/2048 |
+| 14B reference | 0.15625 | 0.259831 | 3.52% | 1217/2048 |
 
 "Hierarchical gates pass" does **not** mean strict `1e-2` bitwise parity.
 
@@ -183,7 +183,8 @@ Set `WAN_VACE_SP_TRACE=1` to print per-layer SP divergence stats (read-only hook
 
 ## Known Gaps
 
-- No CI SSIM regression test yet; reference videos have not been seeded.
+- The SSIM regression test (`fastvideo/tests/ssim/test_wan_vace_similarity.py`) has
+  no committed reference videos yet; CI bootstraps draft references for review.
 - With BF16 weights, the short-pipeline SP2 parity test is still marked `xfail`
   (see [Sequence Parallel](#sequence-parallel-status) above).
 - The video + mask control path has no end-to-end reproduction case; only the
