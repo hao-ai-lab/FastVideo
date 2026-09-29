@@ -25,10 +25,36 @@ arguments.
 
 ## Registry routing
 
-Both FullAttn and the legacy sparse alias ship `WanDMDPipeline` manifests with
-`expand_timesteps=true`. FastVideo disambiguates them with
-`model_index_detectors` on the Wan definition before falling back to path/name
-heuristics.
+Both hub IDs, FullAttn and the legacy sparse alias, map to this dense config by
+name. Any other path is matched by its manifest: `match_model_index` on the Wan
+definition routes every `model_index.json` with
+`_class_name: WanDMDPipeline` and `expand_timesteps: true` to the FullAttn
+config, before the path/name heuristics run. The manifest check cannot tell
+FullAttn from the sparse alias, because both ship the same manifest.
+
+### Checkpoints trained with the FullAttn-to-VSA LoRA recipe
+
+Checkpoints exported from that recipe copy the base model's `model_index.json`,
+so they also route to the dense FullAttn config. It rejects
+`VIDEO_SPARSE_ATTN` and image inputs. Loading the FullAttn base weights with the
+recipe's LoRA and the VSA backend is rejected the same way.
+
+To run such a checkpoint with VSA or TI2V, pass the sparse-capable 5B config
+explicitly as a `PipelineConfig` object:
+
+```python
+from fastvideo import VideoGenerator
+from fastvideo.models.wan.pipeline_config import FastWan2_2_TI2V_5B_Config
+
+generator = VideoGenerator.from_pretrained(
+    "path/to/exported_checkpoint",
+    pipeline_config=FastWan2_2_TI2V_5B_Config(),
+    attention_backend="VIDEO_SPARSE_ATTN",
+)
+```
+
+A pipeline-config JSON path is not enough: FastVideo loads the JSON into the
+config class that the path resolves to, which is still the FullAttn config.
 
 ## Limitations
 
