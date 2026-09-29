@@ -8,7 +8,8 @@ and the registry fastvideo/envs.py) with ``ast`` and reports code that:
 - reads the environment directly for a name outside EXTERNAL_ALLOWLIST;
 - writes the environment directly (os.environ, os.putenv, monkeypatch.setenv);
 - uses the whole environment (os.environ.copy(), dict(os.environ), patch.dict);
-- uses a registry field without one of its methods (``envs.X == "a"``);
+- uses a registry field without calling one of its methods (``envs.X == "a"``,
+  ``getter = envs.X.get``);
 - calls ``envs.X.get()`` outside a function, so the value is read at import.
 
 It also checks every entry in fastvideo/envs.py (FASTVIDEO_ prefix, category,
@@ -696,7 +697,11 @@ class EnvAccessScanner:
             self.violations.append(("write", name, node.lineno))
 
     def _check_registry_use(self, node: ast.Attribute, parent: ast.AST | None, in_function: bool) -> None:
-        if not isinstance(parent, ast.Attribute) or parent.attr not in REGISTRY_METHODS:
+        # Only a call counts: ``getter = envs.X.get`` neither reads the variable
+        # nor uses the field through a method.
+        grandparent = self.parents.get(parent) if parent is not None else None
+        if not (isinstance(parent, ast.Attribute) and parent.attr in REGISTRY_METHODS
+                and isinstance(grandparent, ast.Call) and grandparent.func is parent):
             self.violations.append(("bare-field", node.attr, node.lineno))
             return
         if parent.attr in REGISTRY_READ_METHODS:
@@ -751,6 +756,17 @@ def test_env_access_follows_policy():
         messages.append("These KNOWN_VIOLATIONS entries are fixed; delete them from "
                         "fastvideo/tests/contract/test_env_policy.py:\n" + "\n".join(lines))
     assert not messages, "\n\n".join(messages)
+
+
+def test_registry_method_counts_only_when_called():
+    """An uncalled ``envs.NAME.get`` is a bare field, not a read."""
+    source = ("import fastvideo.envs as envs\n"
+              "def f():\n"
+              "    getter = envs.FASTVIDEO_FA4.get\n"
+              "    return envs.FASTVIDEO_FA4.get()\n")
+    scanner = EnvAccessScanner(ast.parse(source), {"FASTVIDEO_FA4"})
+    assert scanner.violations == [("bare-field", "FASTVIDEO_FA4", 3)]
+    assert scanner.registry_reads["FASTVIDEO_FA4"] == 1
 
 
 def test_registry_entries_have_category_and_description():

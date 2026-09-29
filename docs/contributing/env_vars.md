@@ -103,8 +103,8 @@ It reports each violation as `<path>: <kind> <name>`:
 |                    | `os.putenv`, `os.unsetenv`, `monkeypatch.setenv`/`delenv`    | `envs.NAME.override()`.                      |
 | `whole-environ`    | `os.environ.copy()`, `dict(os.environ)`, iteration,          | Read the specific variables that the code    |
 |                    | `mock.patch.dict(os.environ, ...)`, `os.environ.update`      | needs.                                       |
-| `bare-field`       | A registry field used without a method, as in                | Call `envs.NAME.get()`.                      |
-|                    | `envs.NAME == "auto"`                                        |                                              |
+| `bare-field`       | A registry field used without calling one of its methods,    | Call `envs.NAME.get()`.                      |
+|                    | as in `envs.NAME == "auto"` or `getter = envs.NAME.get`      |                                              |
 | `import-time-read` | `envs.NAME.get()` outside a function                         | Move the read into the function that uses    |
 |                    |                                                              | the value.                                   |
 | `prefix`           | A registry entry without the `FASTVIDEO_` prefix             | Rename the variable and keep the old name as |
