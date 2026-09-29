@@ -1,0 +1,41 @@
+# Wan2.1-VACE Port Status
+
+Model family: wan (VACE variant)
+Official ref: Wan-AI/Wan2.1-VACE-1.3B-diffusers, Wan-AI/Wan2.1-VACE-14B-diffusers (Diffusers layout)
+Workload: controllable T2V (reference images, control video, video + mask)
+Last updated: 2026-09-29
+
+## Component Status
+
+| Component | Type | Parity test | Status | Notes |
+|---|---|---|---|---|
+| WanVACETransformer3DModel | DiT (ported) | tests/local_tests/pipelines/test_wan_vace_pipeline_parity.py | PASS (B200) | Single-step forward vs Diffusers, FP32 and BF16, 1.3B |
+| AutoencoderKLWan | VAE (reused) | tests/local_tests/pipelines/test_wan_vace_end_to_end_parity.py | PASS (B200) | Control/reference latents bf16 bitwise equal to Diffusers |
+| UMT5 text encoder | encoder (reused) | tests/local_tests/pipelines/test_wan_vace_end_to_end_parity.py | PASS (B200) | Prompt embeddings bf16 bitwise equal; needs `T5PaddedConfig` |
+| FlowUniPCMultistepScheduler | scheduler (reused) | tests/local_tests/pipelines/test_wan_vace_end_to_end_parity.py | PASS (B200) | Timesteps bitwise equal |
+
+## Conversion
+
+No conversion script is needed. Both checkpoints use the Diffusers layout and load
+through `WanVACEConfig.param_names_mapping`.
+
+## Pipeline
+
+| Test | Status | Notes |
+|---|---|---|
+| Pipeline smoke | PASS | `test_wan_vace_pipeline_smoke.py`; preflight runs without weights |
+| Pipeline parity vs Diffusers | PASS (B200) | 1.3B t2v / reference / video+mask and 14B reference; gates in [README](README.md#parity-gates) |
+| Basic example | PASS | `examples/inference/basic/basic_wan_vace.py` |
+| SP2 forward (weight-free FP32) | PASS | `fastvideo/tests/distributed/test_sp_wan_vace.py` |
+| SP2 weighted BF16 short pipeline | xfail (strict) | BF16 GEMM results depend on sharded row count; see [docs](../../../docs/inference/wan_vace.md#sequence-parallel-status) |
+
+## Quality
+
+| Item | Status |
+|---|---|
+| SSIM test | deferred_with_reason: no L40S reference videos seeded; component and pipeline parity cover correctness |
+
+## Known Blockers
+
+None for single-GPU inference. SP2 with BF16 weights does not reach the short-pipeline
+numeric gates (tracked above).
