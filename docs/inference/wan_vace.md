@@ -182,10 +182,11 @@ is 0.93).
 |------|-------------------:|-----------:|
 | 1.3B reference | 3.51% | 0.957 |
 | 1.3B video+mask | 3.16% | 0.986 |
-| 14B reference | 2.00%¹ | 0.981¹ |
+| 14B reference | 3.73% | 0.938 |
 
-¹ Measured before the timestep-embedding fix. A rerun was blocked by GPU memory on the
-local host; both sides of this comparison are FastVideo, so the fix affects them equally.
+The 14B case ran on a Slurm B200 node. Its SSIM margin over the 0.93 gate is small; an earlier
+run of the same comparison, before the timestep-embedding fix, measured 2.00% / 0.981. Because
+the BF16 DiT amplifies ulp-level differences, these numbers vary between runs and hosts.
 
 **Production-size video**: 1.3B/14B 480p and 14B 720p SP2 videos matched corresponding
 single-GPU MP4 hashes (81 frames). This is repeatability evidence, not a substitute
