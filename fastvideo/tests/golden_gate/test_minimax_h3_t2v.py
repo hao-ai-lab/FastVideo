@@ -21,7 +21,7 @@ never as unexplained bit drift.
 
 Goldens are device-keyed like SSIM references and live in the same HF dataset
 (``FastVideo/ssim-reference-videos`` under ``golden_gates/<device>/``); a
-local ``goldens/`` directory or ``MINIMAX_H3_GATE_GOLDEN_DIR`` wins over the
+local ``goldens/`` directory or ``FASTVIDEO_TEST_MINIMAX_H3_GATE_GOLDEN_DIR`` wins over the
 download. A missing golden is seeded locally and the test fails with upload
 instructions, mirroring the SSIM missing-reference convention.
 """
@@ -37,21 +37,19 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-GOLDEN_REPO_ID = os.environ.get("FASTVIDEO_SSIM_REFERENCE_HF_REPO", "FastVideo/ssim-reference-videos")
+import fastvideo.envs as envs
+
 MODEL_REPO_ID = "MiniMaxAI/MiniMax-H3"
-LAYER = int(os.environ.get("MINIMAX_H3_GATE_LAYER", "0"))
 SEED = 20260805
 
-# Pin the same attention path the H3 SSIM test runs, before any fastvideo
-# import can cache a backend decision. CUBLAS workspace must be set before
-# cuBLAS initializes for use_deterministic_algorithms to hold.
-os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
-os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-os.environ.setdefault("MASTER_PORT", "29661")
-os.environ.setdefault("RANK", "0")
-os.environ.setdefault("WORLD_SIZE", "1")
-os.environ.setdefault("LOCAL_RANK", "0")
+# CUBLAS workspace must be set before cuBLAS initializes for
+# use_deterministic_algorithms to hold.
+envs.setdefault_external("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+envs.setdefault_external("MASTER_ADDR", "127.0.0.1")
+envs.setdefault_external("MASTER_PORT", "29661")
+envs.setdefault_external("RANK", "0")
+envs.setdefault_external("WORLD_SIZE", "1")
+envs.setdefault_external("LOCAL_RANK", "0")
 
 # Checkpoint -> FastVideo renames, the block-level subset of
 # MiniMaxH3Config.param_names_mapping (fastvideo/configs/models/dits/minimax_h3.py).
@@ -60,6 +58,14 @@ _RENAMES = (
     (re.compile(r"\.ff\.net\.2\."), ".ff.fc_out."),
     (re.compile(r"\.attn\.to_out\.0\."), ".attn.to_out."),
 )
+
+
+def _golden_repo_id() -> str:
+    return envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO.get()
+
+
+def _layer() -> int:
+    return envs.FASTVIDEO_TEST_MINIMAX_H3_GATE_LAYER.get()
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -91,8 +97,8 @@ def _env_fingerprint() -> dict[str, str]:
         "cudnn": str(torch.backends.cudnn.version()),
         "flash_attn": fa_version,
         "device_name": torch.cuda.get_device_name(0),
-        "attention_backend": os.environ.get("FASTVIDEO_ATTENTION_BACKEND", "<unset>"),
-        "fastvideo_fa4": os.environ.get("FASTVIDEO_FA4", "<unset>"),
+        "attention_backend": envs.FASTVIDEO_ATTENTION_BACKEND.get() or "<unset>",
+        "fastvideo_fa4": str(int(envs.FASTVIDEO_FA4.get())) if envs.FASTVIDEO_FA4.is_set() else "<unset>",
         "tf32_matmul": str(torch.backends.cuda.matmul.allow_tf32),
         "tf32_cudnn": str(torch.backends.cudnn.allow_tf32),
     }
@@ -101,18 +107,18 @@ def _env_fingerprint() -> dict[str, str]:
 def _component_dir() -> Path:
     """Local checkout wins; otherwise fetch only the index + the shards that
     hold this layer's tensors (~4.5 GB of the 62 GB checkpoint)."""
-    root = os.environ.get("MINIMAX_H3_MODEL_ROOT")
+    root = envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get()
     if root:
         component = Path(root) / "transformer"
         if not (component / "diffusion_pytorch_model.safetensors.index.json").is_file():
-            pytest.fail(f"MINIMAX_H3_MODEL_ROOT set but index missing under {component}", pytrace=False)
+            pytest.fail(f"FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT set but index missing under {component}", pytrace=False)
         return component
 
     from huggingface_hub import hf_hub_download
 
     index_path = Path(hf_hub_download(MODEL_REPO_ID, "transformer/diffusion_pytorch_model.safetensors.index.json"))
     weight_map = json.loads(index_path.read_text())["weight_map"]
-    prefix = f"transformer_blocks.{LAYER}."
+    prefix = f"transformer_blocks.{_layer()}."
     shards = sorted({shard for name, shard in weight_map.items() if name.startswith(prefix)})
     if not shards:
         pytest.fail(f"no shards found for prefix {prefix} in {MODEL_REPO_ID}", pytrace=False)
@@ -207,13 +213,14 @@ def _device_slug() -> str:
 
 
 def _golden_filename() -> str:
-    backend = os.environ.get("FASTVIDEO_ATTENTION_BACKEND", "default")
-    return f"minimax_h3_t2v_layer{LAYER}_{backend}_seed{SEED}.pt"
+    backend = envs.FASTVIDEO_ATTENTION_BACKEND.get() or "default"
+    return f"minimax_h3_t2v_layer{_layer()}_{backend}_seed{SEED}.pt"
 
 
 def _resolve_golden() -> tuple[Path, bool]:
     """Return (path, exists). Local dir wins; falls back to the HF dataset."""
-    local_root = Path(os.environ.get("MINIMAX_H3_GATE_GOLDEN_DIR", Path(__file__).resolve().parent / "goldens"))
+    local_root = Path(envs.FASTVIDEO_TEST_MINIMAX_H3_GATE_GOLDEN_DIR.get()
+                      or Path(__file__).resolve().parent / "goldens")
     local = local_root / _device_slug() / _golden_filename()
     if local.exists():
         return local, True
@@ -222,7 +229,7 @@ def _resolve_golden() -> tuple[Path, bool]:
     from huggingface_hub.errors import EntryNotFoundError
     try:
         remote = hf_hub_download(
-            GOLDEN_REPO_ID,
+            _golden_repo_id(),
             f"golden_gates/{_device_slug()}/{_golden_filename()}",
             repo_type="dataset",
         )
@@ -231,9 +238,13 @@ def _resolve_golden() -> tuple[Path, bool]:
         return local, False
 
 
-def test_minimax_h3_t2v_golden_gate() -> None:
+def test_minimax_h3_t2v_golden_gate(env_overrides) -> None:
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         pytest.skip("golden-gate requires a bf16-capable CUDA GPU")
+
+    # Pin the same attention path the H3 SSIM test runs unless the caller chose a backend.
+    if not envs.FASTVIDEO_ATTENTION_BACKEND.is_set():
+        env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASH_ATTN"))
 
     # Tripwire: any nondeterministic op added to the block errors immediately
     # instead of flaking the gate. benchmark=False kills cuDNN autotune
@@ -246,8 +257,8 @@ def test_minimax_h3_t2v_golden_gate() -> None:
 
     from fastvideo.forward_context import set_forward_context
 
-    block = _build_block(LAYER)
-    state = _load_layer_state(component_dir, LAYER)
+    block = _build_block(_layer())
+    state = _load_layer_state(component_dir, _layer())
     missing, unexpected = block.load_state_dict(state, strict=True)
     assert not missing and not unexpected
     block = block.to(device=device, dtype=torch.bfloat16).eval()
@@ -259,7 +270,7 @@ def test_minimax_h3_t2v_golden_gate() -> None:
 
     golden_path, golden_exists = _resolve_golden()
     meta = {
-        "layer": LAYER,
+        "layer": _layer(),
         "seed": SEED,
         "shape": list(out.shape),
         "env": _env_fingerprint(),
@@ -269,7 +280,7 @@ def test_minimax_h3_t2v_golden_gate() -> None:
         torch.save({"output": out, "metadata": meta}, golden_path)
         pytest.fail(
             f"golden latent seeded at {golden_path} ({meta}). Verify with a second "
-            f"run, then upload to {GOLDEN_REPO_ID} at "
+            f"run, then upload to {_golden_repo_id()} at "
             f"golden_gates/{_device_slug()}/{_golden_filename()}",
             pytrace=False,
         )

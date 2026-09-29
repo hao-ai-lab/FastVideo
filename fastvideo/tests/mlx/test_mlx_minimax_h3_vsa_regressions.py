@@ -15,6 +15,7 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
+import fastvideo.envs as envs
 from fastvideo.mlx_runtime import minimax_h3 as h3
 from fastvideo.mlx_runtime import minimax_h3_vsa as vsa
 from fastvideo.mlx_runtime import minimax_h3_vsa_simd as simd
@@ -121,12 +122,12 @@ def test_configuration_is_transactional_and_invalidates_geometry():
 
 
 @pytest.fixture
-def tiny_h3_model(monkeypatch, request):
+def tiny_h3_model(env_overrides, request):
     from fastvideo.tests.mlx.tiny_h3 import build_hf_config, build_tiny_h3_config, build_torch_model
     from fastvideo.tests.mlx.tiny_h3 import mlx_dit_from_torch_model
 
-    monkeypatch.setenv("MASTER_ADDR", "localhost")
-    monkeypatch.setenv("MASTER_PORT", "29513")
+    env_overrides.enter_context(envs.override_external("MASTER_ADDR", "localhost"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29513"))
     request.getfixturevalue("distributed_setup")
     return mlx_dit_from_torch_model(build_torch_model(), build_hf_config(build_tiny_h3_config()))
 

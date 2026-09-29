@@ -70,7 +70,7 @@ Run the numerical tests against a local TAEHV checkout containing the released
 weights:
 
 ```bash
-TAEH3_REFERENCE_DIR=/path/to/taehv \
+FASTVIDEO_TEST_TAEH3_REFERENCE_DIR=/path/to/taehv \
   python -m pytest fastvideo/tests/mlx/test_mlx_taeh3.py -q
 ```
 

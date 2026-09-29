@@ -11,6 +11,8 @@ import tempfile
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+import fastvideo.envs as envs
+
 VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
 # Additional artefact types stored under the same reference folders. Latent
 # tensors (`.pt`) back the latent-slice regression tests used by flaky
@@ -19,9 +21,8 @@ VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
 LATENT_EXTENSIONS = (".pt", )
 REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS + (".png", )
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
-HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
-HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
-BOOTSTRAP_ENV_KEY = "FASTVIDEO_SSIM_BOOTSTRAP_MODE"
+HF_REPO_ENV_KEY = "FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO"
+HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO_TYPE"
 
 DEFAULT_REPO_ID = "FastVideo/ssim-reference-videos"
 DEFAULT_REPO_TYPE = "dataset"
@@ -42,11 +43,11 @@ def _ssim_dir() -> Path:
 
 
 def _default_repo_id() -> str:
-    return os.environ.get(HF_REPO_ENV_KEY, DEFAULT_REPO_ID)
+    return envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO.get()
 
 
 def _default_repo_type() -> str:
-    return os.environ.get(HF_REPO_TYPE_ENV_KEY, DEFAULT_REPO_TYPE)
+    return envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO_TYPE.get()
 
 
 def _iter_reference_files(root: Path) -> Iterable[Path]:

@@ -38,7 +38,10 @@ on a summary here.
      name to `DEPRECATED_VARIABLES`. Update the uses in `examples/`,
      `scripts/`, `docs/`, `apps/`, and the tests.
 2. **Read the variable with `envs.NAME.get()` inside a function.**
-   - In tests, change the value with `envs.NAME.override(value)`.
+   - In tests, change the value with `envs.NAME.override(value)`, and a variable
+     outside the registry with `envs.override_external(name, value)`; the
+     `env_overrides` fixture keeps either until the end of the test.
+   - Name a variable that only tests read `FASTVIDEO_TEST_*`.
    - Do not call `os.environ`, `os.getenv`, or `monkeypatch.setenv` for a
      FastVideo variable.
    - To set a variable that another tool reads, call `envs.set_external`,

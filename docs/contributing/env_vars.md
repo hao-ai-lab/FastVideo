@@ -13,12 +13,15 @@ test in the same pull request.
    them directly with `os.environ.get("NAME")`, and the name must be in the external-variable allowlist
    (`EXTERNAL_ALLOWLIST` in the contract test). When FastVideo sets such a variable for the other tool, it calls
    `envs.set_external`, `envs.setdefault_external`, or `envs.unset_external`, and the name must be in
-   `EXTERNAL_WRITE_ALLOWLIST`.
+   `EXTERNAL_WRITE_ALLOWLIST`. Variables that FastVideo's CI and CI tooling define (for example `TEST_SCOPE` and
+   `PERF_RUN_SOURCE`) keep their names and are read directly too; they are listed in `CI_ONLY_VARIABLES` in the
+   contract test, together with the file that sets each one.
 2. **Read with `envs.NAME.get()`, write with `envs.NAME.set()`, and change a value in tests with
    `envs.NAME.override()`.** Each type has one parsing rule. A value that the rule rejects raises
    `fastvideo.envs.EnvVarError` instead of falling back to the default.
 3. **Name FastVideo variables with the `FASTVIDEO_` prefix.** The second word states the purpose where one applies:
-   `ENABLE_`, `DISABLE_`, `USE_`, `FORCE_`, `DEBUG_`, `TEST_`.
+   `ENABLE_`, `DISABLE_`, `USE_`, `FORCE_`, `DEBUG_`, `TEST_`. Variables that only tests read use
+   `FASTVIDEO_TEST_`, for example `FASTVIDEO_TEST_SD35_MODEL_DIR`, and the category `test`.
 4. **Keep a renamed variable as a deprecated alias until the next minor release.** Setting the old name logs a
    warning. Delete a variable that no code reads, and list it in `DEPRECATED_VARIABLES` so that setting it logs a
    warning.
@@ -29,7 +32,8 @@ test in the same pull request.
    effect without re-importing a module. Module level, class bodies, decorators, and default argument values run at
    import time.
 7. **Do not write the environment to pass values between parts of FastVideo.** Pass an argument instead. Tests use
-   `envs.NAME.override()`.
+   `envs.NAME.override()`, and `envs.override_external()` for variables outside the registry; both restore the
+   previous value.
 
 ## Field types
 
@@ -87,6 +91,20 @@ with envs.FASTVIDEO_DEBUG_MY_STAGE.override(True):
     run_stage()
 ```
 
+For a variable outside the registry, such as `MASTER_PORT` or `TEST_SCOPE`, use `envs.override_external`. To keep
+an override until the end of a test, enter it through the `env_overrides` fixture from `fastvideo/tests/conftest.py`,
+which restores every value at teardown:
+
+```python
+def test_my_stage(env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_DEBUG_MY_STAGE.override(True))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29512"))
+    run_stage()
+```
+
+`override_external` accepts any name that code may read directly (`EXTERNAL_ALLOWLIST`, `CI_ONLY_VARIABLES`) or
+that is in `EXTERNAL_WRITE_ALLOWLIST`.
+
 ## Rename or remove a variable
 
 To rename a variable, declare it under the new name and list the old name in `deprecated_names`:
@@ -121,9 +139,11 @@ It reports each violation as `<path>: <kind> <name>`:
 |                    | with a name built at runtime (`<dynamic>`)                   | another tool owns, add it to                 |
 |                    |                                                              | `EXTERNAL_ALLOWLIST` with a reason.          |
 | `write`            | `os.environ[...] = ...`, `setdefault`, `pop`, `del`,         | Pass an argument instead. In tests, use      |
-|                    | `os.putenv`, `os.unsetenv`, `monkeypatch.setenv`/`delenv`,   | `envs.NAME.override()`. For a variable that  |
-|                    | or an `envs.*_external` call with a name outside             | another tool reads, call an                  |
-|                    | `EXTERNAL_WRITE_ALLOWLIST`                                   | `envs.*_external` helper and add the name to |
+|                    | `os.putenv`, `os.unsetenv`, `monkeypatch.setenv`/`delenv`,   | `envs.NAME.override()`, or                   |
+|                    | or an `envs.*_external` call with a name that the            | `envs.override_external()` for a variable    |
+|                    | helper does not accept                                       | outside the registry. For a variable that    |
+|                    |                                                              | another tool reads, call an                  |
+|                    |                                                              | `envs.*_external` helper and add the name to |
 |                    |                                                              | `EXTERNAL_WRITE_ALLOWLIST` with a reason.    |
 | `whole-environ`    | `os.environ.copy()`, `dict(os.environ)`, iteration,          | Read the specific variables that the code    |
 |                    | `mock.patch.dict(os.environ, ...)`, `os.environ.update`      | needs.                                       |
@@ -227,6 +247,36 @@ longer exists also fails the test, so the fixing pull request deletes its entry.
 | `FASTVIDEO_TEST_LTX2_OVERFIT_NUM_COPIES`                   | int                            | `4`                                                   | test        | Number of copies of the overfit sample in the parquet file. Deprecated names: `LTX2_OVERFIT_NUM_COPIES`.                                                                                                                                                 |
 | `FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR`               | str                            | `data/kandinsky5_overfit`                             | test        | Raw data directory for preprocess_kandinsky5_overfit.py. Deprecated names: `KANDINSKY5_OVERFIT_DATA_DIR`.                                                                                                                                                |
 | `FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR`             | str                            | `data/kandinsky5_overfit_preprocessed`                | test        | Output directory for preprocess_kandinsky5_overfit.py. Deprecated names: `KANDINSKY5_OVERFIT_OUTPUT_DIR`.                                                                                                                                                |
+| `FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO`                    | str                            | `FastVideo/ssim-reference-videos`                     | test        | Hugging Face repository that holds the SSIM reference videos. Deprecated names: `FASTVIDEO_SSIM_REFERENCE_HF_REPO`.                                                                                                                                      |
+| `FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO_TYPE`               | str                            | `dataset`                                             | test        | Repository type of FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO. Deprecated names: `FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE`.                                                                                                                                     |
+| `FASTVIDEO_TEST_SSIM_SKIP_REFERENCE_DOWNLOAD`              | bool                           | `0`                                                   | test        | SSIM tests use local reference videos without downloading. Deprecated names: `FASTVIDEO_SSIM_SKIP_REFERENCE_DOWNLOAD`.                                                                                                                                   |
+| `FASTVIDEO_TEST_SSIM_FULL_QUALITY`                         | bool                           | `0`                                                   | test        | SSIM tests use the full-quality sampling configurations. Deprecated names: `FASTVIDEO_SSIM_FULL_QUALITY`.                                                                                                                                                |
+| `FASTVIDEO_TEST_NIGHTLY`                                   | bool                           | `0`                                                   | test        | Run the nightly end-to-end overfit tests. Deprecated names: `FASTVIDEO_NIGHTLY`.                                                                                                                                                                         |
+| `FASTVIDEO_TEST_ULYSSES_FAULT_RANK`                        | str                            | unset                                                 | test        | Rank that fails in the Ulysses fault-injection test. The test sets it for its worker processes. Deprecated names: `FASTVIDEO_ULYSSES_FAULT_RANK`.                                                                                                        |
+| `FASTVIDEO_TEST_ULYSSES_FAULT_STAGE`                       | str                            | unset                                                 | test        | Stage that fails in the Ulysses fault-injection test. The test sets it for its worker processes. Deprecated names: `FASTVIDEO_ULYSSES_FAULT_STAGE`.                                                                                                      |
+| `FASTVIDEO_TEST_GOLDEN_GATE_DIR`                           | str                            | unset                                                 | test        | Local directory of golden-gate reference tensors. Deprecated names: `FASTVIDEO_GOLDEN_GATE_DIR`.                                                                                                                                                         |
+| `FASTVIDEO_TEST_WAN22_5B_ALLOW_LOW_MEMORY`                 | bool                           | `0`                                                   | test        | Run the MLX Wan2.2 5B real-weights parity test on hosts with little memory. Deprecated names: `FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY`.                                                                                                                     |
+| `FASTVIDEO_TEST_WAN22_5B_ROOT`                             | str                            | unset                                                 | test        | Local Wan2.2 5B checkpoint for the MLX real-weights parity test. Deprecated names: `FASTVIDEO_WAN22_5B_ROOT`.                                                                                                                                            |
+| `FASTVIDEO_TEST_GRADNORM_UPDATE`                           | bool                           | `0`                                                   | test        | Gradient-norm regression tests update their references. Deprecated names: `FASTVIDEO_GRADNORM_UPDATE`.                                                                                                                                                   |
+| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`              | str                            | `FastVideo/DreamX-World-5B-Cam-Diffusers`             | test        | Model for the DreamX-World camera SSIM test. Deprecated names: `DREAMX_WORLD_SSIM_MODEL_PATH`.                                                                                                                                                           |
+| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH`           | str                            | `FastVideo/DreamX-World-5B-Diffusers`                 | test        | Model for the DreamX-World autoregressive SSIM test. Deprecated names: `DREAMX_WORLD_AR_SSIM_MODEL_PATH`.                                                                                                                                                |
+| `FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR`                        | str                            | `black-forest-labs/FLUX.1-dev`                        | test        | Model for the Flux text-to-image SSIM test. Deprecated names: `FLUX_T2I_MODEL_DIR`.                                                                                                                                                                      |
+| `FASTVIDEO_TEST_FLUX_TRANSFORMER_PATH`                     | str                            | unset                                                 | test        | Local Flux transformer for the Flux transformer test. Deprecated names: `FLUX_TRANSFORMER_PATH`.                                                                                                                                                         |
+| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`                      | str                            | `FastVideo/HunyuanGameCraft-Diffusers`                | test        | Model for the HunyuanGameCraft SSIM test. Deprecated names: `GAMECRAFT_MODEL_PATH`.                                                                                                                                                                      |
+| `FASTVIDEO_TEST_GEN3C_MODEL_PATH`                          | str                            | `FastVideo/GEN3C-Cosmos-7B-Diffusers`                 | test        | Model for the GEN3C SSIM test. Deprecated names: `GEN3C_MODEL_PATH`.                                                                                                                                                                                     |
+| `FASTVIDEO_TEST_GEN3C_IMAGE_PATH`                          | str                            | unset                                                 | test        | Input image for the GEN3C SSIM test. Deprecated names: `GEN3C_TEST_IMAGE_PATH`.                                                                                                                                                                          |
+| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`               | str                            | unset                                                 | test        | Local official GLM-Image weights for the GLM-Image SSIM test. Deprecated names: `GLM_IMAGE_LOCAL_WEIGHTS_DIR`.                                                                                                                                           |
+| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`                       | str                            | unset                                                 | test        | Model for the GLM-Image SSIM test. Deprecated names: `GLM_IMAGE_MODEL_DIR`.                                                                                                                                                                              |
+| `FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS`                   | int                            | `1`                                                   | test        | GPUs for the Kandinsky5 nightly end-to-end overfit test. Deprecated names: `KANDINSKY5_E2E_NUM_GPUS`.                                                                                                                                                    |
+| `FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE`            | bool                           | `0`                                                   | test        | The Kandinsky5 nightly end-to-end test writes a missing reference video. Deprecated names: `KANDINSKY5_E2E_WRITE_REFERENCE`.                                                                                                                             |
+| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`                        | str                            | unset                                                 | test        | Local LongCat-Video checkpoint for the golden-gate test. Deprecated names: `LONGCAT_MODEL_ROOT`.                                                                                                                                                         |
+| `FASTVIDEO_TEST_MINIMAX_H3_GATE_GOLDEN_DIR`                | str                            | unset                                                 | test        | Local directory of MiniMax-H3 golden-gate tensors. Deprecated names: `MINIMAX_H3_GATE_GOLDEN_DIR`.                                                                                                                                                       |
+| `FASTVIDEO_TEST_MINIMAX_H3_GATE_LAYER`                     | int                            | `0`                                                   | test        | Transformer layer that the MiniMax-H3 golden-gate test checks. Deprecated names: `MINIMAX_H3_GATE_LAYER`.                                                                                                                                                |
+| `FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT`                     | str                            | unset                                                 | test        | Local MiniMax-H3 checkpoint for the golden-gate test. Deprecated names: `MINIMAX_H3_MODEL_ROOT`.                                                                                                                                                         |
+| `FASTVIDEO_TEST_SD35_MODEL_DIR`                            | str                            | `stabilityai/stable-diffusion-3.5-medium`             | test        | Model for the Stable Diffusion 3.5 SSIM test. Deprecated names: `SD35_MODEL_DIR`.                                                                                                                                                                        |
+| `FASTVIDEO_TEST_TAEH3_REFERENCE_DIR`                       | str                            | unset                                                 | test        | Upstream taehv checkout for the MLX TAEH3 parity test. Deprecated names: `TAEH3_REFERENCE_DIR`.                                                                                                                                                          |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                          | str                            | `Tongyi-MAI/Z-Image-Turbo`                            | test        | Model for the Z-Image SSIM test. Deprecated names: `ZIMAGE_MODEL_DIR`.                                                                                                                                                                                   |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`                     | str                            | `f332072aa78be7aecdf3ee76d5c247082da564a6`            | test        | Hugging Face revision of the Z-Image model for its SSIM test. Deprecated names: `ZIMAGE_MODEL_REVISION`.                                                                                                                                                 |
 
 Variables that FastVideo no longer reads; setting one logs a warning:
 

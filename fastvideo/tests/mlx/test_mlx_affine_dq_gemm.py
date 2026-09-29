@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import pytest
 
 mx = pytest.importorskip("mlx.core", reason="MLX is required for affine dq-GEMM tests")
 
+import fastvideo.envs as envs  # noqa: E402
 from fastvideo.mlx_runtime.fastwan import (  # noqa: E402
     MLXQuantizationSpec,
     affine_dq_gemm_min_m,
@@ -57,8 +56,8 @@ def _rel_l2(a, b) -> float:
 
 @pytest.mark.parametrize("bits", AFFINE_BITS)
 @pytest.mark.parametrize("group_size", GROUP_SIZES)
-def test_dq_gemm_matches_qmm_for_supported_bit_widths(bits: int, group_size: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_MLX_DQ_GEMM", "8")
+def test_dq_gemm_matches_qmm_for_supported_bit_widths(bits: int, group_size: int, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("8"))
     reset_dq_gemm_telemetry()
     in_features = group_size * 4
     out_features = group_size * 2
@@ -78,8 +77,8 @@ def test_dq_gemm_matches_qmm_for_supported_bit_widths(bits: int, group_size: int
     assert float(np.max(np.abs(got_np - ref_np))) / scale < 0.08
 
 
-def test_dq_gemm_with_bias_and_batched_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_MLX_DQ_GEMM", "4")
+def test_dq_gemm_with_bias_and_batched_rows(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("4"))
     reset_dq_gemm_telemetry()
     quantized = _try_quantize(64, 128, bits=6, group_size=64)
     x = mx.random.normal((2, 8, 128)).astype(mx.bfloat16)
@@ -94,8 +93,8 @@ def test_dq_gemm_with_bias_and_batched_rows(monkeypatch: pytest.MonkeyPatch) -> 
     assert got.shape == (2, 8, 64)
 
 
-def test_dq_gemm_stays_on_qmm_below_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_MLX_DQ_GEMM", "768")
+def test_dq_gemm_stays_on_qmm_below_threshold(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("768"))
     reset_dq_gemm_telemetry()
     quantized = _try_quantize(64, 128, bits=6, group_size=64)
     x = mx.random.normal((32, 128)).astype(mx.bfloat16)
@@ -107,8 +106,8 @@ def test_dq_gemm_stays_on_qmm_below_threshold(monkeypatch: pytest.MonkeyPatch) -
     np.testing.assert_array_equal(np.asarray(got.astype(mx.float32)), np.asarray(ref.astype(mx.float32)))
 
 
-def test_dq_gemm_env_zero_disables_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_MLX_DQ_GEMM", "0")
+def test_dq_gemm_env_zero_disables_dispatch(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("0"))
     assert affine_dq_gemm_min_m() is None
     reset_dq_gemm_telemetry()
     quantized = _try_quantize(64, 128, bits=6, group_size=64)
@@ -121,8 +120,8 @@ def test_dq_gemm_env_zero_disables_dispatch(monkeypatch: pytest.MonkeyPatch) -> 
     np.testing.assert_array_equal(np.asarray(got.astype(mx.float32)), np.asarray(ref.astype(mx.float32)))
 
 
-def test_shared_linear_stays_on_qmm_at_wide_m(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_MLX_DQ_GEMM", "1")
+def test_shared_linear_stays_on_qmm_at_wide_m(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("1"))
     reset_dq_gemm_telemetry()
     quantized = _try_quantize(64, 128, bits=6, group_size=64)
     x = mx.random.normal((1024, 128)).astype(mx.bfloat16)
@@ -133,8 +132,8 @@ def test_shared_linear_stays_on_qmm_at_wide_m(monkeypatch: pytest.MonkeyPatch) -
     np.testing.assert_array_equal(np.asarray(got.astype(mx.float32)), np.asarray(ref.astype(mx.float32)))
 
 
-def test_non_affine_weights_stay_on_quantized_matmul(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_MLX_DQ_GEMM", "1")
+def test_non_affine_weights_stay_on_quantized_matmul(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("1"))
     reset_dq_gemm_telemetry()
     spec = MLXQuantizationSpec(mode="mxfp8")
     weight = mx.random.normal((64, 64)).astype(mx.bfloat16)
@@ -151,15 +150,13 @@ def test_non_affine_weights_stay_on_quantized_matmul(monkeypatch: pytest.MonkeyP
     assert got.shape == (1024, 64)
 
 
-def test_default_floor_is_measured_768(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_MLX_DQ_GEMM", "1")
+def test_default_floor_is_measured_768(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("1"))
     assert affine_dq_gemm_min_m() == 768
-    monkeypatch.setenv("FASTVIDEO_MLX_DQ_GEMM", "2048")
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override("2048"))
     assert affine_dq_gemm_min_m() == 2048
-    monkeypatch.delenv("FASTVIDEO_MLX_DQ_GEMM", raising=False)
-    os.environ.pop("FASTVIDEO_MLX_DQ_GEMM", None)
+    env_overrides.enter_context(envs.FASTVIDEO_MLX_DQ_GEMM.override(None))
     # Default with unset env is on at the measured floor.
-    monkeypatch.delenv("FASTVIDEO_MLX_DQ_GEMM", raising=False)
-    if "FASTVIDEO_MLX_DQ_GEMM" in os.environ:
+    if envs.FASTVIDEO_MLX_DQ_GEMM.is_set():
         pytest.skip("parent environment pinned FASTVIDEO_MLX_DQ_GEMM")
     assert affine_dq_gemm_min_m() == 768

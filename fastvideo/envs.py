@@ -222,6 +222,27 @@ def unset_external(name: str) -> None:
     os.environ.pop(name, None)
 
 
+@contextmanager
+def override_external(name: str, value: str | None) -> Iterator[None]:
+    """Set, or unset when ``value`` is None, a variable outside the registry, and restore it on exit.
+
+    Tests use it instead of ``monkeypatch.setenv`` for variables that other
+    tools or the CI read.
+    """
+    previous = os.environ.get(name)
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = previous
+
+
 # ================== Paths ==================
 
 FASTVIDEO_CONFIG_ROOT = EnvPath(
@@ -529,6 +550,133 @@ FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR = EnvStr("data/kandinsky5_overfit_p
                                                       category="test",
                                                       doc="Output directory for preprocess_kandinsky5_overfit.py.",
                                                       deprecated_names=("KANDINSKY5_OVERFIT_OUTPUT_DIR", ))
+
+# Switches and paths that only tests read. Each old name stays readable, with a
+# warning, until the next minor release.
+FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO = EnvStr("FastVideo/ssim-reference-videos",
+                                               category="test",
+                                               doc="Hugging Face repository that holds the SSIM reference videos.",
+                                               deprecated_names=("FASTVIDEO_SSIM_REFERENCE_HF_REPO", ))
+FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO_TYPE = EnvStr("dataset",
+                                                    category="test",
+                                                    doc="Repository type of FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO.",
+                                                    deprecated_names=("FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE", ))
+FASTVIDEO_TEST_SSIM_SKIP_REFERENCE_DOWNLOAD = EnvBool(False,
+                                                      category="test",
+                                                      doc="SSIM tests use local reference videos without downloading.",
+                                                      deprecated_names=("FASTVIDEO_SSIM_SKIP_REFERENCE_DOWNLOAD", ))
+FASTVIDEO_TEST_SSIM_FULL_QUALITY = EnvBool(False,
+                                           category="test",
+                                           doc="SSIM tests use the full-quality sampling configurations.",
+                                           deprecated_names=("FASTVIDEO_SSIM_FULL_QUALITY", ))
+FASTVIDEO_TEST_NIGHTLY = EnvBool(False,
+                                 category="test",
+                                 doc="Run the nightly end-to-end overfit tests.",
+                                 deprecated_names=("FASTVIDEO_NIGHTLY", ))
+FASTVIDEO_TEST_ULYSSES_FAULT_RANK = EnvStr(
+    None,
+    category="test",
+    doc="Rank that fails in the Ulysses fault-injection test. The test sets it for its worker processes.",
+    deprecated_names=("FASTVIDEO_ULYSSES_FAULT_RANK", ))
+FASTVIDEO_TEST_ULYSSES_FAULT_STAGE = EnvStr(
+    None,
+    category="test",
+    doc="Stage that fails in the Ulysses fault-injection test. The test sets it for its worker processes.",
+    deprecated_names=("FASTVIDEO_ULYSSES_FAULT_STAGE", ))
+FASTVIDEO_TEST_GOLDEN_GATE_DIR = EnvStr(None,
+                                        category="test",
+                                        doc="Local directory of golden-gate reference tensors.",
+                                        deprecated_names=("FASTVIDEO_GOLDEN_GATE_DIR", ))
+FASTVIDEO_TEST_WAN22_5B_ALLOW_LOW_MEMORY = EnvBool(
+    False,
+    category="test",
+    doc="Run the MLX Wan2.2 5B real-weights parity test on hosts with little memory.",
+    deprecated_names=("FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY", ))
+FASTVIDEO_TEST_WAN22_5B_ROOT = EnvStr(None,
+                                      category="test",
+                                      doc="Local Wan2.2 5B checkpoint for the MLX real-weights parity test.",
+                                      deprecated_names=("FASTVIDEO_WAN22_5B_ROOT", ))
+FASTVIDEO_TEST_GRADNORM_UPDATE = EnvBool(False,
+                                         category="test",
+                                         doc="Gradient-norm regression tests update their references.",
+                                         deprecated_names=("FASTVIDEO_GRADNORM_UPDATE", ))
+FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH = EnvStr("FastVideo/DreamX-World-5B-Cam-Diffusers",
+                                                     category="test",
+                                                     doc="Model for the DreamX-World camera SSIM test.",
+                                                     deprecated_names=("DREAMX_WORLD_SSIM_MODEL_PATH", ))
+FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH = EnvStr("FastVideo/DreamX-World-5B-Diffusers",
+                                                        category="test",
+                                                        doc="Model for the DreamX-World autoregressive SSIM test.",
+                                                        deprecated_names=("DREAMX_WORLD_AR_SSIM_MODEL_PATH", ))
+FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR = EnvStr("black-forest-labs/FLUX.1-dev",
+                                           category="test",
+                                           doc="Model for the Flux text-to-image SSIM test.",
+                                           deprecated_names=("FLUX_T2I_MODEL_DIR", ))
+FASTVIDEO_TEST_FLUX_TRANSFORMER_PATH = EnvStr(None,
+                                              category="test",
+                                              doc="Local Flux transformer for the Flux transformer test.",
+                                              deprecated_names=("FLUX_TRANSFORMER_PATH", ))
+FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH = EnvStr("FastVideo/HunyuanGameCraft-Diffusers",
+                                             category="test",
+                                             doc="Model for the HunyuanGameCraft SSIM test.",
+                                             deprecated_names=("GAMECRAFT_MODEL_PATH", ))
+FASTVIDEO_TEST_GEN3C_MODEL_PATH = EnvStr("FastVideo/GEN3C-Cosmos-7B-Diffusers",
+                                         category="test",
+                                         doc="Model for the GEN3C SSIM test.",
+                                         deprecated_names=("GEN3C_MODEL_PATH", ))
+FASTVIDEO_TEST_GEN3C_IMAGE_PATH = EnvStr(None,
+                                         category="test",
+                                         doc="Input image for the GEN3C SSIM test.",
+                                         deprecated_names=("GEN3C_TEST_IMAGE_PATH", ))
+FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR = EnvStr(None,
+                                                    category="test",
+                                                    doc="Local official GLM-Image weights for the GLM-Image SSIM test.",
+                                                    deprecated_names=("GLM_IMAGE_LOCAL_WEIGHTS_DIR", ))
+FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR = EnvStr(None,
+                                            category="test",
+                                            doc="Model for the GLM-Image SSIM test.",
+                                            deprecated_names=("GLM_IMAGE_MODEL_DIR", ))
+FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS = EnvInt(1,
+                                                category="test",
+                                                doc="GPUs for the Kandinsky5 nightly end-to-end overfit test.",
+                                                deprecated_names=("KANDINSKY5_E2E_NUM_GPUS", ))
+FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE = EnvBool(
+    False,
+    category="test",
+    doc="The Kandinsky5 nightly end-to-end test writes a missing reference video.",
+    deprecated_names=("KANDINSKY5_E2E_WRITE_REFERENCE", ))
+FASTVIDEO_TEST_LONGCAT_MODEL_ROOT = EnvStr(None,
+                                           category="test",
+                                           doc="Local LongCat-Video checkpoint for the golden-gate test.",
+                                           deprecated_names=("LONGCAT_MODEL_ROOT", ))
+FASTVIDEO_TEST_MINIMAX_H3_GATE_GOLDEN_DIR = EnvStr(None,
+                                                   category="test",
+                                                   doc="Local directory of MiniMax-H3 golden-gate tensors.",
+                                                   deprecated_names=("MINIMAX_H3_GATE_GOLDEN_DIR", ))
+FASTVIDEO_TEST_MINIMAX_H3_GATE_LAYER = EnvInt(0,
+                                              category="test",
+                                              doc="Transformer layer that the MiniMax-H3 golden-gate test checks.",
+                                              deprecated_names=("MINIMAX_H3_GATE_LAYER", ))
+FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT = EnvStr(None,
+                                              category="test",
+                                              doc="Local MiniMax-H3 checkpoint for the golden-gate test.",
+                                              deprecated_names=("MINIMAX_H3_MODEL_ROOT", ))
+FASTVIDEO_TEST_SD35_MODEL_DIR = EnvStr("stabilityai/stable-diffusion-3.5-medium",
+                                       category="test",
+                                       doc="Model for the Stable Diffusion 3.5 SSIM test.",
+                                       deprecated_names=("SD35_MODEL_DIR", ))
+FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
+                                            category="test",
+                                            doc="Upstream taehv checkout for the MLX TAEH3 parity test.",
+                                            deprecated_names=("TAEH3_REFERENCE_DIR", ))
+FASTVIDEO_TEST_ZIMAGE_MODEL_DIR = EnvStr("Tongyi-MAI/Z-Image-Turbo",
+                                         category="test",
+                                         doc="Model for the Z-Image SSIM test.",
+                                         deprecated_names=("ZIMAGE_MODEL_DIR", ))
+FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION = EnvStr("f332072aa78be7aecdf3ee76d5c247082da564a6",
+                                              category="test",
+                                              doc="Hugging Face revision of the Z-Image model for its SSIM test.",
+                                              deprecated_names=("ZIMAGE_MODEL_REVISION", ))
 
 # Variables that FastVideo no longer reads. Setting one logs a warning; delete
 # the entries in the next minor release.
