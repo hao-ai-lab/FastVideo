@@ -76,6 +76,29 @@ def prepare_official_pipeline(model_dir: Path, device: torch.device) -> Any:
     return official
 
 
+def load_official_transformer(model_dir: Path, device: torch.device, dtype: torch.dtype = torch.bfloat16) -> Any:
+    from diffusers.models.transformers.transformer_wan_vace import WanVACETransformer3DModel
+
+    return WanVACETransformer3DModel.from_pretrained(str(model_dir),
+                                                     subfolder="transformer",
+                                                     torch_dtype=dtype,
+                                                     local_files_only=True).to(device).eval()
+
+
+def run_official_on_call(transformer: Any, call_args: dict[str, Any], device: torch.device) -> torch.Tensor:
+    """Re-run the Diffusers DiT on one recorded FastVideo call (teacher forcing)."""
+    kwargs = {}
+    for key, value in call_args.items():
+        value = value[0] if isinstance(value, list) else value  # FastVideo passes encoder states as a list
+        if torch.is_tensor(value):
+            kwargs[key] = value.to(device)
+    scale = torch.as_tensor(call_args.get("control_hidden_states_scale", 1.0), device=device)
+    num_layers = len(transformer.config.vace_layers)
+    kwargs["control_hidden_states_scale"] = scale.to(transformer.dtype).reshape(-1).expand(num_layers)
+    with torch.inference_mode():
+        return transformer(**kwargs).sample.detach().cpu()
+
+
 def load_fv_transformer(model_dir: Path,
                         device: torch.device,
                         config_cls: Any,

@@ -27,16 +27,15 @@ through `WanVACEConfig.param_names_mapping`.
 | Pipeline parity vs Diffusers | PASS (B200) | 1.3B t2v / reference / video+mask and 14B reference; gates in [README](README.md#parity-gates) |
 | Basic example | PASS | `examples/inference/basic/basic_wan_vace.py` |
 | SP2 forward (weight-free FP32) | PASS | `fastvideo/tests/distributed/test_sp_wan_vace.py` |
-| SP2 weighted BF16 short pipeline | xfail (strict) | BF16 GEMM results depend on sharded row count; see [docs](../../../docs/inference/wan_vace.md#sequence-parallel-status) |
+| SP2 weighted BF16 short pipeline | PASS (1.3B); 14B within gates on an earlier run | Drift < 5%, frame SSIM ≥ 0.93; not bitwise because BF16 GEMM depends on sharded row count; see [docs](../../../docs/inference/wan_vace.md#sequence-parallel-status) |
 
 ## Quality
 
 | Item | Status |
 |---|---|
-| SSIM test | written (fastvideo/tests/ssim/test_wan_vace_similarity.py; 1.3B reference-image case, 1 GPU) |
-| Reference videos | pending: seeded as drafts by CI SSIM bootstrap on the `[new-model]` PR, then promoted by a maintainer |
+| SSIM test | written (fastvideo/tests/ssim/test_wan_vace_similarity.py; 1.3B reference-image and video+mask cases, 1 GPU) |
+| Reference videos | pending: a maintainer runs the SSIM job with `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1`, reviews the drafts, then promotes them |
 
 ## Known Blockers
 
-None for single-GPU inference. SP2 with BF16 weights does not reach the short-pipeline
-numeric gates (tracked above).
+None. SSIM reference videos still need a maintainer bootstrap run (see Quality).
