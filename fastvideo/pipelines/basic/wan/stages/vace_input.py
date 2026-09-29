@@ -44,6 +44,12 @@ class WanVACEInputStage(PipelineStage):
     """Prepare VACE-specific inputs after shared validation and text encoding."""
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        # The DiT zero-pads short control tokens, so a short video would silently
+        # drop conditioning for the trailing frames.
+        if batch.video_latent is not None and batch.video_latent.shape[2] != batch.num_frames:
+            raise ValueError(f"VACE control video has {batch.video_latent.shape[2]} frames after fps resampling "
+                             f"but num_frames={batch.num_frames}; provide a longer video or lower num_frames")
+
         if batch.mask_path is not None:
             mask_tensor = load_video_path_to_tensor(
                 batch.mask_path,
@@ -52,10 +58,9 @@ class WanVACEInputStage(PipelineStage):
                 target_fps=batch.fps,
                 target_num_frames=batch.num_frames,
             )
-            expected_frames = (batch.video_latent.shape[2] if batch.video_latent is not None else batch.num_frames)
-            if mask_tensor.shape[2] != expected_frames:
+            if mask_tensor.shape[2] != batch.num_frames:
                 raise ValueError(
-                    f"VACE mask has {mask_tensor.shape[2]} frames but video requires {expected_frames} frames")
+                    f"VACE mask has {mask_tensor.shape[2]} frames but video requires {batch.num_frames} frames")
             batch.mask_video = mask_tensor
 
         if batch.references:
