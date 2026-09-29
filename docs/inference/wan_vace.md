@@ -183,16 +183,11 @@ Set `WAN_VACE_SP_TRACE=1` to print per-layer SP divergence stats (read-only hook
 
 ## Known Gaps
 
-- No L40S CI SSIM reference seeded; local B200 video comparisons are drafts only.
-- Full-video human review not completed.
-- 14B 720p SP2 matched single-GPU draft MP4 hash locally (MS-SSIM compare in private validation).
-- Weighted BF16 short-pipeline SP2 remains `xfail`; no production compensation landed.
-- `WanVACETransformer3DModel.forward` duplicates much of `WanTransformer3DModel.forward`.
-- Video+mask control path not covered by `scripts/run_vace_matrix.py`.
-- Slurm worker semaphore ENOENT traced to logind RemoveIPC plus unused streaming
-  `mp.Queue` semaphores; standard inference omits those queues since `feb9b289`.
-  Streaming queue mode still needs `RemoveIPC=no` or linger — see
-  `.agents/lessons/wan_vace_semaphore_removeipc.md`.
+- No CI SSIM regression test yet; reference videos have not been seeded.
+- With BF16 weights, the short-pipeline SP2 parity test is still marked `xfail`
+  (see [Sequence Parallel](#sequence-parallel-status) above).
+- The video + mask control path has no end-to-end reproduction case; only the
+  reference-image case is covered.
 
 ## References
 
