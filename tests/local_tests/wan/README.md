@@ -41,23 +41,24 @@ End-to-end tests in `test_wan_vace_end_to_end_parity.py` use VACE-specific gates
 | Gate | What it checks |
 |---|---|
 | Conditioning inputs | bf16 bitwise equality (prompt, control, video/mask/refs, timesteps, initial latents) |
-| Step0 noise prediction | `assert_dit_parity` against Diffusers (atol/rtol 0.1, abs-mean drift < 5%) |
-| Final latent | abs-mean drift below 5% after multi-step denoising |
+| Every step, teacher-forced | FastVideo prediction vs the Diffusers DiT on FastVideo's exact step inputs (`atol=rtol=0.05`, drift < 1%) |
+| Final latent | free-running abs-mean drift < 4% |
 
-Cases: 1.3B t2v / reference / video+mask, plus 14B reference.
+Cases: 1.3B t2v / reference / video+mask, plus 14B reference. The component test
+(`test_wan_vace_pipeline_parity.py`) covers an integer and a fractional timestep in
+FP32 (`1e-4`) and BF16 (`0.05`, drift < 2%).
 
-All four cases passed these gates offline (B200, cached weights). Final latent
-abs-mean drift ranged from 2.30% to 3.52%. Strict `rtol=atol=1e-2` failed in
-all four cases (diagnostic only). See
+The free-running gate is looser because the BF16 DiT itself turns 1-ulp input changes
+into about 2% output drift. See
 [parity evidence](../../../docs/inference/wan_vace.md#parity-evidence).
 
 ## Sequence Parallel
 
-Weight-free FP32 SP2 forward passes at `atol=rtol=1e-5`. Weighted BF16
-5-frame short pipeline cases are marked `xfail(strict=True)`: BF16 GEMM results
-depend on sharded token row count; conditioning inputs and both ranks still
-match. Production 480p SP2 videos matched single-GPU MP4 hashes (MS-SSIM 1.0)
-but do not replace the short numeric gates. See
+Weight-free FP32 SP2 forward passes at `atol=rtol=1e-5`. The weighted BF16
+5-frame short pipeline (`WAN_VACE_SP_E2E=1`) gates drift < 5% and frame SSIM
+≥ 0.93, the repo's SP2 norm. BF16 GEMM results depend on the sharded token row
+count, so exact equality is not expected; conditioning inputs and both ranks still
+match. See
 [sequence parallel status](../../../docs/inference/wan_vace.md#sequence-parallel-status).
 Set `WAN_VACE_SP_TRACE=1` for read-only per-layer divergence prints.
 
