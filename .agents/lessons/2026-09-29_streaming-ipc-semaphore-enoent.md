@@ -27,19 +27,16 @@ unpickling it, the child fails with ENOENT.
 
 Evidence:
 
-- **Timing.** Three deletion bursts during a probe job each matched, to the
-  second, the end of another job by the same user on the same node:
-  - 21:03:16: job 947243 ended.
-  - 21:04:36: job 947244 ended.
-  - 21:12:12: job 947246 ended.
-  - The window of an earlier failure (946438) also contains same-user job ends.
+- **Timing.** Every recorded deletion burst during a probe job matched, to the
+  second, the end of another job by the same user on the same node
+  (`sacct -u $USER -N <node>` end times).
 - **Controlled reproduction.**
   - Job A held a spawn `Lock` semaphore and a marker file in `/dev/shm`.
   - Job B, on the same node, started and then ended.
   - Job B's start deleted nothing.
   - Within 1 s of job B's end, both of job A's objects were gone, and job A's
     finalizer then hit the same ENOENT.
-- **Still unexplained.** One historical failure (946472) has no same-user job
+- **Still unexplained.** One historical failure has no same-user job
   end in its window, so another deleter cannot be ruled out for it. logind
   `RemoveIPC` was the earlier hypothesis; it is not needed to explain the other
   cases.

@@ -111,6 +111,7 @@ surfaces:
       model_loaded: "Runtime bookkeeping."
       h3_encoder_workers: "Runtime bookkeeping: MiniMax-H3 encoder-group worker count that the Ray executor derives from h3_encoder_nodes and placement."
       regional_compile: "Training-loader switch the modular fastvideo/train moduleloader sets to compile repeated DiT blocks regionally; no CLI flag, and inference regional compile is inference_torch_compile."
+      enable_streaming_ipc_queues: "Executor plumbing; StreamingVideoGenerator sets it before workers spawn."
 
   pipeline_config_base:
     moved:
