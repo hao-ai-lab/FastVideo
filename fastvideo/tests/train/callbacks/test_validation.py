@@ -1110,3 +1110,76 @@ class TestKeepLoadedEncoderWidths:
     ) -> None:
         # Pipelines without text encoders must not raise here.
         ValidationCallback._keep_loaded_encoder_widths(validation, loaded)
+
+
+# ---------------------------------------------------------------------------
+# Validation pipeline config when training substitutes the config class
+# ---------------------------------------------------------------------------
+
+_FULLATTN = "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers"
+
+
+class TestValidationPipelineConfigSubstitution:
+
+    @staticmethod
+    def _load(monkeypatch, training_pipeline_config):
+        """Build the validation pipeline through real args validation; return the loaded args."""
+        import fastvideo.train.callbacks.validation as validation_module
+        from fastvideo.fastvideo_args import FastVideoArgs
+
+        class _RecordingPipeline:
+
+            @classmethod
+            def from_pretrained(cls, model_path, pipeline_config=None, **kwargs):
+                kwargs.pop("loaded_modules")
+                if pipeline_config is not None:
+                    kwargs["pipeline_config"] = pipeline_config
+                return SimpleNamespace(fastvideo_args=FastVideoArgs.from_kwargs(model_path=model_path, **kwargs))
+
+        monkeypatch.setattr(validation_module, "resolve_target", lambda target: _RecordingPipeline)
+        cb = _make_callback()
+        cb.method = SimpleNamespace()
+        cb.training_config = SimpleNamespace(
+            model_path=_FULLATTN,
+            pipeline_config=training_pipeline_config,
+            distributed=SimpleNamespace(tp_size=1, sp_size=1, num_gpus=1, pin_cpu_memory=False),
+        )
+        return cb._get_pipeline(transformer=torch.nn.Linear(1, 1)).fastvideo_args
+
+    def test_vsa_recipe_loads_with_training_config(self, monkeypatch) -> None:
+        # The FullAttn-to-VSA LoRA recipe trains with the sparse-capable 5B
+        # config and sets the VSA backend; the path alone resolves to the
+        # dense-only FullAttn config, which rejects VSA during args validation.
+        from fastvideo import envs
+        from fastvideo.models.wan.pipeline_config import FastWan2_2_TI2V_5B_Config
+
+        training_config = FastWan2_2_TI2V_5B_Config()
+        with envs.FASTVIDEO_ATTENTION_BACKEND.override("VIDEO_SPARSE_ATTN"):
+            args = self._load(monkeypatch, training_config)
+        loaded = args.pipeline_config
+        assert type(loaded) is FastWan2_2_TI2V_5B_Config
+        assert loaded is not training_config
+        assert loaded.ti2v_task
+        assert loaded.vae_config.load_encoder
+
+    def test_matching_config_class_keeps_path_loading(self, monkeypatch) -> None:
+        from fastvideo.models.wan.pipeline_config import FastWan2_2_TI2V_5B_FullAttn_Config
+
+        args = self._load(monkeypatch, FastWan2_2_TI2V_5B_FullAttn_Config())
+        assert type(args.pipeline_config) is FastWan2_2_TI2V_5B_FullAttn_Config
+
+
+def test_from_pretrained_forwards_pipeline_config(monkeypatch) -> None:
+    import fastvideo.pipelines.composed_pipeline_base as base
+
+    sentinel = object()
+    seen = {}
+
+    def _record(**kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after args")
+
+    monkeypatch.setattr(base.FastVideoArgs, "from_kwargs", staticmethod(_record))
+    with pytest.raises(RuntimeError, match="stop after args"):
+        base.ComposedPipelineBase.from_pretrained("unused", pipeline_config=sentinel)
+    assert seen["pipeline_config"] is sentinel
