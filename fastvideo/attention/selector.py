@@ -174,6 +174,44 @@ def component_attention_backend(component: object) -> AttentionBackendEnum | _No
     return NO_REQUEST if resolved is None else resolved
 
 
+def effective_attention_backend(config: object) -> AttentionBackendEnum | None:
+    """Return the attention backend that a component built from ``config`` follows.
+
+    Some components choose part of their own structure by backend: Wan picks
+    its VSA transformer block, LTX-2 its distributed-attention path, and the
+    Gemma and T5-Gemma text encoders switch Hugging Face attention to SDPA.
+    That choice must match the attention layers inside the component, and
+    those layers resolve through :func:`get_attn_backend`. This function
+    applies the same order:
+
+    1. The decision a loader recorded on ``config`` with
+       :func:`record_resolved_attention_backend`. Every component built by a
+       loader has one when a backend was requested.
+    2. While a loader is building a component (a
+       ``_component_attention_backend_scope`` is active), that scope's rule:
+       its backend, and the environment variable only when the scope consults
+       it. A scope that deliberately ignores the environment variable, such as
+       the dense DMD teacher and critic, keeps ignoring it here.
+    3. With no loader involved, the ``FASTVIDEO_ATTENTION_BACKEND``
+       environment variable. This covers components constructed directly,
+       such as MagiHuman's lazily built T5-Gemma encoder or a script that
+       builds a transformer itself.
+
+    Reading only the recorded decision is not enough: a directly constructed
+    component has no recorded decision (``None``), so it would ignore the
+    environment variable while its attention layers still follow it, and the
+    component's structure would not match its layers.
+    """
+    recorded = getattr(config, "_resolved_attention_backend", None)
+    if recorded is not None:
+        return recorded
+    scope = _SCOPE.get()
+    if scope is not None and (scope.backend is not None or not scope.consult_env):
+        return scope.backend
+    env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+    return None if env_backend is None else backend_name_to_enum(env_backend)
+
+
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,

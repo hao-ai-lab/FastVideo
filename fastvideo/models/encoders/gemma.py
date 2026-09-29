@@ -20,6 +20,7 @@ from fastvideo.models.dits.ltx2 import (
     precompute_ltx_freqs_cis,
 )
 from fastvideo.models.loader.weight_utils import default_weight_loader
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.distributed import get_local_torch_device
 import math
@@ -438,7 +439,7 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             # Note: torch.backends.cuda.enable_*_sdp() settings should be configured
             # at application/pipeline initialization level, not here, to avoid
             # unexpected side effects across the application.
-            if self.config._resolved_attention_backend == AttentionBackendEnum.TORCH_SDPA:
+            if effective_attention_backend(self.config) == AttentionBackendEnum.TORCH_SDPA:
                 if hasattr(self._gemma_model.config, "attn_implementation"):
                     self._gemma_model.config.attn_implementation = "sdpa"
                 if hasattr(self._gemma_model.config, "_attn_implementation"):

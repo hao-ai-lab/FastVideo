@@ -15,6 +15,7 @@ from einops import rearrange, repeat
 
 from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.attention.layer import DistributedAttention, LocalAttention
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.configs.models.dits import LTX2VideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather,
@@ -2674,7 +2675,7 @@ class LTX2Transformer3DModel(BaseDiT):
 
         # Get SP world size for distributed attention
         sp_world_size = get_sp_world_size()
-        use_vsa_backend = config._resolved_attention_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN
+        use_vsa_backend = effective_attention_backend(config) == AttentionBackendEnum.VIDEO_SPARSE_ATTN
         use_distributed_attention = sp_world_size > 1 or use_vsa_backend
 
         # Validate that attention heads are divisible by SP world size

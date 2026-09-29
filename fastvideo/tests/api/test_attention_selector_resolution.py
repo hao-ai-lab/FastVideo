@@ -21,6 +21,8 @@ role-override tests); no kernels, no GPU.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
@@ -372,3 +374,34 @@ def test_component_without_a_recorded_decision_reports_no_request():
 
     assert selector.component_attention_backend(_Bare()) is selector.NO_REQUEST
     assert selector.component_attention_backend(_HFStyle()) is selector.NO_REQUEST
+
+
+def test_effective_backend_prefers_the_recorded_decision(monkeypatch) -> None:
+    """A component built by a loader follows the decision recorded on its
+    config, even when the env var asks for something else."""
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    config = SimpleNamespace(_resolved_attention_backend=SDPA)
+    assert selector.effective_attention_backend(config) == SDPA
+
+
+def test_effective_backend_follows_env_for_direct_construction(monkeypatch) -> None:
+    """A component constructed without a loader has no recorded decision; like
+    the attention layers inside it, it follows the env var."""
+    config = SimpleNamespace(_resolved_attention_backend=None)
+    assert selector.effective_attention_backend(config) is None
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    assert selector.effective_attention_backend(config) == SAGE
+    assert selector.get_attn_backend(**KWARGS) == "SAGE_ATTN"
+
+
+def test_effective_backend_follows_the_active_scope(monkeypatch) -> None:
+    """While a loader scope is active, the scope's rule applies: a scope that
+    ignores the env var (the dense teacher/critic case) keeps ignoring it."""
+    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
+    config = SimpleNamespace(_resolved_attention_backend=None)
+    with selector._component_attention_backend_scope(None, component="teacher"):
+        assert selector.effective_attention_backend(config) is None
+    with selector._component_attention_backend_scope(None, component="dit", consult_env=True):
+        assert selector.effective_attention_backend(config) == SAGE
+    with selector._component_attention_backend_scope(SDPA, component="dit"):
+        assert selector.effective_attention_backend(config) == SDPA
