@@ -6,7 +6,9 @@ import pytest
 import torch
 import numpy as np
 
+from fastvideo import envs
 from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, cleanup_dist_env_and_memory)
+from fastvideo.utils import get_open_port
 
 
 @pytest.fixture(scope="function")
@@ -18,6 +20,9 @@ def distributed_setup():
     """
     torch.manual_seed(42)
     np.random.seed(42)
+    # The env:// rendezvous needs these outside the CI runner.
+    envs.setdefault_external("MASTER_ADDR", "127.0.0.1")
+    envs.setdefault_external("MASTER_PORT", str(get_open_port()))
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     yield
 
