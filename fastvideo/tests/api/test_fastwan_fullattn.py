@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Weight-free contracts adapted from #1494 / #1563 for component resolution."""
+import contextlib
 import json
 import pickle
 from unittest.mock import Mock
@@ -7,7 +8,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from fastvideo import registry
+from fastvideo import envs, registry
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.attention import selector
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -55,9 +56,17 @@ class FakeSage(FakeSDPA):
 
 @pytest.fixture(autouse=True)
 def _offline_registry(monkeypatch):
-    monkeypatch.delenv("FASTVIDEO_ATTENTION_BACKEND", raising=False)
     monkeypatch.setattr(registry, "maybe_download_model_index",
                         Mock(side_effect=AssertionError("No Hub access allowed")))
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(None):
+        yield
+
+
+@pytest.fixture
+def attn_env():
+    """Set FASTVIDEO_ATTENTION_BACKEND for the rest of the test; restored on teardown."""
+    with contextlib.ExitStack() as stack:
+        yield lambda value: stack.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(value))
 
 
 @pytest.fixture(params=["full", "alias", "short_full", "short_alias", "renamed", "snapshot_full", "snapshot_alias"])
@@ -78,8 +87,8 @@ def fullattn_identity(request, tmp_path):
     return str(path)
 
 
-def test_fullattn_identity_and_preset(fullattn_identity, monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+def test_fullattn_identity_and_preset(fullattn_identity, monkeypatch, attn_env):
+    attn_env("VIDEO_SPARSE_ATTN")
     info = registry._get_config_info(fullattn_identity)
     assert info.pipeline_config_cls.__name__ == "FastWan2_2_TI2V_5B_FullAttn_Config"
     assert info.default_preset == "fast_wan_2_2_ti2v_5b"
@@ -96,10 +105,10 @@ def test_fullattn_identity_and_preset(fullattn_identity, monkeypatch):
 
 
 @pytest.mark.parametrize("conflict", ["i2v", "VIDEO_SPARSE_ATTN"])
-def test_fullattn_rejects_before_loader(fullattn_identity, conflict, monkeypatch):
+def test_fullattn_rejects_before_loader(fullattn_identity, conflict, monkeypatch, attn_env):
     spy = Mock(side_effect=AssertionError("Weights must not be loaded"))
     monkeypatch.setattr(component_loader, "maybe_load_fsdp_model", spy)
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    attn_env("TORCH_SDPA")
     with pytest.raises(ValueError, match="FullAttn.*" + conflict):
         args = FastVideoArgs.from_kwargs(
             model_path=fullattn_identity, workload_type="i2v" if conflict == "i2v" else "t2v",
@@ -220,18 +229,18 @@ def _assert_backend_construction(model, expected):
     (None, "VIDEO_SPARSE_ATTN", SDPA),
     (Backend.SAGE_ATTN, "VIDEO_SPARSE_ATTN", Backend.SAGE_ATTN),
 ])
-def test_recorded_component_constructs_consistently(backend_construction, monkeypatch, requested, environment,
+def test_recorded_component_constructs_consistently(backend_construction, monkeypatch, attn_env, requested, environment,
                                                     expected):
     config = _tiny_wan_config(WanVideoConfig())
     with selector._component_attention_backend_scope(requested, component="transformer"):
         selector.record_resolved_attention_backend(config)
     if environment:
-        monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", environment)
+        attn_env(environment)
     model = wan.WanTransformer3DModel(config, {})
     _assert_backend_construction(model, expected)
 
 
-def test_interleaved_components_do_not_reread_environment(backend_construction, monkeypatch):
+def test_interleaved_components_do_not_reread_environment(backend_construction, monkeypatch, attn_env):
     models = []
     cases = ((FULL, SDPA), ("FastVideo/FastWan2.1-T2V-1.3B-Diffusers", VSA),
              ("Wan-AI/Wan2.1-T2V-1.3B-Diffusers", None), (ALIAS, SDPA))
@@ -240,19 +249,19 @@ def test_interleaved_components_do_not_reread_environment(backend_construction, 
         with selector._component_attention_backend_scope(requested, component="transformer"):
             selector.record_resolved_attention_backend(config)
         models.append(wan.WanTransformer3DModel(config, {}))
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+    attn_env("VIDEO_SPARSE_ATTN")
     for model, expected in zip(models, (SDPA, VSA, SDPA, SDPA), strict=True):
         _assert_backend_construction(model, expected)
 
 
-def test_direct_construction_keeps_env_compatibility(backend_construction, monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+def test_direct_construction_keeps_env_compatibility(backend_construction, monkeypatch, attn_env):
+    attn_env("VIDEO_SPARSE_ATTN")
     _assert_backend_construction(wan.WanTransformer3DModel(_tiny_wan_config(WanVideoConfig()), {}), VSA)
 
 
-def test_fullattn_direct_construction_rejects_before_parameters(backend_construction, monkeypatch):
+def test_fullattn_direct_construction_rejects_before_parameters(backend_construction, monkeypatch, attn_env):
     config = registry._get_config_info(FULL).pipeline_config_cls().dit_config
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+    attn_env("VIDEO_SPARSE_ATTN")
     spy = Mock(side_effect=AssertionError("Must fail before allocating model parameters"))
     monkeypatch.setattr(wan, "PatchEmbed", spy)
     with pytest.raises(ValueError, match="FullAttn.*VIDEO_SPARSE_ATTN"):
@@ -260,16 +269,16 @@ def test_fullattn_direct_construction_rejects_before_parameters(backend_construc
     spy.assert_not_called()
 
 
-def test_recorded_auto_survives_serialization(backend_construction, monkeypatch):
+def test_recorded_auto_survives_serialization(backend_construction, monkeypatch, attn_env):
     config = _tiny_wan_config(WanVideoConfig())
     selector.record_resolved_attention_backend(config)
     restored = pickle.loads(pickle.dumps(config))
     assert restored._attention_backend_resolved is True
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+    attn_env("VIDEO_SPARSE_ATTN")
     _assert_backend_construction(wan.WanTransformer3DModel(restored, {}), SDPA)
 
 
-def test_legacy_subclass_does_not_inherit_wan_backend_opt_in(backend_construction, monkeypatch):
+def test_legacy_subclass_does_not_inherit_wan_backend_opt_in(backend_construction, monkeypatch, attn_env):
     from fastvideo.models.dits.dreamx_world import DreamXWorldTransformer3DModel
 
     # DreamX inherits Wan methods but owns its constructor and unported layers.
@@ -279,12 +288,12 @@ def test_legacy_subclass_does_not_inherit_wan_backend_opt_in(backend_constructio
     model.hidden_size = 4
     model.num_attention_heads = 1
     selector.record_resolved_attention_backend(model.config)
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+    attn_env("VIDEO_SPARSE_ATTN")
     assert selector.component_attention_backend(model) is selector.NO_REQUEST
     assert DenoisingStage(model, scheduler=None).attn_backend.get_name() == VSA.name
 
 
-def test_constructed_wan_keeps_backend_after_class_wrapping(backend_construction, monkeypatch):
+def test_constructed_wan_keeps_backend_after_class_wrapping(backend_construction, monkeypatch, attn_env):
     config = _tiny_wan_config(WanVideoConfig())
     selector.record_resolved_attention_backend(config)
     model = wan.WanTransformer3DModel(config, {})
@@ -294,7 +303,7 @@ def test_constructed_wan_keeps_backend_after_class_wrapping(backend_construction
 
     # FSDP-style class replacement must not discard the instance's decision.
     model.__class__ = WrappedWan
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+    attn_env("VIDEO_SPARSE_ATTN")
     _assert_backend_construction(model, SDPA)
 
 
@@ -338,7 +347,7 @@ def test_loader_revalidates_before_any_weight_access(monkeypatch, conflict):
     weight_spy.assert_not_called()
 
 
-def test_dense_cross_attention_small_cpu_tensor(backend_construction, monkeypatch):
+def test_dense_cross_attention_small_cpu_tensor(backend_construction, monkeypatch, attn_env):
     from fastvideo.forward_context import set_forward_context
 
     monkeypatch.setattr(current_platform, "get_attn_backend_cls",
@@ -347,7 +356,7 @@ def test_dense_cross_attention_small_cpu_tensor(backend_construction, monkeypatc
     config = _tiny_wan_config(WanVideoConfig())
     with selector._component_attention_backend_scope(SDPA):
         selector.record_resolved_attention_backend(config)
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN")
+    attn_env("VIDEO_SPARSE_ATTN")
     model = wan.WanTransformer3DModel(config, {})
     q = torch.randn(1, 2, 1, 4)
     k = torch.randn(1, 3, 1, 4)
@@ -368,11 +377,11 @@ def test_dense_cross_attention_small_cpu_tensor(backend_construction, monkeypatc
 ])
 @pytest.mark.parametrize("direct_loader", [False, True])
 def test_public_request_reaches_real_transformer_loader(
-        backend_construction, monkeypatch, model_id, requested, environment, expected, direct_loader):
+        backend_construction, monkeypatch, attn_env, model_id, requested, environment, expected, direct_loader):
     args = FastVideoArgs.from_kwargs(model_path=model_id, attention_backend=requested)
     args.pipeline_config.dit_precision = "fp32"
     _tiny_wan_config(args.pipeline_config.dit_config)
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", environment)
+    attn_env(environment)
     monkeypatch.setattr(component_loader, "get_diffusers_config",
                         lambda **kwargs: {"_class_name": "WanTransformer3DModel"})
     monkeypatch.setattr(component_loader.glob, "glob", lambda *args: ["fake.safetensors"])
