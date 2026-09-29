@@ -27,7 +27,7 @@ through `WanVACEConfig.param_names_mapping`.
 | Pipeline parity vs Diffusers | PASS (B200) | 1.3B t2v / reference / video+mask and 14B reference; gates in [README](README.md#parity-gates) |
 | Basic example | PASS | `examples/inference/basic/basic_wan_vace.py` |
 | SP2 forward (weight-free FP32) | PASS | `fastvideo/tests/distributed/test_sp_wan_vace.py` |
-| SP2 weighted BF16 short pipeline | PASS (1.3B); 14B within gates on an earlier run | Drift < 5%, frame SSIM ≥ 0.93; not bitwise because BF16 GEMM depends on sharded row count; see [docs](../../../docs/inference/wan_vace.md#sequence-parallel-status) |
+| SP2 weighted BF16 short pipeline | PASS (1.3B local; 14B Slurm job 951756: drift 3.73%, SSIM 0.938) | Drift < 5%, frame SSIM ≥ 0.93; not bitwise because BF16 GEMM depends on sharded row count; see [docs](../../../docs/inference/wan_vace.md#sequence-parallel-status) |
 
 ## Quality
 
