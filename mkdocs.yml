@@ -237,6 +237,7 @@ nav:
     - Pull Requests: contributing/pull_requests.md
     - CI/CD Architecture: contributing/ci_architecture.md
     - Testing: contributing/testing.md
+    - Environment Variables: contributing/env_vars.md
     - Performance Benchmarks: contributing/performance_benchmarks.md
     - Profiling: contributing/profiling.md
     - Activation Trace: contributing/activation_trace.md

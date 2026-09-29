@@ -16,7 +16,7 @@ logger = init_logger(__name__)
 
 def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
     """Record an NVIDIA worker UUID when external NVTX profiling is enabled."""
-    if not envs.FASTVIDEO_NVTX_PROFILE:
+    if not envs.FASTVIDEO_NVTX_PROFILE.get():
         return
     device_uuid = torch.cuda.get_device_properties(device).uuid
     logger.info("Worker %d CUDA device UUID: GPU-%s", rank, device_uuid, local_main_process_only=False)

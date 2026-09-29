@@ -46,7 +46,7 @@ def get_cache_dir() -> Path:
     """
     return Path(os.environ.get(
         "FASTVIDEO_EVAL_CACHE",
-        os.path.join(envs.FASTVIDEO_CACHE_ROOT, "eval"),
+        os.path.join(envs.FASTVIDEO_CACHE_ROOT.get(), "eval"),
     ))
 
 

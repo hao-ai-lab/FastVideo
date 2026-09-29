@@ -490,7 +490,7 @@ class WanModel(ModelBase):
         assert latents_shape is not None
         assert training_batch.timesteps is not None
 
-        attention_backend = (self.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND)
+        attention_backend = (self.attention_backend_name or envs.FASTVIDEO_ATTENTION_BACKEND.get())
         if attention_backend == "VIDEO_SPARSE_ATTN":
             if (not is_vsa_available() or VideoSparseAttentionMetadataBuilder is None):
                 raise ImportError("FASTVIDEO_ATTENTION_BACKEND is "

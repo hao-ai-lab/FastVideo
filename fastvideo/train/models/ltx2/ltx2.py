@@ -525,7 +525,7 @@ class LTX2Model(WanModel):
         return training_batch
 
     def _build_attention_metadata(self, training_batch: TrainingBatch) -> TrainingBatch:
-        if envs.FASTVIDEO_ATTENTION_BACKEND in ("VIDEO_SPARSE_ATTN", "VMOBA_ATTN"):
+        if envs.FASTVIDEO_ATTENTION_BACKEND.get() in ("VIDEO_SPARSE_ATTN", "VMOBA_ATTN"):
             raise NotImplementedError("LTX2Model does not support VSA/VMOBA attention backends")
         training_batch.attn_metadata = None
         return training_batch

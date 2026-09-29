@@ -208,7 +208,7 @@ def effective_attention_backend(config: object) -> AttentionBackendEnum | None:
     scope = _SCOPE.get()
     if scope is not None and (scope.backend is not None or not scope.consult_env):
         return scope.backend
-    env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+    env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
     return None if env_backend is None else backend_name_to_enum(env_backend)
 
 
@@ -249,11 +249,11 @@ def get_attn_backend(
         if scope is not None:
             requested = scope.backend
             component = scope.component
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND if scope.consult_env else None
+            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get() if scope.consult_env else None
         else:
             requested = None
             component = None
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
     # The active device is a real selection input, not bookkeeping: the
     # platform's backend resolution runs capability probes against the
     # *current* device (e.g. AttnQatInferBackend's per-arch capability sets

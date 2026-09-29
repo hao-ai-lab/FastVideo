@@ -19,6 +19,7 @@ from torch.distributed._tensor import distribute_tensor
 from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard)
 from torch.nn.modules.module import _IncompatibleKeys
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.lora_patch import DenseLoRAPatch
 from fastvideo.models.loader.utils import (get_param_names_mapping, hf_to_custom_state_dict)
@@ -394,7 +395,7 @@ def _regional_compile_unsupported_reason(
         if os.environ.get("FASTVIDEO_H3_VSA_PROBE"):
             return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
                     "regional fullgraph compile cannot capture; this model stays eager")
-        if os.environ.get("FASTVIDEO_VSA_SM100A", "0") != "1":
+        if not envs.FASTVIDEO_VSA_SM100A.get():
             return ("VIDEO_SPARSE_ATTN_H3 regional compile requires the compile-safe sm_100a route "
                     "(FASTVIDEO_VSA_SM100A=1); Triton/CuTe VSA stays eager")
         if vsa_tile_size != 64:

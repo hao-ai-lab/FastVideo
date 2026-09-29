@@ -64,7 +64,7 @@ def find_nccl_library() -> str:
     After importing `torch`, `libnccl.so.2` or `librccl.so.1` can be
     found by `ctypes` automatically.
     """
-    so_file = envs.FASTVIDEO_NCCL_SO_PATH
+    so_file = envs.FASTVIDEO_NCCL_SO_PATH.get()
 
     # manually load the nccl library
     if so_file:
@@ -87,7 +87,7 @@ def find_hccl_library() -> str:
     After importing `torch`, `libhccl.so` can be
     found by `ctypes` automatically.
     """
-    so_file = envs.HCCL_SO_PATH
+    so_file = envs.HCCL_SO_PATH.get()
 
     # manually load the nccl library
     if so_file:
@@ -1127,7 +1127,7 @@ def _append_to_memory_trace(message: str, log_file_path: str | os.PathLike[str] 
 
 # TODO(xingyu): add adopted message for this
 def get_ip() -> str:
-    host_ip = envs.FASTVIDEO_HOST_IP
+    host_ip = envs.FASTVIDEO_HOST_IP.get()
     if host_ip:
         return host_ip
 
@@ -1169,7 +1169,7 @@ def test_loopback_bind(address: str, family: socket.AddressFamily) -> bool:
 
 
 def get_loopback_ip() -> str:
-    loopback_ip = envs.FASTVIDEO_LOOPBACK_IP
+    loopback_ip = envs.FASTVIDEO_LOOPBACK_IP.get()
     if loopback_ip:
         return loopback_ip
 
@@ -1253,7 +1253,7 @@ def get_mp_context() -> BaseContext:
     FASTVIDEO_WORKER_MULTIPROC_METHOD.
     """
     force_spawn()
-    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD
+    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.get()
     return multiprocessing.get_context(mp_method)
 
 

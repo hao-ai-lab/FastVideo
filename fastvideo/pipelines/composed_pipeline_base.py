@@ -162,7 +162,7 @@ class ComposedPipelineBase(ABC):
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
-        trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
+        trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR.get()
         self.profiler_controller = get_or_create_profiler(trace_dir)
 
         self.local_rank = get_world_group().local_rank
@@ -378,7 +378,7 @@ class ComposedPipelineBase(ABC):
             # The hook manager keeps a strong reference to every module it
             # wraps, so attaching here would materialize the DiT before the
             # first request and pin that instance past any release.
-            if envs.FASTVIDEO_TRACE_ACTIVATIONS:
+            if envs.FASTVIDEO_TRACE_ACTIVATIONS.get():
                 logger.warning("Activation trace is not attached to a deferred transformer; "
                                "turn off lazy_module_load to trace it")
             trace_target = None

@@ -113,9 +113,9 @@ def _patch_denoising_module(monkeypatch, cfg_gate_step):
     import fastvideo.pipelines.stages.denoising as denoising
     from fastvideo.pipelines.stages.base import PipelineStage
 
-    # envs.py evaluates FASTVIDEO_CFG_GATE_STEP lazily via __getattr__, so the
-    # stage sees monkeypatched values without reloading the module.
-    assert denoising.envs.FASTVIDEO_CFG_GATE_STEP == expected_gate_step
+    # envs.FASTVIDEO_CFG_GATE_STEP.get() reads the environment on each call, so
+    # the stage sees monkeypatched values without reloading the module.
+    assert denoising.envs.FASTVIDEO_CFG_GATE_STEP.get() == expected_gate_step
 
     logger = RecordingLogger()
     monkeypatch.setattr(denoising, "logger", logger)

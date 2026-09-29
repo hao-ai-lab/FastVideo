@@ -47,7 +47,7 @@ _MINIMAX_H3_FUSION_NAMES = frozenset({"modulate", "qknorm_rope", "swiglu"})
 
 def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
     """Parse the independently switchable inference fusion set."""
-    raw = envs.FASTVIDEO_MINIMAX_H3_FUSIONS if value is None else value
+    raw = envs.FASTVIDEO_MINIMAX_H3_FUSIONS.get() if value is None else value
     normalized = raw.strip().lower()
     if normalized in {"", "0", "none"}:
         return frozenset()
@@ -720,7 +720,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_modulate="modulate" in self.enabled_fusions,
                 fuse_qknorm_rope="qknorm_rope" in self.enabled_fusions,
                 fuse_swiglu="swiglu" in self.enabled_fusions,
-                fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN,
+                fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN.get(),
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(

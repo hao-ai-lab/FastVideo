@@ -114,7 +114,7 @@ class RayDistributedExecutor(Executor):
     def _init_workers_ray(self, placement_group: "PlacementGroup", **ray_remote_kwargs):
         from fastvideo.platforms import current_platform
 
-        num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS
+        num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS.get()
 
         # The remaining workers are the actual ray actors.
         self.workers: list[RayWorkerWrapper] = []
@@ -326,7 +326,7 @@ class RayDistributedExecutor(Executor):
         output = responses[0].output.cpu()
 
         logging_info = None
-        if envs.FASTVIDEO_STAGE_LOGGING:
+        if envs.FASTVIDEO_STAGE_LOGGING.get():
             logging_info = responses[0].logging_info
 
         result_batch = ForwardBatch(

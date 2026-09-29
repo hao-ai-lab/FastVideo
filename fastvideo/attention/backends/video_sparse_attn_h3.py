@@ -45,7 +45,6 @@ logs one warning and falls back.
 
 import functools
 import math
-import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,6 +68,7 @@ try:
 except ImportError:
     _sm100a = None
 
+import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder, layer_idx_from_prefix)
 from fastvideo.attention.backends.video_sparse_attn import (compute_topk, construct_variable_block_sizes,
@@ -469,7 +469,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         """
         if self._compile_layer_idx is None:
             self.prepare_for_compile(device)
-        requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
+        requested = envs.FASTVIDEO_VSA_SM100A.get()
         enabled = False
         reason = None if requested else f"{VSA_SM100A_ENV}=1 is required for compile-safe VSA-H3 attention"
         if requested:
@@ -529,7 +529,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # Training/generic compile keeps the long-standing Triton route.
             sm100a_requested = False
         else:
-            sm100a_requested = os.environ.get(VSA_SM100A_ENV, "0") == "1"
+            sm100a_requested = envs.FASTVIDEO_VSA_SM100A.get()
         needs_sm100a_pair = (attn_metadata.tile_elems == 64 and n_tiles % 2 != 0 and not grad_mode and sm100a_requested)
         kernel_tiles = n_tiles + int(needs_sm100a_pair)
         target_shape = (x.shape[0], kernel_tiles * attn_metadata.tile_elems, x.shape[-2], x.shape[-1])
@@ -702,7 +702,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                         "VSA-H3 regional fullgraph compile requires the prepared sm_100a BF16/head-128 route "
                         "on a supported device; disable inference_torch_compile for this request.")
                 use_sm100a = True
-            elif not compiling and os.environ.get(VSA_SM100A_ENV, "0") == "1":
+            elif not compiling and envs.FASTVIDEO_VSA_SM100A.get():
                 reason = _sm100a_unavailable_reason(_sm100a, q_bhsd, sm100a_variable_block_sizes, grad_mode)
                 if reason is None and map_to_index is None:
                     reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"

@@ -343,7 +343,7 @@ class FastVideoArgs:
             # environment variable is an input read once here, so the loader
             # only ever consults the typed field.
             import fastvideo.envs as envs
-            if envs.FASTVIDEO_INFERENCE_TORCH_COMPILE:
+            if envs.FASTVIDEO_INFERENCE_TORCH_COMPILE.get():
                 self.inference_torch_compile = True
         if self.attention_backend is not None:
             # Fail fast on typos instead of silently auto-selecting later.
@@ -357,7 +357,7 @@ class FastVideoArgs:
             # and falls through to automatic selection rather than raising.
             import fastvideo.envs as envs
             from fastvideo.attention.selector import backend_name_to_enum
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
         self._fold_vae_parallel_env()
@@ -371,12 +371,12 @@ class FastVideoArgs:
         # DEFAULT_DECODE_GATHER_STRATEGY (kept literal here so constructing args
         # never imports model modules; a unit test pins the two in sync).
         strategies = ("gather", "all_gather")
-        if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE:
+        if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
             self.vae_parallel_decode = True
-        if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE:
+        if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
             self.vae_parallel_encode = True
         if self.vae_parallel_decode_strategy is None:
-            self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY or "gather"
+            self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY.get() or "gather"
         if self.vae_parallel_decode_strategy not in strategies:
             raise ValueError(f"vae_parallel_decode_strategy must be one of {strategies}, "
                              f"got {self.vae_parallel_decode_strategy!r}.")

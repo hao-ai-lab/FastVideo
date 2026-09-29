@@ -8,7 +8,7 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-CONFIG_HOME = envs.FASTVIDEO_CONFIG_ROOT
+CONFIG_HOME = envs.FASTVIDEO_CONFIG_ROOT.get()
 
 # This file contains a list of env vars that should not be copied
 # from the driver to the Ray workers.

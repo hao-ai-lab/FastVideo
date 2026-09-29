@@ -60,7 +60,23 @@ def _force_sm100a() -> bool:
     metadata raises because Triton has no compatible fallback.
     ``FASTVIDEO_VSA_TRITON`` still wins.
     """
-    return os.environ.get("FASTVIDEO_VSA_SM100A", "0") == "1"
+    return _env_bool("FASTVIDEO_VSA_SM100A")
+
+
+def _env_bool(name: str) -> bool:
+    """Parse a boolean environment variable with the rule of ``fastvideo.envs.EnvBool``.
+
+    fastvideo-kernel cannot import fastvideo, so the rule is repeated here to keep
+    the kernel and the package in agreement: 1, true, yes, on are true; 0, false,
+    no, off, and the empty string are false; case-insensitive; anything else raises.
+    """
+    value = os.environ.get(name, "0").strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off", ""):
+        return False
+    raise ValueError(f"Invalid value {value!r} for {name}: expected 1, true, yes, on, 0, false, no, off, "
+                     "or an empty string")
 
 
 def _sm100a_is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:

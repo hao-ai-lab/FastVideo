@@ -178,7 +178,7 @@ class PipelineStage(ABC):
         stage_name: str,
     ) -> ForwardBatch:
         """Run forward, with the optional timing and logging wrapper."""
-        if envs.FASTVIDEO_STAGE_LOGGING:
+        if envs.FASTVIDEO_STAGE_LOGGING.get():
             logger.info("[%s] Starting execution", stage_name)
             torch.cuda.synchronize()
             start_time = time.perf_counter()
