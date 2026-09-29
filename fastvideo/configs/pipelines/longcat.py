@@ -7,9 +7,15 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, VAEConfig
 from fastvideo.configs.models.dits.base import DiTArchConfig
-from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config, T5PaddedConfig, clean_t5_prompt
+from fastvideo.configs.models.encoders import (BaseEncoderOutput, T5Config, T5PaddedArchConfig, T5PaddedConfig,
+                                               clean_t5_prompt)
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+
+# Backward-compatible names from before the padded T5 config was shared.
+LongCatT5ArchConfig = T5PaddedArchConfig
+LongCatT5Config = T5PaddedConfig
+longcat_preprocess_text = clean_t5_prompt
 
 
 @dataclass

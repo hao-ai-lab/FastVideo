@@ -66,6 +66,8 @@ class WanVACEArchConfig(WanVideoArchConfig):
             raise ValueError(f"VACE layers {self.vace_layers} exceed num_layers={self.num_layers}.")
         if 0 not in self.vace_layers:
             raise ValueError("VACE layers must include layer 0.")
+        if list(self.vace_layers) != sorted(set(self.vace_layers)):
+            raise ValueError(f"VACE layers must be strictly increasing: {self.vace_layers}")
 
 
 @dataclass
