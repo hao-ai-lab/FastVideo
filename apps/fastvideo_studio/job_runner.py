@@ -150,6 +150,15 @@ class Job:
     error: str | None = None
     output_path: str | None = None
     queued_at: float | None = None
+    # The range/sections last applied via trim_job(), so the Edit video dialog
+    # can reopen showing what actually produced the current output_path instead
+    # of resetting to neutral. Reset to these defaults by restore_job_video().
+    edit_start_seconds: float = 0.0
+    edit_end_seconds: float | None = None
+    #: Ordered, contiguous razor-cut sections, each a {end_seconds, brightness,
+    #: contrast, saturation} dict; see trim.py's DEFAULT_SEGMENTS. Empty means
+    #: never edited (or restored) -- one neutral section covering everything.
+    edit_segments: list[dict[str, Any]] = field(default_factory=list)
     log_file_path: str | None = None  # Path to the job's log file
     num_inference_steps: int = 50
     num_frames: int = 81
@@ -213,6 +222,9 @@ class Job:
             "error": self.error,
             "output_path": self.output_path,
             "log_file_path": self.log_file_path,
+            "edit_start_seconds": self.edit_start_seconds,
+            "edit_end_seconds": self.edit_end_seconds,
+            "edit_segments": self.edit_segments,
             "num_inference_steps": self.num_inference_steps,
             "num_frames": self.num_frames,
             "height": self.height,
@@ -291,8 +303,8 @@ def _job_log_path(output_dir: str, job_id: str) -> str:
     return os.path.join(output_dir, job_id, JOB_LOG_FILENAME)
 
 
-def _decode_references(value: Any) -> list[dict[str, Any]]:
-    """Reference lists round-trip through the DB as JSON text."""
+def _decode_json_list(value: Any) -> list[dict[str, Any]]:
+    """References and edit_segments both round-trip through the DB as JSON text."""
     if not value:
         return []
     if isinstance(value, list):
@@ -300,7 +312,7 @@ def _decode_references(value: Any) -> list[dict[str, Any]]:
     try:
         decoded = json.loads(value)
     except (TypeError, ValueError):
-        logger.warning("Could not decode stored references: %r", value)
+        logger.warning("Could not decode stored JSON list: %r", value)
         return []
     return list(decoded) if isinstance(decoded, list) else []
 
@@ -441,7 +453,7 @@ class JobRunner:
                     job_type=row.get("job_type", "inference"),
                     image_path=row.get("image_path", "") or "",
                     last_image_path=row.get("last_image_path", "") or "",
-                    references=_decode_references(row.get("references")),
+                    references=_decode_json_list(row.get("references")),
                     data_path=row.get("data_path", "") or "",
                     max_train_steps=row.get("max_train_steps", 1000),
                     train_batch_size=row.get("train_batch_size", 1),
@@ -464,6 +476,10 @@ class JobRunner:
                     error=row.get("error"),
                     output_path=row.get("output_path"),
                     log_file_path=row.get("log_file_path"),
+                    # `or <default>` would be wrong here: 0.0 is a real, intentional value, not just "unset".
+                    edit_start_seconds=(float(row["edit_start_seconds"]) if row.get("edit_start_seconds") is not None else 0.0),
+                    edit_end_seconds=(float(row["edit_end_seconds"]) if row.get("edit_end_seconds") is not None else None),
+                    edit_segments=_decode_json_list(row.get("edit_segments")),
                     num_inference_steps=row.get("num_inference_steps", 50),
                     num_frames=row.get("num_frames", 81),
                     height=row.get("height", 480),
@@ -981,34 +997,57 @@ class JobRunner:
 
     # -- trimming --------------------------------------------------------------
 
-    def _set_output(self, job: Job, output_path: str, num_frames: int) -> None:
+    def _set_output(
+        self,
+        job: Job,
+        output_path: str,
+        num_frames: int,
+        *,
+        edit_start_seconds: float = 0.0,
+        edit_end_seconds: float | None = None,
+        edit_segments: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Point a completed job at a different output file, e.g. after trimming.
+
+        The edit_* keyword args record what produced that file (left at their
+        neutral/full-range defaults by restore_job_video()), so the Edit video
+        dialog can reopen showing the edit actually in effect instead of always
+        resetting to neutral -- nothing else needs these; other jobs' last-frame/
+        last-clip references and a merge only ever read output_path.
 
         Bypasses update_job_config()'s pending/failed/stopped gate on purpose:
         a completed job's *generation* config stays fixed, but which cut of its
         own video is showing is not a generation setting.
         """
+        edit_segments = edit_segments or []
         job.output_path = output_path
         job.num_frames = num_frames
+        job.edit_start_seconds = edit_start_seconds
+        job.edit_end_seconds = edit_end_seconds
+        job.edit_segments = edit_segments
         self._save_job(job)
         try:
-            self._db.update_job_config(job.id, {"num_frames": num_frames})
+            self._db.update_job_config(
+                job.id, {
+                    "num_frames": num_frames,
+                    "edit_start_seconds": edit_start_seconds,
+                    "edit_end_seconds": edit_end_seconds,
+                    "edit_segments": edit_segments,
+                })
         except Exception as exc:
-            logger.warning("Failed to persist trimmed frame count for job %s: %s", job.id, exc)
+            logger.warning("Failed to persist edit state for job %s: %s", job.id, exc)
 
     def trim_job(
         self,
         job_id: str,
         start_seconds: float = 0.0,
         end_seconds: float | None = None,
-        brightness: float = 0.0,
-        contrast: float = 1.0,
-        saturation: float = 1.0,
+        segments: list[dict[str, Any]] | None = None,
     ) -> Job:
-        """Cut a completed job's video to [start_seconds, end_seconds) and adjust its color, in place.
+        """Cut a completed job's video to [start_seconds, end_seconds) and grade it section by section, in place.
 
         The untouched original is kept, so this can be called again with a
-        different range and/or color -- it always renders from that original
+        different range and/or sections -- it always renders from that original
         with the full set of parameters given, never compounding quality loss
         or discarding one edit by changing the other -- or undone with
         restore_job_video().
@@ -1017,11 +1056,17 @@ class JobRunner:
             job = self._jobs.get(job_id)
         if job is None:
             raise ValueError(f"Job {job_id} not found")
-        path, kept = trim_video(job, start_seconds, end_seconds, brightness, contrast, saturation)
-        self._set_output(job, path, kept)
-        logger.info("Edited job %s: %.2f-%s s, brightness=%.0f contrast=%.2f saturation=%.2f (%d frames)", job.id,
-                   start_seconds, f"{end_seconds:.2f}" if end_seconds is not None else "end", brightness, contrast,
-                   saturation, kept)
+        path, kept = trim_video(job, start_seconds, end_seconds, segments)
+        self._set_output(
+            job,
+            path,
+            kept,
+            edit_start_seconds=start_seconds,
+            edit_end_seconds=end_seconds,
+            edit_segments=segments,
+        )
+        logger.info("Edited job %s: %.2f-%s s, %d section(s) (%d frames)", job.id, start_seconds,
+                   f"{end_seconds:.2f}" if end_seconds is not None else "end", len(segments or [1]), kept)
         return job
 
     def restore_job_video(self, job_id: str) -> Job:

@@ -147,18 +147,36 @@ last-frame/last-clip references, and a later merge, all just read the job's
 keyframes. Audio is cut to the same range and carried over too (re-encoded to
 AAC regardless of the source's codec), unless the source has none.
 
+Color grading is per **section**, not the whole clip at once, like a razor/blade
+tool: **Split at current time** cuts the kept range wherever the preview is
+paused, and each resulting section gets its own brightness, contrast and
+saturation sliders, next to a before/after preview of a still frame
+(**Preview** on a section seeks to its start and captures that frame; **Use
+current frame** captures wherever the preview is paused instead). That preview
+is computed entirely in the browser (`src/lib/grading.ts` mirrors `trim.py`'s
+`_apply_grade` pixel math) as the sliders move, so it never waits on the
+server -- only **Apply** does that, to actually re-render the file. **Previous
+frame**/**Next frame** step the preview by exactly one frame (at the clip's
+own fps), for lining up a cut precisely -- the native scrub bar alone isn't
+frame-accurate. **Merge with next** undoes a cut, keeping the earlier of the
+two sections' grade.
+Sections are always contiguous and cover the whole kept range -- there's no
+reordering or gaps, only where to cut and what to grade each side; a plain
+range trim with no cuts is just the one-section case. Audio is one continuous
+track regardless of how many sections there are.
+
 The untouched original is always kept alongside it the first time a clip is
 edited, and **every edit always re-renders from that original** with the full
-set of values shown in the dialog -- range and color together, in one pass.
+set of values shown in the dialog -- range and sections together, in one pass.
 That's what lets adjusting either one leave the other in place instead of each
-one silently discarding the other, and it's also why color always reopens at
-neutral (0 brightness, 1 contrast, 1 saturation): nothing is stored server-side
-about which values produced the current video, only the video itself. The range
-fields do reopen at the clip's current length, so leaving color alone and
-re-applying keeps a previous trim -- unless that trim didn't start at 0, in
-which case reopening shows `0` to the current length rather than the original
-window, and re-applying would shift it. **Restore original** undoes every edit
-in one step and is the reliable way to start over.
+one silently discarding the other. The job itself records the range/sections
+of its last edit (`edit_start_seconds`/`edit_end_seconds`/`edit_segments`,
+alongside `output_path`), so reopening the dialog -- even after closing it or
+reloading the page -- shows exactly what produced the current video, not a
+guess: a never-edited clip shows one neutral section covering its full length;
+an edited one shows every section that made it, cuts and start offset
+included. **Restore original** undoes every edit in one step and resets those
+recorded values back to one neutral section too.
 
 ### API Endpoints
 
@@ -176,7 +194,7 @@ in one step and is the reliable way to start over.
 | `POST`   | `/api/jobs/{id}/last-frame`   | Save the job's last frame, for another job to start from |
 | `POST`   | `/api/jobs/{id}/last-clip`    | Save the job's trailing ~1s, for another job to continue from |
 | `POST`   | `/api/scenes/merge`           | Join finished jobs' videos (`{"job_ids": [...], "name": ""}`) in order |
-| `POST`   | `/api/jobs/{id}/trim`         | Cut a job's video to a range and/or adjust its color (`{"start_seconds": 0, "end_seconds": null, "brightness": 0, "contrast": 1, "saturation": 1}`), in place |
+| `POST`   | `/api/jobs/{id}/trim`         | Cut a job's video to a range and/or grade it section by section (`{"start_seconds": 0, "end_seconds": null, "segments": [{"end_seconds": null, "brightness": 0, "contrast": 1, "saturation": 1}]}`), in place |
 | `POST`   | `/api/jobs/{id}/restore-video`| Undo every edit, back to the original video |
 | `GET`    | `/api/merged/{filename}`      | Stream a merged scene video                |
 | `DELETE` | `/api/jobs/{id}`              | Delete a job                               |

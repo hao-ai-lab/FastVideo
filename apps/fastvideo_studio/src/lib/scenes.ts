@@ -18,7 +18,7 @@ import {
 import type { Job } from "@/lib/types";
 
 export const UNNAMED_SCENE = "__unnamed__";
-const DEFAULT_FPS = 24;
+export const DEFAULT_FPS = 24;
 
 // "<stem>[-_. ][clip|part|pt|shot|take][-_. ]<number>". "scene" is deliberately not
 // a clip word: it is far more likely part of the scene's own name ("rooftop-scene-2").

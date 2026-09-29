@@ -5,7 +5,7 @@ import {
 	loadDefaultOptions,
 	type DefaultOptions,
 } from "./defaultOptions";
-import type { Job, JobType } from "./types";
+import type { GradeSegment, Job, JobType } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
 
@@ -219,20 +219,21 @@ export interface EditVideoParams {
 	startSeconds: number;
 	/** omitted (or undefined) keeps to the end of the video */
 	endSeconds?: number;
-	/** added directly to 0-255 pixel values; 0 = unchanged */
-	brightness?: number;
-	/** 1 = unchanged, 0 = flat gray, >1 = more contrast */
-	contrast?: number;
-	/** 1 = unchanged, 0 = grayscale, >1 = more saturated */
-	saturation?: number;
+	/**
+	 * Ordered, contiguous razor-cut sections covering the whole kept range --
+	 * each section's `end_seconds` is relative to that kept range, not the
+	 * original file. Omitted (or empty) means one neutral section, i.e. a
+	 * plain range trim with no grading.
+	 */
+	segments?: GradeSegment[];
 }
 
 /**
- * Cut a completed job's video to a range and/or adjust its color, in place.
- * The untouched original is kept server-side, so this always renders fresh
- * from it with the *given* parameters -- pass every value you want kept, not
- * just the one you changed, or the others reset to their neutral defaults.
- * Can be undone with restoreJobVideo.
+ * Cut a completed job's video to a range and/or grade it section by section,
+ * in place. The untouched original is kept server-side, so this always
+ * renders fresh from it with the *given* parameters -- pass every value you
+ * want kept, not just the one you changed, or the rest reset to their neutral
+ * defaults. Can be undone with restoreJobVideo.
  */
 export async function trimJob(jobId: string, params: EditVideoParams): Promise<Job> {
 	const baseApiUrl = getApiBaseUrl();
@@ -242,9 +243,7 @@ export async function trimJob(jobId: string, params: EditVideoParams): Promise<J
 		body: JSON.stringify({
 			start_seconds: params.startSeconds,
 			end_seconds: params.endSeconds ?? null,
-			brightness: params.brightness ?? 0,
-			contrast: params.contrast ?? 1,
-			saturation: params.saturation ?? 1,
+			segments: params.segments ?? [],
 		}),
 	});
 	if (!response.ok) {

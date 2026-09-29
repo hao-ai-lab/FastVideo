@@ -749,14 +749,14 @@ def _trim_error(e: Exception) -> HTTPException:
 
 @app.post("/api/jobs/{job_id}/trim")
 def trim_job(job_id: str, req: TrimRequest) -> dict[str, Any]:
-    """Cut a completed job's video to [start_seconds, end_seconds) and adjust its color, in place.
+    """Cut a completed job's video to [start_seconds, end_seconds) and grade it section by section, in place.
 
     The untouched original is kept, so this can be called again with a
-    different range and/or color, or undone with POST .../restore-video.
+    different range and/or sections, or undone with POST .../restore-video.
     """
     try:
-        job = job_runner.trim_job(job_id, req.start_seconds, req.end_seconds, req.brightness, req.contrast,
-                                  req.saturation)
+        segments = [s.model_dump() for s in req.segments]
+        job = job_runner.trim_job(job_id, req.start_seconds, req.end_seconds, segments)
     except (ValueError, FrameError) as e:
         raise _trim_error(e) from e
     return job.to_dict()

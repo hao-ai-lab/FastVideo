@@ -128,6 +128,42 @@ def _job(job_id="job-1", status=Status.COMPLETED, output_path=None):
     return SimpleNamespace(id=job_id, status=status, output_path=output_path)
 
 
+def _top_level_atom_offset(path: str, atom_type: bytes) -> int:
+    """Byte offset of a top-level MP4 box (e.g. b"moov", b"mdat"), or -1 if absent."""
+    import struct
+
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(0)
+        pos = 0
+        while pos < size:
+            f.seek(pos)
+            header = f.read(8)
+            if len(header) < 8:
+                break
+            atom_size, found_type = struct.unpack(">I4s", header)
+            if found_type == atom_type:
+                return pos
+            if atom_size in (0, 1):
+                break
+            pos += atom_size
+    return -1
+
+
+def _moov_offset(path: str) -> int:
+    return _top_level_atom_offset(path, b"moov")
+
+
+def _mdat_offset(path: str) -> int:
+    return _top_level_atom_offset(path, b"mdat")
+
+
+def seg(brightness=0.0, contrast=1.0, saturation=1.0, end_seconds=None):
+    """One razor-cut section dict, as the API/trim_video expects."""
+    return {"end_seconds": end_seconds, "brightness": brightness, "contrast": contrast, "saturation": saturation}
+
+
 @pytest.fixture
 def job_dir(tmp_path):
     d = tmp_path / "job-1"
@@ -202,6 +238,12 @@ class TestTrimVideo:
         with av.open(path) as c:
             assert FPS - 1 <= float(c.streams.video[0].average_rate) <= FPS + 1
 
+    def test_output_is_faststart_moov_before_mdat(self, video):
+        # Otherwise a browser has to reach nearly the end of the file just to read
+        # its duration/seek table -- painfully slow over a network filesystem.
+        path, _ = trim_video(_job(output_path=video), start_seconds=0.0, end_seconds=1.0)
+        assert _moov_offset(path) < _mdat_offset(path)
+
     @pytest.mark.parametrize(
         ("start", "end", "match"),
         [
@@ -237,7 +279,7 @@ class TestTrimVideo:
 
 class TestGrading:
     def test_neutral_values_do_not_alter_the_pixels(self, colored_video):
-        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, brightness=0.0, contrast=1.0, saturation=1.0)
+        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg()])
         got = _read_mean_rgb(path)
         want = _read_mean_rgb(colored_video)
         assert np.allclose(got, want, atol=2)  # h264 is lossy even unchanged
@@ -247,34 +289,34 @@ class TestGrading:
 
         calls = []
         monkeypatch.setattr(trim_module, "_apply_grade", lambda *a: calls.append(a) or a[0])
-        trim_video(_job(output_path=colored_video), 0.0, None)
+        trim_video(_job(output_path=colored_video), 0.0, None)  # no segments -> the default single neutral one
         assert calls == []
 
     def test_positive_brightness_lightens_every_channel(self, colored_video):
-        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, brightness=50.0)
+        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(brightness=50.0)])
         got = _read_mean_rgb(path)
         want = _read_mean_rgb(colored_video)
         assert (got > want + 30).all()
 
     def test_negative_brightness_darkens(self, colored_video):
-        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, brightness=-50.0)
+        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(brightness=-50.0)])
         got = _read_mean_rgb(path)
         want = _read_mean_rgb(colored_video)
         assert (got < want - 30).all()
 
     def test_zero_saturation_makes_every_channel_equal(self, colored_video):
-        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, saturation=0.0)
+        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(saturation=0.0)])
         r, g, b = _read_mean_rgb(path)
         assert abs(r - g) < 2 and abs(g - b) < 2  # gray: channels converge on the frame's luma
 
     def test_saturation_above_one_widens_the_channel_spread(self, colored_video):
         base_r, base_g, base_b = _read_mean_rgb(colored_video)
-        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, saturation=2.0)
+        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(saturation=2.0)])
         r, g, b = _read_mean_rgb(path)
         assert (r - b) > (base_r - base_b)  # the warm/cool spread grows, not shrinks
 
     def test_high_contrast_pushes_values_away_from_mid_gray(self, colored_video):
-        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, contrast=2.0)
+        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(contrast=2.0)])
         got = _read_mean_rgb(path)
         want = _read_mean_rgb(colored_video)
         # 128 = mid-gray. This clip's R (200) sits above it and should be pushed further up;
@@ -287,7 +329,8 @@ class TestGrading:
     def test_grading_and_trimming_the_same_call_compose(self, video, colored_video):
         # A range trim and a color grade requested together both take effect --
         # neither is silently dropped by the other.
-        path, kept = trim_video(_job(output_path=colored_video), start_seconds=0.2, end_seconds=0.3, brightness=40.0)
+        path, kept = trim_video(
+            _job(output_path=colored_video), start_seconds=0.2, end_seconds=0.3, segments=[seg(brightness=40.0)])
         assert kept == pytest.approx(FPS * 0.1, abs=1)
         base = _read_mean_rgb(colored_video)
         assert (_read_mean_rgb(path) > base + 20).all()
@@ -305,13 +348,94 @@ class TestGrading:
     )
     def test_refuses_an_out_of_range_value(self, colored_video, kwargs, bounds):
         with pytest.raises(FrameError, match="between") as e:
-            trim_video(_job(output_path=colored_video), 0.0, None, **kwargs)
+            trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(**kwargs)])
         assert e.value.status_code == 400
 
     @pytest.mark.parametrize("kwargs", [{"brightness": BRIGHTNESS_RANGE[1]}, {"contrast": CONTRAST_RANGE[0]},
                                         {"saturation": SATURATION_RANGE[1]}])
     def test_the_edges_of_each_range_are_allowed(self, colored_video, kwargs):
-        trim_video(_job(output_path=colored_video), 0.0, None, **kwargs)  # does not raise
+        trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(**kwargs)])  # does not raise
+
+
+class TestSections:
+    """Razor-cut sections: an ordered, contiguous list of grades within the kept range."""
+
+    def test_two_sections_grade_independently(self, colored_video):
+        path, kept = trim_video(
+            _job(output_path=colored_video), 0.0, None,
+            segments=[seg(brightness=80.0, end_seconds=0.25), seg()],
+        )
+        base = _read_mean_rgb(colored_video)
+        assert (_read_mean_rgb(path, index=0) > base + 40).all()  # first section, graded
+        assert np.allclose(_read_mean_rgb(path, index=kept - 1), base, atol=2)  # second section, untouched
+
+    def test_three_sections_each_get_their_own_grade(self, colored_video):
+        path, kept = trim_video(
+            _job(output_path=colored_video), 0.0, None,
+            segments=[
+                seg(saturation=0.0, end_seconds=4 / FPS),
+                seg(brightness=80.0, end_seconds=8 / FPS),
+                seg(),
+            ],
+        )
+        base = _read_mean_rgb(colored_video)
+        r0, g0, b0 = _read_mean_rgb(path, index=0)
+        assert abs(r0 - g0) < 2 and abs(g0 - b0) < 2  # first section desaturated
+        assert (_read_mean_rgb(path, index=6) > base + 40).all()  # second section brightened
+        assert np.allclose(_read_mean_rgb(path, index=kept - 1), base, atol=2)  # third section untouched
+
+    def test_sections_compose_with_the_range_trim(self, colored_video):
+        # The cut point (0.1) is relative to the KEPT range, not the original file's timeline.
+        path, kept = trim_video(
+            _job(output_path=colored_video), start_seconds=0.1, end_seconds=0.4,
+            segments=[seg(brightness=80.0, end_seconds=0.1), seg()],
+        )
+        base = _read_mean_rgb(colored_video)
+        assert (_read_mean_rgb(path, index=0) > base + 40).all()
+        assert np.allclose(_read_mean_rgb(path, index=kept - 1), base, atol=2)
+
+    def test_an_empty_section_list_defaults_to_one_neutral_section(self, colored_video):
+        path, _ = trim_video(_job(output_path=colored_video), 0.0, None, segments=[])
+        assert np.allclose(_read_mean_rgb(path), _read_mean_rgb(colored_video), atol=2)
+
+    def test_a_single_explicit_end_that_does_not_cover_the_clip_is_refused(self, colored_video):
+        with pytest.raises(FrameError, match="cover the whole clip"):
+            trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(end_seconds=0.1)])
+
+    def test_only_the_last_section_can_be_open_ended(self, colored_video):
+        with pytest.raises(FrameError, match="open-ended"):
+            trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(), seg(end_seconds=0.25)])
+
+    def test_sections_must_be_in_increasing_order(self, colored_video):
+        with pytest.raises(FrameError, match="increasing order"):
+            trim_video(
+                _job(output_path=colored_video), 0.0, None,
+                segments=[seg(end_seconds=0.3), seg(end_seconds=0.2), seg()],
+            )
+
+    def test_a_section_too_short_to_keep_a_frame_is_refused(self, colored_video):
+        # 0.001s at 24fps rounds to 0 frames -- passes the ordering check (> 0) but keeps nothing.
+        with pytest.raises(FrameError, match="too short"):
+            trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(end_seconds=0.001), seg()])
+
+    def test_a_section_with_an_out_of_range_grade_is_refused(self, colored_video):
+        with pytest.raises(FrameError, match="between"):
+            trim_video(
+                _job(output_path=colored_video), 0.0, None,
+                segments=[seg(end_seconds=0.25), seg(brightness=500.0)],
+            )
+
+    def test_only_frames_in_a_graded_section_go_through_the_numpy_round_trip(self, colored_video, monkeypatch):
+        import fastvideo_studio.trim as trim_module
+
+        calls = []
+        original = trim_module._apply_grade
+        monkeypatch.setattr(trim_module, "_apply_grade", lambda *a: calls.append(a) or original(*a))
+        trim_video(
+            _job(output_path=colored_video), 0.0, None,
+            segments=[seg(end_seconds=0.25), seg(brightness=50.0)],  # first neutral, second graded
+        )
+        assert 0 < len(calls) < 12  # some frames graded, not all -- the neutral section was skipped
 
 
 class TestAudio:
@@ -333,7 +457,8 @@ class TestAudio:
             assert sum(1 for _ in c.decode(a)) > 0
 
     def test_grading_alongside_a_trim_also_keeps_the_audio_track(self, video_with_audio):
-        path, _ = trim_video(_job(output_path=video_with_audio), start_seconds=0.0, end_seconds=1.0, brightness=40.0)
+        path, _ = trim_video(
+            _job(output_path=video_with_audio), start_seconds=0.0, end_seconds=1.0, segments=[seg(brightness=40.0)])
         import av
 
         with av.open(path) as c:
@@ -357,7 +482,7 @@ class TestRestoreOriginal:
         assert _read_levels(path) == _read_levels(video)
 
     def test_restores_past_a_grade_too(self, colored_video, job_dir):
-        trim_video(_job(output_path=colored_video), 0.0, None, brightness=50.0, saturation=0.0)
+        trim_video(_job(output_path=colored_video), 0.0, None, segments=[seg(brightness=50.0, saturation=0.0)])
         path, _ = restore_original(_job(output_path=str(job_dir / EDITED_FILENAME)))
         assert np.allclose(_read_mean_rgb(path), _read_mean_rgb(colored_video), atol=2)
 

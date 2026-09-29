@@ -111,6 +111,14 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "jobs", "real_score_model_path", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "fake_score_model_path", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "queued_at", "REAL", "NULL")
+    _add_column_if_missing(conn, "jobs", "edit_start_seconds", "REAL", "0.0")
+    _add_column_if_missing(conn, "jobs", "edit_end_seconds", "REAL", "NULL")
+    # Superseded by edit_segments_json (a list of razor-cut sections, each with
+    # its own grade); left in place, unused, rather than risking a DROP COLUMN.
+    _add_column_if_missing(conn, "jobs", "edit_brightness", "REAL", "0.0")
+    _add_column_if_missing(conn, "jobs", "edit_contrast", "REAL", "1.0")
+    _add_column_if_missing(conn, "jobs", "edit_saturation", "REAL", "1.0")
+    _add_column_if_missing(conn, "jobs", "edit_segments_json", "TEXT", "'[]'")
     # Settings table
     _add_column_if_missing(conn, "settings", "vae_cpu_offload", "INTEGER", "0")
     _add_column_if_missing(conn, "settings", "image_encoder_cpu_offload", "INTEGER", "0")
@@ -348,7 +356,8 @@ class Database:
         self._commit()
 
     #: Job fields stored under a different column name, and how they are encoded.
-    _CONFIG_COLUMNS = {"references": "references_json"}
+    _CONFIG_COLUMNS = {"references": "references_json", "edit_segments": "edit_segments_json"}
+    _JSON_LIST_CONFIG_FIELDS = {"references", "edit_segments"}
     _BOOL_CONFIG_FIELDS = {
         "dit_cpu_offload",
         "text_encoder_cpu_offload",
@@ -371,7 +380,7 @@ class Database:
             column = self._CONFIG_COLUMNS.get(key, key)
             if column not in columns or column == "id":
                 continue
-            if key == "references":
+            if key in self._JSON_LIST_CONFIG_FIELDS:
                 value = json.dumps(value or [])
             elif key in self._BOOL_CONFIG_FIELDS:
                 value = 1 if value else 0
@@ -676,6 +685,13 @@ def _row_to_job(sqlite_row: sqlite3.Row) -> dict[str, Any]:
     for col in ("dmd_denoising_steps", "real_score_model_path", "fake_score_model_path"):
         if col in row:
             result[col] = (row[col] or "") or ""
+    if "edit_start_seconds" in row:
+        start_val: Any = row["edit_start_seconds"]
+        result["edit_start_seconds"] = float(start_val) if start_val is not None else 0.0
+    if "edit_end_seconds" in row:
+        end_val: Any = row["edit_end_seconds"]
+        result["edit_end_seconds"] = float(end_val) if end_val is not None else None
+    result["edit_segments"] = _sqlite_row_get(row, "edit_segments_json", "") or ""
     return result
 
 

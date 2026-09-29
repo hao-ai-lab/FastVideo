@@ -2,6 +2,19 @@
 
 export type JobType = "inference" | "finetuning" | "distillation";
 
+/**
+ * One razor-cut section of a clip's kept (already start/end-trimmed) range,
+ * and its own color grade. `end_seconds` is seconds into that kept range, not
+ * the original file's timeline; only the last section in a list may leave it
+ * null, meaning "to the end". Sections are contiguous, in order, no gaps.
+ */
+export interface GradeSegment {
+	end_seconds: number | null;
+	brightness: number;
+	contrast: number;
+	saturation: number;
+}
+
 export interface Job {
 	id: string;
 	model_id: string;
@@ -18,6 +31,10 @@ export interface Job {
 	error: string | null;
 	output_path: string | null;
 	log_file_path: string | null;
+	/** the range/sections last applied via the trim API; neutral/full-range for a never-edited job */
+	edit_start_seconds?: number;
+	edit_end_seconds?: number | null;
+	edit_segments?: GradeSegment[];
 	num_inference_steps: number;
 	num_frames: number;
 	/** frames per second; the API sends it, older cached objects may not have it */

@@ -128,6 +128,30 @@ def _resolve_output_size(
     return fallback
 
 
+def _find_ffmpeg() -> str | None:
+    """An ffmpeg to run: $FASTVIDEO_FFMPEG_BIN, then PATH, then imageio-ffmpeg's bundled one.
+
+    A plain PATH lookup misses environments (this one included) where ffmpeg
+    is only present as the copy imageio-ffmpeg installs for its own use, never
+    exposed on PATH -- without this fallback, every save silently drops to the
+    PyAV path below, which has no '+faststart', producing MP4s slow to start
+    playback over a network filesystem (the metadata ends up at the end of the
+    file instead of the front).
+    """
+    configured = os.getenv("FASTVIDEO_FFMPEG_BIN")
+    if configured and (shutil.which(configured) or os.path.isfile(configured)):
+        return shutil.which(configured) or configured
+    on_path = shutil.which("ffmpeg")
+    if on_path:
+        return on_path
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
 def _validate_request_stage_overrides(model_path: str, request: GenerationRequest) -> None:
     """Validate typed stage overrides against the model's registered preset."""
     if not request.stage_overrides:
@@ -1100,7 +1124,10 @@ class VideoGenerator:
         try:
             audio_int16, num_channels = cls._audio_to_int16(audio)
             layout = "stereo" if num_channels == 2 else "mono"
-            output = av.open(output_path, mode="w")
+            # movflags=faststart puts the moov atom (duration, seek table) at the
+            # front of the file instead of the end -- this is the fallback path
+            # (ffmpeg unavailable), so it's the one place nothing else adds it.
+            output = av.open(output_path, mode="w", options={"movflags": "faststart"})
             video_stream = output.add_stream("libx264", rate=fps)
             video_stream.width = int(frames[0].shape[1])
             video_stream.height = int(frames[0].shape[0])
@@ -1185,9 +1212,11 @@ class VideoGenerator:
         sample_rate: int,
     ) -> bool:
         """Encode video+audio using ffmpeg via rawvideo stdin + WAV input."""
-        ffmpeg_bin = shutil.which(os.getenv("FASTVIDEO_FFMPEG_BIN", "ffmpeg"))
+        ffmpeg_bin = _find_ffmpeg()
         if ffmpeg_bin is None:
-            logger.warning("ffmpeg not found; cannot use ffmpeg pipe save.")
+            logger.warning("ffmpeg not found (checked $FASTVIDEO_FFMPEG_BIN, PATH, and imageio-ffmpeg's bundled "
+                           "binary); cannot use ffmpeg pipe save. Falling back to a PyAV save that skips "
+                           "'+faststart', so saved clips may be slow to start playback over a network filesystem.")
             return False
 
         if not frames:

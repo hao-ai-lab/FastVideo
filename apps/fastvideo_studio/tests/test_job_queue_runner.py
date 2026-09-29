@@ -561,6 +561,11 @@ class TestRestart:
         assert restored.negative_prompt == "neg"
 
 
+def seg(brightness=0.0, contrast=1.0, saturation=1.0, end_seconds=None):
+    """One razor-cut section dict, as trim_job()/the API expects."""
+    return {"end_seconds": end_seconds, "brightness": brightness, "contrast": contrast, "saturation": saturation}
+
+
 class TestTrimming:
     """trim_job/restore_job_video against a real (small, synthetic) video file."""
 
@@ -608,7 +613,7 @@ class TestTrimming:
     def test_grading_updates_output_path_without_changing_frame_count(self, h):
         r = h.runner()
         job = self._completed(h, r)
-        graded = r.trim_job(job.id, start_seconds=0.0, end_seconds=None, brightness=40.0)
+        graded = r.trim_job(job.id, start_seconds=0.0, end_seconds=None, segments=[seg(brightness=40.0)])
         assert graded.output_path.endswith("edited.mp4")
         assert graded.num_frames == self.FPS * 2  # full length kept, only color changed
 
@@ -617,12 +622,28 @@ class TestTrimming:
 
         r = h.runner()
         job = self._completed(h, r)
-        edited = r.trim_job(job.id, start_seconds=0.5, end_seconds=1.5, brightness=80.0)
+        edited = r.trim_job(job.id, start_seconds=0.5, end_seconds=1.5, segments=[seg(brightness=80.0)])
         assert edited.num_frames == self.FPS  # the range applied
         with av.open(edited.output_path) as c:
             frame = next(c.decode(c.streams.video[0]))
         # Source frame at 0.5s (index 12) is level 60; +80 brightness should clearly lighten it.
         assert int(frame.to_ndarray(format="rgb24")[0, 0, 0]) > 60 + 40
+
+    def test_two_sections_grade_independently(self, h):
+        import av
+
+        r = h.runner()
+        job = self._completed(h, r)  # 48 frames @ 24fps = 2s
+        edited = r.trim_job(
+            job.id, start_seconds=0.0, end_seconds=None,
+            segments=[seg(brightness=80.0, end_seconds=1.0), seg()],
+        )
+        with av.open(edited.output_path) as c:
+            frames = list(c.decode(c.streams.video[0]))
+        first_half_level = int(frames[0].to_ndarray(format="rgb24")[0, 0, 0])
+        second_half_level = int(frames[-1].to_ndarray(format="rgb24")[0, 0, 0])
+        assert first_half_level > 0 + 40  # source level 0, graded section
+        assert second_half_level == min(47 * 5, 255)  # source's actual last-frame level, untouched
 
     def test_trim_persists_across_a_restart(self, h):
         first = h.runner()
@@ -633,6 +654,69 @@ class TestTrimming:
         restored = second.get_job(job.id)
         assert restored.output_path == trimmed.output_path
         assert restored.num_frames == trimmed.num_frames
+
+    def test_trim_records_the_applied_values_on_the_job(self, h):
+        r = h.runner()
+        job = self._completed(h, r)
+        edited = r.trim_job(
+            job.id, start_seconds=0.5, end_seconds=1.5,
+            segments=[seg(brightness=20.0, contrast=1.4, saturation=0.5)],
+        )
+        assert edited.edit_start_seconds == 0.5
+        assert edited.edit_end_seconds == 1.5
+        assert edited.edit_segments == [seg(brightness=20.0, contrast=1.4, saturation=0.5)]
+
+    def test_a_second_trim_overwrites_the_recorded_values_of_the_first(self, h):
+        r = h.runner()
+        job = self._completed(h, r)
+        r.trim_job(job.id, start_seconds=0.5, end_seconds=1.5, segments=[seg(brightness=20.0)])
+        again = r.trim_job(job.id, start_seconds=0.0, end_seconds=None, segments=[seg(contrast=1.4)])
+        assert again.edit_start_seconds == 0.0
+        assert again.edit_end_seconds is None
+        assert again.edit_segments == [seg(contrast=1.4)]  # not carried over from the first trim
+
+    def test_the_recorded_edit_values_persist_across_a_restart(self, h):
+        first = h.runner()
+        job = self._completed(h, first)
+        first.trim_job(
+            job.id, start_seconds=0.5, end_seconds=1.5,
+            segments=[seg(brightness=20.0, contrast=1.4, saturation=0.5)],
+        )
+
+        second = h.runner()
+        restored = second.get_job(job.id)
+        assert restored.edit_start_seconds == 0.5
+        assert restored.edit_end_seconds == 1.5
+        assert restored.edit_segments == [seg(brightness=20.0, contrast=1.4, saturation=0.5)]
+
+    def test_a_multi_section_edit_persists_across_a_restart(self, h):
+        first = h.runner()
+        job = self._completed(h, first)
+        sections = [seg(brightness=20.0, end_seconds=0.5), seg(contrast=1.4)]
+        first.trim_job(job.id, start_seconds=0.0, end_seconds=None, segments=sections)
+
+        second = h.runner()
+        restored = second.get_job(job.id)
+        assert restored.edit_segments == sections
+
+    def test_restore_resets_the_recorded_edit_values_too(self, h):
+        r = h.runner()
+        job = self._completed(h, r)
+        r.trim_job(
+            job.id, start_seconds=0.5, end_seconds=1.5,
+            segments=[seg(brightness=20.0, contrast=1.4, saturation=0.5)],
+        )
+        restored = r.restore_job_video(job.id)
+        assert restored.edit_start_seconds == 0.0
+        assert restored.edit_end_seconds is None
+        assert restored.edit_segments == []
+
+    def test_a_never_edited_job_has_neutral_recorded_values(self, h):
+        r = h.runner()
+        job = self._completed(h, r)
+        assert job.edit_start_seconds == 0.0
+        assert job.edit_end_seconds is None
+        assert job.edit_segments == []
 
     def test_trimming_again_is_relative_to_the_original_not_the_last_trim(self, h):
         r = h.runner()
@@ -662,7 +746,7 @@ class TestTrimming:
 
         r = h.runner()
         job = self._completed(h, r)
-        graded = r.trim_job(job.id, start_seconds=0.0, end_seconds=None, brightness=80.0)
+        graded = r.trim_job(job.id, start_seconds=0.0, end_seconds=None, segments=[seg(brightness=80.0)])
         with av.open(graded.output_path) as c:
             graded_level = int(next(c.decode(c.streams.video[0])).to_ndarray(format="rgb24")[0, 0, 0])
         assert graded_level > 60  # the grade visibly lightened the first frame (source level 0)

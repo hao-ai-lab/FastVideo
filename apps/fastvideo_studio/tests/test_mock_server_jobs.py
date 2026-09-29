@@ -241,6 +241,11 @@ def test_an_unknown_merged_file_is_not_found(client, filename):
 # --- trimming ------------------------------------------------------------------
 
 
+def seg(brightness=0.0, contrast=1.0, saturation=1.0, end_seconds=None):
+    """One razor-cut section dict, as the trim API expects."""
+    return {"end_seconds": end_seconds, "brightness": brightness, "contrast": contrast, "saturation": saturation}
+
+
 def test_trims_a_completed_jobs_video_by_resizing_its_frame_count(client):
     job = _completed(client, "clip")
     mock_server._jobs[job["id"]]["num_frames"] = 240  # 10s @ 24fps
@@ -304,24 +309,103 @@ def test_trim_accepts_color_parameters(client):
     mock_server._jobs[job["id"]]["fps"] = 24
     res = client.post(
         f"/api/jobs/{job['id']}/trim",
-        json={"start_seconds": 0.0, "end_seconds": 5.0, "brightness": 20.0, "contrast": 1.5, "saturation": 0.5},
+        json={"start_seconds": 0.0, "end_seconds": 5.0, "segments": [seg(brightness=20.0, contrast=1.5, saturation=0.5)]},
     )
     assert res.status_code == 200
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"start_seconds": 0.0, "brightness": 200.0},
-        {"start_seconds": 0.0, "contrast": -1.0},
-        {"start_seconds": 0.0, "saturation": 10.0},
-    ],
-)
-def test_trim_refuses_an_out_of_range_color_value(client, body):
+def test_a_never_edited_job_reports_neutral_edit_values(client):
+    job = _completed(client, "clip")
+    body = client.get(f"/api/jobs/{job['id']}").json()
+    assert body["edit_start_seconds"] == 0.0
+    assert body["edit_end_seconds"] is None
+    assert body["edit_segments"] == []
+
+
+def test_trim_response_records_the_applied_values(client):
     job = _completed(client, "clip")
     mock_server._jobs[job["id"]]["num_frames"] = 240
     mock_server._jobs[job["id"]]["fps"] = 24
+    sections = [seg(brightness=20.0, contrast=1.5, saturation=0.5)]
+    res = client.post(
+        f"/api/jobs/{job['id']}/trim",
+        json={"start_seconds": 1.0, "end_seconds": 3.0, "segments": sections},
+    )
+    body = res.json()
+    assert body["edit_start_seconds"] == 1.0
+    assert body["edit_end_seconds"] == 3.0
+    assert body["edit_segments"] == sections
+    # And getting the job again afterwards reflects the same recorded values.
+    again = client.get(f"/api/jobs/{job['id']}").json()
+    assert again["edit_segments"] == sections
+
+
+def test_trim_response_records_multiple_sections(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    sections = [seg(brightness=20.0, end_seconds=2.0), seg(contrast=1.5)]
+    res = client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 0.0, "end_seconds": 5.0,
+                                                            "segments": sections})
+    assert res.json()["edit_segments"] == sections
+
+
+def test_restore_resets_the_recorded_edit_values(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    client.post(
+        f"/api/jobs/{job['id']}/trim",
+        json={"start_seconds": 1.0, "end_seconds": 3.0, "segments": [seg(brightness=20.0, contrast=1.5, saturation=0.5)]},
+    )
+    res = client.post(f"/api/jobs/{job['id']}/restore-video")
+    body = res.json()
+    assert body["edit_start_seconds"] == 0.0
+    assert body["edit_end_seconds"] is None
+    assert body["edit_segments"] == []
+
+
+@pytest.mark.parametrize(
+    "segments",
+    [
+        [seg(brightness=200.0)],
+        [seg(contrast=-1.0)],
+        [seg(saturation=10.0)],
+    ],
+)
+def test_trim_refuses_an_out_of_range_color_value(client, segments):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    body = {"start_seconds": 0.0, "segments": segments}
     assert client.post(f"/api/jobs/{job['id']}/trim", json=body).status_code == 400
+
+
+def test_an_empty_section_list_is_not_an_error_matching_trim_py(client):
+    # Same as sending no `segments` at all -- defaults to one neutral section.
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    res = client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 0.0, "segments": []})
+    assert res.status_code == 200
+
+
+def test_trim_refuses_a_non_last_open_ended_section(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    body = {"start_seconds": 0.0, "segments": [seg(), seg(end_seconds=2.0)]}
+    res = client.post(f"/api/jobs/{job['id']}/trim", json=body)
+    assert res.status_code == 400 and "open-ended" in res.json()["detail"]
+
+
+def test_trim_refuses_sections_out_of_order(client):
+    job = _completed(client, "clip")
+    mock_server._jobs[job["id"]]["num_frames"] = 240
+    mock_server._jobs[job["id"]]["fps"] = 24
+    body = {"start_seconds": 0.0, "segments": [seg(end_seconds=3.0), seg(end_seconds=2.0), seg()]}
+    res = client.post(f"/api/jobs/{job['id']}/trim", json=body)
+    assert res.status_code == 400 and "increasing order" in res.json()["detail"]
 
 
 def test_trim_refuses_an_unfinished_job(client):

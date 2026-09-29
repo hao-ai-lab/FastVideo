@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -935,6 +935,13 @@ describe('editing a clip\'s video', () => {
     return screen.findByRole('dialog');
   };
   const applyButton = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: /Apply|Applying/ });
+  // section is 1-based, matching the "Section N" label shown in the dialog.
+  const sectionSlider = (dialog: HTMLElement, section: number, label: string) =>
+    within(dialog).getByRole('slider', { name: `Section ${section} ${label}` });
+  const press = (el: HTMLElement, key: string, times = 1) => {
+    for (let i = 0; i < times; i++) fireEvent.keyDown(el, { key });
+  };
+  const neutralSection = { end_seconds: null, brightness: 0, contrast: 1, saturation: 1 };
 
   beforeEach(() => {
     vi.mocked(trimJob).mockReset();
@@ -951,7 +958,7 @@ describe('editing a clip\'s video', () => {
     expect(within(document.getElementById('clip-wolf-2') as HTMLElement).queryByRole('button', { name: 'Edit video' })).not.toBeInTheDocument();
   });
 
-  it('opens with the full current range and neutral color, and shows the current duration', async () => {
+  it('opens with the full current range and one neutral section, and shows the current duration', async () => {
     const user = userEvent.setup();
     vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
     render(<ScenesPage />);
@@ -961,9 +968,77 @@ describe('editing a clip\'s video', () => {
     expect(within(dialog).getByText(/Currently 0:10\./)).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Start (seconds)')).toHaveValue(0);
     expect(within(dialog).getByLabelText('End (seconds, optional)')).toHaveValue(10);
-    expect(within(dialog).getByLabelText('Brightness')).toHaveValue(0);
-    expect(within(dialog).getByLabelText('Contrast')).toHaveValue(1);
-    expect(within(dialog).getByLabelText('Saturation')).toHaveValue(1);
+    expect(within(dialog).getByText('Section 1 · 0:00–end')).toBeInTheDocument();
+    expect(sectionSlider(dialog, 1, 'Brightness')).toHaveAttribute('aria-valuenow', '0');
+    expect(sectionSlider(dialog, 1, 'Contrast')).toHaveAttribute('aria-valuenow', '1');
+    expect(sectionSlider(dialog, 1, 'Saturation')).toHaveAttribute('aria-valuenow', '1');
+    expect(within(dialog).queryByRole('button', { name: 'Merge with next' })).not.toBeInTheDocument();
+  });
+
+  it('reopening a previously edited clip shows the range and sections that produced it, not neutral', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([
+      finished(1, {
+        edit_start_seconds: 1,
+        edit_end_seconds: 3,
+        edit_segments: [{ end_seconds: null, brightness: 20, contrast: 1.4, saturation: 0.5 }],
+      }),
+    ]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    expect(within(dialog).getByLabelText('Start (seconds)')).toHaveValue(1);
+    expect(within(dialog).getByLabelText('End (seconds, optional)')).toHaveValue(3);
+    expect(sectionSlider(dialog, 1, 'Brightness')).toHaveAttribute('aria-valuenow', '20');
+    expect(sectionSlider(dialog, 1, 'Contrast')).toHaveAttribute('aria-valuenow', '1.4');
+    expect(sectionSlider(dialog, 1, 'Saturation')).toHaveAttribute('aria-valuenow', '0.5');
+  });
+
+  it('reopening a multi-section edit shows every section, independently', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([
+      finished(1, {
+        edit_segments: [
+          { end_seconds: 4, brightness: 20, contrast: 1, saturation: 1 },
+          { end_seconds: null, brightness: 0, contrast: 1.4, saturation: 1 },
+        ],
+      }),
+    ]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    expect(within(dialog).getByText('Section 1 · 0:00–0:04')).toBeInTheDocument();
+    expect(within(dialog).getByText('Section 2 · 0:04–end')).toBeInTheDocument();
+    expect(sectionSlider(dialog, 1, 'Brightness')).toHaveAttribute('aria-valuenow', '20');
+    expect(sectionSlider(dialog, 2, 'Contrast')).toHaveAttribute('aria-valuenow', '1.4');
+  });
+
+  it('restoring resets the fields to one neutral section and the full length', async () => {
+    const user = userEvent.setup();
+    vi.mocked(restoreJobVideo).mockResolvedValue(finished(1, { num_frames: 240 })); // back to the original 10s, neutral edit_*
+    vi.mocked(getJobsList).mockResolvedValue([
+      finished(1, {
+        num_frames: 48,
+        edit_start_seconds: 1,
+        edit_end_seconds: 3,
+        edit_segments: [{ end_seconds: null, brightness: 20, contrast: 1.4, saturation: 0.5 }],
+      }),
+    ]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    expect(sectionSlider(dialog, 1, 'Brightness')).toHaveAttribute('aria-valuenow', '20');
+
+    await user.click(within(dialog).getByRole('button', { name: 'Restore original' }));
+
+    await waitFor(() => expect(sectionSlider(dialog, 1, 'Brightness')).toHaveAttribute('aria-valuenow', '0'));
+    expect(sectionSlider(dialog, 1, 'Contrast')).toHaveAttribute('aria-valuenow', '1');
+    expect(sectionSlider(dialog, 1, 'Saturation')).toHaveAttribute('aria-valuenow', '1');
+    expect(within(dialog).getByLabelText('Start (seconds)')).toHaveValue(0);
+    expect(within(dialog).getByLabelText('End (seconds, optional)')).toHaveValue(10);
   });
 
   it('applies the chosen range and reports it', async () => {
@@ -981,7 +1056,7 @@ describe('editing a clip\'s video', () => {
     await user.click(applyButton(dialog));
 
     await waitFor(() =>
-      expect(trimJob).toHaveBeenCalledWith('wolf-1', { startSeconds: 1, endSeconds: 3, brightness: 0, contrast: 1, saturation: 1 }),
+      expect(trimJob).toHaveBeenCalledWith('wolf-1', { startSeconds: 1, endSeconds: 3, segments: [neutralSection] }),
     );
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Applied: 0:01–0:03.'));
   });
@@ -994,17 +1069,187 @@ describe('editing a clip\'s video', () => {
     await screen.findByRole('heading', { name: 'wolf-lunch' });
 
     const dialog = await openEdit(user);
-    await user.clear(within(dialog).getByLabelText('Brightness'));
-    await user.type(within(dialog).getByLabelText('Brightness'), '20');
-    await user.clear(within(dialog).getByLabelText('Contrast'));
-    await user.type(within(dialog).getByLabelText('Contrast'), '1.4');
-    await user.clear(within(dialog).getByLabelText('Saturation'));
-    await user.type(within(dialog).getByLabelText('Saturation'), '0.5');
+    press(sectionSlider(dialog, 1, 'Brightness'), 'ArrowRight', 4); // step 5: 0 -> 20
+    press(sectionSlider(dialog, 1, 'Contrast'), 'ArrowRight', 4); // step 0.1: 1 -> 1.4
+    press(sectionSlider(dialog, 1, 'Saturation'), 'ArrowLeft', 5); // step 0.1: 1 -> 0.5
     await user.click(applyButton(dialog));
 
     await waitFor(() =>
-      expect(trimJob).toHaveBeenCalledWith('wolf-1', { startSeconds: 0, endSeconds: 10, brightness: 20, contrast: 1.4, saturation: 0.5 }),
+      expect(trimJob).toHaveBeenCalledWith('wolf-1', {
+        startSeconds: 0,
+        endSeconds: 10,
+        segments: [{ end_seconds: null, brightness: 20, contrast: 1.4, saturation: 0.5 }],
+      }),
     );
+  });
+
+  it('splitting at the current time creates two independently graded sections and applies both', async () => {
+    const user = userEvent.setup();
+    vi.mocked(trimJob).mockResolvedValue(finished(1));
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]); // 240 frames @ 24fps = 10s
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    const video = dialog.querySelector('video') as HTMLVideoElement;
+    video.currentTime = 4;
+    await user.click(within(dialog).getByRole('button', { name: 'Split at current time' }));
+
+    expect(within(dialog).getByText('Section 1 · 0:00–0:04')).toBeInTheDocument();
+    expect(within(dialog).getByText('Section 2 · 0:04–end')).toBeInTheDocument();
+
+    press(sectionSlider(dialog, 1, 'Brightness'), 'ArrowRight', 4); // -> 20
+    press(sectionSlider(dialog, 2, 'Contrast'), 'ArrowRight', 4); // -> 1.4
+    await user.click(applyButton(dialog));
+
+    await waitFor(() =>
+      expect(trimJob).toHaveBeenCalledWith('wolf-1', {
+        startSeconds: 0,
+        endSeconds: 10,
+        segments: [
+          { end_seconds: 4, brightness: 20, contrast: 1, saturation: 1 },
+          { end_seconds: null, brightness: 0, contrast: 1.4, saturation: 1 },
+        ],
+      }),
+    );
+  });
+
+  it('splitting too close to an existing edge is refused', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    const video = dialog.querySelector('video') as HTMLVideoElement;
+    video.currentTime = 0; // right at the (only) section's start edge
+    await user.click(within(dialog).getByRole('button', { name: 'Split at current time' }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(within(dialog).queryByText(/Section 2/)).not.toBeInTheDocument();
+  });
+
+  it('merging a section with the next removes the cut and keeps the first section\'s grade', async () => {
+    const user = userEvent.setup();
+    vi.mocked(trimJob).mockResolvedValue(finished(1));
+    vi.mocked(getJobsList).mockResolvedValue([
+      finished(1, {
+        edit_segments: [
+          { end_seconds: 4, brightness: 20, contrast: 1, saturation: 1 },
+          { end_seconds: null, brightness: 0, contrast: 1.4, saturation: 1 },
+        ],
+      }),
+    ]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Merge with next' }));
+
+    expect(within(dialog).queryByText(/Section 2/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Section 1 · 0:00–end')).toBeInTheDocument();
+    expect(sectionSlider(dialog, 1, 'Brightness')).toHaveAttribute('aria-valuenow', '20'); // the first section's grade won
+
+    await user.click(applyButton(dialog));
+    await waitFor(() =>
+      expect(trimJob).toHaveBeenCalledWith('wolf-1', {
+        startSeconds: 0,
+        endSeconds: 10,
+        segments: [{ end_seconds: null, brightness: 20, contrast: 1, saturation: 1 }],
+      }),
+    );
+  });
+
+  it('stepping frame by frame moves the preview by exactly one frame, clamped to the clip', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]); // 240 frames @ 24fps = 10s
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    const video = dialog.querySelector('video') as HTMLVideoElement;
+    Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+    video.currentTime = 5;
+
+    await user.click(within(dialog).getByRole('button', { name: /Next frame/ }));
+    expect(video.currentTime).toBeCloseTo(5 + 1 / 24, 5);
+
+    await user.click(within(dialog).getByRole('button', { name: /Previous frame/ }));
+    await user.click(within(dialog).getByRole('button', { name: /Previous frame/ }));
+    expect(video.currentTime).toBeCloseTo(5 - 1 / 24, 5);
+
+    video.currentTime = 0;
+    await user.click(within(dialog).getByRole('button', { name: /Previous frame/ }));
+    expect(video.currentTime).toBe(0); // clamped, doesn't go negative
+
+    video.currentTime = 10;
+    await user.click(within(dialog).getByRole('button', { name: /Next frame/ }));
+    expect(video.currentTime).toBe(10); // clamped to the clip's length
+  });
+
+  it('the frame readout updates as the preview moves', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([finished(1)]); // 240 frames @ 24fps = 10s
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    expect(within(dialog).getByText('Frame 0 · 0.00s')).toBeInTheDocument();
+
+    const video = dialog.querySelector('video') as HTMLVideoElement;
+    video.currentTime = 5;
+    fireEvent(video, new Event('timeupdate')); // what a real browser fires as currentTime changes
+
+    expect(within(dialog).getByText('Frame 120 · 5.00s')).toBeInTheDocument();
+  });
+
+  it('previewing a section seeks to its start immediately once metadata is loaded', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([
+      finished(1, {
+        edit_segments: [
+          { end_seconds: 4, brightness: 20, contrast: 1, saturation: 1 },
+          { end_seconds: null, brightness: 0, contrast: 1.4, saturation: 1 },
+        ],
+      }),
+    ]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    const video = dialog.querySelector('video') as HTMLVideoElement;
+    Object.defineProperty(video, 'readyState', { value: 4, configurable: true }); // HAVE_ENOUGH_DATA
+
+    await user.click(within(dialog).getAllByRole('button', { name: 'Preview' })[1]); // section 2: 0:04-end
+    expect(video.currentTime).toBe(4); // starts at 4
+
+    await user.click(within(dialog).getAllByRole('button', { name: 'Preview' })[0]); // section 1: 0:00-0:04
+    expect(video.currentTime).toBe(0); // starts at 0
+  });
+
+  it('previewing a section before metadata has loaded defers the seek instead of dropping it', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getJobsList).mockResolvedValue([
+      finished(1, {
+        edit_segments: [
+          { end_seconds: 4, brightness: 20, contrast: 1, saturation: 1 },
+          { end_seconds: null, brightness: 0, contrast: 1.4, saturation: 1 },
+        ],
+      }),
+    ]);
+    render(<ScenesPage />);
+    await screen.findByRole('heading', { name: 'wolf-lunch' });
+
+    const dialog = await openEdit(user);
+    const video = dialog.querySelector('video') as HTMLVideoElement;
+    Object.defineProperty(video, 'readyState', { value: 0, configurable: true }); // HAVE_NOTHING -- not loaded yet
+
+    await user.click(within(dialog).getAllByRole('button', { name: 'Preview' })[1]); // section 2 starts at 4
+    expect(video.currentTime).toBe(0); // not applied yet -- would be silently dropped by a real browser here
+
+    Object.defineProperty(video, 'readyState', { value: 1, configurable: true });
+    fireEvent(video, new Event('loadedmetadata'));
+    expect(video.currentTime).toBe(4); // applied once metadata is actually available
   });
 
   it('leaving the end blank keeps to the end of the clip', async () => {
@@ -1021,7 +1266,7 @@ describe('editing a clip\'s video', () => {
     await user.click(applyButton(dialog));
 
     await waitFor(() =>
-      expect(trimJob).toHaveBeenCalledWith('wolf-1', { startSeconds: 2, endSeconds: undefined, brightness: 0, contrast: 1, saturation: 1 }),
+      expect(trimJob).toHaveBeenCalledWith('wolf-1', { startSeconds: 2, endSeconds: undefined, segments: [neutralSection] }),
     );
   });
 
@@ -1055,21 +1300,21 @@ describe('editing a clip\'s video', () => {
   });
 
   it.each([
-    ['Brightness', '150', 'Brightness must be between -100 and 100.'],
-    ['Contrast', '5', 'Contrast must be between 0 and 3.'],
-    ['Saturation', '-1', 'Saturation must be between 0 and 3.'],
-  ])('disables Apply for an out-of-range %s and explains why', async (label, value, message) => {
+    ['Brightness', -100, 100],
+    ['Contrast', 0, 3],
+    ['Saturation', 0, 3],
+  ])('cannot push the %s slider past its bounds', async (label, min, max) => {
     const user = userEvent.setup();
     vi.mocked(getJobsList).mockResolvedValue([finished(1)]);
     render(<ScenesPage />);
     await screen.findByRole('heading', { name: 'wolf-lunch' });
 
     const dialog = await openEdit(user);
-    await user.clear(within(dialog).getByLabelText(label));
-    await user.type(within(dialog).getByLabelText(label), value);
-
-    expect(within(dialog).getByText(message)).toBeInTheDocument();
-    expect(applyButton(dialog)).toBeDisabled();
+    const slider = sectionSlider(dialog, 1, label);
+    press(slider, 'End');
+    expect(slider).toHaveAttribute('aria-valuenow', String(max));
+    press(slider, 'Home');
+    expect(slider).toHaveAttribute('aria-valuenow', String(min));
   });
 
   it('restores the original video and reports it', async () => {

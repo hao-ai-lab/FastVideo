@@ -51,8 +51,8 @@ from fastvideo_studio.database import Database, default_settings_dict
 from fastvideo_studio.job_queue import circular_dependency, dependencies, plan_dispatch
 from fastvideo_studio.merge import MergeError, merge_jobs, merged_path
 from fastvideo_studio.trim import BRIGHTNESS_RANGE, CONTRAST_RANGE, SATURATION_RANGE
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, MergeSceneRequest, QueueJobsRequest,
-                                     SettingsUpdate, TrimRequest, UpdateCaptionRequest,
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, GradeSegment, MergeSceneRequest,
+                                     QueueJobsRequest, SettingsUpdate, TrimRequest, UpdateCaptionRequest,
                                      model_label)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -279,6 +279,9 @@ def _new_job_dict(req: CreateJobRequest) -> dict[str, Any]:
         "error": None,
         "output_path": None,
         "log_file_path": None,
+        "edit_start_seconds": 0.0,
+        "edit_end_seconds": None,
+        "edit_segments": [],
         "progress": 0.0,
         "progress_msg": "",
         "phase": "pending",
@@ -828,6 +831,29 @@ def _check_grade_range(name: str, value: float, bounds: tuple[float, float]) -> 
         raise HTTPException(status_code=400, detail=f"{name} must be between {low:g} and {high:g}, got {value:g}.")
 
 
+def _check_segments(segments: list[GradeSegment]) -> None:
+    """Structural checks only (ordering, open-endedness, color bounds) -- the mock has no
+    frames to count, so it doesn't reproduce trim.py's frame-rounding/coverage checks.
+
+    An empty list isn't an error here either, matching trim.py: it defaults to
+    one neutral section covering everything (Pydantic's own default_factory
+    already supplies that when the field is omitted, but an explicit "segments":
+    [] reaches here as a real empty list).
+    """
+    prev_end = 0.0
+    for i, s in enumerate(segments):
+        _check_grade_range("brightness", s.brightness, BRIGHTNESS_RANGE)
+        _check_grade_range("contrast", s.contrast, CONTRAST_RANGE)
+        _check_grade_range("saturation", s.saturation, SATURATION_RANGE)
+        if s.end_seconds is None:
+            if i != len(segments) - 1:
+                raise HTTPException(status_code=400, detail="Only the last section can be open-ended.")
+        else:
+            if s.end_seconds <= prev_end:
+                raise HTTPException(status_code=400, detail="Sections must be in increasing order.")
+            prev_end = s.end_seconds
+
+
 @app.post("/api/jobs/{job_id}/trim")
 def trim_job(job_id: str, req: TrimRequest) -> dict[str, Any]:
     """Stand-in for the real route: no video to cut or grade, so just resize num_frames to match."""
@@ -835,9 +861,7 @@ def trim_job(job_id: str, req: TrimRequest) -> dict[str, Any]:
         job = _trimmable_job(job_id)
         if req.start_seconds < 0:
             raise HTTPException(status_code=400, detail="The start of the range can't be negative.")
-        _check_grade_range("brightness", req.brightness, BRIGHTNESS_RANGE)
-        _check_grade_range("contrast", req.contrast, CONTRAST_RANGE)
-        _check_grade_range("saturation", req.saturation, SATURATION_RANGE)
+        _check_segments(req.segments)
         fps = job.get("fps") or 24
         original_frames = job.setdefault(_ORIGINAL_NUM_FRAMES_KEY, job["num_frames"])
         duration = original_frames / fps
@@ -845,6 +869,11 @@ def trim_job(job_id: str, req: TrimRequest) -> dict[str, Any]:
         if end <= req.start_seconds:
             raise HTTPException(status_code=400, detail="The end of the range must come after the start.")
         job["num_frames"] = max(1, round((end - req.start_seconds) * fps))
+        # Recorded so the dialog can reopen showing what's actually applied,
+        # like the real server's edit_* job fields.
+        job["edit_start_seconds"] = req.start_seconds
+        job["edit_end_seconds"] = req.end_seconds
+        job["edit_segments"] = [s.model_dump() for s in req.segments]
         return _public_job(job)
 
 
@@ -856,6 +885,9 @@ def restore_job_video(job_id: str) -> dict[str, Any]:
         if _ORIGINAL_NUM_FRAMES_KEY not in job:
             raise HTTPException(status_code=404, detail="This job has not been edited.")
         job["num_frames"] = job.pop(_ORIGINAL_NUM_FRAMES_KEY)
+        job["edit_start_seconds"] = 0.0
+        job["edit_end_seconds"] = None
+        job["edit_segments"] = []
         return _public_job(job)
 
 

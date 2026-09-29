@@ -13,6 +13,13 @@ each undo the other's work the moment they ran -- grading, then trimming,
 would silently discard the grade, because the trim would re-cut the original
 as if the grade had never happened. Rendering everything from one function
 each time is what lets adjusting either one leave the other in place.
+
+Color grading is per razor-cut section, not the whole clip at once: the kept
+range is split at zero or more cut points into contiguous sections (no
+reordering, no gaps), each with its own brightness/contrast/saturation. A
+plain range trim with no cuts is just the one-section case. Audio is one
+continuous track regardless -- cuts only change which grade a video frame
+gets, they don't touch the audio.
 """
 
 from __future__ import annotations
@@ -72,16 +79,73 @@ def _apply_grade(array: np.ndarray, brightness: float, contrast: float, saturati
     return np.clip(pixels, 0, 255).astype(np.uint8)
 
 
+#: A neutral single section covering the whole kept range -- what a never-edited
+#: clip (or a call that doesn't care about sections) gets by default.
+DEFAULT_SEGMENTS: list[dict[str, Any]] = [{"end_seconds": None, "brightness": 0.0, "contrast": 1.0, "saturation": 1.0}]
+
+
+class _Segment:
+    """One validated, frame-indexed section: [start_frame, end_frame) plus its grade."""
+
+    __slots__ = ("start_frame", "end_frame", "brightness", "contrast", "saturation")
+
+    def __init__(self, start_frame: int, end_frame: int, brightness: float, contrast: float, saturation: float):
+        self.start_frame = start_frame
+        self.end_frame = end_frame
+        self.brightness = brightness
+        self.contrast = contrast
+        self.saturation = saturation
+
+    @property
+    def graded(self) -> bool:
+        return self.brightness != 0.0 or self.contrast != 1.0 or self.saturation != 1.0
+
+
+def _normalize_segments(segments: list[dict[str, Any]] | None, kept_frames: int, fps: float) -> list[_Segment]:
+    """Validate a razor-cut section list and convert each boundary to a frame index.
+
+    Sections are contiguous and cover the whole kept range in order -- there's
+    no reordering or gaps, only where to cut and what to grade each side. Cut
+    points are seconds into the *kept* (already start/end-trimmed) range, i.e.
+    the same timeline the preview video itself plays, not the original file's.
+    """
+    segments = segments or DEFAULT_SEGMENTS
+
+    out: list[_Segment] = []
+    start_frame = 0
+    prev_end_seconds = 0.0
+    for i, seg in enumerate(segments):
+        is_last = i == len(segments) - 1
+        end_seconds = seg.get("end_seconds")
+        brightness = _clamp_range("brightness", float(seg.get("brightness", 0.0)), BRIGHTNESS_RANGE)
+        contrast = _clamp_range("contrast", float(seg.get("contrast", 1.0)), CONTRAST_RANGE)
+        saturation = _clamp_range("saturation", float(seg.get("saturation", 1.0)), SATURATION_RANGE)
+        if end_seconds is None:
+            if not is_last:
+                raise ValueError("Only the last section can be open-ended.")
+            end_frame = kept_frames
+        else:
+            if end_seconds <= prev_end_seconds:
+                raise ValueError("Sections must be in increasing order.")
+            end_frame = min(kept_frames, round(end_seconds * fps))
+            prev_end_seconds = end_seconds
+        if end_frame <= start_frame:
+            raise ValueError("A section is too short to keep any frames.")
+        out.append(_Segment(start_frame, end_frame, brightness, contrast, saturation))
+        start_frame = end_frame
+    if start_frame < kept_frames:
+        raise ValueError("The sections must cover the whole clip; the last one can't end early.")
+    return out
+
+
 def _render_edit(
     video_path: str,
     out_path: str,
     start_seconds: float,
     end_seconds: float | None,
-    brightness: float,
-    contrast: float,
-    saturation: float,
+    segments: list[dict[str, Any]] | None,
 ) -> int:
-    """Re-encode [``start_seconds``, ``end_seconds``) of ``video_path`` to ``out_path``, color-adjusted.
+    """Re-encode [``start_seconds``, ``end_seconds``) of ``video_path`` to ``out_path``, graded per section.
 
     Re-encoded rather than stream-copied, for a frame-accurate cut regardless
     of where the source's keyframes happen to fall. Returns the frame count kept.
@@ -92,10 +156,6 @@ def _render_edit(
         raise ValueError("The start of the range can't be negative.")
     if end_seconds is not None and end_seconds <= start_seconds:
         raise ValueError("The end of the range must come after the start.")
-    _clamp_range("brightness", brightness, BRIGHTNESS_RANGE)
-    _clamp_range("contrast", contrast, CONTRAST_RANGE)
-    _clamp_range("saturation", saturation, SATURATION_RANGE)
-    graded = brightness != 0.0 or contrast != 1.0 or saturation != 1.0
 
     with av.open(video_path) as src:
         video_stream = src.streams.video[0]
@@ -117,11 +177,17 @@ def _render_edit(
     if not kept:
         raise ValueError("That range keeps no frames.")
     # Audio is cut to the same frame-granular window as the video, not the raw
-    # requested seconds, so the two tracks stay aligned.
+    # requested seconds, so the two tracks stay aligned. Razor cuts only affect
+    # which grade a frame gets, not the audio, which stays one continuous track.
     kept_audio = [f for f in audio_frames if f.time is not None and start_i / fps <= f.time < end_i / fps]
+    section_list = _normalize_segments(segments, len(kept), fps)
 
     tmp_path = f"{out_path}.tmp.mp4"
-    with av.open(tmp_path, mode="w") as out:
+    # movflags=faststart puts the moov atom (duration, seek table) at the front of
+    # the file instead of the end -- without it, a browser has to reach nearly the
+    # end of the file just to read the video's metadata, which is painfully slow
+    # over a network filesystem.
+    with av.open(tmp_path, mode="w", options={"movflags": "faststart"}) as out:
         out_stream = out.add_stream("h264", rate=round(fps))
         out_stream.width, out_stream.height = kept[0].width, kept[0].height
         out_stream.pix_fmt = "yuv420p"
@@ -144,9 +210,14 @@ def _render_edit(
         # muxed container's frame-rate metadata comes out wrong (see frames.py's
         # save_last_clip, which hit exactly this).
         frame_time_base = Fraction(1, round(fps))
+        section_i = 0
         for i, frame in enumerate(kept):
-            if graded:
-                array = _apply_grade(frame.to_ndarray(format="rgb24"), brightness, contrast, saturation)
+            while i >= section_list[section_i].end_frame:
+                section_i += 1
+            section = section_list[section_i]
+            if section.graded:
+                array = _apply_grade(frame.to_ndarray(format="rgb24"), section.brightness, section.contrast,
+                                      section.saturation)
                 frame = av.VideoFrame.from_ndarray(array, format="rgb24")
             frame.pts = i
             frame.time_base = frame_time_base
@@ -181,11 +252,16 @@ def trim_video(
     job: Any,
     start_seconds: float = 0.0,
     end_seconds: float | None = None,
-    brightness: float = 0.0,
-    contrast: float = 1.0,
-    saturation: float = 1.0,
+    segments: list[dict[str, Any]] | None = None,
 ) -> tuple[str, int]:
-    """Cut ``job``'s video to [``start_seconds``, ``end_seconds``) and adjust its color.
+    """Cut ``job``'s video to [``start_seconds``, ``end_seconds``) and grade it section by section.
+
+    ``segments`` is an ordered, contiguous list of razor-cut sections covering
+    the whole kept range -- each a ``{"end_seconds", "brightness", "contrast",
+    "saturation"}`` dict, ``end_seconds`` being seconds into the *kept* range
+    (only the last section's may be ``None``, meaning to the end). Omitted or
+    empty defaults to one neutral section covering everything, i.e. what a
+    plain range trim with no grading looks like.
 
     Always renders from the untouched original with this *full* set of
     parameters, so trimming and grading compose -- adjusting one doesn't
@@ -204,7 +280,7 @@ def trim_video(
 
     edited_path = os.path.join(job_dir, EDITED_FILENAME)
     try:
-        kept = _render_edit(original_path, edited_path, start_seconds, end_seconds, brightness, contrast, saturation)
+        kept = _render_edit(original_path, edited_path, start_seconds, end_seconds, segments)
     except FrameError:
         raise
     except Exception as e:
