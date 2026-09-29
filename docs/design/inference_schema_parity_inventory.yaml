@@ -107,6 +107,7 @@ surfaces:
       moba_config: "Derived runtime config loaded from moba_config_path."
       model_paths: "Runtime bookkeeping."
       model_loaded: "Runtime bookkeeping."
+      enable_streaming_ipc_queues: "Executor plumbing; StreamingVideoGenerator sets it before workers spawn."
 
   pipeline_config_base:
     moved:
