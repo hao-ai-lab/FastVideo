@@ -120,3 +120,17 @@ def test_vace_fp32_time_embedding_casts_to_bf16_context():
 
     ordinary = WanTimeTextImageEmbedding(dim=16, time_freq_dim=8, text_embed_dim=16)
     assert not ordinary.cast_temb_to_context_dtype
+
+
+def test_vace_computes_timestep_frequencies_on_input_device():
+    from fastvideo.layers.visual_embedding import timestep_embedding
+    from fastvideo.models.wan.transformer import WanTimeTextImageEmbedding
+
+    config = _tiny_config(AttentionBackendEnum.TORCH_SDPA)
+    with _component_attention_backend_scope(AttentionBackendEnum.TORCH_SDPA, component="transformer"):
+        model = WanVACETransformer3DModel(config, hf_config={})
+    assert model.condition_embedder.time_embedder.freqs_on_input_device
+    assert not WanTimeTextImageEmbedding(dim=16, time_freq_dim=8, text_embed_dim=16).time_embedder.freqs_on_input_device
+
+    t = torch.tensor([968.73])
+    assert torch.equal(timestep_embedding(t, 256), timestep_embedding(t, 256, freqs_on_input_device=True))
