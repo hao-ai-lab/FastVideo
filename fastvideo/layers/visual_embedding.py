@@ -115,6 +115,7 @@ class TimestepEmbedder(nn.Module):
         max_period=10000,
         dtype=None,
         freq_dtype=torch.float32,
+        freqs_on_input_device: bool = False,
         prefix: str = "",
     ):
         super().__init__()
@@ -123,10 +124,14 @@ class TimestepEmbedder(nn.Module):
 
         self.mlp = MLP(frequency_embedding_size, hidden_size, hidden_size, act_type=act_layer, dtype=dtype)
         self.freq_dtype = freq_dtype
+        self.freqs_on_input_device = freqs_on_input_device
 
     def forward(self, t: torch.Tensor, timestep_seq_len: int | None = None) -> torch.Tensor:
-        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period,
-                                    dtype=self.freq_dtype).to(self.mlp.fc_in.weight.dtype)
+        t_freq = timestep_embedding(t,
+                                    self.frequency_embedding_size,
+                                    self.max_period,
+                                    dtype=self.freq_dtype,
+                                    freqs_on_input_device=self.freqs_on_input_device).to(self.mlp.fc_in.weight.dtype)
         if timestep_seq_len is not None:
             t_freq = t_freq.unflatten(0, (1, timestep_seq_len))
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
@@ -137,7 +142,8 @@ class TimestepEmbedder(nn.Module):
 def timestep_embedding(t: torch.Tensor,
                        dim: int,
                        max_period: int = 10000,
-                       dtype: torch.dtype = torch.float32) -> torch.Tensor:
+                       dtype: torch.dtype = torch.float32,
+                       freqs_on_input_device: bool = False) -> torch.Tensor:
     """
     Create sinusoidal timestep embeddings.
     
@@ -145,12 +151,17 @@ def timestep_embedding(t: torch.Tensor,
         t: Tensor of shape [B] with timesteps
         dim: Embedding dimension
         max_period: Controls the minimum frequency of the embeddings
+        freqs_on_input_device: Compute ``exp`` on ``t.device`` (as Diffusers does)
+            instead of the CPU. CPU and CUDA ``exp`` differ by an ulp, which is
+            enough to flip BF16 rounding of the modulation at fractional timesteps.
         
     Returns:
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) / half).to(device=t.device)
+    freq_device = t.device if freqs_on_input_device else None
+    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype, device=freq_device) /
+                      half).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
