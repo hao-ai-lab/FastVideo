@@ -83,6 +83,8 @@ class InputValidationStage(PipelineStage):
         if batch.do_classifier_free_guidance and batch.guidance_scale <= 0:
             raise ValueError(f"Guidance scale must be positive, but got {batch.guidance_scale}")
 
+        fastvideo_args.pipeline_config.validate_request_inputs(batch)
+
         # for i2v, get image from image_path
         # @TODO(Wei) hard-coded for wan2.2 5b ti2v for now. Should put this in image_encoding stage
         if batch.image_path is not None:

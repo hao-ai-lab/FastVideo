@@ -3,6 +3,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 import torch
 
@@ -306,9 +307,21 @@ class FastWan2_2_TI2V_5B_FullAttn_Config(FastWan2_2_TI2V_5B_Config):
         if workload != "t2v":
             raise ValueError(f"FastWan2.2-TI2V-5B-FullAttn does not support workload type {workload!r}; "
                              "supported workload: 't2v'.")
+        # Overrides such as FastVideoArgs.from_kwargs(ti2v_task=True) are
+        # applied after __post_init__, so re-check the resulting value here.
+        # WanDMDPipeline never prepares the first-frame latent TI2V needs.
+        if self.ti2v_task:
+            raise ValueError("FastWan2.2-TI2V-5B-FullAttn does not support ti2v_task=True; "
+                             "it is a T2V-only checkpoint without first-frame conditioning.")
         if coerce_attn_backend(attention_backend) is AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             raise ValueError("FastWan2.2-TI2V-5B-FullAttn is incompatible with VIDEO_SPARSE_ATTN; "
                              "use a dense backend such as TORCH_SDPA or FLASH_ATTN, or automatic selection.")
+
+    def validate_request_inputs(self, batch: Any) -> None:
+        """Reject image conditioning instead of silently generating text-only video."""
+        if batch.image_path is not None or batch.pil_image is not None:
+            raise ValueError("FastWan2.2-TI2V-5B-FullAttn is T2V-only and does not accept an input image; "
+                             "remove image_path from the request.")
 
 
 @dataclass

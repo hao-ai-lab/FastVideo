@@ -108,6 +108,43 @@ def test_fullattn_rejects_before_loader(fullattn_identity, conflict, monkeypatch
     spy.assert_not_called()
 
 
+def test_fullattn_rejects_ti2v_override_before_loader(fullattn_identity, monkeypatch):
+    # ti2v_task is applied after the config's __post_init__, so the guard must
+    # check the resulting value rather than rely on __post_init__ forcing False.
+    spy = Mock(side_effect=AssertionError("Weights must not be loaded"))
+    monkeypatch.setattr(component_loader, "maybe_load_fsdp_model", spy)
+    with pytest.raises(ValueError, match="FullAttn.*ti2v_task"):
+        FastVideoArgs.from_kwargs(model_path=fullattn_identity, workload_type="t2v",
+                                  attention_backend="TORCH_SDPA", ti2v_task=True)
+    args = FastVideoArgs.from_kwargs(model_path=fullattn_identity, workload_type="t2v",
+                                     attention_backend="TORCH_SDPA")
+    args.pipeline_config.ti2v_task = True
+    with pytest.raises(ValueError, match="FullAttn.*ti2v_task"):
+        component_loader.PipelineComponentLoader.load_module("transformer", "unused", "diffusers", args)
+    spy.assert_not_called()
+
+
+@pytest.mark.parametrize("image_input", ["image_path", "pil_image"])
+def test_fullattn_request_rejects_image_before_loading_it(image_input, monkeypatch):
+    from PIL import Image
+
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+    from fastvideo.pipelines.stages import input_validation
+
+    load_spy = Mock(side_effect=AssertionError("The image must not be loaded"))
+    monkeypatch.setattr(input_validation, "load_image", load_spy)
+    monkeypatch.setattr(input_validation, "load_video", load_spy)
+    args = FastVideoArgs.from_kwargs(model_path=FULL, workload_type="t2v", attention_backend="TORCH_SDPA")
+    image = {"image_path": "first_frame.png", "pil_image": Image.new("RGB", (8, 8))}[image_input]
+    batch = ForwardBatch(data_type="video", prompt="a cat", seed=0, height=480, width=832, **{image_input: image})
+    with pytest.raises(ValueError, match="FullAttn.*input image"):
+        input_validation.InputValidationStage().forward(batch, args)
+    load_spy.assert_not_called()
+
+    text_only = ForwardBatch(data_type="video", prompt="a cat", seed=0, height=480, width=832)
+    assert input_validation.InputValidationStage().forward(text_only, args).pil_image is None
+
+
 @pytest.mark.parametrize("marker", [None, False, "true", 1])
 def test_sparse_manifest_keeps_original_route(tmp_path, marker):
     manifest = {"_class_name": "WanDMDPipeline", "_diffusers_version": "0.35.0"}
