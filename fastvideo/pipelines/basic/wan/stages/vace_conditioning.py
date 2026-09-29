@@ -32,21 +32,12 @@ class WanVACEContextStage(PipelineStage):
         super().__init__()
         self.vae = vae
 
-    @staticmethod
-    def _retrieve_latents(encoder_output: object) -> torch.Tensor:
-        mode = getattr(encoder_output, "mode", None)
-        if callable(mode):
-            return mode()
-        raise AttributeError("Could not access latents of provided encoder_output")
-
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         config = fastvideo_args.pipeline_config
         device = get_local_torch_device()
         vae_dtype = PRECISION_TO_TYPE[config.vae_precision]
-        vae_parameters = list(self.vae.parameters()) if hasattr(self.vae, "parameters") else []
-        original_device = vae_parameters[0].device if vae_parameters else device
+        original_device = next(self.vae.parameters()).device
         self.vae = self.vae.to(device)
-        offload = getattr(fastvideo_args, "vae_cpu_offload", False) and bool(vae_parameters)
 
         video = batch.video_latent.to(device=device, dtype=torch.float32)
         mask = batch.mask_video
@@ -61,7 +52,7 @@ class WanVACEContextStage(PipelineStage):
         # Match Diffusers WanVACEPipeline: keep packed control in VAE fp32 until the
         # denoising stage casts once to DiT dtype immediately before transformer.
         batch.vace_control_latents = torch.cat([conditioning_latents, mask_latents], dim=1).to(device=device)
-        if offload:
+        if fastvideo_args.vae_cpu_offload:
             self.vae = self.vae.to(original_device)
         return batch
 
@@ -74,7 +65,7 @@ class WanVACEContextStage(PipelineStage):
         return latent * scale.to(latent.device, latent.dtype)
 
     def _encode_latent(self, pixels: torch.Tensor, vae_dtype: torch.dtype) -> torch.Tensor:
-        encoded = self._retrieve_latents(self.vae.encode(pixels.to(dtype=vae_dtype)))
+        encoded = self.vae.encode(pixels.to(dtype=vae_dtype)).mode()
         return self._normalize_latent(encoded.float()).to(vae_dtype)
 
     def _prepare_video_latents(

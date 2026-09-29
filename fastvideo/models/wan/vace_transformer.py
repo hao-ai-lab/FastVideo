@@ -7,22 +7,19 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from fastvideo.attention import DistributedAttention
 from fastvideo.attention.selector import get_env_variable_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather_with_unpad,
                                                     sequence_model_parallel_shard)
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
-                                        ScaleResidualLayerNormScaleShift)
+from fastvideo.layers.layernorm import LayerNormScaleShift
 from fastvideo.layers.linear import ReplicatedLinear
-from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import PatchEmbed
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.wan.transformer import (WanI2VCrossAttention, WanT2VCrossAttention,
-                                              WanTimeTextImageEmbedding, WanTransformerBlock)
+from fastvideo.models.wan.transformer import WanTimeTextImageEmbedding, WanTransformerBlock
 from fastvideo.models.wan.vace_config import WanVACEVideoConfig
 from fastvideo.platforms import AttentionBackendEnum, current_platform
+
 
 class WanVACEMainBlock(WanTransformerBlock):
     """Wan main block with Diffusers VACE BF16 residual boundaries.
@@ -99,66 +96,42 @@ class WanVACEMainBlock(WanTransformerBlock):
         return (hidden_states.float() + ff_output.float() * c_gate_msa).to(orig_dtype)
 
 
-class WanVACETransformerBlock(nn.Module):
+class WanVACETransformerBlock(WanVACEMainBlock):
+    """VACE control block: a :class:`WanVACEMainBlock` over the control stream.
 
-    def __init__(self,
-                 dim: int,
-                 ffn_dim: int,
-                 num_heads: int,
-                 qk_norm: str = "rms_norm_across_heads",
-                 cross_attn_norm: bool = False,
-                 eps: float = 1e-6,
-                 added_kv_proj_dim: int | None = None,
-                 apply_input_projection: bool = False,
-                 apply_output_projection: bool = False,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
-                 prefix: str = "") -> None:
-        super().__init__()
-        self.proj_in = (ReplicatedLinear(dim, dim, prefix=f"{prefix}.proj_in")
+    Block 0 projects the control tokens and adds the main hidden states first;
+    every block emits a projected hint that is added to its paired main block.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        ffn_dim: int,
+        num_heads: int,
+        qk_norm: str,
+        cross_attn_norm: bool,
+        eps: float,
+        added_kv_proj_dim: int | None,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None,
+        apply_input_projection: bool = False,
+        quant_config=None,
+        prefix: str = "",
+    ) -> None:
+        super().__init__(dim,
+                         ffn_dim,
+                         num_heads,
+                         qk_norm,
+                         cross_attn_norm,
+                         eps,
+                         added_kv_proj_dim,
+                         supported_attention_backends,
+                         quant_config=quant_config,
+                         prefix=prefix)
+        self.proj_in = (ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.proj_in")
                         if apply_input_projection else None)
-        self.proj_out = (ReplicatedLinear(dim, dim, prefix=f"{prefix}.proj_out")
-                         if apply_output_projection else None)
+        self.proj_out = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.proj_out")
 
-        self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
-        self.to_q = ReplicatedLinear(dim, dim, bias=True, prefix=f"{prefix}.to_q")
-        self.to_k = ReplicatedLinear(dim, dim, bias=True, prefix=f"{prefix}.to_k")
-        self.to_v = ReplicatedLinear(dim, dim, bias=True, prefix=f"{prefix}.to_v")
-        self.to_out = ReplicatedLinear(dim, dim, bias=True, prefix=f"{prefix}.to_out")
-        self.attn1 = DistributedAttention(num_heads=num_heads,
-                                          head_size=dim // num_heads,
-                                          causal=False,
-                                          supported_attention_backends=supported_attention_backends,
-                                          prefix=f"{prefix}.attn1")
-        self.num_attention_heads = num_heads
-        if qk_norm == "rms_norm_across_heads":
-            self.norm_q = nn.RMSNorm(dim, eps=eps)
-            self.norm_k = nn.RMSNorm(dim, eps=eps)
-        else:
-            raise ValueError(f"Unsupported qk_norm for VACE: {qk_norm!r}")
-
-        self.attn2 = (WanI2VCrossAttention(dim, num_heads, qk_norm=qk_norm, eps=eps, prefix=f"{prefix}.attn2")
-                      if added_kv_proj_dim is not None else WanT2VCrossAttention(dim,
-                                                                                num_heads,
-                                                                                qk_norm=qk_norm,
-                                                                                eps=eps,
-                                                                                prefix=f"{prefix}.attn2"))
-        # Diffusers VACE uses torch RMSNorm in both attention branches.
-        # Keep this override local to VACE; ordinary Wan retains its existing norms.
-        self.attn2.norm_q = nn.RMSNorm(dim, eps=eps)
-        self.attn2.norm_k = nn.RMSNorm(dim, eps=eps)
-        if added_kv_proj_dim is not None:
-            self.attn2.norm_added_k = nn.RMSNorm(dim, eps=eps)
-        self.self_attn_residual_norm = ScaleResidualLayerNormScaleShift(dim,
-                                                                      norm_type="layer",
-                                                                      eps=eps,
-                                                                      elementwise_affine=True,
-                                                                      dtype=torch.float32,
-                                                                      compute_dtype=torch.float32)
-        self.norm3 = FP32LayerNorm(dim, eps, elementwise_affine=False)
-        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", prefix=f"{prefix}.ffn")
-        self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
-
-    def forward(
+    def forward(  # type: ignore[override]
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
@@ -166,46 +139,14 @@ class WanVACETransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         original_seq_len: int,
-    ) -> tuple[torch.Tensor | None, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if self.proj_in is not None:
-            if control_hidden_states.dtype == torch.bfloat16:
-                control_hidden_states = control_hidden_states.contiguous()
-            control_hidden_states, _ = self.proj_in(control_hidden_states)
+            control_hidden_states, _ = self.proj_in(control_hidden_states.contiguous())
             control_hidden_states = control_hidden_states + hidden_states
-
-        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-            self.scale_shift_table + temb.float()).chunk(6, dim=1)
-        orig_dtype = control_hidden_states.dtype
-
-        norm_hidden_states = (self.norm1(control_hidden_states.float()) * (1 + scale_msa) + shift_msa).to(orig_dtype)
-        query, _ = self.to_q(norm_hidden_states)
-        key, _ = self.to_k(norm_hidden_states)
-        value, _ = self.to_v(norm_hidden_states)
-        query = self.norm_q(query)
-        key = self.norm_k(key)
-        query = query.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
-        key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
-        value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
-        attn_output, _ = self.attn1(query, key, value, original_seq_len, freqs_cis=freqs_cis)
-        attn_output = attn_output.flatten(2)
-        attn_output, _ = self.to_out(attn_output)
-        attn_output = attn_output.squeeze(1)
-        # Match Diffusers' BF16 boundary: round the gated residual before norm2.
-        # Keep the wrapper's norm path for converted checkpoint compatibility.
-        control_hidden_states = (control_hidden_states.float() + attn_output.float() * gate_msa).to(orig_dtype)
-        norm_hidden_states = self.self_attn_residual_norm.norm(control_hidden_states.float()).to(orig_dtype)
-        attn_output = self.attn2(norm_hidden_states, context=encoder_hidden_states, context_lens=None)
-        control_hidden_states = control_hidden_states + attn_output
-
-        norm_hidden_states = (self.norm3(control_hidden_states.float()) * (1 + c_scale_msa) + c_shift_msa).to(
-            orig_dtype)
-        ff_output = self.ffn(norm_hidden_states)
-        control_hidden_states = (control_hidden_states.float() + ff_output.float() * c_gate_msa).to(orig_dtype)
-
-        conditioning_states = None
-        if self.proj_out is not None:
-            conditioning_states, _ = self.proj_out(control_hidden_states)
-        return conditioning_states, control_hidden_states
+        control_hidden_states = super().forward(control_hidden_states, encoder_hidden_states, temb, freqs_cis,
+                                                original_seq_len)
+        hint, _ = self.proj_out(control_hidden_states)
+        return hint, control_hidden_states
 
 
 class WanVACETransformer3DModel(BaseDiT):
@@ -284,9 +225,9 @@ class WanVACETransformer3DModel(BaseDiT):
                                     arch.cross_attn_norm,
                                     arch.eps,
                                     arch.added_kv_proj_dim,
+                                    supported_backends,
                                     apply_input_projection=(i == 0),
-                                    apply_output_projection=True,
-                                    supported_attention_backends=supported_backends,
+                                    quant_config=config.quant_config,
                                     prefix=f"{config.prefix}.vace_blocks.{i}")
             for i in range(len(arch.vace_layers))
         ])
@@ -309,11 +250,9 @@ class WanVACETransformer3DModel(BaseDiT):
                 control_hidden_states: torch.Tensor | None = None,
                 control_hidden_states_scale: torch.Tensor | list[float] | float | None = None,
                 guidance=None,
-                r_timestep: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
         if control_hidden_states is None:
             raise ValueError("WanVACETransformer3DModel requires control_hidden_states.")
-        orig_dtype = hidden_states.dtype
         if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
         if isinstance(encoder_hidden_states_image, list):
@@ -351,15 +290,14 @@ class WanVACETransformer3DModel(BaseDiT):
         control_hidden_states, _ = sequence_model_parallel_shard(control_hidden_states, dim=1)
 
         if control_hidden_states_scale is None:
-            control_hidden_states_scale = torch.ones(len(self.vace_layers),
-                                                     device=hidden_states.device,
-                                                     dtype=hidden_states.dtype)
-        elif not isinstance(control_hidden_states_scale, torch.Tensor):
-            raise TypeError("control_hidden_states_scale must be a torch.Tensor; "
-                            "normalize scales in WanVACEDenoisingStage.")
-        else:
-            control_hidden_states_scale = control_hidden_states_scale.to(device=hidden_states.device,
-                                                                         dtype=hidden_states.dtype)
+            control_hidden_states_scale = 1.0
+        if isinstance(control_hidden_states_scale, bool):
+            raise TypeError("control_hidden_states_scale must be a float, list of floats, or tensor.")
+        control_hidden_states_scale = torch.as_tensor(control_hidden_states_scale,
+                                                      device=hidden_states.device,
+                                                      dtype=hidden_states.dtype).reshape(-1)
+        if control_hidden_states_scale.numel() == 1:
+            control_hidden_states_scale = control_hidden_states_scale.expand(len(self.vace_layers))
         if control_hidden_states_scale.numel() != len(self.vace_layers):
             raise ValueError(f"control_hidden_states_scale length {control_hidden_states_scale.numel()} "
                              f"!= vace_layers {len(self.vace_layers)}")
@@ -370,23 +308,16 @@ class WanVACETransformer3DModel(BaseDiT):
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
 
-        control_hidden_states_list: list[tuple[torch.Tensor | None, float]] = []
-        for block, scale in zip(self.vace_blocks, control_hidden_states_scale.unbind()):
-            conditioning_states, control_hidden_states = block(hidden_states,
-                                                               encoder_hidden_states,
-                                                               control_hidden_states,
-                                                               timestep_proj,
-                                                               freqs_cis,
-                                                               original_seq_len)
-            control_hidden_states_list.append((conditioning_states, scale))
-        control_hidden_states_list = control_hidden_states_list[::-1]
+        control_hints: dict[int, torch.Tensor] = {}
+        for layer_idx, block, scale in zip(self.vace_layers, self.vace_blocks, control_hidden_states_scale.unbind()):
+            hint, control_hidden_states = block(hidden_states, encoder_hidden_states, control_hidden_states,
+                                                timestep_proj, freqs_cis, original_seq_len)
+            control_hints[layer_idx] = hint * scale
 
         for layer_idx, block in enumerate(self.blocks):
             hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, freqs_cis, original_seq_len)
-            if layer_idx in self.vace_layers:
-                control_hint, scale = control_hidden_states_list.pop()
-                if control_hint is not None:
-                    hidden_states = hidden_states + control_hint.to(hidden_states.device) * scale
+            if layer_idx in control_hints:
+                hidden_states = hidden_states + control_hints[layer_idx]
 
         shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
         hidden_states = self.norm_out(hidden_states, shift, scale)
