@@ -50,6 +50,23 @@ tile and head, including dense overrides. `achieved_sparsity` is the matching
 mean video-tile sparsity; in `compete` mode it measures actual selections,
 not the requested top-k budget. These are tile counts, not token-level FLOPs.
 
+## SM100 fused 64-token layout (Wan inference)
+
+On SM100 (B200) with 64-token tiles, BF16, and head dimension 128, Wan VSA
+inference fuses tile scatter and the four BSHD→BHSD transposes into one Triton
+kernel in `fastvideo-kernel`. Set `FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT=1` to
+force the legacy scatter/transpose path. Training, other tile sizes, and non-SM100
+hardware always use the original route. The gate matches compute capability
+10.0 exactly; other SM10x parts (e.g. SM103) are not yet validated and use the
+original route.
+
+To compare the two routes on a Wan 480p token grid (add `--include_attn` to
+also time the sparse attention call):
+
+```bash
+python fastvideo-kernel/benchmarks/bench_vsa_tile_layout.py
+```
+
 ## Usage
 
 ```python
