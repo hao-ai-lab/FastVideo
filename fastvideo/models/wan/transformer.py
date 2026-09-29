@@ -61,10 +61,14 @@ class WanTimeTextImageEmbedding(nn.Module):
         r_embedder_gate_value: float = 0.25,
         r_embedder_deltatime_type: str = "r",
         cast_temb_to_context_dtype: bool = False,
+        timestep_freqs_on_input_device: bool = False,
     ):
         super().__init__()
 
-        self.time_embedder = TimestepEmbedder(dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
+        self.time_embedder = TimestepEmbedder(dim,
+                                              frequency_embedding_size=time_freq_dim,
+                                              act_layer="silu",
+                                              freqs_on_input_device=timestep_freqs_on_input_device)
         self.cast_temb_to_context_dtype = cast_temb_to_context_dtype
         self.time_modulation = ModulateProjection(dim, factor=6, act_layer="silu")
         self.text_embedder = MLP(text_embed_dim, dim, dim, bias=True,
@@ -284,6 +288,20 @@ class WanI2VCrossAttention(WanSelfAttention):
         x = x + img_x
         x, _ = self.to_out(x)
         return x
+
+
+def wan_rope_freqs(grid: tuple[int, int, int], hidden_size: int, num_heads: int,
+                   device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    """Wan 3D RoPE ``(cos, sin)`` for a post-patch ``(T, H, W)`` grid, as float32 on ``device``."""
+    d = hidden_size // num_heads
+    rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
+    freqs_cos, freqs_sin = get_rotary_pos_embed(grid,
+                                                hidden_size,
+                                                num_heads,
+                                                rope_dim_list,
+                                                dtype=torch.float32 if current_platform.is_mps() else torch.float64,
+                                                rope_theta=10000)
+    return freqs_cos.to(device).float(), freqs_sin.to(device).float()
 
 
 class WanTransformerBlock(nn.Module):
@@ -721,16 +739,8 @@ class WanTransformer3DModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Get rotary embeddings
-        d = self.hidden_size // self.num_attention_heads
-        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames, post_patch_height, post_patch_width),
-                                                    self.hidden_size,
-                                                    self.num_attention_heads,
-                                                    rope_dim_list,
-                                                    dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-                                                    rope_theta=10000)
-        freqs_cis = (freqs_cos.to(hidden_states.device).float(), freqs_sin.to(hidden_states.device).float())
+        freqs_cis = wan_rope_freqs((post_patch_num_frames, post_patch_height, post_patch_width), self.hidden_size,
+                                   self.num_attention_heads, hidden_states.device)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
