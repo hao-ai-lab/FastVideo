@@ -44,6 +44,13 @@ class WanVACEInputStage(PipelineStage):
     """Prepare VACE-specific inputs after shared validation and text encoding."""
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        # Control-mask packing folds VAE-stride pixels into channels on the DiT patch grid.
+        config = fastvideo_args.pipeline_config
+        multiple = (config.vae_config.arch_config.scale_factor_spatial * config.dit_config.arch_config.patch_size[1])
+        if batch.height % multiple or batch.width % multiple:
+            raise ValueError(f"Wan-VACE height and width must be multiples of {multiple}; "
+                             f"got {batch.height}x{batch.width}")
+
         # The DiT zero-pads short control tokens, so a short video would silently
         # drop conditioning for the trailing frames.
         if batch.video_latent is not None and batch.video_latent.shape[2] != batch.num_frames:
