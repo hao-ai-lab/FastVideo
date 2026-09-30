@@ -267,6 +267,10 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
         vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
+        requested_ref_policy = getattr(fastvideo_args.pipeline_config, "vsa_ref_policy", None)
+        if vsa_metadata_builder is None and requested_ref_policy is not None:
+            raise ValueError(f"vsa_ref_policy={requested_ref_policy!r} sparsifies reference videos under "
+                             "VIDEO_SPARSE_ATTN_H3, but this transformer does not run that backend.")
         if vsa_metadata_builder is not None:
             vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
             # Per-request knobs (sweeps flip these between generate_video calls

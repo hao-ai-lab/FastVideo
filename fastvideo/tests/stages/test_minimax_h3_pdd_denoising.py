@@ -328,6 +328,16 @@ def test_without_a_reference_policy_references_stay_in_the_dense_prefix(monkeypa
         assert metadata.ref2va_policy is None and metadata.video_tile_spans == ()
 
 
+def test_p2_policy_requires_a_vsa_transformer(monkeypatch):
+    layout = _ref2va_layout(_reference_video_and_audio_references())
+    args = _args(pdd_steps=32,
+                 pdd_step_indices=GRID32_BLOCKS8,
+                 vsa_ref_policy="p2_multi_region",
+                 vsa_ref_keep_rate=0.1)
+    with pytest.raises(ValueError, match="does not run that backend"):
+        _run(monkeypatch, layout, _TinyPDDTransformer(pdd_steps=32), args=args, sparsity=0.9, builder=None)
+
+
 def test_p2_policy_requires_exempt_prefix_keys(monkeypatch):
     layout = _ref2va_layout(_reference_video_and_audio_references())
     args = _args(pdd_steps=32,

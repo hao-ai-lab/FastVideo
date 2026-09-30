@@ -149,8 +149,11 @@ error.
 
 The pipeline applies `pdd_step_indices` and the reference-video policy. The
 attention backend, sparsity, and tile size remain explicit run settings, as
-for DMD exports; the example passes the contract's values, and the pipeline
-logs a warning when a run differs from them.
+for DMD exports; the example passes the contract's values. An export trained
+with `VIDEO_SPARSE_ATTN_H3`, or whose transformer carries VSA compression
+gates, runs only with that backend: the pipeline rejects any other, including
+automatic selection, before it loads weights. A sparsity or tile size that
+differs from the trained value is logged.
 
 ### Reference-video sparsity
 
