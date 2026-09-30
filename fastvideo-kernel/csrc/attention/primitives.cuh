@@ -220,6 +220,8 @@ ClcTileInfo clc_parse_response(uint32_t resp_smem_addr) {
   uint32_t d0, d1, d2, d3;
   fence_proxy_async_shared_cta();
   clc_load_response(resp_smem_addr, d0, d1, d2, d3);
+  // Complete the read before the caller releases the slot to the next try_cancel.
+  fence_proxy_async_shared_cta();
   const int  ctaid_x = static_cast<int>(d0);
   const int  ctaid_y = static_cast<int>(d1 & 0xFFFFu);
   const bool valid   = (d2 & 1u) != 0u;
