@@ -257,17 +257,18 @@ def single_gpu_parity_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
     from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
     from fastvideo.utils import get_open_port
 
+    from fastvideo import envs
+
     monkeypatch.setenv("MASTER_ADDR", "localhost")
     monkeypatch.setenv("MASTER_PORT", str(get_open_port()))
-    monkeypatch.setenv("DISABLE_SP", "1")
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
     tf32_previous = set_parity_cuda_flags()
-    maybe_init_distributed_environment_and_model_parallel(1, 1)
-    try:
-        yield
-    finally:
-        restore_parity_cuda_flags(tf32_previous)
-        cleanup_dist_env_and_memory()
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"):
+        maybe_init_distributed_environment_and_model_parallel(1, 1)
+        try:
+            yield
+        finally:
+            restore_parity_cuda_flags(tf32_previous)
+            cleanup_dist_env_and_memory()
 
 
 def prepare_vace_inputs(mode: str, tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], int]:

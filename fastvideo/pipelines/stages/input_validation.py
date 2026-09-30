@@ -13,6 +13,7 @@ from fastvideo.models.vision_utils import load_image, load_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import (StageValidators, VerificationResult)
+from fastvideo.pipelines.stages.video_tensor_utils import load_video_path_to_tensor
 from fastvideo.utils import best_output_size
 
 logger = init_logger(__name__)
@@ -130,8 +131,6 @@ class InputValidationStage(PipelineStage):
 
         # for v2v, get control video from video path
         if batch.video_path is not None:
-            from fastvideo.pipelines.stages.video_tensor_utils import load_video_path_to_tensor
-
             batch.video_latent = load_video_path_to_tensor(
                 batch.video_path,
                 target_height=batch.height,
