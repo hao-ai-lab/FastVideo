@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 
@@ -82,7 +83,11 @@ class StreamingVideoGenerator(VideoGenerator):
                  executor_class: type[Executor],
                  log_stats: bool,
                  use_queue_mode: bool = True):
-        fastvideo_args.enable_streaming_ipc_queues = True
+        if use_queue_mode and issubclass(executor_class, MultiprocExecutor):
+            # Copy so callers that reuse these args for a standard VideoGenerator
+            # do not inherit the streaming queues; RPC mode never needs them.
+            fastvideo_args = copy.copy(fastvideo_args)
+            fastvideo_args.enable_streaming_ipc_queues = True
         super().__init__(fastvideo_args, executor_class, log_stats)
         self.accumulated_frames: list[np.ndarray] = []
         self.sampling_param: SamplingParam | None = None
