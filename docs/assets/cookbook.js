@@ -521,8 +521,10 @@
         servingAvailability.textContent = profile
           ? "The playground and the OpenAI Python client share one server process. Both workflows can run on your own machine."
           : servingLoadFailed
-            ? "Server examples could not be loaded. Open the H3 server guide below, or use Python directly."
-            : "This recipe uses Python directly. FastH3 V1 and FastH3 V2 can also run a local server for the playground and the OpenAI Python client.";
+            ? "Server examples could not be loaded. Use Python directly."
+            : root.dataset.family === "minimax_h3"
+              ? "This recipe uses Python directly. FastH3 V1 and FastH3 V2 can also run a local server for the playground and the OpenAI Python client."
+              : "This recipe uses Python directly.";
         servingPanel.hidden = !useServer;
         commandBlock.hidden = useServer;
         root.querySelector("[data-cookbook-python-note]").hidden = useServer;
@@ -573,14 +575,19 @@
         option.setAttribute("aria-pressed", String(selected));
       });
 
+      const hasAudio = Boolean(recipe.serving && recipe.serving.audio);
       description.textContent = useServer
-        ? `${recipe.group_label || recipe.label} generates video with audio. Start the local server, then use the playground or the OpenAI Python client. This profile uses the checked-in ${runtime.label} configuration.`
+        ? `${recipe.label} stays loaded on this ${runtime.label} server. Change the prompt without reloading the model.`
         : recipe.summary;
       label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;
       task.textContent = recipe.task;
       hardwareValue.textContent = runtimeSummary(activeRecipe);
-      if (artifact) artifact.textContent = useServer ? "MP4 with audio" : recipe.expected_artifact || "Not yet documented for this recipe.";
+      if (artifact) {
+        artifact.textContent = useServer
+          ? (hasAudio ? "MP4 with audio" : "MP4 video")
+          : recipe.expected_artifact || "Not yet documented for this recipe.";
+      }
       if (evidenceCell) {
         evidenceCell.textContent = activeRecipe.evidence || "Source-backed";
         evidenceCell.classList.toggle("cookbook-badge--verified", activeRecipe.evidence === "Verified");
@@ -602,7 +609,7 @@
           ? "This MLX server config has no recorded hardware run. Measurements from the Python recipe are not server memory requirements. Only text-to-video/audio is wired; reference inputs and fast modes are not exposed here."
           : runtime.id === "spark"
             ? "This Spark server config has no recorded serving benchmark. Lazy module load reloads Qwen3-VL and the DiT between phases of each request. Compilation of the DiT is disabled."
-            : "This server config has no recorded serving benchmark. Compilation is disabled, unlike the measured Python performance profile.",
+            : "This server config has no recorded serving benchmark.",
         `${profile.sampling.width} × ${profile.sampling.height} · ${profile.sampling.num_frames} frames · ${profile.sampling.fps} fps. The server supplies these defaults; the client sends the model and prompt.`,
         "Generation is serialized. Job metadata is held in memory and is lost when the server restarts.",
       ] : recipe.limitations || []), ...knobCaveats];

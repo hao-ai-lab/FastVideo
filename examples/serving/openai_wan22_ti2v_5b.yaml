@@ -23,5 +23,11 @@ server:
   served_model_name: wan22-ti2v-5b
 
 default_request:
+  sampling:
+    height: 704
+    width: 1280
+    num_frames: 121
+    fps: 24
+    num_inference_steps: 50
   output:
     return_frames: false

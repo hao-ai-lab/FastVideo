@@ -96,7 +96,7 @@
       $("video").removeAttribute("src");
       $("empty-preview").querySelector("h3").textContent = job.status === "failed" ? "Generation failed" : "Your job is on the server";
       $("empty-preview").querySelector("p").textContent = job.status === "failed" ? "Read the error below before trying again." : "You can keep editing the next prompt while you wait.";
-      $("job-status").textContent = job.status === "queued" ? "Queued. The server runs one generation at a time." : job.status === "failed" ? "The server could not complete this job." : "Generating video and audio. This page checks the job status automatically.";
+      $("job-status").textContent = job.status === "queued" ? "Queued. The server runs one generation at a time." : job.status === "failed" ? "The server could not complete this job." : "Generating video. This page checks the job status automatically.";
     }
     if (job.status === "failed") showError(job.error?.message || "Check the server logs before submitting another job.");
   };
@@ -205,7 +205,7 @@
       else await refreshJobs();
     } catch (error) {
       $("connection").textContent = "Server unavailable";
-      $("history-status").textContent = "Start the H3 server, then reload this page.";
+      $("history-status").textContent = "Start the FastVideo server, then reload this page.";
       showError(`${error.message} Check the server terminal and reload this page when model loading completes.`);
     }
   };

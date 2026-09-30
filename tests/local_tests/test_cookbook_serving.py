@@ -157,6 +157,29 @@ def test_example_docs_exclude_installed_client_dependencies(tmp_path):
     assert Example(tmp_path).other_files == [tmp_path / "client.mjs"]
 
 
+@pytest.mark.parametrize(
+    ("recipe_id", "config_name", "fps", "env_prefix"),
+    [
+        ("fastwan21-t2v", "openai_fastwan21_1_3b.yaml", 16, "FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN "),
+        ("wan22-t2v", "openai_wan22_t2v_a14b.yaml", 16, ""),
+        ("wan22-ti2v", "openai_wan22_ti2v_5b.yaml", 24, ""),
+    ],
+)
+def test_wan_text_recipes_publish_server_profiles(recipe_id, config_name, fps, env_prefix):
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    recipe = next(item for item in recipes if item["id"] == recipe_id)
+    assert "audio" not in recipe["serving"]
+    profile = cookbook_serving_profile(recipe)
+    assert profile["command"].startswith(f"{env_prefix}fastvideo serve --config examples/serving/{config_name}")
+    assert profile["sampling"]["fps"] == fps
+
+
+def test_wan21_i2v_stays_python_only():
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    recipe = next(item for item in recipes if item["id"] == "wan21-i2v")
+    assert "serving" not in recipe
+
+
 def test_h3_command_blocks_have_unique_copy_targets():
     class CodeBlocks(HTMLParser):
         def __init__(self):
