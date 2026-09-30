@@ -115,7 +115,7 @@ class WanVACEContextStage(PipelineStage):
                                   size=(new_num_frames, new_height, new_width),
                                   mode="nearest-exact").squeeze(0)
             if reference_images:
-                padding = torch.zeros_like(mask_[:, :len(reference_images), :, :])
+                padding = mask_.new_zeros(mask_.shape[0], len(reference_images), *mask_.shape[2:])
                 mask_ = torch.cat([padding, mask_], dim=1)
             mask_list.append(mask_)
         return torch.stack(mask_list)
