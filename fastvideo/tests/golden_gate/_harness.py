@@ -84,8 +84,9 @@ def env_fingerprint(spec: GateSpec | str | None) -> dict[str, str]:
         result.pop("flash_attn")
         result.pop("fastvideo_fa4")
     elif not isinstance(spec, GateSpec):
-        # New tensor gates record the effective switch. Unset and "0" both
-        # select FA2; retain the old block-gate metadata contract unchanged.
+        # Tensor gates record the effective switch, so unset and "0" both record
+        # "0". Block gates record "<unset>" when FASTVIDEO_FA4 is unset, and "1"
+        # or "0" when it is set.
         result["fastvideo_fa4"] = str(int(envs.FASTVIDEO_FA4.get()))
     return result
 
