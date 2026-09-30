@@ -14,8 +14,8 @@ test in the same pull request.
    (`EXTERNAL_ALLOWLIST` in the contract test). When FastVideo sets such a variable for the other tool, it calls
    `envs.set_external`, `envs.setdefault_external`, or `envs.unset_external`, and the name must be in
    `EXTERNAL_WRITE_ALLOWLIST`. Variables that FastVideo's CI and CI tooling define (for example `TEST_SCOPE` and
-   `PERF_RUN_SOURCE`) keep their names and are read directly too; they are listed in `CI_ONLY_VARIABLES` in the
-   contract test, together with the file that sets each one.
+   `PERF_RUN_SOURCE`) keep their names, and test code under `fastvideo/tests/` reads them directly; they are listed
+   in `CI_ONLY_VARIABLES` in the contract test, together with the file that sets each one.
 2. **Read with `envs.NAME.get()`, write with `envs.NAME.set()`, and change a value in tests with
    `envs.NAME.override()`.** Each type has one parsing rule. A value that the rule rejects raises
    `fastvideo.envs.EnvVarError` instead of falling back to the default.
@@ -102,8 +102,9 @@ def test_my_stage(env_overrides):
     run_stage()
 ```
 
-`override_external` accepts any name that code may read directly (`EXTERNAL_ALLOWLIST`, `CI_ONLY_VARIABLES`) or
-that is in `EXTERNAL_WRITE_ALLOWLIST`.
+In test code under `fastvideo/tests/`, `override_external` accepts any name that code may read directly
+(`EXTERNAL_ALLOWLIST`, `CI_ONLY_VARIABLES`) or that is in `EXTERNAL_WRITE_ALLOWLIST`. Library code may write only
+the names in `EXTERNAL_WRITE_ALLOWLIST`.
 
 ## Rename or remove a variable
 

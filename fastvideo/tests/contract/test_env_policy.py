@@ -5,8 +5,8 @@ docs/contributing/env_vars.md.
 The test parses every Python file under fastvideo/ (except fastvideo/third_party/
 and the registry fastvideo/envs.py) with ``ast`` and reports code that:
 
-- reads the environment directly for a name outside EXTERNAL_ALLOWLIST and
-  CI_ONLY_VARIABLES;
+- reads the environment directly for a name outside EXTERNAL_ALLOWLIST (test
+  code under fastvideo/tests/ may also read CI_ONLY_VARIABLES);
 - writes the environment directly (os.environ, os.putenv, monkeypatch.setenv),
   or through the envs.*_external helpers for a name outside
   EXTERNAL_WRITE_ALLOWLIST;
@@ -43,6 +43,7 @@ REGISTRY_PATH = PACKAGE_ROOT / "envs.py"
 DOC_PATH = REPO_ROOT / "docs" / "contributing" / "env_vars.md"
 POLICY_DOC = "docs/contributing/env_vars.md"
 EXCLUDED_DIRS = (PACKAGE_ROOT / "third_party", )
+TESTS_ROOT = PACKAGE_ROOT / "tests"
 
 DOC_TABLE_BEGIN = "<!-- BEGIN GENERATED ENV TABLE: python fastvideo/tests/contract/test_env_policy.py -->"
 DOC_TABLE_END = "<!-- END GENERATED ENV TABLE -->"
@@ -93,7 +94,7 @@ EXTERNAL_ALLOWLIST = {
 }
 
 # Variables that FastVideo's own CI and CI tooling define. They keep their names
-# and are read directly, like external variables; the value names what sets them.
+# and test code under fastvideo/tests/ reads them directly; the value names what sets them.
 CI_ONLY_VARIABLES = {
     "TEST_SCOPE": ".github/workflows/ci-slash-commands.yml, ci-trigger-full-suite.yml, ci-scheduled-ssim.yml",
     "PERF_RUN_SOURCE": ".buildkite/scripts/lanes/performance.sh",
@@ -102,7 +103,6 @@ CI_ONLY_VARIABLES = {
     "PERF_PYTEST_RC": ".buildkite/scripts/lanes/performance.sh",
     "IMAGE_VERSION": ".buildkite/pipeline.yml",
     "PERFORMANCE_TRACKING_ROOT": ".buildkite/scripts/lanes/performance.sh",
-    "PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS": "Performance tracking tooling (fastvideo/performance/hf_store.py).",
     "HF_REPO_ID": "Performance tracking tooling (fastvideo/tests/modal/pr_test.py).",
     "PERFORMANCE_RESEED_STAGING_ROOT": "Performance reseed tooling (.agents/skills/reseed-performance-baseline).",
     "DASHBOARD_DAYS": "Performance dashboard tooling (fastvideo/tests/performance/dashboard.py).",
@@ -155,6 +155,9 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/entrypoints/openai/api_server.py: write FASTVIDEO_STAGE_LOGGING': 1,
     'fastvideo/entrypoints/video_generator.py: write FASTVIDEO_NVFP4_FA4': 1,
     'fastvideo/mlx_runtime/memory.py: write <dynamic>': 1,
+    'fastvideo/performance/hf_store.py: read HF_REPO_ID': 1,
+    'fastvideo/performance/hf_store.py: read PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS': 1,
+    'fastvideo/performance_dashboard/api.py: read PERFORMANCE_TRACKING_ROOT': 1,
     'fastvideo/tests/contract/test_profiler_regions.py: whole-environ': 2,
     'fastvideo/tests/contract/test_wan_validation_order.py: whole-environ': 1,
     'fastvideo/tests/distributed/test_sp_hunyuanvideo.py: whole-environ': 1,
@@ -206,15 +209,16 @@ def load_registry() -> ModuleType:
     return registry
 
 
-def is_external_write_allowed(helper: str, name: str) -> bool:
+def is_external_write_allowed(helper: str, name: str, in_tests: bool) -> bool:
     """Whether an envs.*_external call may write ``name``.
 
-    override_external restores the previous value, so tests may use it for any
-    variable that code reads directly; the other helpers need the write allowlist.
+    override_external restores the previous value, so test code under fastvideo/tests/
+    may use it for any variable that code reads directly; library code and the other
+    helpers need the write allowlist.
     """
     if name in EXTERNAL_WRITE_ALLOWLIST:
         return True
-    return helper == "override_external" and (is_allowlisted(name) or name in CI_ONLY_VARIABLES)
+    return in_tests and helper == "override_external" and (is_allowlisted(name) or name in CI_ONLY_VARIABLES)
 
 
 def is_allowlisted(name: str) -> bool:
@@ -233,8 +237,9 @@ class EnvAccessScanner:
     ``envs.X.get()`` and ``envs.X.is_set()`` calls by variable name.
     """
 
-    def __init__(self, tree: ast.Module, registry_names: set[str]) -> None:
+    def __init__(self, tree: ast.Module, registry_names: set[str], in_tests: bool) -> None:
         self.registry_names = registry_names
+        self.in_tests = in_tests
         self.violations: list[tuple[str, str, int]] = []
         self.registry_reads: Counter[str] = Counter()
         self.parents: dict[ast.AST, ast.AST] = {}
@@ -355,7 +360,7 @@ class EnvAccessScanner:
               or (isinstance(func, ast.Attribute) and func.attr in ("setenv", "delenv"))):
             self.violations.append(("write", name, node.lineno))
         elif (isinstance(func, ast.Attribute) and func.attr in EXTERNAL_WRITE_HELPERS
-              and self._is_envs_module(func.value) and not is_external_write_allowed(func.attr, name)):
+              and self._is_envs_module(func.value) and not is_external_write_allowed(func.attr, name, self.in_tests)):
             self.violations.append(("write", name, node.lineno))
 
     def _check_registry_use(self, node: ast.Attribute, parent: ast.AST | None, in_function: bool) -> None:
@@ -394,10 +399,12 @@ def collect_violations(registry: ModuleType) -> tuple[dict[str, list[int]], Coun
     reads: Counter[str] = registry_internal_reads(registry_names)
     for path in scanned_files():
         relative = path.relative_to(REPO_ROOT).as_posix()
-        scanner = EnvAccessScanner(ast.parse(path.read_text(encoding="utf-8"), filename=relative), registry_names)
+        in_tests = TESTS_ROOT in path.parents
+        scanner = EnvAccessScanner(ast.parse(path.read_text(encoding="utf-8"), filename=relative), registry_names,
+                                   in_tests)
         reads.update(scanner.registry_reads)
         for kind, name, line in scanner.violations:
-            if kind == "read" and (is_allowlisted(name) or name in CI_ONLY_VARIABLES):
+            if kind == "read" and (is_allowlisted(name) or (in_tests and name in CI_ONLY_VARIABLES)):
                 continue
             key = f"{relative}: {kind} {name}".rstrip()
             found.setdefault(key, []).append(line)
@@ -436,7 +443,7 @@ def test_registry_method_counts_only_when_called():
               "def f():\n"
               "    getter = envs.FASTVIDEO_FA4.get\n"
               "    return envs.FASTVIDEO_FA4.get()\n")
-    scanner = EnvAccessScanner(ast.parse(source), {"FASTVIDEO_FA4"})
+    scanner = EnvAccessScanner(ast.parse(source), {"FASTVIDEO_FA4"}, in_tests=False)
     assert scanner.violations == [("bare-field", "FASTVIDEO_FA4", 3)]
     assert scanner.registry_reads["FASTVIDEO_FA4"] == 1
 
