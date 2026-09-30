@@ -1,8 +1,6 @@
 // primitives.cuh -- device primitives for the sm_100a/sm_103a VSA block-sparse attention
 // forward: tcgen05 (alloc / mma / ld / st / commit / wait / fence), TMA load / store /
 // tensormap, mbarrier, cluster launch control, setmaxnreg, fast math, and the FMHA helpers.
-//
-// Generated and pruned to what the kernel reaches -- do not edit by hand.
 #pragma once
 #include <cstdint>
 #include <cstdio>

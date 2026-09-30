@@ -2,8 +2,6 @@
 // data-center Blackwell sm_100a/sm_103a. The filename is retained for API compatibility.
 // Warp-specialized: load / MMA (tcgen05) / softmax / correction / epilogue / scheduler.
 // Writes O and, when asked, the log-sum-exp the backward consumes.
-//
-// Generated (comments stripped). Do not edit by hand.
 #ifndef BLOCK_SPARSE_VSA_KERNEL_SM100A_CUH
 #define BLOCK_SPARSE_VSA_KERNEL_SM100A_CUH
 
