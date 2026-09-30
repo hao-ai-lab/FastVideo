@@ -275,6 +275,10 @@ def main() -> None:
                 ),
             ))
         print(f"Output written to: {result.video_path}")
+        if result.generation_time is not None:
+            print(f"Generation time: {result.generation_time:.1f} s")
+        if result.peak_memory_mb is not None:
+            print(f"Peak GPU memory allocated (rank 0): {result.peak_memory_mb / 1024:.1f} GiB")
     finally:
         generator.shutdown()
 
