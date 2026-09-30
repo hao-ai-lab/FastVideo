@@ -171,7 +171,11 @@ def test_wan_text_recipes_publish_server_profiles(recipe_id, config_name, fps, e
     assert "audio" not in recipe["serving"]
     profile = cookbook_serving_profile(recipe)
     assert profile["command"].startswith(f"{env_prefix}fastvideo serve --config examples/serving/{config_name}")
+    assert "--server.host 127.0.0.1" in profile["command"]
     assert profile["sampling"]["fps"] == fps
+    if recipe_id == "wan22-ti2v":
+        assert recipe["serving"]["task"] == "Text to video"
+        assert any("text prompt only" in item for item in recipe["serving"]["limitations"])
 
 
 def test_wan21_i2v_stays_python_only():

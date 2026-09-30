@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -65,7 +65,11 @@
       "source": "examples/inference/basic/basic_wan2_2_ti2v.py",
       "serving": {
         "source": "examples/serving/openai_wan22_ti2v_5b.yaml",
-        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e ."
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
+        "task": "Text to video",
+        "limitations": [
+          "This server walkthrough sends a text prompt only. Image-to-video for this checkpoint uses the Python command; the checked-in clients and playground do not upload an image."
+        ]
       },
       "command": "python examples/inference/basic/basic_wan2_2_ti2v.py",
       "gpu_types": ["NVIDIA"],

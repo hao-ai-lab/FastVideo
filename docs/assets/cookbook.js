@@ -581,7 +581,7 @@
         : recipe.summary;
       label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;
-      task.textContent = recipe.task;
+      task.textContent = (useServer && recipe.serving && recipe.serving.task) || recipe.task;
       hardwareValue.textContent = runtimeSummary(activeRecipe);
       if (artifact) {
         artifact.textContent = useServer
@@ -612,7 +612,9 @@
             : "This server config has no recorded serving benchmark.",
         `${profile.sampling.width} × ${profile.sampling.height} · ${profile.sampling.num_frames} frames · ${profile.sampling.fps} fps. The server supplies these defaults; the client sends the model and prompt.`,
         "Generation is serialized. Job metadata is held in memory and is lost when the server restarts.",
-      ] : recipe.limitations || []), ...knobCaveats];
+      ] : recipe.limitations || []),
+      ...(useServer && recipe.serving && Array.isArray(recipe.serving.limitations) ? recipe.serving.limitations : []),
+      ...knobCaveats];
       notes.replaceChildren();
       notes.hidden = limitations.length === 0;
       if (limitations.length) {
