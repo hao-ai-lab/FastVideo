@@ -126,3 +126,30 @@ def test_vmoba_kernel_errors_propagate_at_use(monkeypatch, exception_name):
     impl = object.__new__(VMOBAAttentionImpl)
     with pytest.raises(error_type, match="kernel import failure sentinel"):
         impl.forward(None, None, None, None)
+
+
+@pytest.mark.parametrize("backend_name,message", [
+    ("VIDEO_SPARSE_ATTN", "Video Sparse Attention backend is not installed or its kernel failed"),
+    ("VMOBA_ATTN", "Video MoBA Attention backend is not installed or its kernel failed"),
+])
+def test_selecting_backend_reports_kernel_init_failure(monkeypatch, backend_name, message):
+    # The probes do not import the kernel, so a kernel whose initialization
+    # fails (e.g. no visible GPU driver) is reported when the backend is chosen.
+    import builtins
+
+    import torch
+
+    from fastvideo.platforms import AttentionBackendEnum
+    from fastvideo.platforms.cuda import CudaPlatformBase
+
+    real_import = builtins.__import__
+
+    def failing_kernel_init(name, *args, **kwargs):
+        if name == "fastvideo_kernel":
+            raise RuntimeError("kernel init failure sentinel")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_kernel_init)
+    with pytest.raises(ImportError, match=message) as raised:
+        CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum[backend_name], 128, torch.bfloat16)
+    assert isinstance(raised.value.__cause__, RuntimeError)

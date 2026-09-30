@@ -993,7 +993,11 @@ def _kernel_submodule_exists(submodule: str) -> bool:
     """Whether ``fastvideo_kernel.<submodule>`` is installed, without importing the package.
 
     Looking up a dotted name with util.find_spec imports its parent package,
-    and kernel package initialization may require a visible GPU driver.
+    and kernel package initialization may require a visible GPU driver. This
+    only checks that the submodule's file is present: an installed kernel
+    whose initialization fails still counts as available here. Selecting the
+    backend imports the kernel and reports that failure (see
+    ``CudaPlatformBase.get_attn_backend_cls``).
     """
     package = importlib.util.find_spec("fastvideo_kernel")
     # A single-file module has no search locations; PathFinder would then
@@ -1012,11 +1016,13 @@ def _kernel_submodule_exists(submodule: str) -> bool:
 
 @lru_cache(maxsize=1)
 def is_vsa_available() -> bool:
+    """Whether the VSA kernel is installed; see ``_kernel_submodule_exists``."""
     return _kernel_submodule_exists("ops")
 
 
 @lru_cache(maxsize=1)
 def is_vmoba_available() -> bool:
+    """Whether the VMOBA kernel is installed with flash_attn>=2.7.4; see ``_kernel_submodule_exists``."""
     if not _kernel_submodule_exists("vmoba"):
         return False
     try:
