@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import math
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 import torch
@@ -23,6 +25,7 @@ from fastvideo.distributed.parallel_state import get_sp_world_size, model_parall
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
 from fastvideo.layers.mlp import MLP
+from fastvideo.layers.pdd import PDDReplicatedLinear, fuse_pdd_heads
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.logger import init_logger
@@ -731,21 +734,55 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             prefix=f"{config.prefix}.norm_out",
             apply_silu=self.adaln_rank is None,
         )
-        self.proj_out = ReplicatedLinear(
-            arch.hidden_size,
-            video_patch_dim,
-            bias=True,
-            quant_config=config.quant_config,
-            prefix=f"{config.prefix}.proj_out",
-        )
-        self.audio_proj_out = ReplicatedLinear(
-            arch.hidden_size,
-            arch.audio_in_channels,
-            bias=True,
-            quant_config=config.quant_config,
-            prefix=f"{config.prefix}.audio_proj_out",
-        )
+        # Parallel Decoding Distillation (PDD) students widen both output
+        # projections to ``pdd_steps`` heads, one per interval of a fixed fine
+        # time grid. The sampler fuses one block of heads per forward
+        # (``fuse_pdd_block``), so the fused output keeps the released width.
+        self.pdd_steps: int | None = arch.pdd_steps
+        self.proj_out = self._output_projection(arch.hidden_size, video_patch_dim, config, "proj_out")
+        self.audio_proj_out = self._output_projection(arch.hidden_size, arch.audio_in_channels, config,
+                                                      "audio_proj_out")
         self.__post_init__()
+
+    def _output_projection(self, hidden_size: int, output_size: int, config: MiniMaxH3Config,
+                           name: str) -> ReplicatedLinear:
+        if self.pdd_steps is None:
+            return ReplicatedLinear(
+                hidden_size,
+                output_size,
+                bias=True,
+                quant_config=config.quant_config,
+                prefix=f"{config.prefix}.{name}",
+            )
+        return PDDReplicatedLinear(
+            hidden_size,
+            output_size,
+            grid_size=self.pdd_steps,
+            bias=True,
+            quant_config=config.quant_config,
+            prefix=f"{config.prefix}.{name}",
+        )
+
+    @property
+    def pdd_linears(self) -> dict[str, PDDReplicatedLinear]:
+        """The widened ``{"video": proj_out, "audio": audio_proj_out}`` heads."""
+        if self.pdd_steps is None:
+            # Not AttributeError: nn.Module.__getattr__ would swallow it and
+            # report a misleading missing-attribute message.
+            raise RuntimeError("This MiniMax H3 transformer has no PDD heads (arch_config.pdd_steps is None)")
+        return {"video": self.proj_out, "audio": self.audio_proj_out}
+
+    @contextlib.contextmanager
+    def fuse_pdd_block(
+        self,
+        start: int,
+        end: int,
+        integration_weights: Mapping[str, torch.Tensor],
+        precision_decoding: torch.dtype,
+    ) -> Iterator[None]:
+        """Fuse fine-grid block ``[start, end)`` on both widened heads for the enclosed forwards."""
+        with fuse_pdd_heads(self.pdd_linears, start, end, integration_weights, precision_decoding):
+            yield
 
     @staticmethod
     def _compile_setup_device(attention: MiniMaxH3Attention) -> torch.device:
