@@ -298,6 +298,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # 128 = sm_100a CUDA), plumbed like the run-level sparsity; the
             # builder validates the value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
+            if vsa_video_segments is not None:
+                logger.info(
+                    "MiniMax-H3 VSA-H3 %s: %d reference video region(s) at keep rate %s, target sparsity %s, "
+                    "%d-token tiles", vsa_ref_policy,
+                    len(vsa_video_segments) - 1, vsa_ref_keep_rate, float(batch.VSA_sparsity), vsa_tile_size)
 
         try:
             if full_cpu_offload:

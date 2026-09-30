@@ -40,14 +40,14 @@ _R2V_SEQ = 369
 _R2V_DENSE_RUNS = ((0, 37), (37, 46), (166, 177))  # packed [start, end) of text/ref_audio/tgt_audio
 
 
-def _build_r2v(sparsity=0.0, tile_size=_TILE_ELEMS, **overrides):
+def _build_r2v(sparsity=0.0, tile_size=_TILE_ELEMS, device=_CPU, **overrides):
     call = dict(_R2V, **overrides)
     return MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
         raw_latent_shape=call.pop("raw_latent_shape", None),
         patch_size=_PATCH,
         VSA_sparsity=sparsity,
-        device=_CPU,
+        device=device,
         tile_size=tile_size,
         **call,
     )
@@ -75,7 +75,7 @@ def _sparse_attention_oracle(query, key, value, mask, meta):
     for b in range(query.shape[0]):
         for h in range(query.shape[2]):
             allow = mask[b, h][token_tile][:, token_tile] & token_valid[None, :]
-            bias = torch.zeros(allow.shape, dtype=query.dtype)
+            bias = torch.zeros(allow.shape, dtype=query.dtype, device=query.device)
             bias.masked_fill_(~allow, float("-inf"))
             out[b, :, h] = F.scaled_dot_product_attention(query[b, :, h][None], key[b, :, h][None],
                                                           value[b, :, h][None], attn_mask=bias[None])[0]
@@ -468,3 +468,38 @@ def test_tile128_geometry_uses_4x4x8_tiles():
     # (5, 4, 6) and (8, 4, 6) token grids -> ceil(t/4) * ceil(4/4) * ceil(6/8) tiles each
     assert meta.video_tile_spans == ((3, 5), (5, 7))
     assert math.prod((4, 4, 8)) == 128
+
+
+@pytest.mark.parametrize("sparsity,ref_keep_rate", [(0.5, 0.25), (0.9, 0.1)])
+def test_real_sm100a_tile128_matches_the_token_mask_oracle(env_overrides, sparsity, ref_keep_rate):
+    """The real 128-token CUDA forward on a multi-region layout against an FP32 masked-SDPA oracle."""
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
+        pytest.skip("requires an sm_100a/sm_103a GPU (B200, B300, GB200, GB300)")
+    forwards = getattr(vsa_h3._sm100a, "_FWD_BY_BLOCK", {}) if vsa_h3._sm100a is not None else {}
+    if forwards.get(128) is None or vsa_h3.map_to_index is None:
+        pytest.skip("requires a fastvideo_kernel build with the 128-token sm_100a forward")
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+    device = torch.device("cuda")
+    meta = _build_r2v(sparsity=sparsity, tile_size=128, ref_keep_rate=ref_keep_rate, device=device)
+    n_tiles = meta.variable_block_sizes.numel()
+    logical = n_tiles * 128
+    impl = _impl(_DIM)
+    torch.manual_seed(19)
+    raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, device=device, dtype=torch.bfloat16)
+    with torch.inference_mode():
+        tiled = impl.preprocess_qkv(raw, meta)
+        assert tiled.shape[1] == (n_tiles + n_tiles % 2) * 128
+        query, key, value = tiled.chunk(3, dim=0)
+        actual = impl.postprocess_output(impl.forward(query, key, value, None, meta), meta)
+        # The mask the backend selected: pooled scores of the logical tiles.
+        logical_query, logical_key, logical_value = (t[:, :logical] for t in (query, key, value))
+        scores = torch.matmul(_pool_tiles(logical_query, meta.variable_block_sizes, 128),
+                              _pool_tiles(logical_key, meta.variable_block_sizes, 128).transpose(-2, -1)) / _DIM**0.5
+        mask = _mask(meta, scores, sparsity)
+        assert not mask.all(), "the oracle must exercise a sparse mask"
+        expected = impl.postprocess_output(
+            _sparse_attention_oracle(logical_query.float(), logical_key.float(), logical_value.float(), mask, meta),
+            meta)
+    torch.cuda.synchronize()
+    assert actual.shape == (1, meta.total_seq_length, _HEADS, _DIM)
+    torch.testing.assert_close(actual.float(), expected, atol=0.04, rtol=0.02)
