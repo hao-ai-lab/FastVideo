@@ -218,9 +218,7 @@ template <int CLUSTER_SHAPE_M, int CLUSTER_SHAPE_N, ClcRasterOrder ORDER>
 __device__ __forceinline__
 ClcTileInfo clc_parse_response(uint32_t resp_smem_addr) {
   uint32_t d0, d1, d2, d3;
-  fence_proxy_async_shared_cta();
   clc_load_response(resp_smem_addr, d0, d1, d2, d3);
-  // Complete the read before the caller releases the slot to the next try_cancel.
   fence_proxy_async_shared_cta();
   const int  ctaid_x = static_cast<int>(d0);
   const int  ctaid_y = static_cast<int>(d1 & 0xFFFFu);
@@ -253,7 +251,6 @@ ClcTileInfo clc_fetch_next_tile(
       __cvta_generic_to_shared(&clc_response[clc_cons_stage * 4]));
   ClcTileInfo t = clc_parse_response<
       CLUSTER_SHAPE_M, CLUSTER_SHAPE_N, ORDER>(resp_addr);
-  // The elected lane's release must follow every lane's read; fences and releases are per lane.
   __syncwarp();
   if (do_release) {
     uint32_t empty_local = static_cast<uint32_t>(
