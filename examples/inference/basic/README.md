@@ -158,6 +158,24 @@ The four release launchers are:
 - `run_fasth3_lora_preview_vsa_synthetic_step1900.sh`
 - `run_fasth3_lora_preview_dense_datafree.sh`
 
+### FastH3 OmniRef PDD (Ref2VA)
+
+[basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py)
+runs a Parallel Decoding Distillation Ref2VA student in eight transformer
+forwards. The export carries only its `transformer_ref`, scheduler configs,
+and `fastvideo_inference.json`; the script links them with the base
+MiniMax-H3 components into one local model directory. Its 128-token VSA tiles
+need the sm_100a/sm_103a kernel:
+
+```bash
+python examples/inference/basic/basic_fasth3_omniref_pdd.py \
+  --model-path <local export directory or Hugging Face repo id> \
+  --video reference.mp4 --image character.png --prompt "your prompt"
+```
+
+See [FastH3 distilled checkpoint schedules](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/inference/fasth3-distilled.md#ref2va-pdd-students)
+for the contract and the reference-video sparsity policy.
+
 Each downloads its exact private adapter file from
 `FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA`; authenticate with `hf auth
 login` first. Pass `--lora-strength 0.5` to interpolate every adapter payload at

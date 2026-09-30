@@ -74,6 +74,102 @@ This documents execution support for the published checkpoint. It is not a
 quality claim: compare video/audio output against base MiniMax-H3 on your own
 prompts before adopting it.
 
+## Ref2VA PDD students
+
+A Parallel Decoding Distillation (PDD) student widens the transformer's two
+output projections to `pdd_steps` heads, one per interval of a fixed fine
+time grid on `[0, 0.999]`. Each transformer forward fuses a block of
+consecutive heads into their integration-weighted mean, and an ordinary Euler
+step over the block's two node sigmas applies it. The FastH3 OmniRef PDD-8
+student is a Ref2VA (`transformer_ref`) student with 32 heads, sampled in
+eight blocks of four.
+
+Its export carries only what distillation changed:
+
+| Path | Contents |
+| --- | --- |
+| `transformer_ref/` | Widened `proj_out` and `audio_proj_out`, trained VSA compression gates; `config.json` records `pdd_steps` |
+| `scheduler/`, `audio_scheduler/` | Video and audio shifts (12 and 3) |
+| `fastvideo_inference.json` | The sampling contract below |
+| `modular_model_index.json` | The Diffusers manifest |
+
+The text encoder, tokenizer, processor, and both VAEs are base MiniMax-H3's.
+`basic_fasth3_omniref_pdd.py` composes the two into one local directory of
+symlinks and runs the recipe the contract records. `--model-path` is the
+export, as a local directory or a Hugging Face repo id. The base comes from
+the revision the contract pins in `base_model_revision`, or from
+`--base-model-path`:
+
+```bash
+python examples/inference/basic/basic_fasth3_omniref_pdd.py \
+  --model-path <local export directory or Hugging Face repo id> \
+  --video reference.mp4 --image character.png \
+  --prompt 'The dancer from the video performs the routine in the pictured outfit.' \
+  --height 480 --width 832 --num-frames 124 \
+  --output outputs/fasth3-omniref-pdd
+```
+
+References are ordered: pass `--image`, `--video`, and `--audio` in the order
+the prompt refers to them. At least one image or video is required.
+
+A PDD export uses `fasth3-inference-contract-v1` with PDD fields in place of
+the DMD ladder:
+
+```json
+{
+  "schema_version": "fasth3-inference-contract-v1",
+  "model_type": "ref2va",
+  "transformer_component": "transformer_ref",
+  "pdd_steps": 32,
+  "pdd_step_indices": [0, 4, 8, 12, 16, 20, 24, 28, 32],
+  "num_inference_steps": 8,
+  "transformer_forwards": 8,
+  "grid_max_t": 0.999,
+  "video_scheduler_shift": 12.0,
+  "audio_scheduler_shift": 3.0,
+  "guidance_scale": 1.0,
+  "attention_backend": "VIDEO_SPARSE_ATTN_H3",
+  "vsa_sparsity": 0.9,
+  "vsa_tile_size": 128,
+  "vsa_ref_policy": "p2_multi_region",
+  "vsa_ref_keep_rate": 0.1
+}
+```
+
+The export also records `schema`, `conditioning`, and `base_model_revision`.
+`pdd_steps` must match `transformer_ref/config.json`. `pdd_step_indices` is a
+strictly increasing partition of the grid from 0 to `pdd_steps`;
+`num_inference_steps` and `transformer_forwards` both equal its block count.
+For a PDD student, `num_inference_steps` counts transformer forwards, and a
+request must use exactly that count. The shifts must match the scheduler
+configs. `model_type` and `transformer_component` must match the pipeline, so
+`MiniMaxH3Ref2VAModularPipeline` runs a `ref2va` export. Unknown keys, a DMD
+ladder, an explicit conflicting setting, or any other disagreement is an
+error.
+
+The pipeline applies `pdd_step_indices` and the reference-video policy. The
+attention backend, sparsity, and tile size remain explicit run settings, as
+for DMD exports; the example passes the contract's values, and the pipeline
+logs a warning when a run differs from them.
+
+### Reference-video sparsity
+
+With `vsa_ref_policy: p2_multi_region`, `VIDEO_SPARSE_ATTN_H3` tiles every
+reference video as its own sparse region, in place in the packed sequence.
+Each video query keeps `vsa_ref_keep_rate` of every reference video's tiles
+and `1 - vsa_sparsity` of the target video's tiles. Text, audio, and image
+references stay dense. Without the policy, every conditioning row stays
+dense, as before.
+
+### Hardware
+
+The contract's 128-token tiles, `(4, 4, 8)`, run only on the sm_100a/sm_103a
+CUDA block-sparse kernel (B200, B300, GB200, GB300) of a fastvideo-kernel
+build with the Blackwell VSA extension. There is no Triton fallback for tile
+128: the backend raises instead. Tile 128 runs eagerly; regional compile still
+requires 64-token tiles. The student's trained VSA compression gates exist
+only under `VIDEO_SPARSE_ATTN_H3`, so it does not load with dense attention.
+
 ## Apple Silicon
 
 `mlx_fasth3.py` stays on FastH3 V1 and its uniform AdaLN cache.
