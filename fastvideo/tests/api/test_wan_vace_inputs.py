@@ -6,9 +6,9 @@ import torch
 from PIL import Image
 
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.pipelines.basic.wan.stages.vace_input import preprocess_vace_reference_images
+from fastvideo.pipelines.basic.wan.stages.vace_decoding import WanVACEDecodingStage
 from fastvideo.pipelines.basic.wan.stages.vace_denoising import WanVACEDenoisingStage
-from fastvideo.pipelines.basic.wan.stages.vace_input import WanVACEInputStage
+from fastvideo.pipelines.basic.wan.stages.vace_input import WanVACEInputStage, preprocess_vace_reference_images
 from fastvideo.pipelines.basic.wan.stages.vace_latent_preparation import WanVACELatentPreparationStage
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
@@ -52,6 +52,7 @@ def test_vace_reference_image_preserves_aspect_ratio(tmp_path):
 
 
 def test_vace_mask_resamples_to_video_fps(monkeypatch, vace_args):
+
     def load_mask_tensor(path, **kwargs):
         assert kwargs["target_fps"] == 16
         values = torch.tensor([i * 40 / 127.5 - 1 for i in range(5)])
@@ -80,7 +81,7 @@ def test_vace_video_and_mask_use_same_fps_samples(monkeypatch, vace_args):
         video_numpy = normalize(pil_to_numpy(resized))
         return numpy_to_pt(video_numpy).permute(1, 0, 2, 3).unsqueeze(0)
 
-    monkeypatch.setattr("fastvideo.pipelines.stages.video_tensor_utils.load_video_path_to_tensor", load_video_tensor)
+    monkeypatch.setattr("fastvideo.pipelines.stages.input_validation.load_video_path_to_tensor", load_video_tensor)
     monkeypatch.setattr("fastvideo.pipelines.basic.wan.stages.vace_input.load_video_path_to_tensor", load_video_tensor)
     batch = _batch(video_path="video.mp4", mask_path="mask.mp4", prompt="test", seed=42)
 
@@ -89,8 +90,7 @@ def test_vace_video_and_mask_use_same_fps_samples(monkeypatch, vace_args):
 
     assert batch.video_latent.shape == batch.mask_video.shape == (1, 3, 5, 32, 32)
     assert torch.equal(batch.video_latent, batch.mask_video)
-    assert torch.allclose(batch.video_latent[0, 0, :, 0, 0],
-                          torch.tensor([i * 40 / 127.5 - 1 for i in range(5)]))
+    assert torch.allclose(batch.video_latent[0, 0, :, 0, 0], torch.tensor([i * 40 / 127.5 - 1 for i in range(5)]))
 
 
 def test_vace_mask_and_video_frame_count_must_match(monkeypatch, vace_args):
@@ -134,7 +134,6 @@ def test_vace_reference_frames_extend_latent_length_without_mutating_request(vac
 
 
 def test_vace_decoding_strips_reference_frames_from_trajectory(monkeypatch, vace_args):
-    from fastvideo.pipelines.basic.wan.stages.vace_decoding import WanVACEDecodingStage
     from fastvideo.pipelines.stages.decoding import DecodingStage
 
     monkeypatch.setattr(DecodingStage, "forward", lambda self, batch, args: batch)
@@ -147,6 +146,7 @@ def test_vace_decoding_strips_reference_frames_from_trajectory(monkeypatch, vace
     assert batch.latents.shape[2] == 2
     assert batch.trajectory_latents.shape[3] == 2
 
+
 def test_vace_denoising_forwards_control_kwargs(vace_args):
     control = torch.zeros(1, 96, 2, 4, 4)
     batch = _batch(vace_control_latents=control, conditioning_scale=0.5)
@@ -157,4 +157,3 @@ def test_vace_denoising_forwards_control_kwargs(vace_args):
     assert kwargs["control_hidden_states"].dtype == torch.bfloat16
     assert kwargs["control_hidden_states_scale"] == 0.5
     assert stage.prepare_family_transformer_kwargs(_batch(), None, torch.bfloat16) == {}
-

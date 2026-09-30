@@ -19,6 +19,7 @@ from tests.local_tests.wan.vace_parity_helpers import (
     load_official_transformer,
     prepare_official_pipeline,
     prepare_vace_inputs,
+    register_transformer_capture,
     resolve_model_dir,
     run_fastvideo_stages,
     run_official_on_call,
@@ -64,8 +65,6 @@ def test_wan_vace_pipeline_matches_diffusers(size, mode, env_name, tmp_path, par
 
     official = prepare_official_pipeline(model_dir, device)
     official_calls: dict[str, Any] = {"model_inputs": [], "noise_preds": []}
-    from tests.local_tests.wan.vace_parity_helpers import register_transformer_capture
-
     capture_handles = register_transformer_capture(official.transformer, official_calls)
     try:
         with torch.inference_mode():

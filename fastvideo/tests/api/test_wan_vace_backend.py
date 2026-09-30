@@ -5,7 +5,6 @@ import pytest
 import torch
 
 from fastvideo import envs
-
 from fastvideo.attention.selector import _component_attention_backend_scope
 from fastvideo.models.wan.vace_config import WanVACEArchConfig, WanVACEVideoConfig
 from fastvideo.models.wan.vace_transformer import WanVACETransformer3DModel
