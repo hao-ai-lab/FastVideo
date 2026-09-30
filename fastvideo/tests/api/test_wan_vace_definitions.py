@@ -184,3 +184,16 @@ def test_vace_context_stage_builds_96_channel_control(monkeypatch):
     stage.forward(batch, args)
     assert batch.vace_control_latents is not None
     assert batch.vace_control_latents.shape[1] == 96
+
+
+def test_vace_mask_padding_covers_more_references_than_latent_frames():
+    from fastvideo.fastvideo_args import FastVideoArgs
+
+    args = FastVideoArgs.from_kwargs(model_path="Wan-AI/Wan2.1-VACE-1.3B-diffusers")
+    stage = WanVACEContextStage.__new__(WanVACEContextStage)
+    mask = torch.ones(1, 3, 5, 32, 32)  # 5 frames -> 2 latent frames
+    references = [torch.zeros(3, 32, 32)] * 3
+
+    packed = stage._prepare_masks(mask, references, args.pipeline_config)
+
+    assert packed.shape[2] == 2 + len(references)

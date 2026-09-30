@@ -111,6 +111,13 @@ def test_vace_short_control_video_is_rejected(vace_args):
         WanVACEInputStage().forward(batch, vace_args)
 
 
+def test_vace_rejects_sizes_off_the_patch_grid(vace_args):
+    batch = ForwardBatch(data_type="video", height=24, width=32, num_frames=5, fps=16)
+
+    with pytest.raises(ValueError, match="multiples of 16; got 24x32"):
+        WanVACEInputStage().forward(batch, vace_args)
+
+
 def test_vace_input_stage_does_not_leak_references_between_requests(monkeypatch, vace_args):
     monkeypatch.setattr("fastvideo.pipelines.basic.wan.stages.vace_input.preprocess_vace_reference_images",
                         lambda *args, **kwargs: [torch.zeros(3, 32, 32)])
