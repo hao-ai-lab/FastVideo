@@ -124,7 +124,7 @@ training:
   tracker:
     trackers: [jsonl]
     project_name: distillation_wan
-    run_name: wan2.1_tdm_lora_overfit
+    run_name: wan2.1_tdm_fixed_recipe
 
   model:
     enable_gradient_checkpointing_type: full
