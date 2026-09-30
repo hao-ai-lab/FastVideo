@@ -4,14 +4,32 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import os
 import shutil
 import sys
 import tempfile
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+from types import ModuleType
 
-import fastvideo.envs as envs
+
+def _load_envs_registry() -> ModuleType:
+    """Load fastvideo/envs.py as a standalone module, without importing the fastvideo package.
+
+    Importing fastvideo.envs runs fastvideo/__init__.py, which imports torch and the
+    generation stack. This CLI runs as a plain script that needs only the standard
+    library, so it loads the registry file by path.
+    """
+    registry_path = Path(__file__).resolve().parents[2] / "envs.py"
+    spec = importlib.util.spec_from_file_location("_fastvideo_envs_registry", registry_path)
+    assert spec is not None and spec.loader is not None
+    registry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(registry)
+    return registry
+
+
+envs = _load_envs_registry()
 
 VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
 # Additional artefact types stored under the same reference folders. Latent
