@@ -33,8 +33,18 @@ def _fused_layout(enabled: bool):
 
 @pytest.fixture
 def tile_kernel():
+    """Require the in-tree layout kernel instead of skipping without it.
+
+    CI builds fastvideo-kernel from source, so a missing module means the build
+    is broken or stale (e.g. the pinned PyPI wheel won), and a skip would let
+    the lane pass without exercising the fused route.
+    """
     pytest.importorskip("triton")
-    pytest.importorskip("fastvideo_kernel.triton_kernels.vsa_tile_layout")
+    try:
+        import fastvideo_kernel.triton_kernels.vsa_tile_layout  # noqa: F401
+    except ImportError as exc:
+        pytest.fail("fastvideo_kernel.triton_kernels.vsa_tile_layout is missing; build fastvideo-kernel from "
+                    f"source (cd fastvideo-kernel && ./build.sh): {exc}")
 
 
 def _build(dit_shape: tuple[int, int, int]):
