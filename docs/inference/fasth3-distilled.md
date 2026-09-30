@@ -170,6 +170,11 @@ build with the Blackwell VSA extension. There is no Triton fallback for tile
 requires 64-token tiles. The student's trained VSA compression gates exist
 only under `VIDEO_SPARSE_ATTN_H3`, so it does not load with dense attention.
 
+On GB200, a 480x832, 124-frame request fits on one GPU: the eight forwards
+take about 54 s, and GPU memory peaks near 103 GiB. A 768x1344, 345-frame
+request with `--num-gpus 4` takes about 35 s for the eight forwards and also
+peaks near 103 GiB per GPU. Model loading and decoding come on top of this.
+
 ## Apple Silicon
 
 `mlx_fasth3.py` stays on FastH3 V1 and its uniform AdaLN cache.
