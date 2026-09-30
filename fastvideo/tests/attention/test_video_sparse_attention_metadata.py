@@ -96,8 +96,15 @@ def test_vsa_forward_cur_topk_uses_padded_kv_block_count(monkeypatch):
     kernel_module.video_sparse_attn = fake_video_sparse_attn
     monkeypatch.setitem(sys.modules, "fastvideo_kernel", kernel_module)
 
+    from fastvideo.attention.backends import video_sparse_attn as vsa_backend
+
+    # Kernel resolution is cached; resolve against the fake and do not leak it.
+    vsa_backend._vsa_kernels.cache_clear()
     query = torch.ones(1, padded_seq_len, 1, 1)
-    output = impl.forward(query, query, query, query, metadata)
+    try:
+        output = impl.forward(query, query, query, query, metadata)
+    finally:
+        vsa_backend._vsa_kernels.cache_clear()
 
     assert unpadded_topk < expected_topk
     assert captured["topk"] == expected_topk

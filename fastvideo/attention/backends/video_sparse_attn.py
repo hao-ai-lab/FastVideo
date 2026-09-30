@@ -236,6 +236,26 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             cache_tile_buf=cache_tile_buf)
 
 
+@functools.cache
+def _vsa_kernels() -> tuple[Any, Any]:
+    """Resolve the VSA kernels once; ``None`` for each one this kernel build lacks.
+
+    fastvideo_kernel is optional and may require a GPU driver at import time, so
+    the import is deferred until the kernel is actually needed: CPU-only hosts
+    can still import FastVideo and select a different attention backend. Caching
+    avoids retrying a failed submodule import on every forward call.
+    """
+    try:
+        from fastvideo_kernel import video_sparse_attn
+    except ImportError:
+        video_sparse_attn = None
+    try:
+        from fastvideo_kernel import video_sparse_attn_bshd
+    except ImportError:
+        video_sparse_attn_bshd = None
+    return video_sparse_attn, video_sparse_attn_bshd
+
+
 class VideoSparseAttentionImpl(AttentionImpl):
 
     def __init__(
@@ -316,17 +336,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         block_elements = math.prod(VSA_TILE_SIZE)
         cur_topk = _compute_cur_topk(attn_metadata)
 
-        # fastvideo_kernel is optional and may require a GPU driver at import time.
-        # Defer the import until the kernel is actually needed so CPU-only hosts can
-        # still import FastVideo and select a different attention backend.
-        try:
-            from fastvideo_kernel import video_sparse_attn
-        except ImportError:
-            video_sparse_attn = None
-        try:
-            from fastvideo_kernel import video_sparse_attn_bshd
-        except ImportError:
-            video_sparse_attn_bshd = None
+        video_sparse_attn, video_sparse_attn_bshd = _vsa_kernels()
 
         # 256-element tiles auto-route to the FA4 CuTe BSHD fastpath, which
         # consumes [B, S, H, D] directly -- skip the transpose round-trip.
