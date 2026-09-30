@@ -577,7 +577,7 @@
 
       const hasAudio = Boolean(recipe.serving && recipe.serving.audio);
       description.textContent = useServer
-        ? `${recipe.label} stays loaded on this ${runtime.label} server. Change the prompt without reloading the model.`
+        ? `${recipe.label} keeps this ${runtime.label} server process running. Send another prompt without starting a new process.`
         : recipe.summary;
       label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;
