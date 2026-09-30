@@ -238,3 +238,23 @@ def test_standard_workers_survive_semaphore_removal_during_spawn(captured_worker
             receive.close()
             send.close()
         shutil.rmtree(gate, ignore_errors=True)
+
+
+@pytest.mark.parametrize(("use_queue_mode", "expected"), [(True, True), (False, False)])
+def test_streaming_generator_enables_queues_only_for_queue_mode(monkeypatch, use_queue_mode, expected) -> None:
+    from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
+    from fastvideo.entrypoints.video_generator import VideoGenerator
+
+    seen: list[FastVideoArgs] = []
+
+    def fake_init(self, fastvideo_args, executor_class, log_stats, **kwargs):
+        seen.append(fastvideo_args)
+        self.executor = MultiprocExecutor.__new__(MultiprocExecutor)
+
+    monkeypatch.setattr(VideoGenerator, "__init__", fake_init)
+    args = FastVideoArgs(model_path="test/model")
+
+    StreamingVideoGenerator(args, MultiprocExecutor, log_stats=False, use_queue_mode=use_queue_mode)
+
+    assert seen[0].enable_streaming_ipc_queues is expected
+    assert args.enable_streaming_ipc_queues is False  # the caller's args are never mutated
