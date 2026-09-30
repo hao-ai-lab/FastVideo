@@ -238,22 +238,32 @@ class Trainer:
                 # pre-validation interval save at the same step.
                 checkpoint_manager.maybe_save(step)
 
-            self.callbacks.on_validation_begin(
-                method,
-                iteration=step,
-            )
-            self._run_method_validation(method, step)
-            self.callbacks.on_validation_end(
-                method,
-                iteration=step,
-            )
+            try:
+                self.callbacks.on_validation_begin(
+                    method,
+                    iteration=step,
+                )
+                self._run_method_validation(method, step)
+                self.callbacks.on_validation_end(
+                    method,
+                    iteration=step,
+                )
+            except BaseException:
+                # The final-step interval save was deferred to ``save_final``
+                # after validation; if validation aborts, still persist the
+                # terminal state so a crash (or Ctrl-C) at the last step does
+                # not discard the final unsaved interval.
+                if checkpoint_manager is not None and step == max_steps:
+                    checkpoint_manager.save_final(max_steps)
+                raise
 
-        self.callbacks.on_train_end(
-            method,
-            iteration=max_steps,
-        )
-
-        if checkpoint_manager is not None:
-            checkpoint_manager.save_final(max_steps)
+        try:
+            self.callbacks.on_train_end(
+                method,
+                iteration=max_steps,
+            )
+        finally:
+            if checkpoint_manager is not None:
+                checkpoint_manager.save_final(max_steps)
 
         self.tracker.finish()
