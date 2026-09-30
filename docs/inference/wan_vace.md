@@ -117,7 +117,7 @@ WAN_VACE_14B_MODEL_DIR=/path/to/Wan2.1-VACE-14B-diffusers \
 # SP2 forward parity (two GPUs, no weights)
 pytest fastvideo/tests/distributed/test_sp_wan_vace.py -v -s
 
-# Local SP2 pipeline comparison (two GPUs + cached weights; cases xfail)
+# Local SP2 pipeline comparison (two GPUs + cached weights; drift < 5%, frame SSIM >= 0.93)
 WAN_VACE_SP_E2E=1 \
 WAN_VACE_MODEL_DIR=/path/to/Wan2.1-VACE-1.3B-diffusers \
 WAN_VACE_14B_MODEL_DIR=/path/to/Wan2.1-VACE-14B-diffusers \

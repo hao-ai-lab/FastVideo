@@ -14,7 +14,6 @@ Local parity and smoke coverage for Wan2.1-VACE controllable video generation.
 ```bash
 export WAN_VACE_MODEL_DIR=/path/to/Wan2.1-VACE-1.3B-diffusers
 export WAN_VACE_14B_MODEL_DIR=/path/to/Wan2.1-VACE-14B-diffusers
-export DISABLE_SP=1
 export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 ```
 
@@ -26,12 +25,12 @@ export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 | Input and backend contracts | `fastvideo/tests/api/test_wan_vace_{inputs,backend}.py` | no | Buildkite unit lane |
 | Pipeline smoke | `tests/local_tests/pipelines/test_wan_vace_pipeline_smoke.py` | optional | Preflight always runs |
 | Transformer parity | `tests/local_tests/pipelines/test_wan_vace_pipeline_parity.py` | yes | Single-step forward vs Diffusers |
-| Pipeline parity | `tests/local_tests/pipelines/test_wan_vace_end_to_end_parity.py` | yes | VACE e2e gates (bf16 inputs + step0 DiT + final latent drift) |
+| Pipeline parity | `tests/local_tests/pipelines/test_wan_vace_end_to_end_parity.py` | yes | VACE e2e gates (bf16 inputs + every-step teacher-forced DiT + final drift) |
 | SP2 forward | `fastvideo/tests/distributed/test_sp_wan_vace.py` | 2 | Weight-free FP32 odd-token/short-control parity |
-| SP2 pipeline | `tests/local_tests/pipelines/test_wan_vace_sp_pipeline.py` | 2 | Weighted BF16 single/SP2 gates (`WAN_VACE_SP_E2E=1`); cases `xfail` |
+| SP2 pipeline | `tests/local_tests/pipelines/test_wan_vace_sp_pipeline.py` | 2 | Weighted BF16 single vs SP2 (`WAN_VACE_SP_E2E=1`): drift < 5%, frame SSIM ≥ 0.93 |
 | Shared helpers | `tests/local_tests/wan/vace_parity_helpers.py` | — | Official fp32 VAE/T5 reload, FV transformer load |
 | Repro matrix | `scripts/run_vace_matrix.py` | yes | Official reference-image case |
-| SSIM regression | `fastvideo/tests/ssim/test_wan_vace_similarity.py` | 1 | Reference-image case; CI SSIM lane |
+| SSIM regression | `fastvideo/tests/ssim/test_wan_vace_similarity.py` | 1 | Reference-image and video+mask cases; CI SSIM lane |
 | Port status | `tests/local_tests/wan/PORT_STATUS.md` | — | add-model handoff state |
 
 ## Parity Gates

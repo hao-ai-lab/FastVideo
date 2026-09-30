@@ -6,11 +6,11 @@ from fastvideo.pipelines.stages.denoising import DenoisingState
 
 
 class WanVACEDenoisingStage(WanDenoisingStage):
+    """VACE control reaches the DiT through ``control_hidden_states``, never channel concat.
 
-    def prepare_model_input(self, latents, batch, target_dtype, state):
-        # VACE passes pixel control video via ``batch.video_latent`` and packs
-        # DiT conditioning through ``control_hidden_states`` instead of channel concat.
-        return latents.to(target_dtype)
+    ``WanVACEContextStage`` clears the pixel ``video_latent`` after packing, so the
+    inherited ``prepare_model_input`` passes the noisy latents through unchanged.
+    """
 
     def prepare_family_transformer_kwargs(self, batch, state: DenoisingState, target_dtype) -> dict:
         if batch.vace_control_latents is None:
