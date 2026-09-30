@@ -60,6 +60,11 @@ hardware always use the original route. The gate matches compute capability
 10.0 exactly; other SM10x parts (e.g. SM103) are not yet validated and use the
 original route.
 
+The kernel ships in the first `fastvideo-kernel` release after 0.3.5. Standard
+installs pin `fastvideo-kernel==0.3.5`, which does not include it, so they
+silently use the original route. Until that release, build `fastvideo-kernel`
+from source (`cd fastvideo-kernel && ./build.sh`) to get the fused layout.
+
 To compare the two routes on a Wan 480p token grid (add `--include_attn` to
 also time the sparse attention call):
 
