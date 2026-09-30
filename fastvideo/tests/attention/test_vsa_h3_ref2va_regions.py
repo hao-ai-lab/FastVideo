@@ -8,6 +8,7 @@ differ from the target's. The kernel route for 128-token tiles is exercised
 through a stand-in for the sm_100a extension; real kernels are not needed.
 """
 
+import hashlib
 import math
 
 import pytest
@@ -17,9 +18,9 @@ import torch.nn.functional as F
 import fastvideo.attention.backends.video_sparse_attn_h3 as vsa_h3
 import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn import compute_topk
-from fastvideo.attention.backends.video_sparse_attn_h3 import (_TILE_ELEMS, MiniMaxH3VSAImpl,
+from fastvideo.attention.backends.video_sparse_attn_h3 import (_TILE_ELEMS, VSA_H3_TILE_SHAPES, MiniMaxH3VSAImpl,
                                                                MiniMaxH3VSAMetadataBuilder, _build_block_mask,
-                                                               _h3_segment_tile_geometry, _h3_tile_geometry,
+                                                               _h3_tile_geometry,
                                                                _pool_tiles, assert_ref2va_vsa_metadata,
                                                                token_tile_and_valid)
 from fastvideo.pipelines.basic.minimax_h3.packing import MINIMAX_H3_TEXT_TAG, build_ref2va_packed_sequence
@@ -200,6 +201,42 @@ def test_multi_region_geometry_native_tile_oracle(tile_size, width):
             assert rows.min() >= seg_start and rows.max() < seg_end
 
 
+# SHA-256 of the single-region tile geometry (partition indices, block sizes,
+# untile index, prefix and video tile counts) computed by upstream main at
+# 9edc8adf5, before the multi-region refactor. Frozen so the refactored path
+# is checked against the original implementation, not against itself.
+_LEGACY_GEOMETRY_SHA256 = {
+    ((37, 9, 120, 11), (8, 4, 6), 64): "e246d39c1be206be5b9ad938438d0594fea013d5e8c4fcb08bce05face5d4220",
+    ((37, 9, 120, 11), (8, 4, 6), 128): "bce9def60b23ef5dc71d790e367480c2c22e0e6f414678b72844b808d7f96bd9",
+    ((37, 9, 120, 11), (8, 4, 6), 256): "a710f91b80cb02bf8bbf2d37f06b612c2a4e805356c81f55c744dd066417a535",
+    ((512, 1200, 216), (16, 24, 40), 64): "22d1581bd63b2dfb77951e31e788aa93cd53b50c89290312b1340605889f21a9",
+    ((512, 1200, 216), (16, 24, 40), 128): "23b19d850777a4a6063164c5ceea33991fca5d0e7ded67d22be0a2d24c9ff0a0",
+    ((512, 1200, 216), (16, 24, 40), 256): "93d86b693252631c8f35efd2fdbdc216e2979c574d10c5d8d5b4fb8288750462",
+    ((5, 3, 250), (6, 10, 14), 64): "3226fc23f45bec409992d2bf0f42794c609d53bac401c5162e7c37615904cc41",
+    ((5, 3, 250), (6, 10, 14), 128): "2645e5a4c49b30de3f355ee0163e8703de2676a9a21e6d04b6b1a210a01242ab",
+    ((5, 3, 250), (6, 10, 14), 256): "220fa91d488c88832d08177e28d8bb57f2477b7be36677302ecfefb9cef7c56c",
+}
+
+
+def _geometry_sha256(outputs):
+    digest = hashlib.sha256()
+    for item in outputs:
+        if torch.is_tensor(item):
+            tensor = item.detach().cpu().contiguous()
+            digest.update(str(tensor.dtype).encode())
+            digest.update(str(tuple(tensor.shape)).encode())
+            digest.update(tensor.numpy().tobytes())
+        else:
+            digest.update(repr(int(item)).encode())
+    return digest.hexdigest()
+
+
+@pytest.mark.parametrize("prefix_segments,dit_seq_shape,tile_size", sorted(_LEGACY_GEOMETRY_SHA256))
+def test_single_region_geometry_matches_the_pre_refactor_implementation(prefix_segments, dit_seq_shape, tile_size):
+    geometry = _h3_tile_geometry(prefix_segments, dit_seq_shape, _CPU, VSA_H3_TILE_SHAPES[tile_size])
+    assert _geometry_sha256(geometry) == _LEGACY_GEOMETRY_SHA256[prefix_segments, dit_seq_shape, tile_size]
+
+
 def test_single_region_builds_keep_the_legacy_geometry():
     legacy = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
                                                  raw_latent_shape=(8, 8, 12),
@@ -209,14 +246,9 @@ def test_single_region_builds_keep_the_legacy_geometry():
                                                  device=_CPU,
                                                  tile_size=128)
     assert legacy.video_tile_spans == () and legacy.span_sparsities == () and legacy.ref2va_policy is None
-    general = _h3_segment_tile_geometry((37, 9, 120, 11, (8, 4, 6)), _CPU, (4, 4, 8))
-    for actual, expected in zip(_h3_tile_geometry((37, 9, 120, 11), (8, 4, 6), _CPU, (4, 4, 8)), general[:5],
-                                strict=True):
-        if torch.is_tensor(expected):
-            assert torch.equal(actual, expected)
-        else:
-            assert actual == expected
-    assert torch.equal(legacy.untile_combined_index, general[2])
+    geometry = _h3_tile_geometry((37, 9, 120, 11), (8, 4, 6), _CPU, (4, 4, 8))
+    assert _geometry_sha256(geometry) == _LEGACY_GEOMETRY_SHA256[(37, 9, 120, 11), (8, 4, 6), 128]
+    assert torch.equal(legacy.untile_combined_index, geometry[2])
 
 
 def test_multi_region_span_topk_and_reference_keep_rate():
