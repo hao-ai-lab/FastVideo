@@ -3,15 +3,20 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import torch
 
+from fastvideo.attention.backends.video_sparse_attn_h3 import assert_ref2va_vsa_metadata
 from fastvideo.attention.selector import component_attention_backend, get_attn_backend
+from fastvideo.configs.pipelines.minimax_h3 import MINIMAX_H3_VSA_REF_POLICY_P2
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.hooks.activation_trace import trace_step
+from fastvideo.layers.pdd import PDDModalitySchedule, PDDSamplingPlan, build_pdd_sampling_plan
+from fastvideo.logger import init_logger
 from fastvideo.profiler import nvtx_range, profiler_region
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_KEYFRAME_NOISE_AUG,
@@ -24,6 +29,18 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import get_compute_dtype
+
+logger = init_logger(__name__)
+
+
+def scale_pdd_initial_noise(video_rows: torch.Tensor, audio_rows: torch.Tensor, layout: MiniMaxH3PackedLayout,
+                            plan: PDDSamplingPlan) -> None:
+    """Start PDD targets at the first node's noise level (``0.999 * eps``), as the students are trained.
+
+    Latent preparation draws unit noise; conditioning rows are left untouched.
+    """
+    video_rows[layout.num_condition_video_rows:] *= float(plan.node_sigmas["video"][0])
+    audio_rows[layout.num_condition_audio_rows:] *= float(plan.node_sigmas["audio"][0])
 
 
 def _h3_vsa_metadata_builder(transformer: Any, fastvideo_args: FastVideoArgs) -> Any:
@@ -59,6 +76,49 @@ def _h3_vsa_prefix_segments(layout: MiniMaxH3PackedLayout, patch_size: tuple[int
     return n_text, n_cond, n_audio
 
 
+def _h3_vsa_ref2va_segments(
+    layout: MiniMaxH3PackedLayout,
+    patch_size: tuple[int, int, int],
+) -> tuple[tuple[int, ...], tuple[tuple[int, int, int], ...], tuple[int, ...]]:
+    """Ref2VA multi-region VSA geometry in true packed order.
+
+    Returns ``(prefix_segments, video_segments, video_offsets)`` for
+    ``MiniMaxH3VSAMetadataBuilder.build``: every reference VIDEO becomes a
+    sparsifiable region at its packed offset; text, every reference's audio
+    rows, image references, and the target audio stay dense segments; the
+    target video is the last region. The packed order is
+    ``[text | reference spans... | target audio | target video]``.
+    """
+    if not layout.reference_segments:
+        raise ValueError("Ref2VA VSA sparsification needs per-reference spans on the layout; "
+                         "this layout carries none (T2VA/FL2VA packing).")
+    prefix_segments: list[int] = [int(layout.text_indices.numel())]
+    video_segments: list[tuple[int, int, int]] = []
+    video_offsets: list[int] = []
+    cursor = prefix_segments[0]
+    for kind, rows, latent_shape in layout.reference_segments:
+        rows = int(rows)
+        if kind == "video":
+            video_segments.append((int(latent_shape[0]), int(latent_shape[1]), int(latent_shape[2])))
+            video_offsets.append(cursor)
+        else:
+            # audio rows and single-frame image latents stay dense
+            prefix_segments.append(rows)
+        cursor += rows
+    n_target_audio = int(layout.audio_indices.numel()) - int(layout.num_condition_audio_rows)
+    prefix_segments.append(n_target_audio)
+    cursor += n_target_audio
+    video_segments.append((layout.num_video_latent_frames, layout.latent_height, layout.latent_width))
+    video_offsets.append(cursor)
+    n_target_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
+                      (layout.latent_width // patch_size[2]))
+    if cursor + n_target_video != layout.sequence_length:
+        raise ValueError(f"Ref2VA reference spans {layout.reference_segments} + target segments do not tile the "
+                         f"packed sequence: reached row {cursor} + video {n_target_video} != "
+                         f"{layout.sequence_length}.")
+    return tuple(prefix_segments), tuple(video_segments), tuple(video_offsets)
+
+
 class MiniMaxH3DenoisingStage(PipelineStage):
     """Build both schedules and denoise both modalities in one transformer call."""
 
@@ -85,6 +145,50 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # Explicit sigmas are already shifted. Scheduler timesteps are H3
             # clean time (1 - sigma); passing integer rungs to step() is wrong.
             scheduler.set_timesteps(sigmas=sigmas, device=device)
+
+    def _pdd_sampling_plan(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+        device: torch.device,
+    ) -> PDDSamplingPlan | None:
+        """Partition a PDD-widened transformer's fine grid into ``num_inference_steps`` fused blocks.
+
+        The loaded transformer owns the grid (``pdd_steps`` in its
+        ``config.json``); the pipeline's DiT config, which that file also
+        overlays, must agree. Each modality's node sigmas come from its own
+        scheduler shift on the shared base clock. ``pdd_step_indices`` on the
+        pipeline config (from ``fastvideo_inference.json``) names the trained
+        partition; without it the balanced partition is used.
+        """
+        pipeline_config = fastvideo_args.pipeline_config
+        pdd_steps = getattr(self.transformer, "pdd_steps", None)
+        config_steps = getattr(pipeline_config.dit_config.arch_config, "pdd_steps", None)
+        if config_steps is not None and config_steps != pdd_steps:
+            raise ValueError(f"dit_config.arch_config.pdd_steps={config_steps!r} disagrees with the loaded "
+                             f"transformer's pdd_steps={pdd_steps!r}.")
+        indices = getattr(pipeline_config, "pdd_step_indices", None)
+        if not pdd_steps:
+            if indices is not None:
+                raise ValueError("pdd_step_indices requires a PDD-widened transformer (config.json pdd_steps).")
+            return None
+        num_steps = int(batch.num_inference_steps)
+        if indices is not None and len(indices) != num_steps + 1:
+            raise ValueError(f"This PDD checkpoint runs {len(indices) - 1} fused blocks (pdd_step_indices={indices}); "
+                             f"num_inference_steps counts transformer forwards and must be {len(indices) - 1}, "
+                             f"got {num_steps}.")
+        schedules = {
+            "video": PDDModalitySchedule(shift=float(self.scheduler.shift)),
+            "audio": PDDModalitySchedule(shift=float(self.audio_scheduler.shift)),
+        }
+        return build_pdd_sampling_plan(int(pdd_steps), num_steps, schedules, indices=indices, device=device)
+
+    def _pdd_head_fusion(self, plan: PDDSamplingPlan | None, index: int) -> contextlib.AbstractContextManager[None]:
+        """Fuse runtime step *index*'s block of heads inside both widened output projections."""
+        if plan is None:
+            return contextlib.nullcontext()
+        block_start, block_end = plan.block(index)
+        return self.transformer.fuse_pdd_block(block_start, block_end, plan.integration_weights, torch.float32)
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -117,7 +221,19 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         device = get_local_torch_device()
 
         dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
-        if dmd_steps is None:
+        pdd_plan = self._pdd_sampling_plan(batch, fastvideo_args, device)
+        if pdd_plan is not None:
+            if dmd_steps is not None:
+                raise ValueError("A PDD-widened MiniMax-H3 transformer samples fused blocks of its fine grid; "
+                                 "dmd_denoising_steps must be unset.")
+            # One runtime step fuses one block of heads into their weighted
+            # mean velocity; the ordinary Euler step over the block's two node
+            # sigmas then applies the block's total increment per modality.
+            self.scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["video"].to(torch.float32), device=device)
+            self.audio_scheduler.set_timesteps(sigmas=pdd_plan.node_sigmas["audio"].to(torch.float32), device=device)
+            logger.info("MiniMax-H3 PDD denoising: %d fused block(s) %s over a %d-interval fine grid.",
+                        pdd_plan.num_steps, pdd_plan.block_sizes, pdd_plan.pdd_steps)
+        elif dmd_steps is None:
             self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
             self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
         else:
@@ -153,18 +269,34 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
         if vsa_metadata_builder is not None:
             vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
-            vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
             # Per-request knobs (sweeps flip these between generate_video calls
             # without respawning workers); mode None defers to the env default.
             vsa_mode = batch.extra.get("vsa_mode", "exempt")
             if vsa_mode not in ("exempt", "compete"):
                 raise ValueError(f"vsa_mode must be 'exempt' or 'compete', got {vsa_mode!r}.")
             vsa_exempt = vsa_mode == "exempt"
+            # Ref2VA policy P2 tiles each reference video as its own sparse
+            # region at ``vsa_ref_keep_rate`` instead of keeping every
+            # conditioning row dense (P1, the default).
+            vsa_ref_policy = getattr(fastvideo_args.pipeline_config, "vsa_ref_policy", None)
+            vsa_ref_keep_rate = getattr(fastvideo_args.pipeline_config, "vsa_ref_keep_rate", None)
+            vsa_video_segments: tuple[tuple[int, int, int], ...] | None = None
+            vsa_video_offsets: tuple[int, ...] | None = None
+            if vsa_ref_policy == MINIMAX_H3_VSA_REF_POLICY_P2:
+                if not vsa_exempt:
+                    raise ValueError(f"vsa_ref_policy={vsa_ref_policy!r} requires vsa_mode='exempt' "
+                                     "(compete supports a single video region).")
+                vsa_prefix_segments, vsa_video_segments, vsa_video_offsets = _h3_vsa_ref2va_segments(
+                    layout, vsa_patch_size)
+            elif vsa_ref_policy is None:
+                vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
+            else:
+                raise ValueError(f"Unsupported MiniMax-H3 vsa_ref_policy {vsa_ref_policy!r}.")
             vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
-            # Run-level tile geometry (256 default, 64 = native Triton path),
-            # plumbed like the run-level sparsity; the builder validates the
-            # value against VSA_H3_TILE_SHAPES.
+            # Run-level tile geometry (256 default, 64 = native Triton path,
+            # 128 = sm_100a CUDA), plumbed like the run-level sparsity; the
+            # builder validates the value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
 
         try:
@@ -172,6 +304,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                 self.transformer.to(device)
                 batch.latents = batch.latents.to(device)
                 batch.audio_latents = batch.audio_latents.to(device)
+            if pdd_plan is not None:
+                scale_pdd_initial_noise(batch.latents, batch.audio_latents, layout, pdd_plan)
 
             # The stage range groups the complete denoising loop while the
             # indexed model ranges retain timing detail for every H3 block.
@@ -185,25 +319,49 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                         # selects every tile — parity-proven ≡ dense ≤2e-4); early
                         # steps set global structure and are the most damage-prone.
                         vsa_sparsity = 0.0 if index < vsa_dense_first_n else float(batch.VSA_sparsity)
-                        attn_metadata = vsa_metadata_builder.build(
-                            current_timestep=index,
-                            raw_latent_shape=(layout.num_video_latent_frames, layout.latent_height,
-                                              layout.latent_width),
-                            patch_size=vsa_patch_size,
-                            VSA_sparsity=vsa_sparsity,
-                            prefix_segments=vsa_prefix_segments,
-                            device=device,
-                            exempt=vsa_exempt,
-                            dense_layers=vsa_dense_layers,
-                            tile_size=vsa_tile_size,
-                        )
+                        if vsa_video_segments is None:
+                            attn_metadata = vsa_metadata_builder.build(
+                                current_timestep=index,
+                                raw_latent_shape=(layout.num_video_latent_frames, layout.latent_height,
+                                                  layout.latent_width),
+                                patch_size=vsa_patch_size,
+                                VSA_sparsity=vsa_sparsity,
+                                prefix_segments=vsa_prefix_segments,
+                                device=device,
+                                exempt=vsa_exempt,
+                                dense_layers=vsa_dense_layers,
+                                tile_size=vsa_tile_size,
+                            )
+                        else:
+                            # Every video region, the target included, is
+                            # passed through video_segments.
+                            attn_metadata = vsa_metadata_builder.build(
+                                current_timestep=index,
+                                raw_latent_shape=None,
+                                patch_size=vsa_patch_size,
+                                VSA_sparsity=vsa_sparsity,
+                                prefix_segments=vsa_prefix_segments,
+                                device=device,
+                                exempt=vsa_exempt,
+                                dense_layers=vsa_dense_layers,
+                                tile_size=vsa_tile_size,
+                                video_segments=vsa_video_segments,
+                                video_offsets=vsa_video_offsets,
+                                ref_keep_rate=vsa_ref_keep_rate,
+                            )
+                            assert_ref2va_vsa_metadata(
+                                attn_metadata,
+                                expected_reference_video_regions=len(vsa_video_segments) - 1,
+                                target_sparsity=vsa_sparsity,
+                                ref_keep_rate=vsa_ref_keep_rate,
+                            )
                     # Under torch.compile(mode="reduce-overhead") each denoising
                     # step must be marked, or cudagraph trees flag cross-step
                     # reuse of pooled outputs as "accessing tensor output of
                     # CUDAGraphs that has been overwritten" (surfaces at sp=1;
                     # sp>1 is masked by collective-induced graph breaks).
                     torch.compiler.cudagraph_mark_step_begin()
-                    with trace_step(index), set_forward_context(
+                    with self._pdd_head_fusion(pdd_plan, index), trace_step(index), set_forward_context(
                             current_timestep=index,
                             attn_metadata=attn_metadata,
                             forward_batch=batch,
@@ -247,4 +405,4 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         return batch
 
 
-__all__ = ["MiniMaxH3DenoisingStage"]
+__all__ = ["MiniMaxH3DenoisingStage", "scale_pdd_initial_noise"]

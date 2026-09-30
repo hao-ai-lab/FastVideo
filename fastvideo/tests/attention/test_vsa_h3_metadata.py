@@ -241,7 +241,7 @@ def test_geometry_guard_enforces_tile64_bound():
 
 
 def test_builder_rejects_unknown_tile_size():
-    for bad in (0, 128, 512):
+    for bad in (0, 96, 512):
         with pytest.raises(ValueError, match="tile_size"):
             _build(_TINY, tile_size=bad)
 
