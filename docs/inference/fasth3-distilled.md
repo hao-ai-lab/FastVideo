@@ -175,9 +175,11 @@ loads any weights. With `--num-gpus` above 1 it shards the DiT across the GPUs
 (FSDP) and splits the sequence across them.
 
 On GB200, a 480x832, 124-frame request fits on one GPU: the eight forwards
-take about 54 s, and GPU memory peaks near 103 GiB. A 768x1344, 345-frame
-request with `--num-gpus 4` takes about 35 s for the eight forwards and also
-peaks near 103 GiB per GPU. Model loading and decoding come on top of this.
+take about 54 s, and device memory in use peaks near 103 GiB. A 768x1344,
+345-frame request with `--num-gpus 4` takes about 36 s for the eight
+forwards. With the DiT sharded, peak allocated memory is about 66 GiB per GPU
+(about 95 GiB in use), against 83 GiB (103 GiB) with a full DiT copy on each
+GPU; the output is identical. Model loading and decoding come on top of this.
 
 ## Apple Silicon
 
