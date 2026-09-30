@@ -149,7 +149,7 @@ training:
     checkpoints_total_limit: 3                # 0 = keep all
 
   tracker:
-    trackers: []  # options: none, wandb, swanlab, jsonl
+    trackers: []  # default: [] (auto-adds "wandb" if project_name is set); options: none, wandb, swanlab, jsonl
     project_name: my_project
     run_name: my_run
 
