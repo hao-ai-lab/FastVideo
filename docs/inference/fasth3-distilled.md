@@ -170,8 +170,9 @@ The contract's 128-token tiles, `(4, 4, 8)`, run only on the sm_100a/sm_103a
 CUDA block-sparse kernel (B200, B300, GB200, GB300) of a fastvideo-kernel
 build with the Blackwell VSA extension. There is no Triton fallback for tile
 128: the backend raises instead. Tile 128 runs eagerly; regional compile still
-requires 64-token tiles. The student's trained VSA compression gates exist
-only under `VIDEO_SPARSE_ATTN_H3`, so it does not load with dense attention.
+requires 64-token tiles. The example checks the GPUs and the kernel before it
+loads any weights. With `--num-gpus` above 1 it shards the DiT across the GPUs
+(FSDP) and splits the sequence across them.
 
 On GB200, a 480x832, 124-frame request fits on one GPU: the eight forwards
 take about 54 s, and GPU memory peaks near 103 GiB. A 768x1344, 345-frame

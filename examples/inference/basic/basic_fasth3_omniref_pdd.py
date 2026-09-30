@@ -14,7 +14,9 @@ transformer forward each), the video/audio shifts, and VIDEO_SPARSE_ATTN_H3
 with its sparsity and tile size, where every reference video is its own
 sparse region. The contract's 128-token tiles run only on the sm_100a/sm_103a
 CUDA kernel (B200/B300/GB200/GB300) of a fastvideo-kernel build with the
-Blackwell VSA extension.
+Blackwell VSA extension; the script checks both before loading any weights.
+With ``--num-gpus`` above 1 the DiT is sharded across the GPUs (FSDP) and the
+sequence is split across them (sequence parallelism).
 
 References are ordered. Pass them in order with --image / --video / --audio,
 for example ``--video dance.mp4 --image outfit.png --audio voice.wav``.
@@ -49,6 +51,8 @@ EXPORT_COMPONENTS = ("transformer_ref", "scheduler", "audio_scheduler")
 BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae")
 MANIFESTS = ("modular_model_index.json", "model_index.json")
 DEFAULT_BASE_MODEL = "MiniMaxAI/MiniMax-H3"
+# Data-center Blackwell: the only devices with the 128-token VSA-H3 forward.
+SM100A_CAPABILITIES = frozenset({(10, 0), (10, 3)})
 
 
 class _AppendReference(argparse.Action):
@@ -70,7 +74,10 @@ def build_parser() -> argparse.ArgumentParser:
                         default=None,
                         help="base MiniMax-H3 snapshot (local directory or repo id). Default: the repo and revision "
                         f"pinned by the export's base_model_revision, else {DEFAULT_BASE_MODEL}")
-    parser.add_argument("--base-revision", default=None, help="revision of --base-model-path")
+    parser.add_argument("--base-revision",
+                        default=None,
+                        help="revision of --base-model-path when it is a repo id (the export's pinned revision "
+                        "applies only to its own base repo); without --base-model-path, overrides that pin")
     parser.add_argument("--composed-dir",
                         default=None,
                         help="where to write the composed model directory of symlinks (default: "
@@ -121,6 +128,14 @@ def load_contract(export_dir: Path) -> dict[str, Any]:
     return contract
 
 
+def base_model_source(args: argparse.Namespace, contract: dict[str, Any]) -> tuple[str, str | None]:
+    """The base snapshot and revision: --base-model-path as given, else the export's pin."""
+    if args.base_model_path:
+        return args.base_model_path, args.base_revision
+    base_repo, base_revision = base_model_from_contract(contract)
+    return base_repo, args.base_revision or base_revision
+
+
 def base_model_from_contract(contract: dict[str, Any]) -> tuple[str, str | None]:
     """``hf://<repo>@<revision>`` from the export, else the public base repo."""
     pinned = contract.get("base_model_revision")
@@ -162,11 +177,45 @@ def resolve_model(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     export_dir = _snapshot(args.model_path, args.revision,
                            [CONTRACT, *MANIFESTS, *(f"{name}/**" for name in EXPORT_COMPONENTS)])
     contract = load_contract(export_dir)
-    base_repo, base_revision = base_model_from_contract(contract)
-    base_dir = _snapshot(args.base_model_path or base_repo, args.base_revision or base_revision,
-                         [*MANIFESTS, *(f"{name}/**" for name in BASE_COMPONENTS)])
+    base_source, base_revision = base_model_source(args, contract)
+    base_dir = _snapshot(base_source, base_revision, [*MANIFESTS, *(f"{name}/**" for name in BASE_COMPONENTS)])
     composed_dir = Path(args.composed_dir) if args.composed_dir else Path(args.output) / "fasth3_omniref_model"
     return compose_model_dir(export_dir, base_dir, composed_dir), contract
+
+
+def _tile128_kernel_is_installed() -> bool:
+    try:
+        from fastvideo_kernel import block_sparse_attn_sm100a
+    except ImportError:
+        return False
+    return getattr(block_sparse_attn_sm100a, "_FWD_BY_BLOCK", {}).get(128) is not None
+
+
+def validate_attention_runtime(contract: dict[str, Any], num_gpus: int) -> None:
+    """Fail before loading any weights when this machine cannot run the contract's attention."""
+    if contract.get("attention_backend") != "VIDEO_SPARSE_ATTN_H3" or contract.get("vsa_tile_size") != 128:
+        return
+    from fastvideo.platforms import current_platform
+
+    # NVML-backed on CUDA: reading capabilities does not initialize CUDA in this process.
+    capabilities = [current_platform.get_device_capability(device) for device in range(num_gpus)]
+    if any(capability is None or tuple(capability) not in SM100A_CAPABILITIES for capability in capabilities):
+        found = ", ".join("none" if capability is None else f"sm_{capability.major}{capability.minor}"
+                          for capability in capabilities)
+        raise RuntimeError("This export's 128-token VSA tiles run only on sm_100a/sm_103a GPUs (B200, B300, GB200, "
+                           f"GB300); the {num_gpus} requested GPU(s) are: {found}.")
+    if not _tile128_kernel_is_installed():
+        raise RuntimeError("This export's 128-token VSA tiles need fastvideo-kernel built with the Blackwell VSA "
+                           "extension (the 128-token block_sparse_attn_sm100a forward). Install it with "
+                           "`UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"`, or build "
+                           "`fastvideo-kernel` on this machine with `./build.sh`.")
+
+
+def attention_settings(contract: dict[str, Any]) -> dict[str, Any]:
+    """The contract's trained attention policy; keys it omits keep FastVideo's defaults."""
+    names = (("attention_backend", "attention_backend"), ("vsa_sparsity", "VSA_sparsity"),
+             ("vsa_tile_size", "VSA_tile_size"))
+    return {setting: contract[key] for key, setting in names if contract.get(key) is not None}
 
 
 def build_generator_config(model_dir: Path, contract: dict[str, Any], num_gpus: int) -> GeneratorConfig:
@@ -174,6 +223,8 @@ def build_generator_config(model_dir: Path, contract: dict[str, Any], num_gpus: 
         model_path=str(model_dir),
         engine=EngineConfig(
             num_gpus=num_gpus,
+            # Shard the DiT across the GPUs rather than holding a full copy on each.
+            use_fsdp_inference=num_gpus > 1,
             parallelism=ParallelismConfig(tp_size=1, sp_size=num_gpus),
             offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=True, pin_cpu_memory=False),
         ),
@@ -182,11 +233,7 @@ def build_generator_config(model_dir: Path, contract: dict[str, Any], num_gpus: 
             components=ComponentConfig(override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline"),
             # The trained attention policy. The pipeline applies the contract's
             # fused-block partition and reference-video sparsity itself.
-            experimental={
-                "attention_backend": contract["attention_backend"],
-                "VSA_sparsity": contract["vsa_sparsity"],
-                "VSA_tile_size": contract["vsa_tile_size"],
-            },
+            experimental=attention_settings(contract),
         ),
     )
 
@@ -198,8 +245,9 @@ def main() -> None:
     model_dir, contract = resolve_model(args)
     print(f"Composed model directory: {model_dir}")
     print(f"Contract: {contract['num_inference_steps']} fused blocks of a {contract['pdd_steps']}-interval grid, "
-          f"{contract['attention_backend']} sparsity {contract['vsa_sparsity']} tile {contract['vsa_tile_size']}, "
-          f"reference keep rate {contract.get('vsa_ref_keep_rate')}")
+          f"attention {attention_settings(contract) or 'FastVideo defaults'}, "
+          f"reference policy {contract.get('vsa_ref_policy')} (keep rate {contract.get('vsa_ref_keep_rate')})")
+    validate_attention_runtime(contract, args.num_gpus)
     references = [MiniMaxH3Reference(source=path, media_type=kind) for kind, path in args.references]
 
     generator = VideoGenerator.from_config(build_generator_config(model_dir, contract, args.num_gpus))

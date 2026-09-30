@@ -158,6 +158,15 @@ The four release launchers are:
 - `run_fasth3_lora_preview_vsa_synthetic_step1900.sh`
 - `run_fasth3_lora_preview_dense_datafree.sh`
 
+Each downloads its exact private adapter file from
+`FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA`; authenticate with `hf auth
+login` first. Pass `--lora-strength 0.5` to interpolate every adapter payload at
+half strength. Strength `1` applies the published rank-64 adapter at its trained
+scale and approximates the full student; `0` removes its weight deltas. VSA
+launchers still use sparse attention at strength `0` and require FastVideo's
+tile-64 VSA kernel; the dense launcher selects FA4. Each launcher writes to its
+own variant directory by default so comparison outputs do not collide.
+
 ### FastH3 OmniRef PDD (Ref2VA)
 
 [basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py)
@@ -175,15 +184,6 @@ python examples/inference/basic/basic_fasth3_omniref_pdd.py \
 
 See [FastH3 distilled checkpoint schedules](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/inference/fasth3-distilled.md#ref2va-pdd-students)
 for the contract and the reference-video sparsity policy.
-
-Each downloads its exact private adapter file from
-`FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA`; authenticate with `hf auth
-login` first. Pass `--lora-strength 0.5` to interpolate every adapter payload at
-half strength. Strength `1` applies the published rank-64 adapter at its trained
-scale and approximates the full student; `0` removes its weight deltas. VSA
-launchers still use sparse attention at strength `0` and require FastVideo's
-tile-64 VSA kernel; the dense launcher selects FA4. Each launcher writes to its
-own variant directory by default so comparison outputs do not collide.
 
 ## Basic Walkthrough
 
