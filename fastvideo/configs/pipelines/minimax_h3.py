@@ -38,8 +38,8 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
     pdd_step_indices: list[int] | None = None
     # Ref2VA reference-video sparsity under VIDEO_SPARSE_ATTN_H3.
     # "p2_multi_region" tiles each reference video as its own sparse region
-    # that keeps ``vsa_ref_keep_rate`` of its tiles (unset: the target's keep
-    # rate); None keeps every conditioning row dense.
+    # that keeps ``vsa_ref_keep_rate`` (in (0, 1)) of its tiles (unset: the
+    # target's keep rate); None keeps every conditioning row dense.
     vsa_ref_policy: str | None = None
     vsa_ref_keep_rate: float | None = None
 
@@ -55,9 +55,10 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
             raise ValueError(f"MiniMax-H3 vsa_ref_policy must be None or {MINIMAX_H3_VSA_REF_POLICY_P2!r}, "
                              f"got {self.vsa_ref_policy!r}.")
         keep_rate = self.vsa_ref_keep_rate
+        # A keep rate of 1 would leave reference-video attention dense.
         if keep_rate is not None and (isinstance(keep_rate, bool) or not isinstance(keep_rate, int | float)
-                                      or not 0.0 < float(keep_rate) <= 1.0):
-            raise ValueError(f"MiniMax-H3 vsa_ref_keep_rate must be in (0, 1], got {keep_rate!r}.")
+                                      or not 0.0 < float(keep_rate) < 1.0):
+            raise ValueError(f"MiniMax-H3 vsa_ref_keep_rate must be in (0, 1), got {keep_rate!r}.")
         if keep_rate is not None and self.vsa_ref_policy is None:
             raise ValueError("MiniMax-H3 vsa_ref_keep_rate requires vsa_ref_policy.")
 

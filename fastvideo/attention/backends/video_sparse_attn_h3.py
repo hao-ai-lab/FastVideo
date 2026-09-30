@@ -90,6 +90,7 @@ from fastvideo.attention.backends.video_sparse_attn import (compute_topk, constr
                                                             get_non_pad_index, get_tile_partition_indices,
                                                             scatter_into_tile_buf)
 from fastvideo.attention.backends.video_sparse_attn_h3_probe import probe_enabled, record_probe
+from fastvideo.configs.pipelines.minimax_h3 import MINIMAX_H3_VSA_REF_POLICY_P2
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -435,7 +436,7 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         sparsifiable region, packed order, the generated video last) and
         ``video_offsets`` (the packed row where each region starts);
         ``prefix_segments`` are then the dense segments in packed order and
-        must fill every gap. ``ref_keep_rate`` in (0, 1] sets the keep rate of
+        must fill every gap. ``ref_keep_rate`` in (0, 1) sets the keep rate of
         every region except the last; the last follows ``VSA_sparsity``.
         """
         tile_shape = VSA_H3_TILE_SHAPES.get(int(tile_size))
@@ -503,8 +504,9 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         if not exempt and len(video_segments) > 1:
             raise ValueError("VSA-H3 'compete' mode supports a single video region; multi-region "
                              "(Ref2VA P2) requires exempt prefix keys.")
-        if ref_keep_rate is not None and not 0.0 < float(ref_keep_rate) <= 1.0:
-            raise ValueError(f"ref_keep_rate must be in (0, 1], got {ref_keep_rate!r}.")
+        # A keep rate of 1 would leave reference-video attention dense.
+        if ref_keep_rate is not None and not 0.0 < float(ref_keep_rate) < 1.0:
+            raise ValueError(f"ref_keep_rate must be in (0, 1), got {ref_keep_rate!r}.")
         prefix_segments = tuple(int(s) for s in prefix_segments if s > 0)
 
         token_grids: list[tuple[int, int, int]] = []
@@ -570,7 +572,7 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             dense_layers_tensor=torch.tensor(dense_layers, device=device, dtype=torch.int64),
             video_tile_spans=video_tile_spans,
             span_sparsities=span_sparsities,
-            ref2va_policy="p2_multi_region",
+            ref2va_policy=MINIMAX_H3_VSA_REF_POLICY_P2,
             reference_video_regions=len(video_tile_spans) - 1,
             tile_buf_holder=self._tile_buf_holder,
         )
@@ -602,7 +604,8 @@ def assert_ref2va_vsa_metadata(
     if len(metadata.span_sparsities) != expected_span_count:
         raise ValueError("Ref2VA P2 metadata sparsity policy is not aligned with its video spans: "
                          f"{len(metadata.span_sparsities)} values for {expected_span_count} spans.")
-    if metadata.ref2va_policy != "p2_multi_region" or metadata.reference_video_regions != expected_reference_video_regions:
+    if (metadata.ref2va_policy != MINIMAX_H3_VSA_REF_POLICY_P2
+            or metadata.reference_video_regions != expected_reference_video_regions):
         raise ValueError(
             "Ref2VA P2 metadata has no valid multi-region policy receipt: "
             f"policy={metadata.ref2va_policy!r}, reference_video_regions={metadata.reference_video_regions}, "

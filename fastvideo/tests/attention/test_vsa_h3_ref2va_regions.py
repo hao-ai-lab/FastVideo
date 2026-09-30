@@ -233,12 +233,15 @@ def test_multi_region_span_topk_and_reference_keep_rate():
         assert (mask[:, :, P:, start:end].sum(-1) == compute_topk(sparsity, end - start)).all(), (start, end)
     assert meta.span_sparsities == (0.75, 0.75)
 
-    keep_all = _build_r2v(sparsity=0.75, tile_size=64, ref_keep_rate=1.0)
-    assert keep_all.span_sparsities == (0.0, 0.75)
-    mask = _mask(keep_all, scores, 0.75)
-    ref_span, tgt_span = keep_all.video_tile_spans
-    assert mask[..., ref_span[0]:ref_span[1]].all(), "kept-1.0 reference columns are dense"
+    # A span at sparsity 0 keeps every column; the other span keeps its own top-k.
+    ref_span, tgt_span = meta.video_tile_spans
+    mask = _build_block_mask(scores, P, meta.num_video_tiles, 0.75, meta.exempt, meta.video_tile_spans, (0.0, 0.75))
+    assert mask[..., ref_span[0]:ref_span[1]].all(), "a sparsity-0 span's columns are dense"
     assert (mask[:, :, P:, tgt_span[0]:tgt_span[1]].sum(-1) == compute_topk(0.75, tgt_span[1] - tgt_span[0])).all()
+    # The builder itself never makes a reference dense: its keep rate is in (0, 1).
+    for keep_rate in (0.0, 1.0, 1.5):
+        with pytest.raises(ValueError, match=r"ref_keep_rate must be in \(0, 1\)"):
+            _build_r2v(sparsity=0.75, tile_size=64, ref_keep_rate=keep_rate)
 
     keep_quarter = _build_r2v(sparsity=0.9, tile_size=64, ref_keep_rate=0.25)
     assert keep_quarter.span_sparsities == pytest.approx((0.75, 0.9))
@@ -341,7 +344,7 @@ def test_ref2va_policy_assertion_rejects_p1_and_dense_reference_span():
         assert_ref2va_vsa_metadata(legacy_p1, expected_reference_video_regions=1, target_sparsity=0.9,
                                    ref_keep_rate=0.1)
     with pytest.raises(ValueError, match="leave reference-video conditioning dense"):
-        assert_ref2va_vsa_metadata(_build_r2v(sparsity=0.9, tile_size=64, ref_keep_rate=1.0),
+        assert_ref2va_vsa_metadata(_build_r2v(sparsity=0.9, tile_size=64, ref_keep_rate=0.1),
                                    expected_reference_video_regions=1,
                                    target_sparsity=0.9,
                                    ref_keep_rate=1.0)
