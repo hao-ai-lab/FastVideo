@@ -11,6 +11,7 @@ jobs:
     if: >-
       github.event.context == 'direct-test-completed'
       && github.event.state == 'success'
+      && (vars.CI_GPU_BACKEND == '' || vars.CI_GPU_BACKEND == 'slurm')
     runs-on: ubuntu-latest
     steps:
       - name: Check and update aggregate status

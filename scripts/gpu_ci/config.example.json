@@ -1,0 +1,25 @@
+{
+  "repository": "https://github.com/hao-ai-lab/FastVideo.git",
+  "default_backend": "slurm",
+  "slurm_uploader": ["/opt/fastvideo-ci-runner/pipeline-upload"],
+  "queue": "gpu-ci-dispatch",
+  "state_path": "/var/lib/fastvideo-gpu-ci/admission.sqlite3",
+  "artifacts_dir": "/var/lib/fastvideo-gpu-ci/runs",
+  "max_active_prs": 2,
+  "max_gpus_per_pr": 4,
+  "max_gpus": 8,
+  "queue_timeout_seconds": 21600,
+  "upload_artifacts": true,
+  "kubernetes": {
+    "namespace": "vllm",
+    "image": "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:REPLACE_WITH_REVIEWED_ARM64_SM100_DIGEST",
+    "cpu": "8",
+    "memory": "64Gi",
+    "shared_memory": "8Gi"
+  },
+  "modal": {
+    "app": "fastvideo-gpu-ci",
+    "gpu": "L40S",
+    "image": "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:REPLACE_WITH_REVIEWED_AMD64_SM89_DIGEST"
+  }
+}

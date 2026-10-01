@@ -22,6 +22,12 @@ else
   export PERF_UPLOAD_POLICY=never
 fi
 
+# Alternate GPU backends compare against references without publishing records.
+# Their worker has read-only Hub credentials; publication is an operator task.
+if [ "${FASTVIDEO_CI_LOCAL_ONLY:-0}" = 1 ]; then
+  export PERF_UPLOAD_POLICY=never
+fi
+
 nvidia-smi \
   --query-gpu=index,timestamp,clocks.sm,clocks.max.sm,power.draw,power.limit,temperature.gpu \
   --format=csv -l 10 > "$PERF_REPORTS_DIR/gpu_telemetry.csv" 2>/dev/null &

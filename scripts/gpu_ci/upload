@@ -1,0 +1,6 @@
+#!/bin/sh
+# Install as the trusted bootstrap for each participating Buildkite pipeline.
+set -eu
+exec /opt/fastvideo-gpu-ci/venv/bin/python -I \
+  /opt/fastvideo-gpu-ci/source/scripts/gpu_ci/entrypoint.py upload \
+  --config /etc/fastvideo-gpu-ci.json

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Install this file at /opt/fastvideo-gpu-ci/run on the trusted dispatch host.
+set -eu
+exec /opt/fastvideo-gpu-ci/venv/bin/python -I \
+  /opt/fastvideo-gpu-ci/source/scripts/gpu_ci/entrypoint.py run \
+  --config /etc/fastvideo-gpu-ci.json

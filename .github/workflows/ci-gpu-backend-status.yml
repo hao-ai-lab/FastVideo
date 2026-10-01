@@ -1,0 +1,62 @@
+name: Promote Selected GPU Backend Status
+
+on:
+  status:
+
+permissions:
+  statuses: write
+
+concurrency:
+  group: gpu-ci-status-${{ github.event.sha }}-${{ vars.CI_GPU_BACKEND }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: >-
+      (vars.CI_GPU_BACKEND == 'modal' || vars.CI_GPU_BACKEND == 'vllm')
+      && (github.event.context == format('gpu-ci/{0}/fastcheck-passed', vars.CI_GPU_BACKEND)
+          || github.event.context == format('gpu-ci/{0}/full-suite-passed', vars.CI_GPU_BACKEND))
+    runs-on: ubuntu-latest
+    env:
+      SELECTED_BACKEND: ${{ vars.CI_GPU_BACKEND }}
+    steps:
+      - name: Mirror the selected backend's latest suite results
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const backend = process.env.SELECTED_BACKEND;
+            if (!['modal', 'vllm'].includes(backend)) {
+              throw new Error('Unsupported selected GPU backend');
+            }
+            const sha = context.payload.sha;
+            // Read current state after entering the serialized workflow. A
+            // delayed event must not overwrite a newer failure with success.
+            const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+              per_page: 100,
+            });
+            for (const suffix of ['fastcheck-passed', 'full-suite-passed']) {
+              const sourceContext = `gpu-ci/${backend}/${suffix}`;
+              const matches = statuses.filter(status => status.context === sourceContext);
+              matches.sort((a, b) =>
+                Date.parse(b.updated_at) - Date.parse(a.updated_at) || b.id - a.id
+              );
+              const latest = matches[0];
+              const state = latest ? latest.state : 'pending';
+              if (!['pending', 'success', 'failure', 'error'].includes(state)) {
+                throw new Error(`Unsupported status state for ${sourceContext}`);
+              }
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha,
+                context: suffix,
+                state,
+                description: latest
+                  ? `${backend} ${suffix}: ${state}`
+                  : `Waiting for ${backend} ${suffix}`,
+                ...(latest && latest.target_url ? {target_url: latest.target_url} : {}),
+              });
+            }

@@ -4,6 +4,11 @@ This is the canonical reference for FastVideo's CI/CD system. Contributor-facing
 PR steps live in [Pull Requests](pull_requests.md), and test-authoring guidance
 lives in [Testing](testing.md).
 
+The existing Slurm route below remains the default. Operators can also install
+the [selectable GPU dispatcher](gpu_ci_backends.md) to run the same lane scripts
+on Modal or Kubernetes in the `vllm` namespace. That opt-in path enforces two
+active PRs, four GPUs per PR, and eight total, with separate backend statuses.
+
 ## Overview
 
 FastVideo splits validation across GitHub Actions, Buildkite, Slinky Slurm,
