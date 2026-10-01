@@ -7,6 +7,7 @@ This module intentionally uses only PyTorch and FastVideo configuration types.
 """
 
 import math
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -522,6 +523,11 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         )
 
 
+def _tile_batch_size() -> int:
+    """Spatial tiles decoded per decoder call (``FASTVIDEO_H3_VAE_TILE_BATCH``, default 1 = per tile)."""
+    return max(1, int(os.environ.get("FASTVIDEO_H3_VAE_TILE_BATCH", "1")))
+
+
 def _is_minimax_h3_video_vae_decoder(name: str, submodule: nn.Module) -> bool:
     """Select the video decoder that serves the H3 VAE ``decode`` path."""
     return name == "decoder" and isinstance(submodule, MiniMaxH3VideoViTDecoder3d)
@@ -817,10 +823,28 @@ class AutoencoderKLMiniMaxH3(nn.Module):
 
             ratio = self.spatial_compression_ratio
             rows = []
+            if _tile_batch_size() > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+                # Every tile of the grid has one shape, and the ViT decoder
+                # treats batch entries independently: decode the grid in a few
+                # large calls instead of one small call per tile.
+                with nvtx_range("minimax_h3.vae.decode_clip.decode_tile_batches"):
+                    latent_tiles = [
+                        z[..., y_position // ratio:(y_position + y_length) // ratio,
+                          x_position // ratio:(x_position + x_length) // ratio]
+                        for y_position, y_length in zip(y_indices, y_lengths)
+                        for x_position, x_length in zip(x_indices, x_lengths)
+                    ]
+                    decoded: list[torch.Tensor] = []
+                    per_call = _tile_batch_size()
+                    for start in range(0, len(latent_tiles), per_call):
+                        batch = torch.cat(latent_tiles[start:start + per_call], dim=0)
+                        decoded.extend(self.decoder(self._project_decoder_tile(batch)).split(z.shape[0], dim=0))
+                    columns = len(x_indices)
+                    rows = [decoded[index:index + columns] for index in range(0, len(decoded), columns)]
             # The eager tile driver owns NVTX so each marker remains outside
             # the compiled decoder graph.
             with nvtx_range("minimax_h3.vae.decode_clip.decode_tiles"):
-                for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths)):
+                for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths) if not rows else ()):
                     row = []
                     for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
                         with nvtx_range(f"minimax_h3.vae.decode_clip.tile.{row_index}.{column_index}"):

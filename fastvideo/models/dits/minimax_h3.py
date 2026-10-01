@@ -14,6 +14,8 @@ import torch.nn.functional as F
 
 from fastvideo import envs
 from fastvideo.attention import DistributedAttention
+from fastvideo.attention.backends.abstract import layer_idx_from_prefix
+from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetadata
 from fastvideo.attention.layer import DistributedAttention_VSA
 from fastvideo.attention.selector import get_attn_backend
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
@@ -21,7 +23,9 @@ from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard,
 )
-from fastvideo.distributed.parallel_state import get_sp_world_size, model_parallel_is_initialized
+from fastvideo.distributed.parallel_state import (get_sp_group, get_sp_world_size,
+                                                 model_parallel_is_initialized)
+from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
 from fastvideo.layers.mlp import MLP
@@ -30,6 +34,8 @@ from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.models.dits.minimax_h3_vsa_fp4 import (vsa_fp4_attention, vsa_fp4_attention_sp,
+                                                       vsa_fp4_requested)
 from fastvideo.models.dits.minimax_h3_fusions import (
     HAVE_TRITON,
     fused_qknorm_rope,
@@ -72,6 +78,13 @@ def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
     hitting the strict wrappers' hard RuntimeError mid-forward.
     """
     return HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled()
+
+
+@torch.compile(dynamic=True, fullgraph=True)
+def _gated_residual(hidden_states: torch.Tensor, gate_table: torch.Tensor, indices: torch.Tensor,
+                    branch: torch.Tensor) -> torch.Tensor:
+    """``hidden + gate[indices] * branch`` in one pass (eager materializes the gathered gate)."""
+    return hidden_states + gate_table.index_select(0, indices) * branch
 
 
 class MiniMaxH3RotaryPosEmbed(nn.Module):
@@ -209,6 +222,10 @@ class MiniMaxH3Attention(nn.Module):
             prefix=prefix,
             fa4_packed_varlen=fa4_packed_varlen,
         )
+        # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
+        # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
+        self._layer_idx = layer_idx_from_prefix(prefix, default=-1)
+        self._vsa_fp4 = use_vsa and vsa_fp4_requested()
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
         # skips the gate branch entirely while it is structurally zero.
@@ -255,6 +272,12 @@ class MiniMaxH3Attention(nn.Module):
             return
         if self._gate_compress_active is None:
             weight = self.to_gate_compress.weight
+            if weight is None:
+                # Packed NVFP4 gate: any nonzero E2M1 magnitude (bits 0x7 of
+                # either nibble) makes the branch live.
+                packed = self.to_gate_compress._nvfp4_weight
+                self._gate_compress_active = bool((packed & 0x77).any())
+                return
             # bool() on a DTensor reduction resolves collectively, so every
             # rank caches the same answer.
             self._gate_compress_active = bool((weight != 0).any())
@@ -282,6 +305,20 @@ class MiniMaxH3Attention(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
     ) -> torch.Tensor:
+        if (self._vsa_fp4 and rotary_emb is not None and not torch.is_grad_enabled()
+                and not torch.compiler.is_compiling()):
+            meta = get_forward_context().attn_metadata
+            # Exempt mode lists the first prefix tile for every query, which the
+            # FP4 kernel relies on to start each row from a finite running max.
+            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.exempt:
+                use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
+                if not model_parallel_is_initialized() or get_sp_world_size() == 1:
+                    hidden_states = vsa_fp4_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
+                else:
+                    hidden_states = vsa_fp4_attention_sp(self, hidden_states, rotary_emb, meta, use_fused_rope,
+                                                         get_sp_group())
+                hidden_states, _ = self.to_out(hidden_states)
+                return hidden_states
         query, _ = self.to_q(hidden_states)
         key, _ = self.to_k(hidden_states)
         value, _ = self.to_v(hidden_states)
@@ -566,6 +603,8 @@ class MiniMaxH3TransformerBlock(nn.Module):
                     1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
         with nvtx_range("minimax_h3.transformer_block.feed_forward"):
             feed_forward_output = self.ff(norm_hidden_states)
+        if use_modulate_fusion and not torch.compiler.is_compiling():
+            return _gated_residual(hidden_states, gate_mlp, adaln_indices, feed_forward_output)
         return hidden_states + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
 
 

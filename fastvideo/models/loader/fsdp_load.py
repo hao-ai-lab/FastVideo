@@ -228,7 +228,9 @@ def maybe_load_fsdp_model(
     packed_candidate = find_minimax_h3_nvfp4_dit_export(weight_dir_list)
     weight_dir_list = dense_transformer_safetensors(weight_dir_list)
     quant_config = getattr(init_params.get("config"), "quant_config", None)
-    packed_nvfp4_export = packed_candidate if getattr(quant_config, "layer_profile", None) == "h3_dit" else None
+    packed_profiles = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
+    packed_nvfp4_export = (packed_candidate
+                           if getattr(quant_config, "layer_profile", None) in packed_profiles else None)
     if packed_nvfp4_export is not None and lora_path is not None:
         raise ValueError("Packed MiniMax-H3 NVFP4 DiT export cannot be combined with lora_path; "
                          "merge the adapter before exporting, or load without the packed file.")
