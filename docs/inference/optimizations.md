@@ -198,6 +198,11 @@ The `attn_qat_infer` kernel hard-gates on **sm_120 (consumer Blackwell / RTX
 5090)**; on other GPUs the backend logs a notice and falls back to Flash
 Attention. See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
 
+For VSA-distilled MiniMax-H3 students, the same kernel has a block-sparse
+forward that runs VSA's 64-token tile selection in FP4
+(`FASTVIDEO_H3_VSA_FP4=1`). See
+[FastH3 NVFP4 on RTX PRO 6000](fasth3_rtx_pro_6000.md).
+
 Enable both halves — attention via the env var, linear via `transformer_quant`:
 
 ```python

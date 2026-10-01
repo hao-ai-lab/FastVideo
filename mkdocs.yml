@@ -183,6 +183,7 @@ nav:
     - Configuration: inference/configuration.md
     - Offloading: inference/offloading.md
     - Optimizations: inference/optimizations.md
+    - FastH3 on RTX PRO 6000: inference/fasth3_rtx_pro_6000.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
     - CLI: inference/cli.md
