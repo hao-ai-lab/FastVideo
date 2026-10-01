@@ -24,7 +24,7 @@ def test_nvfp4config_imports_without_flashinfer(monkeypatch):
     # Hide flashinfer from sys.modules and the import path.
     monkeypatch.setitem(sys.modules, "flashinfer", None)
     # Force a re-import of the target module.
-    sys.modules.pop("fastvideo.layers.quantization.nvfp4_config", None)
+    monkeypatch.delitem(sys.modules, "fastvideo.layers.quantization.nvfp4_config", raising=False)
     from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
     config = NVFP4Config()
     assert config.get_name() == "nvfp4"
@@ -45,7 +45,7 @@ def test_nvfp4_kernel_call_raises_clear_error_without_flashinfer(monkeypatch):
     AttributeError or NameError."""
     # Stage a fake flashinfer that fails on import.
     monkeypatch.setitem(sys.modules, "flashinfer", _raise_module_on_import("flashinfer"))
-    sys.modules.pop("fastvideo.layers.quantization.nvfp4_config", None)
+    monkeypatch.delitem(sys.modules, "fastvideo.layers.quantization.nvfp4_config", raising=False)
     from fastvideo.layers.quantization.nvfp4_config import _require_flashinfer
     with pytest.raises(ImportError, match="flashinfer"):
         _require_flashinfer()
