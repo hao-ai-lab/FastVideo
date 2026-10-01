@@ -78,6 +78,8 @@ class QuantizationConfig:
     transformer_quant: str | None = None
     # Forwarded onto ``NVFP4Config`` when ``transformer_quant`` is ``NVFP4``.
     # ``h3_dit`` selects the packed MiniMax-H3 attention+FFN export.
+    # ``h3_dit_ffn`` selects a packed FFN-only export (attention stays dense).
+    # ``h3_dit_vsa`` is ``h3_dit`` plus the VSA compression gates.
     layer_profile: str | None = None
 
 

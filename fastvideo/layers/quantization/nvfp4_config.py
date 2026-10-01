@@ -80,6 +80,7 @@ _LTX2_NVFP4_LINEAR_PREFIXES = frozenset(f"ltx2.blocks.{block_idx}.{suffix}" for 
 _MINIMAX_H3_NVFP4_FF_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.ff\.(?:fc_in|fc_out)$")
 _MINIMAX_H3_NVFP4_DIT_PREFIX = re.compile(
     r"(?:^|\.)transformer_blocks\.\d+\.(?:attn\.to_(?:q|k|v|out)|ff\.(?:fc_in|fc_out))$")
+_MINIMAX_H3_NVFP4_VSA_GATE_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.attn\.to_gate_compress$")
 H3_NVFP4_DIT_EXPORT_FILENAME = "nvfp4_weights.safetensors"
 H3_NVFP4_DIT_KEY_SEP = "::"
 H3_NVFP4_DIT_BUFFER_NAMES = (
@@ -335,6 +336,16 @@ def _mm_fp4(
     )
 
 
+def _mm_fp4_backend() -> str:
+    """FlashInfer ``mm_fp4`` backend (``FASTVIDEO_NVFP4_MM_BACKEND``, default ``auto``).
+
+    On sm_120 ``auto`` picks a kernel about 2x slower than ``cutlass`` or
+    ``cudnn`` once activations reach tens of thousands of rows (measured at
+    73k rows on an RTX PRO 6000); short sequences are unaffected.
+    """
+    return os.environ.get("FASTVIDEO_NVFP4_MM_BACKEND", "auto")
+
+
 def _coerce_fp4_input_dtype(x: torch.Tensor) -> torch.Tensor:
     """Coerce an activation to a dtype the FP4 linear accepts.
 
@@ -462,7 +473,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             alpha,
             torch.bfloat16,
             None,
-            backend='auto',
+            backend=_mm_fp4_backend(),
         )
 
         if bias is not None:
@@ -480,13 +491,18 @@ class NVFP4Config(QuantizationConfig):
     ``fc_in`` and ``fc_out`` in each main transformer-block FFN.
     ``layer_profile="h3_dit"`` expands that to the packed NVFP4H3 DiT set
     (attention ``to_{q,k,v,out}`` plus those FFN linears).
+    ``layer_profile="h3_dit_ffn"`` loads a packed export of the FFN linears
+    only, keeping attention projections dense (e.g. calibrated FFN-only
+    checkpoints such as FastH3 V2 NVFP4).
+    ``layer_profile="h3_dit_vsa"`` is ``h3_dit`` plus each block's VSA
+    compression gate ``attn.to_gate_compress`` (VSA-distilled students).
     """
 
     def __init__(self, layer_profile: str = "refine", retain_original_weights: bool | None = None):
         super().__init__()
-        if layer_profile not in ("base", "refine", "h3_dit"):
-            raise ValueError("NVFP4Config.layer_profile must be one of 'base', 'refine', or 'h3_dit', "
-                             f"got {layer_profile!r}")
+        if layer_profile not in ("base", "refine", "h3_dit", "h3_dit_ffn", "h3_dit_vsa"):
+            raise ValueError("NVFP4Config.layer_profile must be one of 'base', 'refine', 'h3_dit', "
+                             f"'h3_dit_ffn', or 'h3_dit_vsa', got {layer_profile!r}")
         self.layer_profile = layer_profile
         # Original bf16 ``layer.weight`` retention after FP4 conversion.
         # Default (None/False): purge the purgeable originals -- every
@@ -525,6 +541,11 @@ class NVFP4Config(QuantizationConfig):
             return None
         if self.layer_profile == "h3_dit":
             tagged = is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
+        elif self.layer_profile == "h3_dit_vsa":
+            tagged = (is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
+                      or _MINIMAX_H3_NVFP4_VSA_GATE_PREFIX.search(prefix) is not None)
+        elif self.layer_profile == "h3_dit_ffn":
+            tagged = is_minimax_h3_nvfp4_linear_prefix(prefix)
         else:
             tagged = is_ltx2_nvfp4_linear_prefix(prefix) or is_minimax_h3_nvfp4_linear_prefix(prefix)
         if tagged:
