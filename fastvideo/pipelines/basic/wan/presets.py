@@ -190,6 +190,40 @@ WAN_FUN_1_3B_INP = InferencePreset(
     },
 )
 
+WAN_VACE_14B = InferencePreset(
+    name="wan_vace_14b",
+    version=1,
+    model_family="wan",
+    description="Wan 2.1 VACE 14B controllable video (720P default)",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "height": 720,
+        "width": 1280,
+        "num_frames": 81,
+        "fps": 16,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 50,
+        "negative_prompt": _NEGATIVE_PROMPT_CN,
+    },
+)
+
+WAN_VACE_1_3B = InferencePreset(
+    name="wan_vace_1_3b",
+    version=1,
+    model_family="wan",
+    description="Wan 2.1 VACE 1.3B controllable video (480P)",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "height": 480,
+        "width": 832,
+        "num_frames": 81,
+        "fps": 16,
+        "guidance_scale": 5.0,
+        "num_inference_steps": 50,
+        "negative_prompt": _NEGATIVE_PROMPT_CN,
+    },
+)
+
 WAN_FUN_1_3B_CONTROL = InferencePreset(
     name="wan_fun_1_3b_control",
     version=1,
@@ -356,6 +390,8 @@ ALL_PRESETS = (
     WAN_2_2_I2V_A14B,
     WAN_FUN_1_3B_INP,
     WAN_FUN_1_3B_CONTROL,
+    WAN_VACE_1_3B,
+    WAN_VACE_14B,
     FAST_WAN_T2V_480P,
     WAN_2_2_TI2V_5B,
     FAST_WAN_2_2_TI2V_5B,

@@ -144,7 +144,10 @@ class DenoisingStage(PipelineStage):
             # Gate 1: tighten bf16 matmul accumulation for the 4-step Klein model (opt-in via env var).
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
         # Gate 2: Flux2 runs its bf16 transformer WITHOUT autocast — autocast perturbs long-sequence attention enough to break 4-step latent parity.
-        autocast_enabled = ((target_dtype != torch.float32) and not fastvideo_args.disable_autocast and not _is_flux)
+        dit_disable_autocast = getattr(fastvideo_args.pipeline_config.dit_config.arch_config,
+                                       "disable_denoising_autocast", False)
+        autocast_enabled = ((target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+                            and not dit_disable_autocast and not _is_flux)
         scheduler_fp32 = getattr(fastvideo_args.pipeline_config, "scheduler_step_in_fp32", False)
         local_device = get_local_torch_device()
 
@@ -253,6 +256,7 @@ class DenoisingStage(PipelineStage):
 
         state = self.prepare_denoising(batch, fastvideo_args, target_dtype)
         latents = state.latents
+        family_transformer_kwargs = self.prepare_family_transformer_kwargs(batch, state, target_dtype)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -421,6 +425,7 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **family_transformer_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -465,6 +470,7 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **family_transformer_kwargs,
                                 )
                             _cfg_gate_fresh_uncond += 1
 
@@ -566,6 +572,10 @@ class DenoisingStage(PipelineStage):
             latents=latents,
             video_padding=torch.zeros_like(latents) if batch.video_latent is not None else None,
         )
+
+    def prepare_family_transformer_kwargs(self, batch, state: DenoisingState, target_dtype) -> dict:
+        """Optional per-family kwargs forwarded into the transformer forward."""
+        return {}
 
     def activate_transformer(self, model, inactive_model, fastvideo_args) -> None:
         """Keep CPU/layerwise/FSDP offload decisions independent of the sampling recipe."""
