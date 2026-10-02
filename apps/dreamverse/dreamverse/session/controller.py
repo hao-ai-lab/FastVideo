@@ -26,6 +26,12 @@ from typing import TYPE_CHECKING
 
 from fastapi import WebSocket, WebSocketDisconnect
 from dreamverse.gpu_pool import GPUSlot
+from dreamverse.generation_inputs import (
+    GenerationInputs,
+    pin_generation_inputs,
+    release_generation_inputs,
+    resolve_generation_inputs,
+)
 from dreamverse.session_init_image import cleanup_session_init_image, persist_session_init_image
 from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaInit
 
@@ -156,6 +162,7 @@ class SessionController:
         prompt_worker_task: asyncio.Task | None = None
         rewrite_seed_prompts_task: asyncio.Task | None = None
         session_init_image = None
+        generation_inputs: GenerationInputs | None = None
 
         async def session_timeout():
             """Close the session after timeout."""
@@ -191,6 +198,18 @@ class SessionController:
                 init_data = {}
 
             init_type = init_data.get("type")
+            try:
+                next_generation_inputs = resolve_generation_inputs(init_data, ACTIVE_MODEL_ID)
+                pin_generation_inputs(next_generation_inputs)
+                generation_inputs = next_generation_inputs
+            except ValueError as exc:
+                await ws_send_json({
+                    "type": "error",
+                    "error_code": "invalid_generation_input",
+                    "message": str(exc),
+                })
+                await websocket.close(code=1008, reason="Invalid generation inputs")
+                return
             preset_id = init_data.get("preset_id")
             preset_label = str(init_data.get("preset_label") or "").strip()
             initial_rollout_prompt = str(init_data.get("initial_rollout_prompt") or "").strip()
@@ -271,6 +290,7 @@ class SessionController:
                 "type": "gpu_assigned",
                 "gpu_id": gpu_id,
                 "session_timeout": SESSION_TIMEOUT_SECONDS,
+                "generation_mode": generation_inputs.mode,
             })
             await log_event(
                 "gpu_assigned",
@@ -361,6 +381,12 @@ class SessionController:
                     return
 
                 try:
+                    if generation_inputs.mode is not None and payload.get("initial_image") is not None:
+                        raise ValueError("Choose conditioning assets when starting a project; legacy initial_image "
+                                         "cannot replace generation mode inputs.")
+                    if "generation_mode" in payload or "conditioning_assets" in payload:
+                        raise ValueError("Generation mode and assets are locked for this project. Start a new project "
+                                         "to change them.")
                     replace_session_init_image(payload.get("initial_image"))
                 except ValueError as exc:
                     await ws_send_json({
@@ -417,6 +443,7 @@ class SessionController:
                     })
 
             async def apply_project_init_payload(payload: dict[str, object]) -> bool:
+                nonlocal generation_inputs
                 nonlocal preset_id
                 nonlocal preset_label
                 nonlocal initial_rollout_prompt
@@ -496,14 +523,25 @@ class SessionController:
                     })
                     return False
 
+                next_generation_inputs = None
+                next_inputs_pinned = False
                 try:
+                    next_generation_inputs = resolve_generation_inputs(payload, ACTIVE_MODEL_ID)
+                    pin_generation_inputs(next_generation_inputs)
+                    next_inputs_pinned = True
                     replace_session_init_image(payload.get("initial_image"))
                 except ValueError as exc:
+                    if next_inputs_pinned:
+                        release_generation_inputs(next_generation_inputs)
                     await ws_send_json({
                         "type": "error",
+                        "error_code": "invalid_generation_input",
                         "message": str(exc),
                     })
                     return False
+
+                release_generation_inputs(generation_inputs)
+                generation_inputs = next_generation_inputs
 
                 initial_rollout_prompt = next_initial_rollout_prompt
                 enhancement_enabled = next_enhancement_enabled
@@ -1171,6 +1209,7 @@ class SessionController:
                 return drained
 
             async def enter_project_idle() -> None:
+                nonlocal generation_inputs
                 nonlocal curated_prompts
                 nonlocal seed_prompt_memory
                 nonlocal curated_idx
@@ -1220,6 +1259,9 @@ class SessionController:
                 initial_rollout_prompt = ""
                 project_active = False
                 pending_project_end = False
+
+                release_generation_inputs(generation_inputs)
+                generation_inputs = GenerationInputs()
 
                 if project_stream_started:
                     project_stream_started = False
@@ -1627,6 +1669,7 @@ class SessionController:
                         segment_idx=segment_idx,
                         image_path=step_image_path,
                         reset_conditioning=step_reset_conditioning,
+                        generation_inputs=generation_inputs,
                     ))
                 segment_generation_active = True
                 try:
@@ -1681,10 +1724,10 @@ class SessionController:
                                 print(f"[GPU {gpu_id}] Unknown AV event: "
                                       f"{type(event).__name__}")
 
-                    if not step_task.done():
-                        step_task.cancel()
-                    else:
-                        timings = await step_task
+                    # A GPU command cannot be cancelled by cancelling its
+                    # asyncio waiter. Await completion before releasing pinned
+                    # asset files or making this GPU available to a new user.
+                    timings = await step_task
                 finally:
                     segment_generation_active = False
                     if not step_task.done():
@@ -1808,3 +1851,5 @@ class SessionController:
                     await self.gpu_pool.release(client_id)
             finally:
                 cleanup_session_init_image(session_init_image)
+                if generation_inputs is not None:
+                    release_generation_inputs(generation_inputs)
