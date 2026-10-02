@@ -173,8 +173,8 @@ class VideoGenerator:
             log_queue: Optional multiprocessing.Queue to forward worker logs to
         """
         self.config: GeneratorConfig | None = None
-        # Resolved startup values with the provenance of each path; set by from_config.
-        self.resolved_config: ResolvedGeneratorConfig | None = None
+        # Resolved startup values with the provenance of each path, when fastvideo_args was built from a typed config.
+        self.resolved_config: ResolvedGeneratorConfig | None = getattr(fastvideo_args, "resolved_config", None)
         self.fastvideo_args = fastvideo_args
         self.executor = executor_class(fastvideo_args, log_queue=log_queue)
 
@@ -250,7 +250,6 @@ class VideoGenerator:
         fastvideo_args = generator_config_to_fastvideo_args(resolved)
         generator = cls.from_fastvideo_args(fastvideo_args, log_queue=log_queue)
         generator.config = normalized
-        generator.resolved_config = resolved
         return generator
 
     @classmethod
@@ -286,6 +285,13 @@ class VideoGenerator:
         # Initialize distributed environment if needed
         # initialize_distributed_and_parallelism(fastvideo_args)
 
+        if getattr(fastvideo_args, "resolved_config", None) is None:
+            warnings.warn(
+                "VideoGenerator.from_fastvideo_args(...) with a FastVideoArgs that was not built from a typed "
+                "config is deprecated; use VideoGenerator.from_config(GeneratorConfig(...)) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         executor_class = Executor.get_class(fastvideo_args)
         return cls(
             fastvideo_args=fastvideo_args,

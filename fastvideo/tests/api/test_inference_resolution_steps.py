@@ -114,16 +114,19 @@ def test_environment_takes_precedence_over_model_defaults():
 
 
 def test_video_generator_keeps_the_resolved_config(monkeypatch):
-    from types import SimpleNamespace
+    from fastvideo.entrypoints import video_generator
 
-    from fastvideo.entrypoints.video_generator import VideoGenerator
+    class _NoExecutor:
+        """Executor stand-in so that VideoGenerator.__init__ runs without starting workers."""
 
-    monkeypatch.setattr(VideoGenerator, "from_fastvideo_args",
-                        classmethod(lambda cls, fastvideo_args, log_queue=None: SimpleNamespace(args=fastvideo_args)))
+        def __init__(self, fastvideo_args, log_queue=None):
+            pass
+
+    monkeypatch.setattr(video_generator.Executor, "get_class", staticmethod(lambda fastvideo_args: _NoExecutor))
     with isolated_environment():
-        generator = VideoGenerator.from_config({"model_path": WAN_T2V, "engine": {"num_gpus": 2}})
+        generator = video_generator.VideoGenerator.from_config({"model_path": WAN_T2V, "engine": {"num_gpus": 2}})
 
-    assert generator.args.sp_size == 2
+    assert generator.fastvideo_args.sp_size == 2
     provenance = generator.resolved_config.provenance("engine.parallelism.sp_size")
     assert (provenance.value, provenance.source) == (2, "derive_parallel_sizes")
 
