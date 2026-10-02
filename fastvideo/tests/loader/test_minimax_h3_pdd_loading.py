@@ -10,6 +10,7 @@ weights disagree. Runs on CPU with a tiny synthetic checkpoint.
 from __future__ import annotations
 
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -94,8 +95,10 @@ def single_process_group(env_overrides):
     """A 1x1 sequence/tensor-parallel group, which DistributedAttention needs even on one CPU process."""
     from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
 
-    env_overrides.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
-    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29591"))
+    # Keep a launcher- or CI-assigned rendezvous: packed CI lanes share the tray's network namespace, and each
+    # lease gets its own port range.
+    env_overrides.enter_context(envs.override_external("MASTER_ADDR", os.environ.get("MASTER_ADDR") or "127.0.0.1"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", os.environ.get("MASTER_PORT") or "29591"))
     env_overrides.enter_context(envs.override_external("RANK", "0"))
     env_overrides.enter_context(envs.override_external("WORLD_SIZE", "1"))
     env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
