@@ -12,7 +12,7 @@ generator:
       pin_cpu_memory: false
   pipeline:
     workload_type: i2v
-    experimental:
+    longcat:
       enable_bsa: false
 request:
   prompt: >-

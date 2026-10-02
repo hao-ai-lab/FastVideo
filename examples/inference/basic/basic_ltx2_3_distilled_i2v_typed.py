@@ -56,7 +56,7 @@ Typed-API mapping (legacy kwarg ↔ typed field)
 - ``ltx2_vae_tiling``               ↔ ``pipeline.vae_tiling``
 - ``ltx2_refine_enabled``           ↔ ``pipeline.preset_overrides["refine"]["enabled"]``
 - ``ltx2_refine_upsampler_path``    ↔ ``pipeline.components.upsampler_weights``
-- ``ltx2_refine_lora_path``         ↔ ``pipeline.components.lora_path``
+- ``ltx2_refine_lora_path``         ↔ ``pipeline.ltx2.refine.lora_path``
 - ``ltx2_refine_num_inference_steps`` ↔ ``pipeline.preset_overrides["refine"]["num_inference_steps"]``
 - ``ltx2_refine_guidance_scale``    ↔ ``pipeline.preset_overrides["refine"]["guidance_scale"]``
 - ``ltx2_refine_add_noise``         ↔ ``pipeline.preset_overrides["refine"]["add_noise"]``

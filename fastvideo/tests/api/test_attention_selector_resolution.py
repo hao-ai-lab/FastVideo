@@ -243,12 +243,15 @@ def test_env_is_folded_into_the_typed_request_once(env_overrides):
     assert FastVideoArgs(model_path="x", attention_backend="TORCH_SDPA").attention_backend == "TORCH_SDPA"
 
 
-def test_unparseable_env_falls_through_instead_of_raising(env_overrides):
-    """The env var keeps its permissive parse; only explicit requests raise."""
+def test_unsupported_env_backend_raises(env_overrides):
+    """An unsupported name raises from the environment variable and from an explicit request alike."""
     from fastvideo.fastvideo_args import FastVideoArgs
 
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("flash_atn"))
-    assert FastVideoArgs(model_path="x").attention_backend is None
+    with pytest.raises(ValueError, match="FASTVIDEO_ATTENTION_BACKEND='flash_atn' is not a supported"):
+        FastVideoArgs(model_path="x")
+    with pytest.raises(ValueError, match="FASTVIDEO_ATTENTION_BACKEND='flash_atn' is not a supported"):
+        selector.get_env_variable_attn_backend()
 
     with pytest.raises(ValueError, match="Unknown attention backend"):
         FastVideoArgs(model_path="x", attention_backend="flash_atn")

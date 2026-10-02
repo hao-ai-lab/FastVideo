@@ -79,32 +79,24 @@ class MiniMaxH3GenerationBackend:
 
         from fastvideo import VideoGenerator
         from fastvideo.api import (
+            AttentionConfig,
             CompileConfig,
             ComponentConfig,
             EngineConfig,
             GeneratorConfig,
+            MiniMaxH3Options,
             OffloadConfig,
             ParallelismConfig,
             PipelineSelection,
         )
 
         adapter_path = hf_hub_download(repo_id=adapter_repo, filename=adapter_filename)
-        experimental = {
-            "attention_backend": attention_backend,
-            "inference_torch_compile": attention_backend == "FLASH_ATTN",
-            "vae_parallel_decode": True,
-            "vae_parallel_decode_strategy": "gather",
-        }
-        if attention_backend == "VIDEO_SPARSE_ATTN_H3":
-            experimental.update({
-                "VSA_sparsity": 0.9,
-                "VSA_tile_size": 64,
-            })
+        use_vsa = attention_backend == "VIDEO_SPARSE_ATTN_H3"
         generator_config = GeneratorConfig(
             model_path=model_path,
             pipeline=PipelineSelection(
                 components=ComponentConfig(lora_path=adapter_path, lora_strength=1.0),
-                experimental=experimental,
+                minimax_h3=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
             ),
             engine=EngineConfig(
                 num_gpus=DREAMVERSE_SP_SIZE,
@@ -117,7 +109,12 @@ class MiniMaxH3GenerationBackend:
                     vae=True,
                     pin_cpu_memory=True,
                 ),
-                compile=CompileConfig(enabled=False, vae_enabled=True),
+                compile=CompileConfig(enabled=False, vae_enabled=True, regional=attention_backend == "FLASH_ATTN"),
+                attention=AttentionConfig(
+                    backend=attention_backend,
+                    vsa_sparsity=0.9 if use_vsa else None,
+                    vsa_tile_size=64 if use_vsa else None,
+                ),
                 use_fsdp_inference=False,
             ),
         )

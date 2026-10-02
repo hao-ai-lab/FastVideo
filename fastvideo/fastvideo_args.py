@@ -224,8 +224,8 @@ class FastVideoArgs:
     # tile-64 inference route; other VSA routes degrade the transformer to
     # eager with one warning. Dense FA2/FA3/FA4 inference uses compile-visible
     # custom-op boundaries. Opt-in via FASTVIDEO_INFERENCE_TORCH_COMPILE=1 (folded in
-    # __post_init__) or PipelineSelection.experimental
-    # {"inference_torch_compile": true}. Distinct from ``enable_torch_compile``,
+    # __post_init__) or the typed config field engine.compile.regional.
+    # Distinct from ``enable_torch_compile``,
     # which keeps the pipeline-level compile semantics.
     inference_torch_compile: bool = False
 
@@ -339,6 +339,8 @@ class FastVideoArgs:
         self._apply_ltx2_vae_overrides()
         self._resolve_refine_args()
         self._apply_transformer_quant()
+        # The env folds below repeat fill_*_from_env in fastvideo/api/inference_resolution.py
+        # for a FastVideoArgs built directly; a resolved config arrives with the values decided.
         if not self.inference_torch_compile:
             # Parse-once adapter (same pattern as attention_backend below): the
             # environment variable is an input read once here, so the loader
@@ -353,14 +355,12 @@ class FastVideoArgs:
         else:
             # Parse-once adapter: fold the environment variable into the typed
             # request so resolution has a single input and library code never
-            # consults the environment on the load path. The env var keeps its
-            # historically permissive parse — an unknown name is ignored here
-            # and falls through to automatic selection rather than raising.
-            import fastvideo.envs as envs
-            from fastvideo.attention.selector import backend_name_to_enum
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
-            if env_backend is not None and backend_name_to_enum(env_backend) is not None:
-                self.attention_backend = env_backend
+            # consults the environment on the load path. An unsupported name
+            # raises, like an explicit request.
+            from fastvideo.attention.selector import get_env_variable_attn_backend
+            env_backend = get_env_variable_attn_backend()
+            if env_backend is not None:
+                self.attention_backend = env_backend.name
         self._fold_vae_parallel_env()
         # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
         # so a backend chosen by that env var counts as the run's request.
@@ -450,6 +450,8 @@ class FastVideoArgs:
         ))
         if self.ltx2_vae_tiling is not None and hasattr(self.pipeline_config, "vae_tiling"):
             self.pipeline_config.vae_tiling = self.ltx2_vae_tiling
+        # Same rule as derive_vae_tiling_from_ltx2_tile_sizes in fastvideo/api/inference_resolution.py,
+        # for a FastVideoArgs built directly.
         elif has_any and hasattr(self.pipeline_config, "vae_tiling"):
             self.pipeline_config.vae_tiling = True
 
@@ -972,6 +974,8 @@ class FastVideoArgs:
             assert self.hsdp_shard_dim != -1, "hsdp_shard_dim must be set for training"
             assert self.sp_size != -1, "sp_size must be set for training"
 
+        # Same rule as derive_parallel_sizes in fastvideo/api/inference_resolution.py,
+        # for a FastVideoArgs built directly.
         if self.tp_size == -1:
             self.tp_size = 1
         if self.sp_size == -1:

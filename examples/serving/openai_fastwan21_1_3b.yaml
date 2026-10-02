@@ -14,10 +14,10 @@ generator:
       pin_cpu_memory: false
     compile:
       enabled: true
+    attention:
+      vsa_sparsity: 0.8
   pipeline:
-    experimental:
-      VSA_sparsity: 0.8
-      dmd_denoising_steps: [1000, 757, 522]
+    dmd_denoising_steps: [1000, 757, 522]
 
 server:
   host: 0.0.0.0

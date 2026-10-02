@@ -9,10 +9,10 @@ generator:
     parallelism:
       tp_size: 1
       sp_size: 1
+    attention:
+      vsa_sparsity: 0.9
   pipeline:
-    experimental:
-      VSA_sparsity: 0.9
-      dmd_denoising_steps: [1000, 757, 522]
+    dmd_denoising_steps: [1000, 757, 522]
 request:
   negative_prompt: >-
     Bright tones, overexposed, static, blurred details, subtitles, style,

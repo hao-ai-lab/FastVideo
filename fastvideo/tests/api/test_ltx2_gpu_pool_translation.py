@@ -109,9 +109,10 @@ class TestGpuPoolForwardTranslation:
     def test_refine_upsampler_routed_to_components(self, config) -> None:
         assert config.pipeline.components.upsampler_weights == ("/models/ltx2-distilled/spatial_upsampler")
 
-    def test_empty_refine_lora_becomes_none(self, config) -> None:
-        # gpu_pool passes "" to keep refine LoRA disabled; typed schema
-        # treats that as "no LoRA" rather than an empty-string path.
+    def test_empty_refine_lora_stays_disabled(self, config) -> None:
+        # gpu_pool passes "" to keep the refine LoRA disabled. None would
+        # load the checkpoint's default refine LoRA instead.
+        assert config.pipeline.ltx2.refine.lora_path == ""
         assert config.pipeline.components.lora_path is None
 
     def test_refine_preset_overrides(self, config) -> None:
@@ -225,6 +226,9 @@ class TestRefineFlattenCoversAllTypedFields:
             return _Captured(**kw)
 
         monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _capture)
+        # The model path is not a registered model, so skip the model-default resolution step.
+        from fastvideo.api import inference_resolution
+        monkeypatch.setattr(inference_resolution, "pipeline_config_defaults_step", lambda config: lambda view: {})
 
         refine_payload = {
             # Preset-override fields.

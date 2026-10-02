@@ -262,7 +262,8 @@ this adapter can build the config purely from the public typed schema:
 def build_generator_config(args) -> "GeneratorConfig":
     from fastvideo.api import (
         CompileConfig, ComponentConfig, EngineConfig, GeneratorConfig,
-        OffloadConfig, ParallelismConfig, PipelineSelection,
+        LTX2Options, LTX2RefineOptions, OffloadConfig, ParallelismConfig,
+        PipelineSelection,
     )
     return GeneratorConfig(
         model_path=args.model_path,
@@ -275,10 +276,8 @@ def build_generator_config(args) -> "GeneratorConfig":
         pipeline=PipelineSelection(
             workload_type=args.workload or "t2v",
             preset=args.preset,  # e.g. "ltx2_two_stage"
-            components=ComponentConfig(
-                upsampler_weights=args.refine_upsampler,
-                lora_path=args.refine_lora,
-            ),
+            components=ComponentConfig(upsampler_weights=args.refine_upsampler),
+            ltx2=LTX2Options(refine=LTX2RefineOptions(lora_path=args.refine_lora)),
         ),
     )
 ```

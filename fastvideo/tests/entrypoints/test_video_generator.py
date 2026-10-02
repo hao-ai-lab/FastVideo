@@ -87,6 +87,9 @@ def _patch_fastvideo_args_from_kwargs(monkeypatch):
         "fastvideo.api.compat.FastVideoArgs.from_kwargs",
         classmethod(fake_from_kwargs),
     )
+    # "test-model" is not a registered model, so skip the model-default resolution step.
+    monkeypatch.setattr("fastvideo.api.inference_resolution.pipeline_config_defaults_step",
+                        lambda config: lambda view: {})
     return captured
 
 

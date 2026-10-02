@@ -66,7 +66,7 @@ as above.
 
 For exports without this sidecar, an explicit ladder is supported via
 `MiniMaxH3PipelineConfig.dmd_denoising_steps`, or through the typed API's
-`PipelineSelection(experimental={"dmd_denoising_steps": [...]})`. The shifts
+`PipelineSelection(dmd_denoising_steps=[...])`. The shifts
 still come from the checkpoint scheduler configs. Keep generic `flow_shift`
 unset: H3 has separate video and audio shifts, not one shared shift.
 

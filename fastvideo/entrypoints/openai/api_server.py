@@ -178,6 +178,9 @@ def _parse_args() -> tuple[FastVideoArgs, str, int, str]:
     """Parse CLI arguments and return (FastVideoArgs, host, port, output_dir)"""
     from fastvideo.utils import FlexibleArgumentParser
 
+    logger.warning("python -m fastvideo.entrypoints.openai.api_server and its flat flags are deprecated and will be "
+                   "removed; use `fastvideo serve --config SERVE_CONFIG` with dotted overrides such as "
+                   "`--generator.engine.num_gpus 2` instead.")
     parser = FlexibleArgumentParser(description="FastVideo OpenAI-compatible API server")
     parser.add_argument("--host", type=str, default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)

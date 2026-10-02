@@ -13,7 +13,7 @@ generator:
       vae: false
       pin_cpu_memory: false
   pipeline:
-    experimental:
+    longcat:
       enable_bsa: false
 request:
   prompt: >-

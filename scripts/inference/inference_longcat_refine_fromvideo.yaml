@@ -12,12 +12,12 @@ generator:
   pipeline:
     components:
       lora_path: FastVideo/LongCat-Video-T2V-Refinement-LoRA
-    experimental:
+      lora_nickname: refinement
+    longcat:
       enable_bsa: true
       bsa_sparsity: 0.875
       bsa_chunk_q: [4, 4, 8]
       bsa_chunk_k: [4, 4, 8]
-      lora_nickname: refinement
 request:
   prompt: >-
     In a realistic photography style, a white boy around seven or eight years

@@ -382,6 +382,8 @@ generator = VideoGenerator.from_pretrained(
 )
 ```
 
+In a YAML config, set `generator.engine.compile.regional: true`.
+
 Do not combine it with `torch_compile_kwargs['mode']` (the loader injects
 inductor options, and torch.compile forbids mode+options); it is
 independent of `enable_torch_compile`, and when both are set the regional

@@ -57,14 +57,13 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert config.engine.offload.pin_cpu_memory is True
     assert config.engine.compile.enabled is False
     assert config.engine.compile.vae_enabled is True
-    assert config.pipeline.experimental == {
-        "attention_backend": "VIDEO_SPARSE_ATTN_H3",
-        "VSA_sparsity": 0.9,
-        "VSA_tile_size": 64,
-        "inference_torch_compile": True,
-        "vae_parallel_decode": True,
-        "vae_parallel_decode_strategy": "gather",
-    }
+    assert config.pipeline.experimental == {}
+    assert config.engine.attention.backend == "VIDEO_SPARSE_ATTN_H3"
+    assert config.engine.attention.vsa_sparsity == 0.9
+    assert config.engine.attention.vsa_tile_size == 64
+    assert config.engine.compile.regional is True
+    assert config.pipeline.minimax_h3.vae_parallel_decode is True
+    assert config.pipeline.minimax_h3.vae_parallel_decode_strategy == "gather"
 
     assert environment["FASTVIDEO_VSA_SM100A"] == "1"
     assert environment["FASTVIDEO_VSA_CUTEDSL"] == "0"
@@ -106,7 +105,7 @@ def test_fast_profile_supports_measured_durations_without_separate_scripts(tmp_p
 
     assert args.inference_torch_compile is True
     assert args.ulysses_a2a == "off"
-    assert config.pipeline.experimental["inference_torch_compile"] is True
+    assert config.engine.compile.regional is True
     assert request.sampling.num_frames == num_frames
 
 
@@ -141,15 +140,15 @@ def test_strict_profile_changes_only_non_parity_fusions():
     assert fasth3.build_generator_config(all_args) == fasth3.build_generator_config(strict_args)
 
 
-def test_h3_sequential_load_is_opt_in_experimental():
+def test_h3_sequential_load_is_opt_in():
     default = fasth3.build_generator_config(_args())
-    assert "h3_sequential_load" not in default.pipeline.experimental
+    assert default.pipeline.minimax_h3.sequential_load is None
 
     enabled = fasth3.build_generator_config(_args("--h3-sequential-load"))
-    assert enabled.pipeline.experimental["h3_sequential_load"] is True
+    assert enabled.pipeline.minimax_h3.sequential_load is True
 
     disabled = fasth3.build_generator_config(_args("--no-h3-sequential-load"))
-    assert disabled.pipeline.experimental["h3_sequential_load"] is False
+    assert disabled.pipeline.minimax_h3.sequential_load is False
 
 
 def test_opt_outs_override_inherited_environment(monkeypatch):
@@ -183,7 +182,7 @@ def test_opt_outs_override_inherited_environment(monkeypatch):
     assert fasth3.os.environ["FASTVIDEO_VAE_PARALLEL_DECODE"] == "0"
     assert fasth3.os.environ["FASTVIDEO_ULYSSES_A2A"] == "off"
     assert config.engine.compile.vae_enabled is False
-    assert config.pipeline.experimental["vae_parallel_decode"] is False
+    assert config.pipeline.minimax_h3.vae_parallel_decode is False
     assert config.engine.use_fsdp_inference is True
     assert config.engine.offload.pin_cpu_memory is False
 
@@ -261,12 +260,12 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
     assert "Median denoising time: 2.500s" in output
 
 
-def test_taeh3_backend_is_opt_in_experimental():
+def test_taeh3_backend_is_opt_in():
     default = fasth3.build_generator_config(_args())
     taeh3 = fasth3.build_generator_config(_args("--video-decode-backend", "taeh3"))
 
-    assert "video_decode_backend" not in default.pipeline.experimental
-    assert taeh3.pipeline.experimental["video_decode_backend"] == "taeh3"
+    assert default.pipeline.minimax_h3.video_decode_backend is None
+    assert taeh3.pipeline.minimax_h3.video_decode_backend == "taeh3"
 
 
 EIGHT_STEP_EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_fasth3_8step.py"

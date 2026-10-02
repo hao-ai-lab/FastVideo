@@ -13,10 +13,10 @@ generator:
       dit: false
       vae: false
       pin_cpu_memory: false
+    attention:
+      vsa_sparsity: 0.8
   pipeline:
-    experimental:
-      VSA_sparsity: 0.8
-      dmd_denoising_steps: [1000, 757, 522]
+    dmd_denoising_steps: [1000, 757, 522]
 request:
   negative_prompt: >-
     Bright tones, overexposed, static, blurred details, subtitles, style,

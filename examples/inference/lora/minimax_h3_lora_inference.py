@@ -157,8 +157,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     # Backend selection is finalized from the adapter before model construction.
     from fastvideo.models.loader.lora_patch import DenseLoRAPatch
     from fastvideo import VideoGenerator
-    from fastvideo.api import (CompileConfig, ComponentConfig, EngineConfig, GenerationRequest, GeneratorConfig,
-                               OffloadConfig, OutputConfig, ParallelismConfig, PipelineSelection, SamplingConfig)
+    from fastvideo.api import (AttentionConfig, CompileConfig, ComponentConfig, EngineConfig, GenerationRequest,
+                               GeneratorConfig, MiniMaxH3Options, OffloadConfig, OutputConfig, ParallelismConfig,
+                               PipelineSelection, SamplingConfig)
 
     # An adapter carrying to_gate_compress needs the VSA backend, because that is the
     # only configuration in which the module exists. One that does not carry it runs
@@ -177,30 +178,23 @@ def main(argv: Sequence[str] | None = None) -> None:
               "compression branch at its zero-initialized value.")
     configure_environment(args)
 
-    experimental: dict[str, object] = {
-        "inference_torch_compile": True,
-        "vae_parallel_decode": True,
-        "vae_parallel_decode_strategy": "gather",
-    }
-    if args.vsa:
-        experimental.update({
-            "attention_backend": "VIDEO_SPARSE_ATTN_H3",
-            "VSA_sparsity": args.vsa_sparsity,
-            "VSA_tile_size": args.vsa_tile_size,
-        })
-
     config = GeneratorConfig(
         model_path=args.model_path,
         pipeline=PipelineSelection(
             components=ComponentConfig(lora_path=args.lora_path, lora_strength=args.lora_strength),
-            experimental=experimental,
+            minimax_h3=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
         ),
         engine=EngineConfig(
             num_gpus=args.num_gpus,
             use_fsdp_inference=False,
             parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
             offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=True, pin_cpu_memory=True),
-            compile=CompileConfig(enabled=False, vae_enabled=True),
+            compile=CompileConfig(enabled=False, vae_enabled=True, regional=True),
+            attention=AttentionConfig(
+                backend="VIDEO_SPARSE_ATTN_H3" if args.vsa else None,
+                vsa_sparsity=args.vsa_sparsity if args.vsa else None,
+                vsa_tile_size=args.vsa_tile_size if args.vsa else None,
+            ),
         ),
     )
 
