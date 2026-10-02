@@ -347,6 +347,11 @@ FASTVIDEO_MLX_WINDOW = EnvInt(0,
 FASTVIDEO_MLX_WINDOW_SINK = EnvInt(0,
                                    category="attention",
                                    doc="Number of sink tokens that MLX windowed attention always attends to.")
+FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT = EnvBool(
+    False,
+    category="attention",
+    doc="VIDEO_SPARSE_ATTN keeps the original tile scatter and BSHD->BHSD transposes instead of the fused Triton "
+    "layout kernel that no-grad SM100 BF16 head_dim-128 forwards with 64-token tiles use by default.")
 
 # ================== Performance ==================
 
