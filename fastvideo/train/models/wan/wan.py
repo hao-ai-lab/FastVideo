@@ -19,8 +19,6 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.training.activation_checkpoint import (
-    apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling,
     get_sigmas,
@@ -33,6 +31,8 @@ from fastvideo.utils import (
 )
 
 from fastvideo.train.models.base import ModelBase
+from fastvideo.train.utils.activation_checkpoint import (
+    apply_activation_checkpointing, )
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
@@ -80,12 +80,17 @@ class WanModel(ModelBase):
             attention_backend=attention_backend,
         )
         self._init_from = str(init_from)
+        self._resolved_gradient_checkpointing_type = (enable_gradient_checkpointing_type or getattr(
+            getattr(training_config, "model", None),
+            "enable_gradient_checkpointing_type",
+            None,
+        ))
 
         self.transformer = self._load_transformer(
             init_from=self._init_from,
             trainable=self._trainable,
             disable_custom_init_weights=(disable_custom_init_weights),
-            enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            enable_gradient_checkpointing_type=(self._resolved_gradient_checkpointing_type),
             training_config=training_config,
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=self.attention_backend,

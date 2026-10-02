@@ -43,8 +43,6 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
-from fastvideo.training.activation_checkpoint import (
-    apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling,
     get_sigmas,
@@ -53,6 +51,8 @@ from fastvideo.training.training_utils import (
 )
 
 from fastvideo.train.models.base import ModelBase
+from fastvideo.train.utils.activation_checkpoint import (
+    apply_activation_checkpointing, )
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
