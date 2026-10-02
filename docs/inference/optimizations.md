@@ -64,10 +64,11 @@ FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN python example.py
 
 **`FLASHINFER`**
 
-MiniMax H3 dense attention layers can use FlashInfer's prefill kernels. Install a
-FlashInfer release that provides `cudnn_batch_prefill_with_kv_cache`, then
-select either the established per-sample kernel or the batched cuDNN SDPA path
-for your MiniMax H3 inference script (`example.py` below):
+Wan and MiniMax H3 support the shared `FLASHINFER` attention backend for dense
+attention. Install a FlashInfer release that provides
+`cudnn_batch_prefill_with_kv_cache`, then select either the established per-sample
+kernel or the batched cuDNN SDPA path. Replace `example.py` below with your Wan
+or MiniMax H3 inference script:
 
 ```bash
 uv pip install 'flashinfer-python>=0.6.18'
@@ -89,7 +90,7 @@ of silently selecting another kernel when these constraints are not met.
 Kernel-level benchmark results and the standalone benchmark script are included
 in [PR #1827](https://github.com/hao-ai-lab/FastVideo/pull/1827). The script is
 not shipped in the repository. These kernel measurements do not establish
-end-to-end MiniMax H3 speedups; the cuDNN path remains opt-in.
+end-to-end speedups for Wan or MiniMax H3; the cuDNN path remains opt-in.
 
 ### Flash Attention
 
