@@ -257,9 +257,9 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         config = super()._load_config(model_path)
-        # model_path is now local (a Hub repo id is downloaded first). Check the
-        # transformer before any component loads, unless the caller supplied
-        # the transformer already built.
+        # super()._load_config resolved self.model_path to a local directory,
+        # downloading a Hub repo id. Check the transformer before any component
+        # loads, unless the caller supplied the transformer already built.
         if getattr(self, "_check_transformer_before_loading", True):
             self._check_pdd_transformer(self.fastvideo_args)
             # A PDD checkpoint's backend comes from its fastvideo_inference.json

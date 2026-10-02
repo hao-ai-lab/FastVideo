@@ -44,14 +44,14 @@ backward run the Triton block-sparse kernels directly (no expansion,
 ``FASTVIDEO_VSA_CUTEDSL`` does not apply). A third, opt-in route exists
 for the tile-64 FORWARD only: ``FASTVIDEO_VSA_SM100A=1`` sends no-grad
 forwards through the data-center Blackwell CUDA block-sparse kernel
-(``fastvideo_kernel.block_sparse_attn_sm100a``, upstream PR #1719 plus
-our per-q-tile ``q2k_num`` fix) when the extension is built, the device
+(``fastvideo_kernel.block_sparse_attn_sm100a``, which reads a separate
+``q2k_num`` key-tile count per query tile) when the extension is built, the device
 is sm_100 or sm_103, and the geometry qualifies. The CUDA kernel assigns
 adjacent pairs of query tiles to CTAs, so an odd logical tile count receives one
 internal, zero-valid partner tile for the no-grad call only. Score search,
 the trained mask, gate-compress, and the returned packed sequence remain on
 the original logical tiles. Grad-tracking forwards and every backward stay
-on Triton unchanged. If the env is set but a precondition fails, the route
+on the Triton kernels. If the env is set but a precondition fails, the route
 logs one warning and falls back.
 
 Tile 128 has exactly one implementation: the same sm_100a/sm_103a CUDA
@@ -79,7 +79,7 @@ except ImportError:
 
 try:
     # Optional: only present in fastvideo_kernel builds that carry the
-    # sm_100a/sm_103a CUDA block-sparse forward (upstream PR #1719). The module itself imports
+    # sm_100a/sm_103a CUDA block-sparse forward. The module itself imports
     # fine without the compiled symbols (`_HAS_VSA_SM100A` is then False and
     # `is_supported` says no), so this only guards *module* availability.
     from fastvideo_kernel import block_sparse_attn_sm100a as _sm100a
@@ -952,8 +952,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     value=0,
                 )
 
-            # Opt-in sm_100a CUDA forward (upstream PR #1719 + per-q-tile
-            # q2k_num fix). Forward-only: grad-tracking calls stay on Triton
+            # sm_100a CUDA forward, opt-in at tile 64 and the only route at
+            # tile 128. Forward-only: tile-64 grad-tracking calls stay on Triton
             # so autograd keeps the Triton fwd+bwd pairing untouched. The
             # kernel does return an LSE in Triton's M format, so a future
             # fwd/bwd pairing is possible, but it is not built here.
@@ -1000,7 +1000,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     logger.warning_once(f"{VSA_SM100A_ENV}=1 but falling back to the Triton-64 kernels: {reason}")
 
             if use_sm100a:
-                # Regional preparation emits the compile-route receipt before
+                # prepare_for_regional_compile logs the selected mask route before
                 # capture. Logging from this branch would itself break a
                 # ``fullgraph=True`` forward.
                 if not compiling:
@@ -1021,7 +1021,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     # Preserve the established eager/index-native route and
                     # compatibility with older kernel wheels. Per-row counts
                     # are non-uniform (prefix queries are dense; video queries
-                    # run prefix+top-k), which the fixed kernel supports.
+                    # run prefix+top-k); the kernel reads each query tile's own count.
                     q2k_idx, q2k_num = map_to_index(sm100a_mask)
                     out_bhsd, _ = _sm100a.block_sparse_attn_sm100a(
                         q_bhsd,

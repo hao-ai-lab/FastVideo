@@ -362,7 +362,8 @@ class FastVideoArgs:
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
         self._fold_vae_parallel_env()
-        # After the env fold, so an env-var backend counts as the run's request.
+        # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
+        # so a backend chosen by that env var counts as the run's request.
         self.pipeline_config.resolve_checkpoint_settings(self)
         if self.VSA_sparsity is None:
             self.VSA_sparsity = 0.0

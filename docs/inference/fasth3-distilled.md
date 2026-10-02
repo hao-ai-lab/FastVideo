@@ -174,6 +174,7 @@ selection, before it loads any component.
 
 ### Reference-video sparsity
 
+Every PDD contract sets `"vsa_ref_policy": "p2_multi_region"`, the only value FastVideo accepts, which means:
 `VIDEO_SPARSE_ATTN_H3` tiles every reference video as its own sparse region,
 in place in the packed sequence. Each video query keeps `vsa_ref_keep_rate` of
 every reference video's tiles and `1 - VSA_sparsity` of the target video's
