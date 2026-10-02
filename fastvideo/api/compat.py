@@ -321,10 +321,8 @@ _COMPONENT_OVERRIDE_PREFIXES = {
     "vae_config.": "vae",
 }
 # from_pretrained keywords whose empty-string value means "unset", and the field each one sets.
-# ltx2_refine_lora_path sets the main LoRA path.
 _EMPTY_MEANS_UNSET_KEYWORDS = {
     "ltx2_refine_upsampler_path": "pipeline.components.upsampler_weights",
-    "ltx2_refine_lora_path": "pipeline.components.lora_path",
 }
 # from_pretrained keywords that set pipeline.preset_overrides.refine.<key without the ltx2_refine_ prefix>.
 _LTX2_REFINE_PRESET_KEYWORDS = frozenset({

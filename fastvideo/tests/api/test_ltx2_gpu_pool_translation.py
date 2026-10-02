@@ -109,9 +109,10 @@ class TestGpuPoolForwardTranslation:
     def test_refine_upsampler_routed_to_components(self, config) -> None:
         assert config.pipeline.components.upsampler_weights == ("/models/ltx2-distilled/spatial_upsampler")
 
-    def test_empty_refine_lora_becomes_none(self, config) -> None:
-        # gpu_pool passes "" to keep refine LoRA disabled; typed schema
-        # treats that as "no LoRA" rather than an empty-string path.
+    def test_empty_refine_lora_stays_disabled(self, config) -> None:
+        # gpu_pool passes "" to keep the refine LoRA disabled. None would
+        # load the checkpoint's default refine LoRA instead.
+        assert config.pipeline.ltx2.refine.lora_path == ""
         assert config.pipeline.components.lora_path is None
 
     def test_refine_preset_overrides(self, config) -> None:

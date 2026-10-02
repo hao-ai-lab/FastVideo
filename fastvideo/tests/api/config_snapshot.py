@@ -354,6 +354,9 @@ def collect_cases() -> list[SnapshotCase]:
         "ltx2_refine_lora_path": (LTX2, {
             "ltx2_refine_lora_path": "/checkpoints/refine_lora.safetensors"
         }),
+        "ltx2_refine_lora_disabled": (LTX2, {
+            "ltx2_refine_lora_path": ""
+        }),
         "pipeline_config_json_path": ("FastVideo/FastHunyuan-diffusers", {
             "pipeline_config": pipeline_json
         }),

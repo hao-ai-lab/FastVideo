@@ -158,6 +158,9 @@ class LTX2RefineOptions:
     """Stage-2 refine assets that ``preset_overrides.refine`` and ``components`` do not cover."""
 
     transformer_path: str | None = flat_field("ltx2_refine_transformer_path", None)
+    lora_path: str | None = flat_field("ltx2_refine_lora_path", None)
+    """LoRA applied to the refine transformer only. ``None`` uses the checkpoint's default
+    (``fastvideo_refine_lora_path`` in ``model_index.json``); an empty string disables the refine LoRA."""
     noise_path: str | None = flat_field("ltx2_refine_noise_path", None)
     audio_noise_path: str | None = flat_field("ltx2_refine_audio_noise_path", None)
 

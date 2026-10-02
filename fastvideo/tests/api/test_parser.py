@@ -187,6 +187,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "use_distilled_sigmas": None,
                     "refine": {
                         "transformer_path": None,
+                        "lora_path": None,
                         "noise_path": None,
                         "audio_noise_path": None,
                     },
