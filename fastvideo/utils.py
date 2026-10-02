@@ -747,6 +747,32 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
         raise ValueError(f"Failed to download or parse a Diffusers manifest for {model_name_or_path}: {e}") from e
 
 
+def read_optional_model_json(model_name_or_path: str,
+                             relative_path: str,
+                             revision: str | None = None) -> dict[str, Any] | None:
+    """Read one JSON file of a local model directory or Hub repo; None when the model has no such file.
+
+    For a Hub repo only that file is downloaded, into the shared HF cache, so
+    a run can read small checkpoint metadata before any component weights.
+    """
+    if os.path.exists(model_name_or_path):
+        path = os.path.join(model_name_or_path, relative_path)
+        if not os.path.isfile(path):
+            return None
+    else:
+        from huggingface_hub import hf_hub_download
+        from huggingface_hub.utils import EntryNotFoundError
+
+        repo_id, subfolder = _split_hf_repo_subfolder(model_name_or_path)
+        filename = f"{subfolder}/{relative_path}" if subfolder else relative_path
+        try:
+            path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
+        except EntryNotFoundError:
+            return None
+    with open(path, encoding="utf-8") as f:
+        return cast(dict[str, Any], json.load(f))
+
+
 # Token variables that `huggingface_hub` itself reads, in its priority order.
 HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
 # FastVideo-specific token names, kept as deprecated aliases until the next

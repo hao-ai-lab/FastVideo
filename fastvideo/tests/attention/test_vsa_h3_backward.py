@@ -23,10 +23,9 @@ _DIM = 128
 def _build_meta(device, sparsity=0.5):
     return MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
-        raw_latent_shape=_SPEC["raw_latent_shape"],
         patch_size=_SPEC["patch_size"],
         VSA_sparsity=sparsity,
-        prefix_segments=_SPEC["prefix_segments"],
+        packed_segments=(*_SPEC["prefix_segments"], _SPEC["raw_latent_shape"]),
         device=device,
     )
 

@@ -167,6 +167,24 @@ launchers still use sparse attention at strength `0` and require FastVideo's
 tile-64 VSA kernel; the dense launcher selects FA4. Each launcher writes to its
 own variant directory by default so comparison outputs do not collide.
 
+### FastH3 OmniRef PDD (Ref2VA)
+
+[basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py)
+runs a Parallel Decoding Distillation Ref2VA student in eight transformer
+forwards. The export carries only its `transformer_ref`, scheduler configs,
+and `fastvideo_inference.json`; the script links them with the base
+MiniMax-H3 components into one local model directory. Its 128-token VSA tiles
+need the sm_100a/sm_103a kernel:
+
+```bash
+python examples/inference/basic/basic_fasth3_omniref_pdd.py \
+  --model-path <local export directory or Hugging Face repo id> \
+  --video reference.mp4 --image character.png --prompt "your prompt"
+```
+
+See [FastH3 distilled checkpoint schedules](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/inference/fasth3-distilled.md#ref2va-pdd-students)
+for the contract and the reference-video sparsity policy.
+
 ## Basic Walkthrough
 
 All you need to generate videos using multi-gpus from state-of-the-art diffusion pipelines is the following few lines!

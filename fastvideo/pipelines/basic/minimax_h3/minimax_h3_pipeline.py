@@ -12,9 +12,12 @@ from typing import Any
 
 import torch
 
+from fastvideo.attention.selector import (_active_component_attention_backend_scope, coerce_attn_backend,
+                                          get_env_variable_attn_backend)
 from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEArchConfig
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEArchConfig
-from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.configs.pipelines.minimax_h3 import (FASTH3_INFERENCE_FILE, FASTH3_INFERENCE_SCHEMA,
+                                                    MiniMaxH3PipelineConfig)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
@@ -29,6 +32,7 @@ from fastvideo.pipelines.basic.minimax_h3.stages import (
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
@@ -36,6 +40,41 @@ logger = init_logger(__name__)
 # then load DiT + VAEs. Keeping them resident together OOMs unified-memory
 # boxes (GB10 / Spark) even though host offload is correctly disabled there.
 _DENOISE_MODULE_NAMES = ("vae", "audio_vae", "transformer")
+
+
+def _requested_attention_backend(fastvideo_args: FastVideoArgs) -> AttentionBackendEnum | None:
+    """The backend the transformer loader builds with; None means automatic selection.
+
+    Follows ``PipelineComponentLoader.load_module``: an active per-component
+    request wins, then the run's ``attention_backend``, then
+    ``FASTVIDEO_ATTENTION_BACKEND``. Automatic selection never picks
+    VIDEO_SPARSE_ATTN_H3.
+    """
+    scope = _active_component_attention_backend_scope()
+    if scope is not None:
+        if scope.backend is not None or not scope.consult_env:
+            return scope.backend
+        return get_env_variable_attn_backend()
+    requested = coerce_attn_backend(getattr(fastvideo_args, "attention_backend", None))
+    return requested if requested is not None else get_env_variable_attn_backend()
+
+
+def _checkpoint_has_vsa_gates(transformer_dir: Path) -> bool:
+    """Whether a transformer checkpoint ships VSA-H3 compression gates (``to_gate_compress``).
+
+    Reads only the shard index, or the safetensors headers when there is none.
+    """
+    indexes = sorted(transformer_dir.glob("*.safetensors.index.json"))
+    if indexes:
+        return any(".to_gate_compress." in name for index in indexes
+                   for name in json.loads(index.read_text(encoding="utf-8")).get("weight_map", {}))
+    from safetensors import safe_open
+
+    for path in sorted(transformer_dir.glob("*.safetensors")):
+        with safe_open(str(path), framework="pt") as handle:
+            if any(".to_gate_compress." in name for name in handle.keys()):  # noqa: SIM118
+                return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -148,7 +187,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         assert patterns is not None
         # Keep the optional distilled schedule even when downloading only the
         # selected transformer partition. Otherwise Hub and local loads differ.
-        return [*patterns, "fastvideo_inference.json"]
+        return [*patterns, FASTH3_INFERENCE_FILE]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         _apply_h3_checkpoint_arch_configs(self.model_path, fastvideo_args, self._extra_config_module_map)
@@ -161,14 +200,85 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose a positive finite shift, got {shift}.")
         self._load_checkpoint_schedule(fastvideo_args)
 
+    def _checkpoint_facts(self) -> tuple[Any, bool]:
+        """The checkpoint's parsed ``fastvideo_inference.json`` (None without one) and whether its transformer
+        carries VSA compression gates.
+
+        Read once per resolved local path: ``_load_config`` replaces a Hub
+        repo id in ``model_path`` with its downloaded snapshot.
+        """
+        root = Path(self.model_path)
+        cached = getattr(self, "_checkpoint_facts_cache", None)
+        if cached is None or cached[0] != root:
+            path = root / FASTH3_INFERENCE_FILE
+            contract = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+            cached = (root, contract, _checkpoint_has_vsa_gates(self._transformer_dir()))
+            self._checkpoint_facts_cache = cached
+        return cached[1], cached[2]
+
+    def _checkpoint_contract(self) -> Any:
+        """The checkpoint's ``fastvideo_inference.json``, or None when there is none."""
+        return self._checkpoint_facts()[0]
+
+    def _transformer_dir(self) -> Path:
+        return Path(self.model_path) / self._extra_config_module_map.get("transformer", "transformer")
+
+    def _require_checkpoint_attention_backend(self, requested: AttentionBackendEnum | None) -> None:
+        """Reject a backend other than VIDEO_SPARSE_ATTN_H3 for a transformer that carries VSA compression gates.
+
+        MiniMax-H3 builds its compression gates only under that backend and loads
+        strictly, so any other backend would otherwise fail later, while loading
+        weights, as a missing ``to_gate_compress`` parameter.
+        """
+        if requested == AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3 or not self._checkpoint_facts()[1]:
+            return
+        raise ValueError(
+            f"This MiniMax-H3 checkpoint needs attention_backend=VIDEO_SPARSE_ATTN_H3: its "
+            f"{self._transformer_dir().name} carries VSA compression gates (to_gate_compress), and the gates are "
+            f"built only under that backend. This run requests "
+            f"{'automatic selection' if requested is None else requested.name}. Select VIDEO_SPARSE_ATTN_H3.")
+
+    def _check_pdd_transformer(self, fastvideo_args: FastVideoArgs) -> None:
+        """Check this pipeline's transformer against the resolved PDD settings.
+
+        A transformer whose config.json sets ``pdd_steps`` samples only with its
+        trained partition, which comes from the checkpoint's PDD fields; and
+        those fields describe the Ref2VA ``transformer_ref`` student.
+        """
+        indices = getattr(fastvideo_args.pipeline_config, "pdd_step_indices", None)
+        config_path = self._transformer_dir() / "config.json"
+        widened = config_path.is_file() and json.loads(config_path.read_text(encoding="utf-8")).get("pdd_steps")
+        if widened and indices is None:
+            raise ValueError(f"{config_path} sets pdd_steps, but {self.model_path} has no PDD "
+                             f"{FASTH3_INFERENCE_FILE}; a PDD student samples only with its trained partition.")
+        if indices is not None and not self._ref2va:
+            raise ValueError(f"{self.model_path} is a FastH3 Ref2VA PDD checkpoint; select "
+                             "MiniMaxH3Ref2VAModularPipeline.")
+
+    def _load_config(self, model_path: str) -> dict[str, Any]:
+        config = super()._load_config(model_path)
+        # super()._load_config resolved self.model_path to a local directory,
+        # downloading a Hub repo id. Check the transformer before any component
+        # loads, unless the caller supplied the transformer already built.
+        if getattr(self, "_check_transformer_before_loading", True):
+            self._check_pdd_transformer(self.fastvideo_args)
+            # A PDD checkpoint's backend comes from its fastvideo_inference.json
+            # (MiniMaxH3PipelineConfig.resolve_checkpoint_settings).
+            if getattr(self.fastvideo_args.pipeline_config, "pdd_step_indices", None) is None:
+                self._require_checkpoint_attention_backend(_requested_attention_backend(self.fastvideo_args))
+        return config
+
     def _load_checkpoint_schedule(self, fastvideo_args: FastVideoArgs) -> None:
         """A distilled export's schedule is explicit; never silently use a uniform grid."""
-        path = Path(self.model_path) / "fastvideo_inference.json"
-        if not path.is_file():
+        if getattr(fastvideo_args.pipeline_config, "pdd_step_indices", None) is not None:
+            # MiniMaxH3PipelineConfig.resolve_checkpoint_settings already applied
+            # this PDD checkpoint's file when the run's FastVideoArgs were built.
             return
-        contract = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(contract, dict) or contract.get("schema_version") != "fasth3-inference-contract-v1":
-            raise ValueError("Unsupported FastH3 fastvideo_inference.json schema.")
+        contract = self._checkpoint_contract()
+        if contract is None:
+            return
+        if not isinstance(contract, dict) or contract.get("schema_version") != FASTH3_INFERENCE_SCHEMA:
+            raise ValueError(f"Unsupported FastH3 {FASTH3_INFERENCE_FILE} schema.")
         steps = contract.get("dmd_denoising_steps")
         if (not isinstance(steps, list) or not steps
                 or any(type(step) is not int or not 0 < step <= 1000 for step in steps)
@@ -237,6 +347,8 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                      fastvideo_args: FastVideoArgs,
                      loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
         """Load the Qwen3-VL conditioner first; defer DiT and VAEs until after encode."""
+        # _load_config checks the transformer against the run's settings before any component loads.
+        self._check_transformer_before_loading = loaded_modules is None or "transformer" not in loaded_modules
         if not self._defer_denoise_modules(fastvideo_args):
             if _use_taeh3_t2va(fastvideo_args, ref2va=self._ref2va):
                 saved = list(self.required_config_modules)

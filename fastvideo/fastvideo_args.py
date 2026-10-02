@@ -231,9 +231,10 @@ class FastVideoArgs:
 
     disable_autocast: bool = False
 
-    # VSA parameters
-    VSA_sparsity: float = 0.0  # inference/validation sparsity
-    VSA_tile_size: int = 256  # VSA-H3 tile size (256 or 64); 64 = native Triton path
+    # VSA parameters. None means unset: __post_init__ fills the checkpoint's
+    # trained value when the checkpoint fixes one, else 0.0 and 256.
+    VSA_sparsity: float | None = None  # inference/validation sparsity
+    VSA_tile_size: int | None = None  # VSA-H3 tokens per tile (256, 128, 64); 128 = sm_100a CUDA only
 
     # V-MoBA parameters
     moba_config_path: str | None = None
@@ -361,6 +362,13 @@ class FastVideoArgs:
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
         self._fold_vae_parallel_env()
+        # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
+        # so a backend chosen by that env var counts as the run's request.
+        self.pipeline_config.resolve_checkpoint_settings(self)
+        if self.VSA_sparsity is None:
+            self.VSA_sparsity = 0.0
+        if self.VSA_tile_size is None:
+            self.VSA_tile_size = 256
         import fastvideo.envs as envs
         envs.warn_deprecated_variables()
         self.check_fastvideo_args()
@@ -800,13 +808,14 @@ class FastVideoArgs:
             "--VSA-sparsity",
             type=float,
             default=FastVideoArgs.VSA_sparsity,
-            help="Validation sparsity for VSA",
+            help="Validation sparsity for VSA (default: the checkpoint's trained value, else 0.0)",
         )
         parser.add_argument(
             "--VSA-tile-size",
             type=int,
             default=FastVideoArgs.VSA_tile_size,
-            help="VSA-H3 tile size in tokens (256 or 64); 64 runs the native Triton block-sparse path",
+            help="VSA-H3 tile size in tokens (256, 128 or 64; default: the checkpoint's trained value, else 256); "
+            "64 runs the native Triton block-sparse path, 128 requires the sm_100a/sm_103a CUDA kernel",
         )
 
         # Master port for distributed training/inference

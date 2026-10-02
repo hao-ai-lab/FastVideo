@@ -101,7 +101,10 @@ to convert the official weights locally and set `MMAUDIO_MODEL_PATH`.
 
 **Note (MiniMax H3)**: T2VA, FL2VA, and Ref2VA all generate video with stereo
 audio. Use the Ref2VA example when passing ordered image, video, or audio
-references.
+references. Distilled Ref2VA PDD students (eight transformer forwards, with
+reference videos as sparse VSA regions) run through
+[basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py);
+see [FastH3 distilled checkpoint schedules](fasth3-distilled.md#ref2va-pdd-students).
 
 **Note (Wan-VACE)**: not currently supported — no VACE pipeline or registered
 model ID exists on `main`

@@ -35,10 +35,9 @@ def _build_meta(
     builder = builder or MiniMaxH3VSAMetadataBuilder()
     return builder.build(
         current_timestep=0,
-        raw_latent_shape=_SPEC["raw_latent_shape"],
         patch_size=_SPEC["patch_size"],
         VSA_sparsity=sparsity,
-        prefix_segments=prefix_segments,
+        packed_segments=(*prefix_segments, _SPEC["raw_latent_shape"]),
         device=device,
         dense_layers=dense_layers,
         tile_size=64,
@@ -224,10 +223,9 @@ def test_prepared_route_fullgraph_avoids_eager_dispatch(monkeypatch, env_overrid
     # adjacent-query-block contract.
     meta = MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
-        raw_latent_shape=_SPEC["raw_latent_shape"],
         patch_size=_SPEC["patch_size"],
         VSA_sparsity=0.0,
-        prefix_segments=(64, 64),
+        packed_segments=(64, 64, _SPEC["raw_latent_shape"]),
         device=torch.device("cpu"),
         tile_size=64,
     )
