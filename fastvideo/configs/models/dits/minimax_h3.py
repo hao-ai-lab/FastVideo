@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
+from fastvideo.layers.pdd import validate_pdd_steps
 from fastvideo.platforms import AttentionBackendEnum
 
 
@@ -72,9 +73,8 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
         self.patch_size = (self.patch_size[0], self.patch_size[1], self.patch_size[2])
         self.num_channels_latents = self.in_channels
         self.out_channels = self.in_channels
-        if self.pdd_steps is not None and (isinstance(self.pdd_steps, bool) or not isinstance(self.pdd_steps, int)
-                                           or self.pdd_steps < 2):
-            raise ValueError(f"MiniMax H3 pdd_steps must be an int >= 2 or None, got {self.pdd_steps!r}.")
+        if self.pdd_steps is not None:
+            validate_pdd_steps(self.pdd_steps, "MiniMax H3 pdd_steps")
         if self.adaln_rank is not None and not 0 < self.adaln_rank <= self.time_embed_dim:
             raise ValueError(f"MiniMax H3 adaln_rank must be in (0, time_embed_dim={self.time_embed_dim}], "
                              f"got {self.adaln_rank}.")
