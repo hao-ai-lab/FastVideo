@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args, get_origin, get_type_hints
 
 from fastvideo.api.overrides import apply_overrides, normalize_overrides
 from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
@@ -16,6 +16,7 @@ from fastvideo.api.request_metadata import (
     reset_tracking_roots,
 )
 from fastvideo.api.schema import (
+    FLAT_NAME,
     CompileConfig,
     ContinuationState,
     GenerationRequest,
@@ -91,140 +92,49 @@ def legacy_from_pretrained_to_config(
     model_path: str,
     kwargs: Mapping[str, Any],
 ) -> GeneratorConfig:
+    """Build a ``GeneratorConfig`` from ``VideoGenerator.from_pretrained`` keyword arguments.
+
+    A keyword that a schema field declares as its flat name sets that field. The keywords in the branches below
+    need a conversion instead, and any other keyword is kept in ``pipeline.experimental``.
+    """
     raw: dict[str, Any] = {"model_path": model_path}
-    engine: dict[str, Any] = {}
-    parallelism: dict[str, Any] = {}
-    offload: dict[str, Any] = {}
-    compile_config: dict[str, Any] = {}
-    pipeline: dict[str, Any] = {}
-    components: dict[str, Any] = {}
-    quantization: dict[str, Any] = {}
     experimental: dict[str, Any] = {}
-    preset_overrides: dict[str, Any] = {}
-    preset_refine: dict[str, Any] = {}
 
     for key, value in kwargs.items():
-        if key == "revision":
-            raw["revision"] = value
-        elif key == "trust_remote_code":
-            raw["trust_remote_code"] = value
-        elif key == "num_gpus":
-            engine["num_gpus"] = value
-        elif key == "distributed_executor_backend":
-            engine["execution_backend"] = value
-        elif key in {"tp_size", "sp_size", "hsdp_replicate_dim", "hsdp_shard_dim", "dist_timeout"}:
-            parallelism[key] = value
-        elif key == "dit_cpu_offload":
-            offload["dit"] = value
-        elif key == "dit_layerwise_offload":
-            offload["dit_layerwise"] = value
-        elif key == "text_encoder_cpu_offload":
-            offload["text_encoder"] = value
-        elif key == "image_encoder_cpu_offload":
-            offload["image_encoder"] = value
-        elif key == "vae_cpu_offload":
-            offload["vae"] = value
-        elif key == "pin_cpu_memory":
-            offload["pin_cpu_memory"] = value
-        elif key == "lazy_module_load":
-            offload["lazy_module_load"] = value
-        elif key == "enable_torch_compile":
-            compile_config["enabled"] = value
-        elif key == "enable_torch_compile_text_encoder":
-            compile_config["text_encoder_enabled"] = value
-        elif key == "enable_torch_compile_vae":
-            compile_config["vae_enabled"] = value
-        elif key == "enable_torch_compile_audio_vae":
-            compile_config["audio_vae_enabled"] = value
-        elif key == "torch_compile_kwargs":
+        if key == "torch_compile_kwargs":
             remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
             for first_class in _COMPILE_TYPED_KEYS:
                 if first_class in remaining:
-                    compile_config[first_class] = remaining.pop(first_class)
+                    _set_dotted_path(raw, ["engine", "compile", first_class], remaining.pop(first_class))
             if remaining:
-                compile_config["extras"] = remaining
-        elif key in {
-                "torch_compile_kwargs_dit",
-                "torch_compile_kwargs_text_encoder",
-                "torch_compile_kwargs_vae",
-                "torch_compile_kwargs_audio_vae",
-        }:
-            compile_config[key[len("torch_compile_kwargs_"):] +
-                           "_kwargs"] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
-        elif key == "ltx2_vae_tiling":
-            pipeline["vae_tiling"] = value
-        elif key == "config_model_path":
-            components["config_root"] = value
-        elif key == "ltx2_refine_enabled":
-            preset_refine["enabled"] = value
-        elif key == "ltx2_refine_upsampler_path":
-            # Empty string means "no upsampler"; keep typed None.
-            components["upsampler_weights"] = value or None
-        elif key == "ltx2_refine_lora_path":
-            # Empty string means "no refine LoRA"; keep typed None.
-            components["lora_path"] = value or None
-        elif key == "ltx2_refine_add_noise":
-            preset_refine["add_noise"] = value
-        elif key == "ltx2_refine_num_inference_steps":
-            preset_refine["num_inference_steps"] = value
-        elif key == "ltx2_refine_guidance_scale":
-            preset_refine["guidance_scale"] = value
-        elif key in {"enable_stage_verification", "use_fsdp_inference", "disable_autocast"}:
-            engine[key] = value
-        elif key == "override_text_encoder_quant":
-            quantization["text_encoder_quant"] = value
-        elif key == "workload_type":
-            pipeline["workload_type"] = value
-        elif key == "lora_path":
-            components["lora_path"] = value
-        elif key == "lora_nickname":
-            components["lora_nickname"] = value
-        elif key == "lora_strength":
-            components["lora_strength"] = value
-        elif key == "override_pipeline_cls_name":
-            components["override_pipeline_cls_name"] = value
-        elif key == "override_transformer_cls_name":
-            components["override_transformer_cls_name"] = value
-        elif key == "pipeline_config":
-            if isinstance(value, str):
-                components["pipeline_config_path"] = value
-            else:
-                experimental[key] = deepcopy(value)
-        elif key == "override_text_encoder_safetensors":
-            components["text_encoder_weights"] = value
-        elif key == "init_weights_from_safetensors":
-            components["transformer_weights"] = value
-        elif key == "init_weights_from_safetensors_2":
-            components["transformer_2_weights"] = value
+                _set_dotted_path(raw, ["engine", "compile", "extras"], remaining)
+        elif key == "pipeline_config" and not isinstance(value, str):
+            experimental[key] = deepcopy(value)
+        elif key in _LTX2_REFINE_PRESET_KEYWORDS:
+            _set_dotted_path(raw, ["pipeline", "preset_overrides", "refine", key[len("ltx2_refine_"):]], value)
+        elif key in _EMPTY_MEANS_UNSET_KEYWORDS:
+            # An empty string means "no file"; keep typed None.
+            _set_dotted_path(raw, _EMPTY_MEANS_UNSET_KEYWORDS[key].split("."), value or None)
+        elif key in _FLAT_NAME_FIELDS:
+            dotted_path, annotation = _FLAT_NAME_FIELDS[key]
+            if get_origin(annotation) is dict:
+                value = dict(deepcopy(value)) if isinstance(value, Mapping) else {}
+            _set_dotted_path(raw, dotted_path.split("."), value)
         else:
             experimental[key] = deepcopy(value)
 
-    if parallelism:
-        engine["parallelism"] = parallelism
-    if offload:
-        engine["offload"] = offload
-    if compile_config:
-        engine["compile"] = compile_config
-    if quantization:
-        engine["quantization"] = quantization
-    if engine:
-        raw["engine"] = engine
-
-    if components:
-        pipeline["components"] = components
-    if preset_refine:
-        preset_overrides["refine"] = preset_refine
-    if preset_overrides:
-        pipeline["preset_overrides"] = preset_overrides
     if experimental:
-        pipeline["experimental"] = experimental
-    if pipeline:
-        raw["pipeline"] = pipeline
-
+        _set_dotted_path(raw, ["pipeline", "experimental"], experimental)
     return parse_config(GeneratorConfig, raw)
 
 
 def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, Any], ) -> FastVideoArgs:
+    """Flatten a ``GeneratorConfig`` into the ``FastVideoArgs`` that runtime code reads.
+
+    Every field that declares a flat name and holds a value other than ``None`` becomes the keyword of that name.
+    The paths in ``_SPECIALLY_MAPPED_PATHS`` are converted below; ``pipeline.preset_overrides`` and then
+    ``pipeline.experimental`` are applied last, so their keys win over the typed fields.
+    """
     normalized = normalize_generator_config(config)
     unsupported = []
     if normalized.pipeline.preset is not None:
@@ -237,53 +147,14 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         joined = ", ".join(unsupported)
         raise NotImplementedError(f"VideoGenerator compatibility adapter does not support {joined} yet")
 
-    engine = normalized.engine
-    kwargs: dict[str, Any] = {
-        "model_path": normalized.model_path,
-        "revision": normalized.revision,
-        "trust_remote_code": normalized.trust_remote_code,
-        "num_gpus": engine.num_gpus,
-        "distributed_executor_backend": engine.execution_backend,
-        "tp_size": engine.parallelism.tp_size,
-        "sp_size": engine.parallelism.sp_size,
-        "hsdp_replicate_dim": engine.parallelism.hsdp_replicate_dim,
-        "hsdp_shard_dim": engine.parallelism.hsdp_shard_dim,
-        "dist_timeout": engine.parallelism.dist_timeout,
-        "dit_cpu_offload": engine.offload.dit,
-        "dit_layerwise_offload": engine.offload.dit_layerwise,
-        "text_encoder_cpu_offload": engine.offload.text_encoder,
-        "image_encoder_cpu_offload": engine.offload.image_encoder,
-        "vae_cpu_offload": engine.offload.vae,
-        "pin_cpu_memory": engine.offload.pin_cpu_memory,
-        "lazy_module_load": engine.offload.lazy_module_load,
-        "enable_torch_compile": engine.compile.enabled,
-        "torch_compile_kwargs": _compile_config_to_torch_kwargs(engine.compile),
-        "enable_stage_verification": engine.enable_stage_verification,
-        "use_fsdp_inference": engine.use_fsdp_inference,
-        "disable_autocast": engine.disable_autocast,
-    }
-    if normalized.pipeline.workload_type is not None:
-        kwargs["workload_type"] = normalized.pipeline.workload_type
-    if normalized.pipeline.vae_tiling is not None:
-        kwargs["ltx2_vae_tiling"] = normalized.pipeline.vae_tiling
-    if engine.compile.text_encoder_enabled is not None:
-        kwargs["enable_torch_compile_text_encoder"] = (engine.compile.text_encoder_enabled)
-    if engine.compile.vae_enabled is not None:
-        kwargs["enable_torch_compile_vae"] = engine.compile.vae_enabled
-    if engine.compile.audio_vae_enabled is not None:
-        kwargs["enable_torch_compile_audio_vae"] = (engine.compile.audio_vae_enabled)
-    if engine.compile.dit_kwargs:
-        kwargs["torch_compile_kwargs_dit"] = deepcopy(engine.compile.dit_kwargs)
-    if engine.compile.text_encoder_kwargs:
-        kwargs["torch_compile_kwargs_text_encoder"] = deepcopy(engine.compile.text_encoder_kwargs)
-    if engine.compile.vae_kwargs:
-        kwargs["torch_compile_kwargs_vae"] = deepcopy(engine.compile.vae_kwargs)
-    if engine.compile.audio_vae_kwargs:
-        kwargs["torch_compile_kwargs_audio_vae"] = deepcopy(engine.compile.audio_vae_kwargs)
+    kwargs: dict[str, Any] = {}
+    for flat_name, (dotted_path, _) in _FLAT_NAME_FIELDS.items():
+        value = _read_dotted_path(normalized, dotted_path.split("."))
+        if value is not _MISSING and value is not None:
+            kwargs[flat_name] = deepcopy(value)
+    kwargs["torch_compile_kwargs"] = _compile_config_to_torch_kwargs(normalized.engine.compile)
 
-    quantization = engine.quantization
-    if quantization is not None and quantization.text_encoder_quant is not None:
-        kwargs["override_text_encoder_quant"] = quantization.text_encoder_quant
+    quantization = normalized.engine.quantization
     if quantization is not None and quantization.transformer_quant is not None:
         # Resolve the typed quant name to a concrete ``QuantizationConfig``
         # instance and pin it on ``dit_config.quant_config``. The legacy
@@ -294,28 +165,6 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         from fastvideo.layers.quantization import get_quantization_config
         _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
         kwargs["transformer_quant"] = _resolved_quant_cls()
-
-    components = normalized.pipeline.components
-    if components.pipeline_config_path is not None:
-        kwargs["pipeline_config"] = components.pipeline_config_path
-    if components.lora_path is not None:
-        kwargs["lora_path"] = components.lora_path
-        kwargs["lora_nickname"] = components.lora_nickname
-        kwargs["lora_strength"] = components.lora_strength
-    if components.override_pipeline_cls_name is not None:
-        kwargs["override_pipeline_cls_name"] = components.override_pipeline_cls_name
-    if components.override_transformer_cls_name is not None:
-        kwargs["override_transformer_cls_name"] = components.override_transformer_cls_name
-    if components.text_encoder_weights is not None:
-        kwargs["override_text_encoder_safetensors"] = components.text_encoder_weights
-    if components.transformer_weights is not None:
-        kwargs["init_weights_from_safetensors"] = components.transformer_weights
-    if components.transformer_2_weights is not None:
-        kwargs["init_weights_from_safetensors_2"] = components.transformer_2_weights
-    if components.config_root is not None:
-        kwargs["config_model_path"] = components.config_root
-    if components.upsampler_weights is not None:
-        kwargs["ltx2_refine_upsampler_path"] = components.upsampler_weights
 
     preset_overrides = deepcopy(normalized.pipeline.preset_overrides)
     refine = preset_overrides.pop("refine", None)
@@ -421,6 +270,55 @@ def expand_request_prompt_batch(request: GenerationRequest, ) -> list[Generation
 
 def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
     return isinstance(raw.get("generator"), Mapping)
+
+
+def _schema_fields(config_type: type, prefix: str = "") -> Iterator[tuple[str, Any, Any]]:
+    """Yield ``(dotted path, field, annotation)`` for every field under ``config_type`` that is not a nested config.
+
+    A field whose type is a dataclass, or an optional dataclass, is a nested config and is walked into.
+    """
+    type_hints = get_type_hints(config_type)
+    for config_field in fields(config_type):
+        dotted_path = f"{prefix}{config_field.name}"
+        annotation = type_hints[config_field.name]
+        nested = [arg for arg in (annotation, *get_args(annotation)) if isinstance(arg, type) and is_dataclass(arg)]
+        if nested:
+            yield from _schema_fields(nested[0], f"{dotted_path}.")
+        else:
+            yield dotted_path, config_field, annotation
+
+
+# Flat keyword name -> (dotted path, annotation) for every GeneratorConfig field that declares a flat name.
+_FLAT_NAME_FIELDS: dict[str, tuple[str, Any]] = {
+    config_field.metadata[FLAT_NAME]: (dotted_path, annotation)
+    for dotted_path, config_field, annotation in _schema_fields(GeneratorConfig) if FLAT_NAME in config_field.metadata
+}
+# GeneratorConfig fields without a flat name, and how generator_config_to_fastvideo_args carries each one.
+_SPECIALLY_MAPPED_PATHS: dict[str, str] = {
+    **{
+        f"engine.compile.{key}": "merged into torch_compile_kwargs"
+        for key in (*_COMPILE_TYPED_KEYS, "extras")
+    },
+    "engine.quantization.transformer_quant": "resolved to a QuantizationConfig instance",
+    "pipeline.preset": "not supported",
+    "pipeline.preset_version": "not supported",
+    "pipeline.components.vae_weights": "not supported",
+    "pipeline.preset_overrides": "keys passed as flat keywords; refine keys renamed to ltx2_refine_*",
+    "pipeline.experimental": "keys passed as flat keywords",
+}
+# from_pretrained keywords whose empty-string value means "unset", and the field each one sets.
+# ltx2_refine_lora_path sets the main LoRA path.
+_EMPTY_MEANS_UNSET_KEYWORDS = {
+    "ltx2_refine_upsampler_path": "pipeline.components.upsampler_weights",
+    "ltx2_refine_lora_path": "pipeline.components.lora_path",
+}
+# from_pretrained keywords that set pipeline.preset_overrides.refine.<key without the ltx2_refine_ prefix>.
+_LTX2_REFINE_PRESET_KEYWORDS = frozenset({
+    "ltx2_refine_enabled",
+    "ltx2_refine_add_noise",
+    "ltx2_refine_num_inference_steps",
+    "ltx2_refine_guidance_scale",
+})
 
 
 def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str, Any]:

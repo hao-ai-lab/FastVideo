@@ -1,8 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field
 from typing import Any, Literal
+
+# Field metadata key that holds a field's name in the flat keyword API: the keyword arguments of
+# ``VideoGenerator.from_pretrained`` and the fields of ``FastVideoArgs``. ``fastvideo.api.compat`` converts between
+# the nested config and the flat keywords through this name, so a field that declares it needs no other mapping.
+FLAT_NAME = "flat_name"
+
+
+def flat_field(flat_name: str, default: Any = MISSING, *, default_factory: Any = MISSING) -> Any:
+    """Declare a dataclass field whose name in the flat keyword API is ``flat_name``."""
+    return field(default=default, default_factory=default_factory, metadata={FLAT_NAME: flat_name})
 
 
 @dataclass
@@ -15,27 +25,27 @@ class ServerConfig:
 
 @dataclass
 class ParallelismConfig:
-    tp_size: int = -1
-    sp_size: int = -1
-    hsdp_replicate_dim: int = 1
-    hsdp_shard_dim: int = -1
-    dist_timeout: int | None = None
+    tp_size: int = flat_field("tp_size", -1)
+    sp_size: int = flat_field("sp_size", -1)
+    hsdp_replicate_dim: int = flat_field("hsdp_replicate_dim", 1)
+    hsdp_shard_dim: int = flat_field("hsdp_shard_dim", -1)
+    dist_timeout: int | None = flat_field("dist_timeout", None)
 
 
 @dataclass
 class OffloadConfig:
-    dit: bool = True
-    dit_layerwise: bool = True
-    text_encoder: bool = True
-    image_encoder: bool = True
-    vae: bool = True
-    pin_cpu_memory: bool = True
+    dit: bool = flat_field("dit_cpu_offload", True)
+    dit_layerwise: bool = flat_field("dit_layerwise_offload", True)
+    text_encoder: bool = flat_field("text_encoder_cpu_offload", True)
+    image_encoder: bool = flat_field("image_encoder_cpu_offload", True)
+    vae: bool = flat_field("vae_cpu_offload", True)
+    pin_cpu_memory: bool = flat_field("pin_cpu_memory", True)
     # Not a CPU offload: loads each heavy component on first use and frees it
     # after the last stage that needs it, so peak memory is the largest
     # overlapping set rather than the sum. Grouped here because it is the same
     # decision the offload knobs answer, which is how much of the model has to
     # be resident at once. ``None`` auto-enables on unified-memory devices.
-    lazy_module_load: bool | None = None
+    lazy_module_load: bool | None = flat_field("lazy_module_load", None)
 
 
 @dataclass
@@ -55,65 +65,65 @@ class CompileConfig:
     leaving it empty inherits the master kwargs.
     """
 
-    enabled: bool = False
+    enabled: bool = flat_field("enable_torch_compile", False)
     backend: str | None = None
     fullgraph: bool | None = None
     mode: str | None = None
     dynamic: bool | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
-    text_encoder_enabled: bool | None = None
-    vae_enabled: bool | None = None
-    audio_vae_enabled: bool | None = None
+    text_encoder_enabled: bool | None = flat_field("enable_torch_compile_text_encoder", None)
+    vae_enabled: bool | None = flat_field("enable_torch_compile_vae", None)
+    audio_vae_enabled: bool | None = flat_field("enable_torch_compile_audio_vae", None)
 
-    dit_kwargs: dict[str, Any] = field(default_factory=dict)
-    text_encoder_kwargs: dict[str, Any] = field(default_factory=dict)
-    vae_kwargs: dict[str, Any] = field(default_factory=dict)
-    audio_vae_kwargs: dict[str, Any] = field(default_factory=dict)
+    dit_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_dit", default_factory=dict)
+    text_encoder_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_text_encoder", default_factory=dict)
+    vae_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_vae", default_factory=dict)
+    audio_vae_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_audio_vae", default_factory=dict)
 
 
 @dataclass
 class QuantizationConfig:
-    text_encoder_quant: str | None = None
+    text_encoder_quant: str | None = flat_field("override_text_encoder_quant", None)
     transformer_quant: str | None = None
 
 
 @dataclass
 class EngineConfig:
-    num_gpus: int = 1
-    execution_backend: Literal["mp", "ray"] = "mp"
+    num_gpus: int = flat_field("num_gpus", 1)
+    execution_backend: Literal["mp", "ray"] = flat_field("distributed_executor_backend", "mp")
     parallelism: ParallelismConfig = field(default_factory=ParallelismConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     compile: CompileConfig = field(default_factory=CompileConfig)
-    enable_stage_verification: bool = True
-    use_fsdp_inference: bool = False
-    disable_autocast: bool = False
+    enable_stage_verification: bool = flat_field("enable_stage_verification", True)
+    use_fsdp_inference: bool = flat_field("use_fsdp_inference", False)
+    disable_autocast: bool = flat_field("disable_autocast", False)
     quantization: QuantizationConfig | None = None
 
 
 @dataclass
 class ComponentConfig:
-    config_root: str | None = None
-    pipeline_config_path: str | None = None
-    text_encoder_weights: str | None = None
-    transformer_weights: str | None = None
-    transformer_2_weights: str | None = None
+    config_root: str | None = flat_field("config_model_path", None)
+    pipeline_config_path: str | None = flat_field("pipeline_config", None)
+    text_encoder_weights: str | None = flat_field("override_text_encoder_safetensors", None)
+    transformer_weights: str | None = flat_field("init_weights_from_safetensors", None)
+    transformer_2_weights: str | None = flat_field("init_weights_from_safetensors_2", None)
     vae_weights: str | None = None
-    upsampler_weights: str | None = None
-    lora_path: str | None = None
-    lora_nickname: str = "default"
-    lora_strength: float = 1.0
-    override_pipeline_cls_name: str | None = None
-    override_transformer_cls_name: str | None = None
+    upsampler_weights: str | None = flat_field("ltx2_refine_upsampler_path", None)
+    lora_path: str | None = flat_field("lora_path", None)
+    lora_nickname: str = flat_field("lora_nickname", "default")
+    lora_strength: float = flat_field("lora_strength", 1.0)
+    override_pipeline_cls_name: str | None = flat_field("override_pipeline_cls_name", None)
+    override_transformer_cls_name: str | None = flat_field("override_transformer_cls_name", None)
 
 
 @dataclass
 class PipelineSelection:
-    workload_type: Literal["t2v", "i2v", "t2i", "i2i", "v2a", "t2a"] | None = None
+    workload_type: Literal["t2v", "i2v", "t2i", "i2i", "v2a", "t2a"] | None = flat_field("workload_type", None)
     preset: str | None = None
     preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
-    vae_tiling: bool | None = None
+    vae_tiling: bool | None = flat_field("ltx2_vae_tiling", None)
     """Tile-based VAE decode. ``None`` keeps the model's default."""
     preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
@@ -121,9 +131,9 @@ class PipelineSelection:
 
 @dataclass
 class GeneratorConfig:
-    model_path: str
-    revision: str | None = None
-    trust_remote_code: bool = False
+    model_path: str = flat_field("model_path")
+    revision: str | None = flat_field("revision", None)
+    trust_remote_code: bool = flat_field("trust_remote_code", False)
     engine: EngineConfig = field(default_factory=EngineConfig)
     pipeline: PipelineSelection = field(default_factory=PipelineSelection)
 
