@@ -375,7 +375,20 @@
  "pipeline_config_class": "fastvideo.models.wan.pipeline_config.Wan2_2_TI2V_5B_Config",
  "request_batch_extra": {},
  "request_pipeline_overrides": {},
- "resolution_decisions": [],
+ "resolution_decisions": [
+  [
+   "fill_vae_parallel_from_env",
+   {
+    "pipeline.minimax_h3.vae_parallel_decode_strategy": "gather"
+   }
+  ],
+  [
+   "derive_parallel_sizes",
+   {
+    "engine.parallelism.hsdp_shard_dim": 1
+   }
+  ]
+ ],
  "sampling_param": {
   "action_list": null,
   "action_path": null,

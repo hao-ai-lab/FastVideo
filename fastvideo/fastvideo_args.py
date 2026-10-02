@@ -338,6 +338,8 @@ class FastVideoArgs:
         self._apply_ltx2_vae_overrides()
         self._resolve_refine_args()
         self._apply_transformer_quant()
+        # The env folds below repeat fill_*_from_env in fastvideo/api/inference_resolution.py
+        # for a FastVideoArgs built directly; a resolved config arrives with the values decided.
         if not self.inference_torch_compile:
             # Parse-once adapter (same pattern as attention_backend below): the
             # environment variable is an input read once here, so the loader
@@ -963,6 +965,8 @@ class FastVideoArgs:
             assert self.hsdp_shard_dim != -1, "hsdp_shard_dim must be set for training"
             assert self.sp_size != -1, "sp_size must be set for training"
 
+        # Same rule as derive_parallel_sizes in fastvideo/api/inference_resolution.py,
+        # for a FastVideoArgs built directly.
         if self.tp_size == -1:
             self.tp_size = 1
         if self.sp_size == -1:

@@ -4,6 +4,14 @@
 ``resolve_inference_config`` runs ``INFERENCE_RESOLUTION_STEPS`` in order through
 :func:`fastvideo.api.resolution.resolve_generator_config`, so every value that a step decides is recorded with the
 step's name. ``generator_config_to_fastvideo_args`` flattens the resolved values into ``FastVideoArgs``.
+
+The steps run in this order, so an earlier step takes precedence over a later one that fills the same field:
+
+1. Environment variables fill typed fields.
+2. Derived values replace placeholders.
+
+``FastVideoArgs.__post_init__`` and ``check_fastvideo_args`` still apply the same rules to a ``FastVideoArgs`` that
+is built directly; for a resolved config they find the values already decided and change nothing.
 """
 from __future__ import annotations
 
@@ -11,10 +19,62 @@ from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from typing import Any
 
-from fastvideo.api.resolution import ResolutionStep, ResolvedGeneratorConfig, resolve_generator_config
+import fastvideo.envs as envs
+from fastvideo.api.resolution import ResolutionStep, ResolutionView, ResolvedGeneratorConfig, resolve_generator_config
 from fastvideo.api.schema import GeneratorConfig
 
-INFERENCE_RESOLUTION_STEPS: tuple[ResolutionStep, ...] = ()
+
+def fill_attention_backend_from_env(view: ResolutionView) -> dict[str, Any]:
+    """``FASTVIDEO_ATTENTION_BACKEND`` sets ``engine.attention.backend`` while the field is unset."""
+    from fastvideo.attention.selector import backend_name_to_enum
+
+    name = envs.FASTVIDEO_ATTENTION_BACKEND.get()
+    if view.get("engine.attention.backend") is not None or name is None or backend_name_to_enum(name) is None:
+        return {}
+    return {"engine.attention.backend": name}
+
+
+def fill_regional_compile_from_env(view: ResolutionView) -> dict[str, Any]:
+    """``FASTVIDEO_INFERENCE_TORCH_COMPILE`` turns ``engine.compile.regional`` on unless it is already on."""
+    if view.get("engine.compile.regional") or not envs.FASTVIDEO_INFERENCE_TORCH_COMPILE.get():
+        return {}
+    return {"engine.compile.regional": True}
+
+
+def fill_vae_parallel_from_env(view: ResolutionView) -> dict[str, Any]:
+    """The ``FASTVIDEO_VAE_PARALLEL_*`` variables set the MiniMax-H3 sequence-parallel VAE options.
+
+    Each switch turns on unless it is already on. The decode strategy fills while it is unset, and is ``gather``
+    when the variable is unset too.
+    """
+    values: dict[str, Any] = {}
+    if not view.get("pipeline.minimax_h3.vae_parallel_decode") and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
+        values["pipeline.minimax_h3.vae_parallel_decode"] = True
+    if not view.get("pipeline.minimax_h3.vae_parallel_encode") and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
+        values["pipeline.minimax_h3.vae_parallel_encode"] = True
+    if view.get("pipeline.minimax_h3.vae_parallel_decode_strategy") is None:
+        strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY.get() or "gather"
+        values["pipeline.minimax_h3.vae_parallel_decode_strategy"] = strategy
+    return values
+
+
+def derive_parallel_sizes(view: ResolutionView) -> dict[str, Any]:
+    """Replace the -1 placeholders: ``tp_size`` becomes 1, and ``sp_size`` and ``hsdp_shard_dim`` become ``num_gpus``."""
+    num_gpus = view.get("engine.num_gpus")
+    placeholders = {
+        "engine.parallelism.tp_size": 1,
+        "engine.parallelism.sp_size": num_gpus,
+        "engine.parallelism.hsdp_shard_dim": num_gpus,
+    }
+    return {path: value for path, value in placeholders.items() if view.get(path) == -1}
+
+
+INFERENCE_RESOLUTION_STEPS: tuple[ResolutionStep, ...] = (
+    fill_attention_backend_from_env,
+    fill_regional_compile_from_env,
+    fill_vae_parallel_from_env,
+    derive_parallel_sizes,
+)
 
 
 def resolve_inference_config(config: GeneratorConfig | Mapping[str, Any]) -> ResolvedGeneratorConfig:
@@ -63,6 +123,10 @@ def _non_default_fields(value: Any, default: Any) -> dict[str, Any]:
 
 __all__ = [
     "INFERENCE_RESOLUTION_STEPS",
+    "derive_parallel_sizes",
+    "fill_attention_backend_from_env",
+    "fill_regional_compile_from_env",
+    "fill_vae_parallel_from_env",
     "resolve_inference_config",
     "written_fields",
 ]

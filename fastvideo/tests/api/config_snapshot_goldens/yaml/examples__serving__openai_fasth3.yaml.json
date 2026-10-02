@@ -485,7 +485,14 @@
  "pipeline_config_class": "fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig",
  "request_batch_extra": {},
  "request_pipeline_overrides": {},
- "resolution_decisions": [],
+ "resolution_decisions": [
+  [
+   "derive_parallel_sizes",
+   {
+    "engine.parallelism.hsdp_shard_dim": 4
+   }
+  ]
+ ],
  "sampling_param": {
   "action_list": null,
   "action_path": null,
