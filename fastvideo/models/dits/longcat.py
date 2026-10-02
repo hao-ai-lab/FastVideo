@@ -18,8 +18,59 @@ from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.rotary_embedding_3d import RotaryPositionalEmbedding3D
 from fastvideo.attention.layer import DistributedAttention, LocalAttention
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
+                                                    sequence_model_parallel_all_to_all_4D)
+from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.third_party.longcat_video.block_sparse_attention.bsa_interface import flash_attn_bsa_3d
+
+
+class LongCatSPLayout:
+    """Convert between global THW and rank-major spatial partitions.
+
+    All tensors use [batch, sequence, ...]; trailing channel/head axes are opaque.
+    Local spatial dimensions need not be divisible by the BSA chunk dimensions.
+    """
+
+    def __init__(self, grid: tuple[int, int, int], size: int):
+        if size < 1 or len(grid) != 3 or min(grid) < 1:
+            raise ValueError("LongCat SP requires positive grid dimensions and group size")
+        self.grid = tuple(grid)
+        self.size = size
+        self.split_h = max(factor for factor in range(1, math.isqrt(size) + 1) if size % factor == 0)
+        self.split_w = size // self.split_h
+        self.t, self.h, self.w = self.grid
+        if self.h % self.split_h or self.w % self.split_w:
+            raise ValueError(f"LongCat token grid {grid} cannot be split across SP={size}")
+        self.local_h = self.h // self.split_h
+        self.local_w = self.w // self.split_w
+
+    def shard(self, x: torch.Tensor, rank: int) -> torch.Tensor:
+        if not 0 <= rank < self.size:
+            raise ValueError(f"Invalid SP rank {rank} for size {self.size}")
+        b, n, *tail = x.shape
+        if n != self.t * self.h * self.w:
+            raise ValueError("LongCat SP input does not match the global token grid")
+        row, col = divmod(rank, self.split_w)
+        spatial = x.reshape(b, self.t, self.h, self.w, *tail)
+        local = spatial[:, :, row * self.local_h:(row + 1) * self.local_h,
+                        col * self.local_w:(col + 1) * self.local_w]
+        return local.reshape(b, n // self.size, *tail).contiguous()
+
+    def rank_to_global(self, x: torch.Tensor) -> torch.Tensor:
+        b, n, *tail = x.shape
+        if n != self.t * self.h * self.w:
+            raise ValueError("Gathered LongCat SP sequence does not match the global token grid")
+        ranked = x.reshape(b, self.split_h, self.split_w, self.t, self.local_h, self.local_w, *tail)
+        return ranked.permute(0, 3, 1, 4, 2, 5, *range(6, ranked.ndim)).reshape(b, n, *tail).contiguous()
+
+    def global_to_rank(self, x: torch.Tensor) -> torch.Tensor:
+        b, n, *tail = x.shape
+        if n != self.t * self.h * self.w:
+            raise ValueError("Global LongCat SP sequence does not match the token grid")
+        spatial = x.reshape(b, self.t, self.split_h, self.local_h, self.split_w, self.local_w, *tail)
+        return spatial.permute(0, 2, 4, 1, 3, 5, *range(6, spatial.ndim)).reshape(b, n, *tail).contiguous()
+
 
 # ============================================================================
 # Embeddings
@@ -279,6 +330,7 @@ class LongCatSelfAttention(nn.Module):
             latent_shape: tuple,  # (T, H, W)
             num_cond_latents: int = 0,  # Number of conditioning latent frames (for I2V)
             return_kv: bool = False,  # Return K/V for caching
+            sp_layout: LongCatSPLayout | None = None,
             **kwargs) -> torch.Tensor | tuple:
         """
         Forward pass with 3D RoPE and optional BSA.
@@ -293,6 +345,12 @@ class LongCatSelfAttention(nn.Module):
         B, N, C = x.shape
         T, H, W = latent_shape
 
+        if sp_layout is not None:
+            if self.num_heads % sp_layout.size:
+                raise ValueError("LongCat attention heads must be divisible by SP size")
+            if N * sp_layout.size != T * H * W:
+                raise ValueError("LongCat SP attention requires already-sharded input tokens")
+
         # Project to Q/K/V
         q, _ = self.to_q(x)
         k, _ = self.to_k(x)
@@ -306,6 +364,15 @@ class LongCatSelfAttention(nn.Module):
         # Per-head RMS normalization
         q = self.q_norm(q)
         k = self.k_norm(k)
+
+        if sp_layout is not None:
+            # Local sequence / all heads -> global sequence / local heads.
+            # Restore THW before RoPE and BSA so position and sparse blocks
+            # match the single-GPU computation exactly in layout.
+            qkv = sequence_model_parallel_all_to_all_4D(torch.cat([q, k, v], dim=0),
+                                                       scatter_dim=2, gather_dim=1)
+            q, k, v = sp_layout.rank_to_global(qkv).chunk(3, dim=0)
+            del qkv
 
         # Save pre-RoPE K/V for cache if requested (before RoPE is applied)
         if return_kv:
@@ -372,34 +439,13 @@ class LongCatSelfAttention(nn.Module):
             k_bsa = k.transpose(1, 2).contiguous()
             v_bsa = v.transpose(1, 2).contiguous()
 
-            # Handle SP split: BSA operates on per-rank spatial dimensions
-            # Replicate LongCat's cp_split_hw logic exactly
-            from fastvideo.distributed.parallel_state import get_sp_world_size
-            sp_size = get_sp_world_size()
-            if sp_size > 1:
-                # Calculate optimal 2D split (same as LongCat's get_optimal_split)
-                factors = []
-                for i in range(1, int(sp_size**0.5) + 1):
-                    if sp_size % i == 0:
-                        factors.append([i, sp_size // i])
-                cp_split_hw = min(factors, key=lambda x: abs(x[0] - x[1]))
-
-                # Split H and W dimensions by their respective factors
-                T_bsa, H_bsa, W_bsa = latent_shape
-                assert H_bsa % cp_split_hw[0] == 0 and W_bsa % cp_split_hw[1] == 0, \
-                    f"H {H_bsa} must be divisible by {cp_split_hw[0]}, W {W_bsa} must be divisible by {cp_split_hw[1]}"
-                H_bsa = H_bsa // cp_split_hw[0]
-                W_bsa = W_bsa // cp_split_hw[1]
-                latent_shape_bsa = (T_bsa, H_bsa, W_bsa)
-            else:
-                latent_shape_bsa = latent_shape
-
-            # Call BSA with per-rank latent shape
+            # Each rank now owns complete spatial sequences for its heads.
+            # Keep the global grid even when a local shard cuts a BSA block.
             out = flash_attn_bsa_3d(q_bsa,
                                     k_bsa,
                                     v_bsa,
-                                    latent_shape_q=latent_shape_bsa,
-                                    latent_shape_k=latent_shape_bsa,
+                                    latent_shape_q=latent_shape,
+                                    latent_shape_k=latent_shape,
                                     **self.bsa_params)  # [B, num_heads, N, head_dim]
 
             # Transpose back: [B, N, num_heads, head_dim]
@@ -407,6 +453,10 @@ class LongCatSelfAttention(nn.Module):
         else:
             # Standard attention: [B, N, num_heads, head_dim]
             out, _ = self.attn(q, k, v)
+
+        if sp_layout is not None:
+            out = sequence_model_parallel_all_to_all_4D(sp_layout.global_to_rank(out),
+                                                        scatter_dim=1, gather_dim=2)
 
         # Reshape and project out
         out = out.reshape(B, N, C)
@@ -774,6 +824,7 @@ class LongCatTransformerBlock(nn.Module):
             return_kv: bool = False,  # Return K/V for caching
             kv_cache: tuple | None = None,  # Pre-computed K/V cache
             skip_crs_attn: bool = False,  # Skip cross-attention (for cache init)
+            sp_layout: LongCatSPLayout | None = None,
             **kwargs) -> torch.Tensor | tuple:
         """
         Forward pass with AdaLN modulation.
@@ -821,6 +872,7 @@ class LongCatTransformerBlock(nn.Module):
                 latent_shape=latent_shape,
                 num_cond_latents=num_cond_latents,
                 return_kv=return_kv,
+                sp_layout=sp_layout,
             )
             if return_kv:
                 attn_out, kv_cache_new = attn_result
@@ -1054,12 +1106,27 @@ class LongCatTransformer3DModel(BaseDiT):
         N_h = H // self.patch_size[1]
         N_w = W // self.patch_size[2]
 
+        sp_size = get_sp_world_size()
+        sp_layout = None
+        # Apply the new spatial sharding only to BSA refinement inference.
+        # Other modes retain their existing full-sequence execution paths.
+        if (sp_size > 1 and not torch.is_grad_enabled() and not num_cond_latents
+                and not return_kv and not kv_cache_dict and N_t > 1
+                and all(block.self_attn.enable_bsa for block in self.blocks)):
+            if self.num_attention_heads % sp_size:
+                raise ValueError("LongCat attention heads must be divisible by SP size")
+            if any(dim % patch for dim, patch in zip((T, H, W), self.patch_size)):
+                raise ValueError("LongCat SP requires patch-aligned latent dimensions")
+            sp_layout = LongCatSPLayout((N_t, N_h, N_w), sp_size)
+
         # Handle list of encoder outputs (take first one)
         if isinstance(encoder_hidden_states, list):
             encoder_hidden_states = encoder_hidden_states[0]
 
         # 1. Patch embedding
         x = self.patch_embed(hidden_states)  # [B, N, C]
+        if sp_layout is not None:
+            x = sp_layout.shard(x, get_sp_parallel_rank())
 
         # 2. Timestep embedding
         # Expand timestep from [B] to [B, T] if needed
@@ -1090,6 +1157,7 @@ class LongCatTransformer3DModel(BaseDiT):
                 return_kv=return_kv,
                 kv_cache=block_kv_cache,
                 skip_crs_attn=skip_crs_attn,
+                sp_layout=sp_layout,
             )
 
             if return_kv:
@@ -1104,6 +1172,9 @@ class LongCatTransformer3DModel(BaseDiT):
 
         # 5. Output projection
         output = self.final_layer(x, t, latent_shape=(N_t, N_h, N_w))
+
+        if sp_layout is not None:
+            output = sp_layout.rank_to_global(sequence_model_parallel_all_gather(output.contiguous(), dim=1))
 
         # Reshape to [B, C_out, T, H, W]
         output = self.unpatchify(output, N_t, N_h, N_w)

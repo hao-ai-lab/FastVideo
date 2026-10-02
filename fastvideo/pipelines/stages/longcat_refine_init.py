@@ -17,6 +17,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
+from fastvideo.distributed import get_sp_group
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import load_video
@@ -108,29 +109,16 @@ class LongCatRefineInitStage(PipelineStage):
         batch.num_frames = new_num_frames
 
         # Use bucket system to select resolution (exactly like LongCat)
-        # Calculate scale_factor_spatial considering SP split
+        # Calculate the global spatial alignment required by BSA.
         sp_size = fastvideo_args.sp_size if fastvideo_args.sp_size > 0 else 1
         vae_scale_factor_spatial = 8  # VAE spatial downsampling
         patch_size_spatial = 2  # LongCat patch size
         bsa_latent_granularity = 4
         scale_factor_spatial = vae_scale_factor_spatial * patch_size_spatial * bsa_latent_granularity  # 64
 
-        # Calculate optimal split like LongCat (cp_split_hw logic)
-        # For sp_size=1: [1,1], max=1
-        # For sp_size=2: [1,2], max=2
-        # For sp_size=4: [2,2], max=2
-        # For sp_size=8: [2,4], max=4
-        if sp_size > 1:
-            # Get optimal 2D split factors (mimic context_parallel_util.get_optimal_split)
-            factors = []
-            for i in range(1, int(sp_size**0.5) + 1):
-                if sp_size % i == 0:
-                    factors.append([i, sp_size // i])
-            cp_split_hw = min(factors, key=lambda x: abs(x[0] - x[1]))
-            scale_factor_spatial *= max(cp_split_hw)
-            logger.info("SP split: sp_size=%s, cp_split_hw=%s, max_split=%s", sp_size, cp_split_hw, max(cp_split_hw))
-        else:
-            cp_split_hw = [1, 1]
+        # Refinement SP restores global time/height/width order before BSA, so its
+        # chunks need only align to the global grid. Keep bucket selection
+        # independent of GPU count; changing SP must not change the video size.
 
         # Get bucket config and find closest bucket for the input aspect ratio
         bucket_config = get_bucket_config('720p', scale_factor_spatial)
@@ -268,6 +256,10 @@ class LongCatRefineInitStage(PipelineStage):
         # The latents need to be on the same device as the transformer (CUDA)
         target_device = batch.prompt_embeds[0].device
         batch.latents = latent_up.to(device=target_device, dtype=dtype)
+        if sp_size > 1:
+            # Posterior/noise sampling uses worker-local RNG. All SP ranks
+            # must start the scheduler from the same full latent tensor.
+            batch.latents = get_sp_group().broadcast(batch.latents, src=0)
         batch.raw_latent_shape = latent_up.shape
 
         logger.info("Latents device: %s, dtype: %s", batch.latents.device, batch.latents.dtype)
