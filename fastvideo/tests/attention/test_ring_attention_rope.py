@@ -12,15 +12,19 @@ to the Ring rank's token range *before* rotating.
 
 from __future__ import annotations
 
-import os
-
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29511")
-
+import pytest
 import torch
 
+from fastvideo import envs
 from fastvideo.attention.ring_attention import RingAttention
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
+
+
+@pytest.fixture
+def ring_distributed_setup(env_overrides, request):
+    env_overrides.enter_context(envs.override_external("MASTER_ADDR", "localhost"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29511"))
+    request.getfixturevalue("distributed_setup")
 
 
 def _random_rope_tables(global_seq_len: int, head_size: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -61,7 +65,7 @@ def test_local_rope_slice_matches_full_rope_math() -> None:
         torch.testing.assert_close(rotated_k_local, full_k[:, start:end], rtol=1e-5, atol=1e-6)
 
 
-def test_slice_local_rope_delegates_to_ring_rank(distributed_setup) -> None:
+def test_slice_local_rope_delegates_to_ring_rank(ring_distributed_setup) -> None:
     """With SP world size 1 (the ``distributed_setup`` fixture), Ring
     Attention is disabled and the Ring rank is always 0, so
     ``_slice_local_rope`` must return exactly the first ``local_seq_len``
@@ -75,7 +79,7 @@ def test_slice_local_rope_delegates_to_ring_rank(distributed_setup) -> None:
     torch.testing.assert_close(local_sin, sin[:local_seq_len])
 
 
-def test_slice_local_rope_rejects_out_of_range(distributed_setup) -> None:
+def test_slice_local_rope_rejects_out_of_range(ring_distributed_setup) -> None:
     global_seq_len, head_size = 16, 8
     cos, sin = _random_rope_tables(global_seq_len, head_size)
 
