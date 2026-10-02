@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,51 @@ def test_an_unparsable_base_pin_is_an_error(pin, overrides):
     """Never a silent fall back to the base repo's latest revision; the pipeline rejects the same values."""
     with pytest.raises(ValueError, match="must be hf://<repo id>@<revision>"):
         example.base_model_source(_args(*overrides), {**CONTRACT, "base_model_revision": pin})
+
+
+_COMPONENT = ["diffusers", "Component"]
+_FULL_MANIFEST = {
+    "_class_name": "MiniMaxH3ModularPipeline",
+    **{name: _COMPONENT for name in ("transformer", "transformer_ref", "scheduler", "audio_scheduler",
+                                     "text_encoder", "tokenizer", "processor", "vae", "audio_vae")},
+}
+_EXPORT_ONLY_MANIFEST = {
+    "_class_name": "MiniMaxH3ModularPipeline",
+    **{name: _COMPONENT for name in ("transformer_ref", "scheduler", "audio_scheduler")},
+}
+
+
+def _snapshot_dir(root: Path, components, manifest):
+    root.mkdir()
+    for name in components:
+        (root / name).mkdir()
+    if manifest is not None:
+        (root / "modular_model_index.json").write_text(json.dumps(manifest))
+    return root
+
+
+@pytest.mark.parametrize("export_manifest,chosen", [
+    (_FULL_MANIFEST, "export"),
+    (_EXPORT_ONLY_MANIFEST, "base"),
+    (None, "base"),
+])
+def test_the_composed_manifest_declares_every_linked_component(tmp_path, export_manifest, chosen):
+    export = _snapshot_dir(tmp_path / "export", example.EXPORT_COMPONENTS, export_manifest)
+    (export / example.CONTRACT).write_text(json.dumps(CONTRACT))
+    base = _snapshot_dir(tmp_path / "base", example.BASE_COMPONENTS, _FULL_MANIFEST)
+    composed = example.compose_model_dir(export, base, tmp_path / "composed")
+    manifest = composed / "modular_model_index.json"
+    assert manifest.resolve() == ((export if chosen == "export" else base) / "modular_model_index.json").resolve()
+    for name in (*example.EXPORT_COMPONENTS, *example.BASE_COMPONENTS, example.CONTRACT):
+        assert (composed / name).exists()
+
+
+def test_a_manifest_missing_components_everywhere_is_an_error(tmp_path):
+    export = _snapshot_dir(tmp_path / "export", example.EXPORT_COMPONENTS, _EXPORT_ONLY_MANIFEST)
+    (export / example.CONTRACT).write_text(json.dumps(CONTRACT))
+    base = _snapshot_dir(tmp_path / "base", example.BASE_COMPONENTS, _EXPORT_ONLY_MANIFEST)
+    with pytest.raises(FileNotFoundError, match="manifest that declares"):
+        example.compose_model_dir(export, base, tmp_path / "composed")
 
 
 def test_minimal_contract_keeps_fastvideo_attention_defaults(tmp_path):

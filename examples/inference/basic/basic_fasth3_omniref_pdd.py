@@ -50,6 +50,8 @@ CONTRACT = "fastvideo_inference.json"
 EXPORT_COMPONENTS = ("transformer_ref", "scheduler", "audio_scheduler")
 BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae")
 MANIFESTS = ("modular_model_index.json", "model_index.json")
+# Components the composed directory's manifest must declare, besides its transformer_ref.
+MANIFEST_COMPONENTS = ("scheduler", "audio_scheduler", *BASE_COMPONENTS)
 DEFAULT_BASE_MODEL = "MiniMaxAI/MiniMax-H3"
 # Data-center Blackwell: the only devices with the 128-token VSA-H3 forward.
 SM100A_CAPABILITIES = frozenset({(10, 0), (10, 3)})
@@ -159,15 +161,36 @@ def _link(destination: Path, source: Path) -> None:
     destination.symlink_to(source, target_is_directory=source.is_dir())
 
 
+def _declares_components(manifest: Path) -> bool:
+    """Whether a Diffusers manifest declares every component of the composed directory."""
+    declared = {
+        name
+        for name, spec in json.loads(manifest.read_text(encoding="utf-8")).items()
+        if isinstance(spec, list) and spec and spec[0] is not None
+    }
+    return set(MANIFEST_COMPONENTS) <= declared and bool({"transformer", "transformer_ref"} & declared)
+
+
+def select_manifest(export_dir: Path, base_dir: Path) -> Path:
+    """The export's manifest when it declares every composed component, else the base's."""
+    for root in (export_dir, base_dir):
+        for name in MANIFESTS:
+            if (root / name).is_file() and _declares_components(root / name):
+                return root / name
+    raise FileNotFoundError("Neither the export nor the base snapshot has a Diffusers model manifest that declares "
+                            f"{', '.join(MANIFEST_COMPONENTS)} and transformer_ref.")
+
+
 def compose_model_dir(export_dir: Path, base_dir: Path, composed_dir: Path) -> Path:
     """One MiniMax-H3 model directory: distilled components from the export, the rest from the base."""
     composed_dir.mkdir(parents=True, exist_ok=True)
     for name in (*EXPORT_COMPONENTS, CONTRACT):
         _link(composed_dir / name, export_dir / name)
-    manifest_source = next((root / name for root in (export_dir, base_dir) for name in MANIFESTS
-                            if (root / name).is_file()), None)
-    if manifest_source is None:
-        raise FileNotFoundError("Neither the export nor the base snapshot has a Diffusers model manifest.")
+    manifest_source = select_manifest(export_dir, base_dir)
+    for name in MANIFESTS:
+        stale = composed_dir / name
+        if name != manifest_source.name and stale.is_symlink():
+            stale.unlink()
     _link(composed_dir / manifest_source.name, manifest_source)
     for name in BASE_COMPONENTS:
         _link(composed_dir / name, base_dir / name)
