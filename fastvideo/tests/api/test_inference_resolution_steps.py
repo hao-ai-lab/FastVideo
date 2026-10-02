@@ -109,6 +109,7 @@ def test_environment_takes_precedence_over_model_defaults():
         "fill_vae_parallel_from_env",
         "fill_pipeline_config_defaults[WanT2V480PConfig]",
         "derive_parallel_sizes",
+        "derive_vae_tiling_from_ltx2_tile_sizes",
     ]
 
 
@@ -125,3 +126,15 @@ def test_video_generator_keeps_the_resolved_config(monkeypatch):
     assert generator.args.sp_size == 2
     provenance = generator.resolved_config.provenance("engine.parallelism.sp_size")
     assert (provenance.value, provenance.source) == (2, "derive_parallel_sizes")
+
+
+@pytest.mark.parametrize(("pipeline", "expected"), [
+    ({"ltx2": {"vae_spatial_tile_size_in_pixels": 512}}, (True, "derive_vae_tiling_from_ltx2_tile_sizes")),
+    ({"ltx2": {"vae_spatial_tile_size_in_pixels": 512}, "vae_tiling": False}, (False, "input")),
+    ({}, (None, "input")),
+])
+def test_ltx2_tile_sizes_turn_on_unset_vae_tiling(pipeline, expected):
+    resolved = _resolve({"model_path": "FastVideo/LTX2-Distilled-Diffusers", "pipeline": pipeline})
+
+    provenance = resolved.provenance("pipeline.vae_tiling")
+    assert (provenance.value, provenance.source) == expected

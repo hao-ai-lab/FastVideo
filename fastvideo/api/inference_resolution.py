@@ -106,6 +106,21 @@ def derive_parallel_sizes(view: ResolutionView) -> dict[str, Any]:
     return {path: value for path, value in placeholders.items() if view.get(path) == -1}
 
 
+_LTX2_VAE_TILE_FIELDS = (
+    "pipeline.ltx2.vae_spatial_tile_size_in_pixels",
+    "pipeline.ltx2.vae_spatial_tile_overlap_in_pixels",
+    "pipeline.ltx2.vae_temporal_tile_size_in_frames",
+    "pipeline.ltx2.vae_temporal_tile_overlap_in_frames",
+)
+
+
+def derive_vae_tiling_from_ltx2_tile_sizes(view: ResolutionView) -> dict[str, Any]:
+    """An LTX-2 VAE tile size turns ``pipeline.vae_tiling`` on while the field is unset."""
+    if view.get("pipeline.vae_tiling") is not None or all(view.get(path) is None for path in _LTX2_VAE_TILE_FIELDS):
+        return {}
+    return {"pipeline.vae_tiling": True}
+
+
 ENVIRONMENT_STEPS: tuple[ResolutionStep, ...] = (
     fill_attention_backend_from_env,
     fill_regional_compile_from_env,
@@ -115,7 +130,8 @@ ENVIRONMENT_STEPS: tuple[ResolutionStep, ...] = (
 
 def inference_resolution_steps(config: GeneratorConfig) -> tuple[ResolutionStep, ...]:
     """The resolution steps for ``config``, in the order that they run."""
-    return (*ENVIRONMENT_STEPS, pipeline_config_defaults_step(config), derive_parallel_sizes)
+    return (*ENVIRONMENT_STEPS, pipeline_config_defaults_step(config), derive_parallel_sizes,
+            derive_vae_tiling_from_ltx2_tile_sizes)
 
 
 def resolve_inference_config(config: GeneratorConfig | Mapping[str, Any]) -> ResolvedGeneratorConfig:
@@ -166,6 +182,7 @@ def _non_default_fields(value: Any, default: Any) -> dict[str, Any]:
 __all__ = [
     "ENVIRONMENT_STEPS",
     "derive_parallel_sizes",
+    "derive_vae_tiling_from_ltx2_tile_sizes",
     "fill_attention_backend_from_env",
     "fill_regional_compile_from_env",
     "fill_vae_parallel_from_env",

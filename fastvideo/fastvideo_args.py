@@ -442,6 +442,8 @@ class FastVideoArgs:
         ))
         if self.ltx2_vae_tiling is not None and hasattr(self.pipeline_config, "vae_tiling"):
             self.pipeline_config.vae_tiling = self.ltx2_vae_tiling
+        # Same rule as derive_vae_tiling_from_ltx2_tile_sizes in fastvideo/api/inference_resolution.py,
+        # for a FastVideoArgs built directly.
         elif has_any and hasattr(self.pipeline_config, "vae_tiling"):
             self.pipeline_config.vae_tiling = True
 
