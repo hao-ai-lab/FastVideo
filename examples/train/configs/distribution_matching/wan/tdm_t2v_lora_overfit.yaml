@@ -1,0 +1,129 @@
+# Wan 2.1 T2V 1.3B TDM single-prompt overfit diagnostic.
+#
+# Preprocess tdm_overfit_prompts.txt as text-only data into the path below.
+# The prompt is repeated four times so each data-parallel rank receives one
+# sample when this recipe runs on one node with four GPUs.
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - to_q
+        - to_k
+        - to_v
+        - to_out
+  teacher:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: false
+    disable_custom_init_weights: true
+  critic:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    trainable: true
+    disable_custom_init_weights: true
+    lora:
+      enable: true
+      rank: 16
+      alpha: 32
+      target_modules:
+        - to_q
+        - to_k
+        - to_v
+        - to_out
+
+method:
+  _target_: fastvideo.train.methods.distribution_matching.tdm.TDMMethod
+  rollout_mode: simulate
+  generator_update_interval: 1
+  real_score_guidance_scale: 6.0
+  tdm_denoising_steps: [1000, 750, 500, 250]
+  warp_denoising_step: false
+  student_sample_type: ode
+  noise_interval_mode: separate
+  use_randmid: false
+  snr_clip: 5.0
+  importance_weight_clip: 10.0
+  normalize_generator_delta: true
+  use_huber: false
+  huber_c: 0.001
+  max_grad_norm: 1.0
+  fake_score_learning_rate: 1.0e-4
+  fake_score_betas: [0.0, 0.999]
+  fake_score_lr_scheduler: constant
+  cfg_uncond:
+    text: negative_prompt
+    on_missing: error
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    data_path: data/tdm_t2v_overfit_text_only
+    preprocessed_data_type: text_only
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 1000
+    num_latent_t: 20
+    num_height: 448
+    num_width: 832
+    num_frames: 77
+
+  optimizer:
+    # Use the validated TDM range (student 1e-4, fake score 1e-4 below).
+    # The DMD2-inherited 2e-6 is a no-op regime for this objective: the
+    # Phase 3 diagnostic measured ~1e-4 adapter movement over 200 steps
+    # and identical blurred outputs for the treatment and the
+    # regression-only control.
+    learning_rate: 1.0e-4
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 100
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan2.1_tdm_lora_overfit
+    training_state_checkpointing_steps: 25
+    checkpoints_total_limit: 12
+
+  tracker:
+    trackers: [jsonl]
+    project_name: distillation_wan
+    run_name: wan2.1_tdm_lora_overfit
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  validation:
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_dmd_pipeline.WanDMDPipeline
+    offload_training_state: true
+    unload_pipeline_after_validation: true
+    dataset_file: examples/train/configs/distribution_matching/wan/tdm_overfit_validation.json
+    every_steps: 0
+    sampling_steps: [4]
+    sampling_timesteps: [1000, 750, 500, 250]
+    guidance_scale: 6.0
+
+pipeline:
+  flow_shift: 8
+  dmd_sample_type: ode
+  # TDM labels are raw timesteps, so the dense DMD validation sampler must
+  # apply the flow shift to match the trained shifted sigma grid.
+  dmd_denoising_steps_are_scheduler_space: false

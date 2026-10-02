@@ -174,6 +174,19 @@ class TrainingMethod(torch.nn.Module, ABC):
             except TypeError:
                 optimizer.zero_grad()
 
+    def synchronize_gradients(self, iteration: int) -> None:
+        """Synchronize trainable parameters not managed by FSDP."""
+        del iteration
+        from fastvideo.train.utils.lora import (
+            synchronize_lora_gradients, )
+
+        for model in self._role_models.values():
+            if not getattr(model, "_trainable", False):
+                continue
+            transformer = getattr(model, "transformer", None)
+            if isinstance(transformer, torch.nn.Module):
+                synchronize_lora_gradients(transformer)
+
     def seed_optimizer_state_for_resume(self) -> None:
         """Seed optimizer state so DCP can load saved state.
 

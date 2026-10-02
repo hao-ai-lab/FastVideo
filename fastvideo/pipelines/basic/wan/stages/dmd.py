@@ -26,6 +26,52 @@ class DmdDenoisingStage(DenoisingStage):
     def __init__(self, transformer, scheduler) -> None:
         super().__init__(transformer, scheduler)
 
+    def _sigma_for_timestep(
+        self,
+        timestep: torch.Tensor,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        scheduler_timesteps = self.scheduler.timesteps.to(device=device, dtype=torch.float32)
+        scheduler_sigmas = self.scheduler.sigmas.to(device=device, dtype=dtype)
+        t = timestep.to(device=device, dtype=torch.float32).reshape(-1)
+        idx = torch.argmin(
+            (scheduler_timesteps.unsqueeze(0) - t.unsqueeze(1)).abs(),
+            dim=1,
+        )
+        return scheduler_sigmas[idx]
+
+    @staticmethod
+    def _expand_sigma(
+        sigma: torch.Tensor,
+        latents: torch.Tensor,
+    ) -> torch.Tensor:
+        sigma = sigma.to(device=latents.device, dtype=latents.dtype)
+        if sigma.numel() == 1:
+            return sigma.reshape((1, ) + (1, ) * (latents.ndim - 1))
+        return sigma.reshape((latents.shape[0], ) + (1, ) * (latents.ndim - 1))
+
+    def _set_dmd_timesteps(
+        self,
+        timesteps: torch.Tensor,
+        *,
+        device: torch.device,
+        scheduler_space: bool,
+    ) -> torch.Tensor:
+        num_train_timesteps = self.scheduler.config.num_train_timesteps
+        if scheduler_space:
+            shifted_sigmas = timesteps.float() / num_train_timesteps
+            shift = float(self.scheduler.shift)
+            sigmas = shifted_sigmas / (shift - (shift - 1.0) * shifted_sigmas)
+        else:
+            sigmas = timesteps.float() / num_train_timesteps
+        self.scheduler.set_timesteps(
+            sigmas=sigmas.detach().cpu().tolist(),
+            device=device,
+        )
+        return self.scheduler.timesteps.to(device=device)
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -88,6 +134,20 @@ class DmdDenoisingStage(DenoisingStage):
         timesteps = torch.tensor(fastvideo_args.pipeline_config.dmd_denoising_steps,
                                  dtype=torch.long,
                                  device=get_local_torch_device())
+        timesteps = self._set_dmd_timesteps(
+            timesteps,
+            device=get_local_torch_device(),
+            scheduler_space=fastvideo_args.pipeline_config.dmd_denoising_steps_are_scheduler_space,
+        )
+        sample_type = str(getattr(
+            fastvideo_args.pipeline_config,
+            "dmd_sample_type",
+            "sde",
+        ) or "sde").strip().lower()
+        if sample_type not in {"sde", "ode"}:
+            raise ValueError("pipeline_config.dmd_sample_type must be one of "
+                             "{'sde', 'ode'}, got "
+                             f"{sample_type!r}")
 
         # Run denoising loop
         with self.progress_bar(total=len(timesteps)) as progress_bar:
@@ -158,11 +218,31 @@ class DmdDenoisingStage(DenoisingStage):
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones([1], dtype=torch.long, device=pred_video.device)
-                        noise = torch.randn(video_raw_latent_shape,
-                                            dtype=pred_video.dtype,
-                                            generator=batch.generator[0]).to(self.device)
-                        latents = self.scheduler.add_noise(pred_video.flatten(0, 1), noise.flatten(0, 1),
-                                                           next_timestep).unflatten(0, pred_video.shape[:2])
+                        if sample_type == "sde":
+                            noise = torch.randn(video_raw_latent_shape,
+                                                dtype=pred_video.dtype,
+                                                generator=batch.generator[0]).to(self.device)
+                            latents = self.scheduler.add_noise(pred_video.flatten(0, 1), noise.flatten(0, 1),
+                                                               next_timestep).unflatten(0, pred_video.shape[:2])
+                        else:
+                            sigma_cur = self._expand_sigma(
+                                self._sigma_for_timestep(
+                                    t.reshape(1),
+                                    device=pred_video.device,
+                                    dtype=pred_video.dtype,
+                                ),
+                                pred_video,
+                            )
+                            sigma_next = self._expand_sigma(
+                                self._sigma_for_timestep(
+                                    next_timestep,
+                                    device=pred_video.device,
+                                    dtype=pred_video.dtype,
+                                ),
+                                pred_video,
+                            )
+                            eps = (noise_latents - (1.0 - sigma_cur) * pred_video) / sigma_cur.clamp_min(1e-8)
+                            latents = (1.0 - sigma_next) * pred_video + sigma_next * eps
                     else:
                         latents = pred_video
 

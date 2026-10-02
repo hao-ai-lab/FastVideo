@@ -13,7 +13,7 @@ import torch.nn as nn
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, Replicate
 
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.distributed import get_dp_world_size, get_local_torch_device
 from fastvideo.layers.lora.linear import (
     BaseLayerWithLoRA,
     get_lora_layer,
@@ -185,8 +185,47 @@ def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
                 param.detach(),
                 device_mesh=mesh,
                 placements=placements,
+                run_check=True,
             )
             setattr(module, attr_name, nn.Parameter(replicated))
+
+
+def synchronize_lora_gradients(transformer: torch.nn.Module) -> None:
+    """Synchronize replicated LoRA gradients before clipping and stepping.
+
+    LoRA layers are added after FSDP wraps the base transformer, so FSDP does
+    not reduce their gradients. Sequence-parallel ranks contribute partial
+    gradients for the same sample, while data-parallel groups contribute
+    distinct samples. Sum across the world, then divide by the number of data
+    parallel groups to match FSDP's averaged-gradient semantics.
+    """
+
+    if (not dist.is_available() or not dist.is_initialized() or dist.get_world_size() == 1):
+        return
+
+    gradients_by_dtype: dict[torch.dtype, list[torch.Tensor]] = {}
+    for module in transformer.modules():
+        if not isinstance(module, BaseLayerWithLoRA):
+            continue
+        for attr_name in ("lora_A", "lora_B"):
+            param = getattr(module, attr_name, None)
+            if param is None or param.grad is None:
+                continue
+            grad = param.grad.to_local() if isinstance(param.grad, DTensor) else param.grad
+            gradients_by_dtype.setdefault(grad.dtype, []).append(grad)
+
+    dp_world_size = get_dp_world_size()
+    for gradients in gradients_by_dtype.values():
+        flat_grad = torch.cat([gradient.reshape(-1) for gradient in gradients])
+        dist.all_reduce(flat_grad, op=dist.ReduceOp.SUM)
+        flat_grad.div_(float(dp_world_size))
+
+        offset = 0
+        with torch.no_grad():
+            for gradient in gradients:
+                next_offset = offset + gradient.numel()
+                gradient.copy_(flat_grad[offset:next_offset].view_as(gradient))
+                offset = next_offset
 
 
 def enable_lora_training(

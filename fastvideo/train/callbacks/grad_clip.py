@@ -10,15 +10,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.optimizer import (
     clip_grad_norm_if_needed, )
 
 if TYPE_CHECKING:
     from fastvideo.train.methods.base import TrainingMethod
-
-logger = init_logger(__name__)
 
 
 class GradNormClipCallback(Callback):

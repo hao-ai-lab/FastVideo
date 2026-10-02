@@ -32,6 +32,7 @@ from fastvideo.distributed import (
 )
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import DECODE_ON_ALL_RANKS_KEY
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.instantiate import resolve_target
 from fastvideo.train.utils.moduleloader import (
@@ -1358,7 +1359,10 @@ class ValidationCallback(Callback):
         sampling_param.data_type = "video"
         if self.guidance_scale is not None:
             sampling_param.guidance_scale = float(self.guidance_scale)
-        sampling_param.seed = self.seed
+        # A record may carry its own seed so repeated captions sample
+        # different noise; otherwise every record uses the training seed.
+        row_seed = validation_batch.get("seed")
+        sampling_param.seed = (int(row_seed) if row_seed is not None else self.seed)
         # Output multiplicity belongs in SamplingParam so pipeline stages
         # allocate the same batch dimension that validation expects to log.
         sampling_param.num_videos_per_prompt = self.num_videos_per_prompt
@@ -1415,6 +1419,10 @@ class ValidationCallback(Callback):
         # mask instead of the current one, mismatching prompt_embeds.
         batch.prompt_attention_mask = []
         batch.negative_attention_mask = []
+        # Validation drives one sample per data-parallel rank, so pipelines
+        # that default to decoding only on the global output rank must decode
+        # on every rank; otherwise three of four samples never get media.
+        batch.extra[DECODE_ON_ALL_RANKS_KEY] = True
         batch._inference_args = inference_args  # type: ignore[attr-defined]
 
         # Conditionally set I2V fields.
