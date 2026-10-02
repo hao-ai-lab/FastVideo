@@ -217,9 +217,18 @@ def test_trained_sparsity_or_tile_size_mismatch_is_logged(tmp_path, monkeypatch)
     assert warnings == ["FastH3 PDD checkpoint was trained with VSA_tile_size=128; this run uses 256."]
 
 
-_BACKEND_ERROR = ("needs attention_backend=VIDEO_SPARSE_ATTN_H3: it was trained with VIDEO_SPARSE_ATTN_H3.*"
-                  "This run requests {requested}. Select VIDEO_SPARSE_ATTN_H3 with VSA_sparsity=0.9, "
-                  "VSA_tile_size=128")
+_BACKEND_ERROR = ("needs attention_backend=VIDEO_SPARSE_ATTN_H3: its fastvideo_inference.json was trained with "
+                  "VIDEO_SPARSE_ATTN_H3.*This run requests {requested}. Select VIDEO_SPARSE_ATTN_H3 with "
+                  "VSA_sparsity=0.9, VSA_tile_size=128")
+_GATE = "transformer_blocks.0.attn.to_gate_compress.weight"
+
+
+def _write_gates(transformer_dir, indexed=True):
+    if indexed:
+        (transformer_dir / "diffusion_pytorch_model.safetensors.index.json").write_text(
+            json.dumps({"weight_map": {_GATE: "diffusion_pytorch_model-00001-of-00001.safetensors"}}))
+    else:
+        save_file({_GATE: torch.zeros(2, 2)}, str(transformer_dir / "diffusion_pytorch_model.safetensors"))
 
 
 @pytest.mark.parametrize("requested,shown", [("FLASH_ATTN", "FLASH_ATTN"), (None, "automatic selection")])
@@ -245,14 +254,8 @@ def test_trained_gates_require_vsa_even_without_a_contract_backend(tmp_path, env
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
     minimal = {key: PDD_CONTRACT[key] for key in _MINIMAL_KEYS}
     pipeline = _pipeline(tmp_path, minimal)
-    transformer_dir = tmp_path / "transformer_ref"
-    gate = "transformer_blocks.0.attn.to_gate_compress.weight"
-    if indexed:
-        (transformer_dir / "diffusion_pytorch_model.safetensors.index.json").write_text(
-            json.dumps({"weight_map": {gate: "diffusion_pytorch_model-00001-of-00001.safetensors"}}))
-    else:
-        save_file({gate: torch.zeros(2, 2)}, str(transformer_dir / "diffusion_pytorch_model.safetensors"))
-    with pytest.raises(ValueError, match="transformer_ref carries VSA compression gates"):
+    _write_gates(tmp_path / "transformer_ref", indexed)
+    with pytest.raises(ValueError, match="its transformer_ref carries VSA compression gates"):
         _initialize(pipeline, attention_backend="FLASH_ATTN")
     _initialize(pipeline, attention_backend="VIDEO_SPARSE_ATTN_H3")
 
@@ -283,19 +286,79 @@ def test_a_loaded_transformer_reports_its_own_backend(tmp_path, env_overrides, r
             _initialize(pipeline, attention_backend=requested)
 
 
-def test_load_modules_rejects_the_backend_before_loading_any_weights(tmp_path, monkeypatch):
+@pytest.fixture
+def hub_snapshot(tmp_path, monkeypatch):
+    """Resolve the Hub repo id "org/fasth3" to tmp_path, as maybe_download_model does after downloading."""
+    from fastvideo.pipelines import composed_pipeline_base
+
+    downloads = []
+
+    def download(model_path, **kwargs):
+        downloads.append(model_path)
+        return str(tmp_path) if model_path == "org/fasth3" else model_path
+
+    monkeypatch.setattr(composed_pipeline_base, "maybe_download_model", download)
+    monkeypatch.setattr(composed_pipeline_base, "verify_model_config_and_directory",
+                        lambda model_path, **kwargs: {"_class_name": "MiniMaxH3ModularPipeline"})
+    return downloads
+
+
+@pytest.mark.parametrize("contract", [PDD_CONTRACT, DMD_CONTRACT, None], ids=["pdd", "dmd", "no-contract"])
+def test_config_load_rejects_the_backend_for_any_gated_checkpoint(tmp_path, env_overrides, hub_snapshot, contract):
+    """Checked once the Hub snapshot resolves, before any component loads, whatever the schedule."""
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
+    pipeline = _pipeline(tmp_path, contract or {}, pdd_steps=32 if contract is PDD_CONTRACT else None)
+    if contract is None:
+        (tmp_path / "fastvideo_inference.json").unlink()
+    _write_gates(tmp_path / "transformer_ref")
+    pipeline.model_path = "org/fasth3"
+    pipeline.fastvideo_args = SimpleNamespace(attention_backend="FLASH_ATTN")
+    with pytest.raises(ValueError, match="its transformer_ref carries VSA compression gates.*requests FLASH_ATTN"):
+        pipeline._load_config(pipeline.model_path)
+    assert hub_snapshot == ["org/fasth3"] and pipeline.model_path == str(tmp_path)
+    pipeline.fastvideo_args = SimpleNamespace(attention_backend="VIDEO_SPARSE_ATTN_H3")
+    assert pipeline._load_config(pipeline.model_path) == {"_class_name": "MiniMaxH3ModularPipeline"}
+
+
+def test_load_modules_checks_before_loading_unless_the_transformer_is_supplied(tmp_path, env_overrides, monkeypatch,
+                                                                               hub_snapshot):
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
     pipeline = _pipeline(tmp_path, PDD_CONTRACT)
     pipeline._ref2va = True
     loads = []
-    monkeypatch.setattr(ComposedPipelineBase, "load_modules", lambda self, *args, **kwargs: loads.append(args) or {})
+
+    def base_load_modules(self, fastvideo_args, loaded_modules=None):
+        self._load_config(self.model_path)
+        loads.append(loaded_modules)
+        return {}
+
+    monkeypatch.setattr(ComposedPipelineBase, "load_modules", base_load_modules)
     args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig(), attention_backend="FLASH_ATTN",
                            inference_mode=False)
+    pipeline.fastvideo_args = args
     with pytest.raises(ValueError, match="needs attention_backend=VIDEO_SPARSE_ATTN_H3"):
         pipeline.load_modules(args)
     assert loads == []
-    args.attention_backend = "VIDEO_SPARSE_ATTN_H3"
-    pipeline.load_modules(args)
-    assert len(loads) == 1
+    # A transformer the caller already built is not rebuilt, so its checkpoint is not checked.
+    supplied = {"transformer": object()}
+    pipeline.load_modules(args, loaded_modules=supplied)
+    assert loads == [supplied]
+
+
+def test_the_contract_is_read_once_per_resolved_path(tmp_path, monkeypatch, hub_snapshot):
+    from fastvideo.pipelines.basic.minimax_h3 import minimax_h3_pipeline
+
+    reads = []
+    monkeypatch.setattr(minimax_h3_pipeline, "json",
+                        SimpleNamespace(loads=lambda text: reads.append(text) or json.loads(text), dumps=json.dumps))
+    pipeline = _pipeline(tmp_path, PDD_CONTRACT)
+    pipeline.model_path = "org/fasth3"
+    pipeline.fastvideo_args = SimpleNamespace(attention_backend="VIDEO_SPARSE_ATTN_H3")
+    pipeline._load_config(pipeline.model_path)
+    _initialize(pipeline)
+    assert len(reads) == 1
+
+
 
 
 def test_reference_policy_requires_vsa(tmp_path, env_overrides):

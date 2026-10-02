@@ -149,11 +149,15 @@ error.
 
 The pipeline applies `pdd_step_indices` and the reference-video policy. The
 attention backend, sparsity, and tile size are explicit run settings, as for
-DMD exports; the example passes the contract's values. An export trained
-with `VIDEO_SPARSE_ATTN_H3`, or whose transformer carries VSA compression
-gates, runs only with that backend: the pipeline rejects any other, including
-automatic selection, before it loads weights. A sparsity or tile size that
-differs from the trained value is logged.
+DMD exports; the example passes the contract's values. A sparsity or tile
+size that differs from the trained value is logged.
+
+Any MiniMax-H3 checkpoint whose transformer carries VSA compression gates
+(`to_gate_compress` weights), DMD or PDD, runs only with
+`VIDEO_SPARSE_ATTN_H3`, and so does a PDD export whose contract names that
+backend. The pipeline reads the shard index (or the safetensors headers) and
+rejects any other backend, including automatic selection, before it loads
+any component.
 
 ### Reference-video sparsity
 
