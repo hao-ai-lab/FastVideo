@@ -510,6 +510,27 @@ def test_tile128_fails_closed_without_the_cuda_kernel(tile128, monkeypatch):
         _run_tile128(meta)
 
 
+def test_tile128_route_is_resolved_once_per_device(tile128):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    probes = []
+    tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) or True
+    impl = _impl(_DIM)
+    for _ in range(3):
+        raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+        query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
+        impl.forward(query, key, value, None, meta)
+    assert len(tile128.calls) == 3 and probes == [_CPU]
+    # A failed probe is cached too, and every later call still fails closed.
+    tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) and False
+    impl = _impl(_DIM)
+    raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+    query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="tile 128 requires the sm_100a/sm_103a CUDA block-sparse kernel"):
+            impl.forward(query, key, value, None, meta)
+    assert probes == [_CPU, _CPU]
+
+
 def test_tile128_is_inference_only(tile128):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     with pytest.raises(NotImplementedError, match="no-grad inference"):

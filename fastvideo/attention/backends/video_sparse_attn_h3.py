@@ -713,6 +713,12 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # request-time env/probe/fallback behavior; only Dynamo capture reads
         # the prepared, static route.
         self._regional_compile_sm100a_enabled: bool | None = None
+        # Tile-128 route per (device, dtype, head size): None when the CUDA
+        # kernel can run it, else why not. The kernel's predicate otherwise
+        # depends only on the tile-128 buffer contract (contiguous BHSD,
+        # 128-token blocks, an even tile count with the partner tile, integer
+        # tile sizes), which every call meets, so it is evaluated once.
+        self._tile128_route: dict[tuple[torch.device, torch.dtype, int], str | None] = {}
 
     def prepare_for_compile(self, device: torch.device) -> None:
         """Tensorize per-layer state shared by every torch.compile route."""
@@ -958,9 +964,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 # implementation, so it needs no opt-in and never falls back.
                 if grad_mode:
                     raise NotImplementedError("VSA-H3 tile 128 supports no-grad inference forwards only.")
-                reason = _sm100a_unavailable_reason(_sm100a, q_bhsd, sm100a_variable_block_sizes, grad_mode)
-                if reason is None and map_to_index is None:
-                    reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
+                route_key = (q_bhsd.device, q_bhsd.dtype, int(q_bhsd.shape[-1]))
+                if route_key not in self._tile128_route:
+                    reason = _sm100a_unavailable_reason(_sm100a, q_bhsd, sm100a_variable_block_sizes, grad_mode)
+                    if reason is None and map_to_index is None:
+                        reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
+                    self._tile128_route[route_key] = reason
+                reason = self._tile128_route[route_key]
                 if reason is not None:
                     raise RuntimeError(f"VSA-H3 tile 128 requires the sm_100a/sm_103a CUDA block-sparse kernel: "
                                        f"{reason}. Use VSA_tile_size=64 or 256 elsewhere.")
