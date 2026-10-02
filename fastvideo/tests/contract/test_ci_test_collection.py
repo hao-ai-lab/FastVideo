@@ -286,3 +286,11 @@ def test_allowlist_entries_are_still_real_directories():
     # A stale allowlist hides regressions; entries must track reality.
     missing = [name for name in ALLOWLIST if name != "modal" and not (TESTS_ROOT / name).is_dir()]
     assert not missing, (f"Allowlisted directories no longer exist — remove them: {missing}")
+
+
+def test_transformer_lane_collects_flashinfer_coverage():
+    lane = (REPO_ROOT / ".buildkite/scripts/lanes/transformer.sh").read_text()
+
+    assert "./fastvideo/tests/transformers" in lane
+    assert "./fastvideo/tests/attention/test_flashinfer_backend.py" in lane
+    assert "./fastvideo/tests/attention/test_flashinfer_cuda_dispatch.py" in lane

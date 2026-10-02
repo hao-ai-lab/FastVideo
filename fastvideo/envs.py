@@ -347,6 +347,12 @@ FASTVIDEO_MLX_WINDOW = EnvInt(0,
 FASTVIDEO_MLX_WINDOW_SINK = EnvInt(0,
                                    category="attention",
                                    doc="Number of sink tokens that MLX windowed attention always attends to.")
+FASTVIDEO_FLASHINFER_PREFILL_BACKEND = EnvChoice(
+    "single",
+    choices=("single", "cudnn"),
+    category="attention",
+    doc="FlashInfer prefill implementation: single per sample or batched cuDNN SDPA.",
+)
 
 # ================== Performance ==================
 
