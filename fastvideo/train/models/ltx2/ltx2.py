@@ -34,6 +34,7 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 import fastvideo.envs as envs
+from fastvideo.train.utils.negative_prompt import encode_negative_prompt
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
@@ -77,6 +78,8 @@ _SIGMA_Z_HI = 3.0902
 # metadata so training RoPE still matches validation inference.
 _DEFAULT_ROPE_FPS = 24.0
 
+LTX2_UNCONDITIONAL_PROMPT = ""
+
 
 class LTX2Model(WanModel):
     """LTX-2 per-role model for the modular trainer."""
@@ -105,12 +108,7 @@ class LTX2Model(WanModel):
                                       "and loss plumbing.")
 
         cfg_rate = float(getattr(training_config.data, "training_cfg_rate", 0.0) or 0.0)
-        if cfg_rate > 0.0:
-            raise NotImplementedError("LTX2Model only supports training_cfg_rate=0. CFG dropout "
-                                      "zeroes the post-connector text embeddings, which is not "
-                                      "what LTX-2 inference uses as the unconditional input "
-                                      "(an empty prompt encoded through Gemma + connector). Set "
-                                      "training.data.training_cfg_rate: 0.0.")
+        self._training_cfg_rate = cfg_rate
 
         self._timestep_uniform_prob = float(timestep_uniform_prob)
         self._rope_fps: float = _DEFAULT_ROPE_FPS
@@ -134,10 +132,9 @@ class LTX2Model(WanModel):
         if trainable:
             self._freeze_audio_parameters()
 
-        # No negative-prompt cache: cfg_rate is forced to 0 above and
-        # loading Gemma (~23GB) on every rank just for an unused
-        # negative embedding is wasteful.
-        self.set_requires_negative_conditioning(False)
+        # Gemma is ~23GB per rank, so only pay for the unconditional
+        # embedding when CFG dropout is actually enabled.
+        self.set_requires_negative_conditioning(cfg_rate > 0.0)
 
     # ------------------------------------------------------------------
     # Loading
@@ -198,8 +195,27 @@ class LTX2Model(WanModel):
     # ------------------------------------------------------------------
 
     def ensure_negative_conditioning(self) -> None:
-        raise NotImplementedError("LTX2Model does not implement negative conditioning; "
-                                  "training_cfg_rate must stay 0.")
+        """Cache the unconditional conditioning used by CFG dropout.
+
+        LTX-2 inference feeds an empty prompt through Gemma + the
+        Embeddings1D connector to build its unconditional branch, so the
+        dropped samples have to carry that embedding rather than zeros.
+        ``LTX2GemmaTextEncoderModel`` owns the connector, which means the
+        shared ``encode_negative_prompt`` helper already produces the
+        post-connector tensor.
+        """
+        if self.negative_prompt_embeds is not None:  # type: ignore[has-type]
+            return
+
+        assert self.training_config is not None
+        embeds, mask = encode_negative_prompt(
+            self.training_config,
+            prompt=LTX2_UNCONDITIONAL_PROMPT,
+            device=self.device,
+            dtype=self._get_training_dtype(),
+        )
+        self.negative_prompt_embeds = embeds
+        self.negative_prompt_attention_mask = mask
 
     @torch.no_grad()
     def decode_latents(
@@ -229,6 +245,45 @@ class LTX2Model(WanModel):
     # ------------------------------------------------------------------
     # Runtime primitives
     # ------------------------------------------------------------------
+
+    def _apply_cfg_dropout(
+        self,
+        encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        *,
+        generator: torch.Generator,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Replace a fraction of the batch with the unconditional embedding.
+
+        The shared parquet path drops text conditioning by zeroing the
+        stored embedding. For LTX-2 that trains an unconditional branch the
+        sampler never sees, so the drop is done here instead and swaps in
+        the cached empty-prompt embedding.
+        """
+        if self._training_cfg_rate <= 0.0:
+            return encoder_hidden_states, encoder_attention_mask
+
+        self.ensure_negative_conditioning()
+        neg_embeds = self.negative_prompt_embeds
+        neg_mask = self.negative_prompt_attention_mask
+        if neg_embeds is None or neg_mask is None:
+            raise RuntimeError("ensure_negative_conditioning() did not populate the "
+                               "LTX-2 unconditional embedding")
+
+        batch_size = encoder_hidden_states.shape[0]
+        keep = torch.rand(batch_size, generator=generator, device=generator.device)
+        drop = (keep < self._training_cfg_rate).to(encoder_hidden_states.device)
+        if not bool(drop.any()):
+            return encoder_hidden_states, encoder_attention_mask
+
+        embeds = encoder_hidden_states.clone()
+        mask = encoder_attention_mask.clone()
+        neg_embeds = neg_embeds.to(device=embeds.device, dtype=embeds.dtype)
+        neg_mask = neg_mask.to(device=mask.device, dtype=mask.dtype)
+        for idx in torch.nonzero(drop, as_tuple=False).flatten().tolist():
+            embeds[idx] = neg_embeds[0, :embeds.shape[1]]
+            mask[idx] = neg_mask[0, :mask.shape[1]]
+        return embeds, mask
 
     def prepare_batch(
         self,
@@ -282,6 +337,12 @@ class LTX2Model(WanModel):
                              f"{latents_source!r}")
 
         self._check_text_embedding_dim(encoder_hidden_states)
+
+        encoder_hidden_states, encoder_attention_mask = (self._apply_cfg_dropout(
+            encoder_hidden_states,
+            encoder_attention_mask,
+            generator=generator,
+        ))
 
         # LTX-2 VAE encode() already applies per-channel normalization
         # (scaling_factor is 1.0); latents are used as stored.
