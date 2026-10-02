@@ -481,11 +481,22 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 if trained is not None and run_value is not None and float(run_value) != float(trained):
                     logger.warning("FastH3 PDD checkpoint was trained with %s=%s; this run uses %s.", run_name, trained,
                                    run_value)
+        run_sparsity = getattr(fastvideo_args, "VSA_sparsity", None)
+        run_tile = getattr(fastvideo_args, "VSA_tile_size", None)
+        if policy is None:
+            reference = "reference videos dense"
+        elif requested != AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3 or run_sparsity is None or run_sparsity <= 0:
+            reference = (f"reference-video policy {policy} (trained keep rate {keep_rate}) inactive: this run keeps "
+                         "every region dense")
+        else:
+            reference = f"reference-video policy {policy} with keep rate {keep_rate}"
         logger.info(
-            "FastH3 PDD checkpoint: %d fused blocks %s of a %d-interval grid, video/audio shifts=%s/%s, "
-            "reference VSA policy=%s (keep rate %s)", forwards, indices, pdd_steps,
+            "FastH3 PDD checkpoint (applied from fastvideo_inference.json): %d fused blocks %s of a %d-interval "
+            "grid, video/audio shifts %s/%s, %s. Run attention settings: %s, VSA_sparsity=%s, VSA_tile_size=%s.",
+            forwards, indices, pdd_steps,
             self.get_module("scheduler").shift,
-            self.get_module("audio_scheduler").shift, policy, keep_rate)
+            self.get_module("audio_scheduler").shift, reference,
+            "automatic selection" if requested is None else requested.name, run_sparsity, run_tile)
 
     def _defer_denoise_modules(self, fastvideo_args: FastVideoArgs) -> bool:
         if not fastvideo_args.inference_mode or bool(getattr(fastvideo_args, "training_mode", False)):

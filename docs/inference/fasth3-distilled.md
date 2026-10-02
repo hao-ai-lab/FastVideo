@@ -152,7 +152,8 @@ error.
 The pipeline applies `pdd_step_indices` and the reference-video policy. The
 attention backend, sparsity, and tile size are explicit run settings, as for
 DMD exports; the example passes the contract's values. A sparsity or tile
-size that differs from the trained value is logged.
+size that differs from the trained value is logged. With `VSA_sparsity` 0,
+every region is dense and the reference keep rate has no effect.
 
 Any MiniMax-H3 checkpoint whose transformer carries VSA compression gates
 (`to_gate_compress` weights), DMD or PDD, runs only with

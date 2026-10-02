@@ -316,6 +316,27 @@ def test_p2_policy_builds_one_sparse_region_per_reference_video(monkeypatch, den
         assert metadata.span_sparsities == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("sparsity,effect", [
+    (0.9, "each reference keeps 0.25 of its tiles and the target keeps 0.1"),
+    (0.0, "VSA_sparsity=0 keeps every region dense"),
+])
+def test_p2_summary_reports_what_the_run_applies(monkeypatch, sparsity, effect):
+    infos = []
+    monkeypatch.setattr(denoising.logger, "info", lambda message, *args: infos.append(message % args))
+    layout = _ref2va_layout(_reference_video_and_audio_references())
+    args = _args(pdd_steps=32,
+                 pdd_step_indices=GRID32_BLOCKS8,
+                 vsa_ref_policy="p2_multi_region",
+                 vsa_ref_keep_rate=0.25)
+    _run(monkeypatch,
+         layout,
+         _TinyPDDTransformer(pdd_steps=32),
+         args=args,
+         sparsity=sparsity,
+         builder=MiniMaxH3VSAMetadataBuilder())
+    assert f"MiniMax-H3 VSA-H3 p2_multi_region: 1 reference video region(s); {effect}; 128-token tiles." in infos
+
+
 def test_without_a_reference_policy_references_stay_in_the_dense_prefix(monkeypatch):
     layout = _ref2va_layout(_reference_video_and_audio_references())
     transformer = _TinyPDDTransformer(pdd_steps=32)

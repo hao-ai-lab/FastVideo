@@ -364,6 +364,20 @@ def test_the_contract_is_read_once_per_resolved_path(tmp_path, monkeypatch, hub_
     assert len(reads) == 1
 
 
+@pytest.mark.parametrize("sparsity,expected", [
+    (0.9, "reference-video policy p2_multi_region with keep rate 0.1. Run attention settings: "
+     "VIDEO_SPARSE_ATTN_H3, VSA_sparsity=0.9, VSA_tile_size=128."),
+    (0.0, "reference-video policy p2_multi_region (trained keep rate 0.1) inactive: this run keeps every region "
+     "dense. Run attention settings: VIDEO_SPARSE_ATTN_H3, VSA_sparsity=0.0, VSA_tile_size=256."),
+])
+def test_the_summary_separates_contract_values_from_run_settings(tmp_path, monkeypatch, sparsity, expected):
+    from fastvideo.pipelines.basic.minimax_h3 import minimax_h3_pipeline
+
+    infos = []
+    monkeypatch.setattr(minimax_h3_pipeline.logger, "info", lambda message, *args: infos.append(message % args))
+    _initialize(_pipeline(tmp_path, PDD_CONTRACT), VSA_sparsity=sparsity, VSA_tile_size=128 if sparsity else 256)
+    summary = [line for line in infos if line.startswith("FastH3 PDD checkpoint")]
+    assert len(summary) == 1 and summary[0].endswith(expected), summary
 
 
 def test_reference_policy_requires_vsa(tmp_path, env_overrides):

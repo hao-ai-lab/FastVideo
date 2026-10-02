@@ -302,10 +302,15 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # builder validates the value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
             if vsa_video_segments is not None:
-                logger.info(
-                    "MiniMax-H3 VSA-H3 %s: %d reference video region(s) at keep rate %s, target sparsity %s, "
-                    "%d-token tiles", vsa_ref_policy,
-                    len(vsa_video_segments) - 1, vsa_ref_keep_rate, float(batch.VSA_sparsity), vsa_tile_size)
+                run_sparsity = float(batch.VSA_sparsity)
+                if run_sparsity <= 0.0:
+                    effect = "VSA_sparsity=0 keeps every region dense"
+                else:
+                    reference_keep = (1.0 - run_sparsity) if vsa_ref_keep_rate is None else vsa_ref_keep_rate
+                    effect = (f"each reference keeps {reference_keep:g} of its tiles and the target keeps "
+                              f"{1.0 - run_sparsity:g}")
+                logger.info("MiniMax-H3 VSA-H3 %s: %d reference video region(s); %s; %d-token tiles.", vsa_ref_policy,
+                            len(vsa_video_segments) - 1, effect, vsa_tile_size)
 
         try:
             if full_cpu_offload:
