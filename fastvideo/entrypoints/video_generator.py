@@ -37,7 +37,6 @@ from fastvideo.api.compat import (
     normalize_generation_request,
     normalize_generator_config,
     request_to_batch_extra,
-    request_to_pipeline_overrides,
     request_to_sampling_param,
 )
 from fastvideo.api.inference_resolution import resolve_inference_config
@@ -455,15 +454,6 @@ class VideoGenerator:
                 legacy_kwargs=kwargs,
             )
 
-            fastvideo_args = self.fastvideo_args
-            pipeline_overrides = request_to_pipeline_overrides(request)
-            if pipeline_overrides:
-                fastvideo_args = deepcopy(self.fastvideo_args)
-                for key, value in pipeline_overrides.items():
-                    if not hasattr(fastvideo_args.pipeline_config, key):
-                        raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
-                    fastvideo_args.override("request", {f"pipeline_config.{key}": deepcopy(value)})
-
             resolved_sampling_param = request_to_sampling_param(
                 request,
                 model_path=self.fastvideo_args.model_path,
@@ -471,7 +461,7 @@ class VideoGenerator:
             return self._generate_video_impl(
                 prompt=request.prompt,
                 sampling_param=resolved_sampling_param,
-                fastvideo_args=fastvideo_args,
+                fastvideo_args=self.fastvideo_args,
                 **extra_overrides,
             )
         finally:
@@ -505,15 +495,6 @@ class VideoGenerator:
         self,
         request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
-        fastvideo_args = self.fastvideo_args
-        pipeline_overrides = request_to_pipeline_overrides(request)
-        if pipeline_overrides:
-            fastvideo_args = deepcopy(self.fastvideo_args)
-            for key, value in pipeline_overrides.items():
-                if not hasattr(fastvideo_args.pipeline_config, key):
-                    raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
-                fastvideo_args.override("request", {f"pipeline_config.{key}": deepcopy(value)})
-
         sampling_param = request_to_sampling_param(
             request,
             model_path=self.fastvideo_args.model_path,
@@ -522,7 +503,7 @@ class VideoGenerator:
         result = self._generate_video_impl(
             prompt=request.prompt,
             sampling_param=sampling_param,
-            fastvideo_args=fastvideo_args,
+            fastvideo_args=self.fastvideo_args,
             **batch_extra,
         )
         return self._wrap_legacy_result(result)
@@ -753,6 +734,8 @@ class VideoGenerator:
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         # Log parameters
+        embedded_cfg_scale = (fastvideo_args.pipeline_config.embedded_cfg_scale
+                              if sampling_param.embedded_cfg_scale is None else sampling_param.embedded_cfg_scale)
         debug_str = f"""
                       height: {target_height}
                        width: {target_width}
@@ -766,7 +749,7 @@ class VideoGenerator:
               guidance_scale: {sampling_param.guidance_scale}
                     n_tokens: {n_tokens}
                   flow_shift: {fastvideo_args.pipeline_config.flow_shift}
-     embedded_guidance_scale: {fastvideo_args.pipeline_config.embedded_cfg_scale}
+     embedded_guidance_scale: {embedded_cfg_scale}
                   save_video: {sampling_param.save_video}
                   output_path: {output_path}
         """ # type: ignore[attr-defined]

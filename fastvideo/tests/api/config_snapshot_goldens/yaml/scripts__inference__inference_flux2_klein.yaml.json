@@ -341,7 +341,6 @@
  },
  "pipeline_config_class": "fastvideo.configs.pipelines.flux_2.Flux2KleinPipelineConfig",
  "request_batch_extra": {},
- "request_pipeline_overrides": {},
  "resolution_decisions": [
   [
    "fill_vae_parallel_from_env",
@@ -388,6 +387,7 @@
   "conditioning_mask": null,
   "continuation_state": null,
   "data_type": "image",
+  "embedded_cfg_scale": null,
   "enable_teacache": false,
   "fps": 1,
   "grid_sizes": null,

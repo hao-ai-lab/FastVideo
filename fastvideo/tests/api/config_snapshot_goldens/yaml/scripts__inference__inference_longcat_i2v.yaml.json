@@ -373,7 +373,6 @@
  },
  "pipeline_config_class": "fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig",
  "request_batch_extra": {},
- "request_pipeline_overrides": {},
  "resolution_decisions": [
   [
    "fill_vae_parallel_from_env",
@@ -419,6 +418,7 @@
   "conditioning_mask": null,
   "continuation_state": null,
   "data_type": "video",
+  "embedded_cfg_scale": null,
   "enable_teacache": false,
   "fps": 15,
   "grid_sizes": null,

@@ -299,6 +299,9 @@ class SamplingConfig:
     guidance_rescale: float = 0.0
     true_cfg_scale: float | None = None
     use_embedded_guidance: bool | None = None
+    embedded_cfg_scale: float | None = None
+    """Guidance scale that guidance-distilled models take as a DiT input, for this request. ``None`` uses
+    ``generator.pipeline.embedded_cfg_scale``."""
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
 

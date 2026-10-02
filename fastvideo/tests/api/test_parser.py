@@ -253,6 +253,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "guidance_rescale": 0.0,
                 "true_cfg_scale": None,
                 "use_embedded_guidance": None,
+                "embedded_cfg_scale": None,
                 "boundary_ratio": None,
                 "sigmas": None,
             },

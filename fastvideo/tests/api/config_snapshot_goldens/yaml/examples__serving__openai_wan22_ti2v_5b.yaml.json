@@ -374,7 +374,6 @@
  },
  "pipeline_config_class": "fastvideo.models.wan.pipeline_config.Wan2_2_TI2V_5B_Config",
  "request_batch_extra": {},
- "request_pipeline_overrides": {},
  "resolution_decisions": [
   [
    "fill_vae_parallel_from_env",
@@ -422,6 +421,7 @@
   "conditioning_mask": null,
   "continuation_state": null,
   "data_type": "video",
+  "embedded_cfg_scale": null,
   "enable_teacache": false,
   "fps": 24,
   "grid_sizes": null,

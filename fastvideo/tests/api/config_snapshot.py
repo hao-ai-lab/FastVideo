@@ -169,11 +169,10 @@ def describe_error(error: BaseException) -> str:
 
 
 def snapshot_request(request: Any, model_path: str) -> dict[str, Any]:
-    """The three values VideoGenerator derives from a GenerationRequest; a rejected request is recorded as a value."""
-    from fastvideo.api.compat import request_to_batch_extra, request_to_pipeline_overrides, request_to_sampling_param
+    """The values VideoGenerator derives from a GenerationRequest; a rejected request is recorded as a value."""
+    from fastvideo.api.compat import request_to_batch_extra, request_to_sampling_param
 
     snapshot = {
-        "request_pipeline_overrides": to_jsonable(request_to_pipeline_overrides(request)),
         "request_batch_extra": to_jsonable(request_to_batch_extra(request)),
     }
     try:

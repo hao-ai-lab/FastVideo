@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from torchcodec.decoders import VideoDecoder
 
     from fastvideo.api.schema import ContinuationState
+    from fastvideo.fastvideo_args import FastVideoArgs
 
 import time
 from collections import OrderedDict
@@ -115,6 +116,9 @@ class ForwardBatch:
     # and must not imply classic dual-forward CFG. Use ``true_cfg_scale > 1`` for true CFG.
     use_embedded_guidance: bool = False
     true_cfg_scale: float = 1.0
+    # Per-request embedded guidance scale; None uses pipeline_config.embedded_cfg_scale.
+    # Read it through embedded_cfg_scale_for_batch().
+    embedded_cfg_scale: float | None = None
 
     # Batch info
     batch_size: int | None = None
@@ -279,6 +283,13 @@ class ForwardBatch:
 
     def __str__(self):
         return pprint.pformat(asdict(self), indent=2, width=120)
+
+
+def embedded_cfg_scale_for_batch(batch: "ForwardBatch", fastvideo_args: "FastVideoArgs") -> float | None:
+    """The embedded guidance scale for ``batch``: the request's value, else the pipeline config's."""
+    if batch.embedded_cfg_scale is not None:
+        return batch.embedded_cfg_scale
+    return getattr(fastvideo_args.pipeline_config, "embedded_cfg_scale", None)
 
 
 @dataclass

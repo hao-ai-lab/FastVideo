@@ -21,7 +21,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader, UpsamplerLoader
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, embedded_cfg_scale_for_batch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -199,11 +199,12 @@ class SRDenoisingStage(PipelineStage):
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 # Prepare inputs for transformer
+                embedded_cfg_scale = embedded_cfg_scale_for_batch(batch, fastvideo_args)
                 guidance_expand = (torch.tensor(
-                    [fastvideo_args.pipeline_config.embedded_cfg_scale] * latent_model_input.shape[0],
+                    [embedded_cfg_scale] * latent_model_input.shape[0],
                     dtype=torch.float32,
                     device=get_local_torch_device(),
-                ).to(target_dtype) * 1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale is not None else None)
+                ).to(target_dtype) * 1000.0 if embedded_cfg_scale is not None else None)
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):

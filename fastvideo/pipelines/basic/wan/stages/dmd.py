@@ -7,7 +7,7 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.utils import pred_noise_to_pred_video
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, embedded_cfg_scale_for_batch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.utils import dict_to_3d_list
 
@@ -106,11 +106,12 @@ class DmdDenoisingStage(DenoisingStage):
 
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])
+                embedded_cfg_scale = embedded_cfg_scale_for_batch(batch, fastvideo_args)
                 guidance_expand = (torch.tensor(
-                    [fastvideo_args.pipeline_config.embedded_cfg_scale] * latent_model_input.shape[0],
+                    [embedded_cfg_scale] * latent_model_input.shape[0],
                     dtype=torch.float32,
                     device=get_local_torch_device(),
-                ).to(target_dtype) * 1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale is not None else None)
+                ).to(target_dtype) * 1000.0 if embedded_cfg_scale is not None else None)
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):

@@ -2,9 +2,6 @@
  "request_batch_extra": {
   "vsa_mode": "dense"
  },
- "request_pipeline_overrides": {
-  "embedded_cfg_scale": 3.0
- },
  "sampling_param": {
   "action_list": null,
   "action_path": null,
@@ -23,6 +20,7 @@
   "conditioning_mask": null,
   "continuation_state": null,
   "data_type": "video",
+  "embedded_cfg_scale": 3.0,
   "enable_teacache": false,
   "fps": 16,
   "grid_sizes": null,

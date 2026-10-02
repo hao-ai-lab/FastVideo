@@ -1,5 +1,4 @@
 {
  "request_batch_extra": {},
- "request_pipeline_overrides": {},
  "sampling_param_error": "ValueError: Request field 'return_state' is not supported by sampling params for FastVideo/LTX2-Distilled-Diffusers"
 }

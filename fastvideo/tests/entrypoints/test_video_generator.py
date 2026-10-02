@@ -962,8 +962,9 @@ def test_generate_video_legacy_call_routes_compat_kwargs(monkeypatch):
 
     assert captured["prompt"] == "legacy prompt"
     assert captured["sampling_param"].negative_prompt == "custom negative"
-    assert captured["kwargs"]["fastvideo_args"].pipeline_config.embedded_cfg_scale == 7.5
-    assert not hasattr(captured["sampling_param"], "embedded_cfg_scale")
+    assert captured["sampling_param"].embedded_cfg_scale == 7.5
+    assert captured["kwargs"]["fastvideo_args"] is generator.fastvideo_args
+    assert generator.fastvideo_args.pipeline_config.embedded_cfg_scale == 1.0
     assert result["video_path"] == "outputs/test.mp4"
 
 

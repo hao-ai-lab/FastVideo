@@ -524,6 +524,7 @@ surfaces:
       cfg_truncation: request.sampling.cfg_truncation
       guidance_rescale: request.sampling.guidance_rescale
       use_embedded_guidance: request.sampling.use_embedded_guidance
+      embedded_cfg_scale: request.sampling.embedded_cfg_scale
       true_cfg_scale: request.sampling.true_cfg_scale
       boundary_ratio: request.sampling.boundary_ratio
       sigmas: request.sampling.sigmas

@@ -358,6 +358,7 @@
   "conditioning_mask": null,
   "continuation_state": null,
   "data_type": "image",
+  "embedded_cfg_scale": null,
   "enable_teacache": false,
   "fps": 1,
   "grid_sizes": null,

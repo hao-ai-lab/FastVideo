@@ -20,7 +20,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, embedded_cfg_scale_for_batch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -263,7 +263,7 @@ class DenoisingStage(PipelineStage):
         use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
         # Gate 3: Flux2's transformer multiplies guidance by 1000 internally, so we
         # skip the external *1000 pre-scaling for Flux models.
-        embedded_cfg_scale = fastvideo_args.pipeline_config.embedded_cfg_scale
+        embedded_cfg_scale = embedded_cfg_scale_for_batch(batch, fastvideo_args)
         if _is_flux and embedded_cfg_scale is not None:
             embedded_cfg_scale = batch.guidance_scale
         if embedded_cfg_scale is not None:

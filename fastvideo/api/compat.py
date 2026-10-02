@@ -44,9 +44,6 @@ _MISSING = object()
 _LEGACY_REQUEST_ALIASES = {
     "neg_prompt": "negative_prompt",
 }
-_REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
-    "embedded_cfg_scale",
-})
 REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS = (
     "ltx2_audio_latents",
     "ltx2_audio_clean_latent",
@@ -248,7 +245,7 @@ def request_to_sampling_param(
     for key, value in updates.items():
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
-        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS or key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS:
+        elif key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS:
             continue
         elif value == _SCHEMA_DEFAULT_UPDATES.get(key, _MISSING):
             # Schema-default field that isn't on SamplingParam; tolerated
@@ -391,14 +388,6 @@ def _apply_request_field(
         raw.setdefault("output", {})[key] = value
         return
     raw.setdefault("extensions", {})[key] = value
-
-
-def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
-    overrides: dict[str, Any] = {}
-    for key, value in explicit_request_updates(request).items():
-        if key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
-            overrides[key] = deepcopy(value)
-    return overrides
 
 
 def request_to_batch_extra(request: GenerationRequest) -> dict[str, Any]:
@@ -592,6 +581,5 @@ __all__ = [
     "normalize_generator_config",
     "register_continuation_kind",
     "request_to_batch_extra",
-    "request_to_pipeline_overrides",
     "request_to_sampling_param",
 ]

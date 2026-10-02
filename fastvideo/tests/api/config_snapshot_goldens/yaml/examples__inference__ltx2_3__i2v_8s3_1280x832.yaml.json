@@ -354,7 +354,6 @@
  },
  "pipeline_config_class": "fastvideo.pipelines.basic.ltx2.pipeline_configs.LTX2T2VConfig",
  "request_batch_extra": {},
- "request_pipeline_overrides": {},
  "resolution_decisions": [
   [
    "fill_vae_parallel_from_env",
@@ -402,6 +401,7 @@
   "conditioning_mask": null,
   "continuation_state": null,
   "data_type": "video",
+  "embedded_cfg_scale": null,
   "enable_teacache": false,
   "fps": 24,
   "grid_sizes": null,

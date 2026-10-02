@@ -484,7 +484,6 @@
  },
  "pipeline_config_class": "fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig",
  "request_batch_extra": {},
- "request_pipeline_overrides": {},
  "resolution_decisions": [
   [
    "fill_pipeline_config_defaults[MiniMaxH3PipelineConfig]",
@@ -523,6 +522,7 @@
   "conditioning_mask": null,
   "continuation_state": null,
   "data_type": "video",
+  "embedded_cfg_scale": null,
   "enable_teacache": false,
   "fps": 24,
   "grid_sizes": null,

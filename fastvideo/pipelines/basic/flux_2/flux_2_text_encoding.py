@@ -9,7 +9,7 @@ import torch
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, embedded_cfg_scale_for_batch
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 
 FLUX2_SYSTEM_MESSAGE = ("You are an AI that reasons about image descriptions. You give structured "
@@ -50,8 +50,8 @@ def _prepare_flux2_text_ids(prompt_embeds: torch.Tensor) -> torch.Tensor:
 class Flux2TextEncodingStage(TextEncodingStage):
     """Text encoding for Flux2 full and Klein variants."""
 
-    def _uses_embedded_guidance(self, fastvideo_args: FastVideoArgs) -> bool:
-        return getattr(fastvideo_args.pipeline_config, "embedded_cfg_scale", None) is not None
+    def _uses_embedded_guidance(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> bool:
+        return embedded_cfg_scale_for_batch(batch, fastvideo_args) is not None
 
     @torch.no_grad()
     def forward(
@@ -59,7 +59,7 @@ class Flux2TextEncodingStage(TextEncodingStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        if self._uses_embedded_guidance(fastvideo_args):
+        if self._uses_embedded_guidance(batch, fastvideo_args):
             batch.do_classifier_free_guidance = False
             batch.negative_prompt_embeds = []
 

@@ -102,6 +102,9 @@ class SamplingParam:
     cfg_truncation: float | None = 1.0
     # Embedded guidance (FLUX): do not treat ``guidance_scale > 1`` as classic CFG.
     use_embedded_guidance: bool = False
+    # Per-request embedded guidance scale for guidance-distilled DiTs; None uses
+    # pipeline_config.embedded_cfg_scale.
+    embedded_cfg_scale: float | None = None
     # Diffusers-style true CFG for FLUX when > 1 (requires negative prompt encoding).
     true_cfg_scale: float = 1.0
     guidance_rescale: float = 0.0
