@@ -1256,10 +1256,10 @@ class VideoGenerator:
                     envs.FASTVIDEO_OUTPUT_PIX_FMT.get(),
                     # Audio and video decoders may produce different durations.
                     # Preserve every video frame and pad/trim audio to match.
+                    # No -frames:v: ffmpeg 4.4 closes every stream once the video
+                    # reaches that count, which cuts the padded audio short.
                     "-af",
                     "apad",
-                    "-frames:v",
-                    str(len(frames)),
                     "-t",
                     str(len(frames) / fps),
                     "-movflags",
