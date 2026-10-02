@@ -14,6 +14,7 @@ from fastvideo.pipelines.stages.denoising import (Cosmos25AutoDenoisingStage, Co
                                                   CosmosDenoisingStage, DenoisingStage)
 from fastvideo.pipelines.stages.sr_denoising import SRDenoisingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
+from fastvideo.pipelines.stages.audio_encoding import AudioEncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGame2ImageEncodingStage,
                                                        MatrixGame2ImageVAEEncodingStage,
                                                        MatrixGame3ImageVAEEncodingStage, RefImageEncodingStage,
@@ -46,6 +47,7 @@ from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitS
 from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
 
 __all__ = [
+    "AudioEncodingStage",
     "PipelineStage",
     "InputValidationStage",
     "TimestepPreparationStage",
