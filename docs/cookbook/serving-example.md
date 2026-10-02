@@ -5,7 +5,7 @@ TODO(cookbook-ui): Remove this demo page, including its inline HTML/CSS and
 walkthrough, when the new cookbook UI components are integrated. Move any useful
 recipe-authoring guidance into the permanent contributor docs first, then remove
 the demo navigation entry and replace links to this page. Remove the temporary
-PR screenshot at docs/assets/images/cookbook-serving-example.png with the demo.
+PR screenshot at docs/assets/images/cookbook-serving-example.jpg with the demo.
 -->
 
 This prototype follows three CUDA recipes through **authored YAML metadata →
@@ -14,12 +14,13 @@ from the existing cookbook. The page only generates text; it never launches a se
 or submits an inference request.
 
 These GB200 recipes are **source-configured, not GPU-benchmarked by this prototype**.
+Alternative option values have not been checked for output quality or performance here.
 Only the controls below are exposed. All other recipe settings remain visible in the
 server command. Installation assumes a FastVideo checkout and an activated environment;
 the flag-only serving command uses the accompanying local CLI change.
 
 <style>
-[data-serving-controls], [data-serving-request-controls] { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+[data-serving-controls] { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
 .serving-example-option { display: flex; flex-direction: column; gap: .25rem; }
 .serving-example-option input:not([type=checkbox]), .serving-example-option select { border: 1px solid var(--md-default-fg-color--lighter); padding: .4rem; }
 .serving-example-option input[type=checkbox] { align-self: flex-start; }
@@ -33,8 +34,6 @@ the flag-only serving command uses the accompanying local CLI change.
   <p><strong data-serving-context>Loading model metadata…</strong></p>
   <h2>Server options</h2>
   <div data-serving-controls></div>
-  <h2>Generation request</h2>
-  <div data-serving-request-controls></div>
   <p data-serving-error role="status" aria-live="polite">Loading the example…</p>
   <div data-serving-output hidden>
     <h2>1. Install</h2>
@@ -47,10 +46,12 @@ the flag-only serving command uses the accompanying local CLI change.
     <h2>3. Check readiness</h2>
     <button type="button" data-serving-copy="healthCommand">Copy health command</button>
     <pre><code data-serving-code="healthCommand"></code></pre>
-    <h2 data-serving-client-heading>4. Generate one video</h2>
-    <p data-serving-client-note></p>
-    <button type="button" data-serving-copy="clientCommand">Copy client command</button>
-    <pre><code data-serving-code="clientCommand"></code></pre>
+    <details data-serving-client-details>
+      <summary>Optional test request</summary>
+      <p data-serving-client-note></p>
+      <button type="button" data-serving-copy="clientCommand">Copy test request</button>
+      <pre><code data-serving-code="clientCommand"></code></pre>
+    </details>
     <details>
       <summary>Inspect the resolved object before CLI serialization</summary>
       <pre><code data-serving-config></code></pre>
@@ -60,23 +61,24 @@ the flag-only serving command uses the accompanying local CLI change.
 
 ## Follow the implementation
 
-Switching models rebuilds the controls and resets defaults and request inputs. These
-three recipes demonstrate different task and model options using the same resolver:
+Switching models rebuilds the deployment controls and resets their defaults. These
+three recipes use the same resolver:
 
-| Model recipe | Task | GPU count | Model/task differences |
+| Model recipe | Task | Default GPU count | Deployment differences |
 | --- | --- | --- | --- |
-| [FastH3 V2](serving/models/fasth3-v2.yaml) | Text to video | 4 | 9 sigma points / 8 forwards, 124 frames, model-specific VSA sparsity |
-| [Z-Image Turbo](serving/models/zimage-turbo.yaml) | Text to image | 1 | 8 steps, guidance 0, no video-frame controls; returns PNG in base64 JSON |
-| [Wan2.1 I2V](serving/models/wan21-i2v.yaml) | Image to video | 2 | 40 steps, 77 frames, required reference-image path or URL |
+| [FastH3 V2](serving/models/fasth3-v2.yaml) | Text to video | 4 | Inherits GPU choices; adds VSA sparsity, default 0.8 |
+| [Z-Image Turbo](serving/models/zimage-turbo.yaml) | Text to image | 1 (fixed) | Constrains GPU count to one; reuses common server controls |
+| [Wan2.1 I2V](serving/models/wan21-i2v.yaml) | Image to video | 2 | Narrows GPU choices to 2, 4, or 8; keeps tensor parallelism at two |
 
 1. [defaults.yaml](serving/defaults.yaml) defines common controls, types, default values,
    task applicability, runtime launch tokens, and dotted configuration paths.
 2. [hardware.yaml](serving/hardware.yaml) defines the exposed GPU type, NVIDIA GB200,
    and its runtime. It does not set the number of GPUs.
 3. Each model YAML above owns its full baseline and model differences. For example,
-   FastH3 narrows GPUs to `[4]`, sampling points to `[9]`, and links GPU count to
-   sequence parallelism. It adds its VSA sparsity control, fixed at `0.8`, without
-   changing the shared option catalog or renderer. Z-Image adds guidance scale instead.
+   FastH3 inherits the shared GPU choices, defaults to four, and links GPU count to
+   sequence parallelism. It exposes its VSA-sparsity choices as a model-specific
+   deployment option. Z-Image keeps one GPU because its pipeline does not support
+   sequence parallelism.
 4. `docs/cookbook_serving.py` uses strict Pydantic models to validate these files and serializes them during the docs build into
    [cookbook-serving-example.json](../assets/cookbook-serving-example.json).
    This generated file is delivery data, not a second maintained configuration.
@@ -88,19 +90,45 @@ three recipes demonstrate different task and model options using the same resolv
    whenever a selection changes.
 
 GPU type and GPU count are separate selections. This example exposes only the
-GB200 type; each model recipe restricts GPU count and sets sequence parallelism to
-that count. The hardware catalog does not choose or constrain the count.
+GB200 type; each model recipe inherits or restricts GPU-count choices and sets sequence
+parallelism to the chosen count. The hardware catalog does not choose or constrain the count.
 
 Default precedence is **shared → model → explicit user selection**.
-Model properties override common properties; choice lists replace them. To observe
-the flow, change the port: the server, health check, and client commands update
-together. Change VAE offload or seed to see the corresponding dotted flag update.
+An override changes individual properties of an option. Omitted properties retain
+their shared definitions; a supplied choice list replaces the shared list. A model
+does not need to repeat the whole option just to change its default:
+
+```yaml
+# models/fasth3-v2.yaml (relevant properties)
+options:
+  num_gpus:
+    default: 4
+    also_set: [generator.engine.parallelism.sp_size]
+    # Inherits the path, integer type, label, and choices [1, 2, 4, 8].
+
+# models/wan21-i2v.yaml (relevant properties)
+options:
+  num_gpus:
+    choices: [2, 4, 8]
+    default: 2
+    # Replaces only the choices and default; common path/type/label remain.
+```
+
+This merge applies to flat option definitions. It does not provide recursive
+inheritance for arbitrary nested runtime configuration. Each recipe still owns its
+baseline `settings` object.
+
+Singleton choices express fixed constraints, such as Z-Image's one GPU.
+To observe the flow, change the port: the server, health check, and optional test
+request update together. Change VAE offload or GPU count to see the corresponding
+dotted flags update.
 Invalid values hide the generated output until corrected.
 
-Prompt and reference image are request inputs, not server flags. Video requests use
-the resolved server sampling defaults. The image endpoint does not merge those
-defaults, so its generated request includes the resolved image sampling settings
-explicitly. Its command saves `response.json`, then decodes the PNG to `output.png`.
+Prompt, dimensions, sampling steps, and other per-generation values are absent from
+the deployment controls and server command. Each recipe keeps a static
+`example_request` for the collapsed **Optional test request** section, including
+model-required values. Edit it after copying; the I2V example's image path is a
+placeholder. The resolver adds only the resolved server address and model alias.
 
 For another already-supported model, a contributor would add one model recipe and a
 default-output verification case, reusing these controls, resolver, and CLI formatter.

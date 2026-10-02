@@ -33,7 +33,7 @@
    */
   function setPath(config, path, value) {
     const parts = path.split(".");
-    if (!/^(generator|server|default_request)\./.test(path) ||
+    if (!/^(generator|server)\./.test(path) ||
         parts.some((part) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(part) ||
           ["__proto__", "constructor", "prototype"].includes(part))) {
       throw new Error(`Invalid serving configuration path: ${path}`);
@@ -95,11 +95,11 @@
    *
    * @param {Object} bundle Generated JSON: shared defaults, hardware catalog, and model recipes.
    * @param {string} recipeId Model recipe ID, such as "fasth3-v2" or "zimage-turbo".
-   * @param {Object} selections Optional hardware ID, option values, and request inputs.
-   *   Example: {hardware: "gb200", values: {port: 9000}, request: {prompt: "A fox in snow"}}.
+   * @param {Object} selections Optional hardware ID and deployment option values.
+   *   Example: {hardware: "gb200", values: {port: 9000}}.
    * @returns {Object} options for rendering controls; config for inspection; argv and command
    *   for launching the server; installCommand, healthCommand, clientRequest, and clientCommand.
-   * @throws {Error} When a selection, default, configuration path, or request input is invalid.
+   * @throws {Error} When a selection, default, configuration path, or static example request is invalid.
    *
    * Short return-value examples (other fields and command flags omitted):
    *   options: [{key: "port", type: "integer", value: 9000, source: "user"}]
@@ -120,13 +120,13 @@
    * 3. Choose each value: common default -> model default -> explicit user selection.
    * 4. Validate and write values into a copy of recipe.settings. also_set updates linked paths,
    *    such as keeping sequence parallelism equal to the selected GPU count.
-   * 5. Serialize the config and create the task-specific client request from the same resolved data.
+   * 5. Serialize the deployment config. Attach its endpoint/model alias to the static example request.
    */
   function resolveRecipe(bundle, recipeId, selections = {}) {
     const recipe = bundle.recipes.find((item) => item.id === recipeId);
     if (!recipe) throw new Error(`Unknown recipe: ${recipeId}`);
-    if (Object.keys(selections).some((key) => !["hardware", "values", "request"].includes(key))) {
-      throw new Error("Selections must contain only hardware, values, and request");
+    if (Object.keys(selections).some((key) => !["hardware", "values"].includes(key))) {
+      throw new Error("Selections must contain only hardware and values");
     }
     const hardwareId = selections.hardware ?? recipe.default_hardware;
     const hardware = bundle.hardware[hardwareId];
@@ -147,11 +147,15 @@
     }
 
     const config = clone(recipe.settings || {});
+    if (Object.keys(config).some((key) => !["generator", "server"].includes(key))) {
+      throw new Error("Cookbook settings must contain only generator and server configuration");
+    }
     setPath(config, "generator.model_path", recipe.model_id);
     const options = keys.map((key) => {
       const common = bundle.defaults.options[key] || {};
       const model = overrides[key] || {};
-      // Shallow property merge deliberately replaces choice lists instead of concatenating.
+      // Override individual option properties; omitted properties stay shared, lists replace.
+      // This is flat option metadata, not recursive inheritance of runtime configuration trees.
       const definition = { ...common, ...model };
       let value = common.default;
       let defaultSource = "shared";
@@ -185,42 +189,20 @@
     if (["0.0.0.0", "::"].includes(host)) host = "127.0.0.1";
     if (host.includes(":") && !host.startsWith("[")) host = `[${host}]`;
     const endpoint = `http://${host}:${config.server.port}`;
-    const request = selections.request === undefined ? {} : selections.request;
-    if (!request || typeof request !== "object" || Array.isArray(request)) {
-      throw new Error("Request selections must be an object");
+    // Request parameters belong to this optional example, never the deployment controls or flags.
+    const body = clone(recipe.example_request || {});
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new Error("example_request must be an object");
     }
-    const requestKeys = task.requires_image ? ["prompt", "input_reference"] : ["prompt"];
-    for (const key of Object.keys(request)) {
-      if (!requestKeys.includes(key)) throw new Error(`Unknown or unsupported request field: ${key}`);
+    body.model = config.server.served_model_name || recipe.model_id;
+    if (typeof body.prompt !== "string" || !body.prompt.trim()) {
+      throw new Error("example_request.prompt must be a nonempty string");
     }
-    const prompt = own(request, "prompt") ? request.prompt : task.prompt ??
-      "A cinematic view of a futuristic city at sunset, smooth camera pan";
-    if (typeof prompt !== "string" || !prompt.trim()) throw new Error("prompt must be a nonempty string");
-    const body = {
-      model: config.server.served_model_name || recipe.model_id,
-      prompt,
-    };
-    if (task.requires_image) {
-      const reference = own(request, "input_reference") ? request.input_reference : task.input_reference;
-      if (typeof reference !== "string" || !reference.trim()) {
-        throw new Error("input_reference must be a nonempty server-local path or URL");
-      }
-      body.input_reference = reference;
+    if (task.requires_image && (typeof body.input_reference !== "string" || !body.input_reference.trim())) {
+      throw new Error("example_request.input_reference must be a nonempty server-local path or URL");
     }
     const isImage = task.client === "image";
-    if (isImage) {
-      // The image endpoint does not merge server default_request; send these values explicitly.
-      const sampling = config.default_request.sampling;
-      Object.assign(body, {
-        response_format: "b64_json",
-        output_format: "png",
-        size: `${sampling.width}x${sampling.height}`,
-        seed: sampling.seed,
-        num_inference_steps: sampling.num_inference_steps,
-        guidance_scale: sampling.guidance_scale,
-        negative_prompt: config.default_request.negative_prompt,
-      });
-    }
+    if (isImage) Object.assign(body, { response_format: "b64_json", output_format: "png" });
     const clientRequest = {
       endpoint: `${endpoint}${isImage ? "/v1/images/generations" : "/v1/videos/sync"}`,
       body,
@@ -248,7 +230,7 @@
 
   /**
    * Initialize one cookbook element using its data-metadata URL and data-recipe default ID.
-   * Fetch metadata once, then keep option values and request inputs in local UI state.
+   * Fetch metadata once, then keep deployment option values in local UI state.
    * Input changes call render(); model changes rebuild controls with the new model's defaults.
    * No model-specific controls are hardcoded here: option definitions determine their widgets.
    *
@@ -267,16 +249,14 @@
       const bundle = await response.json();
       let recipeId = root.dataset.recipe;
       let values = {};
-      let request = {};
       let selectedHardware;
       const controls = root.querySelector("[data-serving-controls]");
-      const requestControls = root.querySelector("[data-serving-request-controls]");
       let origins = {};
 
       /** Resolve current UI state and update all command blocks together; hide output on invalid input. */
       function render() {
         try {
-          const result = resolveRecipe(bundle, recipeId, { hardware: selectedHardware, values, request });
+          const result = resolveRecipe(bundle, recipeId, { hardware: selectedHardware, values });
           error.textContent = "";
           output.hidden = false;
           root.querySelector("[data-serving-context]").textContent =
@@ -291,12 +271,13 @@
             root.querySelector(`[data-serving-code="${key}"]`).textContent = result[key];
           }
           root.querySelector("[data-serving-config]").textContent = JSON.stringify(result.config, null, 2);
-          const isImage = result.task.client === "image";
-          root.querySelector("[data-serving-client-heading]").textContent =
-            `4. Generate one ${isImage ? "image" : "video"}`;
-          root.querySelector("[data-serving-client-note]").textContent = isImage ?
-            "Run in another terminal. Image sampling settings are sent explicitly in the request. Save the JSON response, then decode its base64 PNG into output.png." :
-            "Run in another terminal. The request uses the sampling defaults explicitly set in the server command. The synchronous endpoint returns MP4 bytes.";
+          root.querySelector("[data-serving-client-note]").textContent =
+            "Copy this static example after the server is ready; edit its prompt or request values in your terminal. " +
+            (result.task.requires_image ?
+              "Replace /path/to/first-frame.png with an image path on the server or a URL it can access. " : "") +
+            (result.task.client === "image" ?
+              "The command saves response.json and decodes its PNG to output.png." :
+              "The synchronous endpoint returns MP4 bytes to output.mp4.");
         } catch (failure) {
           error.textContent = failure.message;
           output.hidden = true;
@@ -306,16 +287,14 @@
       /**
        * Reset selections when the model changes and build its controls from resolved definitions:
        * singleton choices -> fixed text; multiple choices -> dropdown; other types -> input widgets.
-       * Request inputs are separate: every task has a prompt, and I2V also requires an image reference.
        */
       function buildControls() {
         values = {};
-        request = {};
         origins = {};
         const initial = resolveRecipe(bundle, recipeId);
         selectedHardware = initial.recipe.default_hardware;
         controls.replaceChildren();
-        requestControls.replaceChildren();
+        root.querySelector("[data-serving-client-details]").removeAttribute("open");
         const hardwareRow = document.createElement("label");
         hardwareRow.className = "serving-example-option";
         const hardwareTitle = document.createElement("strong");
@@ -363,6 +342,7 @@
             if (option.min !== undefined) control.min = option.min;
             if (option.max !== undefined) control.max = option.max;
             if (option.type === "integer") control.step = "1";
+            if (option.type === "number") control.step = "any";
             control.addEventListener("input", () => {
               values[option.key] = option.type === "boolean" ? control.checked : option.type === "string" ?
                 control.value : control.value === "" ? NaN : Number(control.value);
@@ -380,26 +360,6 @@
             row.append(help);
           }
           controls.append(row);
-        }
-        for (const key of initial.task.requires_image ? ["prompt", "input_reference"] : ["prompt"]) {
-          const row = document.createElement("label");
-          row.className = "serving-example-option";
-          const title = document.createElement("strong");
-          title.textContent = key === "prompt" ? "Prompt" : "Reference image";
-          const input = document.createElement("input");
-          input.type = "text";
-          input.value = initial.clientRequest.body[key];
-          input.required = true;
-          input.setAttribute("aria-label", title.textContent);
-          input.dataset.servingRequest = key;
-          input.addEventListener("input", () => { request[key] = input.value; render(); });
-          row.append(title, input);
-          if (key === "input_reference") {
-            const help = document.createElement("small");
-            help.textContent = "Replace the placeholder with an image path on the server or a URL the server can access. This page does not upload files.";
-            row.append(help);
-          }
-          requestControls.append(row);
         }
         render();
       }

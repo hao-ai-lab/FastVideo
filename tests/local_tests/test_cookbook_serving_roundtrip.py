@@ -57,6 +57,7 @@ def parse_launch(result):
     assert argv == result["argv"]
     assert argv[:2] == ["fastvideo", "serve"]
     assert "--config" not in argv
+    assert not any(arg.startswith("--default_request.") for arg in argv)
 
     parser = FlexibleArgumentParser()
     ServeSubcommand().subparser_init(parser.add_subparsers(dest="subparser"))
@@ -68,7 +69,7 @@ def parse_launch(result):
 
 @pytest.mark.parametrize("values", [
     {},
-    {"port": 9000, "seed": 42, "vae_offload": False},
+    {"port": 9000, "vae_offload": False},
     {"host": "0.0.0.0"},
 ])
 def test_generated_command_round_trips_through_real_serve_parser(values):
@@ -82,18 +83,8 @@ def test_generated_command_round_trips_through_real_serve_parser(values):
     assert config.server.port == values.get("port", 8000)
     assert config.server.host == values.get("host", "127.0.0.1")
     assert config.server.output_dir == "outputs/a user's run"
-    assert explicit_request_updates(config.default_request) == {
-        "negative_prompt": "",
-        "height": 768,
-        "width": 1344,
-        "num_frames": 124,
-        "fps": 24,
-        "num_inference_steps": 9,
-        "guidance_scale": 1.0,
-        "batch_cfg": False,
-        "seed": values.get("seed", 1000),
-        "return_frames": False,
-    }
+    assert explicit_request_updates(config.default_request) == {}
+    assert "default_request" not in result["config"]
     endpoint = f"http://127.0.0.1:{config.server.port}"
     assert endpoint in result["healthCommand"]
     assert endpoint in result["clientCommand"]
@@ -109,7 +100,8 @@ def test_additional_models_generate_valid_cli_and_request_payloads(recipe_id, mo
     assert config.generator.model_path == model
     assert config.generator.engine.num_gpus == config.generator.engine.parallelism.sp_size == gpus
     assert config.generator.pipeline.workload_type == workload
-    assert config.default_request.sampling.num_inference_steps == steps
+    assert explicit_request_updates(config.default_request) == {}
+    assert result["clientRequest"]["body"]["num_inference_steps"] == steps
     assert "VSA_sparsity" not in config.generator.pipeline.experimental
     # The displayed shell command must carry the same JSON tested by the API checks below.
     argv = shlex.split(result["clientCommand"].replace("\\\n", ""))
@@ -117,7 +109,7 @@ def test_additional_models_generate_valid_cli_and_request_payloads(recipe_id, mo
 
 
 def test_image_client_matches_real_image_endpoint(monkeypatch, tmp_path):
-    result = resolve_example("zimage-turbo", {"values": {"seed": 7}})
+    result = resolve_example("zimage-turbo")
     config = parse_launch(result)
     image_bytes = b"mock image output"
     generate = Mock(side_effect=lambda **kwargs: Path(kwargs["output_path"]).write_bytes(image_bytes))
@@ -139,7 +131,7 @@ def test_image_client_matches_real_image_endpoint(monkeypatch, tmp_path):
     assert response.status_code == 200, response.text
     assert base64.b64decode(response.json()["data"][0]["b64_json"]) == image_bytes
     kwargs = generate.call_args.kwargs
-    assert kwargs["seed"] == 7
+    assert kwargs["seed"] == 42
     assert kwargs["num_inference_steps"] == 8
     assert kwargs["guidance_scale"] == 0
     assert kwargs["height"] == kwargs["width"] == 1024
@@ -147,11 +139,35 @@ def test_image_client_matches_real_image_endpoint(monkeypatch, tmp_path):
     assert kwargs["output_path"].endswith(".png")
 
 
+def test_adjusted_h3_options_pass_the_real_request_adapter(tmp_path):
+    result = resolve_example("fasth3-v2", {"values": {
+        "num_gpus": 2,
+        "vsa_sparsity": 0.5,
+    }})
+    config = parse_launch(result)
+    assert config.generator.engine.num_gpus == config.generator.engine.parallelism.sp_size == 2
+    assert config.generator.pipeline.experimental["VSA_sparsity"] == 0.5
+    args = SimpleNamespace(model_path=config.generator.model_path, lora_path=None, override_pipeline_cls_name=None)
+    request = VideoGenerationRequest.model_validate(result["clientRequest"]["body"])
+    resolved = build_generation_request(
+        "cookbook-h3-test", request, args,
+        served_model_name=config.server.served_model_name,
+        output_dir=str(tmp_path),
+        default_request=config.default_request,
+    )
+    assert explicit_request_updates(config.default_request) == {}
+    assert resolved.sampling.num_frames == 124
+    assert resolved.sampling.num_inference_steps == 9
+
+
 def test_i2v_client_matches_video_adapter(tmp_path):
     image_url = "https://example.com/first-frame.png"
-    result = resolve_example("wan21-i2v", {"request": {"input_reference": image_url}})
+    result = resolve_example("wan21-i2v")
     config = parse_launch(result)
-    request = VideoGenerationRequest.model_validate(result["clientRequest"]["body"])
+    # Simulate replacing the placeholder in the copied static test request.
+    body = dict(result["clientRequest"]["body"])
+    body["input_reference"] = image_url
+    request = VideoGenerationRequest.model_validate(body)
     assert request.task is None
     args = SimpleNamespace(model_path=config.generator.model_path, lora_path=None, override_pipeline_cls_name=None)
     resolved = build_generation_request(

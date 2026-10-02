@@ -3,12 +3,12 @@
 This module is the build-time handoff between recipe authors and the cookbook UI.
 Contributors edit three kinds of files under ``docs/cookbook/serving/``:
 
-* ``defaults.yaml`` defines shared controls, allowed values, defaults, tasks,
-  request inputs, and runtime launch commands.
+* ``defaults.yaml`` defines shared deployment controls, allowed values, defaults,
+  task client types, and runtime launch commands.
 * ``hardware.yaml`` lists GPU types and their runtimes; model recipes specify
   GPU counts independently.
-* ``models/*.yaml`` supplies each model's identity, baseline ``settings``, and
-  option differences, such as a different default or a restricted choice list.
+* ``models/*.yaml`` supplies each model's identity, deployment ``settings``, option
+  differences, and a separate static ``example_request`` for a smoke test.
 
 The Pydantic models below validate these files before the site is published.
 They check option types and bounds, defaults against choices, references between
@@ -16,9 +16,10 @@ files, and conflicting writes to configuration paths. Shared option definitions
 and model overrides are combined for validation, but remain separate in the output
 so the browser can explain where each value came from.
 
-For example, a shared sampling-step default of 50 and a model override of 9 are
+For example, a shared GPU-count default of one and a model override of four are
 both preserved in the JSON. ``cookbook-serving.js`` later resolves that model to
-9, renders its controls, and generates commands from the visitor's selections.
+four GPUs, renders its controls, and generates the launch command. Request values
+stay in a separate smoke-test body and never become deployment controls or flags.
 
 Entry points:
 
@@ -51,7 +52,7 @@ SOURCE_DIR = Path(__file__).parent / "cookbook" / "serving"
 OUTPUT_PATH = Path(__file__).parent / "assets" / "cookbook-serving-example.json"
 
 NonemptyString = Annotated[str, Field(min_length=1, pattern=r"\S")]
-ConfigRoot = Annotated[str, Field(pattern=r"^(generator|server|default_request)$")]
+ConfigRoot = Annotated[str, Field(pattern=r"^(generator|server)$")]
 Number = int | float
 Value = TypeVar("Value")
 
@@ -64,7 +65,7 @@ def _browser_safe_path(path: str) -> str:
 
 ConfigPath = Annotated[
     str,
-    Field(pattern=r"^(generator|server|default_request)(\.[A-Za-z_][A-Za-z0-9_]*)+$"),
+    Field(pattern=r"^(generator|server)(\.[A-Za-z_][A-Za-z0-9_]*)+$"),
     AfterValidator(_browser_safe_path),
 ]
 PATH_ADAPTER = TypeAdapter(ConfigPath)
@@ -138,18 +139,13 @@ class Runtime(MetadataModel):
 class Task(MetadataModel):
     label: NonemptyString
     client: Literal["image", "video"]
-    prompt: NonemptyString
     options: list[NonemptyString]
     requires_image: bool = False
-    input_reference: NonemptyString | None = None
 
     @model_validator(mode="after")
     def validate_image_reference(self) -> Self:
-        if self.requires_image:
-            if self.client != "video":
-                raise ValueError("Image references are supported only by the video client")
-            if self.input_reference is None:
-                raise ValueError("Image task requires a nonempty input_reference")
+        if self.requires_image and self.client != "video":
+            raise ValueError("Image references are supported only by the video client")
         return self
 
 
@@ -198,12 +194,11 @@ class Recipe(MetadataModel):
     default_hardware: NonemptyString
     hardware: list[NonemptyString] = Field(min_length=1)
     install: NonemptyString
-    evidence: NonemptyString
-    notes: str = ""
     # Overrides are partial definitions. Validate them as OptionDefinition only
     # after merging with shared fields, and preserve the authored patches in JSON.
     options: dict[NonemptyString, dict[str, JsonValue]] = Field(default_factory=dict)
     settings: dict[ConfigRoot, dict[str, JsonValue]]
+    example_request: dict[NonemptyString, JsonValue]
 
     @model_validator(mode="after")
     def validate_baseline(self) -> Self:
@@ -212,6 +207,11 @@ class Recipe(MetadataModel):
         _settings_paths(self.settings)
         if "model_path" in self.settings.get("generator", {}):
             raise ValueError("Model identity belongs in model_id")
+        prompt = self.example_request.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Example request requires a nonempty prompt")
+        if "model" in self.example_request:
+            raise ValueError("Example request model is supplied by the resolver")
         return self
 
 
@@ -234,6 +234,10 @@ class CookbookMetadata(MetadataModel):
                 raise ValueError(f"Recipe references an unknown task: {recipe.id}")
             if recipe.runtime not in self.defaults.runtimes:
                 raise ValueError(f"Recipe references an unknown runtime: {recipe.id}")
+            if self.defaults.tasks[recipe.task].requires_image:
+                image = recipe.example_request.get("input_reference")
+                if not isinstance(image, str) or not image.strip():
+                    raise ValueError(f"Image example requires a nonempty input_reference: {recipe.id}")
             for hardware_id in recipe.hardware:
                 if hardware_id not in self.hardware:
                     raise ValueError(f"Unknown hardware profile: {hardware_id}")

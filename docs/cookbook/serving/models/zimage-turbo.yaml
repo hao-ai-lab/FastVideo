@@ -6,33 +6,16 @@ runtime: cuda
 default_hardware: gb200
 hardware: [gb200]
 install: 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[dev]"'
-evidence: source-configured
-notes: >-
-  This recipe uses the pinned Z-Image Turbo example and preset defaults with
-  one GPU. The GB200 selection has not been validated by a serving benchmark
-  and is not a memory-capacity or performance guarantee.
 
 options:
   num_gpus:
     choices: [1]
-    default: 1
     # The inherited path sets generator.engine.num_gpus; also_set copies that value
     # to the paths below, keeping sequence parallelism equal to the GPU count.
     also_set: [generator.engine.parallelism.sp_size]
-  num_inference_steps:
-    choices: [8]
-    default: 8
-  seed:
-    default: 42
-  guidance_scale:
-    label: Guidance scale
-    type: number
-    path: default_request.sampling.guidance_scale
-    choices: [0]
-    default: 0
-    help: Fixed to the Turbo preset's guidance setting for this example.
+    help: The native Z-Image pipeline requires sequence parallelism equal to one.
 
-# Cookbook-owned settings. The build does not import the quick-start script.
+# Cookbook-owned deployment settings. The build does not import the quick-start script.
 settings:
   generator:
     revision: f332072aa78be7aecdf3ee76d5c247082da564a6
@@ -45,15 +28,12 @@ settings:
   server:
     output_dir: outputs/openai_zimage_turbo
     served_model_name: zimage-turbo
-  default_request:
-    negative_prompt: ""
-    sampling:
-      height: 1024
-      width: 1024
-      num_frames: 1
-      fps: 1
-      max_sequence_length: 512
-      cfg_normalization: false
-      cfg_truncation: 1.0
-    output:
-      return_frames: false
+
+# Fixed smoke-test body, separate from server settings and interactive controls.
+example_request:
+  prompt: A watercolor painting of a capybara beside a quiet pond
+  size: 1024x1024
+  num_inference_steps: 8
+  guidance_scale: 0
+  seed: 42
+  negative_prompt: ""
