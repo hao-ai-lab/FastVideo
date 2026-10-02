@@ -1,0 +1,51 @@
+# Defines shared cookbook controls: labels, types, allowed values, and defaults.
+# Model recipes inherit these controls and override model-specific differences.
+# The UI uses each control's `path` to generate the corresponding CLI option.
+# Overrides replace individual properties; omitted properties are inherited.
+# For example, {default: 2} retains the shared GPU label/type/path/choices. Lists replace.
+runtimes:
+  cuda:
+    label: CUDA
+    command: [fastvideo, serve]
+
+tasks:
+  t2v:
+    label: Text to video
+    client: video
+    options: [host, port, num_gpus, vae_offload]
+  t2i:
+    label: Text to image
+    client: image
+    options: [host, port, num_gpus, vae_offload]
+  i2v:
+    label: Image to video
+    client: video
+    requires_image: true
+    options: [host, port, num_gpus, vae_offload]
+
+options:
+  host:
+    label: Server host
+    type: string
+    path: server.host
+    # Limit this prototype to host strings that the CLI will not auto-cast.
+    choices: [127.0.0.1, 0.0.0.0, localhost]
+    default: 127.0.0.1
+  port:
+    label: Server port
+    type: integer
+    path: server.port
+    min: 1
+    max: 65535
+    default: 8000
+  num_gpus:
+    label: GPU count
+    type: integer
+    path: generator.engine.num_gpus
+    choices: [1, 2, 4, 8]
+    default: 1
+  vae_offload:
+    label: Offload VAE to CPU
+    type: boolean
+    path: generator.engine.offload.vae
+    default: true

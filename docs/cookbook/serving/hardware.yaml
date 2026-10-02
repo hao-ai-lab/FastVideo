@@ -1,0 +1,5 @@
+# GPU type is separate from the GPU count selected by a model recipe.
+profiles:
+  gb200:
+    label: NVIDIA GB200
+    runtime: cuda

@@ -1,0 +1,56 @@
+id: wan21-i2v
+label: Wan2.1 I2V · 14B 480P
+model_id: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers
+task: i2v
+runtime: cuda
+default_hardware: gb200
+hardware: [gb200]
+install: 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[dev]"'
+
+options:
+  num_gpus:
+    # TP remains two; SP follows GPU count and must divide the 40 attention heads.
+    choices: [2, 4, 8]
+    default: 2
+    # The inherited path sets generator.engine.num_gpus; also_set copies that value
+    # to the paths below, keeping sequence parallelism equal to the GPU count.
+    also_set: [generator.engine.parallelism.sp_size]
+
+# Cookbook-owned baseline; request images never become server defaults.
+settings:
+  generator:
+    engine:
+      parallelism:
+        tp_size: 2
+      offload:
+        dit: true
+        text_encoder: true
+        image_encoder: true
+        pin_cpu_memory: true
+    pipeline:
+      workload_type: i2v
+      experimental:
+        flow_shift: 3.0
+  server:
+    output_dir: outputs/openai_wan21_i2v_14b
+    served_model_name: wan21-i2v-14b
+
+# Fixed smoke-test body; replace the image path when sending this request.
+# These request values are not deployment controls or server defaults.
+example_request:
+  prompt: Animate the provided image with gentle, natural motion
+  input_reference: /path/to/first-frame.png
+  width: 832
+  height: 480
+  num_frames: 77
+  fps: 16
+  num_inference_steps: 40
+  guidance_scale: 5
+  seed: 1024
+  negative_prompt: >-
+    Bright tones, overexposed, static, blurred details, subtitles, style,
+    works, paintings, images, static, overall gray, worst quality, low
+    quality, JPEG compression residue, ugly, incomplete, extra fingers,
+    poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen
+    limbs, fused fingers, still picture, messy background, three legs, many
+    people in the background, walking backwards

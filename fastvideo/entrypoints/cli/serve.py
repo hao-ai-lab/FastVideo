@@ -60,10 +60,7 @@ class ServeSubcommand(CLISubcommand):
         )
 
     def validate(self, args: argparse.Namespace) -> None:
-        if not args.config:
-            raise ValueError("fastvideo serve requires --config PATH; use a nested "
-                             "serve config plus optional dotted overrides")
-        if not os.path.exists(args.config):
+        if args.config and not os.path.exists(args.config):
             raise ValueError(f"Config file not found: {args.config}")
         setattr(
             args,
@@ -78,14 +75,14 @@ class ServeSubcommand(CLISubcommand):
         serve_parser = subparsers.add_parser(
             "serve",
             help="Start an OpenAI-compatible HTTP server",
-            usage="fastvideo serve --config SERVE_CONFIG [--dotted.override VALUE]",
+            usage="fastvideo serve [--config SERVE_CONFIG] [--dotted.override VALUE]",
         )
         serve_parser.add_argument(
             "--config",
             type=str,
             default="",
             required=False,
-            help="Path to a nested config JSON or YAML file. Required.",
+            help="Optional nested JSON or YAML config. Without it, supply --generator.model_path and dotted options.",
         )
         return cast(FlexibleArgumentParser, serve_parser)
 
