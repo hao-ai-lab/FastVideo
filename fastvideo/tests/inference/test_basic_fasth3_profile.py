@@ -216,6 +216,7 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
             return SimpleNamespace(
                 video_path=request.output.output_path,
                 generation_time=1.25,
+                peak_memory_mb=42.0,
                 logging_info=SimpleNamespace(stages={"denoising": {"execution_time": 2.5}}),
             )
 
@@ -256,6 +257,7 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
     assert f"Warmup output written to: {tmp_path / '_fasth3_warmup.mp4'}" in output
     assert output.count("Output written to:") == 3
     assert output.count("Denoising time: 2.500s") == 3
+    assert output.count("Peak memory: 42.0 MB") == 3
     assert "Measured E2E wall times (n=3, warmup excluded): [6.0, 7.0, 8.0]" in output
     assert "Median E2E wall time: 7.000s" in output
     assert "Median denoising time: 2.500s" in output
