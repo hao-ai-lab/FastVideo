@@ -58,6 +58,54 @@ records, see `performance_dashboard/README.md`. The dashboard provides a
 FastAPI API plus a React UI and can be exposed with `ngrok` after building the
 frontend.
 
+## DGX Spark (GB10) local benchmarking
+
+The NVIDIA DGX Spark (GB10) is not available on Modal, so its coverage is
+**local/manual** rather than automated CI. The GB10 benchmark
+`wan-t2v-1.3b-1gpu-gb10` is gated to the GB10 via `run_config.gpu_types`
+(matched as substrings of the CUDA device name), so the shared H100/L40S
+performance lanes discover it and skip it, while a GB10 owner runs it locally.
+
+Run just the GB10 benchmark on a DGX Spark:
+
+```bash
+pytest 'fastvideo/tests/performance/test_inference_performance.py::test_inference_performance[wan-t2v-1.3b-1gpu-gb10]' -vs
+```
+
+To check run-to-run stability (latency, peak memory, throughput), run it a few
+times from a clean results directory, then normalize:
+
+```bash
+rm -f fastvideo/tests/performance/results/perf_*.json
+for i in 1 2 3 4 5; do
+  pytest 'fastvideo/tests/performance/test_inference_performance.py::test_inference_performance[wan-t2v-1.3b-1gpu-gb10]' -vs
+done
+PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
+  python fastvideo/tests/performance/compare_baseline.py
+```
+
+`compare_baseline.py` reports `CALIBRATION_NEEDED` until a baseline exists for
+the GB10 identity, and writes one `normalized_perf_*.json` per run. Reference
+figures on a GB10 (torch 2.12.0+cu130, transformers 5.14.0): generation ~39.3 s,
+peak ~8.4 GB, throughput ~1.15 fps, stable to ~0.4% across five runs.
+
+### Seeding the GB10 baseline (follow-up)
+
+Seeding a baseline-eligible record for the GB10 identity is intentionally **not**
+done from a local run: `seed_baseline.py` accepts only `scheduled_main`
+full-suite source artifacts, so ordinary local/manual uploads stay
+`baseline_eligible=false` (dashboard-visible, but they do not move the rolling
+baseline). Establishing the GB10 baseline requires either:
+
+* a scheduled-main performance run on a GB10 CI runner once one is available, or
+* a carefully scoped, maintainer-approved manual calibration path that preserves
+  the existing exact-identity, batch-consistency, provenance, and
+  explicit-approval safeguards — it must **not** make arbitrary local uploads
+  baseline-eligible.
+
+The reviewed five-run GB10 artifacts are the stability evidence for that first
+baseline. Tracked in #1632.
+
 ## Architecture
 
 ```
