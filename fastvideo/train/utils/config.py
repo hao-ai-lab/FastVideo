@@ -280,6 +280,28 @@ def _parse_pipeline_config(
     if isinstance(pipeline_raw, str):
         kwargs["pipeline_config"] = _resolve_existing_file(pipeline_raw)
 
+    # The FullAttn inference config rejects VSA, but its LoRA recipe trains a
+    # VSA student from the same 5B weights. Only this training path substitutes
+    # the sparse-capable config; teacher/critic loads remain dense by scope.
+    training = cfg.get("training") or {}
+    vsa = training.get("vsa") or {}
+    if model_path is not None and float(vsa.get("sparsity", 0.0) or 0.0) > 0:
+        from fastvideo.models.wan.pipeline_config import (
+            FastWan2_2_TI2V_5B_Config,
+            FastWan2_2_TI2V_5B_FullAttn_Config,
+        )
+        from fastvideo.registry import get_pipeline_config_cls_from_name
+
+        if get_pipeline_config_cls_from_name(model_path) is FastWan2_2_TI2V_5B_FullAttn_Config:
+            training_config = FastWan2_2_TI2V_5B_Config()
+            pipeline_override = kwargs["pipeline_config"]
+            if isinstance(pipeline_override, str):
+                training_config.load_from_json(pipeline_override)
+                kwargs["pipeline_config_path"] = pipeline_override
+            else:
+                training_config.update_pipeline_config(pipeline_override)
+            kwargs["pipeline_config"] = training_config
+
     pipeline_config = PipelineConfig.from_kwargs(kwargs)
     _apply_training_dit_arch_overrides(pipeline_config, dit_arch_overrides)
     _resolve_dit_quant_config(pipeline_config)

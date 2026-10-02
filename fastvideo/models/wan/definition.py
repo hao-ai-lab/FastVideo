@@ -26,6 +26,21 @@ class WanModelDefinition:
     match_any: tuple[str, ...] = ()
     match_all: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
+    match_model_index: tuple[tuple[str, str | bool], ...] = ()
+
+    def matches_model_index(self, model_index: dict) -> bool:
+        """Match variant metadata before broad path and pipeline-name fallbacks."""
+        if not self.match_model_index:
+            return False
+        for key, expected in self.match_model_index:
+            actual = model_index.get(key, "")
+            if isinstance(expected, bool):
+                # A string or integer truth value is not a manifest boolean.
+                if actual is not expected:
+                    return False
+            elif str(actual).lower() != expected.lower():
+                return False
+        return True
 
     def matches(self, path_or_class: str) -> bool:
         """Preserve legacy substring detectors, including their broad matches."""
@@ -102,12 +117,13 @@ WAN_MODEL_DEFINITION_GROUPS = (
     ),
     (
         WanModelDefinition(
-            pipeline_config="FastWan2_2_TI2V_5B_Config",
+            pipeline_config="FastWan2_2_TI2V_5B_FullAttn_Config",
             preset="fast_wan_2_2_ti2v_5b",
             sampling="dmd",
             hf_model_paths=("FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
                             "FastVideo/FastWan2.2-TI2V-5B-Diffusers"),
-            workload_types=("t2v", "i2v"),
+            workload_types=("t2v", ),
+            match_model_index=(("_class_name", "WanDMDPipeline"), ("expand_timesteps", True)),
         ),
         WanModelDefinition(
             pipeline_config="LucyEditDevConfig",

@@ -272,6 +272,41 @@ def test_pipeline_quant_config_rejects_unknown_name(tmp_path: Path) -> None:
         load_run_config(_write_yaml(tmp_path, data))
 
 
+def test_fullattn_vsa_lora_recipe_uses_sparse_capable_training_config() -> None:
+    from fastvideo.models.wan.pipeline_config import (
+        FastWan2_2_TI2V_5B_Config,
+        FastWan2_2_TI2V_5B_FullAttn_Config,
+    )
+
+    recipe = Path("examples/train/configs/fine_tuning/wan/fast_ti2v_fullattn_lora_vsa.yaml")
+    cfg = load_run_config(str(recipe))
+    pipeline = cfg.training.pipeline_config
+    assert type(pipeline) is FastWan2_2_TI2V_5B_Config
+    assert pipeline.flow_shift == 5
+    assert pipeline.ti2v_task is True
+    assert cfg.training.vsa_sparsity == pytest.approx(0.8)
+    assert "to_gate_compress" in cfg.models["student"]["lora"]["target_modules"]
+
+    # The public inference config remains dense-only despite this training
+    # exception, including when selected through its legacy checkpoint alias.
+    inference = FastWan2_2_TI2V_5B_FullAttn_Config()
+    with pytest.raises(ValueError, match="incompatible with VIDEO_SPARSE_ATTN"):
+        inference.validate_runtime_request("t2v", "VIDEO_SPARSE_ATTN")
+    with pytest.raises(ValueError, match="does not support workload"):
+        inference.validate_runtime_request("i2v", "FLASH_ATTN")
+
+
+def test_fullattn_dense_training_keeps_dense_inference_config(tmp_path: Path) -> None:
+    from fastvideo.models.wan.pipeline_config import FastWan2_2_TI2V_5B_FullAttn_Config
+
+    data = _minimal_yaml()
+    data["models"]["student"]["init_from"] = "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers"
+    data["pipeline"] = {"flow_shift": 7}
+    cfg = load_run_config(_write_yaml(tmp_path, data))
+    assert type(cfg.training.pipeline_config) is FastWan2_2_TI2V_5B_FullAttn_Config
+    assert cfg.training.pipeline_config.flow_shift == 7
+
+
 def test_data_path_mapping_parses_repeat_counts(tmp_path: Path) -> None:
     # Config loading should preserve structured multi-dataset paths so the
     # dataset layer can interpret repeat counts later.
