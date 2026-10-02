@@ -125,6 +125,26 @@ Override individual values from the CLI with dotted paths:
 fastvideo generate --config config.yaml --request.sampling.seed 42
 ```
 
+## Where a Value Came From
+
+FastVideo resolves the generator config once at startup and records the source of every value: the input config
+(`input`; `explicit` tells whether you wrote the value or it is the schema default), a `FASTVIDEO_*` environment
+variable, the model's defaults, or a derived value. A worker's device policy and values read from checkpoint files
+are recorded too.
+
+```python
+generator = VideoGenerator.from_config(config)
+generator.resolved_config.provenance("engine.parallelism.sp_size")
+# PathProvenance(path='engine.parallelism.sp_size', value=2, source='derive_parallel_sizes', ...)
+
+result = generator.generate(request)
+result.resolved_request.provenance("sampling.num_frames")
+# PathProvenance(..., value=81, source='fill_sampling_defaults[preset wan_t2v_1_3b]', explicit=False)
+```
+
+`resolved_config.provenance_table()` lists every path. After startup, the configuration that `FastVideoArgs`
+carries is read-only.
+
 ## Performance Optimization
 
 For configuring optimizations, please see our [optimizations guide](optimizations.md)
