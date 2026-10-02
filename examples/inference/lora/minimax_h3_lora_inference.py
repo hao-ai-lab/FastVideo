@@ -158,7 +158,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     from fastvideo.models.loader.lora_patch import DenseLoRAPatch
     from fastvideo import VideoGenerator
     from fastvideo.api import (AttentionConfig, CompileConfig, ComponentConfig, EngineConfig, GenerationRequest,
-                               GeneratorConfig, MiniMaxH3Config, OffloadConfig, OutputConfig, ParallelismConfig,
+                               GeneratorConfig, MiniMaxH3Options, OffloadConfig, OutputConfig, ParallelismConfig,
                                PipelineSelection, SamplingConfig)
 
     # An adapter carrying to_gate_compress needs the VSA backend, because that is the
@@ -182,7 +182,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         model_path=args.model_path,
         pipeline=PipelineSelection(
             components=ComponentConfig(lora_path=args.lora_path, lora_strength=args.lora_strength),
-            minimax_h3=MiniMaxH3Config(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
+            minimax_h3=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
         ),
         engine=EngineConfig(
             num_gpus=args.num_gpus,

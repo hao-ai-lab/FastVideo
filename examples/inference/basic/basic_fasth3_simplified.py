@@ -23,7 +23,7 @@ from fastvideo.api import (  # noqa: E402
     EngineConfig,
     GenerationRequest,
     GeneratorConfig,
-    MiniMaxH3Config,
+    MiniMaxH3Options,
     OffloadConfig,
     OutputConfig,
     ParallelismConfig,
@@ -73,7 +73,7 @@ def main() -> None:
             model_path="MiniMaxAI/MiniMax-H3",
             pipeline=PipelineSelection(
                 components=ComponentConfig(lora_path=adapter_path, lora_strength=1.0),
-                minimax_h3=MiniMaxH3Config(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
+                minimax_h3=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
             ),
             engine=EngineConfig(
                 num_gpus=4,

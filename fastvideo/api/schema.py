@@ -154,7 +154,7 @@ class ComponentConfig:
 
 
 @dataclass
-class LTX2RefineConfig:
+class LTX2RefineOptions:
     """Stage-2 refine assets that ``preset_overrides.refine`` and ``components`` do not cover."""
 
     transformer_path: str | None = flat_field("ltx2_refine_transformer_path", None)
@@ -163,7 +163,7 @@ class LTX2RefineConfig:
 
 
 @dataclass
-class LTX2Config:
+class LTX2Options:
     """LTX-2 settings. ``None`` keeps the model's default."""
 
     vae_spatial_tile_size_in_pixels: int | None = flat_field("ltx2_vae_spatial_tile_size_in_pixels", None)
@@ -178,11 +178,11 @@ class LTX2Config:
     """Draw latent noise in the legacy native order, which earlier SSIM references use."""
     use_distilled_sigmas: bool | None = flat_field("ltx2_use_distilled_sigmas", None)
     """Use the distilled sigma schedule when the checkpoint provides one."""
-    refine: LTX2RefineConfig = field(default_factory=LTX2RefineConfig)
+    refine: LTX2RefineOptions = field(default_factory=LTX2RefineOptions)
 
 
 @dataclass
-class MiniMaxH3Config:
+class MiniMaxH3Options:
     """MiniMax-H3 settings. ``None`` keeps the model's default."""
 
     sequential_load: bool | None = flat_field("h3_sequential_load", None)
@@ -207,7 +207,7 @@ class MiniMaxH3Config:
 
 
 @dataclass
-class LongCatConfig:
+class LongCatOptions:
     """LongCat block sparse attention (BSA) settings. ``None`` keeps the model's default."""
 
     enable_bsa: bool | None = flat_field("enable_bsa", None)
@@ -239,9 +239,9 @@ class PipelineSelection:
     """Overrides for fields of the model's DiT config, such as ``prefix``."""
     vae: dict[str, Any] = field(default_factory=dict)
     """Overrides for fields of the model's VAE config, such as ``load_encoder`` or ``use_tiling``."""
-    ltx2: LTX2Config = field(default_factory=LTX2Config)
-    minimax_h3: MiniMaxH3Config = field(default_factory=MiniMaxH3Config)
-    longcat: LongCatConfig = field(default_factory=LongCatConfig)
+    ltx2: LTX2Options = field(default_factory=LTX2Options)
+    minimax_h3: MiniMaxH3Options = field(default_factory=MiniMaxH3Options)
+    longcat: LongCatOptions = field(default_factory=LongCatOptions)
     preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
 
@@ -436,10 +436,10 @@ __all__ = [
     "GeneratorConfig",
     "GpuPoolConfig",
     "InputConfig",
-    "LTX2Config",
-    "LTX2RefineConfig",
-    "LongCatConfig",
-    "MiniMaxH3Config",
+    "LTX2Options",
+    "LTX2RefineOptions",
+    "LongCatOptions",
+    "MiniMaxH3Options",
     "OffloadConfig",
     "OutputConfig",
     "ParallelismConfig",

@@ -84,7 +84,7 @@ class MiniMaxH3GenerationBackend:
             ComponentConfig,
             EngineConfig,
             GeneratorConfig,
-            MiniMaxH3Config,
+            MiniMaxH3Options,
             OffloadConfig,
             ParallelismConfig,
             PipelineSelection,
@@ -96,7 +96,7 @@ class MiniMaxH3GenerationBackend:
             model_path=model_path,
             pipeline=PipelineSelection(
                 components=ComponentConfig(lora_path=adapter_path, lora_strength=1.0),
-                minimax_h3=MiniMaxH3Config(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
+                minimax_h3=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
             ),
             engine=EngineConfig(
                 num_gpus=DREAMVERSE_SP_SIZE,
