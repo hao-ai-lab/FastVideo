@@ -5,10 +5,11 @@ Each case builds the configuration objects that runtime code reads (``FastVideoA
 and a ``SamplingParam`` where the case has a request) through one of the public entry paths:
 
 - ``registry``: every registered model path, through ``FastVideoArgs.from_kwargs`` and ``SamplingParam.from_pretrained``.
-- ``yaml``: every repository config file with a ``generator`` section, through ``load_generator_config_from_file`` and
-  ``generator_config_to_fastvideo_args``; its ``request`` or ``default_request`` through the ``fastvideo generate`` and
+- ``yaml``: every repository config file with a ``generator`` section, through ``load_generator_config_from_file``,
+  ``resolve_inference_config``, and ``generator_config_to_fastvideo_args``, with the resolution decisions; its ``request`` or ``default_request`` through the ``fastvideo generate`` and
   ``fastvideo serve`` loaders and ``request_to_sampling_param``.
-- ``kwargs``: ``VideoGenerator.from_pretrained`` keywords, through ``legacy_from_pretrained_to_config``.
+- ``kwargs``: ``VideoGenerator.from_pretrained`` keywords, through ``legacy_from_pretrained_to_config`` and the same
+  resolution.
 - ``cli``: argparse flags, through ``FastVideoArgs.add_cli_args`` and ``FastVideoArgs.from_cli_args``.
 - ``env``: environment variables that ``FastVideoArgs.__post_init__`` folds into fields.
 - ``request``: typed ``GenerationRequest`` values, through ``request_to_sampling_param``.
@@ -145,6 +146,17 @@ def snapshot_fastvideo_args(fastvideo_args: Any) -> dict[str, Any]:
     }
 
 
+def snapshot_resolved_fastvideo_args(generator_config: Any) -> dict[str, Any]:
+    """Resolve a GeneratorConfig the way VideoGenerator.from_config does, and record the resolution decisions."""
+    from fastvideo.api.compat import generator_config_to_fastvideo_args
+    from fastvideo.api.inference_resolution import resolve_inference_config
+
+    resolved = resolve_inference_config(generator_config)
+    snapshot = snapshot_fastvideo_args(generator_config_to_fastvideo_args(resolved))
+    snapshot["resolution_decisions"] = to_jsonable(resolved.decisions)
+    return snapshot
+
+
 def snapshot_sampling_param(sampling_param: Any) -> dict[str, Any]:
     return {
         "sampling_param_class": f"{type(sampling_param).__module__}.{type(sampling_param).__qualname__}",
@@ -226,10 +238,10 @@ def _yaml_case(path: Path) -> Callable[[], dict[str, Any]]:
 
     def build() -> dict[str, Any]:
         """Load the file the way VideoGenerator.from_file and the CLI do."""
-        from fastvideo.api.compat import generator_config_to_fastvideo_args, load_generator_config_from_file
+        from fastvideo.api.compat import load_generator_config_from_file
 
         generator_config = load_generator_config_from_file(path)
-        snapshot = snapshot_fastvideo_args(generator_config_to_fastvideo_args(generator_config))
+        snapshot = snapshot_resolved_fastvideo_args(generator_config)
         snapshot.update(snapshot_request(_yaml_request(path), generator_config.model_path))
         return snapshot
 
@@ -249,10 +261,9 @@ def _yaml_request(path: Path) -> Any:
 def _kwargs_case(model_path: str, kwargs: dict[str, Any]) -> Callable[[], dict[str, Any]]:
 
     def build() -> dict[str, Any]:
-        from fastvideo.api.compat import generator_config_to_fastvideo_args, legacy_from_pretrained_to_config
+        from fastvideo.api.compat import legacy_from_pretrained_to_config
 
-        generator_config = legacy_from_pretrained_to_config(model_path, kwargs)
-        return snapshot_fastvideo_args(generator_config_to_fastvideo_args(generator_config))
+        return snapshot_resolved_fastvideo_args(legacy_from_pretrained_to_config(model_path, kwargs))
 
     return build
 

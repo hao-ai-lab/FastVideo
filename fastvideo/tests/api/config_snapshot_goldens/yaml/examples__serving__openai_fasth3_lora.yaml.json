@@ -485,6 +485,7 @@
  "pipeline_config_class": "fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig",
  "request_batch_extra": {},
  "request_pipeline_overrides": {},
+ "resolution_decisions": [],
  "sampling_param": {
   "action_list": null,
   "action_path": null,

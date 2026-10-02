@@ -399,5 +399,6 @@
   "vae_sp": true,
   "vae_tiling": true
  },
- "pipeline_config_class": "fastvideo.configs.pipelines.hunyuan.FastHunyuanConfig"
+ "pipeline_config_class": "fastvideo.configs.pipelines.hunyuan.FastHunyuanConfig",
+ "resolution_decisions": []
 }

@@ -40,6 +40,8 @@ from fastvideo.api.compat import (
     request_to_pipeline_overrides,
     request_to_sampling_param,
 )
+from fastvideo.api.inference_resolution import resolve_inference_config
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.results import (
     GenerationResult,
     VideoFinalEvent,
@@ -171,6 +173,8 @@ class VideoGenerator:
             log_queue: Optional multiprocessing.Queue to forward worker logs to
         """
         self.config: GeneratorConfig | None = None
+        # Resolved startup values with the provenance of each path; set by from_config.
+        self.resolved_config: ResolvedGeneratorConfig | None = None
         self.fastvideo_args = fastvideo_args
         self.executor = executor_class(fastvideo_args, log_queue=log_queue)
 
@@ -242,9 +246,11 @@ class VideoGenerator:
         log_queue=None,
     ) -> "VideoGenerator":
         normalized = normalize_generator_config(config)
-        fastvideo_args = generator_config_to_fastvideo_args(normalized)
+        resolved = resolve_inference_config(config)
+        fastvideo_args = generator_config_to_fastvideo_args(resolved)
         generator = cls.from_fastvideo_args(fastvideo_args, log_queue=log_queue)
         generator.config = normalized
+        generator.resolved_config = resolved
         return generator
 
     @classmethod

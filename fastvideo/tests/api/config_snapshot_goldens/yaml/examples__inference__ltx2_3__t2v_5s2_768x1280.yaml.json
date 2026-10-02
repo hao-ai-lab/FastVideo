@@ -355,6 +355,7 @@
  "pipeline_config_class": "fastvideo.pipelines.basic.ltx2.pipeline_configs.LTX2T2VConfig",
  "request_batch_extra": {},
  "request_pipeline_overrides": {},
+ "resolution_decisions": [],
  "sampling_param": {
   "action_list": null,
   "action_path": null,

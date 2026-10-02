@@ -352,5 +352,6 @@
   },
   "vocoder_precision": "bf16"
  },
- "pipeline_config_class": "fastvideo.pipelines.basic.ltx2.pipeline_configs.LTX2T2VConfig"
+ "pipeline_config_class": "fastvideo.pipelines.basic.ltx2.pipeline_configs.LTX2T2VConfig",
+ "resolution_decisions": []
 }

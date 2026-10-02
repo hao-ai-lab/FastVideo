@@ -7,8 +7,10 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.api.overrides import apply_overrides, normalize_overrides
 from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.request_metadata import (
     EXPLICIT_PATHS_ATTR,
     bind_generation_request_raw,
@@ -131,14 +133,17 @@ def legacy_from_pretrained_to_config(
     return parse_config(GeneratorConfig, raw)
 
 
-def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, Any], ) -> FastVideoArgs:
-    """Flatten a ``GeneratorConfig`` into the ``FastVideoArgs`` that runtime code reads.
+def generator_config_to_fastvideo_args(
+    config: GeneratorConfig | Mapping[str, Any] | ResolvedGeneratorConfig, ) -> FastVideoArgs:
+    """Resolve a ``GeneratorConfig`` and flatten it into the ``FastVideoArgs`` that runtime code reads.
 
-    Every field that declares a flat name and holds a value other than ``None`` becomes the keyword of that name.
+    A config that is not resolved yet goes through :func:`resolve_inference_config` first. Every field of the
+    resolved config that declares a flat name and holds a value other than ``None`` becomes the keyword of that name.
     The paths in ``_SPECIALLY_MAPPED_PATHS`` are converted below; ``pipeline.preset_overrides`` and then
     ``pipeline.experimental`` are applied last, so their keys win over the typed fields.
     """
-    normalized = normalize_generator_config(config)
+    resolved = config if isinstance(config, ResolvedGeneratorConfig) else resolve_inference_config(config)
+    normalized = resolved.to_config()
     unsupported = []
     if normalized.pipeline.preset is not None:
         unsupported.append("pipeline.preset")

@@ -342,6 +342,7 @@
  "pipeline_config_class": "fastvideo.configs.pipelines.flux_2.Flux2KleinPipelineConfig",
  "request_batch_extra": {},
  "request_pipeline_overrides": {},
+ "resolution_decisions": [],
  "sampling_param": {
   "action_list": null,
   "action_path": null,

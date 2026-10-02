@@ -374,6 +374,7 @@
  "pipeline_config_class": "fastvideo.models.wan.pipeline_config.WanT2V480PConfig",
  "request_batch_extra": {},
  "request_pipeline_overrides": {},
+ "resolution_decisions": [],
  "sampling_param": {
   "action_list": null,
   "action_path": null,

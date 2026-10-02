@@ -376,5 +376,6 @@
   "vae_tiling": false,
   "warp_denoising_step": true
  },
- "pipeline_config_class": "fastvideo.models.wan.pipeline_config.Wan2_2_T2V_A14B_Config"
+ "pipeline_config_class": "fastvideo.models.wan.pipeline_config.Wan2_2_T2V_A14B_Config",
+ "resolution_decisions": []
 }
