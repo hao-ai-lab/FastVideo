@@ -192,16 +192,18 @@ class LTX2Pipeline(LoRAPipeline):
         # Apply optional FastVideo-specific refine defaults embedded in
         # model_index.json. These are bundled with distilled checkpoints
         # so the pipeline can self-configure without explicit user kwargs.
+        refine_defaults: dict[str, Any] = {}
         if (model_index.get("fastvideo_refine_enabled") is True and fastvideo_args.refine_enabled is None):
-            fastvideo_args.ltx2_refine_enabled = True
+            refine_defaults["ltx2_refine_enabled"] = True
         if (fastvideo_args.refine_upsampler_path is None and fastvideo_args.ltx2_refine_upsampler_path is None):
-            fastvideo_args.ltx2_refine_upsampler_path = (_resolve_refine_upsampler_path(self.model_path, model_index))
+            refine_defaults["ltx2_refine_upsampler_path"] = (_resolve_refine_upsampler_path(
+                self.model_path, model_index))
         if (fastvideo_args.refine_transformer_path is None and fastvideo_args.ltx2_refine_transformer_path is None):
-            fastvideo_args.ltx2_refine_transformer_path = (_resolve_refine_path(
+            refine_defaults["ltx2_refine_transformer_path"] = (_resolve_refine_path(
                 self.model_path, model_index.get("fastvideo_refine_transformer_path")))
         if (fastvideo_args.refine_lora_path is None and fastvideo_args.ltx2_refine_lora_path is None):
-            fastvideo_args.ltx2_refine_lora_path = _resolve_refine_path(self.model_path,
-                                                                        model_index.get("fastvideo_refine_lora_path"))
+            refine_defaults["ltx2_refine_lora_path"] = _resolve_refine_path(
+                self.model_path, model_index.get("fastvideo_refine_lora_path"))
         if (fastvideo_args.refine_num_inference_steps is None
                 and fastvideo_args.ltx2_refine_num_inference_steps == FastVideoArgs.ltx2_refine_num_inference_steps
                 and model_index.get("fastvideo_refine_num_inference_steps") is not None):
@@ -210,18 +212,22 @@ class LTX2Pipeline(LoRAPipeline):
             # or ltx2_refine_num_inference_steps (LTX-2-specific). This
             # prevents bundled defaults from overwriting explicit caller
             # intent (e.g. requesting 2-step refinement).
-            fastvideo_args.ltx2_refine_num_inference_steps = int(model_index["fastvideo_refine_num_inference_steps"])
+            refine_defaults["ltx2_refine_num_inference_steps"] = int(
+                model_index["fastvideo_refine_num_inference_steps"])
         if (fastvideo_args.refine_guidance_scale is None
                 and model_index.get("fastvideo_refine_guidance_scale") is not None):
-            fastvideo_args.ltx2_refine_guidance_scale = float(model_index["fastvideo_refine_guidance_scale"])
+            refine_defaults["ltx2_refine_guidance_scale"] = float(model_index["fastvideo_refine_guidance_scale"])
         if (fastvideo_args.refine_add_noise is None and model_index.get("fastvideo_refine_add_noise") is not None):
-            fastvideo_args.ltx2_refine_add_noise = bool(model_index["fastvideo_refine_add_noise"])
+            refine_defaults["ltx2_refine_add_noise"] = bool(model_index["fastvideo_refine_add_noise"])
         if (fastvideo_args.refine_noise_path is None and fastvideo_args.ltx2_refine_noise_path is None):
-            fastvideo_args.ltx2_refine_noise_path = _resolve_refine_path(self.model_path,
-                                                                         model_index.get("fastvideo_refine_noise_path"))
+            refine_defaults["ltx2_refine_noise_path"] = _resolve_refine_path(
+                self.model_path, model_index.get("fastvideo_refine_noise_path"))
         if (fastvideo_args.refine_audio_noise_path is None and fastvideo_args.ltx2_refine_audio_noise_path is None):
-            fastvideo_args.ltx2_refine_audio_noise_path = (_resolve_refine_path(
+            refine_defaults["ltx2_refine_audio_noise_path"] = (_resolve_refine_path(
                 self.model_path, model_index.get("fastvideo_refine_audio_noise_path")))
+        changed = {key: value for key, value in refine_defaults.items() if getattr(fastvideo_args, key) != value}
+        if changed:
+            fastvideo_args.override("checkpoint:model_index.json", changed)
 
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")

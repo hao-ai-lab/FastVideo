@@ -88,6 +88,18 @@ class PipelineConfig:
     # Compilation
     # enable_torch_compile: bool = False
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if self.__dict__.get("_frozen") and name in self.__dataclass_fields__:
+            raise AttributeError(f"{type(self).__name__}.{name} was decided by config resolution and is read-only; "
+                                 f"use fastvideo_args.override(source, {{'pipeline_config.{name}': value}}) to "
+                                 "change it")
+        super().__setattr__(name, value)
+
+    def freeze(self) -> None:
+        """Make the fields read-only. Nested component configs stay writable for the checkpoint data that loaders
+        add to them."""
+        object.__setattr__(self, "_frozen", True)
+
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser, prefix: str = "") -> FlexibleArgumentParser:
         prefix_with_dot = f"{prefix}." if (prefix.strip() != "") else ""

@@ -191,7 +191,8 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         config = fastvideo_args.pipeline_config
         if config.dmd_denoising_steps is not None and config.dmd_denoising_steps != steps:
             raise ValueError("Explicit DMD schedule disagrees with the checkpoint's trained DMD rungs.")
-        config.dmd_denoising_steps = list(steps)
+        fastvideo_args.override("checkpoint:fastvideo_inference.json",
+                                {"pipeline_config.dmd_denoising_steps": list(steps)})
         logger.info("FastH3 checkpoint schedule: %d transformer forwards, DMD rungs=%s, video/audio shifts=%s/%s",
                     len(steps), steps,
                     self.get_module("scheduler").shift,

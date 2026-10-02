@@ -12,8 +12,9 @@ precedence over a later one: user input, then environment variables, then model 
 2. Model defaults from the model's ``PipelineConfig`` fill the typed fields that are still unset.
 3. Derived values replace placeholders.
 
-``FastVideoArgs.__post_init__`` and ``check_fastvideo_args`` still apply the same rules to a ``FastVideoArgs`` that
-is built directly; for a resolved config they find the values already decided and change nothing.
+``FastVideoArgs.__post_init__`` and ``check_fastvideo_args`` still apply these rules to a ``FastVideoArgs`` that is
+built directly. A ``FastVideoArgs`` built from a resolved config skips the environment folds, keeps the config as
+``resolved_config``, and is read-only after construction; later decisions go through ``FastVideoArgs.override``.
 """
 from __future__ import annotations
 
@@ -42,8 +43,8 @@ def fill_attention_backend_from_env(view: ResolutionView) -> dict[str, Any]:
 
 
 def fill_regional_compile_from_env(view: ResolutionView) -> dict[str, Any]:
-    """``FASTVIDEO_INFERENCE_TORCH_COMPILE`` turns ``engine.compile.regional`` on unless it is already on."""
-    if view.get("engine.compile.regional") or not envs.FASTVIDEO_INFERENCE_TORCH_COMPILE.get():
+    """``FASTVIDEO_INFERENCE_TORCH_COMPILE`` turns ``engine.compile.regional`` on while the field is unset."""
+    if view.get("engine.compile.regional") is not None or not envs.FASTVIDEO_INFERENCE_TORCH_COMPILE.get():
         return {}
     return {"engine.compile.regional": True}
 
@@ -51,13 +52,13 @@ def fill_regional_compile_from_env(view: ResolutionView) -> dict[str, Any]:
 def fill_vae_parallel_from_env(view: ResolutionView) -> dict[str, Any]:
     """The ``FASTVIDEO_VAE_PARALLEL_*`` variables set the MiniMax-H3 sequence-parallel VAE options.
 
-    Each switch turns on unless it is already on. The decode strategy fills while it is unset, and is ``gather``
-    when the variable is unset too.
+    Each switch turns on while it is unset. The decode strategy fills while it is unset, and is ``gather`` when
+    the variable is unset too.
     """
     values: dict[str, Any] = {}
-    if not view.get("pipeline.minimax_h3.vae_parallel_decode") and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
+    if view.get("pipeline.minimax_h3.vae_parallel_decode") is None and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
         values["pipeline.minimax_h3.vae_parallel_decode"] = True
-    if not view.get("pipeline.minimax_h3.vae_parallel_encode") and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
+    if view.get("pipeline.minimax_h3.vae_parallel_encode") is None and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
         values["pipeline.minimax_h3.vae_parallel_encode"] = True
     if view.get("pipeline.minimax_h3.vae_parallel_decode_strategy") is None:
         strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY.get() or "gather"

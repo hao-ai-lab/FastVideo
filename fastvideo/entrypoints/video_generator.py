@@ -462,7 +462,7 @@ class VideoGenerator:
                 for key, value in pipeline_overrides.items():
                     if not hasattr(fastvideo_args.pipeline_config, key):
                         raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
-                    setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+                    fastvideo_args.override("request", {f"pipeline_config.{key}": deepcopy(value)})
 
             resolved_sampling_param = request_to_sampling_param(
                 request,
@@ -512,7 +512,7 @@ class VideoGenerator:
             for key, value in pipeline_overrides.items():
                 if not hasattr(fastvideo_args.pipeline_config, key):
                     raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
-                setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
+                fastvideo_args.override("request", {f"pipeline_config.{key}": deepcopy(value)})
 
         sampling_param = request_to_sampling_param(
             request,

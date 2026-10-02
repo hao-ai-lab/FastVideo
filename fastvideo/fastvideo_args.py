@@ -5,6 +5,7 @@ import argparse
 import dataclasses
 import json
 import math
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -320,11 +321,46 @@ class FastVideoArgs:
     # MoE parameters used by Wan2.2
     boundary_ratio: float | None = 0.875
 
+    # The resolved typed config that generator_config_to_fastvideo_args builds this object from. When it is given,
+    # resolution has already decided the environment folds below, the object keeps the config as
+    # ``resolved_config``, and after construction its fields change only through override().
+    resolved_config: dataclasses.InitVar[Any] = None
+
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
 
-    def __post_init__(self):
+    def __setattr__(self, name: str, value: Any) -> None:
+        if self.__dict__.get("_frozen") and name in self.__dataclass_fields__ and name not in RUNTIME_STATE_FIELDS:
+            raise AttributeError(f"FastVideoArgs.{name} was decided by config resolution and is read-only; "
+                                 f"use fastvideo_args.override(source, {{{name!r}: value}}) to change it")
+        super().__setattr__(name, value)
+
+    def override(self, source: str, values: Mapping[str, Any]) -> None:
+        """Change fields after construction and record the change as ``(source, values)`` in ``override_log``.
+
+        A key is a FastVideoArgs field name, or ``pipeline_config.<field>`` for a PipelineConfig field. On an
+        object built from a resolved config, the change is also recorded on ``resolved_config`` for every key
+        whose name a typed config field declares as its flat name.
+        """
+        if not source:
+            raise ValueError("an override needs a non-empty source name")
+        typed_values: dict[str, Any] = {}
+        for key, value in values.items():
+            target, name = ((self.pipeline_config, key.split(".", 1)[1]) if key.startswith("pipeline_config.") else
+                            (self, key))
+            if name not in target.__dataclass_fields__:
+                raise AttributeError(f"{type(target).__name__} has no field {name!r}")
+            object.__setattr__(target, name, value)
+            typed_path = _typed_path_for_flat_name(name)
+            if typed_path is not None:
+                typed_values[typed_path] = value
+        self.__dict__.setdefault("override_log", []).append((source, dict(values)))
+        resolved = self.__dict__.get("resolved_config")
+        if resolved is not None and typed_values:
+            object.__setattr__(self, "resolved_config", resolved.with_override(source, typed_values))
+
+    def __post_init__(self, resolved_config: Any = None):
         if not math.isfinite(self.lora_strength):
             raise ValueError(f"lora_strength must be finite, got {self.lora_strength}")
         if self.moba_config_path:
@@ -340,7 +376,8 @@ class FastVideoArgs:
         self._apply_transformer_quant()
         # The env folds below repeat fill_*_from_env in fastvideo/api/inference_resolution.py
         # for a FastVideoArgs built directly; a resolved config arrives with the values decided.
-        if not self.inference_torch_compile:
+        fold_environment = resolved_config is None
+        if fold_environment and not self.inference_torch_compile:
             # Parse-once adapter (same pattern as attention_backend below): the
             # environment variable is an input read once here, so the loader
             # only ever consults the typed field.
@@ -351,7 +388,7 @@ class FastVideoArgs:
             # Fail fast on typos instead of silently auto-selecting later.
             from fastvideo.attention.selector import coerce_attn_backend
             coerce_attn_backend(self.attention_backend)
-        else:
+        elif fold_environment:
             # Parse-once adapter: fold the environment variable into the typed
             # request so resolution has a single input and library code never
             # consults the environment on the load path. An unsupported name
@@ -360,25 +397,30 @@ class FastVideoArgs:
             env_backend = get_env_variable_attn_backend()
             if env_backend is not None:
                 self.attention_backend = env_backend.name
-        self._fold_vae_parallel_env()
+        self._fold_vae_parallel_env(fold_environment)
         import fastvideo.envs as envs
         envs.warn_deprecated_variables()
         self.check_fastvideo_args()
+        if resolved_config is not None:
+            object.__setattr__(self, "resolved_config", resolved_config)
+            object.__setattr__(self, "_frozen", True)
+            self.pipeline_config.freeze()
 
-    def _fold_vae_parallel_env(self) -> None:
-        """Parse-once adapters for the sequence-parallel VAE env vars."""
+    def _fold_vae_parallel_env(self, fold_environment: bool = True) -> None:
+        """Parse-once adapters for the sequence-parallel VAE env vars, then validate the decode strategy."""
         import fastvideo.envs as envs
 
         # Mirrors fastvideo.models.vaes.minimax_h3_parallel.DECODE_GATHER_STRATEGIES /
         # DEFAULT_DECODE_GATHER_STRATEGY (kept literal here so constructing args
         # never imports model modules; a unit test pins the two in sync).
         strategies = ("gather", "all_gather")
-        if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
-            self.vae_parallel_decode = True
-        if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
-            self.vae_parallel_encode = True
-        if self.vae_parallel_decode_strategy is None:
-            self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY.get() or "gather"
+        if fold_environment:
+            if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
+                self.vae_parallel_decode = True
+            if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
+                self.vae_parallel_encode = True
+            if self.vae_parallel_decode_strategy is None:
+                self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY.get() or "gather"
         if self.vae_parallel_decode_strategy not in strategies:
             raise ValueError(f"vae_parallel_decode_strategy must be one of {strategies}, "
                              f"got {self.vae_parallel_decode_strategy!r}.")
@@ -931,7 +973,7 @@ class FastVideoArgs:
         # Filter to only FastVideoArgs dataclass fields — pipeline-specific CLI
         # args (e.g. enable_bsa, bsa_sparsity) live in PipelineConfig and must
         # not be forwarded to the FastVideoArgs constructor.
-        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        valid_fields = {f.name for f in dataclasses.fields(cls)} | {"resolved_config"}
         return cls(**{k: v for k, v in kwargs.items() if k in valid_fields})
 
     def check_fastvideo_args(self) -> None:
@@ -1001,22 +1043,22 @@ class FastVideoArgs:
         from fastvideo.platforms import current_platform
 
         if current_platform.is_mps():
-            self.use_fsdp_inference = False
-            self.dit_layerwise_offload = False
+            self.override("device_policy:mps", {"use_fsdp_inference": False, "dit_layerwise_offload": False})
 
         if self.dit_layerwise_offload:
             if self.use_fsdp_inference:
                 logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
-                self.use_fsdp_inference = False
+                self.override("device_policy:layerwise_offload", {"use_fsdp_inference": False})
             if self.dit_cpu_offload:
                 logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
-                self.dit_cpu_offload = False
+                self.override("device_policy:layerwise_offload", {"dit_cpu_offload": False})
 
     def finalize_device_offload_policy(self, device_id: int = 0) -> bool:
         """Apply device-local memory policy, then resolve incompatible modes."""
         has_unified_memory = self.disable_offload_on_unified_memory(device_id)
         if self.lazy_module_load is None:
-            self.lazy_module_load = bool(has_unified_memory) and not self.training_mode
+            self.override("device_policy:lazy_module_load",
+                          {"lazy_module_load": bool(has_unified_memory) and not self.training_mode})
             if self.lazy_module_load:
                 from fastvideo.platforms import current_platform
 
@@ -1071,8 +1113,20 @@ class FastVideoArgs:
                 logger.info(
                     "Disabling %s: %s has unified memory, so moving weights to the host duplicates "
                     "them rather than freeing device memory.", flag, device_name)
-                setattr(self, flag, False)
+            self.override("device_policy:unified_memory", dict.fromkeys(enabled_flags, False))
         return offload_flag is None or offload_flag in UNIFIED_MEMORY_OFFLOAD_FLAGS
+
+
+# Fields that hold runtime state rather than configuration, so code may set them after construction.
+RUNTIME_STATE_FIELDS = frozenset({"model_paths", "model_loaded", "ray_placement_group", "ray_runtime_env"})
+
+
+def _typed_path_for_flat_name(flat_name: str) -> str | None:
+    """Dotted GeneratorConfig path of the typed field whose flat name is ``flat_name``, if there is one."""
+    from fastvideo.api.compat import _FLAT_NAME_FIELDS
+
+    entry = _FLAT_NAME_FIELDS.get(flat_name)
+    return None if entry is None else entry[0]
 
 
 _current_fastvideo_args = None

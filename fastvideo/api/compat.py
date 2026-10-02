@@ -188,7 +188,7 @@ def generator_config_to_fastvideo_args(
             kwargs["refine_enabled"] = refine["enabled"]
     kwargs.update(preset_overrides)
     kwargs.update(deepcopy(normalized.pipeline.experimental))
-    return FastVideoArgs.from_kwargs(**kwargs)
+    return FastVideoArgs.from_kwargs(**kwargs, resolved_config=resolved)
 
 
 def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:

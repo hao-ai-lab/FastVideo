@@ -18,6 +18,14 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation i
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 
+class _Args(SimpleNamespace):
+    """FastVideoArgs stand-in whose override() writes pipeline_config fields like FastVideoArgs.override."""
+
+    def override(self, source, values):
+        for key, value in values.items():
+            setattr(self.pipeline_config, key.removeprefix("pipeline_config."), value)
+
+
 DMD_STEPS = [999, 874, 749, 624, 500, 375, 250, 125]
 CONTRACT = {
     "schema_version": "fasth3-inference-contract-v1",
@@ -46,7 +54,7 @@ def test_pipeline_preserves_shift10_from_checkpoint(tmp_path):
         "scheduler": MiniMaxH3Scheduler(shift=10.0),
         "audio_scheduler": MiniMaxH3Scheduler(shift=3.0),
     }
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    args = _Args(pipeline_config=MiniMaxH3PipelineConfig())
     pipeline.initialize_pipeline(args)
     assert pipeline.modules["scheduler"].shift == 10.0
     assert pipeline.modules["audio_scheduler"].shift == 3.0
@@ -81,7 +89,7 @@ def _run_tiny_stage(monkeypatch, steps, grid_points, *, video_shift=10.0, offloa
 
     stage = denoising.MiniMaxH3DenoisingStage(transformer, MiniMaxH3Scheduler(shift=video_shift),
                                            MiniMaxH3Scheduler(shift=3.0))
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig(dmd_denoising_steps=steps),
+    args = _Args(pipeline_config=MiniMaxH3PipelineConfig(dmd_denoising_steps=steps),
                            dit_cpu_offload=offloaded_transformer is not None,
                            dit_layerwise_offload=False, use_fsdp_inference=False)
     batch = ForwardBatch(
@@ -158,19 +166,19 @@ def test_pipeline_loads_the_exported_ladder_and_rejects_a_conflicting_one(tmp_pa
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps(CONTRACT))
     pipeline = _pipeline(tmp_path)
     config = MiniMaxH3PipelineConfig()
-    pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=config))
+    pipeline.initialize_pipeline(_Args(pipeline_config=config))
     assert config.dmd_denoising_steps == DMD_STEPS
 
     wrong = MiniMaxH3PipelineConfig(dmd_denoising_steps=[1000, 750, 500, 250])
     with pytest.raises(ValueError, match="checkpoint.*DMD"):
-        pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=wrong))
+        pipeline.initialize_pipeline(_Args(pipeline_config=wrong))
 
 
 @pytest.mark.parametrize("grid_points", [5, 50])
 def test_base_and_four_forward_schedules_are_unchanged(monkeypatch, tmp_path, grid_points):
     config = MiniMaxH3PipelineConfig()
     pipeline = _pipeline(tmp_path, video_shift=12.0)
-    pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=config))
+    pipeline.initialize_pipeline(_Args(pipeline_config=config))
     assert pipeline.modules["scheduler"].shift == 12.0
     assert pipeline.modules["audio_scheduler"].shift == 3.0
     assert config.dmd_denoising_steps is None
@@ -203,7 +211,7 @@ def test_explicit_eight_forward_ladder_requires_nine_grid_points(monkeypatch, gr
 def test_checkpoint_schedule_metadata_must_be_self_consistent(tmp_path, field, value):
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps({**CONTRACT, field: value}))
     with pytest.raises(ValueError):
-        _pipeline(tmp_path).initialize_pipeline(SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig()))
+        _pipeline(tmp_path).initialize_pipeline(_Args(pipeline_config=MiniMaxH3PipelineConfig()))
 
 
 @pytest.mark.parametrize("module_name", ["scheduler", "audio_scheduler"])
@@ -212,7 +220,7 @@ def test_checkpoint_shifts_must_be_positive_and_finite(tmp_path, module_name, sh
     pipeline = _pipeline(tmp_path)
     pipeline.modules[module_name] = SimpleNamespace(shift=shift)
     with pytest.raises(ValueError, match="positive finite shift"):
-        pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig()))
+        pipeline.initialize_pipeline(_Args(pipeline_config=MiniMaxH3PipelineConfig()))
 
 
 def test_sidecar_without_shift_fields_uses_the_checkpoint_schedulers(tmp_path):
@@ -226,11 +234,11 @@ def test_sidecar_without_shift_fields_uses_the_checkpoint_schedulers(tmp_path):
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps(four_step))
     pipeline = _pipeline(tmp_path, video_shift=12.0)
     config = MiniMaxH3PipelineConfig()
-    pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=config))
+    pipeline.initialize_pipeline(_Args(pipeline_config=config))
     assert config.dmd_denoising_steps == [999, 749, 500, 250]
     assert pipeline.modules["scheduler"].shift == 12.0
     assert pipeline.modules["audio_scheduler"].shift == 3.0
     # Explicit disagreement is still rejected.
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps({**four_step, "video_scheduler_shift": 10.0}))
     with pytest.raises(ValueError, match="disagrees"):
-        _pipeline(tmp_path, video_shift=12.0).initialize_pipeline(SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig()))
+        _pipeline(tmp_path, video_shift=12.0).initialize_pipeline(_Args(pipeline_config=MiniMaxH3PipelineConfig()))

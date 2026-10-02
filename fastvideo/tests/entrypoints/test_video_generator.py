@@ -35,9 +35,18 @@ def _new_video_generator() -> VideoGenerator:
     return VideoGenerator.__new__(VideoGenerator)
 
 
+class _FakeFastVideoArgs(SimpleNamespace):
+    """Stand-in for FastVideoArgs that applies override() the way FastVideoArgs does."""
+
+    def override(self, source, values):
+        for key, value in values.items():
+            target, name = (self.pipeline_config, key.split(".", 1)[1]) if "." in key else (self, key)
+            setattr(target, name, value)
+
+
 def _new_runtime_video_generator() -> VideoGenerator:
     generator = _new_video_generator()
-    generator.fastvideo_args = SimpleNamespace(
+    generator.fastvideo_args = _FakeFastVideoArgs(
         model_path="test-model",
         prompt_txt=None,
         workload_type=SimpleNamespace(value="t2v"),
