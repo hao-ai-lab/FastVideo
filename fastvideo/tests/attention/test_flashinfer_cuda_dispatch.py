@@ -15,6 +15,8 @@ import types
 import pytest
 import torch
 
+from fastvideo import envs
+
 from fastvideo.platforms.cuda import CudaPlatformBase
 from fastvideo.platforms.interface import AttentionBackendEnum
 
@@ -87,20 +89,20 @@ def test_flashinfer_warns_on_dtype_cast(monkeypatch, caplog) -> None:
 
 
 @pytest.mark.parametrize("head_size", [64, 256])
-def test_flashinfer_cudnn_rejects_non_128_head_size_at_dispatch(monkeypatch, head_size: int) -> None:
+def test_flashinfer_cudnn_rejects_non_128_head_size_at_dispatch(env_overrides, monkeypatch, head_size: int) -> None:
     # FlashInferBackend.get_supported_head_sizes() allows 64/128/256 generally,
     # but the cudnn prefill arm narrows that to 128 only (FlashInferImpl.__init__).
     # This must fail here, at backend selection, not later per-layer during
     # model construction.
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
     _patch_capability(monkeypatch, supported=True)
     _install_fake_flashinfer_with_cudnn(monkeypatch)
     with pytest.raises(ValueError, match="cuDNN prefill requires head size 128"):
         CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, head_size, torch.bfloat16)
 
 
-def test_flashinfer_cudnn_resolves_for_head_size_128(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+def test_flashinfer_cudnn_resolves_for_head_size_128(env_overrides, monkeypatch) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
     _patch_capability(monkeypatch, supported=True)
     _install_fake_flashinfer_with_cudnn(monkeypatch)
     backend_cls = CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)

@@ -181,7 +181,7 @@ class CudaPlatformBase(Platform):
             try:
                 from flashinfer.prefill import single_prefill_with_kv_cache  # noqa: F401
 
-                if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND == "cudnn":
+                if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.get() == "cudnn":
                     from flashinfer.prefill import cudnn_batch_prefill_with_kv_cache  # noqa: F401
 
                 from fastvideo.attention.backends.flashinfer import (  # noqa: F401
@@ -197,7 +197,7 @@ class CudaPlatformBase(Platform):
             # 128 only (see FlashInferImpl.__init__). Check it here too so a bad
             # combination fails at backend selection instead of per-layer, deep into
             # model construction.
-            if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND == "cudnn" and head_size != 128:
+            if envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.get() == "cudnn" and head_size != 128:
                 raise ValueError(f"FLASHINFER cuDNN prefill requires head size 128; got {head_size}. "
                                  "Use FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single instead.")
             logger.info("Using FlashInfer attention backend.")

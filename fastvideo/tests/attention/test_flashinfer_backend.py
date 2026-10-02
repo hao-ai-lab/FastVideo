@@ -5,6 +5,8 @@ import types
 
 import pytest
 import torch
+
+from fastvideo import envs
 import torch.nn.functional as F
 
 from fastvideo.attention.backends.flashinfer import FlashInferImpl, FlashInferMetadata, _mask_for_sample
@@ -17,8 +19,8 @@ def test_padding_mask_is_front_padded_and_expanded() -> None:
     torch.testing.assert_close(actual, expected)
 
 
-def test_forward_preserves_bshd_contract_and_arguments(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "single")
+def test_forward_preserves_bshd_contract_and_arguments(env_overrides, monkeypatch) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("single"))
     calls = []
 
     def fake_kernel(q, k, v, **kwargs):
@@ -50,8 +52,8 @@ def test_forward_preserves_bshd_contract_and_arguments(monkeypatch) -> None:
     assert calls[0][3]["sm_scale"] == 0.125
 
 
-def test_cudnn_forward_flattens_batch_and_passes_token_offsets(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+def test_cudnn_forward_flattens_batch_and_passes_token_offsets(env_overrides, monkeypatch) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
     FlashInferImpl._cudnn_workspaces.clear()
     calls = []
 
@@ -81,8 +83,8 @@ def test_cudnn_forward_flattens_batch_and_passes_token_offsets(monkeypatch) -> N
     torch.testing.assert_close(calls[0][5]["batch_offsets_k"], torch.tensor([0, 5, 10], dtype=torch.int32))
 
 
-def test_cudnn_rejects_custom_mask_and_unsupported_head_size(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+def test_cudnn_rejects_custom_mask_and_unsupported_head_size(env_overrides, monkeypatch) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
     with pytest.raises(ValueError, match="head size 128"):
         FlashInferImpl(num_heads=4, head_size=64, causal=False, softmax_scale=0.125)
 
@@ -121,9 +123,9 @@ def _sdpa_reference(query: torch.Tensor,
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("head_size", [64, 128, 256])
-def test_flashinfer_real_cuda_kernel_matches_sdpa(monkeypatch, dtype: torch.dtype, head_size: int) -> None:
+def test_flashinfer_real_cuda_kernel_matches_sdpa(env_overrides, monkeypatch, dtype: torch.dtype, head_size: int) -> None:
     """Launch the real single-GPU FlashInfer kernel for every supported head size."""
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "single")
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("single"))
     _require_flashinfer_cuda()
     torch.manual_seed(0)
     device = torch.device("cuda", torch.cuda.current_device())
@@ -142,9 +144,9 @@ def test_flashinfer_real_cuda_kernel_matches_sdpa(monkeypatch, dtype: torch.dtyp
 
 
 @pytest.mark.parametrize("mode", ["causal", "cross_gqa", "causal_padding"])
-def test_flashinfer_real_cuda_kernel_attention_modes(monkeypatch, mode: str) -> None:
+def test_flashinfer_real_cuda_kernel_attention_modes(env_overrides, monkeypatch, mode: str) -> None:
     """Exercise native causal, GQA/cross-attention, and combined custom masks."""
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "single")
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("single"))
     _require_flashinfer_cuda()
     torch.manual_seed(1)
     device = torch.device("cuda", torch.cuda.current_device())
@@ -187,11 +189,11 @@ def test_flashinfer_real_cuda_kernel_attention_modes(monkeypatch, mode: str) -> 
 
 
 @pytest.mark.parametrize("batch_size", [1, 2])
-def test_flashinfer_real_cudnn_kernel_matches_sdpa(monkeypatch, batch_size: int) -> None:
+def test_flashinfer_real_cudnn_kernel_matches_sdpa(env_overrides, monkeypatch, batch_size: int) -> None:
     """Launch FlashInfer's dedicated batched cuDNN SDPA entry point."""
     _require_flashinfer_cuda()
     pytest.importorskip("flashinfer.prefill").cudnn_batch_prefill_with_kv_cache
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", "cudnn")
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override("cudnn"))
     torch.manual_seed(2)
     device = torch.device("cuda", torch.cuda.current_device())
     query = torch.randn(batch_size, 128, 4, 128, device=device, dtype=torch.bfloat16)
