@@ -101,6 +101,8 @@ def _resolve_provider_family(provider_name: str) -> str:
         return "cerebras"
     if provider_name == "groq":
         return "groq"
+    if provider_name == "atlascloud":
+        return "atlascloud"
     raise RuntimeError(f"Unsupported prompt provider: {provider_name}")
 
 
@@ -643,7 +645,7 @@ class PromptEnhancer:
                                    "'cerebras-cloud-sdk' to use prompt enhancement.")
             return Cerebras(api_key=provider_api_key)
 
-        if provider_family == "groq":
+        if provider_family in {"groq", "atlascloud"}:
             if OpenAI is None:
                 raise RuntimeError("OpenAI SDK is not installed. Install 'openai' to use "
                                    f"the {provider_name} prompt provider.")
@@ -652,6 +654,8 @@ class PromptEnhancer:
             }
             if resolved_api_base_url:
                 client_kwargs["base_url"] = resolved_api_base_url
+            if provider_family == "atlascloud":
+                client_kwargs["max_retries"] = 0
             return OpenAI(**client_kwargs)
 
         raise RuntimeError(f"Unsupported prompt provider: {provider_name}")
@@ -897,7 +901,7 @@ class PromptEnhancer:
                 body=provider_body,
                 timeout_seconds=timeout_seconds,
             )
-        elif provider_family == "groq":
+        elif provider_family in {"groq", "atlascloud"}:
             response_json = await self._request_content_with_body_openai_compatible(
                 provider_name=self.provider,
                 client=self.client,
@@ -929,7 +933,7 @@ class PromptEnhancer:
                 body=provider_body,
                 timeout_seconds=timeout_seconds,
             )
-        elif provider_family == "groq":
+        elif provider_family in {"groq", "atlascloud"}:
             response_json = await self._request_content_with_body_openai_compatible(
                 provider_name=provider_family,
                 client=runtime.client,
