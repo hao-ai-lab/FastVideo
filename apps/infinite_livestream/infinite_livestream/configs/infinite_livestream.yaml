@@ -1,0 +1,93 @@
+# Everything Infinite Livestream is configured with, apart from secrets.
+#
+# API keys stay in the environment, because a key in a version-controlled file
+# is a key that leaks:
+#
+#   export OPENAI_API_KEY=...
+#   export LIVESTREAM_WEIGHTS_PATH=/path/to/fasth3
+#
+# Point the app at a copy of this file with `infinite-livestream-server --config`.
+
+inference:
+  # The canvas every clip is generated at. 16:9 resolves to 1344x768.
+  aspect: "16:9"
+  # The longest clip this checkpoint can make (345 frames at 24 fps). One
+  # length everywhere means one compiled shape.
+  clip_seconds: 14.375
+  # Built clips held in host memory awaiting playout; each holds a full
+  # decoded clip, so this is also the memory budget.
+  queue_size: 10
+  # Requests accepted but not yet built.
+  generation_queue_size: 20
+  seed: 1000
+  # Sigma-grid POINTS, not transformer forwards: the distilled schedule is
+  # five points and exactly four forwards.
+  num_inference_steps: 5
+
+  vsa_sparsity: 0.9
+  vsa_tile_size: 64
+  # sm100a is the Blackwell VSA kernel; `triton` is the ~2.5x slower fallback.
+  vsa_kernel: sm100a
+  fa4: true
+  h3_fusions: true
+  inference_torch_compile: true
+  compile_vae: true
+  ulysses_a2a: "off"
+
+  # Shapes warmed before the stream reports ready. "default" warms only
+  # clip_seconds; "all" warms every legal length (slower start, no stall on a
+  # viewer's first odd-length clip).
+  warmup_aspects: ["16:9"]
+  warmup_lengths: "default"
+
+runtime:
+  # Relative to the weights root (LIVESTREAM_WEIGHTS_PATH); "." means the
+  # snapshot's components sit directly under it.
+  checkpoint_dir: "."
+  num_gpus: 4
+  # Replicate the transformer on each GPU rather than FSDP-sharding it: at
+  # four GB200s the weights fit, and replication skips the all-gather.
+  replicated_dit: true
+  offload_text_encoder: false
+  offload_vae: false
+  pin_cpu_memory: false
+
+# How a viewer's prompt becomes scenes. Any OpenAI-compatible endpoint works.
+upsampler:
+  model: gpt-4o-mini
+  # base_url: https://api.groq.com/openai/v1
+  # Most clips one prompt may expand into.
+  max_chunks: 6
+  # Filler always wears the house style; a viewer's own request may pick
+  # whatever look suits it. false puts every clip in the house style.
+  viewer_free_style: true
+
+# Checked before rewriting. Errors fail closed, so a broken endpoint stops
+# prompts rather than letting them through unchecked. Its own endpoint on
+# purpose: inference gateways rarely expose /moderations.
+moderation:
+  enabled: true
+  model: omni-moderation-latest
+  # base_url: https://api.openai.com/v1
+
+director:
+  # Clips the idle filler keeps queued when nobody is typing. 0 turns it off.
+  idle_queue_target: 6
+  # Seconds between accepted prompts, per viewer.
+  chat_cooldown_s: 10
+  chat_command: "!prompt"
+  # Directory holding fillers.json. Unset uses the one that ships.
+  # fillers: /path/to/my-fillers
+
+output:
+  # Unset writes under $XDG_STATE_HOME/fastvideo-livestream/hls, so a source
+  # checkout does not collect segments. Set an absolute path to place it.
+  # hls_dir: /var/lib/livestream/hls
+  # x264 target in kbit/s.
+  video_bitrate_k: 4500
+  # Retained playback history; does not increase target live latency.
+  hls_retention_s: 120
+
+web:
+  host: 0.0.0.0
+  port: 8081

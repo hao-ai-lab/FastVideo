@@ -110,7 +110,7 @@ dependencies = [
 prerelease = "allow"
 
 [tool.uv.workspace]
-members = ["apps/dreamverse"]
+members = ["apps/dreamverse", "apps/infinite_livestream"]
 
 [tool.uv.sources]
 # PyPI's aarch64 fastvideo-kernel wheels do not cover the NVIDIA DGX Spark /
@@ -207,6 +207,14 @@ streaming = [
     "websockets",
 ]
 
+infinite-livestream = [
+    "av>=17,<19",
+    "fastapi>=0.115,<1",
+    "openai>=1.40",
+    "pyyaml>=6.0",
+    "uvicorn[standard]>=0.30,<1",
+]
+
 dreamverse = [
     "uvicorn[standard]>=0.41.0",
     "cerebras-cloud-sdk",
@@ -230,16 +238,19 @@ mlx = [
 
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
+infinite-livestream-server = "infinite_livestream.server_entry:cli"
 dreamverse-server = "dreamverse.server_entry:cli"
 dreamverse-mock-server = "dreamverse.mock_server:cli"
 
 [tool.setuptools.packages.find]
-where = [".", "apps/dreamverse"]
-exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
+where = [".", "apps/dreamverse", "apps/infinite_livestream"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*",
+           "infinite_livestream.tests*"]
 
 [tool.setuptools.package-data]
 "fastvideo.entrypoints.openai" = ["static/*.html", "static/*.css", "static/*.js"]
 dreamverse = ["prompts/*.md"]
+infinite_livestream = ["configs/*.yaml", "presets/*.json", "web/*"]
 "fastvideo.third_party.rife_mlx" = ["LICENSE"]
 "fastvideo.third_party.taehv" = ["LICENSE"]
 
