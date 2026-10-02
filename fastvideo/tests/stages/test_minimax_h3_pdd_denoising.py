@@ -309,8 +309,6 @@ def test_p2_policy_builds_one_sparse_region_per_reference_video(monkeypatch, den
     assert len(transformer.calls) == 8
     for step, call in enumerate(transformer.calls):
         metadata = call["attn_metadata"]
-        assert metadata.ref2va_policy == "p2_multi_region"
-        assert metadata.reference_video_regions == 2
         assert metadata.tile_elems == 128
         assert metadata.total_seq_length == layout.sequence_length
         assert len(metadata.video_tile_spans) == 3
@@ -325,7 +323,7 @@ def test_without_a_reference_policy_references_stay_in_the_dense_prefix(monkeypa
     _run(monkeypatch, layout, transformer, args=args, sparsity=0.9, builder=MiniMaxH3VSAMetadataBuilder())
     for call in transformer.calls:
         metadata = call["attn_metadata"]
-        assert metadata.ref2va_policy is None and metadata.video_tile_spans == ()
+        assert metadata.video_tile_spans == () and metadata.span_sparsities == ()
 
 
 def test_p2_policy_requires_a_vsa_transformer(monkeypatch):

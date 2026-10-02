@@ -90,7 +90,6 @@ from fastvideo.attention.backends.video_sparse_attn import (compute_topk, constr
                                                             get_non_pad_index, get_tile_partition_indices,
                                                             scatter_into_tile_buf)
 from fastvideo.attention.backends.video_sparse_attn_h3_probe import probe_enabled, record_probe
-from fastvideo.configs.pipelines.minimax_h3 import MINIMAX_H3_VSA_REF_POLICY_P2
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -394,10 +393,6 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
     # sparsity. Empty = one region spanning every video tile (legacy).
     video_tile_spans: tuple[tuple[int, int], ...] = ()
     span_sparsities: tuple[float, ...] = ()
-    # Receipt of the reference-aware Ref2VA policy; None for the single
-    # generated-video layout.
-    ref2va_policy: str | None = None
-    reference_video_regions: int = 0
     # Builder-owned padded tile buffer. It records the geometry that last
     # populated the allocation so a same-shaped geometry change can clear
     # stale pad rows once while steady-state denoising reuses the buffer.
@@ -572,68 +567,8 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             dense_layers_tensor=torch.tensor(dense_layers, device=device, dtype=torch.int64),
             video_tile_spans=video_tile_spans,
             span_sparsities=span_sparsities,
-            ref2va_policy=MINIMAX_H3_VSA_REF_POLICY_P2,
-            reference_video_regions=len(video_tile_spans) - 1,
             tile_buf_holder=self._tile_buf_holder,
         )
-
-
-def assert_ref2va_vsa_metadata(
-    metadata: MiniMaxH3VSAMetadata,
-    *,
-    expected_reference_video_regions: int,
-    target_sparsity: float,
-    ref_keep_rate: float | None,
-) -> None:
-    """Fail closed unless metadata represents the requested Ref2VA P2 policy.
-
-    The last video span is the generated target and every preceding span is a
-    reference video. Text, reference audio/images, and target audio are dense
-    prefix tiles. A stale single-region layout would otherwise silently keep
-    reference-video conditioning dense.
-    """
-    expected_reference_video_regions = int(expected_reference_video_regions)
-    if expected_reference_video_regions < 0:
-        raise ValueError("expected_reference_video_regions must be non-negative")
-    expected_span_count = expected_reference_video_regions + 1
-    if len(metadata.video_tile_spans) != expected_span_count:
-        raise ValueError("Ref2VA P2 metadata must contain one sparse span per reference video plus the target; "
-                         f"expected {expected_span_count} spans ({expected_reference_video_regions} references), got "
-                         f"{metadata.video_tile_spans}. A stale single-region layout would leave reference-video "
-                         "conditioning dense.")
-    if len(metadata.span_sparsities) != expected_span_count:
-        raise ValueError("Ref2VA P2 metadata sparsity policy is not aligned with its video spans: "
-                         f"{len(metadata.span_sparsities)} values for {expected_span_count} spans.")
-    if (metadata.ref2va_policy != MINIMAX_H3_VSA_REF_POLICY_P2
-            or metadata.reference_video_regions != expected_reference_video_regions):
-        raise ValueError(
-            "Ref2VA P2 metadata has no valid multi-region policy receipt: "
-            f"policy={metadata.ref2va_policy!r}, reference_video_regions={metadata.reference_video_regions}, "
-            f"expected {expected_reference_video_regions}.")
-
-    cursor = metadata.num_prefix_tiles
-    for index, (start, end) in enumerate(metadata.video_tile_spans):
-        if start != cursor or end <= start:
-            raise ValueError("Ref2VA P2 video tile spans must be positive and contiguous after the dense prefix; "
-                             f"span {index} is {(start, end)} after cursor {cursor}.")
-        cursor = end
-    if cursor != metadata.num_prefix_tiles + metadata.num_video_tiles:
-        raise ValueError("Ref2VA P2 video tile spans do not cover the complete sparse-video suffix: "
-                         f"ended at {cursor}, expected {metadata.num_prefix_tiles + metadata.num_video_tiles}.")
-
-    target_sparsity = float(target_sparsity)
-    if target_sparsity <= 0.0:
-        expected_sparsities = (0.0, ) * expected_span_count
-    else:
-        reference_sparsity = target_sparsity if ref_keep_rate is None else 1.0 - float(ref_keep_rate)
-        if expected_reference_video_regions and reference_sparsity <= 0.0:
-            raise ValueError("Ref2VA P2 requested sparse target attention but would leave reference-video conditioning "
-                             f"dense (ref_keep_rate={ref_keep_rate!r}). Use a keep rate below 1.")
-        expected_sparsities = ((reference_sparsity, ) * expected_reference_video_regions + (target_sparsity, ))
-    if any(not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
-           for actual, expected in zip(metadata.span_sparsities, expected_sparsities, strict=True)):
-        raise ValueError("Ref2VA P2 metadata does not match the requested per-region sparsity policy: "
-                         f"got {metadata.span_sparsities}, expected {expected_sparsities}.")
 
 
 def _pool_tiles(x: torch.Tensor, variable_block_sizes: torch.Tensor, tile_elems: int = _TILE_ELEMS) -> torch.Tensor:
@@ -696,25 +631,16 @@ def _build_region_block_mask(
     video_tile_spans: tuple[tuple[int, int], ...],
     span_sparsities: tuple[float, ...],
 ) -> torch.Tensor:
-    """Per-region top-k for multi-region (Ref2VA P2) metadata.
+    """Per-region top-k for multi-region metadata.
 
-    Reference and target regions select independently, so every video query
-    keeps its region's configured fraction of EACH region. Prefix rows and
-    prefix columns stay dense; ``VSA_sparsity <= 0`` (dense steps and layers)
-    overrides the per-region policy.
+    The regions select independently, so every video query keeps its
+    region's configured fraction of EACH region. Prefix rows and prefix
+    columns stay dense; ``VSA_sparsity <= 0`` (dense steps and layers)
+    overrides the per-region sparsities. ``video_tile_spans`` come from the
+    cached geometry, which lays them out contiguously after the prefix tiles,
+    with one ``span_sparsities`` entry each.
     """
     n_tiles = scores.shape[-1]
-    expected_cursor = num_prefix_tiles
-    for start, end in video_tile_spans:
-        if start != expected_cursor or end <= start:
-            raise ValueError(f"video_tile_spans must be positive and contiguous after tile {num_prefix_tiles}, "
-                             f"got {video_tile_spans}.")
-        expected_cursor = end
-    if expected_cursor != num_prefix_tiles + num_video_tiles:
-        raise ValueError(f"video_tile_spans {video_tile_spans} do not cover {num_video_tiles} video tiles.")
-    if span_sparsities and len(span_sparsities) != len(video_tile_spans):
-        raise ValueError(f"span_sparsities has {len(span_sparsities)} values for "
-                         f"{len(video_tile_spans)} video spans.")
     if not span_sparsities or VSA_sparsity <= 0.0:
         span_sparsities = tuple(VSA_sparsity for _ in video_tile_spans)
     span_topk = [

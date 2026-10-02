@@ -21,8 +21,7 @@ from fastvideo.attention.backends.video_sparse_attn import compute_topk
 from fastvideo.attention.backends.video_sparse_attn_h3 import (_TILE_ELEMS, VSA_H3_TILE_SHAPES, MiniMaxH3VSAImpl,
                                                                MiniMaxH3VSAMetadataBuilder, _build_block_mask,
                                                                _h3_tile_geometry,
-                                                               _pool_tiles, assert_ref2va_vsa_metadata,
-                                                               token_tile_and_valid)
+                                                               _pool_tiles, token_tile_and_valid)
 from fastvideo.pipelines.basic.minimax_h3.packing import MINIMAX_H3_TEXT_TAG, build_ref2va_packed_sequence
 from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_denoising import _h3_vsa_ref2va_segments
@@ -61,6 +60,41 @@ def _impl(head_size=8):
 def _mask(meta, scores, sparsity):
     return _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt,
                              meta.video_tile_spans, meta.span_sparsities)
+
+
+def _assert_multi_region_metadata(metadata, *, expected_reference_video_regions, target_sparsity, ref_keep_rate):
+    """Test oracle: metadata holds one sparse span per reference video plus the target, with the policy's sparsities.
+
+    The last span is the generated target and every earlier span is a
+    reference video; references keep ``ref_keep_rate`` of their tiles and the
+    target keeps ``1 - target_sparsity``. Text, reference audio and images,
+    and target audio are dense prefix tiles.
+    """
+    expected_span_count = expected_reference_video_regions + 1
+    if len(metadata.video_tile_spans) != expected_span_count:
+        raise ValueError("Multi-region metadata must contain one sparse span per reference video plus the target; "
+                         f"expected {expected_span_count} spans, got {metadata.video_tile_spans}. Metadata built "
+                         "with the single-region layout keeps reference-video conditioning dense.")
+    if len(metadata.span_sparsities) != expected_span_count:
+        raise ValueError(f"{len(metadata.span_sparsities)} span sparsities for {expected_span_count} spans.")
+    cursor = metadata.num_prefix_tiles
+    for index, (start, end) in enumerate(metadata.video_tile_spans):
+        if start != cursor or end <= start:
+            raise ValueError(f"span {index} is {(start, end)} after tile {cursor}; spans must be contiguous.")
+        cursor = end
+    if cursor != metadata.num_prefix_tiles + metadata.num_video_tiles:
+        raise ValueError(f"the spans end at tile {cursor} instead of covering every video tile.")
+    if target_sparsity <= 0.0:
+        expected = (0.0, ) * expected_span_count
+    else:
+        reference_sparsity = target_sparsity if ref_keep_rate is None else 1.0 - ref_keep_rate
+        if expected_reference_video_regions and reference_sparsity <= 0.0:
+            raise ValueError("sparse target attention would leave reference-video conditioning dense "
+                             f"(ref_keep_rate={ref_keep_rate!r}).")
+        expected = (reference_sparsity, ) * expected_reference_video_regions + (target_sparsity, )
+    if any(not math.isclose(actual, wanted, rel_tol=0.0, abs_tol=1e-12)
+           for actual, wanted in zip(metadata.span_sparsities, expected, strict=True)):
+        raise ValueError(f"per-region sparsities {metadata.span_sparsities} differ from the policy's {expected}.")
 
 
 def _token_allow(meta, mask, b=0, h=0):
@@ -137,12 +171,10 @@ def test_ref2va_segments_tile_every_layout_in_packed_order(name, tile_size):
                                                video_offsets=offsets,
                                                ref_keep_rate=0.1)
     assert meta.total_seq_length == layout.sequence_length
-    assert meta.ref2va_policy == "p2_multi_region"
-    assert meta.reference_video_regions == len(videos) - 1
-    assert_ref2va_vsa_metadata(meta,
-                               expected_reference_video_regions=len(videos) - 1,
-                               target_sparsity=0.9,
-                               ref_keep_rate=0.1)
+    _assert_multi_region_metadata(meta,
+                                  expected_reference_video_regions=len(videos) - 1,
+                                  target_sparsity=0.9,
+                                  ref_keep_rate=0.1)
     # Dense rows (text, audio, image references) map to prefix tiles only;
     # each video region's rows map to its own span.
     tile_of = meta.untile_combined_index // meta.tile_elems
@@ -245,7 +277,7 @@ def test_single_region_builds_keep_the_legacy_geometry():
                                                  prefix_segments=(37, 9, 120, 11),
                                                  device=_CPU,
                                                  tile_size=128)
-    assert legacy.video_tile_spans == () and legacy.span_sparsities == () and legacy.ref2va_policy is None
+    assert legacy.video_tile_spans == () and legacy.span_sparsities == ()
     geometry = _h3_tile_geometry((37, 9, 120, 11), (8, 4, 6), _CPU, (4, 4, 8))
     assert _geometry_sha256(geometry) == _LEGACY_GEOMETRY_SHA256[(37, 9, 120, 11), (8, 4, 6), 128]
     assert torch.equal(legacy.untile_combined_index, geometry[2])
@@ -364,31 +396,31 @@ def test_multi_region_guard_rejections():
     assert meta.exempt is False and len(meta.video_tile_spans) == 1
 
 
-def test_ref2va_policy_assertion_rejects_p1_and_dense_reference_span():
-    legacy_p1 = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
-                                                    raw_latent_shape=(8, 8, 12),
-                                                    patch_size=_PATCH,
-                                                    VSA_sparsity=0.9,
-                                                    prefix_segments=(37, 9, 120, 11),
-                                                    device=_CPU,
-                                                    tile_size=64)
-    with pytest.raises(ValueError, match="stale single-region layout"):
-        assert_ref2va_vsa_metadata(legacy_p1, expected_reference_video_regions=1, target_sparsity=0.9,
-                                   ref_keep_rate=0.1)
+def test_the_multi_region_oracle_rejects_single_region_metadata_and_dense_references():
+    single = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
+                                                 raw_latent_shape=(8, 8, 12),
+                                                 patch_size=_PATCH,
+                                                 VSA_sparsity=0.9,
+                                                 prefix_segments=(37, 9, 120, 11),
+                                                 device=_CPU,
+                                                 tile_size=64)
+    with pytest.raises(ValueError, match="Metadata built with the single-region layout"):
+        _assert_multi_region_metadata(single, expected_reference_video_regions=1, target_sparsity=0.9,
+                                      ref_keep_rate=0.1)
     with pytest.raises(ValueError, match="leave reference-video conditioning dense"):
-        assert_ref2va_vsa_metadata(_build_r2v(sparsity=0.9, tile_size=64, ref_keep_rate=0.1),
-                                   expected_reference_video_regions=1,
-                                   target_sparsity=0.9,
-                                   ref_keep_rate=1.0)
-    with pytest.raises(ValueError, match="per-region sparsity policy"):
-        assert_ref2va_vsa_metadata(_build_r2v(sparsity=0.9, tile_size=64, ref_keep_rate=0.1),
-                                   expected_reference_video_regions=1,
-                                   target_sparsity=0.9,
-                                   ref_keep_rate=0.2)
-    assert_ref2va_vsa_metadata(_build_r2v(sparsity=0.0, tile_size=64, ref_keep_rate=0.1),
-                               expected_reference_video_regions=1,
-                               target_sparsity=0.0,
-                               ref_keep_rate=0.1)
+        _assert_multi_region_metadata(_build_r2v(sparsity=0.9, tile_size=64, ref_keep_rate=0.1),
+                                      expected_reference_video_regions=1,
+                                      target_sparsity=0.9,
+                                      ref_keep_rate=1.0)
+    with pytest.raises(ValueError, match="differ from the policy"):
+        _assert_multi_region_metadata(_build_r2v(sparsity=0.9, tile_size=64, ref_keep_rate=0.1),
+                                      expected_reference_video_regions=1,
+                                      target_sparsity=0.9,
+                                      ref_keep_rate=0.2)
+    _assert_multi_region_metadata(_build_r2v(sparsity=0.0, tile_size=64, ref_keep_rate=0.1),
+                                  expected_reference_video_regions=1,
+                                  target_sparsity=0.0,
+                                  ref_keep_rate=0.1)
 
 
 # ---------------------------------------------------------------------------

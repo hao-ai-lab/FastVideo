@@ -8,7 +8,6 @@ from typing import Any
 
 import torch
 
-from fastvideo.attention.backends.video_sparse_attn_h3 import assert_ref2va_vsa_metadata
 from fastvideo.attention.selector import component_attention_backend, get_attn_backend
 from fastvideo.configs.pipelines.minimax_h3 import MINIMAX_H3_VSA_REF_POLICY_P2
 from fastvideo.distributed import get_local_torch_device
@@ -356,12 +355,6 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                                 tile_size=vsa_tile_size,
                                 video_segments=vsa_video_segments,
                                 video_offsets=vsa_video_offsets,
-                                ref_keep_rate=vsa_ref_keep_rate,
-                            )
-                            assert_ref2va_vsa_metadata(
-                                attn_metadata,
-                                expected_reference_video_regions=len(vsa_video_segments) - 1,
-                                target_sparsity=vsa_sparsity,
                                 ref_keep_rate=vsa_ref_keep_rate,
                             )
                     # Under torch.compile(mode="reduce-overhead") each denoising
