@@ -28,11 +28,6 @@ CONTRACT = {
     "vsa_ref_policy": "p2_multi_region",
     "vsa_ref_keep_rate": 0.1,
 }
-MINIMAL_CONTRACT = {
-    key: CONTRACT[key]
-    for key in ("schema_version", "pdd_steps", "pdd_step_indices", "num_inference_steps", "transformer_forwards",
-                "video_scheduler_shift", "audio_scheduler_shift")
-}
 
 
 def _load_example():
@@ -59,10 +54,6 @@ def _args(*overrides: str):
 ])
 def test_base_model_source(overrides, expected):
     assert example.base_model_source(_args(*overrides), CONTRACT) == expected
-
-
-def test_an_unpinned_export_uses_the_public_base():
-    assert example.base_model_source(_args(), MINIMAL_CONTRACT) == ("MiniMaxAI/MiniMax-H3", None)
 
 
 @pytest.mark.parametrize("pin", [
@@ -120,21 +111,14 @@ def test_a_manifest_missing_components_everywhere_is_an_error(tmp_path):
         example.compose_model_dir(export, base, tmp_path / "composed")
 
 
-def test_minimal_contract_keeps_fastvideo_attention_defaults(tmp_path):
-    assert example.attention_settings(CONTRACT) == {
-        "attention_backend": "VIDEO_SPARSE_ATTN_H3",
-        "VSA_sparsity": 0.9,
-        "VSA_tile_size": 128,
-    }
-    assert example.attention_settings(MINIMAL_CONTRACT) == {}
-    config = example.build_generator_config(tmp_path, MINIMAL_CONTRACT, 1)
-    assert config.pipeline.experimental == {}
-    example.validate_attention_runtime(MINIMAL_CONTRACT, 1)
+def test_build_generator_config_leaves_trained_settings_to_the_checkpoint(tmp_path):
+    # FastVideo reads the trained attention settings from the composed directory's fastvideo_inference.json.
+    assert example.build_generator_config(tmp_path, 1).pipeline.experimental == {}
 
 
 @pytest.mark.parametrize("num_gpus,sharded", [(1, False), (4, True)])
 def test_multi_gpu_runs_shard_the_dit(tmp_path, num_gpus, sharded):
-    config = example.build_generator_config(tmp_path, CONTRACT, num_gpus)
+    config = example.build_generator_config(tmp_path, num_gpus)
     assert config.engine.use_fsdp_inference is sharded
     assert config.engine.parallelism.sp_size == num_gpus
     assert config.pipeline.components.override_pipeline_cls_name == "MiniMaxH3Ref2VAModularPipeline"

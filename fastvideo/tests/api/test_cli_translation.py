@@ -166,6 +166,7 @@ def test_build_generate_run_config_preserves_model_defaults_for_omitted_request_
     sampling_param = request_to_sampling_param(
         config.request,
         model_path=config.generator.model_path,
+        fixed_num_inference_steps=None,
     )
 
     assert sampling_param.num_frames == 81

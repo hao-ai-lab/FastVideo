@@ -2,8 +2,8 @@
 """CPU contracts for the PDD sampling primitives in ``fastvideo.layers.pdd``.
 
 References are spelled out locally: the rational time shift on the
-``[0, 0.999]`` base clock, its cancellation-free difference, the balanced and
-explicit fine-grid partitions, and the fused-head forward as the
+``[0, 0.999]`` base clock, its cancellation-free difference, the fused blocks
+of an explicit fine-grid partition, and the fused-head forward as the
 integration-weighted mean of the materialized heads.
 """
 
@@ -19,7 +19,6 @@ from fastvideo.layers.pdd import (
     build_pdd_sampling_plan,
     fuse_pdd_heads,
     pdd_fine_grid,
-    pdd_step_indices,
     shifted_noise_amount,
     shifted_noise_delta,
 )
@@ -56,52 +55,33 @@ def test_shifted_noise_delta_matches_the_direct_difference(shift: float) -> None
         assert torch.equal(delta, grid[1:] - grid[:-1])
 
 
-def test_modality_schedule_rejects_invalid_parameters() -> None:
-    with pytest.raises(ValueError, match="shift must be positive"):
-        PDDModalitySchedule(shift=0.0)
-    with pytest.raises(ValueError, match="max_t"):
-        PDDModalitySchedule(shift=1.0, max_t=1.5)
-
-
-def test_fine_grid_is_descending_float64_from_max_t_to_zero() -> None:
+def test_pdd_fine_grid_descending_float64_from_max_t_to_zero() -> None:
     grid = pdd_fine_grid(8)
     assert grid.dtype == torch.float64
     assert grid.shape == (9, )
     assert float(grid[0]) == PDD_GRID_MAX_T
     assert float(grid[-1]) == 0.0
     assert bool((grid[:-1] > grid[1:]).all())
-    with pytest.raises(ValueError, match=">= 2"):
-        pdd_fine_grid(1)
 
 
-def test_step_indices_balanced_explicit_and_rejected() -> None:
-    assert pdd_step_indices(256, 4).tolist() == [0, 64, 128, 192, 256]
-    assert pdd_step_indices(10, 3).tolist() == [0, 3, 6, 10]
-    assert pdd_step_indices(32, 8).tolist() == GRID32_BLOCKS8
-    assert pdd_step_indices(128, 3, indices=[0, 32, 80, 128]).tolist() == [0, 32, 80, 128]
-    with pytest.raises(ValueError, match="Cannot select"):
-        pdd_step_indices(4, 8)
-    with pytest.raises(ValueError, match="start at 0 and end at 128"):
-        pdd_step_indices(128, 3, indices=[0, 32, 80, 120])
-    with pytest.raises(ValueError, match="strictly increasing"):
-        pdd_step_indices(128, 3, indices=[0, 80, 32, 128])
-    with pytest.raises(ValueError, match="must have shape"):
-        pdd_step_indices(128, 3, indices=[0, 128])
-    with pytest.raises(TypeError, match="integer dtype"):
-        pdd_step_indices(8, 2, indices=[0.0, 4.0, 8.0])
-
-
-def test_sampling_plan_blocks_and_node_sigmas() -> None:
+@pytest.mark.parametrize(("step_indices", "block_sizes"), [
+    ([0, 64, 128, 192, 256], [64, 64, 64, 64]),
+    ([0, 2, 5, 8], [2, 3, 3]),
+], ids=["uniform", "uneven"])
+def test_build_pdd_sampling_plan_blocks_and_node_sigmas(step_indices: list[int], block_sizes: list[int]) -> None:
     schedules = {"video": PDDModalitySchedule(shift=12.0), "audio": PDDModalitySchedule(shift=3.0)}
-    plan = build_pdd_sampling_plan(256, 4, schedules)
+    plan = build_pdd_sampling_plan(step_indices, schedules)
 
-    assert plan.pdd_steps == 256
-    assert plan.num_steps == 4
-    assert plan.block_sizes == [64, 64, 64, 64]
-    assert plan.block(1) == (64, 128)
+    grid_size = step_indices[-1]
+    assert plan.pdd_steps == grid_size
+    assert plan.num_steps == len(block_sizes)
+    assert plan.block_sizes == block_sizes
+    assert plan.block(1) == (step_indices[1], step_indices[2])
+    # Node i of an N-interval grid sits at base time max_t * (1 - i / N).
+    node_base = PDD_GRID_MAX_T * (1.0 - torch.tensor(step_indices, dtype=torch.float64) / grid_size)
     for name, schedule in schedules.items():
         node_sigmas = plan.node_sigmas[name]
-        torch.testing.assert_close(node_sigmas, schedule.sigma(plan.fine_grid[plan.indices]), rtol=0.0, atol=0.0)
+        torch.testing.assert_close(node_sigmas, _time_shift(node_base, schedule.shift), rtol=0.0, atol=1e-12)
         assert float(node_sigmas[0]) == pytest.approx(PDD_GRID_MAX_T, abs=1e-15)
         assert float(node_sigmas[-1]) == 0.0
         # A fused block's total weight is exactly its node-sigma increment,
@@ -110,22 +90,20 @@ def test_sampling_plan_blocks_and_node_sigmas() -> None:
             start, end = plan.block(step)
             total = plan.integration_weights[name][start:end].sum()
             torch.testing.assert_close(total, node_sigmas[step + 1] - node_sigmas[step], rtol=1e-12, atol=1e-15)
-    with pytest.raises(ValueError, match="step must be in"):
-        plan.block(4)
-    assert build_pdd_sampling_plan(8, 3, schedules, indices=[0, 2, 5, 8]).indices.tolist() == [0, 2, 5, 8]
-    with pytest.raises(ValueError, match="strictly increasing"):
-        build_pdd_sampling_plan(8, 3, schedules, indices=[0, 5, 2, 8])
+
+
+def test_build_pdd_sampling_plan_mismatched_max_t() -> None:
+    schedules = {"a": PDDModalitySchedule(1.0), "b": PDDModalitySchedule(1.0, max_t=1.0)}
     with pytest.raises(ValueError, match="share max_t"):
-        build_pdd_sampling_plan(8, 2, {"a": PDDModalitySchedule(1.0), "b": PDDModalitySchedule(1.0, max_t=1.0)})
+        build_pdd_sampling_plan([0, 4, 8], schedules)
 
 
-def test_grid32_eight_block_plan_feeds_the_h3_schedulers() -> None:
+def test_build_pdd_sampling_plan_grid32_eight_blocks_feed_the_h3_schedulers() -> None:
     """The exported contract (Grid32, blocks of 4, shifts 12/3) as the stage builds it."""
-    plan = build_pdd_sampling_plan(32, 8, {
+    plan = build_pdd_sampling_plan(GRID32_BLOCKS8, {
         "video": PDDModalitySchedule(shift=12.0),
         "audio": PDDModalitySchedule(shift=3.0)
-    },
-                                   indices=GRID32_BLOCKS8)
+    })
     assert plan.block_sizes == [4] * 8
     for name, shift in (("video", 12.0), ("audio", 3.0)):
         expected = _time_shift(pdd_fine_grid(32)[GRID32_BLOCKS8], shift)
@@ -144,14 +122,12 @@ def _randomized(linear: PDDReplicatedLinear) -> PDDReplicatedLinear:
     return linear
 
 
-def test_pdd_linear_is_head_major_and_state_dict_compatible() -> None:
+def test_pdd_replicated_linear_head_major_and_state_dict_compatible() -> None:
     linear = PDDReplicatedLinear(5, 3, grid_size=4, params_dtype=torch.float32)
     assert linear.weight.shape == (12, 5) and linear.bias.shape == (12, )
     assert linear.head_output_size == 3 and linear.grid_size == 4
     # Fusion state is transient: the state dict is a plain linear's.
     assert set(linear.state_dict()) == {"weight", "bias"}
-    with pytest.raises(ValueError, match="grid_size must be an int >= 2"):
-        PDDReplicatedLinear(3, 2, grid_size=1)
 
 
 def test_fused_params_use_normalized_integration_weights() -> None:
@@ -220,28 +196,11 @@ def test_fuse_pdd_heads_fuses_every_modality_head_at_once() -> None:
         with linear.fuse(1, 3, weights[name], torch.float32):
             torch.testing.assert_close(fused[name], linear(x)[0])
         assert linear._fusion_state is None
-    with pytest.raises(ValueError, match="missing \\['audio'\\]"):
-        with fuse_pdd_heads(linears, 1, 3, {"video": weights["video"]}, torch.float32):
-            pass
 
 
-def test_fusion_rejects_invalid_blocks_and_restores_nested_state() -> None:
+def test_fuse_nested_contexts_restore_the_previous_state() -> None:
     linear = _randomized(PDDReplicatedLinear(3, 2, grid_size=4, params_dtype=torch.float32))
     weights = PDDModalitySchedule(shift=1.0).integration_weights(pdd_fine_grid(4))
-    x = torch.randn(1, 3)
-    with pytest.raises(ValueError, match="0 <= start < end <= grid_size"):
-        with linear.fuse(2, 2, weights, torch.float32):
-            linear(x)
-    with pytest.raises(ValueError, match="fusion weights must have shape"):
-        with linear.fuse(0, 4, weights[:2], torch.float32):
-            linear(x)
-    with pytest.raises(TypeError, match="floating point"):
-        with linear.fuse(0, 4, torch.ones(4, dtype=torch.long), torch.float32):
-            linear(x)
-    with pytest.raises(ValueError, match="finite and non-zero"):
-        with linear.fuse(0, 2, torch.zeros(4, dtype=torch.float64), torch.float32):
-            linear(x)
-
     with linear.fuse(0, 4, weights, torch.float32):
         outer = linear._fusion_state
         with linear.fuse(1, 3, weights, torch.float32):

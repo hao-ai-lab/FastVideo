@@ -31,11 +31,13 @@ _CPU = torch.device("cpu")
 _PATCH = (1, 2, 2)
 
 # packed order: [text 37 | ref_audio 9 | ref_video (5,4,6)=120 | tgt_audio 11
-# | tgt_video (8,4,6)=192] -> S=369; raw latents under patch (1,2,2)
+# | tgt_video (8,4,6)=192] -> S=369; raw latents under patch (1,2,2); the
+# reference video keeps 25% of its tiles
 _R2V = dict(
     prefix_segments=(37, 9, 11),
     video_segments=((5, 8, 12), (8, 8, 12)),
     video_offsets=(46, 177),
+    ref_keep_rate=0.25,
 )
 _R2V_SEQ = 369
 _R2V_DENSE_RUNS = ((0, 37), (37, 46), (166, 177))  # packed [start, end) of text/ref_audio/tgt_audio
@@ -170,12 +172,13 @@ def test_ref2va_segments_tile_every_layout_in_packed_order(name, tile_size):
                                                tile_size=tile_size,
                                                video_segments=videos,
                                                video_offsets=offsets,
-                                               ref_keep_rate=0.1)
+                                               ref_keep_rate=0.25)
     assert meta.total_seq_length == layout.sequence_length
+    # References keep 25% of their tiles, distinct from the target's 10%.
     _assert_multi_region_metadata(meta,
                                   expected_reference_video_regions=len(videos) - 1,
                                   target_sparsity=0.9,
-                                  ref_keep_rate=0.1)
+                                  ref_keep_rate=0.25)
     # Dense rows (text, audio, image references) map to prefix tiles only;
     # each video region's rows map to its own span.
     tile_of = meta.untile_combined_index // meta.tile_elems
@@ -287,7 +290,7 @@ def test_a_single_region_build_uses_the_single_region_geometry():
 def test_multi_region_span_topk_and_reference_keep_rate():
     """Every video query keeps exactly k_i tiles of EACH region; prefix stays dense."""
     torch.manual_seed(3)
-    meta = _build_r2v(sparsity=0.75, tile_size=64)
+    meta = _build_r2v(sparsity=0.75, tile_size=64, ref_keep_rate=0.5)
     P = meta.num_prefix_tiles
     n = P + meta.num_video_tiles
     scores = torch.randn(1, 2, n, n)
@@ -296,17 +299,13 @@ def test_multi_region_span_topk_and_reference_keep_rate():
     assert mask[..., :P].all(), "prefix keys visible to every query"
     for (start, end), sparsity in zip(meta.video_tile_spans, meta.span_sparsities, strict=True):
         assert (mask[:, :, P:, start:end].sum(-1) == compute_topk(sparsity, end - start)).all(), (start, end)
-    assert meta.span_sparsities == (0.75, 0.75)
+    assert meta.span_sparsities == pytest.approx((0.5, 0.75))
 
     # A span at sparsity 0 keeps every column; the other span keeps its own top-k.
     ref_span, tgt_span = meta.video_tile_spans
     mask = _build_block_mask(scores, P, meta.num_video_tiles, 0.75, meta.exempt, meta.video_tile_spans, (0.0, 0.75))
     assert mask[..., ref_span[0]:ref_span[1]].all(), "a sparsity-0 span's columns are dense"
     assert (mask[:, :, P:, tgt_span[0]:tgt_span[1]].sum(-1) == compute_topk(0.75, tgt_span[1] - tgt_span[0])).all()
-    # The builder itself never makes a reference dense: its keep rate is in (0, 1).
-    for keep_rate in (0.0, 1.0, 1.5):
-        with pytest.raises(ValueError, match=r"ref_keep_rate must be in \(0, 1\)"):
-            _build_r2v(sparsity=0.75, tile_size=64, ref_keep_rate=keep_rate)
 
     keep_quarter = _build_r2v(sparsity=0.9, tile_size=64, ref_keep_rate=0.25)
     assert keep_quarter.span_sparsities == pytest.approx((0.75, 0.9))
@@ -324,7 +323,7 @@ def test_target_only_region_reproduces_the_single_region_token_mask():
     k = torch.randn(1, _R2V_SEQ, 2, 8)
     builds = (
         dict(prefix_segments=(37, 9, 120, 11), raw_latent_shape=(8, 8, 12), video_segments=None,
-             video_offsets=None),
+             video_offsets=None, ref_keep_rate=None),
         dict(prefix_segments=(37, 9, 120, 11), video_segments=((8, 8, 12), ), video_offsets=(177, )),
     )
     allows = []
@@ -386,12 +385,7 @@ def test_multi_region_guard_rejections():
         _build_r2v(video_segments=((8, 8, 12), (5, 8, 12)), video_offsets=(177, 46))
     with pytest.raises(ValueError, match="not a positive multiple of patch"):
         _build_r2v(video_segments=((5, 7, 12), (8, 8, 12)))
-    for bad in (0.0, 1.5):
-        with pytest.raises(ValueError, match="ref_keep_rate"):
-            _build_r2v(ref_keep_rate=bad)
-    with pytest.raises(ValueError, match="compete"):
-        _build_r2v(exempt=False)
-    # single-region compete stays supported through the multi-region signature
+    # a single-region build through the multi-region signature keeps compete mode
     meta = _build_r2v(sparsity=0.75, exempt=False, prefix_segments=(37, 20), video_segments=((8, 8, 12), ),
                       video_offsets=(57, ))
     assert meta.exempt is False and len(meta.video_tile_spans) == 1
@@ -422,6 +416,11 @@ def test_the_multi_region_oracle_rejects_single_region_metadata_and_dense_refere
                                   expected_reference_video_regions=1,
                                   target_sparsity=0.0,
                                   ref_keep_rate=0.1)
+
+
+def test_build_multi_region_missing_ref_keep_rate():
+    with pytest.raises(ValueError, match="needs ref_keep_rate"):
+        _build_r2v(sparsity=0.75, ref_keep_rate=None)
 
 
 # ---------------------------------------------------------------------------

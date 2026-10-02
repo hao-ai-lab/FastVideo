@@ -5,10 +5,10 @@ A PDD-widened transformer samples fused blocks of its fine grid: the stage
 partitions the grid (the checkpoint contract's ``pdd_step_indices``), hands
 each scheduler its modality's node sigmas, starts the targets at the first
 node's noise level, and fuses one block of heads per forward. The ordinary
-Euler step over two node sigmas then equals the block advance. Under
-``vsa_ref_policy="p2_multi_region"`` every reference video is its own sparse
-VSA region. All checks are CPU-only; the transformer is a tiny stand-in with
-real widened heads.
+Euler step over two node sigmas then equals the block advance. With
+``vsa_ref_keep_rate`` set, every reference video is its own sparse VSA region.
+All checks are CPU-only; the transformer is a tiny stand-in with real widened
+heads.
 """
 from __future__ import annotations
 
@@ -43,7 +43,9 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 PATCH = (1, 2, 2)
 VIDEO_CHANNELS = 96  # 24 latent channels x (1, 2, 2) patch
 AUDIO_CHANNELS = 32
-GRID32_BLOCKS8 = list(range(0, 33, 4))
+GRID32_BLOCKS8 = tuple(range(0, 33, 4))
+# A 4-block partition of an 8-interval grid, for checks that need a short plan.
+GRID8_BLOCKS4 = (0, 2, 4, 6, 8)
 
 
 def _reference(kind: str, *, frames: int = 1, height: int = 4, width: int = 4, audio: int = 0):
@@ -60,66 +62,43 @@ def _ref2va_layout(references, *, text=5, frames=3, height=4, width=6, audio=3):
     return build_ref2va_packed_sequence(tags, references, frames, height, width, audio, PATCH)
 
 
-def _stage(pdd_steps: int | None) -> denoising.MiniMaxH3DenoisingStage:
+def _stage() -> denoising.MiniMaxH3DenoisingStage:
     return denoising.MiniMaxH3DenoisingStage(
-        transformer=SimpleNamespace(pdd_steps=pdd_steps),
+        transformer=SimpleNamespace(),
         scheduler=MiniMaxH3Scheduler(shift=12.0),
         audio_scheduler=MiniMaxH3Scheduler(shift=3.0),
     )
 
 
-def _args(pdd_steps=None, **pipeline_fields):
-    config = MiniMaxH3PipelineConfig(**pipeline_fields)
-    config.dit_config.arch_config.pdd_steps = pdd_steps
-    return SimpleNamespace(pipeline_config=config,
+def _args(**pipeline_fields):
+    return SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig(**pipeline_fields),
                            dit_cpu_offload=False,
                            dit_layerwise_offload=False,
                            use_fsdp_inference=False,
                            VSA_tile_size=128)
 
 
-def _plan(stage, num_inference_steps, args=None):
-    batch = SimpleNamespace(num_inference_steps=num_inference_steps)
-    args = args if args is not None else _args()
-    return stage._pdd_sampling_plan(batch, args, torch.device("cpu"))
+def _plan(stage, args):
+    return stage._pdd_sampling_plan(args, torch.device("cpu"))
 
 
-def test_plain_transformers_get_no_pdd_plan():
-    assert _plan(_stage(None), 4) is None
-    # The exported config.json overlays the pipeline config, which must agree with the module.
-    assert _plan(_stage(8), 4, _args(pdd_steps=8)).pdd_steps == 8
-    assert _plan(_stage(8), 4).pdd_steps == 8
-    with pytest.raises(ValueError, match="disagrees with the loaded transformer"):
-        _plan(_stage(8), 4, _args(pdd_steps=4))
-    with pytest.raises(ValueError, match="disagrees with the loaded transformer"):
-        _plan(_stage(None), 4, _args(pdd_steps=8))
-    with pytest.raises(ValueError, match="requires a PDD-widened transformer"):
-        _plan(_stage(None), 8, _args(pdd_step_indices=GRID32_BLOCKS8))
+def test_pdd_sampling_plan_unset_step_indices():
+    assert _plan(_stage(), _args()) is None
 
 
-def test_pdd_plan_uses_the_contract_partition_and_each_modality_shift():
-    plan = _plan(_stage(32), 8, _args(pdd_steps=32, pdd_step_indices=GRID32_BLOCKS8))
-    assert plan.indices.tolist() == GRID32_BLOCKS8
-    base = pdd_fine_grid(32)[GRID32_BLOCKS8]
+def test_pdd_sampling_plan_uses_the_contract_partition_and_each_modality_shift():
+    plan = _plan(_stage(), _args(pdd_step_indices=GRID32_BLOCKS8))
+    assert plan.indices.tolist() == list(GRID32_BLOCKS8)
+    base = pdd_fine_grid(32)[list(GRID32_BLOCKS8)]
     torch.testing.assert_close(plan.node_sigmas["video"], shifted_noise_amount(base, 12.0), rtol=0, atol=0)
     torch.testing.assert_close(plan.node_sigmas["audio"], shifted_noise_amount(base, 3.0), rtol=0, atol=0)
-    # Without a contract partition the balanced one is used.
-    assert _plan(_stage(8), 4).indices.tolist() == [0, 2, 4, 6, 8]
 
 
-@pytest.mark.parametrize("num_inference_steps", [4, 9, 50])
-def test_request_must_run_the_contract_block_count(num_inference_steps):
-    with pytest.raises(ValueError, match="num_inference_steps counts transformer forwards and must be 8"):
-        _plan(_stage(32), num_inference_steps, _args(pdd_steps=32, pdd_step_indices=GRID32_BLOCKS8))
-    with pytest.raises(ValueError, match="Cannot select 16 steps"):
-        _plan(_stage(8), 16)
-
-
-def test_scheduler_euler_step_equals_the_fused_block_advance():
+def test_scheduler_step_over_a_pdd_block_equals_the_fused_block_advance():
     """x_end = x_start + sum_j w_j * dx/dsigma_j with the raw H3 output m = x0 - eps = -dx/dsigma."""
     torch.manual_seed(0)
-    stage = _stage(8)
-    plan = _plan(stage, 4)
+    stage = _stage()
+    plan = _plan(stage, _args(pdd_step_indices=GRID8_BLOCKS4))
     stage.scheduler.set_timesteps(sigmas=plan.node_sigmas["video"].to(torch.float32))
     stage.audio_scheduler.set_timesteps(sigmas=plan.node_sigmas["audio"].to(torch.float32))
     video, audio = torch.randn(5, 6), torch.randn(4, 3)
@@ -139,8 +118,8 @@ def test_scheduler_euler_step_equals_the_fused_block_advance():
         video, audio = stepped_video, stepped_audio
 
 
-def test_pdd_initial_noise_starts_targets_at_the_first_node_sigma():
-    plan = _plan(_stage(8), 4)
+def test_scale_pdd_initial_noise_starts_targets_at_the_first_node_sigma():
+    plan = _plan(_stage(), _args(pdd_step_indices=GRID8_BLOCKS4))
     layout = SimpleNamespace(num_condition_video_rows=2, num_condition_audio_rows=1)
     video, audio = torch.randn(5, 6), torch.randn(4, 3)
     expected_video, expected_audio = video.clone(), audio.clone()
@@ -225,10 +204,10 @@ def _reference_video_and_audio_references():
     ]
 
 
-def test_pdd_stage_runs_eight_fused_blocks_from_the_contract(monkeypatch):
+def test_forward_pdd_runs_eight_fused_blocks_from_the_contract(monkeypatch):
     layout = _ref2va_layout(_reference_video_and_audio_references())
     transformer = _TinyPDDTransformer(pdd_steps=32)
-    args = _args(pdd_steps=32, pdd_step_indices=GRID32_BLOCKS8)
+    args = _args(pdd_step_indices=GRID32_BLOCKS8)
     stage, result, latents, audio_latents = _run(monkeypatch, layout, transformer, args=args)
 
     assert len(transformer.calls) == 8 and result.step_index == 7
@@ -239,7 +218,7 @@ def test_pdd_stage_runs_eight_fused_blocks_from_the_contract(monkeypatch):
     # Independent recomputation: node sigmas on each modality's clock, targets
     # start at 0.999 * noise, conditions stay fixed, and every block advances
     # x by -(sigma_end - sigma_start) * (weighted mean of its raw heads).
-    base = pdd_fine_grid(32)[GRID32_BLOCKS8]
+    base = pdd_fine_grid(32)[list(GRID32_BLOCKS8)]
     sigmas = {"video": shifted_noise_amount(base, 12.0), "audio": shifted_noise_amount(base, 3.0)}
     torch.testing.assert_close(stage.scheduler.sigmas, sigmas["video"].float(), rtol=0, atol=0)
     torch.testing.assert_close(stage.audio_scheduler.sigmas, sigmas["audio"].float(), rtol=0, atol=0)
@@ -278,15 +257,8 @@ def test_pdd_stage_runs_eight_fused_blocks_from_the_contract(monkeypatch):
     torch.testing.assert_close(result.audio_latents[:audio_start], audio_latents[:audio_start], rtol=0, atol=0)
 
 
-def test_pdd_transformer_rejects_a_dmd_ladder(monkeypatch):
-    layout = _ref2va_layout([_reference("image", height=4, width=6)])
-    args = _args(pdd_steps=32, pdd_step_indices=GRID32_BLOCKS8, dmd_denoising_steps=[999, 500])
-    with pytest.raises(ValueError, match="dmd_denoising_steps must be unset"):
-        _run(monkeypatch, layout, _TinyPDDTransformer(pdd_steps=32), args=args)
-
-
 @pytest.mark.parametrize("dense_first_n", [0, 1])
-def test_p2_policy_builds_one_sparse_region_per_reference_video(monkeypatch, dense_first_n):
+def test_forward_ref_keep_rate_builds_one_sparse_region_per_reference_video(monkeypatch, dense_first_n):
     references = [
         _reference("video", frames=5, height=4, width=6),
         _reference("image", height=4, width=6),
@@ -294,10 +266,7 @@ def test_p2_policy_builds_one_sparse_region_per_reference_video(monkeypatch, den
     ]
     layout = _ref2va_layout(references)
     transformer = _TinyPDDTransformer(pdd_steps=32)
-    args = _args(pdd_steps=32,
-                 pdd_step_indices=GRID32_BLOCKS8,
-                 vsa_ref_policy="p2_multi_region",
-                 vsa_ref_keep_rate=0.25)
+    args = _args(pdd_step_indices=GRID32_BLOCKS8, vsa_ref_keep_rate=0.25)
     _run(monkeypatch,
          layout,
          transformer,
@@ -320,50 +289,34 @@ def test_p2_policy_builds_one_sparse_region_per_reference_video(monkeypatch, den
     (0.9, "each reference keeps 0.25 of its tiles and the target keeps 0.1"),
     (0.0, "VSA_sparsity=0 keeps every region dense"),
 ])
-def test_p2_summary_reports_what_the_run_applies(monkeypatch, sparsity, effect):
+def test_forward_ref_keep_rate_logs_the_applied_sparsity(monkeypatch, sparsity, effect):
     infos = []
     monkeypatch.setattr(denoising.logger, "info", lambda message, *args: infos.append(message % args))
     layout = _ref2va_layout(_reference_video_and_audio_references())
-    args = _args(pdd_steps=32,
-                 pdd_step_indices=GRID32_BLOCKS8,
-                 vsa_ref_policy="p2_multi_region",
-                 vsa_ref_keep_rate=0.25)
+    args = _args(pdd_step_indices=GRID32_BLOCKS8, vsa_ref_keep_rate=0.25)
     _run(monkeypatch,
          layout,
          _TinyPDDTransformer(pdd_steps=32),
          args=args,
          sparsity=sparsity,
          builder=MiniMaxH3VSAMetadataBuilder())
-    assert f"MiniMax-H3 VSA-H3 p2_multi_region: 1 reference video region(s); {effect}; 128-token tiles." in infos
+    assert f"MiniMax-H3 VSA-H3: 1 reference video region(s); {effect}; 128-token tiles." in infos
 
 
-def test_without_a_reference_policy_references_stay_in_the_dense_prefix(monkeypatch):
+def test_forward_unset_ref_keep_rate_keeps_references_in_the_dense_prefix(monkeypatch):
     layout = _ref2va_layout(_reference_video_and_audio_references())
     transformer = _TinyPDDTransformer(pdd_steps=32)
-    args = _args(pdd_steps=32, pdd_step_indices=GRID32_BLOCKS8)
+    args = _args(pdd_step_indices=GRID32_BLOCKS8)
     _run(monkeypatch, layout, transformer, args=args, sparsity=0.9, builder=MiniMaxH3VSAMetadataBuilder())
     for call in transformer.calls:
         metadata = call["attn_metadata"]
         assert metadata.video_tile_spans == () and metadata.span_sparsities == ()
 
 
-def test_p2_policy_requires_a_vsa_transformer(monkeypatch):
+def test_forward_ref_keep_rate_requires_exempt_prefix_keys(monkeypatch):
     layout = _ref2va_layout(_reference_video_and_audio_references())
-    args = _args(pdd_steps=32,
-                 pdd_step_indices=GRID32_BLOCKS8,
-                 vsa_ref_policy="p2_multi_region",
-                 vsa_ref_keep_rate=0.1)
-    with pytest.raises(ValueError, match="does not run that backend"):
-        _run(monkeypatch, layout, _TinyPDDTransformer(pdd_steps=32), args=args, sparsity=0.9, builder=None)
-
-
-def test_p2_policy_requires_exempt_prefix_keys(monkeypatch):
-    layout = _ref2va_layout(_reference_video_and_audio_references())
-    args = _args(pdd_steps=32,
-                 pdd_step_indices=GRID32_BLOCKS8,
-                 vsa_ref_policy="p2_multi_region",
-                 vsa_ref_keep_rate=0.1)
-    with pytest.raises(ValueError, match="requires vsa_mode='exempt'"):
+    args = _args(pdd_step_indices=GRID32_BLOCKS8, vsa_ref_keep_rate=0.1)
+    with pytest.raises(ValueError, match="require vsa_mode='exempt'"):
         _run(monkeypatch,
              layout,
              _TinyPDDTransformer(pdd_steps=32),

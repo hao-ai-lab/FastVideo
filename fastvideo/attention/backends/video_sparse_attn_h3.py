@@ -446,6 +446,9 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
                              f"video_segments (multi-region); got raw_latent_shape={raw_latent_shape!r}, "
                              f"video_segments={video_segments!r}.")
         if video_segments is not None:
+            if ref_keep_rate is None:
+                raise ValueError("A multi-region (video_segments) build needs ref_keep_rate for its reference "
+                                 "regions.")
             return self._build_regions(current_timestep,
                                        patch_size, VSA_sparsity, prefix_segments, device, exempt, dense_layers,
                                        int(tile_size), tile_shape, video_segments, video_offsets, ref_keep_rate)
@@ -489,9 +492,9 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         tile_shape: tuple[int, int, int],
         video_segments: tuple[tuple[int, int, int], ...],
         video_offsets: tuple[int, ...] | None,
-        ref_keep_rate: float | None,
+        ref_keep_rate: float,
     ) -> MiniMaxH3VSAMetadata:
-        """Multi-region (Ref2VA P2) form of :meth:`build`."""
+        """Multi-region form of :meth:`build`: one region per reference video, then the generated video."""
         if not video_segments:
             raise ValueError("VSA-H3 needs at least one video region.")
         if video_offsets is None or len(video_offsets) != len(video_segments):
@@ -500,12 +503,6 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         video_offsets = tuple(int(offset) for offset in video_offsets)
         if any(later <= earlier for earlier, later in zip(video_offsets, video_offsets[1:], strict=False)):
             raise ValueError(f"VSA-H3 video regions must be in packed order; offsets={video_offsets}.")
-        if not exempt and len(video_segments) > 1:
-            raise ValueError("VSA-H3 'compete' mode supports a single video region; multi-region "
-                             "(Ref2VA P2) requires exempt prefix keys.")
-        # A keep rate of 1 would leave reference-video attention dense.
-        if ref_keep_rate is not None and not 0.0 < float(ref_keep_rate) < 1.0:
-            raise ValueError(f"ref_keep_rate must be in (0, 1), got {ref_keep_rate!r}.")
         prefix_segments = tuple(int(s) for s in prefix_segments if s > 0)
 
         token_grids: list[tuple[int, int, int]] = []
@@ -552,7 +549,7 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
         if VSA_sparsity <= 0.0:
             span_sparsities = tuple(0.0 for _ in video_tile_spans)
         else:
-            ref_sparsity = 1.0 - float(ref_keep_rate) if ref_keep_rate is not None else VSA_sparsity
+            ref_sparsity = 1.0 - float(ref_keep_rate)
             span_sparsities = tuple(ref_sparsity if index < len(video_tile_spans) - 1 else VSA_sparsity
                                     for index in range(len(video_tile_spans)))
 
@@ -645,7 +642,7 @@ def _build_region_block_mask(
     with one ``span_sparsities`` entry each.
     """
     n_tiles = scores.shape[-1]
-    if not span_sparsities or VSA_sparsity <= 0.0:
+    if VSA_sparsity <= 0.0:
         span_sparsities = tuple(VSA_sparsity for _ in video_tile_spans)
     span_topk = [
         compute_topk(sparsity, end - start)
@@ -664,9 +661,8 @@ def _build_region_block_mask(
         mask[..., :num_prefix_tiles] = True
     else:
         # compete: prefix keys enter the top-k under a FLOP-matched budget,
-        # which is defined for a single region only (the builder enforces it)
-        if len(video_tile_spans) > 1:
-            raise ValueError(f"compete mode supports a single video region; got {len(video_tile_spans)} spans.")
+        # which is defined for a single region only (the denoising stage
+        # rejects compete mode for multi-region layouts)
         k_total = min(span_topk[0] + num_prefix_tiles, n_tiles)
         idx = scores.topk(k_total, dim=-1).indices
         mask.scatter_(-1, idx, True)

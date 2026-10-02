@@ -1,14 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
-"""FastH3 Parallel Decoding Distillation (PDD) exports' ``fastvideo_inference.json``.
+"""How a FastH3 Ref2VA PDD checkpoint's ``fastvideo_inference.json`` sets a run's settings.
 
-A PDD contract names the fused-block partition of the transformer's widened
-heads and, for Ref2VA, the reference-video VSA policy. The pipeline applies
-both to its config and rejects any contract it cannot honor exactly. DMD
-contracts are covered by test_minimax_h3_distilled_schedule.
+``MiniMaxH3PipelineConfig.resolve_checkpoint_settings`` runs inside
+``FastVideoArgs.__post_init__``. It fills each unset run setting from the file,
+rejects an explicit value that differs for a setting fixed by training (attention
+backend, VSA tile size, PDD partition), keeps an explicit value that differs for
+a tunable setting (VSA sparsity, reference keep rate) with a warning, and
+rejects a file that is incomplete or disagrees with the checkpoint file that owns
+a value. In the worker, ``MiniMaxH3BasePipeline`` checks its transformer before
+loading weights: against those settings, and, when the transformer carries VSA
+compression gates, against the run's attention backend. DMD exports keep their
+schedule handling (see test_minimax_h3_distilled_schedule.py).
 """
 from __future__ import annotations
 
 import json
+import logging
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,17 +26,17 @@ from safetensors.torch import save_file
 
 from fastvideo import envs
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import (
     MiniMaxH3ModularPipeline,
     MiniMaxH3Ref2VAModularPipeline,
 )
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-GRID32_BLOCKS8 = list(range(0, 33, 4))
-# The OmniRef PDD-8 export's contract, verbatim.
-PDD_CONTRACT = {
+GRID32_BLOCKS8 = [0, 4, 8, 12, 16, 20, 24, 28, 32]
+# The OmniRef PDD-8 export's fastvideo_inference.json, verbatim.
+PDD_FILE = {
     "attention_backend": "VIDEO_SPARSE_ATTN_H3",
     "audio_scheduler_shift": 3.0,
     "base_model_revision": "hf://MiniMaxAI/MiniMax-H3@9bfb6693f2cf6de171db46d1aa586f67d773a1da",
@@ -48,7 +57,8 @@ PDD_CONTRACT = {
     "vsa_sparsity": 0.9,
     "vsa_tile_size": 128,
 }
-DMD_CONTRACT = {
+# A DMD export's fastvideo_inference.json, which has no PDD fields.
+DMD_FILE = {
     "schema_version": "fasth3-inference-contract-v1",
     "dmd_denoising_steps": [999, 874, 749, 624, 500, 375, 250, 125],
     "num_inference_steps": 9,
@@ -58,237 +68,286 @@ DMD_CONTRACT = {
 }
 
 
-def _pipeline(tmp_path, contract, *, cls=MiniMaxH3Ref2VAModularPipeline, pdd_steps=32, video_shift=12.0):
-    """Initialization with weight loading omitted: schedulers, transformer config.json, and the sidecar."""
-    transformer_dir = tmp_path / cls._extra_config_module_map.get("transformer", "transformer")
-    transformer_dir.mkdir(exist_ok=True)
-    transformer_config = {"_class_name": "MiniMaxH3Transformer3DModel", "_diffusers_version": "0.36.0.dev0"}
-    if pdd_steps is not None:
-        transformer_config["pdd_steps"] = pdd_steps
-    (transformer_dir / "config.json").write_text(json.dumps(transformer_config))
-    (tmp_path / "fastvideo_inference.json").write_text(json.dumps(contract))
+@pytest.fixture(autouse=True)
+def _unset_backend_env_var(env_overrides):
+    """Start every test without FASTVIDEO_ATTENTION_BACKEND, which FastVideoArgs reads as an explicit backend."""
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
+
+
+def _checkpoint(root: Path, inference_file: dict | None, *, pdd_steps: int | None = 32) -> str:
+    """Write a Ref2VA checkpoint's JSON files: the inference file and the configs that own its repeated values.
+
+    The transformer_ref config.json sets ``pdd_steps`` unless it is None; the
+    scheduler configs hold the video/audio shifts 12.0/3.0. No weights are written.
+    """
+    files = {
+        "transformer_ref/config.json": {} if pdd_steps is None else {"pdd_steps": pdd_steps},
+        "scheduler/scheduler_config.json": {"shift": 12.0},
+        "audio_scheduler/scheduler_config.json": {"shift": 3.0},
+    }
+    if inference_file is not None:
+        files["fastvideo_inference.json"] = inference_file
+    for relative_path, content in files.items():
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(content))
+    return str(root)
+
+
+def _run_args(model_path: str, config_settings: dict | None = None, **run_settings) -> FastVideoArgs:
+    """Build a run's FastVideoArgs; construction resolves the checkpoint's settings."""
+    pipeline_config = MiniMaxH3PipelineConfig(**(config_settings or {}))
+    return FastVideoArgs(model_path=model_path, pipeline_config=pipeline_config, **run_settings)
+
+
+def _pipeline(model_path: str, cls=MiniMaxH3Ref2VAModularPipeline):
+    """A pipeline without loaded weights: the checkpoint path, its schedulers, and the Ref2VA flag __init__ sets."""
     pipeline = object.__new__(cls)
-    pipeline.model_path = str(tmp_path)
+    pipeline.model_path = model_path
+    pipeline._ref2va = cls._ref2va_default
     pipeline.modules = {
-        "scheduler": MiniMaxH3Scheduler(shift=video_shift),
+        "scheduler": MiniMaxH3Scheduler(shift=12.0),
         "audio_scheduler": MiniMaxH3Scheduler(shift=3.0),
     }
     return pipeline
 
 
-def _initialize(pipeline, config=None, **args):
-    config = config if config is not None else MiniMaxH3PipelineConfig()
-    # The export was trained with VSA-H3; tests that probe the backend pass their own.
-    args.setdefault("attention_backend", "VIDEO_SPARSE_ATTN_H3")
-    pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=config, **args))
-    return config
+# ------------------------------------------------- resolve_checkpoint_settings: run settings on a PDD checkpoint
 
 
-def test_pdd_contract_sets_the_trained_partition_and_reference_policy(tmp_path):
-    config = _initialize(_pipeline(tmp_path, PDD_CONTRACT))
-    assert config.dit_config.arch_config.pdd_steps == 32
-    assert config.pdd_step_indices == GRID32_BLOCKS8
-    assert config.vsa_ref_policy == "p2_multi_region"
-    assert config.vsa_ref_keep_rate == 0.1
-    assert config.dmd_denoising_steps is None
-    config.check_pipeline_config()
+def test_resolve_checkpoint_settings_unset_run_settings(tmp_path):
+    args = _run_args(_checkpoint(tmp_path, PDD_FILE))
+    assert args.attention_backend == "VIDEO_SPARSE_ATTN_H3"
+    assert args.VSA_tile_size == 128
+    assert args.VSA_sparsity == 0.9
+    assert args.pipeline_config.pdd_step_indices == tuple(GRID32_BLOCKS8)
+    assert args.pipeline_config.vsa_ref_keep_rate == 0.1
+    assert args.pipeline_config.fixed_num_inference_steps() == 8
 
 
-def test_minimal_pdd_contract_without_optional_fields(tmp_path):
-    required = {
-        key: PDD_CONTRACT[key]
-        for key in ("schema_version", "pdd_steps", "pdd_step_indices", "num_inference_steps",
-                    "transformer_forwards", "video_scheduler_shift", "audio_scheduler_shift")
-    }
-    config = _initialize(_pipeline(tmp_path, required))
-    assert config.pdd_step_indices == GRID32_BLOCKS8
-    assert config.vsa_ref_policy is None and config.vsa_ref_keep_rate is None
+def test_resolve_checkpoint_settings_matching_explicit_settings(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        args = _run_args(_checkpoint(tmp_path, PDD_FILE), {
+            "pdd_step_indices": GRID32_BLOCKS8,
+            "vsa_ref_keep_rate": 0.1
+        },
+                         attention_backend="VIDEO_SPARSE_ATTN_H3",
+                         VSA_tile_size=128,
+                         VSA_sparsity=0.9)
+    assert args.pipeline_config.pdd_step_indices == tuple(GRID32_BLOCKS8)
+    assert "trained with" not in caplog.text
 
 
-@pytest.mark.parametrize("indices", [list(GRID32_BLOCKS8), tuple(GRID32_BLOCKS8)])
-def test_matching_explicit_settings_are_accepted(tmp_path, indices):
-    config = MiniMaxH3PipelineConfig(pdd_step_indices=indices,
-                                     vsa_ref_policy="p2_multi_region",
-                                     vsa_ref_keep_rate=0.1)
-    _initialize(_pipeline(tmp_path, PDD_CONTRACT), config)
-    assert config.pdd_step_indices == GRID32_BLOCKS8
+def test_resolve_checkpoint_settings_repeated_call(tmp_path):
+    args = _run_args(_checkpoint(tmp_path, PDD_FILE))
+    args.pipeline_config.resolve_checkpoint_settings(args)
+    assert (args.attention_backend, args.VSA_tile_size, args.VSA_sparsity) == ("VIDEO_SPARSE_ATTN_H3", 128, 0.9)
+    assert args.pipeline_config.pdd_step_indices == tuple(GRID32_BLOCKS8)
+    assert args.pipeline_config.vsa_ref_keep_rate == 0.1
+
+
+@pytest.mark.parametrize("config_settings,run_settings,match", [
+    ({}, {"attention_backend": "FLASH_ATTN"},
+     "trained with attention_backend=VIDEO_SPARSE_ATTN_H3; this run requests FLASH_ATTN"),
+    ({}, {"VSA_tile_size": 64}, "trained with VSA_tile_size=128; this run requests 64"),
+    ({"pdd_step_indices": (0, 8, 16, 24, 32)}, {}, re.escape("this run sets [0, 8, 16, 24, 32]")),
+], ids=["backend", "tile_size", "partition"])
+def test_resolve_checkpoint_settings_explicit_training_fixed_conflict(tmp_path, config_settings, run_settings,
+                                                                      match):
+    with pytest.raises(ValueError, match=match):
+        _run_args(_checkpoint(tmp_path, PDD_FILE), config_settings, **run_settings)
+
+
+def test_resolve_checkpoint_settings_env_backend_conflict(tmp_path, env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASH_ATTN"))
+    with pytest.raises(ValueError, match="this run requests FLASH_ATTN"):
+        _run_args(_checkpoint(tmp_path, PDD_FILE))
+
+
+def test_resolve_checkpoint_settings_explicit_sparsity_override(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        args = _run_args(_checkpoint(tmp_path, PDD_FILE), VSA_sparsity=0.8)
+    assert args.VSA_sparsity == 0.8
+    assert "trained with VSA_sparsity=0.9; this run uses 0.8" in caplog.text
+
+
+def test_resolve_checkpoint_settings_explicit_keep_rate_override(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        args = _run_args(_checkpoint(tmp_path, PDD_FILE), {"vsa_ref_keep_rate": 0.2})
+    assert args.pipeline_config.vsa_ref_keep_rate == 0.2
+    assert "trained with vsa_ref_keep_rate=0.1; this run uses 0.2" in caplog.text
+
+
+@pytest.mark.parametrize("config_settings,run_settings,match", [
+    ({}, {"VSA_sparsity": 1.0}, re.escape("VSA_sparsity must be in [0, 1), got 1.0")),
+    ({"vsa_ref_keep_rate": 1.0}, {}, re.escape("vsa_ref_keep_rate must be in (0, 1), got 1.0")),
+], ids=["sparsity", "keep_rate"])
+def test_resolve_checkpoint_settings_tunable_out_of_range(tmp_path, config_settings, run_settings, match):
+    with pytest.raises(ValueError, match=match):
+        _run_args(_checkpoint(tmp_path, PDD_FILE), config_settings, **run_settings)
+
+
+def test_resolve_checkpoint_settings_dmd_steps_on_pdd_checkpoint(tmp_path):
+    with pytest.raises(ValueError, match="dmd_denoising_steps must be unset"):
+        _run_args(_checkpoint(tmp_path, PDD_FILE), {"dmd_denoising_steps": [999, 749, 500, 250]})
+
+
+# ------------------------------------------------- resolve_checkpoint_settings: PDD file validation
+
+
+def test_resolve_checkpoint_settings_missing_field(tmp_path):
+    inference_file = {key: value for key, value in PDD_FILE.items() if key != "vsa_sparsity"}
+    with pytest.raises(ValueError, match=re.escape("missing ['vsa_sparsity']")):
+        _run_args(_checkpoint(tmp_path, inference_file))
+
+
+@pytest.mark.parametrize("pin", ["", None, "9bfb6693", "MiniMaxAI/MiniMax-H3@9bfb6693", "hf://MiniMaxAI/MiniMax-H3"])
+def test_resolve_checkpoint_settings_unparsable_base_model_revision(tmp_path, pin):
+    with pytest.raises(ValueError, match="must be hf://<repo id>@<revision>"):
+        _run_args(_checkpoint(tmp_path, {**PDD_FILE, "base_model_revision": pin}))
+
+
+def test_resolve_checkpoint_settings_unknown_field(tmp_path):
+    with pytest.raises(ValueError, match=re.escape("unknown ['dmd_denoising_steps']")):
+        _run_args(_checkpoint(tmp_path, {**PDD_FILE, "dmd_denoising_steps": [999, 500]}))
 
 
 @pytest.mark.parametrize("field,value", [
-    ("pdd_step_indices", [0, 8, 16, 24, 32]),
-    ("vsa_ref_keep_rate", 0.2),
-    ("dmd_denoising_steps", [999, 749, 500, 250]),
+    ("schema_version", "fasth3-inference-contract-v2"),
+    ("schema", "fasth3-inference-contract-v2"),
+    ("model_type", "t2va"),
+    ("transformer_component", "transformer"),
+    ("conditioning", "noised_references"),
+    ("guidance_scale", 2.0),
+    ("attention_backend", "FLASH_ATTN"),
+    ("vsa_ref_policy", "dense"),
+    ("grid_max_t", 1.0),
 ])
-def test_conflicting_explicit_settings_are_rejected(tmp_path, field, value):
-    config = MiniMaxH3PipelineConfig(**{field: value}, **({"vsa_ref_policy": "p2_multi_region"}
-                                                          if field == "vsa_ref_keep_rate" else {}))
-    with pytest.raises(ValueError, match="disagrees|must be unset"):
-        _initialize(_pipeline(tmp_path, PDD_CONTRACT), config)
-
-
-def test_a_dmd_contract_sets_its_ladder_on_the_ref2va_pipeline(tmp_path):
-    config = _initialize(_pipeline(tmp_path, DMD_CONTRACT, pdd_steps=None))
-    assert config.dmd_denoising_steps == DMD_CONTRACT["dmd_denoising_steps"]
-    assert config.pdd_step_indices is None and config.vsa_ref_policy is None
-
-
-def test_t2va_pipeline_rejects_a_ref2va_export(tmp_path):
-    with pytest.raises(ValueError, match="MiniMaxH3Ref2VAModularPipeline"):
-        _initialize(_pipeline(tmp_path, {**PDD_CONTRACT, "transformer_component": "transformer"},
-                              cls=MiniMaxH3ModularPipeline))
-
-
-def test_transformer_without_widened_heads_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="config.json pdd_steps=None"):
-        _initialize(_pipeline(tmp_path, PDD_CONTRACT, pdd_steps=None))
-
-
-def test_transformer_with_a_different_grid_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="disagrees with transformer_ref/config.json"):
-        _initialize(_pipeline(tmp_path, PDD_CONTRACT, pdd_steps=16))
-
-
-def test_video_shift_must_match_the_contract(tmp_path):
-    # (tmp_path must not contain "scheduler": get_diffusers_config keys its file name on that substring)
-    with pytest.raises(ValueError, match="video_scheduler_shift"):
-        _initialize(_pipeline(tmp_path, PDD_CONTRACT, video_shift=10.0))
-
-
-_MISSING = object()
+def test_resolve_checkpoint_settings_fixed_field_other_value(tmp_path, field, value):
+    with pytest.raises(ValueError, match=re.escape(f"{field}={value!r} is unsupported")):
+        _run_args(_checkpoint(tmp_path, {**PDD_FILE, field: value}))
 
 
 @pytest.mark.parametrize("field,value,match", [
-    ("unexpected_knob", 1, "unsupported keys"),
-    ("dmd_denoising_steps", [999, 500], "unsupported keys"),
-    ("schema", "fasth3-inference-contract-v2", "disagrees with its schema_version"),
-    ("model_type", "t2va", "is a 't2va' PDD export"),
-    ("transformer_component", "transformer", "targets 'transformer'"),
-    ("conditioning", "noised_references", "Unsupported FastH3 Ref2VA conditioning"),
-    ("base_model_revision", "", "must be hf://<repo id>@<revision>"),
-    ("base_model_revision", None, "must be hf://<repo id>@<revision>"),
-    ("base_model_revision", "9bfb6693f2cf6de171db46d1aa586f67d773a1da", "must be hf://<repo id>@<revision>"),
-    ("base_model_revision", "MiniMaxAI/MiniMax-H3@9bfb6693", "must be hf://<repo id>@<revision>"),
-    ("base_model_revision", "hf://MiniMaxAI/MiniMax-H3", "must be hf://<repo id>@<revision>"),
-    ("base_model_revision", "hf://@9bfb6693", "must be hf://<repo id>@<revision>"),
-    ("pdd_steps", 1, "pdd_steps must be an int >= 2"),
-    ("pdd_steps", True, "pdd_steps must be an int >= 2"),
-    ("pdd_step_indices", _MISSING, "pdd_step_indices must be a list of integers"),
-    ("pdd_step_indices", [0, 4, 8, 12, 16, 20, 24, 28, 31], "must start at 0 and end at 32"),
-    ("pdd_step_indices", [1, 4, 8, 12, 16, 20, 24, 28, 32], "must start at 0 and end at 32"),
-    ("pdd_step_indices", [0, 8, 4, 12, 16, 20, 24, 28, 32], "must be strictly increasing"),
-    ("pdd_step_indices", [0.0, 4, 8, 12, 16, 20, 24, 28, 32], "pdd_step_indices must be a list of integers"),
-    ("pdd_step_indices", [False, 4, 8, 12, 16, 20, 24, 28, 32], "pdd_step_indices must be a list of integers"),
-    ("pdd_step_indices", [32], "must name at least one block"),
-    ("num_inference_steps", 9, "num_inference_steps=9 must equal the 8 fused blocks"),
-    ("num_inference_steps", _MISSING, "num_inference_steps=None must equal"),
-    ("transformer_forwards", 4, "transformer_forwards=4 must equal"),
-    ("transformer_forwards", 8.0, "transformer_forwards=8.0 must equal"),
-    ("grid_max_t", 1.0, "grid_max_t=1.0 is unsupported"),
-    ("video_scheduler_shift", _MISSING, "video_scheduler_shift=None disagrees"),
-    ("video_scheduler_shift", float("nan"), "video_scheduler_shift=nan disagrees"),
-    ("audio_scheduler_shift", True, "audio_scheduler_shift=True disagrees"),
-    ("audio_scheduler_shift", 4.0, "audio_scheduler_shift=4.0 disagrees"),
-    ("guidance_scale", 2.0, "guidance_scale=2.0 is unsupported"),
-    ("attention_backend", "NOT_A_BACKEND", "Unknown attention backend"),
-    ("vsa_sparsity", 1.0, r"vsa_sparsity must be in \[0, 1\)"),
-    ("vsa_tile_size", 96, "vsa_tile_size must be one of"),
-    ("vsa_tile_size", 128.0, "vsa_tile_size must be one of"),
-    ("vsa_ref_policy", "p1", "Unsupported FastH3 PDD vsa_ref_policy 'p1'"),
-    ("vsa_ref_policy", _MISSING, "vsa_ref_keep_rate requires vsa_ref_policy"),
-    ("vsa_ref_keep_rate", 0.0, r"vsa_ref_keep_rate must be in \(0, 1\), got 0.0"),
-    ("vsa_ref_keep_rate", 1.0, r"vsa_ref_keep_rate must be in \(0, 1\), got 1.0"),
-    ("vsa_ref_keep_rate", True, r"vsa_ref_keep_rate must be in \(0, 1\), got True"),
-    ("vsa_ref_keep_rate", _MISSING, r"vsa_ref_keep_rate must be in \(0, 1\), got None"),
+    ("pdd_steps", 16, "pdd_steps=16 disagrees with transformer_ref/config.json pdd_steps=32"),
+    ("video_scheduler_shift", 10.0,
+     "video_scheduler_shift=10.0 disagrees with scheduler/scheduler_config.json shift=12.0"),
+    ("audio_scheduler_shift", 4.0,
+     "audio_scheduler_shift=4.0 disagrees with audio_scheduler/scheduler_config.json shift=3.0"),
+    ("num_inference_steps", 9, "num_inference_steps=9 disagrees with the 8 blocks of pdd_step_indices"),
+    ("transformer_forwards", 4, "transformer_forwards=4 disagrees with the 8 blocks of pdd_step_indices"),
 ])
-def test_malformed_pdd_contracts_are_rejected(tmp_path, field, value, match):
-    contract = dict(PDD_CONTRACT)
-    if value is _MISSING:
-        contract.pop(field)
-    else:
-        contract[field] = value
-    with pytest.raises((ValueError, TypeError), match=match):
-        _initialize(_pipeline(tmp_path, contract))
+def test_resolve_checkpoint_settings_duplicate_disagrees_with_owner(tmp_path, field, value, match):
+    with pytest.raises(ValueError, match=match):
+        _run_args(_checkpoint(tmp_path, {**PDD_FILE, field: value}))
 
 
-def test_trained_sparsity_or_tile_size_mismatch_is_logged(tmp_path, monkeypatch):
-    from fastvideo.pipelines.basic.minimax_h3 import minimax_h3_pipeline
-
-    warnings = []
-    monkeypatch.setattr(minimax_h3_pipeline.logger, "warning", lambda message, *args: warnings.append(message % args))
-    _initialize(_pipeline(tmp_path, PDD_CONTRACT),
-                attention_backend="VIDEO_SPARSE_ATTN_H3",
-                VSA_sparsity=0.9,
-                VSA_tile_size=256)
-    assert warnings == ["FastH3 PDD checkpoint was trained with VSA_tile_size=128; this run uses 256."]
+@pytest.mark.parametrize("owner", ["transformer_ref/config.json", "audio_scheduler/scheduler_config.json"])
+def test_resolve_checkpoint_settings_missing_owner_file(tmp_path, owner):
+    model_path = _checkpoint(tmp_path, PDD_FILE)
+    (tmp_path / owner).unlink()
+    with pytest.raises(ValueError, match=f"has fastvideo_inference.json but no {owner}"):
+        _run_args(model_path)
 
 
-_BACKEND_ERROR = ("needs attention_backend=VIDEO_SPARSE_ATTN_H3: its fastvideo_inference.json was trained with "
-                  "VIDEO_SPARSE_ATTN_H3.*This run requests {requested}. Select VIDEO_SPARSE_ATTN_H3 with "
-                  "VSA_sparsity=0.9, VSA_tile_size=128")
+@pytest.mark.parametrize("field,value,match", [
+    ("vsa_tile_size", 96, "vsa_tile_size=96 must be one of"),
+    ("vsa_sparsity", "0.9", "vsa_sparsity must be in \\[0, 1\\), got '0.9'"),
+    ("vsa_ref_keep_rate", 1.0, "vsa_ref_keep_rate must be in \\(0, 1\\), got 1.0"),
+])
+def test_resolve_checkpoint_settings_invalid_trained_vsa_value(tmp_path, field, value, match):
+    with pytest.raises(ValueError, match=match):
+        _run_args(_checkpoint(tmp_path, {**PDD_FILE, field: value}))
+
+
+def test_resolve_checkpoint_settings_transformer_config_without_pdd_steps(tmp_path):
+    with pytest.raises(ValueError, match="pdd_steps=32 disagrees with transformer_ref/config.json pdd_steps=None"):
+        _run_args(_checkpoint(tmp_path, PDD_FILE, pdd_steps=None))
+
+
+@pytest.mark.parametrize("indices", [
+    [0, 8, 4, 12, 16, 20, 24, 28, 32],
+    [1, 4, 8, 12, 16, 20, 24, 28, 32],
+    [0, 4, 8, 12, 16, 20, 24, 28, 31],
+    [0, 4.0, 8, 12, 16, 20, 24, 28, 32],
+    [32],
+], ids=["decreasing", "starts_after_0", "ends_before_pdd_steps", "float_node", "single_node"])
+def test_resolve_checkpoint_settings_malformed_partition(tmp_path, indices):
+    with pytest.raises(ValueError, match=re.escape(f"pdd_step_indices={indices!r} must increase strictly from 0 to "
+                                                   "pdd_steps=32")):
+        _run_args(_checkpoint(tmp_path, {**PDD_FILE, "pdd_step_indices": indices}))
+
+
+# ------------------------------------------------- resolve_checkpoint_settings: checkpoints without PDD fields
+
+
+@pytest.mark.parametrize("inference_file", [None, DMD_FILE], ids=["base", "dmd"])
+def test_resolve_checkpoint_settings_non_pdd_checkpoint(tmp_path, inference_file):
+    args = _run_args(_checkpoint(tmp_path, inference_file, pdd_steps=None))
+    assert (args.attention_backend, args.VSA_tile_size, args.VSA_sparsity) == (None, 256, 0.0)
+    config = args.pipeline_config
+    assert (config.pdd_step_indices, config.vsa_ref_keep_rate, config.dmd_denoising_steps) == (None, None, None)
+    assert config.fixed_num_inference_steps() is None
+
+
+@pytest.mark.parametrize("inference_file", [None, DMD_FILE], ids=["base", "dmd"])
+@pytest.mark.parametrize("config_settings", [{"pdd_step_indices": (0, 16, 32)}, {"vsa_ref_keep_rate": 0.1}],
+                         ids=["partition", "keep_rate"])
+def test_resolve_checkpoint_settings_pdd_setting_on_non_pdd_checkpoint(tmp_path, inference_file, config_settings):
+    with pytest.raises(ValueError, match="applies only to FastH3 PDD checkpoints"):
+        _run_args(_checkpoint(tmp_path, inference_file, pdd_steps=None), config_settings)
+
+
+# ------------------------------------------------- worker pipeline: initialize_pipeline and the transformer check
+
+
+def test_initialize_pipeline_pdd_checkpoint_keeps_resolved_settings(tmp_path):
+    model_path = _checkpoint(tmp_path, PDD_FILE)
+    args = _run_args(model_path)
+    _pipeline(model_path).initialize_pipeline(args)
+    config = args.pipeline_config
+    assert config.dit_config.arch_config.pdd_steps == 32
+    assert config.pdd_step_indices == tuple(GRID32_BLOCKS8)
+    assert config.dmd_denoising_steps is None
+
+
+def test_initialize_pipeline_dmd_checkpoint_applies_rungs(tmp_path):
+    model_path = _checkpoint(tmp_path, DMD_FILE, pdd_steps=None)
+    args = _run_args(model_path)
+    _pipeline(model_path).initialize_pipeline(args)
+    assert args.pipeline_config.dmd_denoising_steps == DMD_FILE["dmd_denoising_steps"]
+    assert args.pipeline_config.pdd_step_indices is None
+
+
+def test_check_pdd_transformer_widened_transformer_without_pdd_file(tmp_path):
+    model_path = _checkpoint(tmp_path, None, pdd_steps=32)
+    with pytest.raises(ValueError, match="sets pdd_steps, but .* has no PDD fastvideo_inference.json"):
+        _pipeline(model_path)._check_pdd_transformer(_run_args(model_path))
+
+
+def test_check_pdd_transformer_pdd_checkpoint_on_t2va_pipeline(tmp_path):
+    model_path = _checkpoint(tmp_path, PDD_FILE)
+    with pytest.raises(ValueError, match="select MiniMaxH3Ref2VAModularPipeline"):
+        _pipeline(model_path, MiniMaxH3ModularPipeline)._check_pdd_transformer(_run_args(model_path))
+
+
+def test_check_pdd_transformer_pdd_checkpoint_on_ref2va_pipeline(tmp_path):
+    model_path = _checkpoint(tmp_path, PDD_FILE)
+    _pipeline(model_path)._check_pdd_transformer(_run_args(model_path))
+
+
+# ------------------------------------------------- worker pipeline: _load_config checks, before any component loads
+
 _GATE = "transformer_blocks.0.attn.to_gate_compress.weight"
 
 
-def _write_gates(transformer_dir, indexed=True):
+def _write_gates(transformer_dir: Path, *, indexed: bool) -> None:
+    """Give a transformer checkpoint one VSA compression gate, listed in a shard index or in a safetensors file."""
     if indexed:
         (transformer_dir / "diffusion_pytorch_model.safetensors.index.json").write_text(
             json.dumps({"weight_map": {_GATE: "diffusion_pytorch_model-00001-of-00001.safetensors"}}))
     else:
         save_file({_GATE: torch.zeros(2, 2)}, str(transformer_dir / "diffusion_pytorch_model.safetensors"))
-
-
-@pytest.mark.parametrize("requested,shown", [("FLASH_ATTN", "FLASH_ATTN"), (None, "automatic selection")])
-def test_a_vsa_trained_export_rejects_other_attention_backends(tmp_path, env_overrides, requested, shown):
-    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
-    with pytest.raises(ValueError, match=_BACKEND_ERROR.format(requested=shown)):
-        _initialize(_pipeline(tmp_path, PDD_CONTRACT), attention_backend=requested)
-
-
-def test_the_environment_backend_counts_as_the_request(tmp_path, env_overrides):
-    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("VIDEO_SPARSE_ATTN_H3"))
-    config = _initialize(_pipeline(tmp_path, PDD_CONTRACT), attention_backend=None)
-    assert config.vsa_ref_policy == "p2_multi_region"
-
-
-_MINIMAL_KEYS = ("schema_version", "pdd_steps", "pdd_step_indices", "num_inference_steps", "transformer_forwards",
-                 "video_scheduler_shift", "audio_scheduler_shift")
-
-
-@pytest.mark.parametrize("indexed", [True, False])
-def test_trained_gates_require_vsa_even_without_a_contract_backend(tmp_path, env_overrides, indexed):
-    """The checkpoint's own to_gate_compress weights mark it as a VSA-H3 student."""
-    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
-    minimal = {key: PDD_CONTRACT[key] for key in _MINIMAL_KEYS}
-    pipeline = _pipeline(tmp_path, minimal)
-    _write_gates(tmp_path / "transformer_ref", indexed)
-    with pytest.raises(ValueError, match="its transformer_ref carries VSA compression gates"):
-        _initialize(pipeline, attention_backend="FLASH_ATTN")
-    _initialize(pipeline, attention_backend="VIDEO_SPARSE_ATTN_H3")
-
-
-def test_a_minimal_contract_without_gates_leaves_the_backend_to_the_run(tmp_path, env_overrides):
-    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
-    minimal = {key: PDD_CONTRACT[key] for key in _MINIMAL_KEYS}
-    config = _initialize(_pipeline(tmp_path, minimal), attention_backend="FLASH_ATTN")
-    assert config.pdd_step_indices == GRID32_BLOCKS8
-
-
-@pytest.mark.parametrize("recorded,requested,accepted", [
-    ("VIDEO_SPARSE_ATTN_H3", None, True),
-    ("FLASH_ATTN", "VIDEO_SPARSE_ATTN_H3", False),
-])
-def test_a_loaded_transformer_reports_its_own_backend(tmp_path, env_overrides, recorded, requested, accepted):
-    """A transformer built elsewhere (for example by a trainer) carries the backend it was built with."""
-    from fastvideo.platforms import AttentionBackendEnum
-
-    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
-    pipeline = _pipeline(tmp_path, PDD_CONTRACT)
-    pipeline.modules["transformer"] = SimpleNamespace(config=SimpleNamespace(
-        _resolved_attention_backend=AttentionBackendEnum[recorded]))
-    if accepted:
-        _initialize(pipeline, attention_backend=requested)
-    else:
-        with pytest.raises(ValueError, match="This run requests FLASH_ATTN"):
-            _initialize(pipeline, attention_backend=requested)
 
 
 @pytest.fixture
@@ -308,28 +367,30 @@ def hub_snapshot(tmp_path, monkeypatch):
     return downloads
 
 
-@pytest.mark.parametrize("contract", [PDD_CONTRACT, DMD_CONTRACT, None], ids=["pdd", "dmd", "no-contract"])
-def test_config_load_rejects_the_backend_for_any_gated_checkpoint(tmp_path, env_overrides, hub_snapshot, contract):
-    """Checked once the Hub snapshot resolves, before any component loads, whatever the schedule."""
-    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
-    pipeline = _pipeline(tmp_path, contract or {}, pdd_steps=32 if contract is PDD_CONTRACT else None)
-    if contract is None:
-        (tmp_path / "fastvideo_inference.json").unlink()
-    _write_gates(tmp_path / "transformer_ref")
-    pipeline.model_path = "org/fasth3"
-    pipeline.fastvideo_args = SimpleNamespace(attention_backend="FLASH_ATTN")
+@pytest.mark.parametrize("indexed", [True, False], ids=["shard_index", "safetensors_header"])
+@pytest.mark.parametrize("inference_file", [None, DMD_FILE], ids=["base", "dmd"])
+def test_load_config_gated_non_pdd_transformer_requires_vsa(tmp_path, hub_snapshot, inference_file, indexed):
+    """The gates are read from the resolved Hub snapshot. A PDD checkpoint's backend is checked by
+    resolve_checkpoint_settings instead (test_resolve_checkpoint_settings_explicit_training_fixed_conflict)."""
+    model_path = _checkpoint(tmp_path, inference_file, pdd_steps=None)
+    _write_gates(tmp_path / "transformer_ref", indexed=indexed)
+    pipeline = _pipeline("org/fasth3")
+    pipeline.fastvideo_args = _run_args(model_path, attention_backend="FLASH_ATTN")
     with pytest.raises(ValueError, match="its transformer_ref carries VSA compression gates.*requests FLASH_ATTN"):
         pipeline._load_config(pipeline.model_path)
-    assert hub_snapshot == ["org/fasth3"] and pipeline.model_path == str(tmp_path)
-    pipeline.fastvideo_args = SimpleNamespace(attention_backend="VIDEO_SPARSE_ATTN_H3")
+    assert hub_snapshot == ["org/fasth3"] and pipeline.model_path == model_path
+    pipeline.fastvideo_args.attention_backend = "VIDEO_SPARSE_ATTN_H3"
     assert pipeline._load_config(pipeline.model_path) == {"_class_name": "MiniMaxH3ModularPipeline"}
 
 
-def test_load_modules_checks_before_loading_unless_the_transformer_is_supplied(tmp_path, env_overrides, monkeypatch,
-                                                                               hub_snapshot):
-    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
-    pipeline = _pipeline(tmp_path, PDD_CONTRACT)
-    pipeline._ref2va = True
+@pytest.mark.parametrize("pdd_steps,gated,match", [
+    (32, False, "has no PDD fastvideo_inference.json"),
+    (None, True, "carries VSA compression gates"),
+], ids=["widened_without_pdd_file", "gated_with_other_backend"])
+def test_load_modules_transformer_check_before_loading_unless_supplied(tmp_path, monkeypatch, hub_snapshot,
+                                                                       pdd_steps, gated, match):
+    """A transformer that fails its check raises before any component loads; a transformer the caller already
+    built is not rebuilt, so its checkpoint is not checked."""
     loads = []
 
     def base_load_modules(self, fastvideo_args, loaded_modules=None):
@@ -338,59 +399,36 @@ def test_load_modules_checks_before_loading_unless_the_transformer_is_supplied(t
         return {}
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", base_load_modules)
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig(), attention_backend="FLASH_ATTN",
-                           inference_mode=False)
+    model_path = _checkpoint(tmp_path, None, pdd_steps=pdd_steps)
+    if gated:
+        _write_gates(tmp_path / "transformer_ref", indexed=True)
+    pipeline = _pipeline(model_path)
+    args = _run_args(model_path, attention_backend="FLASH_ATTN", h3_sequential_load=False)
     pipeline.fastvideo_args = args
-    with pytest.raises(ValueError, match="needs attention_backend=VIDEO_SPARSE_ATTN_H3"):
+    with pytest.raises(ValueError, match=match):
         pipeline.load_modules(args)
     assert loads == []
-    # A transformer the caller already built is not rebuilt, so its checkpoint is not checked.
     supplied = {"transformer": object()}
-    pipeline.load_modules(args, loaded_modules=supplied)
+    pipeline.load_modules(args, supplied)
     assert loads == [supplied]
 
 
-def test_the_contract_is_read_once_per_resolved_path(tmp_path, monkeypatch, hub_snapshot):
+def test_checkpoint_facts_read_once_per_resolved_path(tmp_path, monkeypatch, hub_snapshot):
+    """_load_config (gate check) and initialize_pipeline (DMD rungs) share one parse of the inference file."""
     from fastvideo.pipelines.basic.minimax_h3 import minimax_h3_pipeline
 
-    reads = []
-    monkeypatch.setattr(minimax_h3_pipeline, "json",
-                        SimpleNamespace(loads=lambda text: reads.append(text) or json.loads(text), dumps=json.dumps))
-    pipeline = _pipeline(tmp_path, PDD_CONTRACT)
-    pipeline.model_path = "org/fasth3"
-    pipeline.fastvideo_args = SimpleNamespace(attention_backend="VIDEO_SPARSE_ATTN_H3")
+    parsed = []
+
+    def recording_loads(text):
+        parsed.append(json.loads(text))
+        return parsed[-1]
+
+    monkeypatch.setattr(minimax_h3_pipeline, "json", SimpleNamespace(loads=recording_loads))
+    model_path = _checkpoint(tmp_path, DMD_FILE, pdd_steps=None)
+    args = _run_args(model_path)
+    pipeline = _pipeline("org/fasth3")
+    pipeline.fastvideo_args = args
     pipeline._load_config(pipeline.model_path)
-    _initialize(pipeline)
-    assert len(reads) == 1
-
-
-@pytest.mark.parametrize("sparsity,expected", [
-    (0.9, "reference-video policy p2_multi_region with keep rate 0.1. Run attention settings: "
-     "VIDEO_SPARSE_ATTN_H3, VSA_sparsity=0.9, VSA_tile_size=128."),
-    (0.0, "reference-video policy p2_multi_region (trained keep rate 0.1) inactive: this run keeps every region "
-     "dense. Run attention settings: VIDEO_SPARSE_ATTN_H3, VSA_sparsity=0.0, VSA_tile_size=256."),
-])
-def test_the_summary_separates_contract_values_from_run_settings(tmp_path, monkeypatch, sparsity, expected):
-    from fastvideo.pipelines.basic.minimax_h3 import minimax_h3_pipeline
-
-    infos = []
-    monkeypatch.setattr(minimax_h3_pipeline.logger, "info", lambda message, *args: infos.append(message % args))
-    _initialize(_pipeline(tmp_path, PDD_CONTRACT), VSA_sparsity=sparsity, VSA_tile_size=128 if sparsity else 256)
-    summary = [line for line in infos if line.startswith("FastH3 PDD checkpoint")]
-    assert len(summary) == 1 and summary[0].endswith(expected), summary
-
-
-def test_reference_policy_requires_vsa(tmp_path, env_overrides):
-    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(None))
-    config = MiniMaxH3PipelineConfig(vsa_ref_policy="p2_multi_region", vsa_ref_keep_rate=0.1)
-    with pytest.raises(ValueError, match="vsa_ref_policy='p2_multi_region' sparsifies reference videos"):
-        _initialize(_pipeline(tmp_path, DMD_CONTRACT, pdd_steps=None), config, attention_backend="FLASH_ATTN")
-
-
-def test_forward_checks_the_fused_block_count_before_conditioning(tmp_path):
-    pipeline = _pipeline(tmp_path, PDD_CONTRACT)
-    config = _initialize(pipeline)
-    pipeline.post_init_called = True
-    batch = ForwardBatch(data_type="video", num_inference_steps=4)
-    with pytest.raises(ValueError, match="num_inference_steps counts transformer forwards and must be 8, got 4"):
-        pipeline.forward(batch, SimpleNamespace(pipeline_config=config))
+    pipeline.initialize_pipeline(args)
+    assert args.pipeline_config.dmd_denoising_steps == DMD_FILE["dmd_denoising_steps"]
+    assert parsed.count(DMD_FILE) == 1

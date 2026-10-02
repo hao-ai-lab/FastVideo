@@ -9,7 +9,6 @@ from typing import Any
 import torch
 
 from fastvideo.attention.selector import component_attention_backend, get_attn_backend
-from fastvideo.configs.pipelines.minimax_h3 import MINIMAX_H3_VSA_REF_POLICY_P2
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -145,42 +144,22 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # clean time (1 - sigma); passing integer rungs to step() is wrong.
             scheduler.set_timesteps(sigmas=sigmas, device=device)
 
-    def _pdd_sampling_plan(
-        self,
-        batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
-        device: torch.device,
-    ) -> PDDSamplingPlan | None:
-        """Partition a PDD-widened transformer's fine grid into ``num_inference_steps`` fused blocks.
+    def _pdd_sampling_plan(self, fastvideo_args: FastVideoArgs, device: torch.device) -> PDDSamplingPlan | None:
+        """The fused-block plan of a PDD checkpoint, or None for any other checkpoint.
 
-        The loaded transformer owns the grid (``pdd_steps`` in its
-        ``config.json``); the pipeline's DiT config, which that file also
-        overlays, must agree. Each modality's node sigmas come from its own
-        scheduler shift on the shared base clock. ``pdd_step_indices`` on the
-        pipeline config (from ``fastvideo_inference.json``) names the trained
-        partition; without it the balanced partition is used.
+        ``pdd_step_indices`` is the checkpoint's trained partition, which
+        ``MiniMaxH3PipelineConfig.resolve_checkpoint_settings`` read and checked
+        against the transformer's ``pdd_steps``. Each modality's node sigmas
+        come from its own scheduler shift on the shared base clock.
         """
-        pipeline_config = fastvideo_args.pipeline_config
-        pdd_steps = getattr(self.transformer, "pdd_steps", None)
-        config_steps = getattr(pipeline_config.dit_config.arch_config, "pdd_steps", None)
-        if config_steps is not None and config_steps != pdd_steps:
-            raise ValueError(f"dit_config.arch_config.pdd_steps={config_steps!r} disagrees with the loaded "
-                             f"transformer's pdd_steps={pdd_steps!r}.")
-        indices = getattr(pipeline_config, "pdd_step_indices", None)
-        if not pdd_steps:
-            if indices is not None:
-                raise ValueError("pdd_step_indices requires a PDD-widened transformer (config.json pdd_steps).")
+        indices = getattr(fastvideo_args.pipeline_config, "pdd_step_indices", None)
+        if indices is None:
             return None
-        num_steps = int(batch.num_inference_steps)
-        if indices is not None and len(indices) != num_steps + 1:
-            raise ValueError(f"This PDD checkpoint runs {len(indices) - 1} fused blocks (pdd_step_indices={indices}); "
-                             f"num_inference_steps counts transformer forwards and must be {len(indices) - 1}, "
-                             f"got {num_steps}.")
         schedules = {
             "video": PDDModalitySchedule(shift=float(self.scheduler.shift)),
             "audio": PDDModalitySchedule(shift=float(self.audio_scheduler.shift)),
         }
-        return build_pdd_sampling_plan(int(pdd_steps), num_steps, schedules, indices=indices, device=device)
+        return build_pdd_sampling_plan(indices, schedules, device=device)
 
     def _pdd_head_fusion(self, plan: PDDSamplingPlan | None, index: int) -> contextlib.AbstractContextManager[None]:
         """Fuse runtime step *index*'s block of heads inside both widened output projections."""
@@ -220,11 +199,8 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         device = get_local_torch_device()
 
         dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
-        pdd_plan = self._pdd_sampling_plan(batch, fastvideo_args, device)
+        pdd_plan = self._pdd_sampling_plan(fastvideo_args, device)
         if pdd_plan is not None:
-            if dmd_steps is not None:
-                raise ValueError("A PDD-widened MiniMax-H3 transformer samples fused blocks of its fine grid; "
-                                 "dmd_denoising_steps must be unset.")
             # One runtime step fuses one block of heads into their weighted
             # mean velocity; the ordinary Euler step over the block's two node
             # sigmas then applies the block's total increment per modality.
@@ -266,10 +242,6 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
         vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
-        requested_ref_policy = getattr(fastvideo_args.pipeline_config, "vsa_ref_policy", None)
-        if vsa_metadata_builder is None and requested_ref_policy is not None:
-            raise ValueError(f"vsa_ref_policy={requested_ref_policy!r} sparsifies reference videos under "
-                             "VIDEO_SPARSE_ATTN_H3, but this transformer does not run that backend.")
         if vsa_metadata_builder is not None:
             vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
             # Per-request knobs (sweeps flip these between generate_video calls
@@ -278,23 +250,20 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             if vsa_mode not in ("exempt", "compete"):
                 raise ValueError(f"vsa_mode must be 'exempt' or 'compete', got {vsa_mode!r}.")
             vsa_exempt = vsa_mode == "exempt"
-            # vsa_ref_policy="p2_multi_region" tiles each Ref2VA reference video
-            # as its own sparse region at ``vsa_ref_keep_rate``; with
-            # vsa_ref_policy=None (the default) every conditioning row is dense.
-            vsa_ref_policy = getattr(fastvideo_args.pipeline_config, "vsa_ref_policy", None)
+            # PDD checkpoints set a reference keep rate: each reference video is
+            # then its own sparse region keeping that fraction of its tiles.
+            # Without one, every conditioning row stays dense.
             vsa_ref_keep_rate = getattr(fastvideo_args.pipeline_config, "vsa_ref_keep_rate", None)
             vsa_video_segments: tuple[tuple[int, int, int], ...] | None = None
             vsa_video_offsets: tuple[int, ...] | None = None
-            if vsa_ref_policy == MINIMAX_H3_VSA_REF_POLICY_P2:
+            if vsa_ref_keep_rate is not None:
                 if not vsa_exempt:
-                    raise ValueError(f"vsa_ref_policy={vsa_ref_policy!r} requires vsa_mode='exempt' "
+                    raise ValueError("Sparse reference-video regions require vsa_mode='exempt' "
                                      "(compete supports a single video region).")
                 vsa_prefix_segments, vsa_video_segments, vsa_video_offsets = _h3_vsa_ref2va_segments(
                     layout, vsa_patch_size)
-            elif vsa_ref_policy is None:
-                vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
             else:
-                raise ValueError(f"Unsupported MiniMax-H3 vsa_ref_policy {vsa_ref_policy!r}.")
+                vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
             vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
             # Run-level tile geometry (256 default, 64 = native Triton path,
@@ -306,10 +275,9 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                 if run_sparsity <= 0.0:
                     effect = "VSA_sparsity=0 keeps every region dense"
                 else:
-                    reference_keep = (1.0 - run_sparsity) if vsa_ref_keep_rate is None else vsa_ref_keep_rate
-                    effect = (f"each reference keeps {reference_keep:g} of its tiles and the target keeps "
+                    effect = (f"each reference keeps {vsa_ref_keep_rate:g} of its tiles and the target keeps "
                               f"{1.0 - run_sparsity:g}")
-                logger.info("MiniMax-H3 VSA-H3 %s: %d reference video region(s); %s; %d-token tiles.", vsa_ref_policy,
+                logger.info("MiniMax-H3 VSA-H3: %d reference video region(s); %s; %d-token tiles.",
                             len(vsa_video_segments) - 1, effect, vsa_tile_size)
 
         try:

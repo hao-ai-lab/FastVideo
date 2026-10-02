@@ -139,37 +139,47 @@ the DMD ladder:
 The export also records `schema`, `conditioning`, and `base_model_revision`,
 the base snapshot it was distilled against, as `hf://<repo id>@<revision>`
 (for example `hf://MiniMaxAI/MiniMax-H3@<commit>`); any other form is an
-error. `pdd_steps` must match `transformer_ref/config.json`. `pdd_step_indices` is a
-strictly increasing partition of the grid from 0 to `pdd_steps`;
-`num_inference_steps` and `transformer_forwards` both equal its block count.
-For a PDD student, `num_inference_steps` counts transformer forwards, and a
-request must use exactly that count. The shifts must match the scheduler
-configs. `model_type` and `transformer_component` must match the pipeline, so
-`MiniMaxH3Ref2VAModularPipeline` runs a `ref2va` export. Unknown keys, a DMD
-ladder, an explicit conflicting setting, or any other disagreement is an
-error.
+error. FastVideo reads the file once, when the run's arguments are built and
+before any weights load. The file must carry exactly these fields: a missing
+or unknown field is an error. Fields that repeat a value stored elsewhere must
+equal it: `pdd_steps` equals `transformer_ref/config.json`, the shifts equal
+the scheduler configs, and `num_inference_steps` and `transformer_forwards`
+equal the block count of `pdd_step_indices`, a strictly increasing partition
+of the grid from 0 to `pdd_steps`. Only `MiniMaxH3Ref2VAModularPipeline` runs
+the export. A `transformer_ref` whose `config.json` sets `pdd_steps` without
+this file is an error.
 
-The pipeline applies `pdd_step_indices` and the reference-video policy. The
-attention backend, sparsity, and tile size are explicit run settings, as for
-DMD exports; the example passes the contract's values. A sparsity or tile
-size that differs from the trained value is logged. With `VSA_sparsity` 0,
-every region is dense and the reference keep rate has no effect.
+Each sampling setting has one source, the file:
 
-Any MiniMax-H3 checkpoint whose transformer carries VSA compression gates
-(`to_gate_compress` weights), DMD or PDD, runs only with
-`VIDEO_SPARSE_ATTN_H3`, and so does a PDD export whose contract names that
-backend. The pipeline reads the shard index (or the safetensors headers) and
-rejects any other backend, including automatic selection, before it loads
-any component.
+| Setting                         | Run leaves it unset    | Run sets a different value                     |
+| ------------------------------- | ---------------------- | ---------------------------------------------- |
+| `pdd_step_indices`              | Taken from the file    | Error                                          |
+| `num_inference_steps` (request) | Set to the block count | Error                                          |
+| `attention_backend`             | Taken from the file    | Error, including `FASTVIDEO_ATTENTION_BACKEND` |
+| `VSA_tile_size`                 | Taken from the file    | Error                                          |
+| `VSA_sparsity`                  | Taken from the file    | The run's value, with a warning                |
+| `vsa_ref_keep_rate`             | Taken from the file    | The run's value, with a warning                |
+
+A request leaves `num_inference_steps` unset only when it is parsed from a
+mapping or a config file. A `GenerationRequest` built in Python counts every
+field as set, so it must pass the block count. The trained compression gates
+of `transformer_ref` load only under `VIDEO_SPARSE_ATTN_H3`, so the attention
+backend cannot change. `dmd_denoising_steps` must stay unset.
+
+A MiniMax-H3 checkpoint without PDD fields, such as a DMD export, whose
+transformer carries VSA compression gates (`to_gate_compress` weights) also
+runs only with `VIDEO_SPARSE_ATTN_H3`. The pipeline reads the shard index (or
+the safetensors headers) and rejects any other backend, including automatic
+selection, before it loads any component.
 
 ### Reference-video sparsity
 
-With `vsa_ref_policy: p2_multi_region`, `VIDEO_SPARSE_ATTN_H3` tiles every
-reference video as its own sparse region, in place in the packed sequence.
-Each video query keeps `vsa_ref_keep_rate` of every reference video's tiles
-and `1 - vsa_sparsity` of the target video's tiles. Text, audio, and image
-references stay dense. Without the policy, reference videos stay dense like
-every other conditioning row, and only the target video is sparse.
+`VIDEO_SPARSE_ATTN_H3` tiles every reference video as its own sparse region,
+in place in the packed sequence. Each video query keeps `vsa_ref_keep_rate` of
+every reference video's tiles and `1 - VSA_sparsity` of the target video's
+tiles. Text, audio, and image references stay dense. With `VSA_sparsity` 0,
+every region is dense and the reference keep rate has no effect. Checkpoints
+other than PDD students keep every conditioning row dense.
 
 ### Hardware
 

@@ -41,6 +41,7 @@ def _new_runtime_video_generator() -> VideoGenerator:
         model_path="test-model",
         prompt_txt=None,
         workload_type=SimpleNamespace(value="t2v"),
+        pipeline_config=SimpleNamespace(fixed_num_inference_steps=lambda: None),
     )
     generator.executor = SimpleNamespace(
         set_log_queue=lambda queue: None,
@@ -114,7 +115,7 @@ def _single_video_args(output_type="pil"):
         output_type=output_type,
         pin_cpu_memory=False,
         VSA_sparsity=0.0,
-        pipeline_config=SimpleNamespace(flow_shift=1.0, embedded_cfg_scale=1.0),
+        pipeline_config=SimpleNamespace(flow_shift=1.0, embedded_cfg_scale=1.0, fixed_num_inference_steps=lambda: None),
         workload_type=SimpleNamespace(value="t2v"),
     )
 
@@ -923,7 +924,8 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
 
 def test_generate_video_legacy_call_routes_compat_kwargs(monkeypatch):
     generator = _new_runtime_video_generator()
-    generator.fastvideo_args.pipeline_config = SimpleNamespace(embedded_cfg_scale=1.0)
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(embedded_cfg_scale=1.0,
+                                                               fixed_num_inference_steps=lambda: None)
     captured = {}
 
     def fake_generate_video_impl(

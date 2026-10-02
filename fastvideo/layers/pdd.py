@@ -59,10 +59,6 @@ def shifted_noise_amount(base: torch.Tensor, shift: float, *, max_t: float = PDD
     ``M = max_t`` is a fixed point of every shift, so the first grid node has
     the same noise level in every modality.
     """
-    if shift <= 0:
-        raise ValueError(f"shift must be positive, got {shift}")
-    if not 0.0 < max_t <= 1.0:
-        raise ValueError(f"max_t must satisfy 0 < max_t <= 1, got {max_t}")
     if shift == 1.0:
         return base
     return shift * base * max_t / (base * (shift - 1.0) + max_t)
@@ -81,8 +77,6 @@ def shifted_noise_delta(
     ``s * M^2 * (b - a) / (D(a) * D(b))`` with ``D(u) = M + (s - 1) * u``; the
     identity shift keeps the direct difference bit-exact.
     """
-    if shift <= 0:
-        raise ValueError(f"shift must be positive, got {shift}")
     if shift == 1.0:
         return base_end - base_start
     denominator_start = max_t + (shift - 1.0) * base_start
@@ -96,12 +90,6 @@ class PDDModalitySchedule:
 
     shift: float
     max_t: float = PDD_GRID_MAX_T
-
-    def __post_init__(self) -> None:
-        if self.shift <= 0:
-            raise ValueError(f"shift must be positive, got {self.shift}")
-        if not 0.0 < self.max_t <= 1.0:
-            raise ValueError(f"max_t must satisfy 0 < max_t <= 1, got {self.max_t}")
 
     def sigma(self, base: torch.Tensor) -> torch.Tensor:
         return shifted_noise_amount(base, self.shift, max_t=self.max_t)
@@ -127,55 +115,8 @@ def pdd_fine_grid(
     device: torch.device | str | None = None,
 ) -> torch.Tensor:
     """The descending base-clock grid ``u_0 = max_t > ... > u_N = 0`` in float64."""
-    pdd_steps = validate_pdd_steps(pdd_steps)
     grid = torch.linspace(max_t, 0.0, pdd_steps + 1, dtype=torch.float64, device=device)
     return grid.clamp(max=max_t)
-
-
-def validate_grid_indices(
-    selected: Any,
-    pdd_steps: int,
-    num_steps: int,
-    *,
-    device: torch.device | str | None = None,
-) -> torch.Tensor:
-    """Check an explicit ``num_steps``-block partition of a ``pdd_steps`` grid."""
-    if isinstance(selected, str | bytes):
-        raise TypeError("PDD grid indices must be a one-dimensional sequence of integers")
-    indices = torch.as_tensor(list(selected) if not torch.is_tensor(selected) else selected, device=device)
-    if indices.dtype == torch.bool or indices.is_floating_point() or indices.is_complex():
-        raise TypeError(f"PDD grid indices must have an integer dtype, got {indices.dtype}")
-    indices = indices.to(dtype=torch.long)
-    if indices.shape != (num_steps + 1, ):
-        raise ValueError(f"PDD grid indices for {num_steps} steps must have shape ({num_steps + 1},), "
-                         f"got {tuple(indices.shape)}")
-    if int(indices[0]) != 0 or int(indices[-1]) != pdd_steps:
-        raise ValueError(f"PDD grid indices must start at 0 and end at {pdd_steps}, got {indices.tolist()}")
-    if not bool((indices[:-1] < indices[1:]).all()):
-        raise ValueError(f"PDD grid indices must be strictly increasing, got {indices.tolist()}")
-    return indices
-
-
-def pdd_step_indices(
-    pdd_steps: int,
-    num_steps: int,
-    *,
-    indices: Sequence[int] | torch.Tensor | None = None,
-    device: torch.device | str | None = None,
-) -> torch.Tensor:
-    """Fine-grid node indices of one ``num_steps``-block runtime partition.
-
-    Without explicit *indices* the balanced subset ``arange(n + 1) * N // n``
-    is used.
-    """
-    pdd_steps = validate_pdd_steps(pdd_steps)
-    if isinstance(num_steps, bool) or not isinstance(num_steps, int) or num_steps <= 0:
-        raise ValueError(f"num_steps must be a positive int, got {num_steps!r}")
-    if num_steps > pdd_steps:
-        raise ValueError(f"Cannot select {num_steps} steps from a {pdd_steps}-step PDD grid")
-    if indices is None:
-        return torch.arange(num_steps + 1, device=device, dtype=torch.long) * pdd_steps // num_steps
-    return validate_grid_indices(indices, pdd_steps, num_steps, device=device)
 
 
 @dataclass(frozen=True)
@@ -201,31 +142,26 @@ class PDDSamplingPlan:
 
     def block(self, step: int) -> tuple[int, int]:
         """Half-open fine-grid block ``[start, end)`` of runtime step *step*."""
-        if not 0 <= step < self.num_steps:
-            raise ValueError(f"step must be in [0, {self.num_steps - 1}], got {step}")
         return int(self.indices[step]), int(self.indices[step + 1])
 
 
 def build_pdd_sampling_plan(
-    pdd_steps: int,
-    num_steps: int,
+    step_indices: Sequence[int],
     schedules: Mapping[str, PDDModalitySchedule],
     *,
-    indices: Sequence[int] | torch.Tensor | None = None,
     device: torch.device | str | None = None,
 ) -> PDDSamplingPlan:
-    """Partition the fine grid into *num_steps* fused blocks for every modality.
+    """Partition the fine grid into fused blocks for every modality.
 
-    *indices* is an explicit partition (``num_steps + 1`` fine-grid nodes);
-    the balanced partition is used otherwise.
+    *step_indices* is the checkpoint's trained partition: fine-grid nodes that
+    increase strictly from 0 to the grid size, one fused block per consecutive
+    pair. ``MiniMaxH3PipelineConfig.resolve_checkpoint_settings`` validates it.
     """
-    if not schedules:
-        raise ValueError("build_pdd_sampling_plan requires at least one modality schedule")
     max_ts = {schedule.max_t for schedule in schedules.values()}
     if len(max_ts) != 1:
         raise ValueError(f"Every PDD modality schedule must share max_t, got {sorted(max_ts)}")
-    fine_grid = pdd_fine_grid(pdd_steps, max_t=next(iter(max_ts)), device=device)
-    node_indices = pdd_step_indices(pdd_steps, num_steps, indices=indices, device=fine_grid.device)
+    fine_grid = pdd_fine_grid(int(step_indices[-1]), max_t=next(iter(max_ts)), device=device)
+    node_indices = torch.as_tensor(list(step_indices), dtype=torch.long, device=fine_grid.device)
     weights = {}
     for name, schedule in schedules.items():
         weights[name] = schedule.integration_weights(fine_grid)
@@ -273,7 +209,6 @@ class PDDReplicatedLinear(ReplicatedLinear):
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
-        grid_size = validate_pdd_steps(grid_size, "grid_size")
         super().__init__(
             input_size,
             output_size * grid_size,
@@ -309,13 +244,6 @@ class PDDReplicatedLinear(ReplicatedLinear):
         return to the layer's dtype before the projection runs. The previous
         fusion state is restored on exit.
         """
-        if not (isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= self.grid_size):
-            raise ValueError(f"PDD fusion requires 0 <= start < end <= grid_size, got start={start}, end={end}, "
-                             f"grid_size={self.grid_size}")
-        if weights.ndim != 1 or weights.shape[0] != self.grid_size:
-            raise ValueError(f"fusion weights must have shape [grid_size], got {tuple(weights.shape)}")
-        if not weights.is_floating_point():
-            raise TypeError(f"fusion weights must be floating point, got {weights.dtype}")
         previous = self._fusion_state
         self._fusion_state = (start, end, weights, precision_decoding)
         try:
@@ -337,7 +265,6 @@ class PDDReplicatedLinear(ReplicatedLinear):
         # ``sum_j w_j pred_j``.
         block_weights = weights[start:end].to(device=self.weight.device)
         block_scale = block_weights.sum()
-        validate_finite_nonzero(block_scale, "PDD fusion block total weight")
         normalized = (block_weights / block_scale).to(dtype=precision_decoding)
 
         def fuse_parameter(parameter: torch.Tensor) -> torch.Tensor:
@@ -364,9 +291,6 @@ def fuse_pdd_heads(
     precision_decoding: torch.dtype,
 ) -> Iterator[None]:
     """Fuse block ``[start, end)`` on every modality head at once."""
-    missing = sorted(set(linears) - set(integration_weights))
-    if missing:
-        raise ValueError(f"PDD fusion needs integration weights for every head, missing {missing}")
     with contextlib.ExitStack() as stack:
         for name, linear in linears.items():
             stack.enter_context(linear.fuse(start, end, integration_weights[name], precision_decoding))
@@ -381,10 +305,8 @@ __all__ = [
     "build_pdd_sampling_plan",
     "fuse_pdd_heads",
     "pdd_fine_grid",
-    "pdd_step_indices",
     "shifted_noise_amount",
     "shifted_noise_delta",
     "validate_finite_nonzero",
-    "validate_grid_indices",
     "validate_pdd_steps",
 ]

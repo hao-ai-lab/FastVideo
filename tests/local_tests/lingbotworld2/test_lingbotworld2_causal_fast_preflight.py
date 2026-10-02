@@ -75,7 +75,9 @@ def test_lingbotworld2_request_preserves_action_path() -> None:
             "return_frames": False,
         },
     })
-    sampling_param = request_to_sampling_param(request, model_path=str(FASTVIDEO_MODEL_DIR))
+    sampling_param = request_to_sampling_param(request,
+                                               model_path=str(FASTVIDEO_MODEL_DIR),
+                                               fixed_num_inference_steps=None)
     assert sampling_param.action_path == str(ACTION_PATH)
     assert sampling_param.image_path == str(ACTION_PATH / "image.jpg")
     assert sampling_param.num_frames == 17

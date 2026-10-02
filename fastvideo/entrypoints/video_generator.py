@@ -461,6 +461,7 @@ class VideoGenerator:
             resolved_sampling_param = request_to_sampling_param(
                 request,
                 model_path=self.fastvideo_args.model_path,
+                fixed_num_inference_steps=self.fastvideo_args.pipeline_config.fixed_num_inference_steps(),
             )
             return self._generate_video_impl(
                 prompt=request.prompt,
@@ -511,6 +512,7 @@ class VideoGenerator:
         sampling_param = request_to_sampling_param(
             request,
             model_path=self.fastvideo_args.model_path,
+            fixed_num_inference_steps=self.fastvideo_args.pipeline_config.fixed_num_inference_steps(),
         )
         batch_extra = request_to_batch_extra(request)
         result = self._generate_video_impl(

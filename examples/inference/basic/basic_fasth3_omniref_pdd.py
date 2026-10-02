@@ -43,7 +43,8 @@ from fastvideo.api import (
     PipelineSelection,
     SamplingConfig,
 )
-from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference, parse_base_model_revision
+from fastvideo.configs.pipelines.minimax_h3 import parse_base_model_revision
+from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
 
 CONTRACT = "fastvideo_inference.json"
 # Components the distilled export replaces, and the ones it shares with base MiniMax-H3.
@@ -52,7 +53,6 @@ BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae")
 MANIFESTS = ("modular_model_index.json", "model_index.json")
 # Components the composed directory's manifest must declare, besides its transformer_ref.
 MANIFEST_COMPONENTS = ("scheduler", "audio_scheduler", *BASE_COMPONENTS)
-DEFAULT_BASE_MODEL = "MiniMaxAI/MiniMax-H3"
 # Data-center Blackwell: the only devices with the 128-token VSA-H3 forward.
 SM100A_CAPABILITIES = frozenset({(10, 0), (10, 3)})
 
@@ -75,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-model-path",
                         default=None,
                         help="base MiniMax-H3 snapshot (local directory or repo id). Default: the repo and revision "
-                        f"pinned by the export's base_model_revision, else {DEFAULT_BASE_MODEL}")
+                        "pinned by the export's base_model_revision")
     parser.add_argument("--base-revision",
                         default=None,
                         help="revision of --base-model-path when it is a repo id (the export's pinned revision "
@@ -125,7 +125,7 @@ def load_contract(export_dir: Path) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"{export_dir} has no {CONTRACT}; it is not a FastH3 distilled export.")
     contract = json.loads(path.read_text(encoding="utf-8"))
-    if "pdd_steps" not in contract or contract.get("model_type", "ref2va") != "ref2va":
+    if "pdd_steps" not in contract or contract.get("model_type") != "ref2va":
         raise ValueError(f"{path} is not a Ref2VA PDD contract; use the example matching the checkpoint.")
     return contract
 
@@ -138,14 +138,9 @@ def base_model_source(args: argparse.Namespace, contract: dict[str, Any]) -> tup
     return base_repo, args.base_revision or base_revision
 
 
-def base_model_from_contract(contract: dict[str, Any]) -> tuple[str, str | None]:
-    """The base the export pins as ``hf://<repo id>@<revision>``; without a pin, the public base repo.
-
-    Any other value is an error rather than a silent fallback to the base repo's latest revision.
-    """
-    if "base_model_revision" not in contract:
-        return DEFAULT_BASE_MODEL, None
-    return parse_base_model_revision(contract["base_model_revision"])
+def base_model_from_contract(contract: dict[str, Any]) -> tuple[str, str]:
+    """The base repo id and revision that the export pins as ``hf://<repo id>@<revision>``."""
+    return parse_base_model_revision(contract.get("base_model_revision"))
 
 
 def _link(destination: Path, source: Path) -> None:
@@ -235,14 +230,7 @@ def validate_attention_runtime(contract: dict[str, Any], num_gpus: int) -> None:
                            "`fastvideo-kernel` on this machine with `./build.sh`.")
 
 
-def attention_settings(contract: dict[str, Any]) -> dict[str, Any]:
-    """The contract's trained attention policy; keys it omits keep FastVideo's defaults."""
-    names = (("attention_backend", "attention_backend"), ("vsa_sparsity", "VSA_sparsity"),
-             ("vsa_tile_size", "VSA_tile_size"))
-    return {setting: contract[key] for key, setting in names if contract.get(key) is not None}
-
-
-def build_generator_config(model_dir: Path, contract: dict[str, Any], num_gpus: int) -> GeneratorConfig:
+def build_generator_config(model_dir: Path, num_gpus: int) -> GeneratorConfig:
     return GeneratorConfig(
         model_path=str(model_dir),
         engine=EngineConfig(
@@ -254,10 +242,9 @@ def build_generator_config(model_dir: Path, contract: dict[str, Any], num_gpus: 
         ),
         pipeline=PipelineSelection(
             workload_type="i2v",
+            # FastVideo reads the trained fused-block partition and attention
+            # settings from the composed directory's fastvideo_inference.json.
             components=ComponentConfig(override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline"),
-            # The trained attention policy. The pipeline applies the contract's
-            # fused-block partition and reference-video sparsity itself.
-            experimental=attention_settings(contract),
         ),
     )
 
@@ -269,12 +256,12 @@ def main() -> None:
     model_dir, contract = resolve_model(args)
     print(f"Composed model directory: {model_dir}")
     print(f"Contract: {contract['num_inference_steps']} fused blocks of a {contract['pdd_steps']}-interval grid, "
-          f"attention {attention_settings(contract) or 'FastVideo defaults'}, "
-          f"reference policy {contract.get('vsa_ref_policy')} (keep rate {contract.get('vsa_ref_keep_rate')})")
+          f"{contract['attention_backend']} with sparsity {contract['vsa_sparsity']}, "
+          f"{contract['vsa_tile_size']}-token tiles, reference keep rate {contract['vsa_ref_keep_rate']}")
     validate_attention_runtime(contract, args.num_gpus)
     references = [MiniMaxH3Reference(source=path, media_type=kind) for kind, path in args.references]
 
-    generator = VideoGenerator.from_config(build_generator_config(model_dir, contract, args.num_gpus))
+    generator = VideoGenerator.from_config(build_generator_config(model_dir, args.num_gpus))
     try:
         result = generator.generate(
             GenerationRequest(
