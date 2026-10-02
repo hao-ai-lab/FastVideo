@@ -108,6 +108,16 @@ class SamplingParam:
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
 
+    # Helios autoregressive spatial-pyramid sampling.
+    pyramid_num_inference_steps_list: list[int] | None = None
+    history_sizes: list[int] | None = None
+    num_latent_frames_per_chunk: int = 9
+    keep_first_frame: bool = True
+    is_skip_first_chunk: bool = False
+    use_zero_init: bool = True
+    zero_steps: int = 1
+    is_amplify_first_chunk: bool = False
+
     # TeaCache parameters
     enable_teacache: bool = False
 
@@ -374,6 +384,56 @@ class SamplingParam:
             type=float,
             default=SamplingParam.boundary_ratio,
             help="Boundary timestep ratio",
+        )
+        parser.add_argument(
+            "--pyramid-num-inference-steps-list",
+            nargs=3,
+            type=int,
+            default=SamplingParam.pyramid_num_inference_steps_list,
+            help="Denoising steps for the three Helios pyramid stages",
+        )
+        parser.add_argument(
+            "--history-sizes",
+            nargs=3,
+            type=int,
+            default=SamplingParam.history_sizes,
+            help="Long, mid, and short Helios latent history sizes",
+        )
+        parser.add_argument(
+            "--num-latent-frames-per-chunk",
+            type=int,
+            default=SamplingParam.num_latent_frames_per_chunk,
+            help="Helios autoregressive latent frames per chunk",
+        )
+        parser.add_argument(
+            "--keep-first-frame",
+            action=StoreBoolean,
+            default=SamplingParam.keep_first_frame,
+            help="Keep the first Helios latent frame as prefix conditioning",
+        )
+        parser.add_argument(
+            "--is-skip-first-chunk",
+            action=StoreBoolean,
+            default=SamplingParam.is_skip_first_chunk,
+            help="Skip the first Helios autoregressive chunk",
+        )
+        parser.add_argument(
+            "--use-zero-init",
+            action=StoreBoolean,
+            default=SamplingParam.use_zero_init,
+            help="Enable Helios CFG zero initialization when supported",
+        )
+        parser.add_argument(
+            "--zero-steps",
+            type=int,
+            default=SamplingParam.zero_steps,
+            help="Number of Helios CFG zero-initialization steps",
+        )
+        parser.add_argument(
+            "--is-amplify-first-chunk",
+            action=StoreBoolean,
+            default=SamplingParam.is_amplify_first_chunk,
+            help="Use the amplified DMD schedule for the first Helios chunk",
         )
         parser.add_argument(
             "--save-video",
