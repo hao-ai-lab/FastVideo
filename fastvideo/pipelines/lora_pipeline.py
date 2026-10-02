@@ -590,6 +590,7 @@ class LoRAPipeline(ComposedPipelineBase):
         _convert_quantized_weights_after_lora_merge(self.trainable_transformer_modules)
 
     def merge_lora_weights(self) -> None:
+        """Merge LoRA weights, then refresh packed quantized buffers from the updated BF16 weights."""
         for (
                 transformer_name,
                 transformer_lora_layers,
@@ -601,14 +602,10 @@ class LoRAPipeline(ComposedPipelineBase):
                 with _get_hook_ctx(module):
                     for name, layer in layers.items():
                         layer.merge_lora_weights()
+        _convert_quantized_weights_after_lora_merge(self.trainable_transformer_modules)
 
     def unmerge_lora_weights(self) -> None:
-        """Unmerge LoRA weights when the transformer's quantized weights remain valid."""
-        if _has_quantized_mxfp8_weights(self.trainable_transformer_modules):
-            # TODO(David): Requantize MXFP8 weights after LoRA unmerge before enabling this operation.
-            raise RuntimeError(
-                "LoRA unmerge is unsupported after MXFP8 weight quantization because the quantized weights still "
-                "contain the merged LoRA adapter.")
+        """Unmerge LoRA weights, then requantize MXFP8 buffers from the restored BF16 weights."""
         if _has_quantized_nvfp4_weights(self.trainable_transformer_modules):
             # TODO(David): Preserve BF16 weights and requantize NVFP4 weights after LoRA unmerge.
             raise RuntimeError(
@@ -625,3 +622,4 @@ class LoRAPipeline(ComposedPipelineBase):
                 with _get_hook_ctx(module):
                     for name, layer in layers.items():
                         layer.unmerge_lora_weights()
+        _convert_quantized_weights_after_lora_merge(self.trainable_transformer_modules)
