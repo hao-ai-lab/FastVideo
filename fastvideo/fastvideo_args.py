@@ -106,6 +106,11 @@ class FastVideoArgs:
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 
+    # Create multiprocessing streaming IPC queues at worker spawn. Standard
+    # VideoGenerator inference does not use them; StreamingVideoGenerator sets
+    # this True before the executor starts workers.
+    enable_streaming_ipc_queues: bool = False
+
     # a few attributes for ray related
     ray_placement_group: PlacementGroup | None = None
     ray_runtime_env: RuntimeEnv | None = None
