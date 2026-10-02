@@ -74,6 +74,38 @@ def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
     return HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled()
 
 
+class _ModulationRowGather(torch.autograd.Function):
+    """Per-token gather from a few-row AdaLN table with a GEMM backward.
+
+    The default ``index_select`` backward atomically adds every packed token
+    into one of the ``timesteps x modalities`` table rows in the table dtype,
+    so each BF16 row sum over tens of thousands of tokens is rounded after
+    every add and comes out too small and noisy. The gradient here is
+    ``one_hot(indices)^T @ grad_rows``: one dense reduction over the tokens
+    with FP32 accumulation, valid for any index layout (sequence-parallel
+    shards, multiple timesteps).
+    """
+
+    @staticmethod
+    def forward(ctx, table: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
+        ctx.save_for_backward(indices)
+        ctx.num_rows = table.shape[0]
+        return table.index_select(0, indices)
+
+    @staticmethod
+    def backward(ctx, grad_rows: torch.Tensor) -> tuple[torch.Tensor, None]:
+        (indices, ) = ctx.saved_tensors
+        one_hot = F.one_hot(indices, ctx.num_rows).to(grad_rows.dtype)
+        return one_hot.t() @ grad_rows, None
+
+
+def _gather_modulation_rows(table: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
+    """Select one AdaLN table row per packed token."""
+    if torch.is_grad_enabled() and table.requires_grad:
+        return _ModulationRowGather.apply(table, indices)
+    return table.index_select(0, indices)
+
+
 class MiniMaxH3RotaryPosEmbed(nn.Module):
     """Three-axis rotary frequencies over packed `(t, h, w)` coordinates."""
 
@@ -462,7 +494,8 @@ class MiniMaxH3AdaLayerNormOut(nn.Module):
         shift_scale, _ = self.linear(temb.to(self.linear.weight.dtype))
         shift, scale = shift_scale.chunk(2, dim=-1)
         hidden_states = self.norm(hidden_states)
-        return hidden_states * (1.0 + scale.index_select(0, timestep_indices)) + shift.index_select(0, timestep_indices)
+        return hidden_states * (1.0 + _gather_modulation_rows(scale, timestep_indices)) + _gather_modulation_rows(
+            shift, timestep_indices)
 
 
 class MiniMaxH3TransformerBlock(nn.Module):
@@ -542,8 +575,8 @@ class MiniMaxH3TransformerBlock(nn.Module):
         else:
             with nvtx_range("minimax_h3.transformer_block.no_modulate_fusion"):
                 norm_hidden_states = self.norm1(hidden_states)
-                norm_hidden_states = norm_hidden_states * (
-                    1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
+                norm_hidden_states = norm_hidden_states * (1.0 + _gather_modulation_rows(
+                    scale_msa, adaln_indices)) + _gather_modulation_rows(shift_msa, adaln_indices)
         with nvtx_range("minimax_h3.transformer_block.self_attention"):
             attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
         if use_modulate_fusion:
@@ -560,13 +593,13 @@ class MiniMaxH3TransformerBlock(nn.Module):
                 )
         else:
             with nvtx_range("minimax_h3.transformer_block.no_modulate_fusion"):
-                hidden_states = hidden_states + gate_msa.index_select(0, adaln_indices) * attention_output
+                hidden_states = hidden_states + _gather_modulation_rows(gate_msa, adaln_indices) * attention_output
                 norm_hidden_states = self.norm2(hidden_states)
-                norm_hidden_states = norm_hidden_states * (
-                    1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
+                norm_hidden_states = norm_hidden_states * (1.0 + _gather_modulation_rows(
+                    scale_mlp, adaln_indices)) + _gather_modulation_rows(shift_mlp, adaln_indices)
         with nvtx_range("minimax_h3.transformer_block.feed_forward"):
             feed_forward_output = self.ff(norm_hidden_states)
-        return hidden_states + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
+        return hidden_states + _gather_modulation_rows(gate_mlp, adaln_indices) * feed_forward_output
 
 
 class MiniMaxH3Transformer3DModel(BaseDiT):
