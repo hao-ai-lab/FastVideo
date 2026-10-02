@@ -63,13 +63,15 @@ class _FileGenerator:
         return None
 
 
-def _args(model_path: str, **overrides):
+def _args(model_path: str, fixed_num_inference_steps: int | None = None, **overrides):
     values = {
         "model_path": model_path,
         "lora_path": None,
         "lora_nickname": "default",
         "lora_strength": 1.0,
         "override_pipeline_cls_name": None,
+        # PipelineConfig.fixed_num_inference_steps: the step count a checkpoint fixes, else None.
+        "pipeline_config": SimpleNamespace(fixed_num_inference_steps=lambda: fixed_num_inference_steps),
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -253,6 +255,26 @@ def test_fasth3_request_uses_the_general_adapter(tmp_path: Path) -> None:
     assert adapted.sampling.width == 1344
     assert adapted.sampling.height == 768
     assert adapted.sampling.num_frames == 124
+
+
+def test_checkpoint_fixed_step_count_is_applied_at_admission(tmp_path: Path) -> None:
+    args = _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2", fixed_num_inference_steps=8)
+    adapted = build_generation_request(
+        "video_gen_test",
+        VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", num_frames=124),
+        args,
+        served_model_name="fasth3",
+        output_dir=str(tmp_path),
+    )
+    assert adapted.sampling.num_frames == 124
+    with pytest.raises(RequestAdaptationError, match="runs exactly 8 transformer forwards"):
+        build_generation_request(
+            "video_gen_test",
+            VideoGenerationRequest(prompt="a fox", aspect_ratio="16:9", num_frames=124, num_inference_steps=5),
+            args,
+            served_model_name="fasth3",
+            output_dir=str(tmp_path),
+        )
 
 
 @pytest.mark.parametrize(
