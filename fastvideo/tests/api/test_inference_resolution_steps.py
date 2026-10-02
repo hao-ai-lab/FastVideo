@@ -84,3 +84,44 @@ def test_object_fields_that_differ_from_defaults_are_explicit():
     assert resolved.is_explicit("engine.attention.backend")
     assert not resolved.is_explicit("engine.parallelism.tp_size")
     assert resolved.engine.attention.backend == "FLASH_ATTN"
+
+
+def test_model_defaults_fill_unset_fields_and_keep_explicit_ones():
+    raw = {"model_path": WAN_T2V, "engine": {"precision": {"dit": "fp32"}}}
+    resolved = _resolve(raw)
+
+    dit = resolved.provenance("engine.precision.dit")
+    assert (dit.value, dit.source) == ("fp32", "input")
+    vae = resolved.provenance("engine.precision.vae")
+    assert vae.value == "fp32"
+    assert vae.source == "fill_pipeline_config_defaults[WanT2V480PConfig]"
+    flow_shift = resolved.provenance("pipeline.flow_shift")
+    assert (flow_shift.raw_value, flow_shift.value) == (None, 3.0)
+
+
+def test_environment_takes_precedence_over_model_defaults():
+    from fastvideo.api.inference_resolution import inference_resolution_steps
+
+    names = [step.__qualname__ for step in inference_resolution_steps(GeneratorConfig(model_path=WAN_T2V))]
+    assert names == [
+        "fill_attention_backend_from_env",
+        "fill_regional_compile_from_env",
+        "fill_vae_parallel_from_env",
+        "fill_pipeline_config_defaults[WanT2V480PConfig]",
+        "derive_parallel_sizes",
+    ]
+
+
+def test_video_generator_keeps_the_resolved_config(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastvideo.entrypoints.video_generator import VideoGenerator
+
+    monkeypatch.setattr(VideoGenerator, "from_fastvideo_args",
+                        classmethod(lambda cls, fastvideo_args, log_queue=None: SimpleNamespace(args=fastvideo_args)))
+    with isolated_environment():
+        generator = VideoGenerator.from_config({"model_path": WAN_T2V, "engine": {"num_gpus": 2}})
+
+    assert generator.args.sp_size == 2
+    provenance = generator.resolved_config.provenance("engine.parallelism.sp_size")
+    assert (provenance.value, provenance.source) == (2, "derive_parallel_sizes")

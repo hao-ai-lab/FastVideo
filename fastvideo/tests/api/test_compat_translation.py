@@ -192,9 +192,13 @@ def _engine_with_compile(compile_config):
 
 
 def _stub_fastvideo_args_from_kwargs(monkeypatch):
-    """Swap ``FastVideoArgs.from_kwargs`` for a capture-only stub so
-    translation tests don't need to construct a valid FastVideoArgs."""
+    """Swap ``FastVideoArgs.from_kwargs`` for a capture-only stub, and skip the
+    model-default resolution step, so translation tests need neither a valid
+    FastVideoArgs nor a resolvable model path."""
     from fastvideo import fastvideo_args as fva
+    from fastvideo.api import inference_resolution
+
+    monkeypatch.setattr(inference_resolution, "pipeline_config_defaults_step", lambda config: lambda view: {})
 
     class _Captured:
 

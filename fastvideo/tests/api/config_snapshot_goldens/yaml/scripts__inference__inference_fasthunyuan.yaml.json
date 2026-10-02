@@ -410,6 +410,19 @@
    }
   ],
   [
+   "fill_pipeline_config_defaults[FastHunyuanConfig]",
+   {
+    "engine.precision.dit": "bf16",
+    "engine.precision.image_encoder": "fp32",
+    "engine.precision.text_encoders": [
+     "fp16",
+     "fp16"
+    ],
+    "engine.precision.vae": "fp16",
+    "pipeline.vae_sp": true
+   }
+  ],
+  [
    "derive_parallel_sizes",
    {
     "engine.parallelism.hsdp_shard_dim": 4

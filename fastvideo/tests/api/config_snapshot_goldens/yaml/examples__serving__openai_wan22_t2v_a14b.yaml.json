@@ -387,6 +387,27 @@
    }
   ],
   [
+   "fill_pipeline_config_defaults[Wan2_2_T2V_A14B_Config]",
+   {
+    "engine.precision.dit": "bf16",
+    "engine.precision.image_encoder": "fp32",
+    "engine.precision.text_encoders": [
+     "fp32"
+    ],
+    "engine.precision.vae": "fp32",
+    "engine.precision.vae_decode": "bf16",
+    "pipeline.dmd_denoising_steps": [
+     1000,
+     750,
+     500,
+     250
+    ],
+    "pipeline.embedded_cfg_scale": 6.0,
+    "pipeline.flow_shift": 12.0,
+    "pipeline.vae_sp": false
+   }
+  ],
+  [
    "derive_parallel_sizes",
    {
     "engine.parallelism.hsdp_shard_dim": 2

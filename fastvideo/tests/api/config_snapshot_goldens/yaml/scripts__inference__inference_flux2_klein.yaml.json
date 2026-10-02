@@ -350,6 +350,18 @@
    }
   ],
   [
+   "fill_pipeline_config_defaults[Flux2KleinPipelineConfig]",
+   {
+    "engine.precision.dit": "bf16",
+    "engine.precision.image_encoder": "fp32",
+    "engine.precision.text_encoders": [
+     "bf16"
+    ],
+    "engine.precision.vae": "fp32",
+    "pipeline.vae_sp": false
+   }
+  ],
+  [
    "derive_parallel_sizes",
    {
     "engine.parallelism.hsdp_shard_dim": 1,

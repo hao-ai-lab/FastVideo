@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Resolution of an inference ``GeneratorConfig`` into the frozen values that the run starts with.
 
-``resolve_inference_config`` runs ``INFERENCE_RESOLUTION_STEPS`` in order through
+``resolve_inference_config`` runs the steps from ``inference_resolution_steps`` in order through
 :func:`fastvideo.api.resolution.resolve_generator_config`, so every value that a step decides is recorded with the
 step's name. ``generator_config_to_fastvideo_args`` flattens the resolved values into ``FastVideoArgs``.
 
-The steps run in this order, so an earlier step takes precedence over a later one that fills the same field:
+The steps run in this order. A fill step sets a field only while it is ``None``, so an earlier step takes
+precedence over a later one: user input, then environment variables, then model defaults.
 
 1. Environment variables fill typed fields.
-2. Derived values replace placeholders.
+2. Model defaults from the model's ``PipelineConfig`` fill the typed fields that are still unset.
+3. Derived values replace placeholders.
 
 ``FastVideoArgs.__post_init__`` and ``check_fastvideo_args`` still apply the same rules to a ``FastVideoArgs`` that
 is built directly; for a resolved config they find the values already decided and change nothing.
@@ -16,10 +18,12 @@ is built directly; for a resolved config they find the values already decided an
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import fields, is_dataclass
 from typing import Any
 
 import fastvideo.envs as envs
+from fastvideo.api.parser import parse_config
 from fastvideo.api.resolution import ResolutionStep, ResolutionView, ResolvedGeneratorConfig, resolve_generator_config
 from fastvideo.api.schema import GeneratorConfig
 
@@ -61,6 +65,36 @@ def fill_vae_parallel_from_env(view: ResolutionView) -> dict[str, Any]:
     return values
 
 
+def pipeline_config_defaults_step(config: GeneratorConfig) -> ResolutionStep:
+    """Build the step that fills unset typed fields with the values of the model's ``PipelineConfig``.
+
+    The ``PipelineConfig`` is the one that flattening starts from: the registry class for ``model_path``, updated
+    by a ``pipeline_config`` entry in ``pipeline.experimental`` or else by ``pipeline.components.pipeline_config_path``.
+    A typed field is filled when its flat name is an attribute of that ``PipelineConfig``, its value is ``None``,
+    and the attribute is not ``None``. The step's source name carries the ``PipelineConfig`` class name.
+    """
+    from fastvideo.api.compat import _FLAT_NAME_FIELDS
+    from fastvideo.configs.pipelines.base import PipelineConfig
+
+    pipeline_config_source = config.pipeline.experimental.get("pipeline_config",
+                                                              config.pipeline.components.pipeline_config_path)
+    kwargs: dict[str, Any] = {"model_path": config.model_path}
+    if pipeline_config_source is not None:
+        kwargs["pipeline_config"] = deepcopy(pipeline_config_source)
+    defaults = PipelineConfig.from_kwargs(kwargs)
+
+    def fill_pipeline_config_defaults(view: ResolutionView) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for flat_name, (dotted_path, _) in _FLAT_NAME_FIELDS.items():
+            default = getattr(defaults, flat_name, None)
+            if default is not None and view.get(dotted_path) is None:
+                values[dotted_path] = deepcopy(default)
+        return values
+
+    fill_pipeline_config_defaults.__qualname__ = f"fill_pipeline_config_defaults[{type(defaults).__name__}]"
+    return fill_pipeline_config_defaults
+
+
 def derive_parallel_sizes(view: ResolutionView) -> dict[str, Any]:
     """Replace the -1 placeholders: ``tp_size`` becomes 1, and ``sp_size`` and ``hsdp_shard_dim`` become ``num_gpus``."""
     num_gpus = view.get("engine.num_gpus")
@@ -72,12 +106,16 @@ def derive_parallel_sizes(view: ResolutionView) -> dict[str, Any]:
     return {path: value for path, value in placeholders.items() if view.get(path) == -1}
 
 
-INFERENCE_RESOLUTION_STEPS: tuple[ResolutionStep, ...] = (
+ENVIRONMENT_STEPS: tuple[ResolutionStep, ...] = (
     fill_attention_backend_from_env,
     fill_regional_compile_from_env,
     fill_vae_parallel_from_env,
-    derive_parallel_sizes,
 )
+
+
+def inference_resolution_steps(config: GeneratorConfig) -> tuple[ResolutionStep, ...]:
+    """The resolution steps for ``config``, in the order that they run."""
+    return (*ENVIRONMENT_STEPS, pipeline_config_defaults_step(config), derive_parallel_sizes)
 
 
 def resolve_inference_config(config: GeneratorConfig | Mapping[str, Any]) -> ResolvedGeneratorConfig:
@@ -88,7 +126,8 @@ def resolve_inference_config(config: GeneratorConfig | Mapping[str, Any]) -> Res
     schema defaults count as written.
     """
     raw = config if isinstance(config, Mapping) else written_fields(config)
-    return resolve_generator_config(raw, INFERENCE_RESOLUTION_STEPS)
+    typed_config = config if isinstance(config, GeneratorConfig) else parse_config(GeneratorConfig, config)
+    return resolve_generator_config(raw, inference_resolution_steps(typed_config))
 
 
 def written_fields(config: GeneratorConfig) -> dict[str, Any]:
@@ -125,11 +164,13 @@ def _non_default_fields(value: Any, default: Any) -> dict[str, Any]:
 
 
 __all__ = [
-    "INFERENCE_RESOLUTION_STEPS",
+    "ENVIRONMENT_STEPS",
     "derive_parallel_sizes",
     "fill_attention_backend_from_env",
     "fill_regional_compile_from_env",
     "fill_vae_parallel_from_env",
+    "inference_resolution_steps",
+    "pipeline_config_defaults_step",
     "resolve_inference_config",
     "written_fields",
 ]

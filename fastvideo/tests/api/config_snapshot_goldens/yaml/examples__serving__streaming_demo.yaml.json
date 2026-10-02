@@ -378,6 +378,19 @@
    }
   ],
   [
+   "fill_pipeline_config_defaults[LTX2T2VConfig]",
+   {
+    "engine.precision.dit": "bf16",
+    "engine.precision.image_encoder": "fp32",
+    "engine.precision.text_encoders": [
+     "bf16"
+    ],
+    "engine.precision.vae": "bf16",
+    "pipeline.embedded_cfg_scale": 6.0,
+    "pipeline.vae_sp": false
+   }
+  ],
+  [
    "derive_parallel_sizes",
    {
     "engine.parallelism.hsdp_shard_dim": 1,
