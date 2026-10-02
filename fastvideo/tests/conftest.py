@@ -6,6 +6,7 @@ import pytest
 import torch
 import numpy as np
 
+from fastvideo import envs
 from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, cleanup_dist_env_and_memory)
 
 
@@ -34,3 +35,9 @@ def env_overrides():
     """
     with contextlib.ExitStack() as stack:
         yield stack
+
+
+@pytest.fixture
+def cuda_hidden(env_overrides):
+    """Hide CUDA from child processes started during the test; restored at teardown."""
+    env_overrides.enter_context(envs.override_external("CUDA_VISIBLE_DEVICES", ""))
