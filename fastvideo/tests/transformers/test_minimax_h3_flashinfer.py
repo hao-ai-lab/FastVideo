@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 import torch
 
+from fastvideo import envs
 from fastvideo.platforms import AttentionBackendEnum
 
 
@@ -60,7 +63,7 @@ def test_minimax_h3_routes_flashinfer_to_distributed_attention(
 
 @pytest.mark.parametrize("prefill_backend", ["single", "cudnn"])
 def test_minimax_h3_flashinfer_matches_torch_sdpa(
-    monkeypatch: pytest.MonkeyPatch,
+    env_overrides,
     prefill_backend: str,
 ) -> None:
     """Run the real H3 attention path and compare FlashInfer with Torch SDPA."""
@@ -68,13 +71,16 @@ def test_minimax_h3_flashinfer_matches_torch_sdpa(
         pytest.skip("BF16 CUDA is required")
     pytest.importorskip("flashinfer")
 
-    monkeypatch.setenv("FASTVIDEO_FLASHINFER_PREFILL_BACKEND", prefill_backend)
-    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
-    monkeypatch.setenv("MASTER_PORT", "29575")
-    monkeypatch.setenv("RANK", "0")
-    monkeypatch.setenv("WORLD_SIZE", "1")
-    monkeypatch.setenv("LOCAL_RANK", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override(prefill_backend))
+    env_overrides.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", os.environ.get("MASTER_PORT", "29575")))
+    env_overrides.enter_context(envs.override_external("RANK", "0"))
+    env_overrides.enter_context(envs.override_external("WORLD_SIZE", "1"))
+    env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
 
+    from fastvideo.attention.backends.flashinfer import FlashInferImpl
+    from fastvideo.attention.backends.sdpa import SDPAImpl
+    from fastvideo.attention.selector import _component_attention_backend_scope
     from fastvideo.distributed import (cleanup_dist_env_and_memory,
                                        maybe_init_distributed_environment_and_model_parallel)
     from fastvideo.forward_context import set_forward_context
@@ -93,14 +99,20 @@ def test_minimax_h3_flashinfer_matches_torch_sdpa(
         previous_default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.bfloat16)
         try:
-            reference = MiniMaxH3Attention(
-                **common,
-                supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
-            )
-            flashinfer = MiniMaxH3Attention(
-                **common,
-                supported_attention_backends=(AttentionBackendEnum.FLASHINFER, ),
-            )
+            with _component_attention_backend_scope(AttentionBackendEnum.TORCH_SDPA):
+                reference = MiniMaxH3Attention(
+                    **common,
+                    supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+                )
+            with _component_attention_backend_scope(AttentionBackendEnum.FLASHINFER):
+                flashinfer = MiniMaxH3Attention(
+                    **common,
+                    supported_attention_backends=(AttentionBackendEnum.FLASHINFER, ),
+                )
+            assert reference.distributed_attention.backend == AttentionBackendEnum.TORCH_SDPA
+            assert isinstance(reference.distributed_attention.attn_impl, SDPAImpl)
+            assert flashinfer.distributed_attention.backend == AttentionBackendEnum.FLASHINFER
+            assert isinstance(flashinfer.distributed_attention.attn_impl, FlashInferImpl)
         finally:
             torch.set_default_dtype(previous_default_dtype)
 
