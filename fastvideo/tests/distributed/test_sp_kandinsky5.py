@@ -57,8 +57,8 @@ def _seed_everything(seed: int) -> None:
 def _build_tiny_config(visual_cond=False) -> Kandinsky5VideoConfig:
     return Kandinsky5VideoConfig(arch_config=Kandinsky5ArchConfig(
         patch_size=(1, 1, 1), in_visual_dim=4, out_visual_dim=4,
-        model_dim=32, ff_dim=64, time_dim=16, in_text_dim=12, in_text_dim2=8,
-        axes_dims=(2, 2, 4), num_text_blocks=1, num_visual_blocks=2, visual_cond=visual_cond))
+        model_dim=128, ff_dim=64, time_dim=16, in_text_dim=12, in_text_dim2=8,
+        axes_dims=(8, 8, 16), num_text_blocks=1, num_visual_blocks=2, visual_cond=visual_cond))
 
 
 def _initialize_model_parameters(model: torch.nn.Module) -> None:
@@ -115,7 +115,11 @@ def _run_worker(mode: str, output_path: Path, sp_size=2, dtype="float32", visual
             _compile_model_regions(model, {})
         expected_backend = AttentionBackendEnum[os.environ["FASTVIDEO_ATTENTION_BACKEND"]]
         for block in model.visual_transformer_blocks:
-            assert block.self_attention.local_attention.backend == expected_backend
+            attention = block.self_attention
+            assert attention.local_attention.backend == expected_backend
+            if sp_size > 1:
+                assert attention.distributed_attention is not None
+                assert attention.distributed_attention.backend == expected_backend
         outputs = {"state_keys": tuple(model.state_dict())}
         if mode == "sp":
             bad = _build_tiny_config()
@@ -123,7 +127,7 @@ def _run_worker(mode: str, output_path: Path, sp_size=2, dtype="float32", visual
             with pytest.raises(ValueError, match="dense checkpoints"):
                 Kandinsky5Transformer3DModel(config=bad, hf_config={})
             bad = _build_tiny_config()
-            bad.arch_config.model_dim = 24
+            bad.arch_config.model_dim = 96
             with pytest.raises(ValueError, match="divisible"):
                 Kandinsky5Transformer3DModel(config=bad, hf_config={})
             with torch.enable_grad(), set_forward_context(0, None), torch.autocast(
