@@ -32,7 +32,6 @@ from fastvideo.tests.performance.identity import (
     software_profile,
     software_profile_id,
 )
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
@@ -176,8 +175,7 @@ def _get_thresholds(cfg):
 def _shutdown_executor(generator):
     if generator is None:
         return
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
 
 def _extract_component_times(result: dict) -> dict[str, float | None]:
