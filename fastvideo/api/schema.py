@@ -75,11 +75,42 @@ class CompileConfig:
     text_encoder_enabled: bool | None = flat_field("enable_torch_compile_text_encoder", None)
     vae_enabled: bool | None = flat_field("enable_torch_compile_vae", None)
     audio_vae_enabled: bool | None = flat_field("enable_torch_compile_audio_vae", None)
+    regional: bool | None = flat_field("inference_torch_compile", None)
+    """Regional fullgraph compile of each DiT transformer block, independent of ``enabled``. The loader applies it
+    with fixed options and ignores the kwargs below. ``None`` falls back to ``FASTVIDEO_INFERENCE_TORCH_COMPILE``."""
 
     dit_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_dit", default_factory=dict)
     text_encoder_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_text_encoder", default_factory=dict)
     vae_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_vae", default_factory=dict)
     audio_vae_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_audio_vae", default_factory=dict)
+
+
+@dataclass
+class AttentionConfig:
+    backend: str | None = flat_field("attention_backend", None)
+    """Default attention backend request, such as ``FLASH_ATTN`` or ``TORCH_SDPA``, applied per component at load
+    time. ``None`` falls back to ``FASTVIDEO_ATTENTION_BACKEND``, then per-layer defaults, then automatic selection."""
+    vsa_sparsity: float | None = flat_field("VSA_sparsity", None)
+    """Video sparse attention (VSA) sparsity at inference. ``None`` keeps the default of 0.0."""
+    vsa_tile_size: int | None = flat_field("VSA_tile_size", None)
+    """VSA tile size in tokens, 256 or 64; 64 runs the native Triton block-sparse path. ``None`` keeps 256."""
+    moba_config_path: str | None = flat_field("moba_config_path", None)
+    """Path to a JSON config for V-MoBA attention."""
+
+
+Precision = Literal["fp32", "fp16", "bf16"]
+
+
+@dataclass
+class PrecisionConfig:
+    """Numeric precision of each model component. ``None`` keeps the model's default."""
+
+    dit: Precision | None = flat_field("dit_precision", None)
+    vae: Precision | None = flat_field("vae_precision", None)
+    vae_decode: Precision | None = flat_field("vae_decode_precision", None)
+    image_encoder: Precision | None = flat_field("image_encoder_precision", None)
+    text_encoders: list[Precision] | None = flat_field("text_encoder_precisions", None)
+    """One precision per text encoder, in the model's text encoder order."""
 
 
 @dataclass
@@ -95,6 +126,8 @@ class EngineConfig:
     parallelism: ParallelismConfig = field(default_factory=ParallelismConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     compile: CompileConfig = field(default_factory=CompileConfig)
+    attention: AttentionConfig = field(default_factory=AttentionConfig)
+    precision: PrecisionConfig = field(default_factory=PrecisionConfig)
     enable_stage_verification: bool = flat_field("enable_stage_verification", True)
     use_fsdp_inference: bool = flat_field("use_fsdp_inference", False)
     disable_autocast: bool = flat_field("disable_autocast", False)
@@ -113,6 +146,9 @@ class ComponentConfig:
     lora_path: str | None = flat_field("lora_path", None)
     lora_nickname: str = flat_field("lora_nickname", "default")
     lora_strength: float = flat_field("lora_strength", 1.0)
+    lora_target_modules: list[str] | None = flat_field("lora_target_modules", None)
+    """Module name substrings that restrict LoRA injection, such as ``["q_proj", "v_proj"]``. ``None`` adapts the
+    default modules."""
     override_pipeline_cls_name: str | None = flat_field("override_pipeline_cls_name", None)
     override_transformer_cls_name: str | None = flat_field("override_transformer_cls_name", None)
 
@@ -125,6 +161,14 @@ class PipelineSelection:
     components: ComponentConfig = field(default_factory=ComponentConfig)
     vae_tiling: bool | None = flat_field("ltx2_vae_tiling", None)
     """Tile-based VAE decode. ``None`` keeps the model's default."""
+    vae_sp: bool | None = flat_field("vae_sp", None)
+    """VAE spatial parallelism across ranks; requires ``vae_tiling``. ``None`` keeps the model's default."""
+    flow_shift: float | None = flat_field("flow_shift", None)
+    """Flow-matching scheduler shift. ``None`` keeps the model's default."""
+    embedded_cfg_scale: float | None = flat_field("embedded_cfg_scale", None)
+    """Guidance scale that guidance-distilled models take as a DiT input. ``None`` keeps the model's default."""
+    dmd_denoising_steps: list[int] | None = flat_field("dmd_denoising_steps", None)
+    """Timesteps of a few-step distilled (DMD) sampler. ``None`` keeps the model's default."""
     preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
 
@@ -309,6 +353,7 @@ class ServeConfig:
 
 
 __all__ = [
+    "AttentionConfig",
     "CompileConfig",
     "ComponentConfig",
     "ContinuationState",
@@ -323,6 +368,7 @@ __all__ = [
     "ParallelismConfig",
     "PipelineSelection",
     "PlannedStage",
+    "PrecisionConfig",
     "PromptEnhancerConfig",
     "PromptSafetyConfig",
     "QuantizationConfig",

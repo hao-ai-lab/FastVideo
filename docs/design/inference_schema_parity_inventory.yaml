@@ -65,6 +65,12 @@ surfaces:
       ltx2_refine_num_inference_steps: request.stage_overrides.refine.num_inference_steps
       ltx2_refine_guidance_scale: request.stage_overrides.refine.guidance_scale
       ltx2_refine_add_noise: generator.pipeline.preset_overrides.refine.add_noise
+      lora_target_modules: generator.pipeline.components.lora_target_modules
+      attention_backend: generator.engine.attention.backend
+      VSA_sparsity: generator.engine.attention.vsa_sparsity
+      VSA_tile_size: generator.engine.attention.vsa_tile_size
+      moba_config_path: generator.engine.attention.moba_config_path
+      inference_torch_compile: generator.engine.compile.regional
     preset_owned:
       ltx2_vae_spatial_tile_size_in_pixels: generator.pipeline.preset_overrides.ltx2.vae.spatial_tile_size_in_pixels
       ltx2_vae_spatial_tile_overlap_in_pixels: generator.pipeline.preset_overrides.ltx2.vae.spatial_tile_overlap_in_pixels
@@ -75,11 +81,7 @@ surfaces:
     compatibility_only:
       mode: "Legacy multi-mode FastVideoArgs switch; typed inference config should not expose execution mode."
       inference_mode: "Legacy boolean mirror of mode; kept only through adapters while FastVideoArgs remains."
-      lora_target_modules: "Legacy LoRA configuration surface pending dedicated component API."
       output_type: "Legacy output formatting surface pending GenerationResult cleanup."
-      VSA_sparsity: "Model-specific inference optimization not yet represented in the typed public schema."
-      VSA_tile_size: "VSA-H3 tile geometry request; model-specific optimization not yet represented in the typed public schema."
-      inference_torch_compile: "Regional inference compile opt-in currently carried through PipelineSelection.experimental rather than CompileConfig."
       vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
       h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
       video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
@@ -87,8 +89,6 @@ surfaces:
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
       vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
-      attention_backend: "Process-wide default attention-backend request applied per component at load time; kernel-selection knob not yet represented in the typed public schema."
-      moba_config_path: "Model-specific MoBA optimization surface not yet represented in the typed public schema."
       master_port: "Executor/bootstrap compatibility field; not part of the canonical inference schema."
       refine_transformer_path: "Generic stage-2 refine transformer override; no typed equivalent yet."
       refine_noise_path: "Generic stage-2 refine noise override; no typed equivalent yet."
@@ -111,27 +111,27 @@ surfaces:
   pipeline_config_base:
     moved:
       pipeline_config_path: generator.pipeline.components.pipeline_config_path
+      embedded_cfg_scale: generator.pipeline.embedded_cfg_scale
+      flow_shift: generator.pipeline.flow_shift
+      vae_sp: generator.pipeline.vae_sp
+      dmd_denoising_steps: generator.pipeline.dmd_denoising_steps
+      dit_precision: generator.engine.precision.dit
+      vae_precision: generator.engine.precision.vae
+      vae_decode_precision: generator.engine.precision.vae_decode
+      image_encoder_precision: generator.engine.precision.image_encoder
+      text_encoder_precisions: generator.engine.precision.text_encoders
     preset_owned:
-      embedded_cfg_scale: generator.pipeline.preset_overrides.embedded_cfg_scale
-      flow_shift: generator.pipeline.preset_overrides.flow_shift
       flow_shift_sr: generator.pipeline.preset_overrides.flow_shift_sr
       is_causal: generator.pipeline.preset_overrides.is_causal
       vae_tiling: generator.pipeline.preset_overrides.vae_tiling
-      vae_sp: generator.pipeline.preset_overrides.vae_sp
-      dmd_denoising_steps: generator.pipeline.preset_overrides.dmd_denoising_steps
       ti2v_task: generator.pipeline.preset_overrides.ti2v_task
       lucy_edit_task: generator.pipeline.preset_overrides.lucy_edit_task
       boundary_ratio: generator.pipeline.preset_overrides.boundary_ratio
     compatibility_only:
       model_path: "Redundant with generator.model_path."
       disable_autocast: "Duplicated by generator.engine.disable_autocast during migration."
-      dit_precision: "Precision override pending dedicated typed component precision design."
       upsampler_precision: "Precision override pending dedicated typed component precision design."
-      vae_precision: "Precision override pending dedicated typed component precision design."
-      vae_decode_precision: "Decode-only precision override pending dedicated typed component precision design."
-      image_encoder_precision: "Precision override pending dedicated typed component precision design."
       image_encoder_precisions: "Precision overrides pending dedicated typed component precision design."
-      text_encoder_precisions: "Precision override pending dedicated typed component precision design."
     internal_only:
       dit_config: "Legacy internal component config object."
       upsampler_config: "Legacy internal component config object."

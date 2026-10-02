@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo.api.schema import (
+    AttentionConfig,
     CompileConfig,
     ComponentConfig,
     ContinuationState,
@@ -14,6 +15,7 @@ from fastvideo.api.schema import (
     ParallelismConfig,
     PipelineSelection,
     PlannedStage,
+    PrecisionConfig,
     PromptEnhancerConfig,
     PromptSafetyConfig,
     QuantizationConfig,
@@ -57,6 +59,7 @@ from fastvideo.api.results import (
 from fastvideo.api.sampling_param import SamplingParam
 
 __all__ = [
+    "AttentionConfig",
     "CompileConfig",
     "ComponentConfig",
     "ContinuationState",
@@ -73,6 +76,7 @@ __all__ = [
     "ParallelismConfig",
     "PipelineSelection",
     "PlannedStage",
+    "PrecisionConfig",
     "PromptEnhancerConfig",
     "PromptSafetyConfig",
     "QuantizationConfig",
