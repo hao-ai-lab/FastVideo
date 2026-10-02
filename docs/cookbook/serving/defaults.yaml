@@ -1,0 +1,74 @@
+# Defines shared cookbook controls: labels, types, allowed values, and defaults.
+# Model recipes inherit these controls and override model-specific differences.
+# The UI uses each control's `path` to generate the corresponding CLI option.
+runtimes:
+  cuda:
+    label: CUDA
+    command: [fastvideo, serve]
+
+tasks:
+  t2v:
+    label: Text to video
+    client: video
+    prompt: A cinematic view of a futuristic city at sunset, smooth camera pan
+    options: [host, port, num_gpus, num_inference_steps, seed, vae_offload, num_frames]
+  t2i:
+    label: Text to image
+    client: image
+    prompt: A watercolor painting of a capybara beside a quiet pond
+    options: [host, port, num_gpus, num_inference_steps, seed, vae_offload]
+  i2v:
+    label: Image to video
+    client: video
+    prompt: Animate the provided image with gentle, natural motion
+    requires_image: true
+    # Request-only placeholder; this is never written into server defaults.
+    input_reference: /path/to/first-frame.png
+    options: [host, port, num_gpus, num_inference_steps, seed, vae_offload, num_frames]
+
+options:
+  host:
+    label: Server host
+    type: string
+    path: server.host
+    # Limit this prototype to host strings that the CLI will not auto-cast.
+    choices: [127.0.0.1, 0.0.0.0, localhost]
+    default: 127.0.0.1
+  port:
+    label: Server port
+    type: integer
+    path: server.port
+    min: 1
+    max: 65535
+    default: 8000
+  num_gpus:
+    label: GPU count
+    type: integer
+    path: generator.engine.num_gpus
+    choices: [1, 2, 4, 8]
+    default: 1
+  num_inference_steps:
+    label: Sampling steps
+    type: integer
+    path: default_request.sampling.num_inference_steps
+    min: 1
+    max: 200
+    default: 50
+  seed:
+    label: Seed
+    type: integer
+    path: default_request.sampling.seed
+    min: 0
+    max: 4294967295
+    default: 1024
+  vae_offload:
+    label: Offload VAE to CPU
+    type: boolean
+    path: generator.engine.offload.vae
+    default: true
+  num_frames:
+    label: Frames
+    type: integer
+    path: default_request.sampling.num_frames
+    min: 1
+    default: 81

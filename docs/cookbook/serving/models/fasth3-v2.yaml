@@ -1,0 +1,78 @@
+id: fasth3-v2
+label: FastH3 V2 · 8 forwards
+model_id: FastVideo/FastVideo-FastH3-8-Step-V2
+task: t2v
+runtime: cuda
+default_hardware: gb200
+hardware: [gb200]
+install: 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"'
+evidence: source-configured
+notes: >-
+  GPU type is NVIDIA GB200; this model recipe separately fixes the GPU count
+  to four. These source-configured settings have not been validated by a
+  serving benchmark and are not a memory-capacity or performance guarantee.
+
+# Only differences from defaults.yaml. Singleton choices render as fixed values.
+options:
+  num_gpus:
+    choices: [4]
+    default: 4
+    # The inherited path sets generator.engine.num_gpus; also_set copies that value
+    # to the paths below, keeping sequence parallelism equal to the GPU count.
+    also_set: [generator.engine.parallelism.sp_size]
+    help: This example keeps sequence parallelism equal to the four-GPU count.
+  num_inference_steps:
+    choices: [9]
+    default: 9
+    help: Nine sigma points correspond to eight DiT forwards for this checkpoint.
+  seed:
+    default: 1000
+  num_frames:
+    choices: [124]
+    default: 124
+  vsa_sparsity:
+    label: VSA sparsity
+    type: number
+    path: generator.pipeline.experimental.VSA_sparsity
+    choices: [0.8]
+    default: 0.8
+    help: Fixed to the documented setting for this example.
+
+# Cookbook-owned baseline. The build never loads examples/serving YAML files.
+# Model identity and the option values above are supplied by the shared resolver.
+settings:
+  generator:
+    engine:
+      use_fsdp_inference: false
+      parallelism:
+        tp_size: 1
+      offload:
+        dit: false
+        dit_layerwise: false
+        text_encoder: true
+        image_encoder: true
+        pin_cpu_memory: true
+      compile:
+        enabled: false
+        vae_enabled: false
+    pipeline:
+      workload_type: t2v
+      experimental:
+        attention_backend: VIDEO_SPARSE_ATTN_H3
+        VSA_tile_size: 64
+        inference_torch_compile: false
+        vae_parallel_decode: true
+        vae_parallel_decode_strategy: gather
+  server:
+    output_dir: outputs/openai_fasth3_8step
+    served_model_name: fasth3
+  default_request:
+    negative_prompt: ""
+    sampling:
+      height: 768
+      width: 1344
+      fps: 24
+      guidance_scale: 1.0
+      batch_cfg: false
+    output:
+      return_frames: false
