@@ -25,11 +25,13 @@ from pathlib import Path
 
 from fastvideo import VideoGenerator
 from fastvideo.api import (
+    AttentionConfig,
     CompileConfig,
     ComponentConfig,
     EngineConfig,
     GenerationRequest,
     GeneratorConfig,
+    MiniMaxH3Config,
     OffloadConfig,
     OutputConfig,
     ParallelismConfig,
@@ -254,23 +256,6 @@ def _execution_backend(args: argparse.Namespace) -> str:
 
 def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
     use_vsa = _uses_vsa(args)
-    experimental: dict[str, object] = {
-        "attention_backend": "VIDEO_SPARSE_ATTN_H3" if use_vsa else "FLASH_ATTN",
-        "inference_torch_compile": args.inference_torch_compile,
-        "vae_parallel_decode": args.parallel_vae,
-        "vae_parallel_decode_strategy": "gather",
-    }
-    if args.h3_sequential_load is not None:
-        experimental["h3_sequential_load"] = args.h3_sequential_load
-    if args.video_decode_backend != "h3-vae":
-        experimental["video_decode_backend"] = args.video_decode_backend
-    if args.taeh3_checkpoint is not None:
-        experimental["taeh3_checkpoint"] = args.taeh3_checkpoint
-    if use_vsa:
-        experimental.update({
-            "VSA_sparsity": args.vsa_sparsity,
-            "VSA_tile_size": args.vsa_tile_size,
-        })
     return GeneratorConfig(
         model_path=args.model_path,
         pipeline=PipelineSelection(
@@ -278,7 +263,13 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
                 lora_path=getattr(args, "lora_path", None),
                 lora_strength=float(getattr(args, "lora_strength", 1.0)),
             ),
-            experimental=experimental,
+            minimax_h3=MiniMaxH3Config(
+                sequential_load=args.h3_sequential_load,
+                video_decode_backend=None if args.video_decode_backend == "h3-vae" else args.video_decode_backend,
+                taeh3_checkpoint=args.taeh3_checkpoint,
+                vae_parallel_decode=args.parallel_vae,
+                vae_parallel_decode_strategy="gather",
+            ),
         ),
         engine=EngineConfig(
             num_gpus=args.num_gpus,
@@ -297,6 +288,12 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
                 enabled=args.torch_compile,
                 mode=args.compile_mode,
                 vae_enabled=args.compile_vae,
+                regional=args.inference_torch_compile,
+            ),
+            attention=AttentionConfig(
+                backend="VIDEO_SPARSE_ATTN_H3" if use_vsa else "FLASH_ATTN",
+                vsa_sparsity=args.vsa_sparsity if use_vsa else None,
+                vsa_tile_size=args.vsa_tile_size if use_vsa else None,
             ),
         ),
     )

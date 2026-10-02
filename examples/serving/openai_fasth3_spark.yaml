@@ -26,13 +26,14 @@ generator:
     compile:
       enabled: false
       vae_enabled: true
+      regional: false
+    attention:
+      backend: VIDEO_SPARSE_ATTN_H3
+      vsa_sparsity: 0.9
+      vsa_tile_size: 64
   pipeline:
     workload_type: t2v
-    experimental:
-      attention_backend: VIDEO_SPARSE_ATTN_H3
-      VSA_sparsity: 0.9
-      VSA_tile_size: 64
-      inference_torch_compile: false
+    minimax_h3:
       vae_parallel_decode: true
       vae_parallel_decode_strategy: gather
 

@@ -44,8 +44,7 @@ def test_spark_configs_use_lazy_load_not_sequential(config_path):
     cfg = yaml.safe_load((ROOT / config_path).read_text())
     offload = cfg["generator"]["engine"]["offload"]
     assert offload["lazy_module_load"] is True
-    experimental = cfg["generator"]["pipeline"]["experimental"]
-    assert "h3_sequential_load" not in experimental
+    assert "sequential_load" not in cfg["generator"]["pipeline"].get("minimax_h3", {})
 
 
 def test_spark_preview_is_a_runtime_with_one_or_two_devices():

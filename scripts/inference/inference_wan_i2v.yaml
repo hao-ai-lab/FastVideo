@@ -15,8 +15,7 @@ generator:
       pin_cpu_memory: true
   pipeline:
     workload_type: i2v
-    experimental:
-      flow_shift: 3.0
+    flow_shift: 3.0
 request:
   prompt: >-
     An astronaut hatching from an egg, on the surface of the moon, the

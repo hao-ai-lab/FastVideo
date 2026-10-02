@@ -11,10 +11,10 @@ generator:
       dit: false
       vae: false
       pin_cpu_memory: false
+    attention:
+      vsa_sparsity: 0.9
   pipeline:
-    experimental:
-      flow_shift: 5.0
-      VSA_sparsity: 0.9
+    flow_shift: 5.0
 request:
   negative_prompt: >-
     Bright tones, overexposed, static, blurred details, subtitles, style,

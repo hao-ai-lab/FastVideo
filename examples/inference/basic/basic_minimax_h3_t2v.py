@@ -16,7 +16,6 @@ from fastvideo.api import (
     OffloadConfig,
     OutputConfig,
     ParallelismConfig,
-    PipelineSelection,
     SamplingConfig,
 )
 
@@ -82,17 +81,10 @@ def main() -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Boot-time run configuration folded into FastVideoArgs (the same
-    # experimental-dict route basic_fasth3.py uses for the VSA knobs).
-    experimental: dict[str, object] = {}
-    if args.inference_torch_compile:
-        experimental["inference_torch_compile"] = True
-
     execution_backend = args.execution_backend or ("ray" if os.environ.get("RAY_ADDRESS") else "mp")
     generator = VideoGenerator.from_config(
         GeneratorConfig(
             model_path=args.model_path,
-            pipeline=PipelineSelection(experimental=experimental),
             engine=EngineConfig(
                 num_gpus=args.num_gpus,
                 execution_backend=execution_backend,
@@ -110,6 +102,7 @@ def main() -> None:
                     enabled=args.torch_compile,
                     mode=args.compile_mode,
                     vae_enabled=args.compile_vae,
+                    regional=True if args.inference_torch_compile else None,
                 ),
             ),
         ))

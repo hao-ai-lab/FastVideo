@@ -319,7 +319,7 @@ def collect_cases() -> list[SnapshotCase]:
         SnapshotCase("yaml",
                      path.relative_to(REPO_ROOT).as_posix(), _yaml_case(path)) for path in _repository_config_files()
     ]
-    # One case per kind of branch in legacy_from_pretrained_to_config: typed keys, keys left in
+    # One case per kind of branch in legacy_from_pretrained_to_config: flat names of typed fields, keys left in
     # pipeline.experimental, compile sub-keys, LTX-2 refine keys, and a pipeline config JSON path.
     pipeline_json = str(REPO_ROOT / "fastvideo/configs/fasthunyuan_t2v.json")
     kwargs_cases = {
@@ -329,11 +329,16 @@ def collect_cases() -> list[SnapshotCase]:
             "dit_cpu_offload": False,
             "vae_cpu_offload": False,
         }),
-        "untyped_experimental_keys": (WAN_T2V, {
+        "attention_precision_and_flow_shift": (WAN_T2V, {
             "attention_backend": "TORCH_SDPA",
             "flow_shift": 5.0,
             "VSA_sparsity": 0.5,
             "dit_precision": "fp32",
+        }),
+        "keys_without_typed_fields": (WAN_T2V, {
+            "master_port": 29600,
+            "refine_enabled": True,
+            "boundary_ratio": 0.5,
         }),
         "torch_compile_kwargs_typed_and_extra": (WAN_T2V, {
             "enable_torch_compile": True,

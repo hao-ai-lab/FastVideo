@@ -12,8 +12,7 @@ generator:
       vae: false
       pin_cpu_memory: false
   pipeline:
-    experimental:
-      flow_shift: 8.0
+    flow_shift: 8.0
 request:
   negative_prompt: >-
     Bright tones, overexposed, static, blurred details, subtitles, style,

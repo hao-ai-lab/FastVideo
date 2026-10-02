@@ -11,10 +11,10 @@ generator:
       dit: false
       vae: false
       pin_cpu_memory: false
-  pipeline:
-    experimental:
-      flow_shift: 8.0
+    attention:
       moba_config_path: fastvideo/configs/backend/vmoba/wan_1.3B_77_480_832.json
+  pipeline:
+    flow_shift: 8.0
 request:
   negative_prompt: >-
     Bright tones, overexposed, static, blurred details, subtitles, style,

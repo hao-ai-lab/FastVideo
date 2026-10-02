@@ -34,9 +34,7 @@ def test_inference_bsa(env_overrides):
                 },
             },
             "pipeline": {
-                "experimental": {
-                    "flow_shift": 8.0,
-                },
+                "flow_shift": 8.0,
             },
         },
         "request": {

@@ -3,12 +3,12 @@ import time
 
 from fastvideo import VideoGenerator
 from fastvideo.api import (
+    AttentionConfig,
     EngineConfig,
     GenerationRequest,
     GeneratorConfig,
     OffloadConfig,
     OutputConfig,
-    PipelineSelection,
 )
 
 OUTPUT_PATH = "video_samples_dmd2_typed"
@@ -29,12 +29,8 @@ def main():
                 dit=False,
                 vae=False,
             ),
+            attention=AttentionConfig(vsa_sparsity=0.8),
         ),
-        # PR 2 still routes a few advanced inference knobs through the
-        # compatibility bridge until they get first-class typed fields.
-        pipeline=PipelineSelection(experimental={
-            "VSA_sparsity": 0.8,
-        }, ),
     )
 
     load_start_time = time.perf_counter()

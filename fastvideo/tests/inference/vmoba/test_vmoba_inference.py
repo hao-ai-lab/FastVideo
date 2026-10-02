@@ -32,12 +32,12 @@ def test_inference_vmoba(env_overrides):
                     "text_encoder": True,
                     "pin_cpu_memory": False,
                 },
-            },
-            "pipeline": {
-                "experimental": {
-                    "flow_shift": 8.0,
+                "attention": {
                     "moba_config_path": moba_config,
                 },
+            },
+            "pipeline": {
+                "flow_shift": 8.0,
             },
         },
         "request": {

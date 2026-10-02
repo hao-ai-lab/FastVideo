@@ -17,11 +17,13 @@ sys.path.insert(0, str(FASTVIDEO_ROOT))
 
 from fastvideo import VideoGenerator  # noqa: E402
 from fastvideo.api import (  # noqa: E402
+    AttentionConfig,
     CompileConfig,
     ComponentConfig,
     EngineConfig,
     GenerationRequest,
     GeneratorConfig,
+    MiniMaxH3Config,
     OffloadConfig,
     OutputConfig,
     ParallelismConfig,
@@ -57,17 +59,7 @@ def main() -> None:
     args = parse_args()
 
     attention_backend = VARIANT_BACKENDS[args.variant]
-    experimental = {
-        "attention_backend": attention_backend,
-        "inference_torch_compile": attention_backend == "FLASH_ATTN",
-        "vae_parallel_decode": True,
-        "vae_parallel_decode_strategy": "gather",
-    }
-    if attention_backend == "VIDEO_SPARSE_ATTN_H3":
-        experimental.update({
-            "VSA_sparsity": 0.9,
-            "VSA_tile_size": 64,
-        })
+    use_vsa = attention_backend == "VIDEO_SPARSE_ATTN_H3"
 
     adapter_path = hf_hub_download(
         repo_id="FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA",
@@ -81,13 +73,18 @@ def main() -> None:
             model_path="MiniMaxAI/MiniMax-H3",
             pipeline=PipelineSelection(
                 components=ComponentConfig(lora_path=adapter_path, lora_strength=1.0),
-                experimental=experimental,
+                minimax_h3=MiniMaxH3Config(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
             ),
             engine=EngineConfig(
                 num_gpus=4,
                 parallelism=ParallelismConfig(tp_size=1, sp_size=4),
                 offload=OffloadConfig(dit=False, dit_layerwise=False),
-                compile=CompileConfig(vae_enabled=True),
+                compile=CompileConfig(vae_enabled=True, regional=attention_backend == "FLASH_ATTN"),
+                attention=AttentionConfig(
+                    backend=attention_backend,
+                    vsa_sparsity=0.9 if use_vsa else None,
+                    vsa_tile_size=64 if use_vsa else None,
+                ),
             ),
         )
     )
