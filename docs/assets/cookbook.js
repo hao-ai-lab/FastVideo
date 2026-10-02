@@ -506,6 +506,10 @@
       const runtime = runtimeFor(recipe);
       const profile = servingPanel && servingProfiles[recipe.id];
       const useServer = Boolean(profile && usagePreference === "server");
+      // Only some servers expose the browser playground or return audio; both come from the serving profile.
+      const hasPlayground = Boolean(profile && profile.playground_url);
+      const hasAudio = Boolean(profile && profile.audio);
+      const playgroundAny = familyRecipes.some((item) => servingProfiles[item.id] && servingProfiles[item.id].playground_url);
       // The measured local profile and the server config have separate evidence.
       const activeRecipe = useServer ? { ...recipe, hardware: profile.hardware, evidence: "Source-backed" } : recipe;
       const knobs = knobsFor(recipe);
@@ -515,15 +519,18 @@
         usage.querySelectorAll("[data-cookbook-mode]").forEach((option) => {
           const selected = option.dataset.cookbookMode === (useServer ? "server" : "python");
           option.disabled = option.dataset.cookbookMode === "server" && !profile;
+          const hint = option.querySelector("[data-cookbook-server-hint]");
+          if (hint) hint.textContent = (profile ? hasPlayground : playgroundAny) ? "Playground, cURL, or an API client" : "cURL or an API client";
           option.classList.toggle("cookbook-option--selected", selected);
           option.setAttribute("aria-pressed", String(selected));
         });
+        const servedNames = [...new Set(familyRecipes.filter((item) => servingProfiles[item.id]).map((item) => item.group_label || item.label))];
         servingAvailability.textContent = profile
-          ? "The playground and the OpenAI Python client share one server process. Both workflows can run on your own machine."
+          ? `${hasPlayground ? "The playground" : "cURL"} and the OpenAI Python client share one server process. Both workflows can run on your own machine.`
           : servingLoadFailed
             ? "Server examples could not be loaded. Use Python directly."
-            : root.dataset.family === "minimax_h3"
-              ? "This recipe uses Python directly. FastH3 V1 and FastH3 V2 can also run a local server for the playground and the OpenAI Python client."
+            : servedNames.length
+              ? `This recipe uses Python directly. ${new Intl.ListFormat("en").format(servedNames)} can also run a local server for ${playgroundAny ? "the playground and " : "cURL and "}the OpenAI Python client.`
               : "This recipe uses Python directly.";
         servingPanel.hidden = !useServer;
         commandBlock.hidden = useServer;
@@ -533,11 +540,12 @@
       if (useServer) {
         const isMLX = profile.runtime === "mlx";
         const isSpark = runtime.id === "spark";
+        const where = hasPlayground ? "in the playground or your app" : "in your app";
         servingPanel.querySelector("[data-cookbook-server-lifetime]").textContent = isMLX
-          ? "Start once, then change prompts in the playground or your app. MLX reuses its pipeline and prompt cache, but loads and releases model components between phases to limit unified-memory use. It does not keep all weights resident."
+          ? `Start once, then change prompts ${where}. MLX reuses its pipeline and prompt cache, but loads and releases model components between phases to limit unified-memory use. It does not keep all weights resident.`
           : isSpark
-            ? "Start once, then change prompts in the playground or your app. On a DGX Spark, lazy module load still reloads Qwen3-VL and the DiT between phases of each request, so later prompts are not a free hot cache."
-            : "Start once, then change prompts in the playground or your app. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.";
+            ? `Start once, then change prompts ${where}. On a DGX Spark, lazy module load still reloads Qwen3-VL and the DiT between phases of each request, so later prompts are not a free hot cache.`
+            : `Start once, then change prompts ${where}. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.`;
         servingPanel.querySelector("[data-cookbook-install-guide]").href = isMLX
           ? "../../getting_started/installation/mlx/"
           : isSpark
@@ -548,7 +556,10 @@
         servingPanel.querySelector("[data-cookbook-server-install]").textContent = profile.install;
         servingPanel.querySelector("[data-cookbook-server-command]").textContent = profile.command;
         servingPanel.querySelector("[data-cookbook-health-command]").textContent = profile.health_command;
-        servingPanel.querySelector("[data-cookbook-playground]").href = profile.playground_url;
+        servingPanel.querySelectorAll("[data-cookbook-playground-only]").forEach((element) => {
+          element.hidden = !hasPlayground;
+        });
+        if (hasPlayground) servingPanel.querySelector("[data-cookbook-playground]").href = profile.playground_url;
         const client = profile.clients[selectedClient];
         const filename = client.source.split("/").pop();
         servingPanel.querySelector("[data-cookbook-client-install]").textContent = client.install;
@@ -575,9 +586,8 @@
         option.setAttribute("aria-pressed", String(selected));
       });
 
-      const hasAudio = Boolean(recipe.serving && recipe.serving.audio);
       description.textContent = useServer
-        ? `${recipe.label} keeps this ${runtime.label} server process running. Send another prompt without starting a new process.`
+        ? `${recipe.group_label || recipe.label} generates video${hasAudio ? " with audio" : ""}. Start the local server, then use ${hasPlayground ? "the playground or " : "cURL or "}the OpenAI Python client. This profile uses the checked-in ${runtime.label} configuration.`
         : recipe.summary;
       label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;
@@ -609,7 +619,7 @@
           ? "This MLX server config has no recorded hardware run. Measurements from the Python recipe are not server memory requirements. Only text-to-video/audio is wired; reference inputs and fast modes are not exposed here."
           : runtime.id === "spark"
             ? "This Spark server config has no recorded serving benchmark. Lazy module load reloads Qwen3-VL and the DiT between phases of each request. Compilation of the DiT is disabled."
-            : "This server config has no recorded serving benchmark.",
+            : `This server config has no recorded serving benchmark.${profile.compile_enabled === false ? " Compilation is disabled, unlike the measured Python performance profile." : ""}`,
         `${profile.sampling.width} × ${profile.sampling.height} · ${profile.sampling.num_frames} frames · ${profile.sampling.fps} fps. The server supplies these defaults; the client sends the model and prompt.`,
         "Generation is serialized. Job metadata is held in memory and is lost when the server restarts.",
       ] : recipe.limitations || []),

@@ -1,5 +1,5 @@
 {
-  "version": 13,
+  "version": 12,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -32,7 +32,10 @@
       "source": "examples/inference/basic/basic_wan2_2.py",
       "serving": {
         "source": "examples/serving/openai_wan22_t2v_a14b.yaml",
-        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e ."
+        "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
+        "limitations": [
+          "Generation at 1280 × 720 on two GPUs with DiT CPU offload is slow. The client examples stop polling after 30 minutes while the job keeps running on the server; retrieve it by ID or raise the deadline."
+        ]
       },
       "command": "python examples/inference/basic/basic_wan2_2.py",
       "gpu_types": ["NVIDIA"],
@@ -68,7 +71,7 @@
         "install": "UV_TORCH_BACKEND=cu130 uv pip install -e .",
         "task": "Text to video",
         "limitations": [
-          "This server walkthrough sends a text prompt only. Image-to-video for this checkpoint uses the Python command; the checked-in clients and playground do not upload an image."
+          "This server walkthrough sends a text prompt only. The server API also accepts an image reference (input_reference) for this checkpoint, but the checked-in clients do not upload one. For the cookbook's image-to-video workflow, use the Python command."
         ]
       },
       "command": "python examples/inference/basic/basic_wan2_2_ti2v.py",
