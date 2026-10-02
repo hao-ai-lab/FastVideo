@@ -36,9 +36,9 @@ def backend_name_to_enum(backend_name: str) -> AttentionBackendEnum | None:
 def coerce_attn_backend(attn_backend: AttentionBackendEnum | str | None, ) -> AttentionBackendEnum | None:
     """Normalize an explicit backend selection.
 
-    Environment-variable parsing remains permissive via
-    :func:`backend_name_to_enum`, but typed/config-driven call sites should
-    fail fast on typos instead of silently falling back to another backend.
+    Typed/config-driven call sites fail fast on typos instead of silently
+    falling back to another backend. :func:`get_env_variable_attn_backend`
+    applies the same rule to the environment variable.
     """
     if attn_backend is None or isinstance(attn_backend, AttentionBackendEnum):
         return attn_backend
@@ -56,16 +56,20 @@ def coerce_attn_backend(attn_backend: AttentionBackendEnum | str | None, ) -> At
 
 def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
     '''
-    Get the backend override specified by the FastVideo attention
-    backend environment variable, if one is specified.
+    Get the backend that the FASTVIDEO_ATTENTION_BACKEND environment variable
+    names, or None when the variable is unset.
 
-    Returns:
-
-    * _Backend enum value if an override is specified
-    * None otherwise
+    Raises ValueError when the variable names an unsupported backend, so a
+    typo fails instead of silently falling back to automatic selection.
     '''
     backend_name = envs.FASTVIDEO_ATTENTION_BACKEND.get()
-    return (None if backend_name is None else backend_name_to_enum(backend_name))
+    if backend_name is None:
+        return None
+    try:
+        return coerce_attn_backend(backend_name)
+    except ValueError as error:
+        raise ValueError(f"FASTVIDEO_ATTENTION_BACKEND={backend_name!r} is not a supported attention backend. "
+                         f"Expected one of {sorted(AttentionBackendEnum.__members__)}") from error
 
 
 class _NoRequest:
@@ -207,8 +211,7 @@ def effective_attention_backend(config: object) -> AttentionBackendEnum | None:
     scope = _SCOPE.get()
     if scope is not None and (scope.backend is not None or not scope.consult_env):
         return scope.backend
-    env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
-    return None if env_backend is None else backend_name_to_enum(env_backend)
+    return get_env_variable_attn_backend()
 
 
 def get_attn_backend(
@@ -248,11 +251,11 @@ def get_attn_backend(
         if scope is not None:
             requested = scope.backend
             component = scope.component
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get() if scope.consult_env else None
+            env_backend = _env_backend_name() if scope.consult_env else None
         else:
             requested = None
             component = None
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
+            env_backend = _env_backend_name()
     # The active device is a real selection input, not bookkeeping: the
     # platform's backend resolution runs capability probes against the
     # *current* device (e.g. AttnQatInferBackend's per-arch capability sets
@@ -270,6 +273,12 @@ def get_attn_backend(
         component=component,
         device_index=device_index,
     )
+
+
+def _env_backend_name() -> str | None:
+    """Validated FASTVIDEO_ATTENTION_BACKEND as an enum name, the form the cached resolution takes."""
+    backend = get_env_variable_attn_backend()
+    return None if backend is None else backend.name
 
 
 @cache

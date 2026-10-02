@@ -354,14 +354,12 @@ class FastVideoArgs:
         else:
             # Parse-once adapter: fold the environment variable into the typed
             # request so resolution has a single input and library code never
-            # consults the environment on the load path. The env var keeps its
-            # historically permissive parse — an unknown name is ignored here
-            # and falls through to automatic selection rather than raising.
-            import fastvideo.envs as envs
-            from fastvideo.attention.selector import backend_name_to_enum
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
-            if env_backend is not None and backend_name_to_enum(env_backend) is not None:
-                self.attention_backend = env_backend
+            # consults the environment on the load path. An unsupported name
+            # raises, like an explicit request.
+            from fastvideo.attention.selector import get_env_variable_attn_backend
+            env_backend = get_env_variable_attn_backend()
+            if env_backend is not None:
+                self.attention_backend = env_backend.name
         self._fold_vae_parallel_env()
         import fastvideo.envs as envs
         envs.warn_deprecated_variables()

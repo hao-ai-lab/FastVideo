@@ -31,6 +31,11 @@ def test_explicit_attention_backend_wins_over_environment():
     assert (provenance.value, provenance.source, provenance.explicit) == ("FLASH_ATTN", "input", True)
 
 
+def test_unsupported_environment_attention_backend_raises():
+    with pytest.raises(ValueError, match="FASTVIDEO_ATTENTION_BACKEND='NOT_A_BACKEND' is not a supported"):
+        _resolve({"model_path": WAN_T2V}, {"FASTVIDEO_ATTENTION_BACKEND": "NOT_A_BACKEND"})
+
+
 def test_environment_turns_on_regional_compile_and_parallel_vae():
     resolved = _resolve(
         {"model_path": WAN_T2V},

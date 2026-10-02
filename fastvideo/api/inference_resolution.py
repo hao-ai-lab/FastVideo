@@ -25,13 +25,16 @@ from fastvideo.api.schema import GeneratorConfig
 
 
 def fill_attention_backend_from_env(view: ResolutionView) -> dict[str, Any]:
-    """``FASTVIDEO_ATTENTION_BACKEND`` sets ``engine.attention.backend`` while the field is unset."""
-    from fastvideo.attention.selector import backend_name_to_enum
+    """``FASTVIDEO_ATTENTION_BACKEND`` sets ``engine.attention.backend`` while the field is unset.
 
-    name = envs.FASTVIDEO_ATTENTION_BACKEND.get()
-    if view.get("engine.attention.backend") is not None or name is None or backend_name_to_enum(name) is None:
+    An unsupported backend name raises ``ValueError``.
+    """
+    from fastvideo.attention.selector import get_env_variable_attn_backend
+
+    if view.get("engine.attention.backend") is not None:
         return {}
-    return {"engine.attention.backend": name}
+    backend = get_env_variable_attn_backend()
+    return {} if backend is None else {"engine.attention.backend": backend.name}
 
 
 def fill_regional_compile_from_env(view: ResolutionView) -> dict[str, Any]:

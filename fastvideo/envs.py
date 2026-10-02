@@ -314,7 +314,8 @@ FASTVIDEO_ATTENTION_BACKEND = EnvStr(
     None,
     category="attention",
     doc="Attention backend, as an AttentionBackendEnum name such as TORCH_SDPA, FLASH_ATTN, VIDEO_SPARSE_ATTN, "
-    "SAGE_ATTN, or SAGE_ATTN_THREE. FastVideoArgs uses it when FastVideoArgs.attention_backend is unset.")
+    "SAGE_ATTN, or SAGE_ATTN_THREE. FastVideoArgs uses it when FastVideoArgs.attention_backend is unset. An "
+    "unsupported name raises an error.")
 # FA4 is opt-in and never auto-selected just because it is installed. Below
 # sm90, grad-enabled and GQA calls are routed to FA2 (FA4's backward asserts
 # sm90+ and its pack_gqa fails to JIT there).
