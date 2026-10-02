@@ -21,17 +21,27 @@ code path inlined into the attention layer.
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 
 from fastvideo.attention.ring import ring_flash_attn_func
+from fastvideo.attention.ring.capabilities import HAS_FLASH_ATTN as HAS_FLASH_ATTN_2
 from fastvideo.distributed.communication_op import ulysses_all_to_all_4D
 from fastvideo.distributed.parallel_state import (get_ring_group, get_ring_rank, get_ring_size, get_sp_world_size,
                                                   get_ulysses_group)
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
+from fastvideo.logger import init_logger
 from fastvideo.platforms import AttentionBackendEnum
+
+logger = init_logger(__name__)
 
 
 class RingAttention:
-    """Ring Attention (and its USP hybrid with Ulysses) for one attention layer."""
+    """Ring Attention (and its USP hybrid with Ulysses) for one attention layer.
+
+    This integration requires FA2 even when local FLASH_ATTN layers select
+    FA3/FA4. The dependency is checked when an enabled Ring layer is built;
+    ring_size=1 does not require FA2 through this delegate.
+    """
 
     @classmethod
     def create_if_enabled(
@@ -84,6 +94,15 @@ class RingAttention:
             raise NotImplementedError("The Ring+Ulysses (USP) hybrid requires num_heads to be divisible by the Ulysses "
                                       f"subgroup size. Got num_heads={num_heads}, ulysses_size={ulysses_size} "
                                       f"(sp_world_size={sp_world_size} // ring_size={self.ring_size}).")
+        # FLASH_ATTN identifies a backend family, not the installed FA version.
+        # The vendored Ring kernel currently calls FA2's private interface.
+        if not HAS_FLASH_ATTN_2:
+            raise RuntimeError("Ring Attention currently requires FlashAttention-2 "
+                               "(flash_attn.flash_attn_interface). The FLASH_ATTN backend may use FA3/FA4, "
+                               "but those implementations are not supported by this Ring kernel. "
+                               "Install a compatible FlashAttention-2 package or disable Ring Attention "
+                               "with ring_size=1.")
+        logger.info_once("Ring Attention uses FlashAttention-2, independently of the local FLASH_ATTN implementation.")
         self.softmax_scale = softmax_scale
         self.causal = causal
 
@@ -112,12 +131,9 @@ class RingAttention:
         if original_seq_len is not None:
             local_seq_len = q.shape[1]
             global_seq_len = local_seq_len * get_sp_world_size()
-            if original_seq_len != global_seq_len:
-                raise NotImplementedError(
-                    "Ring Attention does not yet support sequence-parallel padding or uneven shards. "
-                    f"original_seq_len={original_seq_len}, local_seq_len={local_seq_len}, "
-                    f"sp_world_size={get_sp_world_size()} (expected original_seq_len == "
-                    f"local_seq_len * sp_world_size == {global_seq_len}).")
+            if not 0 < original_seq_len <= global_seq_len:
+                raise ValueError("original_seq_len must be positive and no larger than the padded SP sequence. "
+                                 f"Got original_seq_len={original_seq_len}, padded_seq_len={global_seq_len}.")
 
         if q.dtype not in (torch.float16, torch.bfloat16):
             raise NotImplementedError(
@@ -129,6 +145,7 @@ class RingAttention:
     def _slice_local_rope(
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         local_seq_len: int,
+        original_seq_len: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Slice global RoPE tables down to this rank's contiguous token range.
 
@@ -153,12 +170,20 @@ class RingAttention:
         end = start + local_seq_len
 
         cos, sin = freqs_cis
-        if cos.shape[0] < end or sin.shape[0] < end:
+        # Padding has no position in the original RoPE table. Require every
+        # real token to be present, then use the identity rotation for padding.
+        required_end = end if original_seq_len is None else min(end, original_seq_len)
+        if cos.shape[0] < required_end or sin.shape[0] < required_end:
             raise ValueError("RoPE tables are shorter than the required global token range. "
-                             f"rank={rank}, local_seq_len={local_seq_len}, required_end={end}, "
+                             f"rank={rank}, local_seq_len={local_seq_len}, required_end={required_end}, "
                              f"cos_shape={tuple(cos.shape)}, sin_shape={tuple(sin.shape)}.")
 
-        return cos[start:end], sin[start:end]
+        local_cos, local_sin = cos[start:required_end], sin[start:required_end]
+        pad = local_seq_len - local_cos.shape[0]
+        if pad:
+            local_cos = F.pad(local_cos, (0, 0, 0, pad), value=1.0)
+            local_sin = F.pad(local_sin, (0, 0, 0, pad))
+        return local_cos, local_sin
 
     def forward(
         self,
@@ -212,7 +237,7 @@ class RingAttention:
         ring_local_seq_len = q.shape[1]
 
         if freqs_cis is not None:
-            local_cos, local_sin = self._slice_local_rope(freqs_cis, ring_local_seq_len)
+            local_cos, local_sin = self._slice_local_rope(freqs_cis, ring_local_seq_len, original_seq_len)
             q = _apply_rotary_emb(q, local_cos, local_sin, is_neox_style=False)
             k = _apply_rotary_emb(k, local_cos, local_sin, is_neox_style=False)
 
@@ -236,6 +261,7 @@ class RingAttention:
             softmax_scale=self.softmax_scale,
             causal=False,
             group=ring_group.device_group,
+            original_seq_len=original_seq_len,
         )
 
         # Ulysses step back (no-op when ulysses_size == 1): redistribute

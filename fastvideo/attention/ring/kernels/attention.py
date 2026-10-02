@@ -33,7 +33,7 @@ def flash_attn_forward(q: torch.Tensor,
                        softcap: float | None = None,
                        alibi_slopes: torch.Tensor | None = None,
                        return_softmax: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
-    assert HAS_FLASH_ATTN, "FlashAttention is not available"
+    assert HAS_FLASH_ATTN, "FlashAttention-2 is not available"
     if softmax_scale is None:
         softmax_scale = q.shape[-1]**(-0.5)
     if _FLASH_ATTN_VERSION <= (2, 6, 3):

@@ -28,18 +28,19 @@ _FIRST_RING_LOG = True
 
 
 def ring_flash_attn_forward(
-        process_group,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        softmax_scale,
-        dropout_p=0,
-        causal=True,
-        window_size=(-1, -1),
-        softcap=0.0,
-        alibi_slopes=None,
-        deterministic=False,
-        attn_type: AttnType = AttnType.FA,
+    process_group,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    softmax_scale,
+    dropout_p=0,
+    causal=True,
+    window_size=(-1, -1),
+    softcap=0.0,
+    alibi_slopes=None,
+    deterministic=False,
+    attn_type: AttnType = AttnType.FA,
+    original_seq_len: int | None = None,
 ):
 
     global _FIRST_RING_LOG
@@ -64,6 +65,7 @@ def ring_flash_attn_forward(
     out = None
     lse = None
 
+    shard_len = k.shape[1]
     next_k: torch.Tensor | None = None
     next_v: torch.Tensor | None = None
 
@@ -73,12 +75,17 @@ def ring_flash_attn_forward(
             next_v = comm.send_recv(v)
             comm.commit()
 
-        if not causal or step <= comm.rank:
+        # Communication keeps equal-sized buffers; only kernel inputs are
+        # trimmed. After each receive, KV belongs to the preceding Ring rank.
+        owner = (comm.rank - step) % comm.world_size
+        valid_k = shard_len if original_seq_len is None else max(0, min(shard_len, original_seq_len -
+                                                                        owner * shard_len))
+        if valid_k > 0 and (not causal or step <= comm.rank):
             fn = select_flash_attn_impl(attn_type, stage="fwd-only")
             block_out, block_lse = fn(
                 q,
-                k,
-                v,
+                k[:, :valid_k],
+                v[:, :valid_k],
                 dropout_p=dropout_p,
                 softmax_scale=softmax_scale,
                 causal=causal and step == 0,
@@ -94,7 +101,11 @@ def ring_flash_attn_forward(
             k = next_k
             v = next_v
 
+    assert out is not None and lse is not None
     out = out.to(q.dtype)
+    if original_seq_len is not None:
+        valid_q = max(0, min(q.shape[1], original_seq_len - comm.rank * q.shape[1]))
+        out[:, valid_q:] = 0
     lse = lse.squeeze(dim=-1).transpose(1, 2)
     return out, lse
 
@@ -202,6 +213,7 @@ class RingFlashAttnFunc(torch.autograd.Function):
         return_softmax,
         group,
         attn_type,
+        original_seq_len,
     ):
         if softmax_scale is None:
             softmax_scale = q.shape[-1]**(-0.5)
@@ -222,6 +234,7 @@ class RingFlashAttnFunc(torch.autograd.Function):
             alibi_slopes=alibi_slopes,
             deterministic=False,
             attn_type=attn_type,
+            original_seq_len=original_seq_len,
         )
         # this should be out_padded
         ctx.save_for_backward(q, k, v, out, softmax_lse)
@@ -256,7 +269,7 @@ class RingFlashAttnFunc(torch.autograd.Function):
             deterministic=ctx.deterministic,
             attn_type=ctx.attn_type,
         )
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
 def ring_flash_attn_func(
@@ -273,7 +286,15 @@ def ring_flash_attn_func(
     return_attn_probs=False,
     group=None,
     attn_type: AttnType = AttnType.FA,
+    original_seq_len: int | None = None,
 ):
+    padded = original_seq_len is not None and original_seq_len != k.shape[1] * dist.get_world_size(group)
+    if original_seq_len is not None and not 0 < original_seq_len <= k.shape[1] * dist.get_world_size(group):
+        raise ValueError("original_seq_len must be within the padded Ring sequence")
+    if padded and causal:
+        raise NotImplementedError("Padded Ring Attention only supports non-causal attention")
+    if torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v)) and padded:
+        raise NotImplementedError("Ring backward requires unpadded inputs")
     return RingFlashAttnFunc.apply(
         q,
         k,
@@ -288,4 +309,5 @@ def ring_flash_attn_func(
         return_attn_probs,
         group,
         attn_type,
+        original_seq_len,
     )
