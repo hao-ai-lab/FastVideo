@@ -278,9 +278,9 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             if vsa_mode not in ("exempt", "compete"):
                 raise ValueError(f"vsa_mode must be 'exempt' or 'compete', got {vsa_mode!r}.")
             vsa_exempt = vsa_mode == "exempt"
-            # Ref2VA policy P2 tiles each reference video as its own sparse
-            # region at ``vsa_ref_keep_rate`` instead of keeping every
-            # conditioning row dense (P1, the default).
+            # vsa_ref_policy="p2_multi_region" tiles each Ref2VA reference video
+            # as its own sparse region at ``vsa_ref_keep_rate``; with
+            # vsa_ref_policy=None (the default) every conditioning row is dense.
             vsa_ref_policy = getattr(fastvideo_args.pipeline_config, "vsa_ref_policy", None)
             vsa_ref_keep_rate = getattr(fastvideo_args.pipeline_config, "vsa_ref_keep_rate", None)
             vsa_video_segments: tuple[tuple[int, int, int], ...] | None = None

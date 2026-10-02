@@ -148,8 +148,8 @@ ladder, an explicit conflicting setting, or any other disagreement is an
 error.
 
 The pipeline applies `pdd_step_indices` and the reference-video policy. The
-attention backend, sparsity, and tile size remain explicit run settings, as
-for DMD exports; the example passes the contract's values. An export trained
+attention backend, sparsity, and tile size are explicit run settings, as for
+DMD exports; the example passes the contract's values. An export trained
 with `VIDEO_SPARSE_ATTN_H3`, or whose transformer carries VSA compression
 gates, runs only with that backend: the pipeline rejects any other, including
 automatic selection, before it loads weights. A sparsity or tile size that
@@ -161,15 +161,15 @@ With `vsa_ref_policy: p2_multi_region`, `VIDEO_SPARSE_ATTN_H3` tiles every
 reference video as its own sparse region, in place in the packed sequence.
 Each video query keeps `vsa_ref_keep_rate` of every reference video's tiles
 and `1 - vsa_sparsity` of the target video's tiles. Text, audio, and image
-references stay dense. Without the policy, every conditioning row stays
-dense, as before.
+references stay dense. Without the policy, reference videos stay dense like
+every other conditioning row, and only the target video is sparse.
 
 ### Hardware
 
 The contract's 128-token tiles, `(4, 4, 8)`, run only on the sm_100a/sm_103a
 CUDA block-sparse kernel (B200, B300, GB200, GB300) of a fastvideo-kernel
 build with the Blackwell VSA extension. There is no Triton fallback for tile
-128: the backend raises instead. Tile 128 runs eagerly; regional compile still
+128: the backend raises instead. Tile 128 runs eagerly. Regional compile
 requires 64-token tiles. The example checks the GPUs and the kernel before it
 loads any weights. With `--num-gpus` above 1 it shards the DiT across the GPUs
 (FSDP) and splits the sequence across them.

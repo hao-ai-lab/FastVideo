@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU checks for VSA-H3 reference-video regions (Ref2VA policy P2) and 128-token tiles.
+"""CPU checks for VSA-H3 reference-video regions and 128-token tiles.
 
-Under P2 every reference video is its own sparse region, tiled in place at its
-packed offset, while text, audio, and image references stay dense. Each
-video query keeps its own top-k of every region: the reference keep rate may
-differ from the target's. The kernel route for 128-token tiles is exercised
-through a stand-in for the sm_100a extension; real kernels are not needed.
+With vsa_ref_policy="p2_multi_region" every Ref2VA reference video is its own
+sparse region, tiled in place at its packed offset, while text, audio, and
+image references stay dense. Each video query keeps its own top-k of every
+region: the reference keep rate may differ from the target's. The kernel
+route for 128-token tiles is exercised through a stand-in for the sm_100a
+extension; real kernels are not needed.
 """
 
 import hashlib
@@ -237,7 +238,7 @@ def test_multi_region_geometry_native_tile_oracle(tile_size, width):
 # untile index, prefix and video tile counts) computed by upstream main at
 # 9edc8adf5, before the multi-region refactor. Frozen so the refactored path
 # is checked against the original implementation, not against itself.
-_LEGACY_GEOMETRY_SHA256 = {
+_SINGLE_REGION_GEOMETRY_SHA256 = {
     ((37, 9, 120, 11), (8, 4, 6), 64): "e246d39c1be206be5b9ad938438d0594fea013d5e8c4fcb08bce05face5d4220",
     ((37, 9, 120, 11), (8, 4, 6), 128): "bce9def60b23ef5dc71d790e367480c2c22e0e6f414678b72844b808d7f96bd9",
     ((37, 9, 120, 11), (8, 4, 6), 256): "a710f91b80cb02bf8bbf2d37f06b612c2a4e805356c81f55c744dd066417a535",
@@ -263,24 +264,24 @@ def _geometry_sha256(outputs):
     return digest.hexdigest()
 
 
-@pytest.mark.parametrize("prefix_segments,dit_seq_shape,tile_size", sorted(_LEGACY_GEOMETRY_SHA256))
+@pytest.mark.parametrize("prefix_segments,dit_seq_shape,tile_size", sorted(_SINGLE_REGION_GEOMETRY_SHA256))
 def test_single_region_geometry_matches_the_pre_refactor_implementation(prefix_segments, dit_seq_shape, tile_size):
     geometry = _h3_tile_geometry(prefix_segments, dit_seq_shape, _CPU, VSA_H3_TILE_SHAPES[tile_size])
-    assert _geometry_sha256(geometry) == _LEGACY_GEOMETRY_SHA256[prefix_segments, dit_seq_shape, tile_size]
+    assert _geometry_sha256(geometry) == _SINGLE_REGION_GEOMETRY_SHA256[prefix_segments, dit_seq_shape, tile_size]
 
 
-def test_single_region_builds_keep_the_legacy_geometry():
-    legacy = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
+def test_a_single_region_build_uses_the_single_region_geometry():
+    single = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
                                                  raw_latent_shape=(8, 8, 12),
                                                  patch_size=_PATCH,
                                                  VSA_sparsity=0.5,
                                                  prefix_segments=(37, 9, 120, 11),
                                                  device=_CPU,
                                                  tile_size=128)
-    assert legacy.video_tile_spans == () and legacy.span_sparsities == ()
+    assert single.video_tile_spans == () and single.span_sparsities == ()
     geometry = _h3_tile_geometry((37, 9, 120, 11), (8, 4, 6), _CPU, (4, 4, 8))
-    assert _geometry_sha256(geometry) == _LEGACY_GEOMETRY_SHA256[(37, 9, 120, 11), (8, 4, 6), 128]
-    assert torch.equal(legacy.untile_combined_index, geometry[2])
+    assert _geometry_sha256(geometry) == _SINGLE_REGION_GEOMETRY_SHA256[(37, 9, 120, 11), (8, 4, 6), 128]
+    assert torch.equal(single.untile_combined_index, geometry[2])
 
 
 def test_multi_region_span_topk_and_reference_keep_rate():
@@ -317,7 +318,7 @@ def test_multi_region_span_topk_and_reference_keep_rate():
 
 
 def test_target_only_region_reproduces_the_single_region_token_mask():
-    """Folding the reference video back into the prefix must reproduce the legacy policy token for token."""
+    """Folding the reference video back into the prefix must reproduce the single-region layout token for token."""
     torch.manual_seed(4)
     q = torch.randn(1, _R2V_SEQ, 2, 8)
     k = torch.randn(1, _R2V_SEQ, 2, 8)
@@ -336,7 +337,7 @@ def test_target_only_region_reproduces_the_single_region_token_mask():
         allows.append(torch.stack([_token_allow(meta, _mask(meta, scores, 0.75), 0, h) for h in range(2)]))
     assert torch.equal(allows[0], allows[1])
 
-    # ...and the P2 policy (reference video as its own region) is not that policy.
+    # ...and the multi-region layout (reference video as its own region) is not that layout.
     meta = _build_r2v(sparsity=0.75)
     impl = _impl()
     tq, tk = (impl.tile(t, meta).clone() for t in (q, k))

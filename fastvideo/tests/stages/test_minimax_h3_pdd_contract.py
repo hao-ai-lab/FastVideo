@@ -3,8 +3,8 @@
 
 A PDD contract names the fused-block partition of the transformer's widened
 heads and, for Ref2VA, the reference-video VSA policy. The pipeline applies
-both to its config and rejects any contract it cannot honor exactly; the DMD
-contract keeps its existing behavior (see test_minimax_h3_distilled_schedule).
+both to its config and rejects any contract it cannot honor exactly. DMD
+contracts are covered by test_minimax_h3_distilled_schedule.
 """
 from __future__ import annotations
 
@@ -126,7 +126,7 @@ def test_conflicting_explicit_settings_are_rejected(tmp_path, field, value):
         _initialize(_pipeline(tmp_path, PDD_CONTRACT), config)
 
 
-def test_dmd_contract_is_unchanged_on_the_ref2va_pipeline(tmp_path):
+def test_a_dmd_contract_sets_its_ladder_on_the_ref2va_pipeline(tmp_path):
     config = _initialize(_pipeline(tmp_path, DMD_CONTRACT, pdd_steps=None))
     assert config.dmd_denoising_steps == DMD_CONTRACT["dmd_denoising_steps"]
     assert config.pdd_step_indices is None and config.vsa_ref_policy is None

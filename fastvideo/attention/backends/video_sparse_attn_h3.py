@@ -9,15 +9,18 @@ backend differs from the Wan-tuned ``video_sparse_attn``:
   tiles never straddle segment boundaries. The tile size is selectable at
   metadata build time: 256 tokens ``(4,8,8)`` (default), 128 tokens
   ``(4,4,8)``, or 64 tokens ``(4,4,4)`` (see ``VSA_H3_TILE_SHAPES``).
-- Ref2VA may sparsify its reference videos too (policy ``p2_multi_region``):
-  the builder then takes one 3-D region per reference video plus the target
-  video, at their packed offsets, with dense segments (text, audio, image
-  references) anywhere between them. Rows are permuted to
+- Multi-region builds (``video_segments``) sparsify more than one video:
+  the builder takes one 3-D region per video, at its packed offset, with
+  dense segments (text, audio, image references) anywhere between them.
+  Ref2VA uses this for its reference videos. Rows are permuted to
   ``[dense chunks][region 0 tiles][region 1 tiles]...`` and
-  ``untile_combined_index`` inverts the permutation, so the kernels see the
-  single-region layout. Every video query keeps its own top-k of EACH region
-  (``video_tile_spans`` / ``span_sparsities``); references may use a
-  different keep rate than the target. Single-region builds are unchanged.
+  ``untile_combined_index`` inverts the permutation, so the kernels see one
+  dense prefix followed by video tiles. Every video query keeps its own
+  top-k of EACH region (``video_tile_spans`` / ``span_sparsities``); the
+  earlier regions may use a different keep rate than the last. Without
+  ``video_segments`` the builder produces the single-region layout: every
+  prefix segment is dense and the generated video is the only sparse region
+  (``video_tile_spans`` stays empty).
 - Selection is pure Python on pooled tile scores; the block-sparse kernel
   consumes an explicit bool mask, so no kernel changes are needed.
 - The compression branch is gated by ``to_gate_compress``, which the base
@@ -237,7 +240,7 @@ def _single_region_segments(
     prefix_segments: tuple[int, ...],
     dit_seq_shape: tuple[int, int, int],
 ) -> tuple[int | tuple[int, int, int], ...]:
-    """The packed-order segments of the legacy layout: every prefix segment, then the video."""
+    """Packed-order segments of the single-region layout: every prefix segment, then the video."""
     t, h, w = dit_seq_shape
     return (*prefix_segments, (int(t), int(h), int(w)))
 
@@ -389,8 +392,9 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
     tile_elems: int = _TILE_ELEMS
     # layers forced dense regardless of sparsity (probe-guided opt-outs)
     dense_layers: tuple[int, ...] = ()
-    # One [start, end) tile range per video region (Ref2VA P2) and its
-    # sparsity. Empty = one region spanning every video tile (legacy).
+    # One [start, end) tile range per video region of a multi-region build,
+    # and its sparsity. Empty means the single-region layout: all video tiles
+    # form one region that uses VSA_sparsity.
     video_tile_spans: tuple[tuple[int, int], ...] = ()
     span_sparsities: tuple[float, ...] = ()
     # Builder-owned padded tile buffer. It records the geometry that last

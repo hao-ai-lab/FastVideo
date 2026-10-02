@@ -319,7 +319,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         contract names the fine-grid partition it was trained to sample
         (``pdd_step_indices``, one fused block per transformer forward) and,
         for Ref2VA, the reference-video sparsity policy. Both are applied to
-        the pipeline config. Attention backend, sparsity, and tile size stay
+        the pipeline config. Attention backend, sparsity, and tile size are
         explicit run settings: an export trained with VIDEO_SPARSE_ATTN_H3
         requires that backend, and a sparsity or tile-size mismatch is logged.
         """
