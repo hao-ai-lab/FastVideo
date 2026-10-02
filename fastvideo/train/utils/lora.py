@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import partial
+import hashlib
+import math
 from typing import Any
 
 import torch
@@ -37,6 +40,12 @@ DEFAULT_LORA_TARGET_MODULES = [
 ]
 
 _LORA_CONFIG_KEYS = ("enable", "rank", "alpha", "target_modules")
+
+# Private loader attributes intentionally live on the transformed model.  The
+# component loader constructs the model on ``meta`` before FSDP sees it, so the
+# structural transform and the checkpoint-loading plan have to travel together.
+LORA_CHECKPOINT_KEY_ALIASES_ATTR = "_fastvideo_checkpoint_key_aliases"
+LORA_MISSING_PARAMETER_INITIALIZER_ATTR = "_fastvideo_missing_parameter_initializer"
 
 
 @dataclass
@@ -189,12 +198,65 @@ def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
             setattr(module, attr_name, nn.Parameter(replicated))
 
 
+def _initialize_lora_parameter(
+    name: str,
+    shape: torch.Size,
+    dtype: torch.dtype,
+    *,
+    parameter_names: frozenset[str],
+    seed: int,
+) -> torch.Tensor | None:
+    """Build one deterministic full LoRA tensor for the FSDP loader.
+
+    Every rank constructs the same full tensor and lets the loader distribute
+    it according to the parameter's FSDP placement.  Deriving a seed from the
+    fully-qualified name keeps initialization independent of state-dict/set
+    iteration order.
+    """
+    if name not in parameter_names:
+        return None
+
+    if name.endswith(".lora_B"):
+        return torch.zeros(tuple(shape), dtype=dtype, device="cpu")
+    if not name.endswith(".lora_A") or len(shape) != 2:
+        raise ValueError(f"Unsupported LoRA parameter initialization request: {name} {tuple(shape)}")
+
+    name_seed = int.from_bytes(hashlib.sha256(name.encode("utf-8")).digest()[:8], "little")
+    generator = torch.Generator(device="cpu").manual_seed((int(seed) + name_seed) % (2**63 - 1))
+    # nn.init.kaiming_uniform_(a=sqrt(5)) simplifies to +/- 1/sqrt(fan_in).
+    bound = 1.0 / math.sqrt(int(shape[1]))
+    value = torch.empty(tuple(shape), dtype=torch.float32, device="cpu")
+    value.uniform_(-bound, bound, generator=generator)
+    return value.to(dtype=dtype)
+
+
+def finalize_lora_training(transformer: torch.nn.Module) -> int:
+    """Freeze base weights and enable only adapter parameters after loading."""
+    transformer.requires_grad_(False)
+    count = 0
+    for module in transformer.modules():
+        if not isinstance(module, BaseLayerWithLoRA):
+            continue
+        if module.lora_A is None or module.lora_B is None:
+            raise RuntimeError("Training LoRA wrapper is missing adapter parameters")
+        module.base_layer.requires_grad_(False)
+        module.lora_A.requires_grad_(True)
+        module.lora_B.requires_grad_(True)
+        count += 1
+    if count == 0:
+        raise ValueError("No training LoRA wrappers were found after checkpoint loading")
+    transformer.train()
+    return count
+
+
 def enable_lora_training(
     transformer: torch.nn.Module,
     *,
     lora_rank: int,
     lora_alpha: int | None = None,
     lora_target_modules: Sequence[str] | None = None,
+    prepare_for_fsdp: bool = False,
+    initialization_seed: int = 0,
 ) -> int:
     """Replace supported linear layers with trainable LoRA wrappers.
 
@@ -217,6 +279,8 @@ def enable_lora_training(
     transformer.requires_grad_(False)
 
     replacements: list[tuple[str, BaseLayerWithLoRA]] = []
+    checkpoint_key_aliases: dict[str, str] = {}
+    lora_parameter_names: set[str] = set()
     for module_name, module in transformer.named_modules():
         if not module_name:
             continue
@@ -234,6 +298,9 @@ def enable_lora_training(
         if lora_layer is None:
             continue
         replacements.append((module_name, lora_layer))
+        for state_name in module.state_dict():
+            checkpoint_key_aliases[f"{module_name}.{state_name}"] = f"{module_name}.base_layer.{state_name}"
+        lora_parameter_names.update({f"{module_name}.lora_A", f"{module_name}.lora_B"})
 
     if not replacements:
         raise ValueError("No LoRA-compatible layers were found for the requested "
@@ -242,8 +309,26 @@ def enable_lora_training(
     for module_name, lora_layer in replacements:
         replace_submodule(transformer, module_name, lora_layer)
 
-    _replicate_lora_parameters(transformer)
-    transformer.train()
+    if prepare_for_fsdp:
+        # The FSDP loader consumes these aliases after the normal HF-to-native
+        # mapping, then initializes adapter tensors that are intentionally absent
+        # from the base checkpoint.  FSDP therefore owns base and adapter params
+        # in the same parameter groups from the outset.
+        setattr(transformer, LORA_CHECKPOINT_KEY_ALIASES_ATTR, checkpoint_key_aliases)
+        setattr(
+            transformer,
+            LORA_MISSING_PARAMETER_INITIALIZER_ATTR,
+            partial(
+                _initialize_lora_parameter,
+                parameter_names=frozenset(lora_parameter_names),
+                seed=int(initialization_seed),
+            ),
+        )
+    else:
+        # Retain the legacy post-load path for existing model plugins.  New
+        # distributed integrations must use ``prepare_for_fsdp=True``.
+        _replicate_lora_parameters(transformer)
+        finalize_lora_training(transformer)
 
     logger.info(
         "Enabled LoRA training with rank=%d alpha=%d on %d layers",
