@@ -16,6 +16,11 @@ exec pytest \
   ./fastvideo/tests/worker/ \
   ./fastvideo/tests/training/test_trackers.py \
   ./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py \
+  ./fastvideo/tests/attention/test_ring_attention_fa2_dependency.py \
+  ./fastvideo/tests/attention/test_ring_attention_config.py \
+  ./fastvideo/tests/attention/test_ring_attention_rope.py \
+  ./fastvideo/tests/attention/test_ring_attention_padding.py \
+  ./fastvideo/tests/distributed/test_usp_group_layout.py \
   ./fastvideo/tests/attention/test_vsa_h3_tile_grad_safety.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \
