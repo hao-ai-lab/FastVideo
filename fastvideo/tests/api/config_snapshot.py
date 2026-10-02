@@ -11,7 +11,7 @@ and a ``SamplingParam`` where the case has a request) through one of the public 
 - ``kwargs``: ``VideoGenerator.from_pretrained`` keywords, through ``legacy_from_pretrained_to_config`` and the same
   resolution.
 - ``cli``: argparse flags, through ``FastVideoArgs.add_cli_args`` and ``FastVideoArgs.from_cli_args``.
-- ``env``: environment variables that ``FastVideoArgs.__post_init__`` folds into fields.
+- ``environment``: environment variables that ``FastVideoArgs.__post_init__`` folds into fields.
 - ``request``: typed ``GenerationRequest`` values, through ``request_to_sampling_param``.
 
 Every case runs with all registered environment variables unset (except the ones an ``env`` case sets) and with model
@@ -422,11 +422,11 @@ def collect_cases() -> list[SnapshotCase]:
         },
     }
     cases += [
-        SnapshotCase("env", name, _env_case(env_values, model_path=WAN_T2V))
+        SnapshotCase("environment", name, _env_case(env_values, model_path=WAN_T2V))
         for name, env_values in env_cases.items()
     ]
     cases.append(
-        SnapshotCase("env", "explicit_argument_wins_over_attention_backend",
+        SnapshotCase("environment", "explicit_argument_wins_over_attention_backend",
                      _env_case({"FASTVIDEO_ATTENTION_BACKEND": "TORCH_SDPA"},
                                model_path=WAN_T2V,
                                attention_backend="FLASH_ATTN")))
