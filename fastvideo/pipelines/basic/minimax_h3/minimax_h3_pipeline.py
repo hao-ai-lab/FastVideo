@@ -70,10 +70,21 @@ _PDD_CONTRACT_KEYS = frozenset({
 })
 # Ref2VA: ordered references are clean conditions; only target rows follow the flow.
 _REF2VA_CONDITIONING = "fixed_ordered_references_target_only_flow"
+# The base snapshot an export was distilled against: "hf://<repo id>@<revision>".
+_BASE_MODEL_REVISION_PREFIX = "hf://"
 
 
 def _is_real_number(value: Any) -> TypeGuard[int | float]:
     return not isinstance(value, bool) and isinstance(value, int | float) and math.isfinite(value)
+
+
+def parse_base_model_revision(value: Any) -> tuple[str, str]:
+    """Split a contract's ``base_model_revision``, ``hf://<repo id>@<revision>``, into repo id and revision."""
+    if isinstance(value, str) and value.startswith(_BASE_MODEL_REVISION_PREFIX):
+        repo, separator, revision = value[len(_BASE_MODEL_REVISION_PREFIX):].partition("@")
+        if separator and repo.strip() and revision.strip() and "@" not in revision:
+            return repo, revision
+    raise ValueError(f"FastH3 base_model_revision={value!r} must be hf://<repo id>@<revision>.")
 
 
 def _requested_attention_backend(fastvideo_args: FastVideoArgs) -> AttentionBackendEnum | None:
@@ -382,9 +393,8 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                              f"loads {transformer_dir!r}.")
         if model_type == "ref2va" and contract.get("conditioning", _REF2VA_CONDITIONING) != _REF2VA_CONDITIONING:
             raise ValueError(f"Unsupported FastH3 Ref2VA conditioning {contract['conditioning']!r}.")
-        revision = contract.get("base_model_revision")
-        if revision is not None and (not isinstance(revision, str) or not revision.strip()):
-            raise ValueError(f"FastH3 PDD base_model_revision must be a non-empty string, got {revision!r}.")
+        if "base_model_revision" in contract:
+            parse_base_model_revision(contract["base_model_revision"])
 
         pdd_steps = validate_pdd_steps(contract["pdd_steps"])
         transformer_steps = fastvideo_args.pipeline_config.dit_config.arch_config.pdd_steps
@@ -752,4 +762,5 @@ __all__ = [
     "MiniMaxH3Pipeline",
     "MiniMaxH3Ref2VAModularPipeline",
     "MiniMaxH3RefPipeline",
+    "parse_base_model_revision",
 ]

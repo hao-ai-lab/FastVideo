@@ -43,7 +43,7 @@ from fastvideo.api import (
     PipelineSelection,
     SamplingConfig,
 )
-from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
+from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference, parse_base_model_revision
 
 CONTRACT = "fastvideo_inference.json"
 # Components the distilled export replaces, and the ones it shares with base MiniMax-H3.
@@ -130,19 +130,20 @@ def load_contract(export_dir: Path) -> dict[str, Any]:
 
 def base_model_source(args: argparse.Namespace, contract: dict[str, Any]) -> tuple[str, str | None]:
     """The base snapshot and revision: --base-model-path as given, else the export's pin."""
+    base_repo, base_revision = base_model_from_contract(contract)
     if args.base_model_path:
         return args.base_model_path, args.base_revision
-    base_repo, base_revision = base_model_from_contract(contract)
     return base_repo, args.base_revision or base_revision
 
 
 def base_model_from_contract(contract: dict[str, Any]) -> tuple[str, str | None]:
-    """``hf://<repo>@<revision>`` from the export, else the public base repo."""
-    pinned = contract.get("base_model_revision")
-    if isinstance(pinned, str) and pinned.startswith("hf://"):
-        repo, _, revision = pinned[len("hf://"):].partition("@")
-        return repo, revision or None
-    return DEFAULT_BASE_MODEL, None
+    """The base the export pins as ``hf://<repo id>@<revision>``; without a pin, the public base repo.
+
+    Any other value is an error rather than a silent fallback to the base repo's latest revision.
+    """
+    if "base_model_revision" not in contract:
+        return DEFAULT_BASE_MODEL, None
+    return parse_base_model_revision(contract["base_model_revision"])
 
 
 def _link(destination: Path, source: Path) -> None:

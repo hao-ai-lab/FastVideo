@@ -136,8 +136,10 @@ the DMD ladder:
 }
 ```
 
-The export also records `schema`, `conditioning`, and `base_model_revision`.
-`pdd_steps` must match `transformer_ref/config.json`. `pdd_step_indices` is a
+The export also records `schema`, `conditioning`, and `base_model_revision`,
+the base snapshot it was distilled against, as `hf://<repo id>@<revision>`
+(for example `hf://MiniMaxAI/MiniMax-H3@<commit>`); any other form is an
+error. `pdd_steps` must match `transformer_ref/config.json`. `pdd_step_indices` is a
 strictly increasing partition of the grid from 0 to `pdd_steps`;
 `num_inference_steps` and `transformer_forwards` both equal its block count.
 For a PDD student, `num_inference_steps` counts transformer forwards, and a

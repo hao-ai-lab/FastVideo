@@ -60,6 +60,20 @@ def test_base_model_source(overrides, expected):
     assert example.base_model_source(_args(*overrides), CONTRACT) == expected
 
 
+def test_an_unpinned_export_uses_the_public_base():
+    assert example.base_model_source(_args(), MINIMAL_CONTRACT) == ("MiniMaxAI/MiniMax-H3", None)
+
+
+@pytest.mark.parametrize("pin", [
+    BASE_PIN, f"MiniMaxAI/MiniMax-H3@{BASE_PIN}", "hf://MiniMaxAI/MiniMax-H3", "hf://@abc", "", None,
+])
+@pytest.mark.parametrize("overrides", [(), ("--base-model-path", "someone/mirror")])
+def test_an_unparsable_base_pin_is_an_error(pin, overrides):
+    """Never a silent fall back to the base repo's latest revision; the pipeline rejects the same values."""
+    with pytest.raises(ValueError, match="must be hf://<repo id>@<revision>"):
+        example.base_model_source(_args(*overrides), {**CONTRACT, "base_model_revision": pin})
+
+
 def test_minimal_contract_keeps_fastvideo_attention_defaults(tmp_path):
     assert example.attention_settings(CONTRACT) == {
         "attention_backend": "VIDEO_SPARSE_ATTN_H3",
