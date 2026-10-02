@@ -2,8 +2,6 @@
 // data-center Blackwell sm_100a/sm_103a. The filename is retained for API compatibility.
 // Warp-specialized: load / MMA (tcgen05) / softmax / correction / epilogue / scheduler.
 // Writes O and, when asked, the log-sum-exp the backward consumes.
-//
-// Generated (comments stripped). Do not edit by hand.
 #ifndef BLOCK_SPARSE_VSA_KERNEL_SM100A_CUH
 #define BLOCK_SPARSE_VSA_KERNEL_SM100A_CUH
 
@@ -506,9 +504,11 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
         const uint32_t o_tmem_addr = tmem_base + (uint32_t)(2 * S_COLS + i * O_COLS);
 
         int slot = 0;
+        // Declared outside the loop: with BLK128 only p == 0 initializes it and p == 1 continues
+        // the p == 0 descriptor walk.
+        SmemDescPair desc_bv;
         #pragma unroll
         for (int p = 0; p < V_SUBTILES; ++p) {
-        SmemDescPair desc_bv;
           if (!BLK128 || p == 0) {
             slot = kv_ph.get_stage();
             mbarrier_wait_parity(smem_ptr_u32(&full_bar[slot]), kv_ph.get_phase());
@@ -518,8 +518,6 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
               desc_bv.u64 = desc_v0;
               desc_bv.w.x += (uint32_t)(slot * (int)KV_DESC_DELTA);
             }
-          const uint64_t dbV = desc_kv0 + (uint64_t)slot * KV_DESC_DELTA
-                             + (BLK128 ? (uint64_t)p * (V_BLK_BYTES >> 4) : 0u);
           #pragma unroll
           for (int ki = 0; ki < K_ATOMS_PER_TILE; ++ki) {
             const int a = p * K_ATOMS_PER_TILE + ki;
