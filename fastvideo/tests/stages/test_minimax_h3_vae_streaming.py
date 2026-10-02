@@ -156,9 +156,15 @@ def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch) -> None:
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(minimax_h3_decoding, "allocate_cpu_tensor_with_pin_fallback", fake_allocate)
 
-    MiniMaxH3VideoDecodingStage(VAE(), SimpleNamespace(patch_size=(1, 1, 1))).forward(
+    MiniMaxH3VideoDecodingStage(VAE()).forward(
         batch,
-        SimpleNamespace(output_type="pil", pin_cpu_memory=True, vae_cpu_offload=False, vae_parallel_decode=False),
+        SimpleNamespace(
+            output_type="pil",
+            pin_cpu_memory=True,
+            vae_cpu_offload=False,
+            vae_parallel_decode=False,
+            pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+        ),
     )
 
     assert observed == {
