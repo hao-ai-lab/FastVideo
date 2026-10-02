@@ -26,6 +26,8 @@ class GenerationResult:
     peak_memory_mb: float | None = None
     state: ContinuationState | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    # Settings of the request that produced this result, with the source of each value; set by VideoGenerator.
+    resolved_request: Any | None = None
 
     @classmethod
     def from_legacy_result(

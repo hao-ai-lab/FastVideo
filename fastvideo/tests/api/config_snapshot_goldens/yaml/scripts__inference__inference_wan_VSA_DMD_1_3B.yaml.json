@@ -377,6 +377,16 @@
  },
  "pipeline_config_class": "fastvideo.models.wan.pipeline_config.FastWan2_1_T2V_480P_Config",
  "request_batch_extra": {},
+ "request_resolution_decisions": [
+  [
+   "fill_sampling_defaults[preset fast_wan_t2v_480p]",
+   {
+    "sampling.guidance_scale": 3.0,
+    "sampling.true_cfg_scale": 1.0,
+    "sampling.use_embedded_guidance": false
+   }
+  ]
+ ],
  "resolution_decisions": [
   [
    "fill_vae_parallel_from_env",

@@ -35,8 +35,8 @@ from types import MappingProxyType
 from typing import Any
 
 from fastvideo.api.parser import parse_config
-from fastvideo.api.request_metadata import _record_value_paths
-from fastvideo.api.schema import GeneratorConfig
+from fastvideo.api.request_metadata import _record_value_paths, get_explicit_paths
+from fastvideo.api.schema import GenerationRequest, GeneratorConfig
 
 # Source name reported for a path that no step or override decided.
 INPUT_SOURCE = "input"
@@ -390,6 +390,23 @@ class ResolvedGeneratorConfig(_ResolvedTree):
         return _to_config(object.__getattribute__(self, "_struct"))
 
 
+class ResolvedRequest(_ResolvedTree):
+    """Frozen result of resolving the settings of a ``GenerationRequest``, with the provenance of every path.
+
+    It holds the ``sampling``, ``runtime``, ``output``, and ``stage_overrides`` sections. The prompts, inputs,
+    continuation state, plan, and extensions are request data that resolution does not decide.
+    """
+
+    __slots__ = ()
+
+    def with_override(self, source: str, values: Mapping[str, Any]) -> ResolvedRequest:
+        return super().with_override(source, values)
+
+
+# GenerationRequest sections that request resolution covers.
+REQUEST_SETTING_SECTIONS = ("sampling", "runtime", "output", "stage_overrides")
+
+
 def _run_steps(typed_config: Any, explicit_paths: frozenset[str],
                steps: Sequence[ResolutionStep]) -> tuple[_Struct, _Struct, list[Decision]]:
     """Run ``steps`` in order over a parsed typed config; return the resolved tree, the input tree, and decisions."""
@@ -420,12 +437,28 @@ def resolve_generator_config(raw: Mapping[str, Any], steps: Sequence[ResolutionS
     return ResolvedGeneratorConfig(tree, raw_tree, frozenset(explicit_paths), decisions, ())
 
 
+def resolve_generation_request(request: GenerationRequest, steps: Sequence[ResolutionStep]) -> ResolvedRequest:
+    """Run ``steps`` over the settings sections of a parsed request and freeze the result.
+
+    The explicit paths are the ones that the request tracked while it was parsed or built (see
+    ``fastvideo.api.request_metadata``); only those inside ``REQUEST_SETTING_SECTIONS`` are kept.
+    """
+    settings = GenerationRequest(**{section: getattr(request, section) for section in REQUEST_SETTING_SECTIONS})
+    explicit_paths = frozenset(path for path in get_explicit_paths(request)
+                               if path.split(".", 1)[0] in REQUEST_SETTING_SECTIONS)
+    tree, raw_tree, decisions = _run_steps(settings, explicit_paths, steps)
+    return ResolvedRequest(tree, raw_tree, explicit_paths, decisions, ())
+
+
 __all__ = [
     "INPUT_SOURCE",
     "PathProvenance",
     "ResolutionError",
     "ResolutionStep",
+    "REQUEST_SETTING_SECTIONS",
     "ResolutionView",
     "ResolvedGeneratorConfig",
+    "ResolvedRequest",
+    "resolve_generation_request",
     "resolve_generator_config",
 ]

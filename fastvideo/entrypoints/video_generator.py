@@ -40,6 +40,7 @@ from fastvideo.api.compat import (
     request_to_sampling_param,
 )
 from fastvideo.api.inference_resolution import resolve_inference_config
+from fastvideo.api.request_resolution import resolve_request
 from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.results import (
     GenerationResult,
@@ -499,6 +500,7 @@ class VideoGenerator:
             request,
             model_path=self.fastvideo_args.model_path,
         )
+        resolved_request = resolve_request(request, model_path=self.fastvideo_args.model_path)
         batch_extra = request_to_batch_extra(request)
         result = self._generate_video_impl(
             prompt=request.prompt,
@@ -506,7 +508,10 @@ class VideoGenerator:
             fastvideo_args=self.fastvideo_args,
             **batch_extra,
         )
-        return self._wrap_legacy_result(result)
+        wrapped = self._wrap_legacy_result(result)
+        for item in wrapped if isinstance(wrapped, list) else [wrapped]:
+            item.resolved_request = resolved_request
+        return wrapped
 
     def _generate_video_impl(
         self,

@@ -714,6 +714,8 @@ def test_generate_uses_typed_request_path(monkeypatch):
     assert captured["sampling_param"].height == 480
     assert captured["sampling_param"].width == 832
     assert result.video_path == "outputs/test.mp4"
+    provenance = result.resolved_request.provenance("sampling.num_frames")
+    assert (provenance.value, provenance.source, provenance.explicit) == (81, "input", True)
 
 
 def test_generate_rejects_stage_override_outside_registered_stage(monkeypatch) -> None:

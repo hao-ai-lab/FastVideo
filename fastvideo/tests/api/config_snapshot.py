@@ -172,8 +172,11 @@ def snapshot_request(request: Any, model_path: str) -> dict[str, Any]:
     """The values VideoGenerator derives from a GenerationRequest; a rejected request is recorded as a value."""
     from fastvideo.api.compat import request_to_batch_extra, request_to_sampling_param
 
+    from fastvideo.api.request_resolution import resolve_request
+
     snapshot = {
         "request_batch_extra": to_jsonable(request_to_batch_extra(request)),
+        "request_resolution_decisions": to_jsonable(resolve_request(request, model_path=model_path).decisions),
     }
     try:
         snapshot.update(snapshot_sampling_param(request_to_sampling_param(request, model_path=model_path)))
