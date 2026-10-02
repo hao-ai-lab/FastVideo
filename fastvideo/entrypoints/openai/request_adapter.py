@@ -422,11 +422,7 @@ def build_generation_request(
     try:
         # Resolve once at admission time so unsupported model-specific fields
         # are a deterministic 400, rather than an asynchronous failed job.
-        request_to_sampling_param(
-            generation_request,
-            model_path=args.model_path,
-            fixed_num_inference_steps=args.pipeline_config.fixed_num_inference_steps(),
-        )
+        request_to_sampling_param(generation_request, model_path=args.model_path)
     except (TypeError, ValueError) as error:
         raise RequestAdaptationError(str(error)) from error
     return generation_request

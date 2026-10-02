@@ -372,14 +372,7 @@ def request_to_sampling_param(
     request: GenerationRequest,
     *,
     model_path: str,
-    fixed_num_inference_steps: int | None,
 ) -> SamplingParam:
-    """Resolve a request into sampling params: preset defaults, then the request's explicit fields.
-
-    ``fixed_num_inference_steps`` is the step count the checkpoint fixes
-    (``PipelineConfig.fixed_num_inference_steps``). A request that leaves the
-    step count unset gets it; a request that sets another count is rejected.
-    """
     if request.plan is not None:
         raise NotImplementedError("GenerationRequest.plan is not wired into VideoGenerator yet")
 
@@ -390,14 +383,6 @@ def request_to_sampling_param(
     if request.output.return_state:
         sampling_param.return_continuation_state = True
     updates = explicit_request_updates(request)
-    if fixed_num_inference_steps is not None:
-        requested_steps = updates.get("num_inference_steps", fixed_num_inference_steps)
-        if requested_steps != fixed_num_inference_steps:
-            raise ValueError(f"{model_path} runs exactly {fixed_num_inference_steps} transformer forwards; the "
-                             f"request sets num_inference_steps={requested_steps}. Pass num_inference_steps="
-                             f"{fixed_num_inference_steps}. Only a request parsed from a mapping or a config file "
-                             "can leave it unset; a GenerationRequest built in Python counts every field as set.")
-        sampling_param.num_inference_steps = fixed_num_inference_steps
 
     for key, value in updates.items():
         if hasattr(sampling_param, key):

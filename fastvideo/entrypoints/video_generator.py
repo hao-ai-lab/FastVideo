@@ -458,10 +458,9 @@ class VideoGenerator:
                         raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
                     setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
 
-            resolved_sampling_param = request_to_sampling_param(
+            resolved_sampling_param = fastvideo_args.pipeline_config.apply_request_constraints(
                 request,
-                model_path=self.fastvideo_args.model_path,
-                fixed_num_inference_steps=self.fastvideo_args.pipeline_config.fixed_num_inference_steps(),
+                request_to_sampling_param(request, model_path=self.fastvideo_args.model_path),
             )
             return self._generate_video_impl(
                 prompt=request.prompt,
@@ -509,10 +508,9 @@ class VideoGenerator:
                     raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
                 setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
 
-        sampling_param = request_to_sampling_param(
+        sampling_param = fastvideo_args.pipeline_config.apply_request_constraints(
             request,
-            model_path=self.fastvideo_args.model_path,
-            fixed_num_inference_steps=self.fastvideo_args.pipeline_config.fixed_num_inference_steps(),
+            request_to_sampling_param(request, model_path=self.fastvideo_args.model_path),
         )
         batch_extra = request_to_batch_extra(request)
         result = self._generate_video_impl(

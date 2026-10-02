@@ -7,8 +7,10 @@ rejects an explicit value that differs for a setting fixed by training (attentio
 backend, VSA tile size, PDD partition), keeps an explicit value that differs for
 a tunable setting (VSA sparsity, reference keep rate) with a warning, and
 rejects a file that is incomplete or disagrees with the checkpoint file that owns
-a value. In the worker, ``MiniMaxH3BasePipeline`` checks its transformer before
-loading weights: against those settings, and, when the transformer carries VSA
+a value. ``MiniMaxH3PipelineConfig.apply_request_constraints`` then fills an
+unset request step count with the block count and rejects a different one. In
+the worker, ``MiniMaxH3BasePipeline`` checks its transformer before loading
+weights: against those settings, and, when the transformer carries VSA
 compression gates, against the run's attention backend. A DMD export's schedule
 comes from its ``dmd_denoising_steps`` (see test_minimax_h3_distilled_schedule.py).
 """
@@ -25,6 +27,10 @@ import torch
 from safetensors.torch import save_file
 
 from fastvideo import envs
+from fastvideo.api.compat import normalize_generation_request
+from fastvideo.api.parser import parse_config
+from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.schema import GenerationRequest
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
@@ -122,7 +128,6 @@ def test_resolve_checkpoint_settings_unset_run_settings(tmp_path):
     assert args.VSA_sparsity == 0.9
     assert args.pipeline_config.pdd_step_indices == tuple(GRID32_BLOCKS8)
     assert args.pipeline_config.vsa_ref_keep_rate == 0.1
-    assert args.pipeline_config.fixed_num_inference_steps() == 8
 
 
 def test_resolve_checkpoint_settings_matching_explicit_settings(tmp_path, caplog):
@@ -287,7 +292,6 @@ def test_resolve_checkpoint_settings_non_pdd_checkpoint(tmp_path, inference_file
     assert (args.attention_backend, args.VSA_tile_size, args.VSA_sparsity) == (None, 256, 0.0)
     config = args.pipeline_config
     assert (config.pdd_step_indices, config.vsa_ref_keep_rate, config.dmd_denoising_steps) == (None, None, None)
-    assert config.fixed_num_inference_steps() is None
 
 
 @pytest.mark.parametrize("inference_file", [None, DMD_FILE], ids=["base", "dmd"])
@@ -296,6 +300,40 @@ def test_resolve_checkpoint_settings_non_pdd_checkpoint(tmp_path, inference_file
 def test_resolve_checkpoint_settings_pdd_setting_on_non_pdd_checkpoint(tmp_path, inference_file, config_settings):
     with pytest.raises(ValueError, match="applies only to FastH3 PDD checkpoints"):
         _run_args(_checkpoint(tmp_path, inference_file, pdd_steps=None), config_settings)
+
+
+# ------------------------------------------------- apply_request_constraints: the step count of a request
+
+
+def _pdd_config():
+    return MiniMaxH3PipelineConfig(pdd_step_indices=tuple(GRID32_BLOCKS8))
+
+
+@pytest.mark.parametrize("sampling", [{}, {"num_inference_steps": 8}])
+def test_apply_request_constraints_pdd_unset_or_matching_steps(sampling):
+    request = parse_config(GenerationRequest, {"prompt": "fox", "sampling": sampling})
+    sampling_param = _pdd_config().apply_request_constraints(request, SamplingParam(num_inference_steps=50))
+    assert sampling_param.num_inference_steps == 8
+
+
+def test_apply_request_constraints_pdd_conflicting_steps():
+    request = parse_config(GenerationRequest, {"prompt": "fox", "sampling": {"num_inference_steps": 50}})
+    with pytest.raises(ValueError, match="runs exactly 8 transformer forwards.*num_inference_steps=50"):
+        _pdd_config().apply_request_constraints(request, SamplingParam())
+
+
+def test_apply_request_constraints_pdd_python_request_counts_schema_default_as_set():
+    """A GenerationRequest built in Python carries the schema default 50 as a set value."""
+    request = normalize_generation_request(GenerationRequest(prompt="fox"))
+    with pytest.raises(ValueError, match="num_inference_steps=50. Pass num_inference_steps=8"):
+        _pdd_config().apply_request_constraints(request, SamplingParam())
+
+
+def test_apply_request_constraints_non_pdd_checkpoint_keeps_request_steps():
+    request = parse_config(GenerationRequest, {"prompt": "fox", "sampling": {"num_inference_steps": 50}})
+    sampling_param = SamplingParam(num_inference_steps=50)
+    assert MiniMaxH3PipelineConfig().apply_request_constraints(request, sampling_param) is sampling_param
+    assert sampling_param.num_inference_steps == 50
 
 
 # ------------------------------------------------- worker pipeline: initialize_pipeline and the transformer check

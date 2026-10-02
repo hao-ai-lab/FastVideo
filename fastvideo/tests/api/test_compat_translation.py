@@ -5,12 +5,9 @@ PR 6.
 """
 from __future__ import annotations
 
-import pytest
-
 from fastvideo.api.compat import (
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
-    normalize_generation_request,
     request_to_sampling_param,
 )
 from fastvideo.api.parser import parse_config
@@ -177,33 +174,8 @@ def test_batch_cfg_typed_request_reaches_sampling_param(monkeypatch) -> None:
             }
         },
     )
-    sampling_param = request_to_sampling_param(request, model_path="test-model", fixed_num_inference_steps=None)
+    sampling_param = request_to_sampling_param(request, model_path="test-model")
     assert sampling_param.batch_cfg is True
-
-
-@pytest.mark.parametrize("sampling,expected_steps", [({}, 8), ({"num_inference_steps": 8}, 8)])
-def test_request_to_sampling_param_fixed_steps_fill_or_restate(monkeypatch, sampling, expected_steps) -> None:
-    """A checkpoint-fixed step count fills an unset request value and accepts the same explicit value."""
-    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(lambda cls, model_path: cls()))
-    request = parse_config(GenerationRequest, {"prompt": "fox", "sampling": sampling})
-    sampling_param = request_to_sampling_param(request, model_path="pdd-model", fixed_num_inference_steps=8)
-    assert sampling_param.num_inference_steps == expected_steps
-
-
-def test_request_to_sampling_param_fixed_steps_dataclass_request_counts_default_as_set(monkeypatch) -> None:
-    """A GenerationRequest built in Python carries the schema default 50 as a set value, so it is rejected."""
-    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(lambda cls, model_path: cls()))
-    request = normalize_generation_request(GenerationRequest(prompt="fox"))
-    with pytest.raises(ValueError, match="num_inference_steps=50. Pass num_inference_steps=8"):
-        request_to_sampling_param(request, model_path="pdd-model", fixed_num_inference_steps=8)
-
-
-def test_request_to_sampling_param_fixed_steps_conflict(monkeypatch) -> None:
-    """A request that sets another step count than the checkpoint fixes is rejected."""
-    monkeypatch.setattr(SamplingParam, "from_pretrained", classmethod(lambda cls, model_path: cls()))
-    request = parse_config(GenerationRequest, {"prompt": "fox", "sampling": {"num_inference_steps": 50}})
-    with pytest.raises(ValueError, match="runs exactly 8 transformer forwards.*num_inference_steps=50"):
-        request_to_sampling_param(request, model_path="pdd-model", fixed_num_inference_steps=8)
 
 
 # -------------------------------------------------------------------

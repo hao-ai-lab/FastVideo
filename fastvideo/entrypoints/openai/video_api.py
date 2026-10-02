@@ -161,12 +161,7 @@ def _make_video_job(
     req: VideoGenerationRequest,
     generation_request: GenerationRequest,
 ) -> dict[str, Any]:
-    server_args = get_server_args()
-    sampling = request_to_sampling_param(
-        generation_request,
-        model_path=server_args.model_path,
-        fixed_num_inference_steps=server_args.pipeline_config.fixed_num_inference_steps(),
-    )
+    sampling = request_to_sampling_param(generation_request, model_path=get_server_args().model_path)
     size = f"{sampling.width}x{sampling.height}" if sampling.width and sampling.height else None
     seconds = int(round(sampling.num_frames / sampling.fps)) if sampling.fps else int(req.seconds or 4)
     return {

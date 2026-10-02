@@ -13,6 +13,8 @@ from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean, shallow_asdict
 
 if TYPE_CHECKING:
+    from fastvideo.api.sampling_param import SamplingParam
+    from fastvideo.api.schema import GenerationRequest
     from fastvideo.fastvideo_args import FastVideoArgs
 
 logger = init_logger(__name__)
@@ -292,9 +294,16 @@ class PipelineConfig:
         run settings, so the base implementation does nothing.
         """
 
-    def fixed_num_inference_steps(self) -> int | None:
-        """The step count the checkpoint fixes for every request, or None when each request chooses it."""
-        return None
+    def apply_request_constraints(self, request: "GenerationRequest",
+                                  sampling_param: "SamplingParam") -> "SamplingParam":
+        """Apply this model's constraints on a generation request to its sampling parameters.
+
+        ``sampling_param`` holds the preset defaults with the request's explicit
+        fields applied. A model sets the values it fixes when the request leaves
+        them unset, and raises when the request sets a value it does not accept.
+        The base PipelineConfig accepts every request unchanged.
+        """
+        return sampling_param
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)

@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -41,7 +42,7 @@ def _new_runtime_video_generator() -> VideoGenerator:
         model_path="test-model",
         prompt_txt=None,
         workload_type=SimpleNamespace(value="t2v"),
-        pipeline_config=SimpleNamespace(fixed_num_inference_steps=lambda: None),
+        pipeline_config=SimpleNamespace(apply_request_constraints=lambda request, sampling_param: sampling_param),
     )
     generator.executor = SimpleNamespace(
         set_log_queue=lambda queue: None,
@@ -115,7 +116,9 @@ def _single_video_args(output_type="pil"):
         output_type=output_type,
         pin_cpu_memory=False,
         VSA_sparsity=0.0,
-        pipeline_config=SimpleNamespace(flow_shift=1.0, embedded_cfg_scale=1.0, fixed_num_inference_steps=lambda: None),
+        pipeline_config=SimpleNamespace(flow_shift=1.0,
+                                        embedded_cfg_scale=1.0,
+                                        apply_request_constraints=lambda request, sampling_param: sampling_param),
         workload_type=SimpleNamespace(value="t2v"),
     )
 
@@ -705,6 +708,31 @@ def test_generate_uses_typed_request_path(monkeypatch):
     assert result.video_path == "outputs/test.mp4"
 
 
+@pytest.mark.parametrize("entry", ["generate", "generate_video"])
+def test_generate_applies_pipeline_config_request_constraints(monkeypatch, entry):
+    """Both entry points run the sampling params that the loaded model's request constraints return."""
+    generator = _new_runtime_video_generator()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+
+    def apply_request_constraints(request, sampling_param):
+        return dataclasses.replace(sampling_param, num_inference_steps=8)
+
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(apply_request_constraints=apply_request_constraints)
+    captured = {}
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+    if entry == "generate":
+        generator.generate(GenerationRequest(prompt="hello world"))
+    else:
+        with pytest.warns(DeprecationWarning):
+            generator.generate_video(prompt="hello world")
+    assert captured["sampling_param"].num_inference_steps == 8
+
+
 def test_generate_rejects_stage_override_outside_registered_stage(monkeypatch) -> None:
     """Validate typed stage overrides at the public generation entrypoint."""
     generator = _new_runtime_video_generator()
@@ -924,8 +952,8 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
 
 def test_generate_video_legacy_call_routes_compat_kwargs(monkeypatch):
     generator = _new_runtime_video_generator()
-    generator.fastvideo_args.pipeline_config = SimpleNamespace(embedded_cfg_scale=1.0,
-                                                               fixed_num_inference_steps=lambda: None)
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(
+        embedded_cfg_scale=1.0, apply_request_constraints=lambda request, sampling_param: sampling_param)
     captured = {}
 
     def fake_generate_video_impl(

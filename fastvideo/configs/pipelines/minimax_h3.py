@@ -16,6 +16,8 @@ from fastvideo.logger import init_logger
 from fastvideo.utils import read_optional_model_json
 
 if TYPE_CHECKING:
+    from fastvideo.api.sampling_param import SamplingParam
+    from fastvideo.api.schema import GenerationRequest
     from fastvideo.fastvideo_args import FastVideoArgs
 
 logger = init_logger(__name__)
@@ -238,9 +240,27 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
             len(indices) - 1, list(indices), indices[-1], fastvideo_args.attention_backend,
             fastvideo_args.VSA_tile_size, fastvideo_args.VSA_sparsity, self.vsa_ref_keep_rate)
 
-    def fixed_num_inference_steps(self) -> int | None:
-        """The number of transformer forwards a PDD checkpoint runs, or None when requests choose it."""
-        return None if self.pdd_step_indices is None else len(self.pdd_step_indices) - 1
+    def apply_request_constraints(self, request: GenerationRequest, sampling_param: SamplingParam) -> SamplingParam:
+        """Fix ``num_inference_steps`` to the block count of a PDD checkpoint.
+
+        A PDD checkpoint runs exactly one transformer forward per trained fused
+        block: a request that leaves ``num_inference_steps`` unset gets the block
+        count, and a request that sets another count raises. Checkpoints without
+        a PDD partition return ``sampling_param`` unchanged.
+        """
+        if self.pdd_step_indices is None:
+            return sampling_param
+        from fastvideo.api.compat import explicit_request_updates
+
+        num_blocks = len(self.pdd_step_indices) - 1
+        requested_steps = explicit_request_updates(request).get("num_inference_steps", num_blocks)
+        if requested_steps != num_blocks:
+            raise ValueError(f"This FastH3 PDD checkpoint runs exactly {num_blocks} transformer forwards; the request "
+                             f"sets num_inference_steps={requested_steps}. Pass num_inference_steps={num_blocks}. Only "
+                             "a request parsed from a mapping or a config file can leave it unset; a "
+                             "GenerationRequest built in Python counts every field as set.")
+        sampling_param.num_inference_steps = num_blocks
+        return sampling_param
 
 
 __all__ = ["FASTH3_INFERENCE_FILE", "FASTH3_INFERENCE_SCHEMA", "MiniMaxH3PipelineConfig", "parse_base_model_revision"]
