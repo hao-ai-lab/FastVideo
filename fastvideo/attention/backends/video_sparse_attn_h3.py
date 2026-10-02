@@ -9,18 +9,16 @@ backend differs from the Wan-tuned ``video_sparse_attn``:
   tiles never straddle segment boundaries. The tile size is selectable at
   metadata build time: 256 tokens ``(4,8,8)`` (default), 128 tokens
   ``(4,4,8)``, or 64 tokens ``(4,4,4)`` (see ``VSA_H3_TILE_SHAPES``).
-- Multi-region builds (``video_segments``) sparsify more than one video:
-  the builder takes one 3-D region per video, at its packed offset, with
-  dense segments (text, audio, image references) anywhere between them.
-  Ref2VA uses this for its reference videos. Rows are permuted to
+- The builder takes the packed sequence as ordered segments: dense row
+  counts (text, audio, image references) and one 3-D sparse region per
+  video, wherever it sits. The generated video is the last region; a Ref2VA
+  PDD run adds one earlier region per reference video. Rows are permuted to
   ``[dense chunks][region 0 tiles][region 1 tiles]...`` and
   ``untile_combined_index`` inverts the permutation, so the kernels see one
   dense prefix followed by video tiles. Every video query keeps its own
   top-k of EACH region (``video_tile_spans`` / ``span_sparsities``); the
-  earlier regions may use a different keep rate than the last. Without
-  ``video_segments`` the builder produces the single-region layout: every
-  prefix segment is dense and the generated video is the only sparse region
-  (``video_tile_spans`` stays empty).
+  reference-video regions may use a different keep rate than the generated
+  video.
 - Selection is pure Python on pooled tile scores; the block-sparse kernel
   consumes an explicit bool mask, so no kernel changes are needed.
 - The compression branch is gated by ``to_gate_compress``, which the base
@@ -236,27 +234,6 @@ def _validate_h3_segment_geometry(
                          f"pad-slot hit={maps_into_pad} (segments={segments}).")
 
 
-def _single_region_segments(
-    prefix_segments: tuple[int, ...],
-    dit_seq_shape: tuple[int, int, int],
-) -> tuple[int | tuple[int, int, int], ...]:
-    """Packed-order segments of the single-region layout: every prefix segment, then the video."""
-    t, h, w = dit_seq_shape
-    return (*prefix_segments, (int(t), int(h), int(w)))
-
-
-def _validate_h3_tile_geometry(
-    prefix_segments: tuple[int, ...],
-    dit_seq_shape: tuple[int, int, int],
-    variable_block_sizes: torch.Tensor,
-    untile_combined_index: torch.Tensor,
-    tile_elems: int = _TILE_ELEMS,
-) -> None:
-    """Single-region form of :func:`_validate_h3_segment_geometry`."""
-    _validate_h3_segment_geometry(_single_region_segments(prefix_segments, dit_seq_shape), variable_block_sizes,
-                                  untile_combined_index, tile_elems)
-
-
 @functools.lru_cache(maxsize=10)
 def _h3_segment_tile_geometry(
     segments: tuple[int | tuple[int, int, int], ...],
@@ -326,21 +303,6 @@ def _h3_segment_tile_geometry(
             tuple(video_tile_spans))
 
 
-def _h3_tile_geometry(
-    prefix_segments: tuple[int, ...],
-    dit_seq_shape: tuple[int, int, int],
-    device: torch.device,
-    tile_shape: tuple[int, int, int] = VSA_H3_TILE_SIZE,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
-    """Tile the packed sequence: segment-pure prefix chunks, then video tiles.
-
-    Returns (tile_partition_indices, variable_block_sizes,
-    untile_combined_index, num_prefix_tiles, num_video_tiles).
-    """
-    geometry = _h3_segment_tile_geometry(_single_region_segments(prefix_segments, dit_seq_shape), device, tile_shape)
-    return geometry[:5]
-
-
 class MiniMaxH3VSABackend(AttentionBackend):
 
     accept_output_buffer: bool = True
@@ -386,17 +348,16 @@ class MiniMaxH3VSAMetadata(AttentionMetadata):
     # this tensor with each implementation's tensor-valued layer index so the
     # shared block code does not specialize once per Python ``layer_idx``.
     dense_layers_tensor: torch.Tensor
+    # One [start, end) tile range per sparse video region, in packed order
+    # with the generated video last, and the sparsity of that region's top-k.
+    video_tile_spans: tuple[tuple[int, int], ...]
+    span_sparsities: tuple[float, ...]
     # tokens per tile (256, 128 or 64); selects the tile geometry AND the
     # kernel route in forward() (256 -> VSA-256 CuTe/Triton, 128 -> sm_100a
     # CUDA, 64 -> native Triton or opt-in sm_100a CUDA)
     tile_elems: int = _TILE_ELEMS
     # layers forced dense regardless of sparsity (probe-guided opt-outs)
     dense_layers: tuple[int, ...] = ()
-    # One [start, end) tile range per video region of a multi-region build,
-    # and its sparsity. Empty means the single-region layout: all video tiles
-    # form one region that uses VSA_sparsity.
-    video_tile_spans: tuple[tuple[int, int], ...] = ()
-    span_sparsities: tuple[float, ...] = ()
     # Builder-owned padded tile buffer. It records the geometry that last
     # populated the allocation so a same-shaped geometry change can clear
     # stale pad rows once while steady-state denoising reuses the buffer.
@@ -414,144 +375,61 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
     def build(  # type: ignore
         self,
         current_timestep: int,
-        raw_latent_shape: tuple[int, int, int] | None,
         patch_size: tuple[int, int, int],
         VSA_sparsity: float,
-        prefix_segments: tuple[int, ...],
+        packed_segments: tuple[int | tuple[int, int, int], ...],
         device: torch.device,
         exempt: bool = True,
         dense_layers: tuple[int, ...] = (),
         tile_size: int = _TILE_ELEMS,
-        video_segments: tuple[tuple[int, int, int], ...] | None = None,
-        video_offsets: tuple[int, ...] | None = None,
         ref_keep_rate: float | None = None,
         **kwargs: dict[str, Any],
     ) -> MiniMaxH3VSAMetadata:
         """Build per-step metadata for one packed H3 sequence.
 
-        Single region: pass ``raw_latent_shape``; the generated video follows
-        every ``prefix_segments`` row. Multi-region (Ref2VA P2): pass
-        ``raw_latent_shape=None``, ``video_segments`` (one raw latent shape per
-        sparsifiable region, packed order, the generated video last) and
-        ``video_offsets`` (the packed row where each region starts);
-        ``prefix_segments`` are then the dense segments in packed order and
-        must fill every gap. ``ref_keep_rate`` in (0, 1) sets the keep rate of
-        every region except the last; the last follows ``VSA_sparsity``.
+        ``packed_segments`` lists the sequence in packed order: an ``int`` is
+        a dense segment's row count, and a ``(t, h, w)`` triple is the raw
+        latent shape of one sparse video region. The last region is the
+        generated video and follows ``VSA_sparsity``; every earlier region is
+        a reference video and keeps ``ref_keep_rate`` of its tiles, which a
+        build with reference-video regions requires. ``exempt=False``
+        (compete mode) supports only the generated-video region.
         """
         tile_shape = VSA_H3_TILE_SHAPES.get(int(tile_size))
         if tile_shape is None:
             raise ValueError(f"VSA-H3 tile_size must be one of {sorted(VSA_H3_TILE_SHAPES)}, got {tile_size!r}")
-        if (raw_latent_shape is None) == (video_segments is None):
-            raise ValueError("VSA-H3 build takes exactly one of raw_latent_shape (single video region) or "
-                             f"video_segments (multi-region); got raw_latent_shape={raw_latent_shape!r}, "
-                             f"video_segments={video_segments!r}.")
-        if video_segments is not None:
-            if ref_keep_rate is None:
-                raise ValueError("A multi-region (video_segments) build needs ref_keep_rate for its reference "
-                                 "regions.")
-            return self._build_regions(current_timestep,
-                                       patch_size, VSA_sparsity, prefix_segments, device, exempt, dense_layers,
-                                       int(tile_size), tile_shape, video_segments, video_offsets, ref_keep_rate)
-        if video_offsets is not None or ref_keep_rate is not None:
-            raise ValueError("video_offsets and ref_keep_rate apply only to a multi-region (video_segments) build.")
-        assert raw_latent_shape is not None
-        dit_seq_shape = (raw_latent_shape[0] // patch_size[0], raw_latent_shape[1] // patch_size[1],
-                         raw_latent_shape[2] // patch_size[2])
-        prefix_segments = tuple(int(s) for s in prefix_segments if s > 0)
-        total_seq_length = sum(prefix_segments) + math.prod(dit_seq_shape)
-
-        (_tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles,
-         num_video_tiles) = _h3_tile_geometry(prefix_segments, dit_seq_shape, device, tile_shape)
-
-        dense_layers = tuple(int(layer) for layer in dense_layers)
-        return MiniMaxH3VSAMetadata(
-            current_timestep=current_timestep,
-            VSA_sparsity=VSA_sparsity,
-            total_seq_length=total_seq_length,
-            num_prefix_tiles=num_prefix_tiles,
-            num_video_tiles=num_video_tiles,
-            exempt=exempt,
-            variable_block_sizes=variable_block_sizes,
-            untile_combined_index=untile_combined_index,
-            tile_elems=int(tile_size),
-            dense_layers=dense_layers,
-            dense_layers_tensor=torch.tensor(dense_layers, device=device, dtype=torch.int64),
-            tile_buf_holder=self._tile_buf_holder,
-        )
-
-    def _build_regions(
-        self,
-        current_timestep: int,
-        patch_size: tuple[int, int, int],
-        VSA_sparsity: float,
-        prefix_segments: tuple[int, ...],
-        device: torch.device,
-        exempt: bool,
-        dense_layers: tuple[int, ...],
-        tile_size: int,
-        tile_shape: tuple[int, int, int],
-        video_segments: tuple[tuple[int, int, int], ...],
-        video_offsets: tuple[int, ...] | None,
-        ref_keep_rate: float,
-    ) -> MiniMaxH3VSAMetadata:
-        """Multi-region form of :meth:`build`: one region per reference video, then the generated video."""
-        if not video_segments:
+        # Video regions become token grids under the patch size; empty dense segments are dropped.
+        token_segments: list[int | tuple[int, int, int]] = []
+        for segment in packed_segments:
+            if isinstance(segment, tuple):
+                if any(int(v) <= 0 or int(v) % p for v, p in zip(segment, patch_size, strict=True)):
+                    raise ValueError(f"VSA-H3 video region latent shape {tuple(segment)} is not a positive multiple "
+                                     f"of patch {tuple(patch_size)}.")
+                t, h, w = (int(v) // p for v, p in zip(segment, patch_size, strict=True))
+                token_segments.append((t, h, w))
+            elif segment > 0:
+                token_segments.append(int(segment))
+        num_regions = sum(isinstance(segment, tuple) for segment in token_segments)
+        if num_regions == 0:
             raise ValueError("VSA-H3 needs at least one video region.")
-        if video_offsets is None or len(video_offsets) != len(video_segments):
-            raise ValueError(f"video_segments needs one packed-row offset per region; got "
-                             f"{len(video_segments)} regions and offsets={video_offsets!r}.")
-        video_offsets = tuple(int(offset) for offset in video_offsets)
-        if any(later <= earlier for earlier, later in zip(video_offsets, video_offsets[1:], strict=False)):
-            raise ValueError(f"VSA-H3 video regions must be in packed order; offsets={video_offsets}.")
-        prefix_segments = tuple(int(s) for s in prefix_segments if s > 0)
-
-        token_grids: list[tuple[int, int, int]] = []
-        for region, shape in enumerate(video_segments):
-            if any(int(v) <= 0 or int(v) % p for v, p in zip(shape, patch_size, strict=True)):
-                raise ValueError(f"VSA-H3 video region {region} latent shape {tuple(shape)} is not a positive "
-                                 f"multiple of patch {tuple(patch_size)}.")
-            token_grids.append(
-                (int(shape[0]) // patch_size[0], int(shape[1]) // patch_size[1], int(shape[2]) // patch_size[2]))
-
-        # Interleave dense segments and video regions into packed order,
-        # checking that the dense segments exactly fill the gaps.
-        segments: list[int | tuple[int, int, int]] = []
-        prefix_index = 0
-        cursor = 0
-        for grid, offset in zip(token_grids, video_offsets, strict=True):
-            gap = offset - cursor
-            if gap < 0:
-                raise ValueError(f"VSA-H3 video regions must not overlap; region at offset {offset} starts "
-                                 f"before row {cursor}.")
-            while gap > 0:
-                if prefix_index >= len(prefix_segments):
-                    raise ValueError(f"VSA-H3 prefix segments {prefix_segments} do not fill the {gap} rows before "
-                                     f"the video region at offset {offset}.")
-                segment = prefix_segments[prefix_index]
-                prefix_index += 1
-                if segment > gap:
-                    raise ValueError(f"VSA-H3 prefix segment of {segment} rows straddles the video region at "
-                                     f"offset {offset} (only {gap} rows remain before it).")
-                segments.append(segment)
-                gap -= segment
-            segments.append(grid)
-            cursor = offset + math.prod(grid)
-        segments.extend(prefix_segments[prefix_index:])
-        total_seq_length = sum(prefix_segments) + sum(math.prod(grid) for grid in token_grids)
+        reference_sparsities: tuple[float, ...] = ()
+        if num_regions > 1:
+            if ref_keep_rate is None:
+                raise ValueError(f"A VSA-H3 build with {num_regions - 1} reference-video region(s) needs "
+                                 "ref_keep_rate.")
+            if not exempt:
+                raise ValueError(f"vsa_mode='compete' supports only the generated-video region; this build has "
+                                 f"{num_regions - 1} reference-video region(s). Use vsa_mode='exempt'.")
+            reference_sparsities = (1.0 - float(ref_keep_rate), ) * (num_regions - 1)
+        total_seq_length = sum(math.prod(s) if isinstance(s, tuple) else s for s in token_segments)
 
         (_tile_partition_indices, variable_block_sizes, untile_combined_index, num_prefix_tiles, num_video_tiles,
-         video_tile_spans) = _h3_segment_tile_geometry(tuple(segments), device, tile_shape)
+         video_tile_spans) = _h3_segment_tile_geometry(tuple(token_segments), device, tile_shape)
 
-        # References (every region but the last) may keep a different
-        # fraction than the target. A dense build (sparsity 0: dense steps)
-        # stays fully dense regardless of the reference keep rate.
+        # A dense build (sparsity 0: dense steps) keeps every region dense,
+        # whatever the reference keep rate.
         VSA_sparsity = float(VSA_sparsity)
-        if VSA_sparsity <= 0.0:
-            span_sparsities = tuple(0.0 for _ in video_tile_spans)
-        else:
-            ref_sparsity = 1.0 - float(ref_keep_rate)
-            span_sparsities = tuple(ref_sparsity if index < len(video_tile_spans) - 1 else VSA_sparsity
-                                    for index in range(len(video_tile_spans)))
+        span_sparsities = (0.0, ) * num_regions if VSA_sparsity <= 0.0 else (*reference_sparsities, VSA_sparsity)
 
         dense_layers = tuple(int(layer) for layer in dense_layers)
         return MiniMaxH3VSAMetadata(
@@ -563,11 +441,11 @@ class MiniMaxH3VSAMetadataBuilder(AttentionMetadataBuilder):
             exempt=exempt,
             variable_block_sizes=variable_block_sizes,
             untile_combined_index=untile_combined_index,
-            tile_elems=tile_size,
-            dense_layers=dense_layers,
             dense_layers_tensor=torch.tensor(dense_layers, device=device, dtype=torch.int64),
             video_tile_spans=video_tile_spans,
             span_sparsities=span_sparsities,
+            tile_elems=int(tile_size),
+            dense_layers=dense_layers,
             tile_buf_holder=self._tile_buf_holder,
         )
 
@@ -588,58 +466,24 @@ def _pool_tiles(x: torch.Tensor, variable_block_sizes: torch.Tensor, tile_elems:
 
 
 def _build_block_mask(
-        scores: torch.Tensor,
-        num_prefix_tiles: int,
-        num_video_tiles: int,
-        VSA_sparsity: float,
-        exempt: bool,
-        video_tile_spans: tuple[tuple[int, int], ...] = (),
-        span_sparsities: tuple[float, ...] = (),
-) -> torch.Tensor:
-    """scores: [B, H, n_tiles, n_tiles] -> bool mask, same shape.
-
-    Empty ``video_tile_spans`` is the single-region policy. Otherwise every
-    video query keeps its own top-k of each region, with the budget from that
-    region's ``span_sparsities`` entry (see :func:`_build_region_block_mask`).
-    """
-    if video_tile_spans:
-        return _build_region_block_mask(scores, num_prefix_tiles, num_video_tiles, VSA_sparsity, exempt,
-                                        video_tile_spans, span_sparsities)
-    n_tiles = scores.shape[-1]
-    k_vid = compute_topk(VSA_sparsity, num_video_tiles)
-    if k_vid == num_video_tiles:
-        return torch.ones_like(scores, dtype=torch.bool)
-    mask = torch.zeros_like(scores, dtype=torch.bool)
-    if exempt or num_prefix_tiles == 0:
-        video_cols = scores[..., num_prefix_tiles:]
-        idx = video_cols.topk(k_vid, dim=-1).indices + num_prefix_tiles
-        mask.scatter_(-1, idx, True)
-        mask[..., :num_prefix_tiles] = True
-    else:
-        k_total = min(k_vid + num_prefix_tiles, n_tiles)
-        idx = scores.topk(k_total, dim=-1).indices
-        mask.scatter_(-1, idx, True)
-    mask[:, :, :num_prefix_tiles, :] = True
-    return mask
-
-
-def _build_region_block_mask(
     scores: torch.Tensor,
     num_prefix_tiles: int,
-    num_video_tiles: int,
     VSA_sparsity: float,
     exempt: bool,
     video_tile_spans: tuple[tuple[int, int], ...],
     span_sparsities: tuple[float, ...],
 ) -> torch.Tensor:
-    """Per-region top-k for multi-region metadata.
+    """scores: [B, H, n_tiles, n_tiles] -> bool mask, same shape.
 
-    The regions select independently, so every video query keeps its
-    region's configured fraction of EACH region. Prefix rows and prefix
-    columns stay dense; ``VSA_sparsity <= 0`` (dense steps and layers)
-    overrides the per-region sparsities. ``video_tile_spans`` come from the
-    cached geometry, which lays them out contiguously after the prefix tiles,
-    with one ``span_sparsities`` entry each.
+    Prefix rows (non-video queries) stay dense. With ``exempt``, every query
+    keeps every prefix column, and every video query keeps its own top-k of
+    EACH video region, with the budget from that region's ``span_sparsities``
+    entry. Without ``exempt`` (compete mode, generated-video region only),
+    prefix and video columns compete for one FLOP-matched top-k.
+    ``VSA_sparsity <= 0`` (dense steps and layers) keeps every tile.
+    ``video_tile_spans`` come from the cached geometry, which lays them out
+    contiguously after the prefix tiles, with one ``span_sparsities`` entry
+    each.
     """
     n_tiles = scores.shape[-1]
     if VSA_sparsity <= 0.0:
@@ -661,8 +505,8 @@ def _build_region_block_mask(
         mask[..., :num_prefix_tiles] = True
     else:
         # compete: prefix keys enter the top-k under a FLOP-matched budget,
-        # which is defined for a single region only (the denoising stage
-        # rejects compete mode for multi-region layouts)
+        # which is defined for the generated-video region alone (the builder
+        # rejects compete mode with reference-video regions)
         k_total = min(span_topk[0] + num_prefix_tiles, n_tiles)
         idx = scores.topk(k_total, dim=-1).indices
         mask.scatter_(-1, idx, True)
@@ -919,7 +763,6 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             mask = _build_block_mask(
                 scores,
                 attn_metadata.num_prefix_tiles,
-                attn_metadata.num_video_tiles,
                 layer_sparsity,
                 attn_metadata.exempt,
                 attn_metadata.video_tile_spans,

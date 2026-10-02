@@ -60,8 +60,16 @@ def _h3_vsa_metadata_builder(transformer: Any, fastvideo_args: FastVideoArgs) ->
     return backend.get_builder_cls()()
 
 
-def _h3_vsa_prefix_segments(layout: MiniMaxH3PackedLayout, patch_size: tuple[int, int, int]) -> tuple[int, ...]:
-    """Segment sizes preceding the generated-video tail, validated against the layout."""
+def _h3_vsa_single_region_segments(
+    layout: MiniMaxH3PackedLayout,
+    patch_size: tuple[int, int, int],
+) -> tuple[int | tuple[int, int, int], ...]:
+    """VSA-H3 packed segments with the generated video as the only sparse region.
+
+    Returns ``(text rows, condition rows, audio rows, target video latent
+    shape)`` for ``MiniMaxH3VSAMetadataBuilder.build``, validated against the
+    layout; every conditioning row stays dense.
+    """
     n_text = int(layout.text_indices.numel())
     n_cond = int(layout.num_condition_video_rows)
     n_audio = int(layout.audio_indices.numel())
@@ -71,50 +79,45 @@ def _h3_vsa_prefix_segments(layout: MiniMaxH3PackedLayout, patch_size: tuple[int
         raise ValueError("VSA-H3 supports the standard [text|cond|audio|video] packing only; "
                          f"segments ({n_text}, {n_cond}, {n_audio}) + video {n_video} do not sum to "
                          f"sequence length {layout.sequence_length}.")
-    return n_text, n_cond, n_audio
+    return n_text, n_cond, n_audio, (layout.num_video_latent_frames, layout.latent_height, layout.latent_width)
 
 
 def _h3_vsa_ref2va_segments(
     layout: MiniMaxH3PackedLayout,
     patch_size: tuple[int, int, int],
-) -> tuple[tuple[int, ...], tuple[tuple[int, int, int], ...], tuple[int, ...]]:
-    """Ref2VA multi-region VSA geometry in true packed order.
+) -> tuple[int | tuple[int, int, int], ...]:
+    """VSA-H3 packed segments of a Ref2VA layout with every reference video as a sparse region.
 
-    Returns ``(prefix_segments, video_segments, video_offsets)`` for
-    ``MiniMaxH3VSAMetadataBuilder.build``: every reference VIDEO becomes a
-    sparsifiable region at its packed offset; text, every reference's audio
-    rows, image references, and the target audio stay dense segments; the
-    target video is the last region. The packed order is
-    ``[text | reference spans... | target audio | target video]``.
+    Returns the segments for ``MiniMaxH3VSAMetadataBuilder.build`` in true
+    packed order, ``[text | reference spans... | target audio | target
+    video]``: each reference VIDEO is a region (its latent shape); text,
+    every reference's audio rows, image references, and the target audio are
+    dense row counts; the target video is the last region.
     """
     if not layout.reference_segments:
         raise ValueError("Ref2VA VSA sparsification needs per-reference spans on the layout; "
                          "this layout carries none (T2VA/FL2VA packing).")
-    prefix_segments: list[int] = [int(layout.text_indices.numel())]
-    video_segments: list[tuple[int, int, int]] = []
-    video_offsets: list[int] = []
-    cursor = prefix_segments[0]
+    cursor = int(layout.text_indices.numel())
+    segments: list[int | tuple[int, int, int]] = [cursor]
     for kind, rows, latent_shape in layout.reference_segments:
         rows = int(rows)
         if kind == "video":
-            video_segments.append((int(latent_shape[0]), int(latent_shape[1]), int(latent_shape[2])))
-            video_offsets.append(cursor)
+            segments.append((int(latent_shape[0]), int(latent_shape[1]), int(latent_shape[2])))
         else:
             # audio rows and single-frame image latents stay dense
-            prefix_segments.append(rows)
+            segments.append(rows)
         cursor += rows
     n_target_audio = int(layout.audio_indices.numel()) - int(layout.num_condition_audio_rows)
-    prefix_segments.append(n_target_audio)
+    segments.append(n_target_audio)
     cursor += n_target_audio
-    video_segments.append((layout.num_video_latent_frames, layout.latent_height, layout.latent_width))
-    video_offsets.append(cursor)
+    segments.append((layout.num_video_latent_frames, layout.latent_height, layout.latent_width))
     n_target_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
                       (layout.latent_width // patch_size[2]))
     if cursor + n_target_video != layout.sequence_length:
         raise ValueError(f"Ref2VA reference spans {layout.reference_segments} + target segments do not tile the "
                          f"packed sequence: reached row {cursor} + video {n_target_video} != "
                          f"{layout.sequence_length}.")
-    return tuple(prefix_segments), tuple(video_segments), tuple(video_offsets)
+    return tuple(segments)
 
 
 class MiniMaxH3DenoisingStage(PipelineStage):
@@ -254,23 +257,18 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # then its own sparse region keeping that fraction of its tiles.
             # Without one, every conditioning row stays dense.
             vsa_ref_keep_rate = getattr(fastvideo_args.pipeline_config, "vsa_ref_keep_rate", None)
-            vsa_video_segments: tuple[tuple[int, int, int], ...] | None = None
-            vsa_video_offsets: tuple[int, ...] | None = None
-            if vsa_ref_keep_rate is not None:
-                if not vsa_exempt:
-                    raise ValueError("Sparse reference-video regions require vsa_mode='exempt' "
-                                     "(compete supports a single video region).")
-                vsa_prefix_segments, vsa_video_segments, vsa_video_offsets = _h3_vsa_ref2va_segments(
-                    layout, vsa_patch_size)
+            if vsa_ref_keep_rate is None:
+                vsa_packed_segments = _h3_vsa_single_region_segments(layout, vsa_patch_size)
             else:
-                vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
+                vsa_packed_segments = _h3_vsa_ref2va_segments(layout, vsa_patch_size)
             vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
             # Run-level tile geometry (256 default, 64 = native Triton path,
             # 128 = sm_100a CUDA), plumbed like the run-level sparsity; the
             # builder validates the value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
-            if vsa_video_segments is not None:
+            if vsa_ref_keep_rate is not None:
+                num_reference_regions = sum(isinstance(segment, tuple) for segment in vsa_packed_segments) - 1
                 run_sparsity = float(batch.VSA_sparsity)
                 if run_sparsity <= 0.0:
                     effect = "VSA_sparsity=0 keeps every region dense"
@@ -278,7 +276,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     effect = (f"each reference keeps {vsa_ref_keep_rate:g} of its tiles and the target keeps "
                               f"{1.0 - run_sparsity:g}")
                 logger.info("MiniMax-H3 VSA-H3: %d reference video region(s); %s; %d-token tiles.",
-                            len(vsa_video_segments) - 1, effect, vsa_tile_size)
+                            num_reference_regions, effect, vsa_tile_size)
 
         try:
             if full_cpu_offload:
@@ -300,36 +298,17 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                         # selects every tile — parity-proven ≡ dense ≤2e-4); early
                         # steps set global structure and are the most damage-prone.
                         vsa_sparsity = 0.0 if index < vsa_dense_first_n else float(batch.VSA_sparsity)
-                        if vsa_video_segments is None:
-                            attn_metadata = vsa_metadata_builder.build(
-                                current_timestep=index,
-                                raw_latent_shape=(layout.num_video_latent_frames, layout.latent_height,
-                                                  layout.latent_width),
-                                patch_size=vsa_patch_size,
-                                VSA_sparsity=vsa_sparsity,
-                                prefix_segments=vsa_prefix_segments,
-                                device=device,
-                                exempt=vsa_exempt,
-                                dense_layers=vsa_dense_layers,
-                                tile_size=vsa_tile_size,
-                            )
-                        else:
-                            # Every video region, the target included, is
-                            # passed through video_segments.
-                            attn_metadata = vsa_metadata_builder.build(
-                                current_timestep=index,
-                                raw_latent_shape=None,
-                                patch_size=vsa_patch_size,
-                                VSA_sparsity=vsa_sparsity,
-                                prefix_segments=vsa_prefix_segments,
-                                device=device,
-                                exempt=vsa_exempt,
-                                dense_layers=vsa_dense_layers,
-                                tile_size=vsa_tile_size,
-                                video_segments=vsa_video_segments,
-                                video_offsets=vsa_video_offsets,
-                                ref_keep_rate=vsa_ref_keep_rate,
-                            )
+                        attn_metadata = vsa_metadata_builder.build(
+                            current_timestep=index,
+                            patch_size=vsa_patch_size,
+                            VSA_sparsity=vsa_sparsity,
+                            packed_segments=vsa_packed_segments,
+                            device=device,
+                            exempt=vsa_exempt,
+                            dense_layers=vsa_dense_layers,
+                            tile_size=vsa_tile_size,
+                            ref_keep_rate=vsa_ref_keep_rate,
+                        )
                     # Under torch.compile(mode="reduce-overhead") each denoising
                     # step must be marked, or cudagraph trees flag cross-step
                     # reuse of pooled outputs as "accessing tensor output of

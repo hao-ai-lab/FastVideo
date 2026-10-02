@@ -21,7 +21,7 @@ import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn import compute_topk
 from fastvideo.attention.backends.video_sparse_attn_h3 import (_TILE_ELEMS, VSA_H3_TILE_SHAPES, MiniMaxH3VSAImpl,
                                                                MiniMaxH3VSAMetadataBuilder, _build_block_mask,
-                                                               _h3_tile_geometry,
+                                                               _h3_segment_tile_geometry,
                                                                _pool_tiles, token_tile_and_valid)
 from fastvideo.pipelines.basic.minimax_h3.packing import MINIMAX_H3_TEXT_TAG, build_ref2va_packed_sequence
 from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference
@@ -34,9 +34,7 @@ _PATCH = (1, 2, 2)
 # | tgt_video (8,4,6)=192] -> S=369; raw latents under patch (1,2,2); the
 # reference video keeps 25% of its tiles
 _R2V = dict(
-    prefix_segments=(37, 9, 11),
-    video_segments=((5, 8, 12), (8, 8, 12)),
-    video_offsets=(46, 177),
+    packed_segments=(37, 9, (5, 8, 12), 11, (8, 8, 12)),
     ref_keep_rate=0.25,
 )
 _R2V_SEQ = 369
@@ -47,7 +45,6 @@ def _build_r2v(sparsity=0.0, tile_size=_TILE_ELEMS, device=_CPU, **overrides):
     call = dict(_R2V, **overrides)
     return MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
-        raw_latent_shape=call.pop("raw_latent_shape", None),
         patch_size=_PATCH,
         VSA_sparsity=sparsity,
         device=device,
@@ -61,8 +58,8 @@ def _impl(head_size=8):
 
 
 def _mask(meta, scores, sparsity):
-    return _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt,
-                             meta.video_tile_spans, meta.span_sparsities)
+    return _build_block_mask(scores, meta.num_prefix_tiles, sparsity, meta.exempt, meta.video_tile_spans,
+                             meta.span_sparsities)
 
 
 def _assert_multi_region_metadata(metadata, *, expected_reference_video_regions, target_sparsity, ref_keep_rate):
@@ -76,8 +73,8 @@ def _assert_multi_region_metadata(metadata, *, expected_reference_video_regions,
     expected_span_count = expected_reference_video_regions + 1
     if len(metadata.video_tile_spans) != expected_span_count:
         raise ValueError("Multi-region metadata must contain one sparse span per reference video plus the target; "
-                         f"expected {expected_span_count} spans, got {metadata.video_tile_spans}. Metadata built "
-                         "with the single-region layout keeps reference-video conditioning dense.")
+                         f"expected {expected_span_count} spans, got {metadata.video_tile_spans}. Metadata whose only "
+                         "sparse region is the generated video keeps reference-video conditioning dense.")
     if len(metadata.span_sparsities) != expected_span_count:
         raise ValueError(f"{len(metadata.span_sparsities)} span sparsities for {expected_span_count} spans.")
     cursor = metadata.num_prefix_tiles
@@ -139,19 +136,17 @@ def _layout(references, *, text=7, target=(3, 4, 6), audio=5):
     return build_ref2va_packed_sequence(tags, references, *target, audio, _PATCH)
 
 
-# (references, expected prefix segments, expected video segments, expected offsets).
+# (references, expected packed segments, expected packed row of each video region).
 # Rows: an image (1, 4, 6) latent is 1*2*3 = 6 rows; a (5, 4, 6) video is 30; the
 # (3, 4, 6) target is 18; audio rows are 2 per latent; text is 7.
 _LAYOUTS = {
-    "images_only": ([_reference("image"), _reference("image", height=8, width=4)], (7, 6, 8, 10), ((3, 4, 6), ),
-                    (31, )),
-    "image_and_silent_video": ([_reference("image"), _reference("video", frames=5)], (7, 6, 10), ((5, 4, 6),
-                                                                                                  (3, 4, 6)),
-                               (13, 53)),
+    "images_only": ([_reference("image"), _reference("image", height=8, width=4)], (7, 6, 8, 10, (3, 4, 6)), (31, )),
+    "image_and_silent_video": ([_reference("image"), _reference("video", frames=5)], (7, 6, (5, 4, 6), 10,
+                                                                                      (3, 4, 6)), (13, 53)),
     "video_with_audio_and_audio": ([_reference("video", frames=5, audio=4),
-                                    _reference("audio", audio=3)], (7, 8, 6, 10), ((5, 4, 6), (3, 4, 6)), (15, 61)),
+                                    _reference("audio", audio=3)], (7, 8, (5, 4, 6), 6, 10, (3, 4, 6)), (15, 61)),
     "two_videos": ([_reference("video", frames=2, height=8, width=4),
-                    _reference("video", frames=5, audio=2)], (7, 4, 10), ((2, 8, 4), (5, 4, 6), (3, 4, 6)),
+                    _reference("video", frames=5, audio=2)], (7, (2, 8, 4), 4, (5, 4, 6), 10, (3, 4, 6)),
                    (7, 27, 67)),
 }
 
@@ -159,19 +154,17 @@ _LAYOUTS = {
 @pytest.mark.parametrize("name", sorted(_LAYOUTS))
 @pytest.mark.parametrize("tile_size", [64, 128, 256])
 def test_h3_vsa_ref2va_segments_tile_layouts_in_packed_order(name, tile_size):
-    references, prefix, videos, offsets = _LAYOUTS[name]
+    references, segments, offsets = _LAYOUTS[name]
     layout = _layout(references)
-    assert _h3_vsa_ref2va_segments(layout, _PATCH) == (prefix, videos, offsets)
+    assert _h3_vsa_ref2va_segments(layout, _PATCH) == segments
+    videos = [segment for segment in segments if isinstance(segment, tuple)]
 
     meta = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
-                                               raw_latent_shape=None,
                                                patch_size=_PATCH,
                                                VSA_sparsity=0.9,
-                                               prefix_segments=prefix,
+                                               packed_segments=segments,
                                                device=_CPU,
                                                tile_size=tile_size,
-                                               video_segments=videos,
-                                               video_offsets=offsets,
                                                ref_keep_rate=0.25)
     assert meta.total_seq_length == layout.sequence_length
     # References keep 25% of their tiles, distinct from the target's 10%.
@@ -238,8 +231,8 @@ def test_build_multi_region_native_tile_geometry(tile_size, width):
 
 
 # SHA-256 of the single-region tile geometry (partition indices, block sizes,
-# untile index, prefix and video tile counts) that _h3_tile_geometry returned at
-# commit 9edc8adf5, where MiniMaxH3VSAMetadataBuilder supported only one sparse video region. The
+# untile index, prefix and video tile counts) recorded at commit 9edc8adf5,
+# where MiniMaxH3VSAMetadataBuilder supported only one sparse video region. The
 # hashes are fixed so the geometry is compared with that recorded output
 # instead of with the code under test.
 _SINGLE_REGION_GEOMETRY_SHA256 = {
@@ -269,23 +262,23 @@ def _geometry_sha256(outputs):
 
 
 @pytest.mark.parametrize("prefix_segments,dit_seq_shape,tile_size", sorted(_SINGLE_REGION_GEOMETRY_SHA256))
-def test_h3_tile_geometry_single_region_matches_frozen_hashes(prefix_segments, dit_seq_shape, tile_size):
-    geometry = _h3_tile_geometry(prefix_segments, dit_seq_shape, _CPU, VSA_H3_TILE_SHAPES[tile_size])
+def test_h3_segment_tile_geometry_single_region_matches_frozen_hashes(prefix_segments, dit_seq_shape, tile_size):
+    geometry = _h3_segment_tile_geometry((*prefix_segments, dit_seq_shape), _CPU, VSA_H3_TILE_SHAPES[tile_size])[:5]
     assert _geometry_sha256(geometry) == _SINGLE_REGION_GEOMETRY_SHA256[prefix_segments, dit_seq_shape, tile_size]
 
 
-def test_build_single_region_matches_h3_tile_geometry():
+def test_build_single_region_one_generated_video_span():
     single = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
-                                                 raw_latent_shape=(8, 8, 12),
                                                  patch_size=_PATCH,
                                                  VSA_sparsity=0.5,
-                                                 prefix_segments=(37, 9, 120, 11),
+                                                 packed_segments=(37, 9, 120, 11, (8, 8, 12)),
                                                  device=_CPU,
                                                  tile_size=128)
-    assert single.video_tile_spans == () and single.span_sparsities == ()
-    geometry = _h3_tile_geometry((37, 9, 120, 11), (8, 4, 6), _CPU, (4, 4, 8))
-    assert _geometry_sha256(geometry) == _SINGLE_REGION_GEOMETRY_SHA256[(37, 9, 120, 11), (8, 4, 6), 128]
-    assert torch.equal(single.untile_combined_index, geometry[2])
+    # The 37, 9, 120, and 11 dense rows each fit one 128-token tile; the (8, 4, 6) video grid
+    # makes 2 * 1 * 1 (4, 4, 8) tiles.
+    assert (single.num_prefix_tiles, single.num_video_tiles) == (4, 2)
+    assert single.video_tile_spans == ((4, 6), )
+    assert single.span_sparsities == (0.5, )
 
 
 def test_build_block_mask_per_region_topk_and_reference_keep_rate():
@@ -304,7 +297,7 @@ def test_build_block_mask_per_region_topk_and_reference_keep_rate():
 
     # A span at sparsity 0 keeps every column; the other span keeps its own top-k.
     ref_span, tgt_span = meta.video_tile_spans
-    mask = _build_block_mask(scores, P, meta.num_video_tiles, 0.75, meta.exempt, meta.video_tile_spans, (0.0, 0.75))
+    mask = _build_block_mask(scores, P, 0.75, meta.exempt, meta.video_tile_spans, (0.0, 0.75))
     assert mask[..., ref_span[0]:ref_span[1]].all(), "a sparsity-0 span's columns are dense"
     assert (mask[:, :, P:, tgt_span[0]:tgt_span[1]].sum(-1) == compute_topk(0.75, tgt_span[1] - tgt_span[0])).all()
 
@@ -313,41 +306,30 @@ def test_build_block_mask_per_region_topk_and_reference_keep_rate():
     # A dense build (sparsity 0: dense steps) ignores the reference override.
     assert _build_r2v(sparsity=0.0, ref_keep_rate=0.25).span_sparsities == (0.0, 0.0)
     # Dense layers pass sparsity 0 to the mask builder, which overrides the spans.
-    assert _build_block_mask(scores, P, meta.num_video_tiles, 0.0, True, meta.video_tile_spans,
-                             meta.span_sparsities).all()
+    assert _build_block_mask(scores, P, 0.0, True, meta.video_tile_spans, meta.span_sparsities).all()
 
 
-def test_build_target_only_region_matches_single_region_token_mask():
-    """Folding the reference video back into the prefix must reproduce the single-region layout token for token."""
+def test_build_reference_video_region_sparsifies_reference_keys():
+    """A reference-video region sparsifies that video's keys and queries; target-to-target selection is unchanged."""
     torch.manual_seed(4)
     q = torch.randn(1, _R2V_SEQ, 2, 8)
     k = torch.randn(1, _R2V_SEQ, 2, 8)
-    builds = (
-        dict(prefix_segments=(37, 9, 120, 11), raw_latent_shape=(8, 8, 12), video_segments=None,
-             video_offsets=None, ref_keep_rate=None),
-        dict(prefix_segments=(37, 9, 120, 11), video_segments=((8, 8, 12), ), video_offsets=(177, )),
-    )
     allows = []
-    for build in builds:
+    # The reference video's 120 rows as a dense segment, then as its own region.
+    for build in (dict(packed_segments=(37, 9, 120, 11, (8, 8, 12)), ref_keep_rate=None), {}):
         meta = _build_r2v(sparsity=0.75, **build)
         impl = _impl()
         tq, tk = (impl.tile(t, meta).clone() for t in (q, k))
         scores = torch.matmul(_pool_tiles(tq, meta.variable_block_sizes),
                               _pool_tiles(tk, meta.variable_block_sizes).transpose(-2, -1))
         allows.append(torch.stack([_token_allow(meta, _mask(meta, scores, 0.75), 0, h) for h in range(2)]))
-    assert torch.equal(allows[0], allows[1])
-
-    # ...and the multi-region layout (reference video as its own region) is not that layout.
-    meta = _build_r2v(sparsity=0.75)
-    impl = _impl()
-    tq, tk = (impl.tile(t, meta).clone() for t in (q, k))
-    scores = torch.matmul(_pool_tiles(tq, meta.variable_block_sizes),
-                          _pool_tiles(tk, meta.variable_block_sizes).transpose(-2, -1))
-    multi_region_allow = torch.stack([_token_allow(meta, _mask(meta, scores, 0.75), 0, h) for h in range(2)])
-    assert not torch.equal(allows[0], multi_region_allow)
+    dense_reference_allow, multi_region_allow = allows
+    assert dense_reference_allow[..., 46:166].all(), "a dense reference video is visible to every query"
+    assert not torch.equal(dense_reference_allow, multi_region_allow)
     for start, end in _R2V_DENSE_RUNS:
         assert multi_region_allow[:, start:end].all() and multi_region_allow[..., start:end].all(), (start, end)
-    assert not multi_region_allow[:, 200, 46:166].all(), "the multi-region layout sparsifies reference-video keys"
+    assert not multi_region_allow[:, 200, 46:166].all(), "a reference-video region sparsifies its keys"
+    assert torch.equal(dense_reference_allow[:, 177:, 177:], multi_region_allow[:, 177:, 177:])
 
 
 @pytest.mark.parametrize("tile_size", [_TILE_ELEMS, 64, 128])
@@ -369,38 +351,34 @@ def test_build_multi_region_sparsity_zero_matches_dense_sdpa(tile_size):
     assert torch.allclose(sparse_out, dense_out, atol=1e-5), (sparse_out - dense_out).abs().max()
 
 
-def test_build_multi_region_invalid_arguments():
-    with pytest.raises(ValueError, match="exactly one of"):
-        _build_r2v(raw_latent_shape=(8, 8, 12))
-    with pytest.raises(ValueError, match="exactly one of"):
-        _build_r2v(video_segments=None, video_offsets=None)
-    with pytest.raises(ValueError, match="only to a multi-region"):
-        _build_r2v(raw_latent_shape=(8, 8, 12), video_segments=None, ref_keep_rate=0.1)
-    with pytest.raises(ValueError, match="one packed-row offset per region"):
-        _build_r2v(video_offsets=(46, ))
-    with pytest.raises(ValueError, match="do not fill"):
-        _build_r2v(video_offsets=(46, 300))
-    with pytest.raises(ValueError, match="straddles"):
-        _build_r2v(video_offsets=(40, 171))
-    with pytest.raises(ValueError, match="packed order"):
-        _build_r2v(video_segments=((8, 8, 12), (5, 8, 12)), video_offsets=(177, 46))
+def test_build_region_shape_not_multiple_of_patch():
     with pytest.raises(ValueError, match="not a positive multiple of patch"):
-        _build_r2v(video_segments=((5, 7, 12), (8, 8, 12)))
-    # a single-region build through the multi-region signature keeps compete mode
-    meta = _build_r2v(sparsity=0.75, exempt=False, prefix_segments=(37, 20), video_segments=((8, 8, 12), ),
-                      video_offsets=(57, ))
+        _build_r2v(packed_segments=(37, 9, (5, 7, 12), 11, (8, 8, 12)))
+
+
+def test_build_no_video_region():
+    with pytest.raises(ValueError, match="at least one video region"):
+        _build_r2v(packed_segments=(37, 9, 11))
+
+
+def test_build_compete_with_reference_video_regions():
+    with pytest.raises(ValueError, match="compete' supports only the generated-video region"):
+        _build_r2v(sparsity=0.75, exempt=False)
+
+
+def test_build_compete_with_generated_video_only():
+    meta = _build_r2v(sparsity=0.75, exempt=False, packed_segments=(37, 20, (8, 8, 12)))
     assert meta.exempt is False and len(meta.video_tile_spans) == 1
 
 
 def test_assert_multi_region_metadata_rejects_mismatched_metadata():
     single = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
-                                                 raw_latent_shape=(8, 8, 12),
                                                  patch_size=_PATCH,
                                                  VSA_sparsity=0.9,
-                                                 prefix_segments=(37, 9, 120, 11),
+                                                 packed_segments=(37, 9, 120, 11, (8, 8, 12)),
                                                  device=_CPU,
                                                  tile_size=64)
-    with pytest.raises(ValueError, match="Metadata built with the single-region layout"):
+    with pytest.raises(ValueError, match="only sparse region is the generated video"):
         _assert_multi_region_metadata(single, expected_reference_video_regions=1, target_sparsity=0.9,
                                       ref_keep_rate=0.1)
     with pytest.raises(ValueError, match="leave reference-video conditioning dense"):
@@ -494,7 +472,7 @@ def test_forward_tile128_odd_tile_count_adds_partner_tile(tile128):
 
 
 def test_forward_tile128_even_tile_count_no_partner_tile(tile128):
-    meta = _build_r2v(sparsity=0.5, tile_size=128, prefix_segments=(37, 9, 11, 64))
+    meta = _build_r2v(sparsity=0.5, tile_size=128, packed_segments=(37, 9, (5, 8, 12), 11, (8, 8, 12), 64))
     assert meta.variable_block_sizes.numel() % 2 == 0
     tiled, _ = _run_tile128(meta)
     assert tiled.shape[1] == meta.variable_block_sizes.numel() * 128

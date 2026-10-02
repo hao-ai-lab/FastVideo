@@ -310,13 +310,14 @@ def test_forward_unset_ref_keep_rate_keeps_references_in_dense_prefix(monkeypatc
     _run(monkeypatch, layout, transformer, args=args, sparsity=0.9, builder=MiniMaxH3VSAMetadataBuilder())
     for call in transformer.calls:
         metadata = call["attn_metadata"]
-        assert metadata.video_tile_spans == () and metadata.span_sparsities == ()
+        # The generated video is the only sparse region.
+        assert len(metadata.video_tile_spans) == 1 and metadata.span_sparsities == (0.9, )
 
 
 def test_forward_ref_keep_rate_requires_exempt_prefix_keys(monkeypatch):
     layout = _ref2va_layout(_reference_video_and_audio_references())
     args = _args(pdd_step_indices=GRID32_BLOCKS8, vsa_ref_keep_rate=0.1)
-    with pytest.raises(ValueError, match="require vsa_mode='exempt'"):
+    with pytest.raises(ValueError, match="compete' supports only the generated-video region"):
         _run(monkeypatch,
              layout,
              _TinyPDDTransformer(pdd_steps=32),

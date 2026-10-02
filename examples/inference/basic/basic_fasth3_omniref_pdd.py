@@ -14,7 +14,8 @@ transformer forward each), the video/audio shifts, and VIDEO_SPARSE_ATTN_H3
 with its sparsity and tile size, where every reference video is its own
 sparse region. The contract's 128-token tiles run only on the sm_100a/sm_103a
 CUDA kernel (B200/B300/GB200/GB300) of a fastvideo-kernel build with the
-Blackwell VSA extension; the script checks both before loading any weights.
+Blackwell VSA extension; the VSA-H3 backend raises at the first attention call
+when either is missing.
 With ``--num-gpus`` above 1 the DiT is sharded across the GPUs (FSDP) and the
 sequence is split across them (sequence parallelism).
 
@@ -53,8 +54,6 @@ BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae")
 MANIFESTS = ("modular_model_index.json", "model_index.json")
 # Components the composed directory's manifest must declare, besides its transformer_ref.
 MANIFEST_COMPONENTS = ("scheduler", "audio_scheduler", *BASE_COMPONENTS)
-# Data-center Blackwell: the only devices with the 128-token VSA-H3 forward.
-SM100A_CAPABILITIES = frozenset({(10, 0), (10, 3)})
 
 
 class _AppendReference(argparse.Action):
@@ -202,34 +201,6 @@ def resolve_model(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     return compose_model_dir(export_dir, base_dir, composed_dir), contract
 
 
-def _tile128_kernel_is_installed() -> bool:
-    try:
-        from fastvideo_kernel import block_sparse_attn_sm100a
-    except ImportError:
-        return False
-    return getattr(block_sparse_attn_sm100a, "_FWD_BY_BLOCK", {}).get(128) is not None
-
-
-def validate_attention_runtime(contract: dict[str, Any], num_gpus: int) -> None:
-    """Fail before loading any weights when this machine cannot run the contract's attention."""
-    if contract.get("attention_backend") != "VIDEO_SPARSE_ATTN_H3" or contract.get("vsa_tile_size") != 128:
-        return
-    from fastvideo.platforms import current_platform
-
-    # NVML-backed on CUDA: reading capabilities does not initialize CUDA in this process.
-    capabilities = [current_platform.get_device_capability(device) for device in range(num_gpus)]
-    if any(capability is None or tuple(capability) not in SM100A_CAPABILITIES for capability in capabilities):
-        found = ", ".join("none" if capability is None else f"sm_{capability.major}{capability.minor}"
-                          for capability in capabilities)
-        raise RuntimeError("This export's 128-token VSA tiles run only on sm_100a/sm_103a GPUs (B200, B300, GB200, "
-                           f"GB300); the {num_gpus} requested GPU(s) are: {found}.")
-    if not _tile128_kernel_is_installed():
-        raise RuntimeError("This export's 128-token VSA tiles need fastvideo-kernel built with the Blackwell VSA "
-                           "extension (the 128-token block_sparse_attn_sm100a forward). Install it with "
-                           "`UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"`, or build "
-                           "`fastvideo-kernel` on this machine with `./build.sh`.")
-
-
 def build_generator_config(model_dir: Path, num_gpus: int) -> GeneratorConfig:
     return GeneratorConfig(
         model_path=str(model_dir),
@@ -258,7 +229,6 @@ def main() -> None:
     print(f"Contract: {contract['num_inference_steps']} fused blocks of a {contract['pdd_steps']}-interval grid, "
           f"{contract['attention_backend']} with sparsity {contract['vsa_sparsity']}, "
           f"{contract['vsa_tile_size']}-token tiles, reference keep rate {contract['vsa_ref_keep_rate']}")
-    validate_attention_runtime(contract, args.num_gpus)
     references = [MiniMaxH3Reference(source=path, media_type=kind) for kind, path in args.references]
 
     generator = VideoGenerator.from_config(build_generator_config(model_dir, args.num_gpus))

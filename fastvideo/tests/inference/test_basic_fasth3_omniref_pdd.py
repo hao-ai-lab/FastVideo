@@ -8,8 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from fastvideo.platforms.interface import DeviceCapability
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_fasth3_omniref_pdd.py"
 BASE_PIN = "9bfb6693f2cf6de171db46d1aa586f67d773a1da"
@@ -122,33 +120,3 @@ def test_build_generator_config_multi_gpu_shards_dit(tmp_path, num_gpus, sharded
     assert config.engine.use_fsdp_inference is sharded
     assert config.engine.parallelism.sp_size == num_gpus
     assert config.pipeline.components.override_pipeline_cls_name == "MiniMaxH3Ref2VAModularPipeline"
-
-
-@pytest.fixture
-def capabilities(monkeypatch):
-    from fastvideo.platforms import current_platform
-
-    found: list[DeviceCapability | None] = []
-    monkeypatch.setattr(current_platform, "get_device_capability", lambda device_id=0: found[device_id])
-    return found
-
-
-def test_tile128_needs_sm100a_devices(capabilities, monkeypatch):
-    monkeypatch.setattr(example, "_tile128_kernel_is_installed", lambda: True)
-    capabilities[:] = [DeviceCapability(10, 0), DeviceCapability(9, 0)]
-    with pytest.raises(RuntimeError, match="sm_100a/sm_103a GPUs .* are: sm_100, sm_90"):
-        example.validate_attention_runtime(CONTRACT, 2)
-    capabilities[:] = [None]
-    with pytest.raises(RuntimeError, match="are: none"):
-        example.validate_attention_runtime(CONTRACT, 1)
-    capabilities[:] = [DeviceCapability(10, 0), DeviceCapability(10, 3)]
-    example.validate_attention_runtime(CONTRACT, 2)
-
-
-def test_tile128_needs_the_128_token_kernel(capabilities, monkeypatch):
-    capabilities[:] = [DeviceCapability(10, 0)]
-    monkeypatch.setattr(example, "_tile128_kernel_is_installed", lambda: False)
-    with pytest.raises(RuntimeError, match="128-token block_sparse_attn_sm100a forward"):
-        example.validate_attention_runtime(CONTRACT, 1)
-    # Other tile sizes do not need the sm_100a kernel.
-    example.validate_attention_runtime({**CONTRACT, "vsa_tile_size": 64}, 1)
