@@ -154,6 +154,72 @@ class ComponentConfig:
 
 
 @dataclass
+class LTX2RefineConfig:
+    """Stage-2 refine assets that ``preset_overrides.refine`` and ``components`` do not cover."""
+
+    transformer_path: str | None = flat_field("ltx2_refine_transformer_path", None)
+    noise_path: str | None = flat_field("ltx2_refine_noise_path", None)
+    audio_noise_path: str | None = flat_field("ltx2_refine_audio_noise_path", None)
+
+
+@dataclass
+class LTX2Config:
+    """LTX-2 settings. ``None`` keeps the model's default."""
+
+    vae_spatial_tile_size_in_pixels: int | None = flat_field("ltx2_vae_spatial_tile_size_in_pixels", None)
+    vae_spatial_tile_overlap_in_pixels: int | None = flat_field("ltx2_vae_spatial_tile_overlap_in_pixels", None)
+    vae_temporal_tile_size_in_frames: int | None = flat_field("ltx2_vae_temporal_tile_size_in_frames", None)
+    vae_temporal_tile_overlap_in_frames: int | None = flat_field("ltx2_vae_temporal_tile_overlap_in_frames", None)
+    initial_latent_path: str | None = flat_field("ltx2_initial_latent_path", None)
+    """Path to load or save a precomputed initial video latent."""
+    audio_latent_path: str | None = flat_field("ltx2_audio_latent_path", None)
+    """Path to load or save a precomputed initial audio latent."""
+    legacy_native_noise_order: bool | None = flat_field("ltx2_legacy_native_noise_order", None)
+    """Draw latent noise in the legacy native order, which earlier SSIM references use."""
+    use_distilled_sigmas: bool | None = flat_field("ltx2_use_distilled_sigmas", None)
+    """Use the distilled sigma schedule when the checkpoint provides one."""
+    refine: LTX2RefineConfig = field(default_factory=LTX2RefineConfig)
+
+
+@dataclass
+class MiniMaxH3Config:
+    """MiniMax-H3 settings. ``None`` keeps the model's default."""
+
+    sequential_load: bool | None = flat_field("h3_sequential_load", None)
+    """Encode with Qwen3-VL, release that encoder, then load the DiT and VAEs. ``None`` enables it on
+    unified-memory devices only."""
+    video_decode_backend: Literal["h3-vae", "taeh3"] | None = flat_field("video_decode_backend", None)
+    """``h3-vae`` is the full VAE; ``taeh3`` is a fast approximate preview decoder."""
+    taeh3_checkpoint: str | None = flat_field("taeh3_checkpoint", None)
+    """Local ``taeh3.safetensors`` path. ``None`` downloads the pinned upstream weights."""
+    taeh3_chunk_size: int | None = flat_field("taeh3_chunk_size", None)
+    """TAEH3 latent frames per execution chunk."""
+    vae_parallel_decode: bool | None = flat_field("vae_parallel_decode", None)
+    """Spread VAE decode chunks across the sequence-parallel ranks. ``None`` falls back to
+    ``FASTVIDEO_VAE_PARALLEL_DECODE``."""
+    vae_parallel_encode: bool | None = flat_field("vae_parallel_encode", None)
+    """Spread reference-video VAE encode clips across the sequence-parallel ranks. ``None`` falls back to
+    ``FASTVIDEO_VAE_PARALLEL_ENCODE``."""
+    vae_parallel_decode_strategy: Literal["gather", "all_gather"] | None = flat_field(
+        "vae_parallel_decode_strategy", None)
+    """Collective that moves decoded chunks. ``None`` falls back to ``FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY``,
+    then ``gather``."""
+
+
+@dataclass
+class LongCatConfig:
+    """LongCat block sparse attention (BSA) settings. ``None`` keeps the model's default."""
+
+    enable_bsa: bool | None = flat_field("enable_bsa", None)
+    bsa_sparsity: float | None = flat_field("bsa_sparsity", None)
+    bsa_cdf_threshold: float | None = flat_field("bsa_cdf_threshold", None)
+    bsa_chunk_q: list[int] | None = flat_field("bsa_chunk_q", None)
+    """Query chunk shape as ``[T, H, W]``."""
+    bsa_chunk_k: list[int] | None = flat_field("bsa_chunk_k", None)
+    """Key chunk shape as ``[T, H, W]``."""
+
+
+@dataclass
 class PipelineSelection:
     workload_type: Literal["t2v", "i2v", "t2i", "i2i", "v2a", "t2a"] | None = flat_field("workload_type", None)
     preset: str | None = None
@@ -169,6 +235,13 @@ class PipelineSelection:
     """Guidance scale that guidance-distilled models take as a DiT input. ``None`` keeps the model's default."""
     dmd_denoising_steps: list[int] | None = flat_field("dmd_denoising_steps", None)
     """Timesteps of a few-step distilled (DMD) sampler. ``None`` keeps the model's default."""
+    dit: dict[str, Any] = field(default_factory=dict)
+    """Overrides for fields of the model's DiT config, such as ``prefix``."""
+    vae: dict[str, Any] = field(default_factory=dict)
+    """Overrides for fields of the model's VAE config, such as ``load_encoder`` or ``use_tiling``."""
+    ltx2: LTX2Config = field(default_factory=LTX2Config)
+    minimax_h3: MiniMaxH3Config = field(default_factory=MiniMaxH3Config)
+    longcat: LongCatConfig = field(default_factory=LongCatConfig)
     preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
 
@@ -363,6 +436,10 @@ __all__ = [
     "GeneratorConfig",
     "GpuPoolConfig",
     "InputConfig",
+    "LTX2Config",
+    "LTX2RefineConfig",
+    "LongCatConfig",
+    "MiniMaxH3Config",
     "OffloadConfig",
     "OutputConfig",
     "ParallelismConfig",

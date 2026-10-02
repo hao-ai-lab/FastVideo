@@ -110,6 +110,9 @@ def legacy_from_pretrained_to_config(
                 _set_dotted_path(raw, ["engine", "compile", "extras"], remaining)
         elif key == "pipeline_config" and not isinstance(value, str):
             experimental[key] = deepcopy(value)
+        elif key.startswith(tuple(_COMPONENT_OVERRIDE_PREFIXES)):
+            component, field_name = key.split(".", 1)
+            _set_dotted_path(raw, ["pipeline", _COMPONENT_OVERRIDE_PREFIXES[component + "."], field_name], value)
         elif key in _LTX2_REFINE_PRESET_KEYWORDS:
             _set_dotted_path(raw, ["pipeline", "preset_overrides", "refine", key[len("ltx2_refine_"):]], value)
         elif key in _EMPTY_MEANS_UNSET_KEYWORDS:
@@ -165,6 +168,10 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         from fastvideo.layers.quantization import get_quantization_config
         _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
         kwargs["transformer_quant"] = _resolved_quant_cls()
+
+    for prefix, section in _COMPONENT_OVERRIDE_PREFIXES.items():
+        for field_name, value in getattr(normalized.pipeline, section).items():
+            kwargs[f"{prefix}{field_name}"] = deepcopy(value)
 
     preset_overrides = deepcopy(normalized.pipeline.preset_overrides)
     refine = preset_overrides.pop("refine", None)
@@ -303,8 +310,15 @@ _SPECIALLY_MAPPED_PATHS: dict[str, str] = {
     "pipeline.preset": "not supported",
     "pipeline.preset_version": "not supported",
     "pipeline.components.vae_weights": "not supported",
+    "pipeline.dit": "keys passed as dit_config.<key>",
+    "pipeline.vae": "keys passed as vae_config.<key>",
     "pipeline.preset_overrides": "keys passed as flat keywords; refine keys renamed to ltx2_refine_*",
     "pipeline.experimental": "keys passed as flat keywords",
+}
+# Flat keyword prefix for a component config override -> the PipelineSelection dict that holds the overrides.
+_COMPONENT_OVERRIDE_PREFIXES = {
+    "dit_config.": "dit",
+    "vae_config.": "vae",
 }
 # from_pretrained keywords whose empty-string value means "unset", and the field each one sets.
 # ltx2_refine_lora_path sets the main LoRA path.

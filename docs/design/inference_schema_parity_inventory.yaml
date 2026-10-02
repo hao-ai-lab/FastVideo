@@ -71,33 +71,32 @@ surfaces:
       VSA_tile_size: generator.engine.attention.vsa_tile_size
       moba_config_path: generator.engine.attention.moba_config_path
       inference_torch_compile: generator.engine.compile.regional
-    preset_owned:
-      ltx2_vae_spatial_tile_size_in_pixels: generator.pipeline.preset_overrides.ltx2.vae.spatial_tile_size_in_pixels
-      ltx2_vae_spatial_tile_overlap_in_pixels: generator.pipeline.preset_overrides.ltx2.vae.spatial_tile_overlap_in_pixels
-      ltx2_vae_temporal_tile_size_in_frames: generator.pipeline.preset_overrides.ltx2.vae.temporal_tile_size_in_frames
-      ltx2_vae_temporal_tile_overlap_in_frames: generator.pipeline.preset_overrides.ltx2.vae.temporal_tile_overlap_in_frames
-      ltx2_initial_latent_path: request.extensions.ltx2.initial_latent_path
-      ltx2_audio_latent_path: request.extensions.ltx2.audio_latent_path
+      vae_parallel_decode: generator.pipeline.minimax_h3.vae_parallel_decode
+      vae_parallel_encode: generator.pipeline.minimax_h3.vae_parallel_encode
+      vae_parallel_decode_strategy: generator.pipeline.minimax_h3.vae_parallel_decode_strategy
+      h3_sequential_load: generator.pipeline.minimax_h3.sequential_load
+      video_decode_backend: generator.pipeline.minimax_h3.video_decode_backend
+      taeh3_checkpoint: generator.pipeline.minimax_h3.taeh3_checkpoint
+      taeh3_chunk_size: generator.pipeline.minimax_h3.taeh3_chunk_size
+      refine_transformer_path: generator.pipeline.ltx2.refine.transformer_path
+      refine_noise_path: generator.pipeline.ltx2.refine.noise_path
+      refine_audio_noise_path: generator.pipeline.ltx2.refine.audio_noise_path
+      ltx2_refine_transformer_path: generator.pipeline.ltx2.refine.transformer_path
+      ltx2_refine_noise_path: generator.pipeline.ltx2.refine.noise_path
+      ltx2_refine_audio_noise_path: generator.pipeline.ltx2.refine.audio_noise_path
+      ltx2_legacy_native_noise_order: generator.pipeline.ltx2.legacy_native_noise_order
+      ltx2_use_distilled_sigmas: generator.pipeline.ltx2.use_distilled_sigmas
+      ltx2_vae_spatial_tile_size_in_pixels: generator.pipeline.ltx2.vae_spatial_tile_size_in_pixels
+      ltx2_vae_spatial_tile_overlap_in_pixels: generator.pipeline.ltx2.vae_spatial_tile_overlap_in_pixels
+      ltx2_vae_temporal_tile_size_in_frames: generator.pipeline.ltx2.vae_temporal_tile_size_in_frames
+      ltx2_vae_temporal_tile_overlap_in_frames: generator.pipeline.ltx2.vae_temporal_tile_overlap_in_frames
+      ltx2_initial_latent_path: generator.pipeline.ltx2.initial_latent_path
+      ltx2_audio_latent_path: generator.pipeline.ltx2.audio_latent_path
     compatibility_only:
       mode: "Legacy multi-mode FastVideoArgs switch; typed inference config should not expose execution mode."
       inference_mode: "Legacy boolean mirror of mode; kept only through adapters while FastVideoArgs remains."
       output_type: "Legacy output formatting surface pending GenerationResult cleanup."
-      vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
-      h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
-      video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
-      taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
-      taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
-      vae_parallel_encode: "MiniMax-H3 sequence-parallel reference VAE encode opt-in; model-specific optimization not yet represented in the typed public schema."
-      vae_parallel_decode_strategy: "Chunk-transport collective for vae_parallel_decode; model-specific optimization not yet represented in the typed public schema."
       master_port: "Executor/bootstrap compatibility field; not part of the canonical inference schema."
-      refine_transformer_path: "Generic stage-2 refine transformer override; no typed equivalent yet."
-      refine_noise_path: "Generic stage-2 refine noise override; no typed equivalent yet."
-      refine_audio_noise_path: "Generic stage-2 refine audio noise override; no typed equivalent yet."
-      ltx2_refine_transformer_path: "LTX-2 refine transformer carrier; no typed equivalent yet."
-      ltx2_refine_noise_path: "LTX-2 refine noise carrier; no typed equivalent yet."
-      ltx2_refine_audio_noise_path: "LTX-2 refine audio noise carrier; no typed equivalent yet."
-      ltx2_legacy_native_noise_order: "LTX-2 SSIM compatibility knob preserving legacy native latent noise ordering."
-      ltx2_use_distilled_sigmas: "LTX-2 compatibility knob gating use of distilled sigma schedule."
     private_only:
       ray_placement_group: "Ray deployment-only field."
       ray_runtime_env: "Ray deployment-only field."
@@ -326,16 +325,21 @@ surfaces:
           - fastvideo.configs.pipelines.wan.WanT2V720PConfig
       bsa_cdf_threshold:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.bsa_cdf_threshold
       bsa_chunk_k:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.bsa_chunk_k
       bsa_chunk_q:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.bsa_chunk_q
       bsa_params:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
       bsa_sparsity:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.bsa_sparsity
       enable_bsa:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.enable_bsa
       enable_kv_cache:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
       enhance_hf:
