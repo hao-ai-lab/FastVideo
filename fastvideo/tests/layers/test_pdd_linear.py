@@ -35,7 +35,7 @@ def _time_shift(value: torch.Tensor, shift: float, max_t: float = PDD_GRID_MAX_T
 
 
 @pytest.mark.parametrize("shift", [1.0, 0.25, 3.0, 12.0])
-def test_shifted_noise_amount_is_the_rational_time_shift(shift: float) -> None:
+def test_shifted_noise_amount_matches_rational_time_shift(shift: float) -> None:
     base = torch.linspace(0.0, PDD_GRID_MAX_T, 17, dtype=torch.float64)
     torch.testing.assert_close(shifted_noise_amount(base, shift), _time_shift(base, shift), rtol=0.0, atol=1e-15)
     # max_t is a fixed point of every shift, so the first node has the same
@@ -45,7 +45,7 @@ def test_shifted_noise_amount_is_the_rational_time_shift(shift: float) -> None:
 
 
 @pytest.mark.parametrize("shift", [1.0, 0.25, 12.0])
-def test_shifted_noise_delta_matches_the_direct_difference(shift: float) -> None:
+def test_shifted_noise_delta_matches_direct_difference(shift: float) -> None:
     grid = pdd_fine_grid(256)
     direct = shifted_noise_amount(grid[1:], shift) - shifted_noise_amount(grid[:-1], shift)
     delta = shifted_noise_delta(grid[:-1], grid[1:], shift)
@@ -98,7 +98,7 @@ def test_build_pdd_sampling_plan_mismatched_max_t() -> None:
         build_pdd_sampling_plan([0, 4, 8], schedules)
 
 
-def test_build_pdd_sampling_plan_grid32_eight_blocks_feed_the_h3_schedulers() -> None:
+def test_build_pdd_sampling_plan_grid32_eight_blocks_feed_h3_schedulers() -> None:
     """The exported contract (Grid32, blocks of 4, shifts 12/3) as the stage builds it."""
     plan = build_pdd_sampling_plan(GRID32_BLOCKS8, {
         "video": PDDModalitySchedule(shift=12.0),
@@ -146,7 +146,7 @@ def test_fused_params_use_normalized_integration_weights() -> None:
     torch.testing.assert_close(actual_bias, expected_bias, rtol=1e-6, atol=1e-6)
 
 
-def test_fused_forward_is_the_weighted_mean_of_materialized_heads() -> None:
+def test_forward_fused_block_weighted_mean_of_materialized_heads() -> None:
     torch.manual_seed(3)
     grid, out_features, in_features = 6, 4, 5
     linear = _randomized(PDDReplicatedLinear(in_features, out_features, grid_size=grid, params_dtype=torch.float32))
@@ -167,7 +167,7 @@ def test_fused_forward_is_the_weighted_mean_of_materialized_heads() -> None:
     torch.testing.assert_close(linear(x)[0].unflatten(-1, (grid, out_features)), heads)
 
 
-def test_fused_bf16_heads_accumulate_in_the_decoding_precision() -> None:
+def test_fused_params_bf16_heads_accumulate_in_decoding_precision() -> None:
     torch.manual_seed(5)
     linear = _randomized(PDDReplicatedLinear(8, 3, grid_size=4, params_dtype=torch.bfloat16))
     weights = PDDModalitySchedule(shift=12.0).integration_weights(pdd_fine_grid(4))
@@ -198,7 +198,7 @@ def test_fuse_pdd_heads_fuses_every_modality_head_at_once() -> None:
         assert linear._fusion_state is None
 
 
-def test_fuse_nested_contexts_restore_the_previous_state() -> None:
+def test_fuse_nested_contexts_restore_outer_state() -> None:
     linear = _randomized(PDDReplicatedLinear(3, 2, grid_size=4, params_dtype=torch.float32))
     weights = PDDModalitySchedule(shift=1.0).integration_weights(pdd_fine_grid(4))
     with linear.fuse(0, 4, weights, torch.float32):

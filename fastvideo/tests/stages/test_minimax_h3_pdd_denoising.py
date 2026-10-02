@@ -86,7 +86,7 @@ def test_pdd_sampling_plan_unset_step_indices():
     assert _plan(_stage(), _args()) is None
 
 
-def test_pdd_sampling_plan_uses_the_contract_partition_and_each_modality_shift():
+def test_pdd_sampling_plan_uses_contract_partition_and_modality_shifts():
     plan = _plan(_stage(), _args(pdd_step_indices=GRID32_BLOCKS8))
     assert plan.indices.tolist() == list(GRID32_BLOCKS8)
     base = pdd_fine_grid(32)[list(GRID32_BLOCKS8)]
@@ -94,7 +94,7 @@ def test_pdd_sampling_plan_uses_the_contract_partition_and_each_modality_shift()
     torch.testing.assert_close(plan.node_sigmas["audio"], shifted_noise_amount(base, 3.0), rtol=0, atol=0)
 
 
-def test_scheduler_step_over_a_pdd_block_equals_the_fused_block_advance():
+def test_step_pdd_block_equals_fused_block_advance():
     """x_end = x_start + sum_j w_j * dx/dsigma_j with the raw H3 output m = x0 - eps = -dx/dsigma."""
     torch.manual_seed(0)
     stage = _stage()
@@ -118,7 +118,7 @@ def test_scheduler_step_over_a_pdd_block_equals_the_fused_block_advance():
         video, audio = stepped_video, stepped_audio
 
 
-def test_scale_pdd_initial_noise_starts_targets_at_the_first_node_sigma():
+def test_scale_pdd_initial_noise_starts_targets_at_first_node_sigma():
     plan = _plan(_stage(), _args(pdd_step_indices=GRID8_BLOCKS4))
     layout = SimpleNamespace(num_condition_video_rows=2, num_condition_audio_rows=1)
     video, audio = torch.randn(5, 6), torch.randn(4, 3)
@@ -204,7 +204,7 @@ def _reference_video_and_audio_references():
     ]
 
 
-def test_forward_pdd_runs_eight_fused_blocks_from_the_contract(monkeypatch):
+def test_forward_pdd_runs_eight_fused_blocks_from_contract(monkeypatch):
     layout = _ref2va_layout(_reference_video_and_audio_references())
     transformer = _TinyPDDTransformer(pdd_steps=32)
     args = _args(pdd_step_indices=GRID32_BLOCKS8)
@@ -289,7 +289,7 @@ def test_forward_ref_keep_rate_builds_one_sparse_region_per_reference_video(monk
     (0.9, "each reference keeps 0.25 of its tiles and the target keeps 0.1"),
     (0.0, "VSA_sparsity=0 keeps every region dense"),
 ])
-def test_forward_ref_keep_rate_logs_the_applied_sparsity(monkeypatch, sparsity, effect):
+def test_forward_ref_keep_rate_logs_applied_sparsity(monkeypatch, sparsity, effect):
     infos = []
     monkeypatch.setattr(denoising.logger, "info", lambda message, *args: infos.append(message % args))
     layout = _ref2va_layout(_reference_video_and_audio_references())
@@ -303,7 +303,7 @@ def test_forward_ref_keep_rate_logs_the_applied_sparsity(monkeypatch, sparsity, 
     assert f"MiniMax-H3 VSA-H3: 1 reference video region(s); {effect}; 128-token tiles." in infos
 
 
-def test_forward_unset_ref_keep_rate_keeps_references_in_the_dense_prefix(monkeypatch):
+def test_forward_unset_ref_keep_rate_keeps_references_in_dense_prefix(monkeypatch):
     layout = _ref2va_layout(_reference_video_and_audio_references())
     transformer = _TinyPDDTransformer(pdd_steps=32)
     args = _args(pdd_step_indices=GRID32_BLOCKS8)

@@ -158,7 +158,7 @@ _LAYOUTS = {
 
 @pytest.mark.parametrize("name", sorted(_LAYOUTS))
 @pytest.mark.parametrize("tile_size", [64, 128, 256])
-def test_ref2va_segments_tile_every_layout_in_packed_order(name, tile_size):
+def test_h3_vsa_ref2va_segments_tile_layouts_in_packed_order(name, tile_size):
     references, prefix, videos, offsets = _LAYOUTS[name]
     layout = _layout(references)
     assert _h3_vsa_ref2va_segments(layout, _PATCH) == (prefix, videos, offsets)
@@ -192,7 +192,7 @@ def test_ref2va_segments_tile_every_layout_in_packed_order(name, tile_size):
     assert torch.equal(_impl().tile(x, meta)[:, meta.untile_combined_index], x)
 
 
-def test_ref2va_segments_require_reference_spans():
+def test_h3_vsa_ref2va_segments_missing_reference_spans():
     layout = _layout([_reference("image")])
     stripped = type(layout)(**{**layout.__dict__, "reference_segments": ()})
     with pytest.raises(ValueError, match="per-reference spans"):
@@ -205,7 +205,7 @@ def test_ref2va_segments_require_reference_spans():
 
 
 @pytest.mark.parametrize("tile_size,width", [(64, 4), (128, 8)])
-def test_multi_region_geometry_native_tile_oracle(tile_size, width):
+def test_build_multi_region_native_tile_geometry(tile_size, width):
     """Hand-computed per-region (4,4,4)/(4,4,8) tile ids and sizes at true offsets."""
     meta = _build_r2v(tile_size=tile_size)
     assert meta.total_seq_length == _R2V_SEQ
@@ -238,9 +238,10 @@ def test_multi_region_geometry_native_tile_oracle(tile_size, width):
 
 
 # SHA-256 of the single-region tile geometry (partition indices, block sizes,
-# untile index, prefix and video tile counts) computed by upstream main at
-# 9edc8adf5, before the multi-region refactor. Frozen so the refactored path
-# is checked against the original implementation, not against itself.
+# untile index, prefix and video tile counts) that _h3_tile_geometry returned at
+# commit 9edc8adf5, where MiniMaxH3VSAMetadataBuilder supported only one sparse video region. The
+# hashes are fixed so the geometry is compared with that recorded output
+# instead of with the code under test.
 _SINGLE_REGION_GEOMETRY_SHA256 = {
     ((37, 9, 120, 11), (8, 4, 6), 64): "e246d39c1be206be5b9ad938438d0594fea013d5e8c4fcb08bce05face5d4220",
     ((37, 9, 120, 11), (8, 4, 6), 128): "bce9def60b23ef5dc71d790e367480c2c22e0e6f414678b72844b808d7f96bd9",
@@ -268,12 +269,12 @@ def _geometry_sha256(outputs):
 
 
 @pytest.mark.parametrize("prefix_segments,dit_seq_shape,tile_size", sorted(_SINGLE_REGION_GEOMETRY_SHA256))
-def test_single_region_geometry_matches_the_pre_refactor_implementation(prefix_segments, dit_seq_shape, tile_size):
+def test_h3_tile_geometry_single_region_matches_frozen_hashes(prefix_segments, dit_seq_shape, tile_size):
     geometry = _h3_tile_geometry(prefix_segments, dit_seq_shape, _CPU, VSA_H3_TILE_SHAPES[tile_size])
     assert _geometry_sha256(geometry) == _SINGLE_REGION_GEOMETRY_SHA256[prefix_segments, dit_seq_shape, tile_size]
 
 
-def test_a_single_region_build_uses_the_single_region_geometry():
+def test_build_single_region_matches_h3_tile_geometry():
     single = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
                                                  raw_latent_shape=(8, 8, 12),
                                                  patch_size=_PATCH,
@@ -287,7 +288,7 @@ def test_a_single_region_build_uses_the_single_region_geometry():
     assert torch.equal(single.untile_combined_index, geometry[2])
 
 
-def test_multi_region_span_topk_and_reference_keep_rate():
+def test_build_block_mask_per_region_topk_and_reference_keep_rate():
     """Every video query keeps exactly k_i tiles of EACH region; prefix stays dense."""
     torch.manual_seed(3)
     meta = _build_r2v(sparsity=0.75, tile_size=64, ref_keep_rate=0.5)
@@ -316,7 +317,7 @@ def test_multi_region_span_topk_and_reference_keep_rate():
                              meta.span_sparsities).all()
 
 
-def test_target_only_region_reproduces_the_single_region_token_mask():
+def test_build_target_only_region_matches_single_region_token_mask():
     """Folding the reference video back into the prefix must reproduce the single-region layout token for token."""
     torch.manual_seed(4)
     q = torch.randn(1, _R2V_SEQ, 2, 8)
@@ -342,15 +343,15 @@ def test_target_only_region_reproduces_the_single_region_token_mask():
     tq, tk = (impl.tile(t, meta).clone() for t in (q, k))
     scores = torch.matmul(_pool_tiles(tq, meta.variable_block_sizes),
                           _pool_tiles(tk, meta.variable_block_sizes).transpose(-2, -1))
-    p2_allow = torch.stack([_token_allow(meta, _mask(meta, scores, 0.75), 0, h) for h in range(2)])
-    assert not torch.equal(allows[0], p2_allow)
+    multi_region_allow = torch.stack([_token_allow(meta, _mask(meta, scores, 0.75), 0, h) for h in range(2)])
+    assert not torch.equal(allows[0], multi_region_allow)
     for start, end in _R2V_DENSE_RUNS:
-        assert p2_allow[:, start:end].all() and p2_allow[..., start:end].all(), (start, end)
-    assert not p2_allow[:, 200, 46:166].all(), "P2 sparsifies reference-video keys"
+        assert multi_region_allow[:, start:end].all() and multi_region_allow[..., start:end].all(), (start, end)
+    assert not multi_region_allow[:, 200, 46:166].all(), "the multi-region layout sparsifies reference-video keys"
 
 
 @pytest.mark.parametrize("tile_size", [_TILE_ELEMS, 64, 128])
-def test_multi_region_sparsity_zero_matches_dense_sdpa(tile_size):
+def test_build_multi_region_sparsity_zero_matches_dense_sdpa(tile_size):
     torch.manual_seed(5)
     meta = _build_r2v(tile_size=tile_size)
     q, k, v = (torch.randn(1, _R2V_SEQ, 2, 8) for _ in range(3))
@@ -368,7 +369,7 @@ def test_multi_region_sparsity_zero_matches_dense_sdpa(tile_size):
     assert torch.allclose(sparse_out, dense_out, atol=1e-5), (sparse_out - dense_out).abs().max()
 
 
-def test_multi_region_guard_rejections():
+def test_build_multi_region_invalid_arguments():
     with pytest.raises(ValueError, match="exactly one of"):
         _build_r2v(raw_latent_shape=(8, 8, 12))
     with pytest.raises(ValueError, match="exactly one of"):
@@ -391,7 +392,7 @@ def test_multi_region_guard_rejections():
     assert meta.exempt is False and len(meta.video_tile_spans) == 1
 
 
-def test_the_multi_region_oracle_rejects_single_region_metadata_and_dense_references():
+def test_assert_multi_region_metadata_rejects_mismatched_metadata():
     single = MiniMaxH3VSAMetadataBuilder().build(current_timestep=0,
                                                  raw_latent_shape=(8, 8, 12),
                                                  patch_size=_PATCH,
@@ -477,7 +478,7 @@ def _run_tile128(meta, requires_grad=False):
     return tiled, impl.forward(query, key, value, None, meta)
 
 
-def test_tile128_routes_to_the_cuda_kernel_with_an_odd_tile_partner(tile128):
+def test_forward_tile128_odd_tile_count_adds_partner_tile(tile128):
     meta = _build_r2v(sparsity=0.5, tile_size=128, ref_keep_rate=0.25)
     n_tiles = meta.variable_block_sizes.numel()
     assert n_tiles % 2 == 1
@@ -492,7 +493,7 @@ def test_tile128_routes_to_the_cuda_kernel_with_an_odd_tile_partner(tile128):
     assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
 
 
-def test_tile128_even_tile_count_needs_no_partner(tile128):
+def test_forward_tile128_even_tile_count_no_partner_tile(tile128):
     meta = _build_r2v(sparsity=0.5, tile_size=128, prefix_segments=(37, 9, 11, 64))
     assert meta.variable_block_sizes.numel() % 2 == 0
     tiled, _ = _run_tile128(meta)
@@ -500,7 +501,7 @@ def test_tile128_even_tile_count_needs_no_partner(tile128):
     assert len(tile128.calls) == 1
 
 
-def test_tile128_fails_closed_without_the_cuda_kernel(tile128, monkeypatch):
+def test_forward_tile128_unavailable_cuda_kernel(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     tile128.supported = False
     with pytest.raises(RuntimeError, match="tile 128 requires the sm_100a/sm_103a CUDA block-sparse kernel"):
@@ -510,7 +511,7 @@ def test_tile128_fails_closed_without_the_cuda_kernel(tile128, monkeypatch):
         _run_tile128(meta)
 
 
-def test_tile128_route_is_resolved_once_per_device(tile128):
+def test_forward_tile128_route_resolved_once_per_device(tile128):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     probes = []
     tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) or True
@@ -531,14 +532,14 @@ def test_tile128_route_is_resolved_once_per_device(tile128):
     assert probes == [_CPU, _CPU]
 
 
-def test_tile128_is_inference_only(tile128):
+def test_forward_tile128_requires_no_grad(tile128):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     with pytest.raises(NotImplementedError, match="no-grad inference"):
         _run_tile128(meta, requires_grad=True)
     assert tile128.calls == []
 
 
-def test_tile128_rejects_regional_fullgraph_compile(tile128, monkeypatch):
+def test_forward_tile128_rejects_regional_fullgraph_compile(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     impl = _impl(_DIM)
     impl._regional_compile_sm100a_enabled = True
@@ -548,7 +549,7 @@ def test_tile128_rejects_regional_fullgraph_compile(tile128, monkeypatch):
         impl.forward(q, q, q, None, meta)
 
 
-def test_tile128_geometry_uses_4x4x8_tiles():
+def test_build_tile128_uses_4x4x8_tiles():
     meta = _build_r2v(tile_size=128)
     assert meta.tile_elems == 128
     assert int(meta.variable_block_sizes.max()) <= 128
@@ -559,7 +560,7 @@ def test_tile128_geometry_uses_4x4x8_tiles():
 
 
 @pytest.mark.parametrize("sparsity,ref_keep_rate", [(0.5, 0.25), (0.9, 0.1)])
-def test_real_sm100a_tile128_matches_the_token_mask_oracle(env_overrides, sparsity, ref_keep_rate):
+def test_forward_tile128_real_sm100a_kernel_matches_oracle(env_overrides, sparsity, ref_keep_rate):
     """The real 128-token CUDA forward on a multi-region layout against an FP32 masked-SDPA oracle."""
     if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
         pytest.skip("requires an sm_100a/sm_103a GPU (B200, B300, GB200, GB300)")

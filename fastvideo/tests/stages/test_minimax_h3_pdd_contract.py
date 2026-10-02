@@ -9,8 +9,8 @@ a tunable setting (VSA sparsity, reference keep rate) with a warning, and
 rejects a file that is incomplete or disagrees with the checkpoint file that owns
 a value. In the worker, ``MiniMaxH3BasePipeline`` checks its transformer before
 loading weights: against those settings, and, when the transformer carries VSA
-compression gates, against the run's attention backend. DMD exports keep their
-schedule handling (see test_minimax_h3_distilled_schedule.py).
+compression gates, against the run's attention backend. A DMD export's schedule
+comes from its ``dmd_denoising_steps`` (see test_minimax_h3_distilled_schedule.py).
 """
 from __future__ import annotations
 

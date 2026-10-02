@@ -52,7 +52,7 @@ def _args(*overrides: str):
     (("--base-model-path", "someone/mirror"), ("someone/mirror", None)),
     (("--base-model-path", "someone/mirror", "--base-revision", "abc"), ("someone/mirror", "abc")),
 ])
-def test_base_model_source(overrides, expected):
+def test_base_model_source_command_line_overrides(overrides, expected):
     assert example.base_model_source(_args(*overrides), CONTRACT) == expected
 
 
@@ -60,7 +60,7 @@ def test_base_model_source(overrides, expected):
     BASE_PIN, f"MiniMaxAI/MiniMax-H3@{BASE_PIN}", "hf://MiniMaxAI/MiniMax-H3", "hf://@abc", "", None,
 ])
 @pytest.mark.parametrize("overrides", [(), ("--base-model-path", "someone/mirror")])
-def test_an_unparsable_base_pin_is_an_error(pin, overrides):
+def test_base_model_source_unparsable_base_pin(pin, overrides):
     """Never a silent fall back to the base repo's latest revision; the pipeline rejects the same values."""
     with pytest.raises(ValueError, match="must be hf://<repo id>@<revision>"):
         example.base_model_source(_args(*overrides), {**CONTRACT, "base_model_revision": pin})
@@ -92,7 +92,7 @@ def _snapshot_dir(root: Path, components, manifest):
     (_EXPORT_ONLY_MANIFEST, "base"),
     (None, "base"),
 ])
-def test_the_composed_manifest_declares_every_linked_component(tmp_path, export_manifest, chosen):
+def test_compose_model_dir_selects_complete_manifest(tmp_path, export_manifest, chosen):
     export = _snapshot_dir(tmp_path / "export", example.EXPORT_COMPONENTS, export_manifest)
     (export / example.CONTRACT).write_text(json.dumps(CONTRACT))
     base = _snapshot_dir(tmp_path / "base", example.BASE_COMPONENTS, _FULL_MANIFEST)
@@ -103,7 +103,7 @@ def test_the_composed_manifest_declares_every_linked_component(tmp_path, export_
         assert (composed / name).exists()
 
 
-def test_a_manifest_missing_components_everywhere_is_an_error(tmp_path):
+def test_compose_model_dir_no_complete_manifest(tmp_path):
     export = _snapshot_dir(tmp_path / "export", example.EXPORT_COMPONENTS, _EXPORT_ONLY_MANIFEST)
     (export / example.CONTRACT).write_text(json.dumps(CONTRACT))
     base = _snapshot_dir(tmp_path / "base", example.BASE_COMPONENTS, _EXPORT_ONLY_MANIFEST)
@@ -111,13 +111,13 @@ def test_a_manifest_missing_components_everywhere_is_an_error(tmp_path):
         example.compose_model_dir(export, base, tmp_path / "composed")
 
 
-def test_build_generator_config_leaves_trained_settings_to_the_checkpoint(tmp_path):
+def test_build_generator_config_leaves_trained_settings_to_checkpoint(tmp_path):
     # FastVideo reads the trained attention settings from the composed directory's fastvideo_inference.json.
     assert example.build_generator_config(tmp_path, 1).pipeline.experimental == {}
 
 
 @pytest.mark.parametrize("num_gpus,sharded", [(1, False), (4, True)])
-def test_multi_gpu_runs_shard_the_dit(tmp_path, num_gpus, sharded):
+def test_build_generator_config_multi_gpu_shards_dit(tmp_path, num_gpus, sharded):
     config = example.build_generator_config(tmp_path, num_gpus)
     assert config.engine.use_fsdp_inference is sharded
     assert config.engine.parallelism.sp_size == num_gpus

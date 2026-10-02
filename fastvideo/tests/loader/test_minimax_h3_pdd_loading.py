@@ -151,7 +151,7 @@ def _load(path):
     return component_loader.TransformerLoader().load(str(path), args)
 
 
-def test_widened_heads_and_trained_gates_load_exactly(tmp_path, vsa_gates):
+def test_load_widened_heads_and_trained_gates_exactly(tmp_path, vsa_gates):
     path, tensors = _write_transformer_ref(tmp_path, config_pdd_steps=PDD_STEPS)
     model = _load(path)
 
@@ -174,7 +174,7 @@ def test_widened_heads_and_trained_gates_load_exactly(tmp_path, vsa_gates):
         assert all(block.attn._gate_active() for block in model.transformer_blocks)
 
 
-def test_export_without_gates_keeps_the_gate_branch_disabled(tmp_path, vsa_gates):
+def test_load_export_without_gates_disables_gate_branch(tmp_path, vsa_gates):
     path, _ = _write_transformer_ref(tmp_path, config_pdd_steps=PDD_STEPS, with_gates=False)
     model = _load(path)
     with torch.no_grad():
@@ -182,14 +182,14 @@ def test_export_without_gates_keeps_the_gate_branch_disabled(tmp_path, vsa_gates
 
 
 @pytest.mark.parametrize("config_pdd_steps,weight_pdd_steps", [(None, PDD_STEPS), (PDD_STEPS, None), (8, PDD_STEPS)])
-def test_config_and_weight_grids_must_agree(tmp_path, vsa_gates, config_pdd_steps, weight_pdd_steps):
+def test_load_mismatched_config_and_weight_grids(tmp_path, vsa_gates, config_pdd_steps, weight_pdd_steps):
     path, _ = _write_transformer_ref(tmp_path, config_pdd_steps=config_pdd_steps, weight_pdd_steps=weight_pdd_steps)
     # ReplicatedLinear.weight_loader rejects the shape; never a silent partial load.
     with pytest.raises((AssertionError, RuntimeError), match="size"):
         _load(path)
 
 
-def test_fused_forward_is_the_weighted_mean_of_the_widened_heads(tmp_path, cpu_loader, single_process_group):
+def test_fuse_pdd_block_weighted_mean_of_widened_heads(tmp_path, cpu_loader, single_process_group):
     """End to end through the DiT: a fused block equals the weighted mean of its heads' outputs."""
     path, _ = _write_transformer_ref(tmp_path, config_pdd_steps=PDD_STEPS, with_gates=False)
     model = _load(path)
