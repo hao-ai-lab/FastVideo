@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 
 import fastvideo.envs as envs
-from fastvideo.attention.ring import ring_flash_attn_func
 from fastvideo.attention.ring_attention import RingAttention
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
