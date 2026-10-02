@@ -380,6 +380,10 @@ def collect_cases() -> list[SnapshotCase]:
         "vae_tiling_typed": (LTX2, {
             "ltx2_vae_tiling": False
         }),
+        "ltx2_vae_tile_sizes": (LTX2, {
+            "ltx2_vae_spatial_tile_size_in_pixels": 512,
+            "ltx2_vae_temporal_tile_size_in_frames": 64,
+        }),
     }
     cases += [
         SnapshotCase("kwargs", name, _kwargs_case(model, kwargs)) for name, (model, kwargs) in kwargs_cases.items()
