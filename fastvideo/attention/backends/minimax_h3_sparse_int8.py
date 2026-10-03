@@ -42,12 +42,23 @@ def _quantize_v(X, Scale, Y, L: tl.constexpr, D: tl.constexpr, ROWS: tl.constexp
              < L)
 
 
+@triton.jit
+def _quantize_v_tiles(X, Y, Scale, L: tl.constexpr, D: tl.constexpr):
+    tile, hz = tl.program_id(0), tl.program_id(1)
+    rows = tile * 64 + tl.arange(0, 64)
+    cols = tl.arange(0, D)
+    x = tl.load(X + (hz * L + rows[:, None]) * D + cols[None, :]).to(tl.float32)
+    scale = tl.maximum(tl.max(tl.abs(x), 0) / 448.0, 1e-8)
+    tl.store(Scale + (hz * (L // 64) + tile) * D + cols, scale)
+    tl.store(Y + (hz * L + rows[:, None]) * D + cols[None, :], (x / scale[None, :]).to(tl.float8e4nv))
+
+
 @triton.autotune(
     configs=[triton.Config({}, num_warps=w, num_stages=s) for w, s in ((4, 2), (4, 3), (4, 4), (8, 2), (8, 3))],
     key=["L", "D"])
 @triton.jit
 def _sparse_int8_fp8(Q, K, V, QS, KS, VS, Index, Count, VBS, Out, L: tl.constexpr, D: tl.constexpr,
-                     INT8_QK: tl.constexpr, FP8_PV: tl.constexpr):
+                     INT8_QK: tl.constexpr, FP8_PV: tl.constexpr, V_TILE: tl.constexpr, P_DYNAMIC: tl.constexpr):
     tile, hz = tl.program_id(0), tl.program_id(1)
     nt: tl.constexpr = L // 64
     rows = tile * 64 + tl.arange(0, 64)
@@ -72,19 +83,30 @@ def _sparse_int8_fp8(Q, K, V, QS, KS, VS, Index, Count, VBS, Out, L: tl.constexp
                 logits = logits * qs[:, None] * ks[None, :]
             logits = logits * (1.4426950408889634 / D**0.5)
             logits = tl.where((tl.arange(0, 64) < valid)[None, :], logits, -float("inf"))
-            new_m = tl.maximum(m, tl.max(logits, 1))
+            block_max = tl.max(logits, 1)
+            new_m = tl.maximum(m, block_max)
             p = tl.exp2(logits - new_m[:, None])
             alpha = tl.exp2(m - new_m)
             den = den * alpha + tl.sum(p, 1)
             acc = acc * alpha[:, None]
             v = tl.load(V + (hz * L + key_rows[:, None]) * D + cols[None, :])
             if FP8_PV:
-                acc += tl.dot((p * 448.0).to(tl.float8e4nv), v, out_dtype=tl.float32)
+                if P_DYNAMIC:
+                    pscale = tl.maximum(tl.exp2(block_max - new_m) / 448.0, 1e-30)
+                    pv = tl.dot((p / pscale[:, None]).to(tl.float8e4nv), v, out_dtype=tl.float32)
+                    pv = pv * (pscale[:, None] * 448.0)
+                else:
+                    pv = tl.dot((p * 448.0).to(tl.float8e4nv), v, out_dtype=tl.float32)
+                if V_TILE:
+                    scale = tl.load(VS + (hz * nt + kv) * D + cols)
+                    acc += pv * (scale[None, :] / 448.0)
+                else:
+                    acc += pv
             else:
                 acc += tl.dot(p.to(tl.bfloat16), v, out_dtype=tl.float32)
             m = new_m
     result = acc / den[:, None]
-    if FP8_PV:
+    if FP8_PV and not V_TILE:
         vs = tl.load(VS + hz * D + cols)
         result = result * (vs[None, :] / 448.0)
     result = tl.where(den[:, None] > 0, result, 0.0)
@@ -98,7 +120,9 @@ def sparse_sm89_attention(q: torch.Tensor,
                           vbs: torch.Tensor,
                           *,
                           int8_qk: bool = True,
-                          fp8_pv: bool = False) -> torch.Tensor:
+                          fp8_pv: bool = False,
+                          fp8_v_tiles: bool = False,
+                          fp8_dynamic_p: bool = False) -> torch.Tensor:
     """Forward-only ``[B,H,S,128]`` BF16 attention on sm89, with 64-token tiles."""
     if torch.is_grad_enabled():
         raise ValueError("Sparse INT8/FP8 attention is inference-only")
@@ -125,9 +149,13 @@ def sparse_sm89_attention(q: torch.Tensor,
         _quantize_qk[grid](q, mean, vbs, qi, qs, length, dim, CENTER=False, ROWS=16, num_warps=4)
         _quantize_qk[grid](k, mean, vbs, ki, ks, length, dim, CENTER=True, ROWS=16, num_warps=4)
     if fp8_pv:
-        vs = (v.abs().amax(dim=2).float() / 448).clamp_min(1e-8)
         vf = torch.empty_like(v, dtype=torch.float8_e4m3fn)
-        _quantize_v[grid](v, vs, vf, length, dim, ROWS=16, num_warps=4)
+        if fp8_v_tiles:
+            vs = torch.empty((b, h, length // 64, dim), device=q.device, dtype=torch.float32)
+            _quantize_v_tiles[(length // 64, b * h)](v, vf, vs, length, dim, num_warps=8)
+        else:
+            vs = (v.abs().amax(dim=2).float() / 448).clamp_min(1e-8)
+            _quantize_v[grid](v, vs, vf, length, dim, ROWS=16, num_warps=4)
     index, count = map_to_index(mask.contiguous())
     out = torch.empty_like(q)
     _sparse_int8_fp8[(length // 64, b * h)](qi,
@@ -143,5 +171,7 @@ def sparse_sm89_attention(q: torch.Tensor,
                                             length,
                                             dim,
                                             INT8_QK=int8_qk,
-                                            FP8_PV=fp8_pv)
+                                            FP8_PV=fp8_pv,
+                                            V_TILE=fp8_v_tiles,
+                                            P_DYNAMIC=fp8_dynamic_p)
     return out
