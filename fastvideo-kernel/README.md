@@ -198,6 +198,16 @@ python benchmarks/bench_vsa.py --block_size 128 --use_cute \
   --batch_size 1 --num_heads 12 --head_dim 128 --q_seq_lens 39936 --topk 40
 ```
 
+### GB10 Attn-QAT forward-consistent dV
+
+On GB10 (SM121) the training backward rebuilds dV from the forward's own
+quantized online probabilities instead of re-quantizing normalized P, whose
+E4M3 group scales underflow to zero on long sequences; forward output, dQ, dK,
+STE output and M are unchanged bit for bit. `FASTVIDEO_ATTN_QAT_SM121_FWD_DV=0`
+restores the legacy dV and `FASTVIDEO_ATTN_QAT_SM121_DV_STATS=save|recompute`
+selects retained statistics or a forward replay; see
+[the QAT training documentation](../docs/training/attn_qat.md).
+
 ### TurboDiffusion Kernels
 
 This package also includes kernels from [TurboDiffusion](https://github.com/thu-ml/TurboDiffusion), including INT8 GEMM, Quantization, RMSNorm and LayerNorm.

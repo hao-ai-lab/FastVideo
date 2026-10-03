@@ -97,6 +97,46 @@ def _use_sm100_optimized_qat(
             and fake_quant_p and not two_level_quant_p and not use_global_sf_p)
 
 
+# GB10 (SM121) runs the forward, the forward replay and the forward-consistent
+# dV kernel with the same 32x32 tiles; the saved online statistics are indexed
+# by the forward KV tile, so the launch sites share these constants.
+SM121_BLOCK = 32
+SM121_NUM_WARPS = 4
+SM121_NUM_STAGES = 2
+
+
+def _sm121_forward_consistent_dv_enabled():
+    """Return whether GB10 replaces the legacy re-quantized-P dV with the forward-consistent dV."""
+    return os.environ.get("FASTVIDEO_ATTN_QAT_SM121_FWD_DV", "1") != "0"
+
+
+def _use_sm121_forward_consistent_dv(q, k, v, causal, is_qat, fake_quant_p,
+                                      two_level_quant_p, global_scale_p, qat_qkv_backward, smooth_k):
+    """Return whether this call matches the validated GB10 (SM121) training configuration."""
+    return (is_cuda() and torch.cuda.get_device_capability(q.device) == (12, 1)
+            and _sm121_forward_consistent_dv_enabled()
+            and q.dtype == k.dtype == v.dtype == torch.bfloat16
+            and q.device == k.device == v.device and q.shape[-1] == 128
+            and q.is_contiguous() and k.is_contiguous() and v.is_contiguous()
+            and q.shape[2] > 0 and k.shape[2] > 0 and not causal and is_qat
+            and fake_quant_p and not two_level_quant_p and not global_scale_p
+            and qat_qkv_backward and not smooth_k)
+
+
+def _sm121_dv_stats_mode():
+    """``save`` keeps the forward's online maxima and denominators for backward; ``recompute`` replays the forward."""
+    raw = os.environ.get("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", "save")
+    mode = raw.strip().lower()
+    if mode not in ("save", "recompute"):
+        raise ValueError(f"FASTVIDEO_ATTN_QAT_SM121_DV_STATS={raw!r} (want save|recompute)")
+    return mode
+
+
+def _sm121_dv_stats_shape(batch: int, heads: int, n_ctx_q: int, n_ctx_kv: int):
+    """Shape of the per-KV-tile online maxima: one FP32 row of ``n_ctx_q`` per forward KV tile."""
+    return (batch, heads, triton.cdiv(n_ctx_kv, SM121_BLOCK), n_ctx_q)
+
+
 def _select_sm100_forward_config(n_ctx_q: int, n_ctx_kv: int, mode: str):
     n_ctx = max(n_ctx_q, n_ctx_kv)
     if mode == "reference":
@@ -143,7 +183,10 @@ def _attn_fwd_inner(acc,
                     fake_quant_P: tl.constexpr = True,
                     two_level_quant_P: tl.constexpr = False,
                     use_global_sf_P: tl.constexpr = True,
-                    JOIN_QAT_PV: tl.constexpr = False):
+                    JOIN_QAT_PV: tl.constexpr = False,
+                    DV_MAXIMA=None,
+                    N_CTX_Q=0,
+                    SAVE_DV_STATS: tl.constexpr = False):
     # range of values handled by this stage (kv blocks)
     if STAGE == 1:
         lo, hi = 0, start_m * BLOCK_M
@@ -176,6 +219,10 @@ def _attn_fwd_inner(acc,
             m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
             qk = qk * qk_scale - m_ij[:, None]
         p = tl.math.exp2(qk)
+        if SAVE_DV_STATS:
+            # One fp32 running maximum per valid row and KV tile, not a P matrix.
+            stat_offsets = (start_n // BLOCK_N) * N_CTX_Q + offs_m
+            tl.store(DV_MAXIMA + stat_offsets, m_ij, mask=q_valid)
         if IS_QAT:
             p, high_prec_p = fake_quantize(src_tensor=p,
                                            valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
@@ -366,6 +413,9 @@ def _attn_fwd(
     use_global_sf_P: tl.constexpr = True,
     JOIN_QAT_PV: tl.constexpr = False,
     SM100_SPLIT_FULL_TILES: tl.constexpr = False,
+    DV_MAXIMA=None,
+    DV_DENOMINATOR=None,
+    SAVE_DV_STATS: tl.constexpr = False,
 ):
     dtype = tl.float8e5 if FP8_OUTPUT else tl.bfloat16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
@@ -404,6 +454,8 @@ def _attn_fwd(
                                                    strides=[N_CTX_Q * HEAD_DIM, HEAD_DIM, 1],
                                                    block_shape=[1, BLOCK_M, HEAD_DIM])
 
+    if SAVE_DV_STATS:
+        DV_MAXIMA += off_hz * tl.cdiv(N_CTX_KV, BLOCK_N) * N_CTX_Q
     offset_y_q = off_z * (N_CTX_Q * H) + off_h * N_CTX_Q  # offset for query tensor
     offset_y_kv = off_z * (N_CTX_KV * H) + off_h * N_CTX_KV  # offset for key/value tensors
     qo_offset_y = offset_y_q + start_m * BLOCK_M
@@ -442,8 +494,9 @@ def _attn_fwd(
                                                            offset_y_kv, dtype, start_m, qk_scale, BLOCK_M, HEAD_DIM,
                                                            BLOCK_N, 4 - STAGE, offs_m, offs_n, N_CTX_KV,
                                                            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P,
-                                                           two_level_quant_P, use_global_sf_P, JOIN_QAT_PV)
-    # stage 2: on-band
+                                                           two_level_quant_P, use_global_sf_P, JOIN_QAT_PV,
+                                                           DV_MAXIMA, N_CTX_Q, SAVE_DV_STATS)
+    # stage 2: on-band (no dV statistics: the forward-consistent dV is non-causal only)
     if STAGE & 2:
         acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, desc_k, desc_v,
                                                        offset_y_kv, dtype, start_m, qk_scale, BLOCK_M, HEAD_DIM,
@@ -451,6 +504,8 @@ def _attn_fwd(
                                                        IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P,
                                                        JOIN_QAT_PV)
     # epilogue
+    if SAVE_DV_STATS:
+        tl.store(DV_DENOMINATOR + off_hz * N_CTX_Q + offs_m, l_i, mask=q_valid)
     m_i += tl.math.log2(l_i)
     acc = acc / l_i[:, None]
     if IS_QAT:
@@ -1233,6 +1288,79 @@ def _attn_bwd(
     tl.store(dq_ptrs, dq, mask=q_valid[:, None])
 
 
+@triton.jit
+def _attn_bwd_dv_forward_weights(Q, K, DO, DV, MAXIMA, DENOMINATOR, sm_scale,
+                                  stride_qz, stride_qh, stride_kz, stride_kh,
+                                  HEADS, NQ, NK,
+                                  HEAD_DIM: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+    # dV from the forward's own quantized online probabilities. The legacy backward
+    # re-quantizes the normalized P instead, and its E4M3 group scale underflows to 0
+    # below ~2^-10, which zeroes dV for the whole 16-key group (docs/training/attn_qat.md).
+    kv_tile = tl.program_id(0)
+    bhid = tl.program_id(1)
+    off_z = bhid // HEADS
+    off_h = bhid % HEADS
+    q_base = off_z * stride_qz + off_h * stride_qh
+    k_base = off_z * stride_kz + off_h * stride_kh
+    offs_n = kv_tile * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, HEAD_DIM)
+    kv_valid = offs_n < NK
+    k = tl.load(K + k_base + offs_n[:, None] * HEAD_DIM + offs_k[None, :], mask=kv_valid[:, None], other=0.0)
+    dv = tl.zeros((BLOCK_N, HEAD_DIM), tl.float32)
+    num_kv_tiles = tl.cdiv(NK, BLOCK_N)
+    RCP_LN2: tl.constexpr = 1.44269504  # the forward's fp32 literal, so p is bit-identical to the forward's p
+    qk_scale = sm_scale * RCP_LN2
+    for query_tile in range(tl.cdiv(NQ, BLOCK_M)):
+        offs_m = query_tile * BLOCK_M + tl.arange(0, BLOCK_M)
+        q_valid = offs_m < NQ
+        q = tl.load(Q + q_base + offs_m[:, None] * HEAD_DIM + offs_k[None, :], mask=q_valid[:, None], other=0.0)
+        do = tl.load(DO + bhid * NQ * HEAD_DIM + offs_m[:, None] * HEAD_DIM + offs_k[None, :],
+                     mask=q_valid[:, None], other=0.0)
+        # Running maximum the forward used for this KV tile; the last tile's is the final m_i.
+        local_max = tl.load(MAXIMA + (bhid * num_kv_tiles + kv_tile) * NQ + offs_m, mask=q_valid, other=0.0)
+        final_max = tl.load(MAXIMA + (bhid * num_kv_tiles + num_kv_tiles - 1) * NQ + offs_m,
+                            mask=q_valid, other=0.0)
+        denominator = tl.load(DENOMINATOR + bhid * NQ + offs_m, mask=q_valid, other=1.0)
+        logits = tl.dot(q, tl.trans(k))
+        logits = tl.where(kv_valid[None, :], logits, -1.0e6)
+        valid = q_valid[:, None] & kv_valid[None, :]
+        probability = tl.math.exp2(logits * qk_scale - local_max[:, None])
+        probability = tl.where(valid, probability, 0.0)
+        quantized, _ = fake_quantize(probability, valid, BLOCK_M, BLOCK_N, tl.bfloat16,
+                                    use_global_sf=False, two_level_quant_P=False)
+        # Quantize the un-normalized online p exactly as the forward did, then apply the
+        # forward's rescaling and normalization in FP32. V's fake quantizer is an identity
+        # STE, so these weights multiply dO directly.
+        correction = tl.math.exp2(local_max - final_max) / denominator
+        weights = quantized.to(tl.float32) * correction[:, None]
+        dv += tl.dot(tl.trans(weights), do.to(tl.float32), input_precision="tf32x3")
+    tl.store(DV + k_base + offs_n[:, None] * HEAD_DIM + offs_k[None, :], dv, mask=kv_valid[:, None])
+
+
+def _replay_sm121_dv_statistics(q, k, v, sm_scale, maxima, denominator):
+    """Re-run the SM121 split forward only to regenerate its online maxima and denominators.
+
+    The outputs are discarded; the launch mirrors the forward's SM121 configuration so the
+    statistics are bit-identical to the ones ``save`` mode would have retained.
+    """
+    batch, heads, nq, dim = q.shape
+    nk = k.shape[2]
+    block = SM121_BLOCK
+    stats = torch.empty((batch, heads, nq), device=q.device, dtype=torch.float32)
+    desc_q = TensorDescriptor(q, [batch * heads * nq, dim], [dim, 1], [block, dim])
+    desc_k = TensorDescriptor(k, [batch * heads * nk, dim], [dim, 1], [block, dim])
+    desc_v = TensorDescriptor(v, [batch * heads * nk, dim], [dim, 1], [block, dim])
+    desc_o, desc_ste = [TensorDescriptor(torch.empty_like(q), [batch * heads, nq, dim], [nq * dim, dim, 1],
+                                         [1, block, dim]) for _ in range(2)]
+    _attn_fwd[(triton.cdiv(nq, block), batch * heads, 1)](
+        sm_scale, stats, batch, heads, desc_q, desc_k, desc_v, desc_o, desc_ste,
+        N_CTX_Q=nq, N_CTX_KV=nk, HEAD_DIM=dim, BLOCK_M=block, BLOCK_N=block,
+        FP8_OUTPUT=False, STAGE=1, warp_specialize=False, IS_HOPPER=False,
+        IS_QAT=True, fake_quant_P=True, two_level_quant_P=False, use_global_sf_P=False,
+        JOIN_QAT_PV=False, DV_MAXIMA=maxima, DV_DENOMINATOR=denominator,
+        SAVE_DV_STATS=True, num_warps=SM121_NUM_WARPS, num_stages=SM121_NUM_STAGES)
+
+
 class _attention(torch.autograd.Function):
 
     @staticmethod
@@ -1451,6 +1579,20 @@ class _attention(torch.autograd.Function):
                 use_global_sf=use_global_sf_QKV,
             )
 
+        forward_consistent_dv = _use_sm121_forward_consistent_dv(
+            q, k, v, causal, IS_QAT, fake_quant_P, two_level_quant_P,
+            use_global_sf_P, use_qat_qkv_backward, smooth_k)
+        dv_stats_mode = _sm121_dv_stats_mode() if forward_consistent_dv else None
+        save_dv_stats = forward_consistent_dv and dv_stats_mode == "save"
+        # ``None`` is specialized as a constexpr, so other architectures do not
+        # gain two pointer arguments when the statistics are not saved.
+        dv_maxima, dv_denominator = None, None
+        if save_dv_stats:
+            assert fwd_block_n == SM121_BLOCK, "saved dV statistics are indexed by the SM121 forward KV tile"
+            dv_maxima = torch.empty(_sm121_dv_stats_shape(q.shape[0], q.shape[1], N_CTX_Q, N_CTX_KV),
+                                   device=q.device, dtype=torch.float32)
+            dv_denominator = torch.empty_like(M)
+
         # Apply pre-hook to set block shapes on tensor descriptors
         _host_descriptor_pre_hook({
             "BLOCK_M": fwd_block_m,
@@ -1489,6 +1631,9 @@ class _attention(torch.autograd.Function):
                         JOIN_QAT_PV=_use_consumer_blackwell_joined_qat_pv(q.device),
                         SM100_SPLIT_FULL_TILES=_sm100_long_sequence_route(
                             N_CTX_Q, N_CTX_KV, q.dtype, sm100_optimized, fwd_mode),
+                        DV_MAXIMA=dv_maxima,
+                        DV_DENOMINATOR=dv_denominator,
+                        SAVE_DV_STATS=save_dv_stats,
                         num_warps=fwd_num_warps,
                         num_stages=fwd_num_stages,
                         **extra_kern_args)
@@ -1523,7 +1668,12 @@ class _attention(torch.autograd.Function):
             k = fake_k
             v = fake_v
 
-        ctx.save_for_backward(q, k, v, o_for_bwd, M)
+        saved = (q, k, v, o_for_bwd, M)
+        if save_dv_stats:
+            saved += (dv_maxima, dv_denominator)
+        ctx.save_for_backward(*saved)
+        ctx.forward_consistent_dv = forward_consistent_dv
+        ctx.dv_stats_mode = dv_stats_mode
         ctx.sm_scale = sm_scale
         ctx.HEAD_DIM = HEAD_DIM_K
         ctx.causal = causal
@@ -1540,7 +1690,9 @@ class _attention(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do):
-        q, k, v, o_for_bwd, M = ctx.saved_tensors
+        # Unpack ctx.saved_tensors once: non-reentrant checkpoint unpack hooks fire per access.
+        saved = ctx.saved_tensors
+        q, k, v, o_for_bwd, M = saved[:5]
         do = do.contiguous()
         assert do.is_contiguous()
         dq = torch.empty_like(q)
@@ -1759,6 +1911,21 @@ class _attention(torch.autograd.Function):
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES,
             )
+
+        if ctx.forward_consistent_dv:
+            if ctx.dv_stats_mode == "save":
+                dv_maxima, dv_denominator = saved[5:7]
+            else:
+                dv_maxima = torch.empty(_sm121_dv_stats_shape(BATCH, N_HEAD, N_CTX_Q, N_CTX_KV),
+                                       device=q.device, dtype=torch.float32)
+                dv_denominator = torch.empty_like(M)
+                _replay_sm121_dv_statistics(q, k, v, ctx.sm_scale, dv_maxima, dv_denominator)
+            _attn_bwd_dv_forward_weights[(triton.cdiv(N_CTX_KV, SM121_BLOCK), BATCH * N_HEAD)](
+                q, k, do, dv, dv_maxima, dv_denominator, ctx.sm_scale,
+                q.stride(0), q.stride(1), k.stride(0), k.stride(1),
+                N_HEAD, N_CTX_Q, N_CTX_KV, HEAD_DIM=ctx.HEAD_DIM,
+                BLOCK_M=SM121_BLOCK, BLOCK_N=SM121_BLOCK,
+                num_warps=SM121_NUM_WARPS, num_stages=SM121_NUM_STAGES)
 
         return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None
 

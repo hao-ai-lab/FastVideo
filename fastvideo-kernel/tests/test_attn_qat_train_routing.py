@@ -283,7 +283,7 @@ def test_sm121_forward_backward_keeps_split_path(monkeypatch, q_length, kv_lengt
         _set_join_switch(monkeypatch, switch)
         q, k, v = [tensor.clone().requires_grad_(True) for tensor in inputs]
         output = kernel.attention(q, k, v, False, 1.0 / math.sqrt(q_shape[-1]), *flags)
-        ste_output, stats = output.grad_fn.saved_tensors[3:]
+        ste_output, stats = output.grad_fn.saved_tensors[3:5]
         grads = torch.autograd.grad(output, (q, k, v), grad_out)
         return output.detach(), *grads, ste_output, stats
 
@@ -295,3 +295,56 @@ def test_sm121_forward_backward_keeps_split_path(monkeypatch, q_length, kv_lengt
             assert torch.equal(candidate, reference), name
 
     assert launched_joined_pv == [False] * 3, launched_joined_pv
+
+
+def _bf16_stub(device, shape=(1, 1, 128, 128)):
+    """Stand-in for a contiguous BF16 CUDA tensor; the gate only reads these attributes."""
+    from types import SimpleNamespace
+    return SimpleNamespace(dtype=torch.bfloat16, device=device, shape=shape, is_contiguous=lambda: True)
+
+
+VALIDATED_DV_OPTIONS = {"causal": False, "is_qat": True, "fake_quant_p": True, "two_level_quant_p": False,
+                        "global_scale_p": False, "qat_qkv_backward": True, "smooth_k": False}
+
+
+@pytest.mark.parametrize("capability", [(12, 0), (12, 1), (12, 2), (10, 0), (9, 0)])
+def test_forward_consistent_dv_requires_sm121_input_device(monkeypatch, capability):
+    device = torch.device("cuda", 1)
+    q = _bf16_stub(device, shape=(1, 3, 128, 128))
+    monkeypatch.setattr(kernel, "is_cuda", lambda: True)
+
+    def get_capability(selected):
+        assert selected == device
+        return capability
+
+    monkeypatch.setattr(torch.cuda, "get_device_capability", get_capability)
+    assert kernel._use_sm121_forward_consistent_dv(q, q, q, **VALIDATED_DV_OPTIONS) == (capability == (12, 1))
+
+
+@pytest.mark.parametrize(("key", "value"), [("causal", True), ("is_qat", False), ("fake_quant_p", False),
+                                            ("two_level_quant_p", True), ("global_scale_p", True),
+                                            ("qat_qkv_backward", False), ("smooth_k", True)])
+def test_forward_consistent_dv_rejects_unvalidated_quantization(monkeypatch, key, value):
+    q = _bf16_stub(torch.device("cuda"))
+    monkeypatch.setattr(kernel, "is_cuda", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (12, 1))
+    assert not kernel._use_sm121_forward_consistent_dv(q, q, q, **{**VALIDATED_DV_OPTIONS, key: value})
+
+
+def test_forward_consistent_dv_kill_switch(monkeypatch):
+    q = _bf16_stub(torch.device("cuda"))
+    monkeypatch.setattr(kernel, "is_cuda", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (12, 1))
+    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_FWD_DV", None):
+        assert kernel._use_sm121_forward_consistent_dv(q, q, q, **VALIDATED_DV_OPTIONS)
+    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_FWD_DV", "0"):
+        assert not kernel._use_sm121_forward_consistent_dv(q, q, q, **VALIDATED_DV_OPTIONS)
+
+
+@pytest.mark.parametrize(("value", "expected"), [(None, "save"), ("save", "save"), ("RECOMPUTE", "recompute")])
+def test_forward_consistent_dv_stats_mode_env(value, expected):
+    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", value):
+        assert kernel._sm121_dv_stats_mode() == expected
+    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", "cache"):
+        with pytest.raises(ValueError):
+            kernel._sm121_dv_stats_mode()
