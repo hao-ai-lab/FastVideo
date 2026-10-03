@@ -27,9 +27,14 @@ def main():
             def baseline():
                 return block_sparse_attn(q, k, v, mask, vbs)[0]
             expected = baseline()
-            for int8_qk, fp8_pv in ((True, True), (True, False), (False, True), (False, False)):
+            for int8_qk, fp8_pv, v_tiles, dynamic_p in ((True, True, False, False),
+                                                       (True, True, True, False),
+                                                       (True, True, True, True),
+                                                       (True, False, False, False),
+                                                       (False, True, True, True),
+                                                       (False, False, False, False)):
                 def candidate():
-                    return sparse_sm89_attention(q, k, v, mask, vbs, int8_qk=int8_qk, fp8_pv=fp8_pv)
+                    return sparse_sm89_attention(q, k, v, mask, vbs, int8_qk=int8_qk, fp8_pv=fp8_pv, fp8_v_tiles=v_tiles, fp8_dynamic_p=dynamic_p)
                 output = candidate()
                 valid_rows = state["untile"]
                 ref = expected.index_select(2, valid_rows).float()
@@ -37,7 +42,7 @@ def main():
                 delta = actual - ref
                 reference_ms = triton.testing.do_bench(baseline)
                 candidate_ms = triton.testing.do_bench(candidate)
-                record = {"capture": capture.name, "shape": list(q.shape), "int8_qk": int8_qk, "fp8_pv": fp8_pv,
+                record = {"capture": capture.name, "shape": list(q.shape), "int8_qk": int8_qk, "fp8_pv": fp8_pv, "fp8_v_tiles": v_tiles, "fp8_dynamic_p": dynamic_p,
                           "mask_density": float(mask.float().mean()),
                           "finite": bool(torch.isfinite(actual).all()),
                           "relative_l2": float(delta.norm() / ref.norm()),

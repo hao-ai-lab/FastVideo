@@ -46,3 +46,27 @@ def test_sparse_int8_handles_empty_selection():
         out = sparse_sm89_attention(q, q, q, torch.zeros(1, 1, 2, 2, device="cuda", dtype=torch.bool),
                                         torch.tensor([64, 64], device="cuda", dtype=torch.int32))
     assert torch.count_nonzero(out) == 0
+
+
+def test_fp8_dynamic_probability_scale_preserves_small_blocks():
+    """A large earlier max must not erase a later block's small P but large V."""
+    _cuda_sm89()
+    from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
+
+    q = torch.zeros(1, 1, 128, 128, device="cuda", dtype=torch.bfloat16)
+    k, v = torch.zeros_like(q), torch.zeros_like(q)
+    q[..., 0] = 16
+    k[..., :64, 0] = 14
+    k[..., 64:, 0] = 2
+    v[..., 64:, :] = 1e7
+    mask = torch.ones(1, 1, 2, 2, device="cuda", dtype=torch.bool)
+    vbs = torch.tensor([64, 64], device="cuda", dtype=torch.int32)
+    with torch.inference_mode():
+        reference = torch.nn.functional.scaled_dot_product_attention(q.float(), k.float(), v.float())
+        fixed = sparse_sm89_attention(q, k, v, mask, vbs, int8_qk=False, fp8_pv=True,
+                                       fp8_v_tiles=True, fp8_dynamic_p=False)
+        dynamic = sparse_sm89_attention(q, k, v, mask, vbs, int8_qk=False, fp8_pv=True,
+                                         fp8_v_tiles=True, fp8_dynamic_p=True)
+    assert reference.abs().min() > 0.1
+    assert torch.count_nonzero(fixed) == 0
+    torch.testing.assert_close(dynamic.float(), reference, rtol=0.02, atol=0.02)
