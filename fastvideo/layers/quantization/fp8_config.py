@@ -32,6 +32,9 @@ FP8_MIN_SCALE = 1.0 / (FP8_MAX * 512.0)
 _FP8_SUFFIXES = (
     "ffn.fc_in",
     "ffn.fc_out",
+    # MiniMax-H3 blocks name their MLP ``ff``.
+    "ff.fc_in",
+    "ff.fc_out",
     "to_q",
     "to_k",
     "to_v",

@@ -26,6 +26,14 @@ each block's VSA compression gate, for ``layer_profile="h3_dit_vsa"``.
 Without either the export holds the FFN linears only and must be loaded with
 ``layer_profile="h3_dit_ffn"``.
 
+``--quantize-ffn`` takes the FFN linears from a dense BF16 source instead of a
+ModelOpt export, with the same round-to-nearest weight math as the runtime
+(ModelOpt's max calibration produces the same weight codes). ``--act-amax``
+adds a calibrated static activation scale per linear
+(``_nvfp4_input_global_sf`` = 448 * 6 / amax) from a JSON of input amax keyed
+``b<block>.<module>`` (e.g. ``b3.ff.fc_in``); without it activations use the
+unit global scale, which saturates inputs above 2688 (H3's ``ff.fc_out``).
+
 Every exported linear is probed on random BF16 rows through the same
 ``mm_fp4`` path the loader runs; the relative error against a BF16 matmul with
 the dequantized weight must stay under ``--max-probe-error`` (genuine W4A4
@@ -51,6 +59,7 @@ from safetensors.torch import save_file
 
 EXPORT_FILENAME = "nvfp4_weights.safetensors"
 _BLOCK_ATTN = re.compile(r"^transformer_blocks\.\d+\.attn\.(?:to_q|to_k|to_v|to_out\.0)$")
+_BLOCK_FFN = re.compile(r"^transformer_blocks\.\d+\.ff\.net\.(?:0\.proj|2)$")
 _BLOCK_GATE = re.compile(r"^transformer_blocks\.\d+\.attn\.to_gate_compress$")
 _RENAMES = ((re.compile(r"\.ff\.net\.0\.proj$"), ".ff.fc_in"), (re.compile(r"\.ff\.net\.2$"), ".ff.fc_out"),
             (re.compile(r"\.attn\.to_out\.0$"), ".attn.to_out"))
@@ -140,6 +149,8 @@ def main() -> None:
     parser.add_argument("--dst", required=True, type=Path)
     parser.add_argument("--quantize-attention", action="store_true")
     parser.add_argument("--quantize-gate", action="store_true", help="also quantize attn.to_gate_compress")
+    parser.add_argument("--quantize-ffn", action="store_true", help="quantize the FFN linears from a bf16 source")
+    parser.add_argument("--act-amax", type=Path, help="JSON of calibrated input amax per linear")
     parser.add_argument("--max-probe-error", type=float, default=0.3)
     parser.add_argument("--dense-shard-gb", type=float, default=5.0)
     args = parser.parse_args()
@@ -152,9 +163,17 @@ def main() -> None:
     modelopt_keys = {f"{p}.{s}" for p in modelopt for s in ("weight", "weight_scale", "weight_scale_2", "input_scale")}
     if args.quantize_gate and not args.quantize_attention:
         parser.error("--quantize-gate requires --quantize-attention")
-    dense_pattern = re.compile(_BLOCK_ATTN.pattern + ("|" + _BLOCK_GATE.pattern if args.quantize_gate else ""))
+    selected = ([_BLOCK_ATTN.pattern] if args.quantize_attention else []) + (
+        [_BLOCK_GATE.pattern] if args.quantize_gate else []) + ([_BLOCK_FFN.pattern] if args.quantize_ffn else [])
+    dense_pattern = re.compile("|".join(selected)) if selected else None
     attention = sorted(k[:-len(".weight")] for k in weight_map
-                       if k.endswith(".weight") and dense_pattern.match(k[:-len(".weight")])) if args.quantize_attention else []
+                       if k.endswith(".weight") and dense_pattern.match(k[:-len(".weight")])) if dense_pattern else []
+    if args.quantize_ffn and any(_BLOCK_FFN.match(p) for p in modelopt):
+        parser.error("--quantize-ffn needs a bf16 source; this one already holds ModelOpt FFN linears")
+    amax_table = None
+    if args.act_amax:
+        raw = json.loads(args.act_amax.read_text())
+        amax_table = {k: float(v["all"] if isinstance(v, dict) else v) for k, v in raw.items()}
     attention_keys = {f"{p}.weight" for p in attention}
 
     readers = {shard: safe_open(str(args.src / shard), framework="pt", device="cpu") for shard in set(weight_map.values())}
@@ -177,6 +196,13 @@ def main() -> None:
         if error > args.max_probe_error:
             raise SystemExit(f"probe error {error:.3f} on {prefix} exceeds {args.max_probe_error}; nothing written")
         module = fastvideo_module_name(prefix)
+        if amax_table is not None:
+            block = re.match(r"transformer_blocks\.(\d+)\.(.+)$", module)
+            key = f"b{block.group(1)}.{block.group(2)}"
+            if key not in amax_table:
+                raise SystemExit(f"--act-amax has no entry {key!r} for {module}; nothing written")
+            buffers["_nvfp4_input_global_sf"] = torch.tensor((448.0 * 6.0) / max(amax_table[key], 1e-12),
+                                                             dtype=torch.float32)
         for name, value in buffers.items():
             export[f"{module}::{name}"] = value.cpu()
     save_file(export, str(args.dst / EXPORT_FILENAME))
@@ -206,7 +232,8 @@ def main() -> None:
         if extra.suffix not in (".safetensors", ".json"):
             shutil.copy2(extra, args.dst / extra.name)
     print(json.dumps({"exported_linears": len(modelopt) + len(attention), "modelopt_linears": len(modelopt),
-                      "quantized_attention_linears": len(attention), "worst_probe_error": round(worst, 4),
+                      "quantized_dense_linears": len(attention), "worst_probe_error": round(worst, 4),
+                      "static_activation_scales": len(attention) + len(modelopt) if amax_table else 0,
                       "gate_linears": sum(1 for p in attention if _BLOCK_GATE.match(p)),
                       "min_scale_byte_agreement": round(min(agreements), 4) if agreements else None,
                       "mean_scale_byte_agreement": round(sum(agreements) / len(agreements), 4) if agreements else None,

@@ -7,7 +7,9 @@ import time
 
 import modal
 
-WORKTREE = pathlib.Path(__file__).resolve().parents[3]
+_HERE = pathlib.Path(__file__).resolve()
+# Inside the container this file is /root/app.py; the repo is already baked into the image there.
+WORKTREE = _HERE.parents[3] if len(_HERE.parents) > 3 else pathlib.Path("/src/fastvideo")
 CUTLASS_COMMIT = "e67e63c331d6e4b729047c95cf6b92c8454cba89"
 volume = modal.Volume.from_name("h3-pro6000-weights", create_if_missing=True)
 
@@ -18,7 +20,7 @@ image = (
     .add_local_dir(WORKTREE, "/src/fastvideo", copy=True,
                    ignore=[".git", "**/__pycache__", "fastvideo-kernel/include/cutlass/**",
                            "fastvideo-kernel/include/tk/**", "fastvideo/third_party/eval/**", "docs/**",
-                           "assets/**", "comfyui/**", "apps/**", "**/*.mp4"])
+                           "assets/**", "comfyui/**", "apps/**", "**/*.mp4", "**/*.log"])
     .run_commands("cd /src/fastvideo && UV_TORCH_BACKEND=cu130 uv pip install --system -e . --no-sources")
     .run_commands("uv pip install --system 'cmake==3.31.6' ninja 'scikit-build-core>=0.10' pybind11 hf_transfer")
     .run_commands(f"git clone --filter=blob:none https://github.com/NVIDIA/cutlass.git /cutlass && "
@@ -186,8 +188,11 @@ PROMPTS = {
 def run_variant(name: str, model: str, profile: str, attention: str, decode: str, vae_compile: bool,
                 height: int = 480, width: int = 832, warmups: int = 1, num_frames: int = 124,
                 env: dict | None = None, prompts: tuple = ("kitesurf", "chef"), sparsity: float = 0.8,
-                steps: int = 9, num_gpus: int = 1, parallel_decode: bool = False, pre_runs: tuple = ()) -> dict:
+                steps: int = 9, num_gpus: int = 1, parallel_decode: bool = False, pre_runs: tuple = (),
+                prompt_texts: dict | None = None, offload: dict | None = None,
+                experimental_extra: dict | None = None) -> dict:
     os.environ.update(env or {})
+    texts = {**PROMPTS, **(prompt_texts or {})}
     _install_kernel()
     import torch
     from fastvideo import VideoGenerator
@@ -198,13 +203,14 @@ def run_variant(name: str, model: str, profile: str, attention: str, decode: str
                     "vae_parallel_decode": parallel_decode, "video_decode_backend": decode}
     if attention == "VIDEO_SPARSE_ATTN_H3":
         experimental.update({"VSA_sparsity": sparsity, "VSA_tile_size": 64})
+    experimental.update(experimental_extra or {})
     config = {
         "model_path": f"/vol/fv/{model}",
         "engine": {"num_gpus": num_gpus, "use_fsdp_inference": False,
                    "quantization": {"transformer_quant": "NVFP4", "layer_profile": profile},
                    "parallelism": {"tp_size": 1, "sp_size": num_gpus},
                    "offload": {"dit": False, "dit_layerwise": False, "text_encoder": False, "vae": False,
-                               "pin_cpu_memory": num_gpus == 1, "lazy_module_load": False},
+                               "pin_cpu_memory": num_gpus == 1, "lazy_module_load": False, **(offload or {})},
                    "compile": {"enabled": False, "vae_enabled": vae_compile}},
         "pipeline": {"experimental": experimental},
     }
@@ -219,7 +225,7 @@ def run_variant(name: str, model: str, profile: str, attention: str, decode: str
     try:
         # Optional runs at other shapes first (e.g. a 480p correctness clip), same loaded model.
         for j, (ph, pw, pf, pid) in enumerate(pre_runs):
-            request = {"prompt": PROMPTS[pid], "negative_prompt": "",
+            request = {"prompt": texts[pid], "negative_prompt": "",
                        "sampling": {"seed": 20260929, "height": ph, "width": pw, "num_frames": pf, "fps": 24,
                                     "num_inference_steps": steps, "guidance_scale": 1.0, "batch_cfg": False},
                        "output": {"output_path": str(out_dir / f"pre{j:02d}_{pid}_{ph}p.mp4"), "save_video": True,
@@ -229,9 +235,16 @@ def run_variant(name: str, model: str, profile: str, attention: str, decode: str
             results.setdefault("pre_runs", []).append({"shape": [ph, pw, pf], "prompt": pid,
                                                        "wall_s": round(time.perf_counter() - t, 2),
                                                        "video": getattr(result, "video_path", None)})
-        order = [prompts[0]] * warmups + list(prompts)
+            print("PRE_RUN", json.dumps(results["pre_runs"][-1]), flush=True)
+        if pre_runs:
+            (out_dir / "results.json").write_text(json.dumps(results, indent=1))
+            volume.commit()
+        # Warm every distinct prompt: prompt length changes the packed sequence, and shape-specialized
+        # compiled kernels would otherwise recompile inside the first timed run of each prompt.
+        distinct = list(dict.fromkeys(prompts))
+        order = [distinct[i % len(distinct)] for i in range(warmups)] + list(prompts)
         for i, pid in enumerate(order):
-            prompt = PROMPTS[pid]
+            prompt = texts[pid]
             request = {"prompt": prompt, "negative_prompt": "",
                        "sampling": {"seed": 20260929, "height": height, "width": width, "num_frames": num_frames, "fps": 24,
                                     "num_inference_steps": steps, "guidance_scale": 1.0, "batch_cfg": False},
@@ -248,6 +261,7 @@ def run_variant(name: str, model: str, profile: str, attention: str, decode: str
         results["peak_mem_gb_device"] = _sh("nvidia-smi --query-gpu=memory.used --format=csv,noheader").strip()
     finally:
         generator.shutdown()
+    (out_dir / "results.json").write_text(json.dumps(results, indent=1))
     volume.commit()
     return results
 
@@ -297,9 +311,63 @@ def run_variant2(*args, **kwargs) -> dict:
     return run_variant.local(*args, **kwargs)
 
 
-@app.function(gpu="RTX-PRO-6000:8", memory=65536, cpu=16, timeout=5400, volumes={"/vol": volume})
+@app.function(gpu="RTX-PRO-6000:8", memory=196608, cpu=16, timeout=5400, volumes={"/vol": volume})
 def run_variant8(*args, **kwargs) -> dict:
     return run_variant.local(*args, **kwargs)
+
+
+@app.function(gpu="RTX-PRO-6000:4", memory=131072, cpu=8, timeout=5400, volumes={"/vol": volume})
+def run_variant4(*args, **kwargs) -> dict:
+    return run_variant.local(*args, **kwargs)
+
+
+@app.function(gpu="RTX-PRO-6000:8", memory=196608, cpu=16, timeout=2 * 3600, volumes={"/vol": volume})
+def bench8_pair(prompt_texts: dict, timed: tuple, warmups: int, models: tuple = ("v2", "v2_profile")) -> list:
+    """8-GPU 10 s 768p V2 8-step benchmark, then a stage-profiled pass, in one container (shared compile caches)."""
+    specs = {"v2": ("sp8_v2_8step_768p10s_1k", "v2_vsa_light", 0.8, 9, {}, timed, warmups),
+             # One warm + one profiled generation; CUDA-event spans log per DiT forward as H3_STAGE_MS.
+             "v2_profile": ("sp8_v2_8step_profile", "v2_vsa_light", 0.8, 9, {"FASTVIDEO_H3_SP_PROFILE": "1"},
+                            timed[:1], 1)}
+    out = []
+    for m in models:
+        name, model, sparsity, steps, extra_env, prompts, warm = specs[m]
+        r = run_variant.local(name, model, "h3_dit_vsa", attention="VIDEO_SPARSE_ATTN_H3", decode="h3-vae",
+                              vae_compile=True, height=768, width=1344, num_frames=243, warmups=warm,
+                              env={**FAST_ENV, **extra_env}, prompts=prompts, sparsity=sparsity, steps=steps,
+                              num_gpus=8, parallel_decode=True, prompt_texts=prompt_texts)
+        print("RESULT", json.dumps(r), flush=True)
+        out.append(r)
+    return out
+
+
+@app.function(gpu="RTX-PRO-6000", memory=196608, cpu=16, timeout=3 * 3600, volumes={"/vol": volume})
+def memladder(prompt_texts: dict, pid: str, configs: dict | None = None) -> list:
+    """V2 8-step 10 s 768p on one GPU under memory placements; stage logs carry per-stage peaks.
+
+    ``configs`` maps a name to (offload overrides, experimental overrides, extra env). The env can set
+    FASTVIDEO_CUDA_MEMORY_CAP_GIB to emulate a smaller card.
+    """
+    seq = {"h3_sequential_load": True}
+    lw = {"text_encoder": True, "vae": True, "dit_layerwise": True}
+    configs = configs or {
+        "A_resident": ({}, {}, {}),
+        "B_seq_encoder_vae_offload": ({"text_encoder": True, "vae": True}, seq, {}),
+        "C_plus_dit_layerwise": (lw, seq, {}),
+    }
+    out = []
+    for name, (offload, extra, env_extra) in configs.items():
+        try:
+            r = run_variant.local(f"mem_{name}", "v2_vsa_light", "h3_dit_vsa", attention="VIDEO_SPARSE_ATTN_H3",
+                                  decode="h3-vae", vae_compile=False, height=768, width=1344, num_frames=243,
+                                  warmups=1, env={**FAST_ENV, **env_extra}, prompts=(pid,), sparsity=0.8, steps=9,
+                                  num_gpus=1, prompt_texts=prompt_texts, offload=offload, experimental_extra=extra)
+        except Exception as e:  # keep the ladder going; record the failure
+            r = {"name": f"mem_{name}", "error": repr(e)[:3000]}
+        print("RESULT", json.dumps(r), flush=True)
+        out.append(r)
+        for k in env_extra:
+            os.environ.pop(k, None)
+    return out
 
 
 @app.function(cpu=8, memory=32768, timeout=1800, volumes={"/vol": volume})
@@ -320,7 +388,7 @@ FAST_ENV = {"FASTVIDEO_H3_VSA_FP4": "1", "FASTVIDEO_MINIMAX_H3_FUSIONS": "all", 
 
 
 @app.local_entrypoint()
-def main(step: str = "all"):
+def main(step: str = "all", ladder: str = "base"):
     if step == "prep_personal":
         print("KERNEL", build_kernel.remote())
         print("CONVERT", json.dumps(convert.remote(minimal=True), indent=1)[:6000])
@@ -340,6 +408,68 @@ def main(step: str = "all"):
             "sp8_v2_8step", "v2_vsa_light", "h3_dit_vsa", attention="VIDEO_SPARSE_ATTN_H3", decode="h3-vae",
             vae_compile=True, height=768, width=1344, num_frames=243, warmups=1, env=FAST_ENV,
             prompts=("kitesurf", "chef", "kitesurf", "chef"), sparsity=0.8, steps=9, num_gpus=8, parallel_decode=True,
+            pre_runs=((480, 832, 124, "kitesurf"), ))
+        print("RESULT", json.dumps(r))
+        if r.get("pre_runs"):
+            print("COMPARE", json.dumps(compare_videos.remote("/vol/outputs/sp1_480p/00_kitesurf.mp4",
+                                                              r["pre_runs"][0]["video"])))
+        return
+    if step == "simfp8":
+        # SP=1 with and without the SP exchange's FP8 rounding, same settings as sp1_480p.
+        common = dict(attention="VIDEO_SPARSE_ATTN_H3", decode="h3-vae", vae_compile=False, height=480, width=832,
+                      num_frames=124, warmups=0, prompts=("kitesurf",), sparsity=0.8, steps=9)
+        plain = run_variant.spawn("sp1_480p_rerun", "v2_vsa_light", "h3_dit_vsa", env=FAST_ENV, **common)
+        sim = run_variant.spawn("sp1_480p_simfp8", "v2_vsa_light", "h3_dit_vsa",
+                                env={**FAST_ENV, "FASTVIDEO_H3_SIM_SP_FP8": "1"}, **common)
+        r_plain, r_sim = plain.get(), sim.get()
+        print("RESULT", json.dumps(r_plain))
+        print("RESULT", json.dumps(r_sim))
+        return
+    if step == "memreport":
+        r = run_variant.remote("memreport", "v2_vsa_light", "h3_dit_vsa", attention="VIDEO_SPARSE_ATTN_H3",
+                               decode="h3-vae", vae_compile=False, height=480, width=832, num_frames=124, warmups=0,
+                               env={**FAST_ENV, "FASTVIDEO_MEMORY_REPORT": "1"}, prompts=("kitesurf",), sparsity=0.8,
+                               steps=9, offload={"text_encoder": True, "vae": True},
+                               experimental_extra={"h3_sequential_load": False})
+        print("RESULT", json.dumps(r))
+        return
+    if step == "memladder":
+        rows = [json.loads(line) for line in open(WORKTREE.parent / "UniServe-sm120fp4" / "uniserve_eval" / "workloads"
+                                                  / "fast_h3" / "latency.jsonl")]
+        pid = "latency-ceramics-005"
+        text = {r["id"]: r["prompt"] for r in rows if r["id"] == pid}
+        configs = None
+        if ladder == "caps":
+            seq = {"h3_sequential_load": True}
+            lw = {"text_encoder": True, "vae": True, "dit_layerwise": True}
+            configs = {
+                "D32_C_cap32": (lw, seq, {"FASTVIDEO_CUDA_MEMORY_CAP_GIB": "32"}),
+                "D24_buffers_cap24": (lw, seq, {"FASTVIDEO_CUDA_MEMORY_CAP_GIB": "24",
+                                                "FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS": "1"}),
+                "D16_buffers_tile8_cap16": (lw, seq, {"FASTVIDEO_CUDA_MEMORY_CAP_GIB": "16",
+                                                      "FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS": "1",
+                                                      "FASTVIDEO_H3_VAE_TILE_BATCH": "8"}),
+            }
+        for r in memladder.remote(text, pid, configs):
+            print("RESULT", json.dumps(r))
+        return
+    if step == "bench8_pair":
+        # UniServe's 10 s / ~1K-token latency prompts, so the numbers line up with its published protocol.
+        rows = [json.loads(line) for line in open(WORKTREE.parent / "UniServe-sm120fp4" / "uniserve_eval" / "workloads"
+                                                  / "fast_h3" / "latency.jsonl")]
+        ten = {r["id"]: r["prompt"] for r in rows if r["seconds"] == 10 and r["prompt_len"] == 1000}
+        ids = ("latency-ceramics-005", "latency-harbor-005")
+        texts = {i: ten[i] for i in ids}
+        for r in bench8_pair.remote(texts, (ids[0], ids[1], ids[0], ids[1]), 2):
+            timed = sorted(x["wall_s"] for x in r["runs"] if not x["warmup"])
+            print("SUMMARY", r["name"], "timed", timed, "median", timed[len(timed) // 2] if len(timed) % 2
+                  else (timed[len(timed) // 2 - 1] + timed[len(timed) // 2]) / 2)
+        return
+    if step == "sp4":
+        r = run_variant4.remote(
+            "sp4_v2_8step", "v2_vsa_light", "h3_dit_vsa", attention="VIDEO_SPARSE_ATTN_H3", decode="h3-vae",
+            vae_compile=True, height=768, width=1344, num_frames=243, warmups=1, env=FAST_ENV,
+            prompts=("kitesurf", "chef", "kitesurf", "chef"), sparsity=0.8, steps=9, num_gpus=4, parallel_decode=True,
             pre_runs=((480, 832, 124, "kitesurf"), ))
         print("RESULT", json.dumps(r))
         if r.get("pre_runs"):

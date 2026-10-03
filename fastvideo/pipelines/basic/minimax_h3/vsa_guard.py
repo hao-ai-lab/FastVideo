@@ -21,7 +21,8 @@ def refuse_zero_initialized_h3_vsa(transformer: Any) -> None:
         if gate is None:
             continue
         weight = getattr(gate, "weight", None)
-        if weight is None:
+        # Layerwise offload leaves a zero-element placeholder on the module; it says nothing about the gate.
+        if weight is None or weight.numel() == 0:
             continue
         saw_weight = True
         if bool((weight != 0).any()):

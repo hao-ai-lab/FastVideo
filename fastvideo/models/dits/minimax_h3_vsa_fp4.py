@@ -29,6 +29,48 @@ from fastvideo.attention.backends.video_sparse_attn_h3 import (MiniMaxH3VSAMetad
 VSA_FP4_ENV = "FASTVIDEO_H3_VSA_FP4"
 _BLOCK = 128
 
+
+class _StageTimer:
+    """Opt-in (``FASTVIDEO_H3_SP_PROFILE=1``) CUDA-event spans summed per stage over one DiT forward.
+
+    Events are only recorded during the forward; ``flush`` synchronizes once
+    and returns milliseconds per stage, so enabling it costs one sync per step.
+    """
+
+    def __init__(self) -> None:
+        self.enabled = os.environ.get("FASTVIDEO_H3_SP_PROFILE", "0") == "1"
+        self._spans: list[tuple[str, torch.cuda.Event, torch.cuda.Event]] = []
+
+    def span(self, name: str):
+        import contextlib
+        if not self.enabled:
+            return contextlib.nullcontext()
+        return self._record(name)
+
+    def _record(self, name: str):
+        import contextlib
+
+        @contextlib.contextmanager
+        def ctx():
+            start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+            start.record()
+            yield
+            end.record()
+            self._spans.append((name, start, end))
+
+        return ctx()
+
+    def flush(self) -> dict[str, float]:
+        torch.cuda.synchronize()
+        totals: dict[str, float] = {}
+        for name, start, end in self._spans:
+            totals[name] = totals.get(name, 0.0) + start.elapsed_time(end)
+        self._spans.clear()
+        return {k: round(v, 1) for k, v in totals.items()}
+
+
+STAGES = _StageTimer()
+
 _fp4_api: Any = None
 
 
@@ -101,35 +143,46 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
     api = _api()
     layout = _layout_for(meta, rotary_emb)
     heads, dim = attn.num_attention_heads, attn.attention_head_dim
-    x_tiles = layout.gather_in(hidden_states)
-    query, key, value = (t.unflatten(-1, (heads, dim))
-                         for t in _shared_input_projections((attn.to_q, attn.to_k, attn.to_v), x_tiles))
-    if use_fused_rope:
-        from fastvideo.models.dits.minimax_h3_fusions import fused_qknorm_rope
-        cos, sin = layout.cos.to(query.dtype), layout.sin.to(query.dtype)
-        query = fused_qknorm_rope(query, attn.norm_q.weight, cos, sin, attn.norm_q.eps)
-        key = fused_qknorm_rope(key, attn.norm_k.weight, cos, sin, attn.norm_k.eps)
-    else:
-        rope = (layout.cos, layout.sin)
-        query = attn._apply_rotary_emb(attn.norm_q(query), rope)
-        key = attn._apply_rotary_emb(attn.norm_k(key), rope)
+    with STAGES.span("qkv_proj_rope"):
+        x_tiles = layout.gather_in(hidden_states)
+        query, key, value = (t.unflatten(-1, (heads, dim))
+                             for t in _shared_input_projections((attn.to_q, attn.to_k, attn.to_v), x_tiles))
+        if use_fused_rope:
+            from fastvideo.models.dits.minimax_h3_fusions import fused_qknorm_rope
+            cos, sin = layout.cos.to(query.dtype), layout.sin.to(query.dtype)
+            query = fused_qknorm_rope(query, attn.norm_q.weight, cos, sin, attn.norm_q.eps)
+            key = fused_qknorm_rope(key, attn.norm_k.weight, cos, sin, attn.norm_k.eps)
+        else:
+            rope = (layout.cos, layout.sin)
+            query = attn._apply_rotary_emb(attn.norm_q(query), rope)
+            key = attn._apply_rotary_emb(attn.norm_k(key), rope)
+
+    sim_fp8 = os.environ.get(SIM_SP_FP8_ENV, "0") == "1"
+    if sim_fp8:
+        query, key, value = (_fp8_roundtrip(t) for t in (query, key, value))
 
     vbs = meta.variable_block_sizes
     logical = layout.n_tiles * layout.tile
-    q_pooled = _pool_tiles(query[:, :logical], vbs, layout.tile)
-    k_pooled = _pool_tiles(key[:, :logical], vbs, layout.tile)
-    scores = torch.matmul(q_pooled, k_pooled.transpose(-2, -1)) / (dim**0.5)
-    sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
-    mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt)
-    q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
-    out = api.sageattn_blackwell_sparse_bshd(query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad)
-    out = out.transpose(1, 2).index_select(1, layout.untile)  # [B, L, H, D], packed order
+    with STAGES.span("select_mask"):
+        q_pooled = _pool_tiles(query[:, :logical], vbs, layout.tile)
+        k_pooled = _pool_tiles(key[:, :logical], vbs, layout.tile)
+        scores = torch.matmul(q_pooled, k_pooled.transpose(-2, -1)) / (dim**0.5)
+        sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
+        mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt)
+        q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
+    with STAGES.span("fp4_attention"):
+        out = api.sageattn_blackwell_sparse_bshd(query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad)
+    with STAGES.span("out_untile"):
+        out = out.transpose(1, 2).index_select(1, layout.untile)  # [B, L, H, D], packed order
+    if sim_fp8:
+        out = _fp8_roundtrip(out)
 
     if attn.to_gate_compress is not None and attn._gate_active():
-        gate, _ = attn.to_gate_compress(hidden_states)
-        v_pooled = _pool_tiles(value[:, :logical], vbs, layout.tile)
-        out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled).permute(0, 2, 1, 3).to(out.dtype)
-        out = out.addcmul_(out_c.index_select(1, layout.row_tile), gate.unflatten(-1, (heads, dim)))
+        with STAGES.span("gate_compress"):
+            gate, _ = attn.to_gate_compress(hidden_states)
+            v_pooled = _pool_tiles(value[:, :logical], vbs, layout.tile)
+            out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled).permute(0, 2, 1, 3).to(out.dtype)
+            out = out.addcmul_(out_c.index_select(1, layout.row_tile), gate.unflatten(-1, (heads, dim)))
     return out.flatten(2, 3)
 
 
@@ -148,6 +201,19 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
 
 _FP8 = torch.float8_e4m3fn
 _FP8_MAX = 448.0
+
+# Debug: apply the SP path's FP8 rounding on one GPU (q/k/v after RoPE and the
+# attention output, one scale per token and head), to separate exchange
+# rounding from sharding errors when comparing SP>1 against SP=1.
+SIM_SP_FP8_ENV = "FASTVIDEO_H3_SIM_SP_FP8"
+
+
+@torch.compile(dynamic=True, fullgraph=True)
+def _fp8_roundtrip(x: torch.Tensor) -> torch.Tensor:
+    """``[..., H, D]`` BF16 -> FP8 with a per-(token, head) scale -> BF16, as the SP exchange does."""
+    xf = x.float()
+    scale = (xf.abs().amax(dim=-1) / _FP8_MAX).clamp_min(1e-12)
+    return ((xf / scale[..., None]).to(_FP8).float() * scale[..., None]).to(torch.bfloat16)
 
 
 @torch.compile(dynamic=False, fullgraph=True)
@@ -242,41 +308,53 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
         layout = _SPTileLayout(meta, rank, local_rows)
         meta._h3_fp4_sp_layout = layout  # type: ignore[attr-defined]
 
-    query, key, value = (t.unflatten(-1, (heads, dim))
-                         for t in _shared_input_projections((attn.to_q, attn.to_k, attn.to_v), hidden_states))
-    if use_fused_rope:
-        from fastvideo.models.dits.minimax_h3_fusions import fused_qknorm_rope
-        cos, sin = rotary_emb[0].to(query.dtype), rotary_emb[1].to(query.dtype)
-        query = fused_qknorm_rope(query, attn.norm_q.weight, cos, sin, attn.norm_q.eps)
-        key = fused_qknorm_rope(key, attn.norm_k.weight, cos, sin, attn.norm_k.eps)
-    else:
-        query = attn._apply_rotary_emb(attn.norm_q(query), rotary_emb)
-        key = attn._apply_rotary_emb(attn.norm_k(key), rotary_emb)
+    with STAGES.span("qkv_proj_rope"):
+        query, key, value = (t.unflatten(-1, (heads, dim))
+                             for t in _shared_input_projections((attn.to_q, attn.to_k, attn.to_v), hidden_states))
+        if use_fused_rope:
+            from fastvideo.models.dits.minimax_h3_fusions import fused_qknorm_rope
+            cos, sin = rotary_emb[0].to(query.dtype), rotary_emb[1].to(query.dtype)
+            query = fused_qknorm_rope(query, attn.norm_q.weight, cos, sin, attn.norm_q.eps)
+            key = fused_qknorm_rope(key, attn.norm_k.weight, cos, sin, attn.norm_k.eps)
+        else:
+            query = attn._apply_rotary_emb(attn.norm_q(query), rotary_emb)
+            key = attn._apply_rotary_emb(attn.norm_k(key), rotary_emb)
 
-    payload, scale = _pack_heads_fp8(query[0], key[0], value[0], world)
-    payload, scale = _all_to_all(payload, scale, sp_group.device_group)
-    qkv = layout.tiles_from(_unpack_seq_fp8(payload, scale, layout.seq_len))  # [3, R, Hs, D]
+    with STAGES.span("qkv_pack"):
+        payload, scale = _pack_heads_fp8(query[0], key[0], value[0], world)
+    with STAGES.span("qkv_all_to_all"):
+        payload, scale = _all_to_all(payload, scale, sp_group.device_group)
+    with STAGES.span("qkv_unpack_tile"):
+        qkv = layout.tiles_from(_unpack_seq_fp8(payload, scale, layout.seq_len))  # [3, R, Hs, D]
     q_t, k_t, v_t = qkv[0:1], qkv[1:2], qkv[2:3]
 
     vbs = meta.variable_block_sizes
     logical = layout.n_tiles * layout.tile
-    scores = torch.matmul(_pool_tiles(q_t[:, :logical], vbs, layout.tile),
-                          _pool_tiles(k_t[:, :logical], vbs, layout.tile).transpose(-2, -1)) / (dim**0.5)
-    sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
-    mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt)
-    q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
-    out_bhsd = api.sageattn_blackwell_sparse_bshd(q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad)
+    with STAGES.span("select_mask"):
+        scores = torch.matmul(_pool_tiles(q_t[:, :logical], vbs, layout.tile),
+                              _pool_tiles(k_t[:, :logical], vbs, layout.tile).transpose(-2, -1)) / (dim**0.5)
+        sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
+        mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt)
+        q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
+    with STAGES.span("fp4_attention"):
+        out_bhsd = api.sageattn_blackwell_sparse_bshd(q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad)
 
-    payload, scale = _pack_seq_fp8(out_bhsd, layout.untile, world, local_rows)
-    payload, scale = _all_to_all(payload, scale, sp_group.device_group)
-    out = _unpack_heads_fp8(payload, scale)  # [rows, H, D]
+    with STAGES.span("out_pack"):
+        payload, scale = _pack_seq_fp8(out_bhsd, layout.untile, world, local_rows)
+    with STAGES.span("out_all_to_all"):
+        payload, scale = _all_to_all(payload, scale, sp_group.device_group)
+    with STAGES.span("out_unpack"):
+        out = _unpack_heads_fp8(payload, scale)  # [rows, H, D]
 
     if attn.to_gate_compress is not None and attn._gate_active():
-        v_pooled = _pool_tiles(v_t[:, :logical], vbs, layout.tile)
-        out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled)[0].to(out.dtype)  # [Hs, n_tiles, D]
-        gathered = torch.empty((world, *out_c.shape), dtype=out_c.dtype, device=out_c.device)
-        dist.all_gather_into_tensor(gathered, out_c.contiguous(), group=sp_group.device_group)
-        out_c_all = gathered.flatten(0, 1).transpose(0, 1)  # [n_tiles, H, D]
-        gate, _ = attn.to_gate_compress(hidden_states)
-        out = _apply_gate(out, out_c_all, layout.local_row_tile, gate[0].unflatten(-1, (heads, dim)))
+        with STAGES.span("gate_compress"):
+            v_pooled = _pool_tiles(v_t[:, :logical], vbs, layout.tile)
+            out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled)[0].to(out.dtype)  # [Hs, n_tiles, D]
+            gathered = torch.empty((world, *out_c.shape), dtype=out_c.dtype, device=out_c.device)
+        with STAGES.span("gate_all_gather"):
+            dist.all_gather_into_tensor(gathered, out_c.contiguous(), group=sp_group.device_group)
+        with STAGES.span("gate_apply"):
+            out_c_all = gathered.flatten(0, 1).transpose(0, 1)  # [n_tiles, H, D]
+            gate, _ = attn.to_gate_compress(hidden_states)
+            out = _apply_gate(out, out_c_all, layout.local_row_tile, gate[0].unflatten(-1, (heads, dim)))
     return out.flatten(1, 2).unsqueeze(0)

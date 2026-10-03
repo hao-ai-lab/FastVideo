@@ -182,6 +182,38 @@ def _nvfp4_linear(
     )
 
 
+_E2M1_VALUES = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0)
+
+
+def _fp4_gemm_supported(device: torch.device) -> bool:
+    """FP4 tensor-core GEMMs exist on Blackwell (sm_100 / sm_120) and newer."""
+    return torch.cuda.is_available() and torch.cuda.get_device_capability(device)[0] >= 10
+
+
+def unswizzle_128x4_scales(scale: torch.Tensor, rows: int, cols: int) -> torch.Tensor:
+    """FlashInfer ``layout_128x4`` block scales -> row-major ``[rows, cols]`` (E4M3 bytes).
+
+    The swizzled buffer holds the padded matrix ``[ceil(rows/128)*128, ceil(cols/4)*4]`` as
+    ``(row_tile, col_tile, row % 32, (row // 32) % 4, col % 4)``.
+    """
+    pad_rows, pad_cols = -(-rows // 128) * 128, -(-cols // 4) * 4
+    tiles = scale.reshape(-1)[:pad_rows * pad_cols].view(pad_rows // 128, pad_cols // 4, 32, 4, 4)
+    return tiles.permute(0, 3, 2, 1, 4).reshape(pad_rows, pad_cols)[:rows, :cols]
+
+
+def dequantize_serialized_nvfp4(weight_packed: torch.Tensor, weight_scale: torch.Tensor, global_scale: float,
+                                dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
+    """Packed E2M1 ``[out, in // 2]`` + swizzled E4M3 scales -> dense ``[out, in]`` weight."""
+    out_features, in_features = weight_packed.shape[0], weight_packed.shape[1] * 2
+    lut = torch.tensor(_E2M1_VALUES, device=weight_packed.device, dtype=torch.float32)
+    packed = weight_packed.view(torch.uint8)
+    values = torch.stack((lut[(packed & 0x0F).long()], lut[(packed >> 4).long()]), dim=-1).reshape(
+        out_features, in_features)
+    scales = unswizzle_128x4_scales(weight_scale.view(torch.uint8), out_features, in_features // NVFP4_GROUP_SIZE)
+    scales = scales.view(torch.float8_e4m3fn).float().repeat_interleave(NVFP4_GROUP_SIZE, dim=1)
+    return (values * scales / global_scale).to(dtype)
+
+
 class MiniMaxH3SerializedNVFP4Config(QuantizationConfig):
     """Serialized 16-group NVFP4 contract for the H3 text encoder.
 
@@ -384,6 +416,12 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
 
     @staticmethod
     def _apply_finalized(layer: torch.nn.Module, x: torch.Tensor, bias: torch.Tensor | None) -> torch.Tensor:
+        if not _fp4_gemm_supported(layer.weight_packed.device):
+            # Pre-Blackwell GPUs have no FP4 GEMM: expand this layer's weight to bf16 for the one call.
+            # The encoder runs once per request, so the transient weight is cheaper than keeping a bf16 copy.
+            weight = dequantize_serialized_nvfp4(layer.weight_packed, layer.weight_scale,
+                                                 float(layer.weight_global_scale.item()), x.dtype)
+            return torch.nn.functional.linear(x, weight, None if bias is None else bias.to(x.dtype))
         x = _coerce_fp4_input_dtype(x)
         original_shape = x.shape
         if x.numel() == 0:
