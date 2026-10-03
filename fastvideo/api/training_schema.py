@@ -301,9 +301,20 @@ def training_resolution_steps(config: GeneratorConfig, defaults: Any = None) -> 
                                       after=(derive_lora_alpha_from_rank, ))
 
 
+def derive_video_preprocess_vae_precision(view: ResolutionView) -> dict[str, Any]:
+    """A ``preprocess.data_merge_path`` run encodes video in every task except ``text_only``, so its VAE runs in fp32."""
+    if (not view.get("preprocess.data_merge_path") or view.get("preprocess.preprocess_task") == "text_only"
+            or view.get("engine.precision.vae") == "fp32"):
+        return {}
+    return {"engine.precision.vae": "fp32"}
+
+
 def preprocess_resolution_steps(config: GeneratorConfig, defaults: Any = None) -> tuple[ResolutionStep, ...]:
     """The resolution steps of a ``PreprocessRunConfig``, in the order that they run."""
-    return generator_resolution_steps(config, defaults, after=(fill_preprocess_model_path, validate_preprocess_options))
+    return generator_resolution_steps(config,
+                                      defaults,
+                                      after=(derive_video_preprocess_vae_precision, fill_preprocess_model_path,
+                                             validate_preprocess_options))
 
 
 def resolve_training_config(config: TrainingRunConfig | Mapping[str, Any]) -> ResolvedGeneratorConfig:

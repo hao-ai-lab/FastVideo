@@ -278,6 +278,9 @@ class _FrozenNode:
     def __init__(self, struct: _Struct):
         object.__setattr__(self, "_struct", struct)
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        return type(self), (object.__getattribute__(self, "_struct"), )
+
     def __getattr__(self, name: str) -> Any:
         struct = object.__getattribute__(self, "_struct")
         if name not in struct.fields:

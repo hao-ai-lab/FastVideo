@@ -1,6 +1,5 @@
 import os
 import warnings
-from collections.abc import Sequence
 
 from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.training_schema import PreprocessRunConfig, load_resolved_run_config
@@ -16,18 +15,6 @@ from fastvideo.pipelines.preprocess.matrixgame2.matrixgame2_preprocess_pipeline_
 from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
-
-
-def resolve_preprocess_task_config(argv: Sequence[str] | None = None) -> ResolvedGeneratorConfig:
-    """Load the ``PreprocessRunConfig`` of ``--config <yaml>`` plus dotted overrides for one preprocess task.
-
-    ``argv`` defaults to ``sys.argv[1:]``. Every task except ``text_only`` encodes video, so its VAE runs in fp32.
-    """
-    resolved_config = load_resolved_run_config(PreprocessRunConfig, argv)
-    if resolved_config.preprocess.preprocess_task != "text_only" and resolved_config.engine.precision.vae != "fp32":
-        resolved_config = resolved_config.with_override("v1_preprocess.video_task_vae_precision",
-                                                        {"engine.precision.vae": "fp32"})
-    return resolved_config
 
 
 def main(resolved_config: ResolvedGeneratorConfig) -> None:
@@ -79,4 +66,4 @@ def main(resolved_config: ResolvedGeneratorConfig) -> None:
 
 
 if __name__ == "__main__":
-    main(resolve_preprocess_task_config())
+    main(load_resolved_run_config(PreprocessRunConfig))
