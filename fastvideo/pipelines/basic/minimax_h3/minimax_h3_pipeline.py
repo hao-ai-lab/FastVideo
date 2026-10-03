@@ -464,6 +464,10 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             stage.conditioner = self.get_module("text_encoder")
 
     def _move_module(self, module: Any, device: str | torch.device) -> bool:
+        if getattr(module, "_h3_encoder_layerwise_device", None) is not None:
+            # Layer hooks own placement; moving the whole encoder would restore
+            # every weight at once and defeat its VRAM bound.
+            return True
         if _module_has_dtensor_params(module):
             return False
         if os.environ.get("FASTVIDEO_H3_PINNED_SWAP", "1") == "1":

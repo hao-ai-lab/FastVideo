@@ -172,7 +172,11 @@ class LayerwiseOffloadHook(ForwardHook):
             self.state.on_init(self.state.module_ref)  # pyright: ignore
 
 
-def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
+def enable_layerwise_offload(model: nn.Module,
+                             is_replace: bool = False,
+                             *,
+                             resident_blocks: int | None = None,
+                             cyclic: bool = True):
     if torch.cuda.is_available():
         device = torch.device("cuda", torch.cuda.current_device())
     else:
@@ -183,12 +187,15 @@ def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
     # The first N entries skip offloading and stay wherever the model is placed (normally the
     # GPU), so a GPU with spare memory streams only the remainder over PCIe.
     import os
-    try:
-        resident = max(0, int(os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS", "0")))
-    except ValueError:
-        logger.warning("Ignoring malformed FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=%r",
-                       os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS"))
-        resident = 0
+    if resident_blocks is not None:
+        resident = max(0, resident_blocks)
+    else:
+        try:
+            resident = max(0, int(os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS", "0")))
+        except ValueError:
+            logger.warning("Ignoring malformed FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=%r",
+                           os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS"))
+            resident = 0
     for name, submodule in model.named_children():
         if isinstance(submodule, nn.ModuleList):
             for idx, module_entry in enumerate(submodule):
@@ -214,6 +221,7 @@ def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
             return
         raise ValueError("No nn.ModuleList found in the model for layerwise offloading.")
 
-    # circular linking of states
+    # Repeated DiT steps prefetch the first block after the last. A once-per-request
+    # encoder can skip that unused copy and release every layer after its forward.
     for i in range(len(state_list)):
-        state_list[i].next_state = state_list[(i + 1) % len(state_list)]
+        state_list[i].next_state = state_list[(i + 1) % len(state_list)] if cyclic or i + 1 < len(state_list) else None

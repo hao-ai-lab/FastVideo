@@ -417,6 +417,10 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
         # ``mm_fp4`` folds both global scales into one multiplier. Activations use a
         # unit global scale, so the multiplier is the inverse weight global scale.
         device = weight_scale.device
+        # Serialized weights are immutable between post-load hooks. Keeping the
+        # validated scalar on the host avoids a CUDA synchronization per linear
+        # on the BF16 fallback used by consumer GPUs.
+        layer._nvfp4_dequant_global_scale = global_scale
         layer.register_buffer("_nvfp4_alpha", torch.tensor(1.0 / global_scale, dtype=torch.float32, device=device),
                               persistent=False)
         layer.register_buffer("_nvfp4_x_global_scale", torch.ones((), dtype=torch.float32, device=device),
@@ -429,7 +433,7 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
             # Pre-Blackwell GPUs have no FP4 GEMM: expand this layer's weight to bf16 for the one call.
             # The encoder runs once per request, so the transient weight is cheaper than keeping a bf16 copy.
             weight = dequantize_serialized_nvfp4(layer.weight_packed, layer.weight_scale,
-                                                 float(layer.weight_global_scale.item()), x.dtype)
+                                                 layer._nvfp4_dequant_global_scale, x.dtype)
             return torch.nn.functional.linear(x, weight, None if bias is None else bias.to(x.dtype))
         original_shape = x.shape
         if x.numel() == 0:

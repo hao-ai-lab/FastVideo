@@ -467,6 +467,14 @@ class TextEncoderLoader(ComponentLoader):
             # Explicitly move model to target device after loading weights
             model = model.to(target_device)
 
+            prepare_layerwise = getattr(model, "prepare_layerwise_offload", None)
+            if os.environ.get("FASTVIDEO_H3_ENCODER_LAYERWISE", "0") == "1" and callable(prepare_layerwise):
+                if target_device.type != "cpu":
+                    raise ValueError("Layerwise H3 encoder requires text_encoder_cpu_offload=True")
+                prepare_layerwise(runtime_device)
+                use_cpu_offload = False
+                logger.info("Enabled text-only layerwise H3 encoder with CPU token embeddings")
+
             from fastvideo.platforms import current_platform
 
             if use_cpu_offload and checkpoint_quant_config is not None:
