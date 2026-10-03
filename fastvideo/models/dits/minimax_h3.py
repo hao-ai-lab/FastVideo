@@ -140,8 +140,22 @@ class MiniMaxH3FeedForward(nn.Module):
         self.fuse_swiglu = fuse_swiglu
         self.use_mxfp8 = isinstance(self.fc_in.quant_method, MXFP8QuantizeMethod) and isinstance(
             self.fc_out.quant_method, MXFP8QuantizeMethod)
+        # Inference-only token chunking: the 2 * ffn_dim intermediate is ~5.3x the block input
+        # (4.5 GiB at 78k tokens), so chunks bound the activation peak on 24-32 GB GPUs.
+        self.chunk_tokens = int(os.environ.get("FASTVIDEO_H3_FFN_CHUNK_TOKENS", "0"))
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        tokens = hidden_states.shape[-2] if hidden_states.dim() > 1 else 0
+        if (self.chunk_tokens and tokens > self.chunk_tokens and not torch.is_grad_enabled()
+                and not torch.compiler.is_compiling() and hidden_states.numel() == tokens * hidden_states.shape[-1]):
+            out = torch.empty_like(hidden_states)
+            for start in range(0, tokens, self.chunk_tokens):
+                rows = slice(start, start + self.chunk_tokens)
+                out[..., rows, :] = self._forward(hidden_states[..., rows, :].contiguous())
+            return out
+        return self._forward(hidden_states)
+
+    def _forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         if self.use_mxfp8:
             from fastvideo.layers.mxfp8linear import mxfp8_swiglu_feed_forward
 
@@ -977,6 +991,16 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         self._rope_cache = (position_ids, dtype, value)
         return value
 
+    def attach_step_splice(self, late: nn.Module, from_step: int) -> None:
+        """Hand denoising steps ``from_step`` onward to ``late`` (same architecture, other weights).
+
+        Early DMD steps fix layout and object count, late ones texture and detail, so two checkpoints
+        can split the trajectory. ``late`` is kept out of this module's children: it is placed, offloaded
+        and checkpointed on its own.
+        """
+        object.__setattr__(self, "_splice_late", late)
+        self._splice_from_step = int(from_step)
+
     def enable_adaln_host_cache(self, table_path: str | None = None) -> None:
         """Move every block's AdaLN projection to pinned host memory behind a per-timestep cache.
 
@@ -1055,6 +1079,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         text_indices: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict video and audio velocities from one caller-defined packed layout."""
+        late = self.__dict__.get("_splice_late")
+        if late is not None and get_forward_context().current_timestep >= self._splice_from_step:
+            return late(hidden_states, audio_hidden_states, encoder_hidden_states, timestep, timestep_indices,
+                        token_tags, position_ids, video_indices, audio_indices, text_indices)
         if position_ids.ndim != 2 or position_ids.shape[-1] != 3:
             raise ValueError(f"position_ids must have shape (seq_len, 3), got {tuple(position_ids.shape)}.")
         sequence_length = position_ids.shape[0]

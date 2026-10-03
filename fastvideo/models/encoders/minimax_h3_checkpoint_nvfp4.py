@@ -54,6 +54,9 @@ from fastvideo.layers.quantization.nvfp4_config import (
     _require_flashinfer,
 )
 from fastvideo.models.utils import set_weight_attrs
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 NVFP4_GROUP_SIZE = 16
 NVFP4_SCALE_LAYOUT = "128x4"
@@ -299,15 +302,20 @@ class MiniMaxH3SerializedNVFP4Config(QuantizationConfig):
             raise RuntimeError(f"MiniMax-H3 serialized NVFP4 requires a CUDA device; got {device.type!r}")
         capability = torch.cuda.get_device_capability(device)
         capability_number = capability[0] * 10 + capability[1]
-        if capability_number < self.get_min_capability():
-            raise RuntimeError("MiniMax-H3 serialized NVFP4 requires GPU capability "
-                               f"sm{self.get_min_capability()} or newer, got sm{capability_number}")
-        if capability[0] not in (10, 12):
-            raise RuntimeError("MiniMax-H3 serialized NVFP4 runs FlashInfer's Blackwell FP4 GEMM; "
-                               f"got unsupported sm{capability_number}")
         if get_tp_world_size() > 1:
             raise NotImplementedError("MiniMax-H3 serialized NVFP4 supports a single GPU: packed FP4 columns and "
                                       "128x4 swizzled scale rows cannot be narrowed per tensor-parallel rank")
+        if capability_number < self.get_min_capability():
+            if capability_number < 80:
+                raise RuntimeError("MiniMax-H3 serialized NVFP4 needs bf16 compute (sm80+) for its de-quantized "
+                                   f"fallback, got sm{capability_number}")
+            logger.warning(
+                "MiniMax-H3 serialized NVFP4 on sm%d: no FP4 GEMM, each linear de-quantizes its weight to bf16 "
+                "per call", capability_number)
+            return
+        if capability[0] not in (10, 12):
+            raise RuntimeError("MiniMax-H3 serialized NVFP4 runs FlashInfer's Blackwell FP4 GEMM; "
+                               f"got unsupported sm{capability_number}")
         sf_layout, _, _ = _require_flashinfer()
         if not hasattr(sf_layout, "layout_128x4"):
             raise RuntimeError("The installed flashinfer has no SfLayout.layout_128x4; MiniMax-H3 serialized NVFP4 "

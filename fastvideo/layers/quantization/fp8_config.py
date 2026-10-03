@@ -3,6 +3,8 @@
 
 Matches linear layers by suffix (``to_q/k/v/to_out``, ``ffn.fc_in/fc_out``).
 Supports per-tensor (default, fast) and per-channel (higher accuracy) granularity.
+On sm89 the per-channel path runs the per-tensor GEMM plus a Triton scale epilogue
+(``fp8_kernels``), since torch's rowwise-scaled kernel there is slower than bf16.
 Falls back to bf16 dequant on GPUs older than sm89.
 """
 from __future__ import annotations
@@ -77,8 +79,18 @@ def _quantize_tensorwise(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor
     return x_fp8, x_scale.view(1)
 
 
+def _rowwise_scaled_mm_is_slow() -> bool:
+    if getattr(torch.version, "hip", None) or not torch.cuda.is_available():
+        return False
+    from fastvideo.layers.quantization.fp8_kernels import rowwise_scaled_mm_is_slow
+    return rowwise_scaled_mm_is_slow()
+
+
 def _quantize_rowwise(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Returns ``(x_fp8 [M, K], x_scale [M, 1] float32)``."""
+    if x_2d.is_cuda and _rowwise_scaled_mm_is_slow():
+        from fastvideo.layers.quantization.fp8_kernels import quantize_rowwise_fp8
+        return quantize_rowwise_fp8(x_2d)
     x_absmax = x_2d.abs().amax(dim=-1, keepdim=True).float()
     x_scale = (x_absmax / FP8_MAX).clamp(min=FP8_MIN_SCALE)
     x_fp8 = (x_2d / x_scale.to(x_2d.dtype)).clamp(-FP8_MAX, FP8_MAX).to(FP8_DTYPE)
@@ -159,6 +171,12 @@ class FP8QuantizeMethod(QuantizeMethodBase):
 
         w_fp8 = layer._fp8_weight
         w_scale = layer._fp8_weight_scale
+        if self.granularity == "channel" and _rowwise_scaled_mm_is_slow():
+            from fastvideo.layers.quantization.fp8_kernels import scaled_mm_token_channel
+            out = scaled_mm_token_channel(x_fp8, x_scale, w_fp8.t(), w_scale)
+            if bias is not None:
+                out = out + bias
+            return out.view(*original_shape[:-1], out_dim)
         scale_b = w_scale.view(1, -1) if self.granularity == "channel" else w_scale
 
         out = torch._scaled_mm(

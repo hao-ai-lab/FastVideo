@@ -1210,6 +1210,17 @@ class TransformerLoader(ComponentLoader):
                     "nn.ModuleList structure. Skipping layerwise offload.", cls_name)
                 if layerwise_load:
                     model = model.to(get_local_torch_device())
+        # FASTVIDEO_H3_SPLICE_TRANSFORMER=<transformer dir>: a second checkpoint of the same architecture
+        # runs denoising steps FASTVIDEO_H3_SPLICE_FROM_STEP (default 4) onward.
+        splice_path = os.environ.pop("FASTVIDEO_H3_SPLICE_TRANSFORMER", None)
+        if splice_path and hasattr(model, "attach_step_splice"):
+            try:
+                late = self.load(splice_path, fastvideo_args)
+            finally:
+                os.environ["FASTVIDEO_H3_SPLICE_TRANSFORMER"] = splice_path
+            from_step = int(os.environ.get("FASTVIDEO_H3_SPLICE_FROM_STEP", "4"))
+            model.attach_step_splice(late, from_step)
+            logger.info("Step splice: steps >= %d run the transformer from %s", from_step, splice_path)
         return model
 
 

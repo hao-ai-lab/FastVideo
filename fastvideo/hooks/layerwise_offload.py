@@ -167,9 +167,15 @@ def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
         return
     state_list = []
     async_stream = torch.cuda.Stream()
+    # The first N entries skip offloading and stay wherever the model is placed (normally the
+    # GPU), so a GPU with spare memory streams only the remainder over PCIe.
+    import os
+    resident = int(os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS", "0"))
     for name, submodule in model.named_children():
         if isinstance(submodule, nn.ModuleList):
             for idx, module_entry in enumerate(submodule):
+                if idx < resident:
+                    continue
                 state = LayerwiseOffloadState(async_copy_stream=async_stream, device=device)
                 state_list.append(state)
                 hook_mgr = ModuleHookManager.get_from_or_default(module_entry)
