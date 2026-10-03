@@ -123,20 +123,79 @@ def _layout_for(meta: MiniMaxH3VSAMetadata, rotary_emb: tuple[torch.Tensor, torc
 
 
 def _shared_input_projections(linears: tuple[Any, ...], x: torch.Tensor) -> list[torch.Tensor]:
-    """Run projections of one input, quantizing it once when all are NVFP4 with the unit activation scale.
+    """Share compatible FP8 preparation or unit-scale NVFP4 activation quantization.
 
-    Only then is one quantized copy exactly what each layer would have produced; layers with a calibrated
-    or dynamic activation scale quantize their own input.
+    Calibrated or dynamic NVFP4 activation scales retain independent preparation.
     """
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+    from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
 
     methods = [linear.quant_method for linear in linears]
-    if not all(
-            type(m) is NVFP4QuantizeMethod and m.wants_prequantized_input() and m.uses_unit_activation_scale(linear)
-            for m, linear in zip(methods, linears, strict=True)):
+    same_nvfp4 = all(type(m) is NVFP4QuantizeMethod and m.wants_prequantized_input()
+                     and m.uses_unit_activation_scale(linear)
+                     for m, linear in zip(methods, linears, strict=True))
+    same_fp8 = all(type(m) is FP8QuantizeMethod and m.granularity == methods[0].granularity for m in methods)
+    if not (same_nvfp4 or same_fp8):
         return [linear(x)[0] for linear in linears]
     pre = methods[0].quantize_input(x)
     return [m.apply(linear, x, linear.bias, pre_quantized=pre) for m, linear in zip(methods, linears, strict=True)]
+
+
+def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
+                             rotary_emb: tuple[torch.Tensor, torch.Tensor],
+                             meta: MiniMaxH3VSAMetadata, use_fused_rope: bool) -> torch.Tensor:
+    """Single-rank BF16 VSA with one input scatter instead of a Q/K/V/gate stack.
+
+    The existing backend computes the same tile-64 mask, valid-key handling,
+    fine attention and compression branch. Bias-free projections keep pad
+    rows zero. This path is inference-only and keeps the checkpoint layout.
+    """
+    layout = _layout_for(meta, rotary_emb)
+    logical = layout.n_tiles * layout.tile
+    heads, dim = attn.num_attention_heads, attn.attention_head_dim
+    with STAGES.span("tile_input"):
+        x_tiles = layout.gather_in(hidden_states)[:, :logical]
+    with STAGES.span("qkv_proj"):
+        query, key, value = (t.unflatten(-1, (heads, dim))
+                             for t in _shared_input_projections((attn.to_q, attn.to_k, attn.to_v), x_tiles))
+    with STAGES.span("qknorm_rope"):
+        cos, sin = layout.cos[:logical], layout.sin[:logical]
+        if use_fused_rope:
+            from fastvideo.models.dits.minimax_h3_fusions import fused_qknorm_rope
+            query = fused_qknorm_rope(query, attn.norm_q.weight, cos.to(query.dtype), sin.to(query.dtype), attn.norm_q.eps)
+            key = fused_qknorm_rope(key, attn.norm_k.weight, cos.to(key.dtype), sin.to(key.dtype), attn.norm_k.eps)
+        else:
+            query = attn._apply_rotary_emb(attn.norm_q(query), (cos, sin))
+            key = attn._apply_rotary_emb(attn.norm_k(key), (cos, sin))
+    gate = None
+    if attn.to_gate_compress is not None and attn._gate_active():
+        with STAGES.span("gate_proj"):
+            gate, _ = attn.to_gate_compress(x_tiles)
+            gate = gate.unflatten(-1, (heads, dim))
+    capture_root = os.environ.get("FASTVIDEO_H3_CAPTURE_QKV")
+    if capture_root and attn._layer_idx in (0, 20, 41):
+        from pathlib import Path
+        root = Path(capture_root)
+        root.mkdir(parents=True, exist_ok=True)
+        capture = root / f"layer-{attn._layer_idx}.pt"
+        if not capture.exists():
+            q_pooled = _pool_tiles(query, meta.variable_block_sizes, meta.tile_elems)
+            k_pooled = _pool_tiles(key, meta.variable_block_sizes, meta.tile_elems)
+            scores = torch.matmul(q_pooled, k_pooled.transpose(-2, -1)) / dim**0.5
+            sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
+            mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt)
+            # Two heads keep the artifact small while retaining all real keys,
+            # query rows, per-tile selections and partial-tile validity.
+            torch.save({"q": query[:, :, :2].transpose(1, 2).contiguous().cpu(),
+                        "k": key[:, :, :2].transpose(1, 2).contiguous().cpu(),
+                        "v": value[:, :, :2].transpose(1, 2).contiguous().cpu(),
+                        "mask": mask[:, :2].cpu(), "vbs": meta.variable_block_sizes.cpu(),
+                        "untile": meta.untile_combined_index.cpu()}, capture)
+            del q_pooled, k_pooled, scores, mask
+    with STAGES.span("attention"):
+        out = attn.distributed_attention.attn_impl.forward(query, key, value, gate, meta)
+    with STAGES.span("untile_output"):
+        return out.index_select(1, layout.untile).flatten(2, 3)
 
 
 def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[torch.Tensor, torch.Tensor],
