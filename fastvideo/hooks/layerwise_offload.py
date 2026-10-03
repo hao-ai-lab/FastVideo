@@ -4,6 +4,7 @@ from typing import Any
 import torch
 from torch import nn
 from fastvideo.hooks.hooks import ForwardHook, ModuleHookManager
+from fastvideo.hooks.pinned_memory import PinnedTensorArena
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -53,6 +54,7 @@ class LayerwiseOffloadState:
         self.cpu_named_parameters: dict[str, torch.Tensor] = {}
         self.module_ref: nn.Module = None  # type: ignore
         self.device: torch.device = device
+        self.cpu_arena: PinnedTensorArena | None = None
 
     def _will_offload(self, name: str) -> bool:
         return True
@@ -60,10 +62,21 @@ class LayerwiseOffloadState:
     @torch.compiler.disable
     def on_init(self, module: nn.Module):
         self.module_ref = module
+        self.clear_cpu_storage()
+        self.cpu_arena = PinnedTensorArena(
+            (name, param) for name, param in _offload_tensors(module) if self._will_offload(name))
         for name, param in _offload_tensors(self.module_ref):
             if self._will_offload(name):
-                self.cpu_named_parameters[name] = (param.data.detach().to("cpu").pin_memory())
+                host = self.cpu_arena.empty_like(name, param)
+                host.copy_(param.data.detach())
+                self.cpu_named_parameters[name] = host
                 param.data = _tensor_placeholder(param.data, self.device)
+
+    def clear_cpu_storage(self) -> None:
+        self.cpu_named_parameters.clear()
+        if self.cpu_arena is not None:
+            self.cpu_arena.close()
+            self.cpu_arena = None
 
     @torch.compiler.disable
     def wait_and_replace_params(self):
@@ -108,16 +121,17 @@ class LayerwiseOffloadHook(ForwardHook):
         self.state.on_init(module)  # pyright: ignore
 
     def on_detach(self, module: nn.Module):
+        self.state.async_copy_stream.synchronize()
         named_parameters = dict(_offload_tensors(module, self.state.cpu_named_parameters))
         for name, cpu_tensor in self.state.cpu_named_parameters.items():
-            if name not in self.state.gpu_named_parameters:
-                if name in named_parameters:
-                    named_parameters[name].data = cpu_tensor.to(device=self.state.device)
-                else:
-                    logger.warning(
-                        "Parameter {} not found in module during detachment.",
-                        name,
-                    )
+            if name in named_parameters:
+                gpu_tensor = self.state.gpu_named_parameters.get(name)
+                named_parameters[name].data = gpu_tensor if gpu_tensor is not None else cpu_tensor.to(self.state.device)
+            else:
+                logger.warning("Parameter %s not found in module during detachment.", name)
+        self.state.gpu_named_parameters.clear()
+        self.state.clear_cpu_storage()
+        self.state.next_state = None
 
     @classmethod
     def name(cls) -> str:
@@ -154,7 +168,6 @@ class LayerwiseOffloadHook(ForwardHook):
             yield
         finally:
             # instead of releasing, we should overwrite the original params since they have been modified
-            self.state.cpu_named_parameters.clear()
             self.state.gpu_named_parameters.clear()
             self.state.on_init(self.state.module_ref)  # pyright: ignore
 

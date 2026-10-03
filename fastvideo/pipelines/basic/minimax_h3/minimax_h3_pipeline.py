@@ -20,6 +20,7 @@ from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEArch
 from fastvideo.configs.pipelines.minimax_h3 import (FASTH3_INFERENCE_FILE, FASTH3_INFERENCE_SCHEMA,
                                                     MiniMaxH3PipelineConfig)
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.hooks.pinned_memory import PinnedTensorArena
 from fastvideo.logger import init_logger
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.pipelines.basic.minimax_h3.stages import (
@@ -76,64 +77,37 @@ def _checkpoint_has_vsa_gates(transformer_dir: Path) -> bool:
     return False
 
 
-def _exact_pinned_views(tensors: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor | None]:
-    """Page-locked host copies of ``tensors`` backed by one exact-size allocation.
-
-    ``Tensor.pin_memory()`` goes through torch's caching host allocator, which rounds every block up to a power
-    of two (1.76x for H3's packed FFN weights), so pinning a 20 GB DiT plus a 15 GB encoder overruns a 60 GB
-    container. Registering one plain allocation with ``cudaHostRegister`` pins exactly what is needed; the views
-    stay pinned and keep the arena alive.
-    """
-    sizes = [-(-t.numel() * t.element_size() // 256) * 256 for t in tensors]
-    arena = torch.empty(max(sum(sizes), 1), dtype=torch.uint8)
-    cudart = torch.cuda.cudart()
-    if cudart.cudaHostRegister(arena.data_ptr(), arena.numel(), 0) != cudart.cudaError.success:
-        logger.warning("cudaHostRegister failed; falling back to torch pinned allocations")
-        return [t.detach().to("cpu").pin_memory() for t in tensors], None
-    views, offset = [], 0
-    for tensor, size in zip(tensors, sizes, strict=True):
-        nbytes = tensor.numel() * tensor.element_size()
-        view = arena[offset:offset + nbytes].view(tensor.dtype).view(tensor.shape)
-        view.copy_(tensor)
-        views.append(view)
-        offset += size
-    return views, arena
-
-
 def _pinned_swap(module: Any, device: torch.device) -> None:
-    """Move a module's tensors between the GPU and persistent, exactly sized pinned host copies.
+    """Move a module's tensors between the GPU and a persistent pinned host copy.
 
     Inference weights never change, so a parameter's pinned copy is made once and parking just repoints the
-    parameter at it (no transfer); restoring is one pinned host-to-device copy. Buffers keep a persistent host
-    copy too and are copied back into it on every park, so mutable buffers stay correct without new allocations.
+    parameter at it (no transfer); restoring is one pinned host-to-device copy. Buffers are copied every time.
     """
     store = module.__dict__.setdefault("_pinned_host_tensors", {})
-    arenas = module.__dict__.setdefault("_pinned_host_arenas", [])
     params = dict(module.named_parameters())
-    named = [(name, tensor) for name, tensor in list(params.items()) + list(module.named_buffers())
-             if tensor is not None]
+    tensors = list(params.items()) + list(module.named_buffers())
     if device.type == "cpu":
-        missing = [(name, tensor) for name, tensor in named if tensor.device.type != "cpu" and (
-            name not in store or store[name].shape != tensor.shape or store[name].dtype != tensor.dtype)]
-        if missing:
-            views, arena = _exact_pinned_views([tensor.detach() for _, tensor in missing])
-            store.update({name: view for (name, _), view in zip(missing, views, strict=True)})
-            if arena is not None:
-                arenas.append(arena)
-            fresh = {name for name, _ in missing}
-        else:
-            fresh = set()
-        for name, tensor in named:
+        missing = [(name, tensor) for name, tensor in tensors
+                   if tensor is not None and tensor.device.type != "cpu" and (
+                       name not in store or store[name].shape != tensor.shape or store[name].dtype != tensor.dtype)]
+        arena = PinnedTensorArena(missing) if missing else None
+    for name, tensor in tensors:
+        if tensor is None:
+            continue
+        if device.type == "cpu":
             if tensor.device.type == "cpu":
                 continue
-            host = store[name]
-            if name not in params and name not in fresh:
+            host = store.get(name)
+            if host is None or host.shape != tensor.shape or host.dtype != tensor.dtype:
+                assert arena is not None
+                host = arena.empty_like(name, tensor)
+                host.copy_(tensor)
+                store[name] = host
+            elif name not in params:
                 host.copy_(tensor)
             tensor.data = host
-    else:
-        for _, tensor in named:
-            if tensor.device != device:
-                tensor.data = tensor.data.to(device, non_blocking=True)
+        elif tensor.device != device:
+            tensor.data = tensor.data.to(device, non_blocking=True)
     if device.type != "cpu" and torch.cuda.is_available():
         torch.cuda.current_stream(device).synchronize()
 
