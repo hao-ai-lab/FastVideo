@@ -471,6 +471,9 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             return True
         if _module_has_dtensor_params(module):
             return False
+        if not callable(getattr(module, "named_parameters", None)):
+            module.to(device)
+            return True
         if envs.FASTVIDEO_H3_PINNED_SWAP.get():
             _pinned_swap(module, torch.device(device))
         else:

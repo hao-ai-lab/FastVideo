@@ -5,6 +5,8 @@
 # Copyright 2025 The FastVideo Authors.
 
 from __future__ import annotations
+
+import os
 import contextlib
 import re
 from collections.abc import Callable, Generator
