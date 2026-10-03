@@ -19,6 +19,7 @@ from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
+from fastvideo.api.device_policy import offload_disabled_on_unified_memory
 from fastvideo.attention.selector import (
     _active_component_attention_backend_scope,
     _component_attention_backend_scope,
@@ -352,8 +353,13 @@ class TextEncoderLoader(ComponentLoader):
         runtime_device = get_local_torch_device()
         device_id = runtime_device.index if runtime_device.index is not None else 0
         requested_cpu_offload = getattr(fastvideo_args, offload_flag) if cpu_offload is None else cpu_offload
-        disable_cpu_offload = fastvideo_args.disable_offload_on_unified_memory(device_id,
-                                                                               offload_flag=offload_flag)
+        # A resolved config already carries the worker's offload policy, so only ask whether the policy covers this
+        # component; a FastVideoArgs applies the policy to itself.
+        apply_policy = getattr(fastvideo_args, "disable_offload_on_unified_memory", None)
+        if apply_policy is not None:
+            disable_cpu_offload = apply_policy(device_id, offload_flag=offload_flag)
+        else:
+            disable_cpu_offload = offload_disabled_on_unified_memory(device_id, offload_flag)
 
         if requested_cpu_offload and disable_cpu_offload:
             # Direct loader callers can choose a CPU target before the worker

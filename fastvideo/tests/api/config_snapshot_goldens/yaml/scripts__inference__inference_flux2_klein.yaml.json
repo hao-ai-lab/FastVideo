@@ -44,7 +44,7 @@
   "ltx2_vae_spatial_tile_size_in_pixels": null,
   "ltx2_vae_temporal_tile_overlap_in_frames": null,
   "ltx2_vae_temporal_tile_size_in_frames": null,
-  "ltx2_vae_tiling": null,
+  "ltx2_vae_tiling": false,
   "master_port": null,
   "moba_config": {},
   "moba_config_path": null,
@@ -376,6 +376,30 @@
     "engine.parallelism.hsdp_shard_dim": 1,
     "engine.parallelism.sp_size": 1,
     "engine.parallelism.tp_size": 1
+   }
+  ],
+  [
+   "fill_vae_tiling_default[Flux2KleinPipelineConfig]",
+   {
+    "pipeline.vae_tiling": false
+   }
+  ],
+  [
+   "fill_runtime_defaults",
+   {
+    "engine.attention.moba_config": {},
+    "engine.attention.vsa_sparsity": 0.0,
+    "engine.attention.vsa_tile_size": 256,
+    "engine.compile.audio_vae_enabled": false,
+    "engine.compile.regional": false,
+    "engine.compile.text_encoder_enabled": false,
+    "engine.compile.vae_enabled": false,
+    "pipeline.ltx2.legacy_native_noise_order": false,
+    "pipeline.ltx2.use_distilled_sigmas": true,
+    "pipeline.minimax_h3.taeh3_chunk_size": 5,
+    "pipeline.minimax_h3.vae_parallel_decode": false,
+    "pipeline.minimax_h3.vae_parallel_encode": false,
+    "pipeline.minimax_h3.video_decode_backend": "h3-vae"
    }
   ]
  ],

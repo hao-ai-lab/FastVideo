@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, field
+from enum import Enum
 from typing import Any, Literal
 
 # Field metadata key that holds a field's name in the flat keyword API: the keyword arguments of
@@ -13,6 +14,59 @@ FLAT_NAME = "flat_name"
 def flat_field(flat_name: str, default: Any = MISSING, *, default_factory: Any = MISSING) -> Any:
     """Declare a dataclass field whose name in the flat keyword API is ``flat_name``."""
     return field(default=default, default_factory=default_factory, metadata={FLAT_NAME: flat_name})
+
+
+class ExecutionMode(str, Enum):
+    """
+    Enumeration for different pipeline modes.
+    
+    Inherits from str to allow string comparison for backward compatibility.
+    """
+    INFERENCE = "inference"
+    PREPROCESS = "preprocess"
+    FINETUNING = "finetuning"
+    DISTILLATION = "distillation"
+
+    @classmethod
+    def from_string(cls, value: str) -> ExecutionMode:
+        """Convert string to ExecutionMode enum."""
+        try:
+            return cls(value.lower())
+        except ValueError:
+            raise ValueError(f"Invalid mode: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        """Get all available choices as strings for argparse."""
+        return [mode.value for mode in cls]
+
+
+class WorkloadType(str, Enum):
+    """
+    Enumeration for different workload types.
+    
+    Inherits from str to allow string comparison for backward compatibility.
+    """
+    I2V = "i2v"  # Image to Video
+    T2V = "t2v"  # Text to Video
+    T2I = "t2i"  # Text to Image
+    I2I = "i2i"  # Image to Image
+    V2A = "v2a"  # Video to Audio
+    T2A = "t2a"  # Text to Audio
+
+    @classmethod
+    def from_string(cls, value: str) -> WorkloadType:
+        """Convert string to WorkloadType enum."""
+        try:
+            return cls(value.lower())
+        except ValueError:
+            raise ValueError(
+                f"Invalid workload type: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        """Get all available choices as strings for argparse."""
+        return [workload.value for workload in cls]
 
 
 @dataclass
@@ -30,6 +84,8 @@ class ParallelismConfig:
     hsdp_replicate_dim: int = flat_field("hsdp_replicate_dim", 1)
     hsdp_shard_dim: int = flat_field("hsdp_shard_dim", -1)
     dist_timeout: int | None = flat_field("dist_timeout", None)
+    master_port: int | None = flat_field("master_port", None)
+    """Port of the rendezvous that the executor opens for its workers. ``None`` picks an open port."""
 
 
 @dataclass
@@ -96,6 +152,8 @@ class AttentionConfig:
     """VSA tile size in tokens, 256 or 64; 64 runs the native Triton block-sparse path. ``None`` keeps 256."""
     moba_config_path: str | None = flat_field("moba_config_path", None)
     """Path to a JSON config for V-MoBA attention."""
+    moba_config: dict[str, Any] | None = flat_field("moba_config", None)
+    """V-MoBA attention settings. Resolution loads them from ``moba_config_path`` when that path is set."""
 
 
 Precision = Literal["fp32", "fp16", "bf16"]
@@ -155,8 +213,27 @@ class ComponentConfig:
 
 @dataclass
 class LTX2RefineOptions:
-    """Stage-2 refine assets that ``preset_overrides.refine`` and ``components`` do not cover."""
+    """Stage-2 refine settings. ``pipeline.components.upsampler_weights`` holds the refine upsampler.
 
+    Resolution copies ``pipeline.preset_overrides.refine`` into the fields of the same name. When the pipeline loads,
+    the ``fastvideo_refine_*`` defaults of the checkpoint's ``model_index.json`` override them: ``enabled`` unless
+    ``preset_overrides.refine.enabled`` or a ``refine_enabled`` key set it, ``num_inference_steps`` while it is 3,
+    ``guidance_scale`` and ``add_noise`` unless a ``refine_guidance_scale`` or ``refine_add_noise`` key set them, and
+    each path while it is ``None``.
+    """
+
+    enabled: bool | None = flat_field("ltx2_refine_enabled", None)
+    """Run the stage-2 spatial refine. ``None`` is ``False``."""
+    num_inference_steps: int | None = flat_field("ltx2_refine_num_inference_steps", None)
+    """Stage-2 denoising steps, 2 or 3. ``None`` is 3."""
+    guidance_scale: float | None = flat_field("ltx2_refine_guidance_scale", None)
+    """Stage-2 guidance scale. ``None`` is 1.0."""
+    add_noise: bool | None = flat_field("ltx2_refine_add_noise", None)
+    """Add noise to the upsampled latents before stage 2. ``None`` is ``True``."""
+    image_crf: int | None = None
+    """Stage-2 image conditioning CRF from ``preset_overrides.refine``. Requests set it per call."""
+    video_position_offset_sec: float | None = None
+    """Stage-2 video position offset from ``preset_overrides.refine``. Requests set it per call."""
     transformer_path: str | None = flat_field("ltx2_refine_transformer_path", None)
     lora_path: str | None = flat_field("ltx2_refine_lora_path", None)
     """LoRA applied to the refine transformer only. ``None`` uses the checkpoint's default
@@ -224,7 +301,7 @@ class LongCatOptions:
 
 @dataclass
 class PipelineSelection:
-    workload_type: Literal["t2v", "i2v", "t2i", "i2i", "v2a", "t2a"] | None = flat_field("workload_type", None)
+    workload_type: WorkloadType | None = flat_field("workload_type", None)
     preset: str | None = None
     preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
@@ -238,6 +315,10 @@ class PipelineSelection:
     """Guidance scale that guidance-distilled models take as a DiT input. ``None`` keeps the model's default."""
     dmd_denoising_steps: list[int] | None = flat_field("dmd_denoising_steps", None)
     """Timesteps of a few-step distilled (DMD) sampler. ``None`` keeps the model's default."""
+    boundary_ratio: float | None = flat_field("boundary_ratio", None)
+    """Mixture-of-experts switch point of a two-transformer model. ``None`` keeps the model's default."""
+    output_type: str = flat_field("output_type", "pil")
+    """Output of the decoding stage: ``pil`` for decoded frames, ``latent`` to skip the VAE decode."""
     dit: dict[str, Any] = field(default_factory=dict)
     """Overrides for fields of the model's DiT config, such as ``prefix``."""
     vae: dict[str, Any] = field(default_factory=dict)
@@ -252,6 +333,8 @@ class PipelineSelection:
 @dataclass
 class GeneratorConfig:
     model_path: str = flat_field("model_path")
+    mode: ExecutionMode = flat_field("mode", ExecutionMode.INFERENCE)
+    """What the run does: inference, preprocessing, finetuning, or distillation."""
     revision: str | None = flat_field("revision", None)
     trust_remote_code: bool = flat_field("trust_remote_code", False)
     engine: EngineConfig = field(default_factory=EngineConfig)
@@ -437,6 +520,7 @@ __all__ = [
     "ComponentConfig",
     "ContinuationState",
     "EngineConfig",
+    "ExecutionMode",
     "GenerationPlan",
     "GenerationRequest",
     "GeneratorConfig",
@@ -462,4 +546,5 @@ __all__ = [
     "ServerConfig",
     "StreamingConfig",
     "WarmupConfig",
+    "WorkloadType",
 ]

@@ -22,6 +22,7 @@ from fastvideo.api import (
     SamplingConfig,
     load_run_config,
 )
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator, _resolve_output_size
 from fastvideo.fastvideo_args import WorkloadType
@@ -79,25 +80,14 @@ def _patch_from_fastvideo_args(monkeypatch):
     return captured
 
 
-def _patch_fastvideo_args_from_kwargs(monkeypatch):
-    captured = {}
-
-    def fake_from_kwargs(cls, **kwargs):
-        captured["kwargs"] = kwargs
-        return SimpleNamespace(
-            model_path=kwargs["model_path"],
-            num_gpus=kwargs["num_gpus"],
-            workload_type=WorkloadType.from_string(kwargs.get("workload_type", "t2v")),
-        )
-
-    monkeypatch.setattr(
-        "fastvideo.api.compat.FastVideoArgs.from_kwargs",
-        classmethod(fake_from_kwargs),
-    )
-    # "test-model" is not a registered model, so skip the model-default resolution step.
+def _skip_model_definition(monkeypatch):
+    """"test-model" is not a registered model, so skip the registry lookup, the model defaults, and the
+    PipelineConfig materialization of resolution."""
+    monkeypatch.setattr("fastvideo.api.inference_resolution.build_model_pipeline_config", lambda config: None)
     monkeypatch.setattr("fastvideo.api.inference_resolution.pipeline_config_defaults_step",
-                        lambda config: lambda view: {})
-    return captured
+                        lambda config, defaults=None: lambda view: {})
+    monkeypatch.setattr("fastvideo.api.inference_resolution.materialize_pipeline_config",
+                        lambda resolved, pipeline_config: None)
 
 
 def _patch_sampling_param_from_pretrained(monkeypatch):
@@ -546,7 +536,7 @@ def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(mon
     )
     worker = Worker.__new__(Worker)
     worker.fastvideo_args = SimpleNamespace()
-    worker.pipeline = SimpleNamespace(forward=lambda batch, args: worker_output)
+    worker.pipeline = SimpleNamespace(fastvideo_args=SimpleNamespace(), forward=lambda batch, args: worker_output)
 
     monkeypatch.setattr(RayDistributedExecutor, "__abstractmethods__", frozenset())
     executor = RayDistributedExecutor.__new__(RayDistributedExecutor)
@@ -607,24 +597,26 @@ def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_pat
     assert result["video_path"] is None
 
 
-def test_from_config_normalizes_and_translates(monkeypatch):
+def test_from_config_normalizes_and_resolves(monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
-    _patch_fastvideo_args_from_kwargs(monkeypatch)
+    _skip_model_definition(monkeypatch)
     config = GeneratorConfig(model_path="test-model")
     config.engine.num_gpus = 2
     config.pipeline.workload_type = "t2v"
 
     generator = VideoGenerator.from_config(config)
 
-    assert captured["fastvideo_args"].model_path == "test-model"
-    assert captured["fastvideo_args"].num_gpus == 2
-    assert captured["fastvideo_args"].workload_type.value == "t2v"
+    resolved = captured["fastvideo_args"]
+    assert isinstance(resolved, ResolvedGeneratorConfig)
+    assert resolved.model_path == "test-model"
+    assert resolved.engine.num_gpus == 2
+    assert resolved.pipeline.workload_type is WorkloadType.T2V
     assert generator.config == config
 
 
 def test_from_file_loads_generator_from_run_config(tmp_path, monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
-    _patch_fastvideo_args_from_kwargs(monkeypatch)
+    _skip_model_definition(monkeypatch)
     config_path = tmp_path / "run.yaml"
     config_path.write_text(
         "generator:\n"
@@ -639,12 +631,12 @@ def test_from_file_loads_generator_from_run_config(tmp_path, monkeypatch):
     VideoGenerator.from_file(str(config_path))
 
     assert captured["fastvideo_args"].model_path == "test-model"
-    assert captured["fastvideo_args"].num_gpus == 3
+    assert captured["fastvideo_args"].engine.num_gpus == 3
 
 
 def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
-    fastvideo_args_capture = _patch_fastvideo_args_from_kwargs(monkeypatch)
+    _skip_model_definition(monkeypatch)
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -659,13 +651,14 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
         )
 
     assert not caught
-    assert captured["fastvideo_args"].model_path == "test-model"
-    assert captured["fastvideo_args"].num_gpus == 4
-    assert fastvideo_args_capture["kwargs"]["use_fsdp_inference"] is False
-    assert fastvideo_args_capture["kwargs"]["text_encoder_cpu_offload"] is True
-    assert fastvideo_args_capture["kwargs"]["pin_cpu_memory"] is True
-    assert fastvideo_args_capture["kwargs"]["dit_cpu_offload"] is False
-    assert fastvideo_args_capture["kwargs"]["vae_cpu_offload"] is False
+    resolved = captured["fastvideo_args"]
+    assert resolved.model_path == "test-model"
+    assert resolved.engine.num_gpus == 4
+    assert resolved.engine.use_fsdp_inference is False
+    assert resolved.engine.offload.text_encoder is True
+    assert resolved.engine.offload.pin_cpu_memory is True
+    assert resolved.engine.offload.dit is False
+    assert resolved.engine.offload.vae is False
     assert generator.config is not None
     assert generator.config.model_path == "test-model"
     assert generator.config.engine.num_gpus == 4
@@ -673,7 +666,7 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
 
 def test_from_pretrained_rejects_other_kwargs_with_their_config_path(monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
-    _patch_fastvideo_args_from_kwargs(monkeypatch)
+    _skip_model_definition(monkeypatch)
 
     with pytest.raises(TypeError, match="workload_type -> pipeline.workload_type"):
         VideoGenerator.from_pretrained(

@@ -14,6 +14,7 @@ from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
 from fastvideo.utils import (DEPRECATED_HF_TOKEN_ENV_VARS, HF_TOKEN_ENV_VARS, get_ip, get_distributed_init_method,
                              get_open_port, get_loopback_ip)
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.executor import Executor
@@ -284,7 +285,8 @@ class RayDistributedExecutor(Executor):
             else:
                 self.non_driver_workers.append(worker)
 
-    def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def execute_streaming_reset(self, forward_batch: ForwardBatch,
+                                fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
         responses: list[dict[str, Any]] = self.collective_rpc(
             "execute_streaming_reset",
             kwargs={
@@ -316,7 +318,8 @@ class RayDistributedExecutor(Executor):
     def execute_streaming_clear(self) -> None:
         self.collective_rpc("execute_streaming_clear")
 
-    def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def execute_forward(self, forward_batch: ForwardBatch,
+                        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
         responses: list[ForwardBatch] = self.collective_rpc(
             "execute_forward",
             kwargs={

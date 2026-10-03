@@ -150,9 +150,11 @@ class TestRefineFlattenCoversAllTypedFields:
             return _Captured(**kw)
 
         monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _capture)
-        # The model path is not a registered model, so skip the model-default resolution step.
+        # The model path is not a registered model, so skip the model definition.
         from fastvideo.api import inference_resolution
-        monkeypatch.setattr(inference_resolution, "pipeline_config_defaults_step", lambda config: lambda view: {})
+        monkeypatch.setattr(inference_resolution, "build_model_pipeline_config", lambda config: None)
+        monkeypatch.setattr(inference_resolution, "pipeline_config_defaults_step", lambda config, defaults=None: lambda view: {})
+        monkeypatch.setattr(inference_resolution, "materialize_pipeline_config", lambda resolved, pipeline_config: None)
 
         refine_payload = {
             # Preset-override fields.

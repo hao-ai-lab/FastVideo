@@ -9,15 +9,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from fastvideo.api.resolution import ResolvedGeneratorConfig
     from fastvideo.api.schema import GenerationRequest
     from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine, ServingGenerator
-    from fastvideo.fastvideo_args import FastVideoArgs
 
 DEFAULT_OUTPUT_DIR = "outputs"
 
 _generator: ServingGenerator | None = None
 _serving_engine: OpenAIServingEngine | None = None
-_fastvideo_args: FastVideoArgs | None = None
+_fastvideo_args: ResolvedGeneratorConfig | None = None
 _output_dir: str = DEFAULT_OUTPUT_DIR
 _served_model_name: str | None = None
 _default_request: GenerationRequest | None = None
@@ -35,8 +35,8 @@ def get_serving_engine() -> OpenAIServingEngine:
     return _serving_engine
 
 
-def get_server_args() -> FastVideoArgs:
-    """Return the global FastVideoArgs (set during startup)."""
+def get_server_args() -> ResolvedGeneratorConfig:
+    """Return the resolved runtime config of the served generator (set during startup)."""
     assert _fastvideo_args is not None, "Server not initialized — args is None"
     return _fastvideo_args
 
@@ -62,7 +62,7 @@ def get_default_request() -> GenerationRequest | None:
 def set_state(
     generator: ServingGenerator,
     serving_engine: OpenAIServingEngine,
-    fastvideo_args: FastVideoArgs,
+    fastvideo_args: ResolvedGeneratorConfig,
     output_dir: str,
     default_request: GenerationRequest | None = None,
     served_model_name: str | None = None,

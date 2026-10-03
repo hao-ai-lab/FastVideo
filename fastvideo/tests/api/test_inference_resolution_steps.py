@@ -48,7 +48,8 @@ def test_environment_turns_on_regional_compile_and_parallel_vae():
 
     assert resolved.engine.compile.regional is True
     assert resolved.pipeline.minimax_h3.vae_parallel_decode is True
-    assert resolved.pipeline.minimax_h3.vae_parallel_encode is None
+    assert resolved.pipeline.minimax_h3.vae_parallel_encode is False
+    assert resolved.provenance("pipeline.minimax_h3.vae_parallel_encode").source == "fill_runtime_defaults"
     assert resolved.pipeline.minimax_h3.vae_parallel_decode_strategy == "all_gather"
     assert resolved.provenance("engine.compile.regional").source == "fill_regional_compile_from_env"
 
@@ -108,8 +109,19 @@ def test_environment_takes_precedence_over_model_defaults():
         "fill_regional_compile_from_env",
         "fill_vae_parallel_from_env",
         "fill_pipeline_config_defaults[WanT2V480PConfig]",
+        "copy_refine_preset_overrides",
+        "route_flat_override_keys",
         "derive_parallel_sizes",
         "derive_vae_tiling_from_ltx2_tile_sizes",
+        "fill_vae_tiling_default[WanT2V480PConfig]",
+        "load_moba_config",
+        "validate_lora_strength",
+        "validate_attention_backend",
+        "validate_vae_parallel_decode_strategy",
+        "warn_deprecated_environment_variables",
+        "validate_parallel_sizes",
+        "derive_num_gpus_from_parallel_sizes",
+        "fill_runtime_defaults",
     ]
 
 
@@ -134,7 +146,7 @@ def test_video_generator_keeps_the_resolved_config(monkeypatch):
 @pytest.mark.parametrize(("pipeline", "expected"), [
     ({"ltx2": {"vae_spatial_tile_size_in_pixels": 512}}, (True, "derive_vae_tiling_from_ltx2_tile_sizes")),
     ({"ltx2": {"vae_spatial_tile_size_in_pixels": 512}, "vae_tiling": False}, (False, "input")),
-    ({}, (None, "input")),
+    ({}, (True, "fill_vae_tiling_default[LTX2T2VConfig]")),
 ])
 def test_ltx2_tile_sizes_turn_on_unset_vae_tiling(pipeline, expected):
     resolved = _resolve({"model_path": "FastVideo/LTX2-Distilled-Diffusers", "pipeline": pipeline})

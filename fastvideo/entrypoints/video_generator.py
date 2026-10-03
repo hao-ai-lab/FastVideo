@@ -31,7 +31,6 @@ from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     expand_request_prompt_batch,
     from_pretrained_kwargs_to_config,
-    generator_config_to_fastvideo_args,
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
@@ -129,7 +128,7 @@ class VideoGenerator:
 
     def __init__(
         self,
-        fastvideo_args: FastVideoArgs,
+        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
         executor_class: type[Executor],
         log_stats: bool,
         *,
@@ -139,14 +138,15 @@ class VideoGenerator:
         Initialize the video generator.
 
         Args:
-            fastvideo_args: The inference arguments
+            fastvideo_args: The resolved runtime config that the workers run with
             executor_class: The executor class to use for inference
             log_stats: Whether to log statistics
             log_queue: Optional multiprocessing.Queue to forward worker logs to
         """
         self.config: GeneratorConfig | None = None
-        # Resolved startup values with the provenance of each path, when fastvideo_args was built from a typed config.
-        self.resolved_config: ResolvedGeneratorConfig | None = getattr(fastvideo_args, "resolved_config", None)
+        # Resolved startup values with the provenance of each path and the model's PipelineConfig.
+        self.resolved_config: ResolvedGeneratorConfig | None = (fastvideo_args if isinstance(
+            fastvideo_args, ResolvedGeneratorConfig) else getattr(fastvideo_args, "resolved_config", None))
         self.fastvideo_args = fastvideo_args
         self.executor = executor_class(fastvideo_args, log_queue=log_queue)
 
@@ -206,8 +206,7 @@ class VideoGenerator:
     ) -> "VideoGenerator":
         normalized = normalize_generator_config(config)
         resolved = resolve_inference_config(config)
-        fastvideo_args = generator_config_to_fastvideo_args(resolved)
-        generator = cls.from_fastvideo_args(fastvideo_args, log_queue=log_queue)
+        generator = cls.from_fastvideo_args(resolved, log_queue=log_queue)
         generator.config = normalized
         return generator
 
@@ -227,15 +226,15 @@ class VideoGenerator:
     @classmethod
     def from_fastvideo_args(
         cls,
-        fastvideo_args: FastVideoArgs,
+        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
         *,
         log_queue=None,
     ) -> "VideoGenerator":
         """
-        Create a video generator with the specified arguments.
+        Create a video generator that runs with a resolved runtime config.
 
         Args:
-            fastvideo_args: The inference arguments
+            fastvideo_args: The resolved runtime config from ``resolve_inference_config``
             log_queue: Optional multiprocessing.Queue to forward worker logs to
 
         Returns:
@@ -244,7 +243,8 @@ class VideoGenerator:
         # Initialize distributed environment if needed
         # initialize_distributed_and_parallelism(fastvideo_args)
 
-        if getattr(fastvideo_args, "resolved_config", None) is None:
+        if (not isinstance(fastvideo_args, ResolvedGeneratorConfig)
+                and getattr(fastvideo_args, "resolved_config", None) is None):
             warnings.warn(
                 "VideoGenerator.from_fastvideo_args(...) with a FastVideoArgs that was not built from a typed "
                 "config is deprecated; use VideoGenerator.from_config(GeneratorConfig(...)) instead.",
@@ -412,7 +412,7 @@ class VideoGenerator:
         keyboard_cond: torch.Tensor | None = None,
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
-        fastvideo_args: FastVideoArgs | None = None,
+        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | None = None,
         **kwargs,
     ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
         """Run one prompt, or each prompt of a prompt file, through the pipeline with ``sampling_param``."""
@@ -596,7 +596,7 @@ class VideoGenerator:
         self,
         prompt: str,
         sampling_param: SamplingParam | None = None,
-        fastvideo_args: FastVideoArgs | None = None,
+        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """Internal method for single video generation"""

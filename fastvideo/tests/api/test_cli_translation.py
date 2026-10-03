@@ -439,7 +439,7 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
     ])
     captured: dict[str, object] = {}
 
-    def fake_generator_config_to_fastvideo_args(config):
+    def fake_resolve_inference_config(config):
         captured["config"] = config
         return SimpleNamespace(model_path=config.model_path)
 
@@ -451,8 +451,8 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
         captured["default_request"] = default_request
 
     monkeypatch.setattr(
-        "fastvideo.entrypoints.cli.serve.generator_config_to_fastvideo_args",
-        fake_generator_config_to_fastvideo_args,
+        "fastvideo.entrypoints.cli.serve.resolve_inference_config",
+        fake_resolve_inference_config,
     )
     monkeypatch.setattr(api_server, "run_server", fake_run_server)
 
@@ -479,15 +479,15 @@ def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     args, _ = _parse_serve_args(["--config", str(config_path)])
     captured: dict[str, object] = {}
 
-    def fake_generator_config_to_fastvideo_args(config):
+    def fake_resolve_inference_config(config):
         return SimpleNamespace(model_path=config.model_path)
 
     def fake_run_server(fastvideo_args, host, port, output_dir, default_request, served_model_name=None):
         captured["default_request"] = default_request
 
     monkeypatch.setattr(
-        "fastvideo.entrypoints.cli.serve.generator_config_to_fastvideo_args",
-        fake_generator_config_to_fastvideo_args,
+        "fastvideo.entrypoints.cli.serve.resolve_inference_config",
+        fake_resolve_inference_config,
     )
     monkeypatch.setattr(api_server, "run_server", fake_run_server)
 

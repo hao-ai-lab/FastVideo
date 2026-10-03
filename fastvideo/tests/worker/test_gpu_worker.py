@@ -6,8 +6,10 @@ import pytest
 import torch
 
 import fastvideo.envs as envs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.tests.api.config_snapshot import isolated_environment
 from fastvideo.worker.gpu_worker import Worker, _log_cuda_device_uuid
 
 
@@ -42,10 +44,23 @@ def test_cuda_device_uuid_receipt_identifies_profiled_worker(monkeypatch, env_ov
 @pytest.mark.parametrize("executor_backend", ["mp", "ray"])
 def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypatch, env_overrides,
                                                                         executor_backend: str) -> None:
-    """The runtime probe must see this worker's device, never driver device 0."""
+    """The runtime probe must see this worker's device, never driver device 0, and the worker keeps its result."""
     events = []
-    args = FastVideoArgs(model_path="test", num_gpus=1, distributed_executor_backend=executor_backend)
-    args.finalize_device_offload_policy = Mock(side_effect=lambda device_id: events.append(("policy", device_id)))
+    with isolated_environment():
+        args = resolve_inference_config({
+            "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            "engine": {
+                "num_gpus": 1,
+                "execution_backend": executor_backend
+            },
+        })
+    decided = args.with_override("test:device_policy", {"engine.offload.lazy_module_load": False})
+
+    def fake_policy(resolved_config, device_id):
+        events.append(("policy", device_id))
+        return decided
+
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.finalize_device_offload_policy", fake_policy)
     worker = Worker(args, local_rank=3, rank=3, distributed_init_method="env://")
 
     env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
@@ -70,12 +85,13 @@ def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypa
     assert os.environ["LOCAL_RANK"] == "3"
     assert worker.device == torch.device("cuda:3")
     assert worker.init_gpu_memory == 123
+    assert worker.fastvideo_args is decided
 
 
 def _worker_returning(output_batch: ForwardBatch) -> Worker:
     worker = Worker.__new__(Worker)
     worker.fastvideo_args = SimpleNamespace()
-    worker.pipeline = SimpleNamespace(forward=lambda batch, args: output_batch)
+    worker.pipeline = SimpleNamespace(fastvideo_args=SimpleNamespace(), forward=lambda batch, args: output_batch)
     return worker
 
 

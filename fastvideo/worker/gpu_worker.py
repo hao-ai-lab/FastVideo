@@ -4,6 +4,8 @@ from typing import Any, cast
 import torch
 
 import fastvideo.envs as envs
+from fastvideo.api.device_policy import finalize_device_offload_policy
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import (cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -23,7 +25,8 @@ def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
 
 class Worker:
 
-    def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int, rank: int, distributed_init_method: str):
+    def __init__(self, fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs, local_rank: int, rank: int,
+                 distributed_init_method: str):
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
         self.rank = rank
@@ -80,10 +83,13 @@ class Worker:
 
         # CUDA's unified-memory classification reads runtime device
         # properties, so make this decision only after this worker has bound
-        # its own device. The worker-local args object is what every loader and
-        # pipeline stage below will consume.
+        # its own device. The worker keeps the config that the policy returns,
+        # and every loader and pipeline stage below consumes it.
         device_id = self.device.index if self.device.index is not None else 0
-        self.fastvideo_args.finalize_device_offload_policy(device_id)
+        if isinstance(self.fastvideo_args, ResolvedGeneratorConfig):
+            self.fastvideo_args = finalize_device_offload_policy(self.fastvideo_args, device_id)
+        else:
+            self.fastvideo_args.finalize_device_offload_policy(device_id)
 
         # Initialize the distributed environment.
         maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
@@ -91,8 +97,10 @@ class Worker:
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 
-    def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
+    def execute_forward(self, forward_batch: ForwardBatch,
+                        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
+        # The pipeline's config carries the overrides that the pipeline made from its checkpoint.
+        output_batch = self.pipeline.forward(forward_batch, self.pipeline.fastvideo_args)
         needs_output = forward_batch.return_frames or (forward_batch.save_video
                                                        and fastvideo_args.output_type != "latent"
                                                        and not output_batch.extra.get("audio_only"))
@@ -133,8 +141,9 @@ class Worker:
             return {"status": "lora_adapter_unmerged"}
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
-    def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
-        self.pipeline.streaming_reset(forward_batch, self.fastvideo_args)
+    def execute_streaming_reset(self, forward_batch: ForwardBatch,
+                                fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
+        self.pipeline.streaming_reset(forward_batch, self.pipeline.fastvideo_args)
         return {"status": "reset_complete"}
 
     def execute_streaming_step(self, keyboard_action: torch.Tensor, mouse_action: torch.Tensor) -> ForwardBatch:

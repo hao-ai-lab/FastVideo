@@ -8,9 +8,9 @@ import math
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import field
-from enum import Enum
 from typing import Any, TYPE_CHECKING
 
+from fastvideo.api.schema import ExecutionMode, WorkloadType
 from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.utils import clean_cli_args
@@ -37,59 +37,6 @@ UNIFIED_MEMORY_OFFLOAD_FLAGS = (
     "image_encoder_cpu_offload",
     "vae_cpu_offload",
 )
-
-
-class ExecutionMode(str, Enum):
-    """
-    Enumeration for different pipeline modes.
-    
-    Inherits from str to allow string comparison for backward compatibility.
-    """
-    INFERENCE = "inference"
-    PREPROCESS = "preprocess"
-    FINETUNING = "finetuning"
-    DISTILLATION = "distillation"
-
-    @classmethod
-    def from_string(cls, value: str) -> "ExecutionMode":
-        """Convert string to ExecutionMode enum."""
-        try:
-            return cls(value.lower())
-        except ValueError:
-            raise ValueError(f"Invalid mode: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
-
-    @classmethod
-    def choices(cls) -> list[str]:
-        """Get all available choices as strings for argparse."""
-        return [mode.value for mode in cls]
-
-
-class WorkloadType(str, Enum):
-    """
-    Enumeration for different workload types.
-    
-    Inherits from str to allow string comparison for backward compatibility.
-    """
-    I2V = "i2v"  # Image to Video
-    T2V = "t2v"  # Text to Video
-    T2I = "t2i"  # Text to Image
-    I2I = "i2i"  # Image to Image
-    V2A = "v2a"  # Video to Audio
-    T2A = "t2a"  # Text to Audio
-
-    @classmethod
-    def from_string(cls, value: str) -> "WorkloadType":
-        """Convert string to WorkloadType enum."""
-        try:
-            return cls(value.lower())
-        except ValueError:
-            raise ValueError(
-                f"Invalid workload type: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
-
-    @classmethod
-    def choices(cls) -> list[str]:
-        """Get all available choices as strings for argparse."""
-        return [workload.value for workload in cls]
 
 
 # args for fastvideo framework

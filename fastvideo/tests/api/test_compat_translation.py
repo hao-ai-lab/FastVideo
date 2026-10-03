@@ -124,14 +124,14 @@ class TestTextEncoderCompileFlattening:
         args = generator_config_to_fastvideo_args(config)
         assert args.kwargs["enable_torch_compile_text_encoder"] is True
 
-    def test_reverse_unset_skips_key(self, monkeypatch) -> None:
+    def test_reverse_unset_emits_the_runtime_default(self, monkeypatch) -> None:
         _stub_fastvideo_args_from_kwargs(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
             engine=_engine_with_compile(CompileConfig()),
         )
         args = generator_config_to_fastvideo_args(config)
-        assert "enable_torch_compile_text_encoder" not in args.kwargs
+        assert args.kwargs["enable_torch_compile_text_encoder"] is False
 
 
 def test_batch_cfg_typed_request_reaches_sampling_param(monkeypatch) -> None:
@@ -169,12 +169,15 @@ def _engine_with_compile(compile_config):
 
 def _stub_fastvideo_args_from_kwargs(monkeypatch):
     """Swap ``FastVideoArgs.from_kwargs`` for a capture-only stub, and skip the
-    model-default resolution step, so translation tests need neither a valid
-    FastVideoArgs nor a resolvable model path."""
+    model definition (registry lookup, model defaults, and PipelineConfig
+    materialization), so translation tests need neither a valid FastVideoArgs
+    nor a resolvable model path."""
     from fastvideo import fastvideo_args as fva
     from fastvideo.api import inference_resolution
 
-    monkeypatch.setattr(inference_resolution, "pipeline_config_defaults_step", lambda config: lambda view: {})
+    monkeypatch.setattr(inference_resolution, "build_model_pipeline_config", lambda config: None)
+    monkeypatch.setattr(inference_resolution, "pipeline_config_defaults_step", lambda config, defaults=None: lambda view: {})
+    monkeypatch.setattr(inference_resolution, "materialize_pipeline_config", lambda resolved, pipeline_config: None)
 
     class _Captured:
 

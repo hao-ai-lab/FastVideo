@@ -139,8 +139,6 @@ def _typed_path_of_keyword(key: str, value: Any) -> str:
     """The ``GeneratorConfig`` path that holds the setting of a flat ``FastVideoArgs`` keyword."""
     if key in _FLAT_NAME_FIELDS and not (key == "pipeline_config" and not isinstance(value, str)):
         return _FLAT_NAME_FIELDS[key][0]
-    if key in _LTX2_REFINE_PRESET_KEYWORDS:
-        return f"pipeline.preset_overrides.refine.{key[len('ltx2_refine_'):]}"
     for prefix, section in _COMPONENT_OVERRIDE_PREFIXES.items():
         if key.startswith(prefix):
             return f"pipeline.{section}.{key[len(prefix):]}"
@@ -149,14 +147,22 @@ def _typed_path_of_keyword(key: str, value: Any) -> str:
 
 def generator_config_to_fastvideo_args(
     config: GeneratorConfig | Mapping[str, Any] | ResolvedGeneratorConfig, ) -> FastVideoArgs:
-    """Resolve a ``GeneratorConfig`` and flatten it into the ``FastVideoArgs`` that runtime code reads.
+    """Resolve a ``GeneratorConfig`` and flatten it into a ``FastVideoArgs``.
 
-    A config that is not resolved yet goes through :func:`resolve_inference_config` first. Every field of the
-    resolved config that declares a flat name and holds a value other than ``None`` becomes the keyword of that name.
-    The paths in ``_SPECIALLY_MAPPED_PATHS`` are converted below; ``pipeline.preset_overrides`` and then
-    ``pipeline.experimental`` are applied last, so their keys win over the typed fields.
+    A config that is not resolved yet goes through :func:`resolve_inference_config` first. The keywords are the ones
+    that :func:`generator_kwargs` builds.
     """
     resolved = config if isinstance(config, ResolvedGeneratorConfig) else resolve_inference_config(config)
+    return FastVideoArgs.from_kwargs(**generator_kwargs(resolved), resolved_config=resolved)
+
+
+def generator_kwargs(resolved: ResolvedGeneratorConfig) -> dict[str, Any]:
+    """Flatten a resolved config into the flat keywords that build its ``PipelineConfig``.
+
+    Every field of the resolved config that declares a flat name and holds a value other than ``None`` becomes the
+    keyword of that name. The paths in ``_SPECIALLY_MAPPED_PATHS`` are converted below; ``pipeline.preset_overrides``
+    and then ``pipeline.experimental`` are applied last, so their keys win over the typed fields.
+    """
     normalized = resolved.to_config()
     unsupported = []
     if normalized.pipeline.preset is not None:
@@ -202,7 +208,7 @@ def generator_config_to_fastvideo_args(
             kwargs["refine_enabled"] = refine["enabled"]
     kwargs.update(preset_overrides)
     kwargs.update(deepcopy(normalized.pipeline.experimental))
-    return FastVideoArgs.from_kwargs(**kwargs, resolved_config=resolved)
+    return kwargs
 
 
 def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:
@@ -301,6 +307,8 @@ _SPECIALLY_MAPPED_PATHS: dict[str, str] = {
     "pipeline.preset": "not supported",
     "pipeline.preset_version": "not supported",
     "pipeline.components.vae_weights": "not supported",
+    "pipeline.ltx2.refine.image_crf": "no flat keyword; copied from pipeline.preset_overrides.refine",
+    "pipeline.ltx2.refine.video_position_offset_sec": "no flat keyword; copied from pipeline.preset_overrides.refine",
     "pipeline.dit": "keys passed as dit_config.<key>",
     "pipeline.vae": "keys passed as vae_config.<key>",
     "pipeline.preset_overrides": "keys passed as flat keywords; refine keys renamed to ltx2_refine_*",
@@ -311,13 +319,6 @@ _COMPONENT_OVERRIDE_PREFIXES = {
     "dit_config.": "dit",
     "vae_config.": "vae",
 }
-# Flat keywords whose setting is pipeline.preset_overrides.refine.<key without the ltx2_refine_ prefix>.
-_LTX2_REFINE_PRESET_KEYWORDS = frozenset({
-    "ltx2_refine_enabled",
-    "ltx2_refine_add_noise",
-    "ltx2_refine_num_inference_steps",
-    "ltx2_refine_guidance_scale",
-})
 
 
 def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str, Any]:
@@ -537,6 +538,7 @@ __all__ = [
     "explicit_request_updates",
     "from_pretrained_kwargs_to_config",
     "generator_config_to_fastvideo_args",
+    "generator_kwargs",
     "load_generator_config_from_file",
     "normalize_generation_request",
     "normalize_generator_config",

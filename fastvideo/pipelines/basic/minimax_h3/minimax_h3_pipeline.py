@@ -12,6 +12,7 @@ from typing import Any
 
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEArchConfig
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEArchConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
@@ -191,8 +192,12 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         config = fastvideo_args.pipeline_config
         if config.dmd_denoising_steps is not None and config.dmd_denoising_steps != steps:
             raise ValueError("Explicit DMD schedule disagrees with the checkpoint's trained DMD rungs.")
-        fastvideo_args.override("checkpoint:fastvideo_inference.json",
-                                {"pipeline_config.dmd_denoising_steps": list(steps)})
+        if isinstance(fastvideo_args, ResolvedGeneratorConfig):
+            self.fastvideo_args = fastvideo_args.with_override("checkpoint:fastvideo_inference.json",
+                                                               {"pipeline.dmd_denoising_steps": list(steps)})
+        else:
+            fastvideo_args.override("checkpoint:fastvideo_inference.json",
+                                    {"pipeline_config.dmd_denoising_steps": list(steps)})
         logger.info("FastH3 checkpoint schedule: %d transformer forwards, DMD rungs=%s, video/audio shifts=%s/%s",
                     len(steps), steps,
                     self.get_module("scheduler").shift,
@@ -409,8 +414,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             self._add_denoise_stages(ref2va=ref2va)
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        if not self.post_init_called:
-            self.post_init()
+        fastvideo_args = self._post_init_before_forward(fastvideo_args)
 
         # Sequential encode-then-release is the H3-only fallback. Lazy and the
         # fully-resident discrete-GPU path both keep a complete stage list and

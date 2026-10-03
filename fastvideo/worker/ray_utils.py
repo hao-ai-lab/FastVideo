@@ -6,6 +6,7 @@ import os
 import time
 
 from fastvideo.utils import get_ip
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.worker.worker_base import WorkerWrapperBase
 from fastvideo.logger import init_logger
@@ -60,7 +61,8 @@ def assert_ray_available() -> None:
                          "Please install Ray with `uv pip install ray`.")
 
 
-def _verify_bundles(placement_group: "PlacementGroup", fastvideo_args: FastVideoArgs, device_str: str):
+def _verify_bundles(placement_group: "PlacementGroup", fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+                    device_str: str):
     """Verify a given placement group has bundles located in the right place.
 
     There are 2 rules.
@@ -141,7 +143,7 @@ def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
 
 
 def initialize_ray_cluster(
-    fastvideo_args: FastVideoArgs,
+    fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
     ray_address: str | None = None,
 ):
     """Initialize the distributed cluster with Ray.

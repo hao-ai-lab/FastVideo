@@ -1,6 +1,7 @@
 import os
 from typing import Any
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.worker.gpu_worker import Worker
@@ -20,7 +21,7 @@ class WorkerWrapperBase:
 
     def __init__(
         self,
-        fastvideo_args: FastVideoArgs,
+        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
         rpc_rank: int = 0,
     ) -> None:
         """
@@ -35,7 +36,7 @@ class WorkerWrapperBase:
         """
         self.rpc_rank = rpc_rank
         self.worker: Worker | None = None
-        self.fastvideo_args: FastVideoArgs | None = None
+        self.fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | None = None
         # do not store this `fastvideo_args`, `init_worker` will set the final
         # one.
 

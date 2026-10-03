@@ -386,6 +386,25 @@
    {
     "pipeline.vae_tiling": true
    }
+  ],
+  [
+   "fill_runtime_defaults",
+   {
+    "engine.attention.moba_config": {},
+    "engine.attention.vsa_sparsity": 0.0,
+    "engine.attention.vsa_tile_size": 256,
+    "engine.compile.audio_vae_enabled": false,
+    "engine.compile.regional": false,
+    "engine.compile.text_encoder_enabled": false,
+    "engine.compile.vae_enabled": false,
+    "pipeline.ltx2.legacy_native_noise_order": false,
+    "pipeline.ltx2.use_distilled_sigmas": true,
+    "pipeline.minimax_h3.taeh3_chunk_size": 5,
+    "pipeline.minimax_h3.vae_parallel_decode": false,
+    "pipeline.minimax_h3.vae_parallel_encode": false,
+    "pipeline.minimax_h3.video_decode_backend": "h3-vae",
+    "pipeline.workload_type": "t2v"
+   }
   ]
  ]
 }

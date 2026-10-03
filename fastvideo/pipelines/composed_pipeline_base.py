@@ -14,6 +14,8 @@ from typing import Any, cast
 
 import torch
 
+from fastvideo.api.device_policy import finalize_device_offload_policy
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed import (
     get_local_torch_device,
@@ -82,7 +84,7 @@ class ComposedPipelineBase(ABC):
     _required_config_modules: list[str] = []
     _extra_config_module_map: dict[str, str] = {}
     training_args: TrainingArgs | None = None
-    fastvideo_args: FastVideoArgs | TrainingArgs | None = None
+    fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | TrainingArgs | None = None
     modules: dict[str, Any] = {}
     # do not need to include moe related transformers
     trainable_transformer_names: list[str] = ["transformer"]
@@ -130,7 +132,7 @@ class ComposedPipelineBase(ABC):
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
-                 fastvideo_args: FastVideoArgs | TrainingArgs,
+                 fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | TrainingArgs,
                  required_config_modules: list[str] | None = None,
                  loaded_modules: dict[str, torch.nn.Module] | None = None):
         """
@@ -155,10 +157,15 @@ class ComposedPipelineBase(ABC):
         # VideoGenerator applies this in each Worker before building the
         # pipeline. Keep direct from_pretrained/build_pipeline callers aligned,
         # but only after distributed setup has selected this process's device.
+        # On a config that the worker already decided, the policy changes nothing.
         if fastvideo_args.inference_mode:
             local_device = get_local_torch_device()
             device_id = local_device.index if local_device.index is not None else 0
-            fastvideo_args.finalize_device_offload_policy(device_id)
+            if isinstance(fastvideo_args, ResolvedGeneratorConfig):
+                fastvideo_args = finalize_device_offload_policy(fastvideo_args, device_id)
+                self.fastvideo_args = fastvideo_args
+            else:
+                fastvideo_args.finalize_device_offload_policy(device_id)
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
@@ -735,24 +742,36 @@ class ComposedPipelineBase(ABC):
                          stage_name)
             self._install_lazy_release_hooks()
 
+    def _post_init_before_forward(
+            self, fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> ResolvedGeneratorConfig | FastVideoArgs:
+        """Run ``post_init`` before the first forward, and return the config that the stages read.
+
+        ``post_init`` can rebind ``self.fastvideo_args`` to an override of it, such as a schedule from the
+        checkpoint. A caller that passed the pipeline's own config then runs with the rebound one.
+        """
+        if self.post_init_called:
+            return fastvideo_args
+        passed_own_config = fastvideo_args is self.fastvideo_args
+        self.post_init()
+        return self.fastvideo_args if passed_own_config else fastvideo_args
+
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
     ) -> ForwardBatch:
         """
         Generate a video or image using the pipeline.
         
         Args:
             batch: The batch to generate from.
-            fastvideo_args: The inference arguments.
+            fastvideo_args: The resolved runtime config.
         Returns:
             ForwardBatch: The batch with the generated video or image.
         """
-        if not self.post_init_called:
-            self.post_init()
+        fastvideo_args = self._post_init_before_forward(fastvideo_args)
 
         # Execute each stage
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())

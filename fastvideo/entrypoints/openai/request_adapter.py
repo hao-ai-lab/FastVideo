@@ -22,7 +22,7 @@ from fastvideo.entrypoints.openai.protocol import (
     VideoGenerationRequest,
 )
 from fastvideo.entrypoints.openai.utils import save_image_to_path
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.models.vision_utils import load_image
 from fastvideo.registry import get_preset_selection
 
@@ -192,7 +192,7 @@ def _apply_aspect_ratio(
 
 def validate_served_model_name(
     model: str | None,
-    args: FastVideoArgs,
+    args: ResolvedGeneratorConfig,
     served_model_name: str,
 ) -> None:
     """Reject a request model id that is not the one this server loaded."""
@@ -206,7 +206,7 @@ def validate_served_model_name(
 
 def validate_model_and_lora(
     request: VideoGenerationRequest,
-    args: FastVideoArgs,
+    args: ResolvedGeneratorConfig,
     served_model_name: str,
 ) -> None:
     """Validate vLLM-style model and LoRA selectors against startup state.
@@ -249,7 +249,7 @@ def validate_model_and_lora(
 def _apply_reference_inputs(
     kwargs: dict[str, Any],
     request: VideoGenerationRequest,
-    args: FastVideoArgs,
+    args: ResolvedGeneratorConfig,
     *,
     model_family: str | None,
 ) -> None:
@@ -310,7 +310,7 @@ def _apply_reference_inputs(
 def build_generation_request(
     request_id: str,
     request: VideoGenerationRequest,
-    args: FastVideoArgs,
+    args: ResolvedGeneratorConfig,
     *,
     served_model_name: str,
     output_dir: str,

@@ -95,6 +95,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
     assert config_to_dict(loaded) == {
         "generator": {
             "model_path": "/models/wan",
+            "mode": "inference",
             "revision": None,
             "trust_remote_code": False,
             "engine": {
@@ -106,6 +107,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "hsdp_replicate_dim": 1,
                     "hsdp_shard_dim": -1,
                     "dist_timeout": None,
+                    "master_port": None,
                 },
                 "offload": {
                     "dit": True,
@@ -137,6 +139,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "vsa_sparsity": None,
                     "vsa_tile_size": None,
                     "moba_config_path": None,
+                    "moba_config": None,
                 },
                 "precision": {
                     "dit": None,
@@ -174,6 +177,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "flow_shift": None,
                 "embedded_cfg_scale": None,
                 "dmd_denoising_steps": None,
+                "boundary_ratio": None,
+                "output_type": "pil",
                 "dit": {},
                 "vae": {},
                 "ltx2": {
@@ -186,6 +191,12 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "legacy_native_noise_order": None,
                     "use_distilled_sigmas": None,
                     "refine": {
+                        "enabled": None,
+                        "num_inference_steps": None,
+                        "guidance_scale": None,
+                        "add_noise": None,
+                        "image_crf": None,
+                        "video_position_offset_sec": None,
                         "transformer_path": None,
                         "lora_path": None,
                         "noise_path": None,

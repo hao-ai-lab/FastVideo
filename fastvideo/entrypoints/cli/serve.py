@@ -5,7 +5,7 @@ import argparse
 import os
 from typing import cast
 
-from fastvideo.api.compat import generator_config_to_fastvideo_args
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.logger import init_logger
@@ -49,7 +49,7 @@ class ServeSubcommand(CLISubcommand):
             serve_config.server.port,
         )
 
-        fastvideo_args = generator_config_to_fastvideo_args(serve_config.generator)
+        fastvideo_args = resolve_inference_config(serve_config.generator)
         run_server(
             fastvideo_args,
             host=serve_config.server.host,

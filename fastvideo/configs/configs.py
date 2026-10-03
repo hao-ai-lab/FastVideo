@@ -89,6 +89,14 @@ class PreprocessConfig:
     # framework configuration
     seed: int = 42
 
+    # Settings of the per-task preprocessing pipelines (fastvideo/pipelines/preprocess/v1_preprocess.py). They read
+    # a merged caption file instead of dataset_path and write to dataset_output_dir.
+    data_merge_path: str = ""
+    preprocess_task: str = "t2v"
+    num_latent_t: int = 28
+    text_max_length: int = 256
+    cache_dir: str = "./cache_dir"
+
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser, prefix: str = "preprocess") -> FlexibleArgumentParser:
         """Add preprocessing configuration arguments to the parser."""

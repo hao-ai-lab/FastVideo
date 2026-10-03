@@ -4,6 +4,7 @@ from collections.abc import Callable
 from queue import Queue
 from typing import Any, TypeVar, cast
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import init_logger
@@ -17,7 +18,7 @@ class Executor(ABC):
 
     def __init__(
         self,
-        fastvideo_args: FastVideoArgs,
+        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
         *,
         log_queue=None,
     ):
@@ -31,7 +32,7 @@ class Executor(ABC):
         raise NotImplementedError
 
     @staticmethod
-    def get_class(fastvideo_args: FastVideoArgs) -> type["Executor"]:
+    def get_class(fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> type["Executor"]:
         if fastvideo_args.distributed_executor_backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
@@ -44,7 +45,7 @@ class Executor(ABC):
     def execute_forward(
         self,
         forward_batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
     ) -> ForwardBatch:
         outputs: list[dict[str, Any]] = self.collective_rpc("execute_forward",
                                                             kwargs={

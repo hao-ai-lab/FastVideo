@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import enum
 import json
 import types
 from pathlib import Path
@@ -150,6 +151,8 @@ class _SchemaParser:
             return self._parse_tuple(annotation, value, path)
         if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
             return self.parse_dataclass(annotation, value, path)
+        if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+            return self._parse_enum(annotation, value, path)
 
         scalar_parser = _SCALAR_PARSERS.get(annotation)
         if scalar_parser is not None:
@@ -192,6 +195,16 @@ class _SchemaParser:
         if value not in allowed:
             raise ConfigValidationError(path, f"expected one of {sorted(allowed)!r}")
         return value
+
+    def _parse_enum(self, annotation: type[enum.Enum], value: Any, path: str) -> enum.Enum:
+        """An enum member passes through; any other value must be the value of a member."""
+        if isinstance(value, annotation):
+            return value
+        try:
+            return annotation(value)
+        except (TypeError, ValueError):
+            allowed = [member.value for member in annotation]
+            raise ConfigValidationError(path, f"expected one of {allowed!r}") from None
 
     def _parse_list(self, annotation: Any, value: Any, path: str) -> list[Any]:
         if not isinstance(value, list):

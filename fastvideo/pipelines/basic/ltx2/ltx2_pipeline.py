@@ -8,6 +8,8 @@ from typing import Any
 
 from transformers import AutoTokenizer
 
+from fastvideo.api.flat_name_fallback import typed_path_of_flat_name
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
@@ -226,7 +228,14 @@ class LTX2Pipeline(LoRAPipeline):
             refine_defaults["ltx2_refine_audio_noise_path"] = (_resolve_refine_path(
                 self.model_path, model_index.get("fastvideo_refine_audio_noise_path")))
         changed = {key: value for key, value in refine_defaults.items() if getattr(fastvideo_args, key) != value}
-        if changed:
+        if changed and isinstance(fastvideo_args, ResolvedGeneratorConfig):
+            # The pipeline owns its config; later stages read the rebound one.
+            fastvideo_args = fastvideo_args.with_override("checkpoint:model_index.json", {
+                typed_path_of_flat_name(key): value
+                for key, value in changed.items()
+            })
+            self.fastvideo_args = fastvideo_args
+        elif changed:
             fastvideo_args.override("checkpoint:model_index.json", changed)
 
         model_index.pop("_class_name")
