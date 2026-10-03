@@ -48,6 +48,8 @@ def main():
         "median_stage_s": {name: statistics.median(run["stage_s"][name] for run in timed)
                            for name in ("conditioning", "denoising", "video_decoding", "audio_decoding")},
         "peak_gpu_allocated_gib": max(run["peak_gpu_allocated_gib"] for run in timed),
+        "peak_gpu_used_gib": max((run["peak_gpu_used_gib"] for run in timed
+                                   if run.get("peak_gpu_used_gib") is not None), default=None),
         "peak_host_anon_gib": max(run["peak_host_anon_gib"] for run in timed),
         "peak_host_cgroup_gib": max(run["peak_host_cgroup_gib"] for run in timed),
         "notes": "Stage times include deferred component loading. Host peaks are pod-wide samples every 100 ms.",
