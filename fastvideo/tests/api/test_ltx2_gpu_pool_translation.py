@@ -1,19 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LTX-2 streaming-server config flattening tests.
+"""LTX-2 streaming-server config resolution tests.
 
 ``GPU_POOL_CONFIG`` is the typed ``GeneratorConfig`` form of the settings that the FastVideo-internal
-``ui/ltx2-streaming/server/gpu_pool.py`` loads. The tests check that ``generator_config_to_fastvideo_args`` turns it
-into the flat ``FastVideoArgs`` keywords that the LTX-2 runtime reads.
+``ui/ltx2-streaming/server/gpu_pool.py`` loads. The tests check that resolution puts each setting at the typed path
+that the LTX-2 runtime reads.
 """
 from __future__ import annotations
 
 import pytest
 
-from fastvideo.api.compat import (
-    from_pretrained_kwargs_to_config,
-    generator_config_to_fastvideo_args,
-    normalize_generator_config,
-)
+from fastvideo.api.compat import from_pretrained_kwargs_to_config
+from fastvideo.api.inference_resolution import resolve_inference_config, torch_compile_kwargs
+from fastvideo.tests.api.config_snapshot import isolated_environment
 
 GPU_POOL_CONFIG = {
     "model_path": "FastVideo/LTX2-Distilled-Diffusers",
@@ -60,96 +58,58 @@ GPU_POOL_CONFIG = {
 }
 
 
-class TestGpuPoolFlattening:
-    """The typed gpu_pool config -> the FastVideoArgs keywords that the LTX-2 runtime reads."""
+class TestGpuPoolResolution:
+    """The typed gpu_pool config -> the resolved typed paths that the LTX-2 runtime reads."""
 
     @pytest.fixture
-    def args_kwargs(self, monkeypatch):
-        from fastvideo import fastvideo_args as fva
+    def resolved(self):
+        with isolated_environment():
+            return resolve_inference_config(GPU_POOL_CONFIG)
 
-        captured: dict[str, object] = {}
+    def test_empty_refine_lora_path_kept(self, resolved) -> None:
+        assert resolved.pipeline.ltx2.refine.lora_path == ""
 
-        def _capture(**kw):
-            captured.update(kw)
-            return _Captured(**kw)
+    def test_ltx2_refine_flags_copied_from_preset_overrides(self, resolved) -> None:
+        refine = resolved.pipeline.ltx2.refine
+        assert refine.enabled is True
+        assert refine.add_noise is True
+        assert refine.num_inference_steps == 2
+        assert refine.guidance_scale == 1.0
 
-        class _Captured:
+    def test_refine_upsampler_path_kept(self, resolved) -> None:
+        assert resolved.pipeline.components.upsampler_weights == ("/models/ltx2-distilled/spatial_upsampler")
 
-            def __init__(self, **kw):
-                self.kwargs = kw
+    def test_config_root_kept(self, resolved) -> None:
+        assert resolved.pipeline.components.config_root == "/models/ltx2-distilled/config"
 
-        monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _capture)
-
-        generator_config_to_fastvideo_args(normalize_generator_config(GPU_POOL_CONFIG))
-        return captured
-
-    def test_empty_refine_lora_path_reemitted(self, args_kwargs) -> None:
-        assert args_kwargs["ltx2_refine_lora_path"] == ""
-
-    def test_ltx2_refine_flags_reemitted(self, args_kwargs) -> None:
-        assert args_kwargs["ltx2_refine_enabled"] is True
-        assert args_kwargs["ltx2_refine_add_noise"] is True
-        assert args_kwargs["ltx2_refine_num_inference_steps"] == 2
-        assert args_kwargs["ltx2_refine_guidance_scale"] == 1.0
-
-    def test_refine_upsampler_path_reemitted(self, args_kwargs) -> None:
-        assert args_kwargs["ltx2_refine_upsampler_path"] == ("/models/ltx2-distilled/spatial_upsampler")
-
-    def test_config_model_path_reemitted(self, args_kwargs) -> None:
-        assert args_kwargs["config_model_path"] == "/models/ltx2-distilled/config"
-
-    def test_torch_compile_kwargs_reassembled(self, args_kwargs) -> None:
-        assert args_kwargs["torch_compile_kwargs"] == {
+    def test_torch_compile_kwargs_reassembled(self, resolved) -> None:
+        assert torch_compile_kwargs(resolved) == {
             "backend": "inductor",
             "fullgraph": True,
             "mode": "max-autotune-no-cudagraphs",
             "dynamic": False,
         }
 
-    def test_vae_tiling_reemitted_with_legacy_name(self, args_kwargs) -> None:
-        assert args_kwargs["ltx2_vae_tiling"] is False
+    def test_vae_tiling_kept(self, resolved) -> None:
+        assert resolved.pipeline.vae_tiling is False
 
-    def test_text_encoder_compile_reemitted(self, args_kwargs) -> None:
-        # Present in the captured kwargs dict even though
-        # ``FastVideoArgs.from_kwargs`` will filter it out — realtime
-        # runtime upstream (PR 7.6) reads it off this dict.
-        assert args_kwargs["enable_torch_compile_text_encoder"] is True
-
-    def test_no_stray_refine_dict(self, args_kwargs) -> None:
-        """preset_overrides.refine must flatten to ltx2_refine_* kwargs
-        rather than landing as a nested ``refine`` kwarg that
-        FastVideoArgs doesn't understand."""
-        assert "refine" not in args_kwargs
+    def test_text_encoder_compile_kept(self, resolved) -> None:
+        assert resolved.engine.compile.text_encoder_enabled is True
 
 
-class TestRefineFlattenCoversAllTypedFields:
+class TestRefinePresetOverridesCoverAllTypedFields:
     """Every field on LTX2Refine{Preset,Stage}Override must survive the
-    round-trip through preset_overrides.refine back to ltx2_refine_*
-    kwargs. Guards against the hardcoded-key-tuple regression where
+    copy from preset_overrides.refine into ``pipeline.ltx2.refine``.
+    Guards against the hardcoded-key-tuple regression where
     image_crf / video_position_offset_sec silently dropped."""
 
-    def test_all_fields_reemitted(self, monkeypatch) -> None:
-        from fastvideo import fastvideo_args as fva
-        from fastvideo.api.compat import (
-            generator_config_to_fastvideo_args, )
+    def test_all_fields_copied(self, monkeypatch) -> None:
         from fastvideo.api.schema import GeneratorConfig, PipelineSelection
         from fastvideo.pipelines.basic.ltx2.stage_overrides import (
             refine_preset_override_fields,
             refine_stage_override_fields,
         )
 
-        captured: dict[str, object] = {}
-
-        class _Captured:
-
-            def __init__(self, **kw):
-                self.kwargs = kw
-
-        def _capture(**kw):
-            captured.update(kw)
-            return _Captured(**kw)
-
-        monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _capture)
         # The model path is not a registered model, so skip the model definition.
         from fastvideo.api import inference_resolution
         monkeypatch.setattr(inference_resolution, "build_model_pipeline_config", lambda config: None)
@@ -167,39 +127,23 @@ class TestRefineFlattenCoversAllTypedFields:
             "video_position_offset_sec": 2.5,
         }
         all_fields = (refine_preset_override_fields() | refine_stage_override_fields())
-        assert set(refine_payload) == all_fields, ("payload must cover every typed field to exercise the flatten loop")
+        assert set(refine_payload) == all_fields, ("payload must cover every typed field to exercise the copy loop")
 
         config = GeneratorConfig(
             model_path="/models/ltx2",
             pipeline=PipelineSelection(preset_overrides={"refine": refine_payload}),
         )
-        generator_config_to_fastvideo_args(config)
+        resolved = resolve_inference_config(config)
 
         for key, value in refine_payload.items():
-            assert captured[f"ltx2_refine_{key}"] == value
+            assert getattr(resolved.pipeline.ltx2.refine, key) == value
 
 
 class TestCompileExtrasPreserved:
     """Additional torch.compile kwargs beyond the four typed fields
     round-trip through ``CompileConfig.extras``."""
 
-    def test_extras_preserved(self, monkeypatch) -> None:
-        from fastvideo import fastvideo_args as fva
-
-        captured: dict[str, object] = {}
-
-        def _capture(**kw):
-            captured.update(kw)
-
-            class _Captured:
-
-                def __init__(self, **kw):
-                    self.kwargs = kw
-
-            return _Captured(**kw)
-
-        monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _capture)
-
+    def test_extras_preserved(self) -> None:
         kwargs = {
             "enable_torch_compile": True,
             "torch_compile_kwargs": {
@@ -219,8 +163,9 @@ class TestCompileExtrasPreserved:
             "disable": False,
         }
 
-        generator_config_to_fastvideo_args(config)
-        assert captured["torch_compile_kwargs"] == {
+        with isolated_environment():
+            resolved = resolve_inference_config(config)
+        assert torch_compile_kwargs(resolved) == {
             "backend": "inductor",
             "options": {
                 "triton.cudagraphs": False

@@ -26,7 +26,6 @@ import torch
 from fastvideo.distributed.parallel_state import get_dp_group, get_tp_group
 import fastvideo.envs as envs
 from fastvideo.api.resolution import ResolvedGeneratorConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.utils import (decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip,
@@ -83,7 +82,7 @@ class StreamingTask:
     mouse_action: torch.Tensor | None = None
     # For RESET tasks:
     batch: ForwardBatch | None = None
-    resolved_config: ResolvedGeneratorConfig | FastVideoArgs | None = None
+    resolved_config: ResolvedGeneratorConfig | None = None
 
 
 @dataclass
@@ -97,13 +96,13 @@ class StreamingResult:
 class MultiprocExecutor(Executor):
 
     def _init_executor(self) -> None:
-        self.world_size = self.resolved_config.num_gpus
+        self.world_size = self.resolved_config.engine.num_gpus
         self.shutting_down = False
 
         set_multiproc_executor_envs()
 
-        # Check if master_port is provided in fastvideo_args
-        master_port = get_open_port(self.resolved_config.master_port)
+        # Start from engine.parallelism.master_port when it is set; otherwise pick an open port.
+        master_port = get_open_port(self.resolved_config.engine.parallelism.master_port)
         distributed_init_method = get_distributed_init_method(get_loopback_ip(), master_port)
         logger.info("Use master port: %s", master_port)
 
@@ -142,8 +141,7 @@ class MultiprocExecutor(Executor):
         # Register shutdown on exit
         atexit.register(self.shutdown)
 
-    def execute_forward(self, forward_batch: ForwardBatch,
-                        resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
+    def execute_forward(self, forward_batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         responses = self.collective_rpc("execute_forward",
                                         kwargs={
                                             "forward_batch": forward_batch,
@@ -167,7 +165,7 @@ class MultiprocExecutor(Executor):
         return result_batch
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
+                                resolved_config: ResolvedGeneratorConfig) -> dict[str, Any]:
         responses = self.collective_rpc("execute_streaming_reset",
                                         kwargs={
                                             "forward_batch": forward_batch,
@@ -213,8 +211,7 @@ class MultiprocExecutor(Executor):
         self._streaming_input_queue = None
         self._streaming_output_queue = None
 
-    def submit_reset(self, forward_batch: ForwardBatch,
-                     resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> None:
+    def submit_reset(self, forward_batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> None:
         if not self._streaming_enabled:
             self.enable_streaming()
 
@@ -477,7 +474,7 @@ class WorkerMultiprocProc:
 
     def __init__(
         self,
-        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         local_rank: int,
         rank: int,
         distributed_init_method: str,
@@ -494,7 +491,7 @@ class WorkerMultiprocProc:
         self._initial_log_handler = _initial_log_handler
         wrapper = WorkerWrapperBase(resolved_config=resolved_config, rpc_rank=rank)
 
-        all_kwargs: list[dict] = [{} for _ in range(resolved_config.num_gpus)]
+        all_kwargs: list[dict] = [{} for _ in range(resolved_config.engine.num_gpus)]
         all_kwargs[rank] = {
             "resolved_config": resolved_config,
             "local_rank": local_rank,
@@ -512,7 +509,7 @@ class WorkerMultiprocProc:
 
     @staticmethod
     def make_worker_process(
-        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         local_rank: int,
         rank: int,
         distributed_init_method: str,

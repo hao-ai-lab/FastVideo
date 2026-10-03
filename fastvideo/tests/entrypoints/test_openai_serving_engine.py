@@ -63,16 +63,16 @@ class _FileGenerator:
         return None
 
 
-def _args(model_path: str, **overrides):
+def _served_config(model_path: str, **components):
+    """Stand-in for the served resolved config; ``components`` overrides ``pipeline.components`` fields."""
     values = {
-        "model_path": model_path,
         "lora_path": None,
         "lora_nickname": "default",
         "lora_strength": 1.0,
         "override_pipeline_cls_name": None,
     }
-    values.update(overrides)
-    return SimpleNamespace(**values)
+    values.update(components)
+    return SimpleNamespace(model_path=model_path, pipeline=SimpleNamespace(components=SimpleNamespace(**values)))
 
 
 def test_engine_cancellation_keeps_pipeline_locked() -> None:
@@ -116,25 +116,25 @@ def test_protocol_rejects_unknown_and_client_output_fields() -> None:
 
 
 def test_validate_served_model_name_accepts_omitted_or_matching_name() -> None:
-    args = _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    validate_served_model_name(None, args, "wan")
-    validate_served_model_name("wan", args, "wan")
+    resolved_config = _served_config("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    validate_served_model_name(None, resolved_config, "wan")
+    validate_served_model_name("wan", resolved_config, "wan")
 
 
 def test_validate_served_model_name_rejects_mismatch() -> None:
     with pytest.raises(RequestAdaptationError, match="this server provides wan"):
-        validate_served_model_name("other-model", _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"), "wan")
+        validate_served_model_name("other-model", _served_config("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"), "wan")
 
 
 def test_validate_served_model_name_uses_lora_nickname() -> None:
-    args = _args(
+    resolved_config = _served_config(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         lora_path="/models/startup.safetensors",
         lora_nickname="fast",
     )
-    validate_served_model_name("fast", args, "wan")
+    validate_served_model_name("fast", resolved_config, "wan")
     with pytest.raises(RequestAdaptationError, match="this server provides fast"):
-        validate_served_model_name("wan", args, "wan")
+        validate_served_model_name("wan", resolved_config, "wan")
 
 
 def test_request_adapter_restricts_extra_params(tmp_path: Path) -> None:
@@ -143,7 +143,7 @@ def test_request_adapter_restricts_extra_params(tmp_path: Path) -> None:
         build_generation_request(
             "video_gen_test",
             request,
-            _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+            _served_config("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
             served_model_name="wan",
             output_dir=str(tmp_path),
         )
@@ -155,7 +155,7 @@ def test_request_adapter_owns_output_path(tmp_path: Path) -> None:
     adapted = build_generation_request(
         "video_gen_test",
         request,
-        _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+        _served_config("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
         served_model_name="wan",
         output_dir=str(tmp_path),
         default_request=default_request,
@@ -179,7 +179,7 @@ def test_request_adapter_resolves_vllm_nested_params(tmp_path: Path) -> None:
     adapted = build_generation_request(
         "video_gen_test",
         request,
-        _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+        _served_config("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
         served_model_name="wan",
         output_dir=str(tmp_path),
     )
@@ -194,7 +194,7 @@ def test_request_adapter_resolves_vllm_nested_params(tmp_path: Path) -> None:
 
 def test_request_adapter_accepts_matching_startup_lora(tmp_path: Path) -> None:
     adapter = str(tmp_path / "adapter.safetensors")
-    args = _args(
+    resolved_config = _served_config(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         lora_path=adapter,
         lora_nickname="fast",
@@ -209,14 +209,14 @@ def test_request_adapter_accepts_matching_startup_lora(tmp_path: Path) -> None:
     build_generation_request(
         "video_gen_test",
         request,
-        args,
+        resolved_config,
         served_model_name="wan",
         output_dir=str(tmp_path),
     )
 
 
 def test_request_adapter_rejects_runtime_lora_swap(tmp_path: Path) -> None:
-    args = _args(
+    resolved_config = _served_config(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         lora_path="/models/startup.safetensors",
         lora_nickname="fast",
@@ -227,7 +227,7 @@ def test_request_adapter_rejects_runtime_lora_swap(tmp_path: Path) -> None:
         build_generation_request(
             "video_gen_test",
             request,
-            args,
+            resolved_config,
             served_model_name="wan",
             output_dir=str(tmp_path),
         )
@@ -245,7 +245,7 @@ def test_fasth3_request_uses_the_general_adapter(tmp_path: Path) -> None:
     adapted = build_generation_request(
         "video_gen_test",
         request,
-        _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+        _served_config("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
         served_model_name="fasth3",
         output_dir=str(tmp_path),
     )
@@ -270,7 +270,7 @@ def test_fasth3_invalid_geometry_fails_at_admission(tmp_path: Path, overrides, m
         build_generation_request(
             "video_gen_test",
             request,
-            _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+            _served_config("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
             served_model_name="fasth3",
             output_dir=str(tmp_path),
         )
@@ -282,7 +282,7 @@ def test_fasth3_seconds_align_to_causal_vae_grid(tmp_path: Path, seconds: str, e
     adapted = build_generation_request(
         "video_gen_test",
         request,
-        _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+        _served_config("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
         served_model_name="fasth3",
         output_dir=str(tmp_path),
     )
@@ -301,7 +301,7 @@ def test_fasth3_ref2va_limits_references_at_admission(tmp_path: Path) -> None:
         build_generation_request(
             "video_gen_test",
             request,
-            _args(
+            _served_config(
                 "MiniMaxAI/MiniMax-H3",
                 override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline",
             ),
@@ -323,7 +323,7 @@ def test_aspect_ratio_overrides_operator_dimensions(tmp_path: Path) -> None:
     adapted = build_generation_request(
         "video_gen_test",
         request,
-        _args("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
+        _served_config("FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"),
         served_model_name="fasth3",
         output_dir=str(tmp_path),
         default_request=default_request,
@@ -344,7 +344,7 @@ def test_explicit_null_uses_seconds_and_operator_fps(tmp_path: Path) -> None:
     adapted = build_generation_request(
         "video_gen_test",
         request,
-        _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+        _served_config("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
         served_model_name="wan",
         output_dir=str(tmp_path),
         default_request=default_request,
@@ -360,7 +360,7 @@ def test_unsupported_vllm_postprocessing_fails_at_admission(tmp_path: Path) -> N
         build_generation_request(
             "video_gen_test",
             request,
-            _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
+            _served_config("Wan-AI/Wan2.1-T2V-1.3B-Diffusers"),
             served_model_name="wan",
             output_dir=str(tmp_path),
         )
@@ -372,11 +372,11 @@ def test_video_routes_cover_async_sync_list_content_and_delete(tmp_path: Path) -
 
     generator = _FileGenerator()
     engine = OpenAIServingEngine(generator)  # type: ignore[arg-type]
-    args = _args("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    resolved_config = _served_config("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
     state.set_state(
         generator,  # type: ignore[arg-type]
         engine,
-        args,  # type: ignore[arg-type]
+        resolved_config,  # type: ignore[arg-type]
         str(tmp_path),
         served_model_name="wan-test",
     )

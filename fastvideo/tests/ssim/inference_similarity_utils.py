@@ -36,34 +36,6 @@ DEVICE_MAPPINGS = (
     ("B200", "B200"),
 )
 
-# Typed GeneratorConfig path of each flat init keyword that build_init_kwargs or an SSIM test's init override sets.
-_INIT_KWARG_CONFIG_PATHS = {
-    "num_gpus": "engine.num_gpus",
-    "sp_size": "engine.parallelism.sp_size",
-    "tp_size": "engine.parallelism.tp_size",
-    "use_fsdp_inference": "engine.use_fsdp_inference",
-    "dit_cpu_offload": "engine.offload.dit",
-    "dit_layerwise_offload": "engine.offload.dit_layerwise",
-    "text_encoder_cpu_offload": "engine.offload.text_encoder",
-    "image_encoder_cpu_offload": "engine.offload.image_encoder",
-    "vae_cpu_offload": "engine.offload.vae",
-    "pin_cpu_memory": "engine.offload.pin_cpu_memory",
-    "text_encoder_precisions": "engine.precision.text_encoders",
-    "revision": "revision",
-    "trust_remote_code": "trust_remote_code",
-    "workload_type": "pipeline.workload_type",
-    "flow_shift": "pipeline.flow_shift",
-    "vae_sp": "pipeline.vae_sp",
-    "override_pipeline_cls_name": "pipeline.components.override_pipeline_cls_name",
-    "ltx2_vae_tiling": "pipeline.vae_tiling",
-    "ltx2_vae_spatial_tile_size_in_pixels": "pipeline.ltx2.vae_spatial_tile_size_in_pixels",
-    "ltx2_vae_spatial_tile_overlap_in_pixels": "pipeline.ltx2.vae_spatial_tile_overlap_in_pixels",
-    "ltx2_vae_temporal_tile_size_in_frames": "pipeline.ltx2.vae_temporal_tile_size_in_frames",
-    "ltx2_vae_temporal_tile_overlap_in_frames": "pipeline.ltx2.vae_temporal_tile_overlap_in_frames",
-    "ltx2_legacy_native_noise_order": "pipeline.ltx2.legacy_native_noise_order",
-    "ltx2_use_distilled_sigmas": "pipeline.ltx2.use_distilled_sigmas",
-}
-
 # Request section that holds each field of the typed generation request configs.
 _REQUEST_SECTION_FIELDS = {
     section_name: {config_field.name
@@ -210,30 +182,31 @@ def _assert_similarity(
 
 
 def build_init_kwargs(base_params: dict[str, object], ) -> dict[str, object]:
+    """Build an SSIM test's generator init settings, keyed by dotted ``GeneratorConfig`` paths, from its params."""
     init_kwargs: dict[str, object] = {
-        "num_gpus": base_params["num_gpus"],
-        "sp_size": base_params.get("sp_size", 1),
-        "tp_size": base_params.get("tp_size", 1),
-        "use_fsdp_inference": True,
-        "dit_cpu_offload": False,
-        "dit_layerwise_offload": False,
+        "engine.num_gpus": base_params["num_gpus"],
+        "engine.parallelism.sp_size": base_params.get("sp_size", 1),
+        "engine.parallelism.tp_size": base_params.get("tp_size", 1),
+        "engine.use_fsdp_inference": True,
+        "engine.offload.dit": False,
+        "engine.offload.dit_layerwise": False,
     }
     if "flow_shift" in base_params:
-        init_kwargs["flow_shift"] = base_params["flow_shift"]
+        init_kwargs["pipeline.flow_shift"] = base_params["flow_shift"]
     if base_params.get("vae_sp"):
-        init_kwargs["vae_sp"] = True
-        init_kwargs["vae_tiling"] = True
+        init_kwargs["pipeline.vae_sp"] = True
+        init_kwargs["pipeline.vae_tiling"] = True
     if "text-encoder-precision" in base_params:
-        init_kwargs["text_encoder_precisions"] = list(base_params["text-encoder-precision"])
+        init_kwargs["engine.precision.text_encoders"] = list(base_params["text-encoder-precision"])
     if base_params.get("ltx2_vae_tiling"):
-        init_kwargs["ltx2_vae_tiling"] = True
-        init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = base_params.get("ltx2_vae_spatial_tile_size_in_pixels",
-                                                                              512)
-        init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = base_params.get(
+        init_kwargs["pipeline.vae_tiling"] = True
+        init_kwargs["pipeline.ltx2.vae_spatial_tile_size_in_pixels"] = base_params.get(
+            "ltx2_vae_spatial_tile_size_in_pixels", 512)
+        init_kwargs["pipeline.ltx2.vae_spatial_tile_overlap_in_pixels"] = base_params.get(
             "ltx2_vae_spatial_tile_overlap_in_pixels", 64)
-        init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = base_params.get("ltx2_vae_temporal_tile_size_in_frames",
-                                                                               64)
-        init_kwargs["ltx2_vae_temporal_tile_overlap_in_frames"] = base_params.get(
+        init_kwargs["pipeline.ltx2.vae_temporal_tile_size_in_frames"] = base_params.get(
+            "ltx2_vae_temporal_tile_size_in_frames", 64)
+        init_kwargs["pipeline.ltx2.vae_temporal_tile_overlap_in_frames"] = base_params.get(
             "ltx2_vae_temporal_tile_overlap_in_frames", 24)
     return init_kwargs
 
@@ -262,16 +235,15 @@ def build_generation_kwargs(
     return generation_kwargs
 
 
-def build_generator_config(model_path: object, init_kwargs: dict[str, object]) -> dict[str, Any]:
-    """Build the ``VideoGenerator.from_config`` mapping for flat init keywords.
+def build_generator_config(model_path: object, init_settings: dict[str, object]) -> dict[str, Any]:
+    """Build the ``VideoGenerator.from_config`` mapping from init settings keyed by dotted ``GeneratorConfig`` paths.
 
-    This applies the placement rule for flat ``GeneratorConfig`` keywords: a keyword in
-    ``_INIT_KWARG_CONFIG_PATHS`` sets its typed ``GeneratorConfig`` path, and any other keyword, such as
-    ``vae_tiling`` or ``output_type``, goes to ``pipeline.experimental`` under its own name.
+    Each key names a typed ``GeneratorConfig`` field, such as ``engine.offload.dit`` or ``pipeline.vae_tiling``, and
+    its value is nested at that path.
     """
     generator_config: dict[str, Any] = {"model_path": model_path}
-    for key, value in init_kwargs.items():
-        *parents, leaf = _INIT_KWARG_CONFIG_PATHS.get(key, f"pipeline.experimental.{key}").split(".")
+    for config_path, value in init_settings.items():
+        *parents, leaf = config_path.split(".")
         section = generator_config
         for parent in parents:
             section = section.setdefault(parent, {})

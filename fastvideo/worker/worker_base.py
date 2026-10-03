@@ -2,7 +2,6 @@ import os
 from typing import Any
 
 from fastvideo.api.resolution import ResolvedGeneratorConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.worker.gpu_worker import Worker
 from fastvideo.utils import (run_method, update_environment_variables)
@@ -21,11 +20,11 @@ class WorkerWrapperBase:
 
     def __init__(
         self,
-        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         rpc_rank: int = 0,
     ) -> None:
         """
-        Initialize the worker wrapper with the given fastvideo_args and rpc_rank.
+        Initialize the worker wrapper with the given resolved_config and rpc_rank.
         Note: rpc_rank is the rank of the worker in the executor. In most cases,
         it is also the rank of the worker in the distributed group. However,
         when multiple executors work together, they can be different.
@@ -36,8 +35,8 @@ class WorkerWrapperBase:
         """
         self.rpc_rank = rpc_rank
         self.worker: Worker | None = None
-        self.resolved_config: ResolvedGeneratorConfig | FastVideoArgs | None = None
-        # do not store this `fastvideo_args`, `init_worker` will set the final
+        self.resolved_config: ResolvedGeneratorConfig | None = None
+        # do not store this `resolved_config`, `init_worker` will set the final
         # one.
 
     def adjust_rank(self, rank_mapping: dict[int, int]) -> None:
@@ -65,7 +64,7 @@ class WorkerWrapperBase:
         """
         kwargs = all_kwargs[self.rpc_rank]
         self.resolved_config = kwargs.get("resolved_config")
-        assert self.resolved_config is not None, ("fastvideo_args is required to initialize the worker")
+        assert self.resolved_config is not None, ("resolved_config is required to initialize the worker")
 
         self.worker = Worker(**kwargs)
         assert self.worker is not None

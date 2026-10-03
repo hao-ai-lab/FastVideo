@@ -190,17 +190,20 @@ def create_mlx_app(config: MLXServeConfig):
         raise ValueError("MLX default_request must set: " + ", ".join(sorted(required - set(explicit))))
     validate_mlx_video_request(VideoGenerationRequest(prompt="validate config", **explicit),
                                model_path=config.generator.model_path)
-    # Transport admission uses the registered H3 family, not CUDA engine options.
-    args = SimpleNamespace(model_path=config.generator.model_path,
-                           lora_path=None,
-                           lora_nickname="default",
-                           lora_strength=1.0,
-                           override_pipeline_cls_name=None)
+    # Transport admission uses the registered H3 family, not CUDA engine options. The server state holds the typed
+    # paths that request admission reads, with no LoRA and no pipeline class override.
+    resolved_config = SimpleNamespace(model_path=config.generator.model_path,
+                                      pipeline=SimpleNamespace(components=SimpleNamespace(
+                                          lora_path=None,
+                                          lora_nickname="default",
+                                          lora_strength=1.0,
+                                          override_pipeline_cls_name=None,
+                                      )))
     from fastvideo.entrypoints.openai.request_adapter import build_generation_request
 
     build_generation_request("config-check",
                              VideoGenerationRequest(prompt="validate config"),
-                             args,
+                             resolved_config,
                              served_model_name=config.server.served_model_name,
                              output_dir=config.server.output_dir,
                              default_request=request)
@@ -209,7 +212,7 @@ def create_mlx_app(config: MLXServeConfig):
         validate_mlx_video_request(request, model_path=config.generator.model_path)
 
     return create_app(
-        args,
+        resolved_config,
         config.server.output_dir,
         request,
         config.server.served_model_name,

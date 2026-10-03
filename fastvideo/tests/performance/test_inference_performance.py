@@ -58,14 +58,16 @@ V2_OPTIONAL_METADATA_FIELDS = ("quality_metadata", )
 COMMON_OBJECT_FIELDS = ("regression_thresholds", )
 RESULT_SCHEMA_VERSION = 2
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
-# Typed GeneratorConfig path of each flat init keyword that the benchmark configs set.
-_INIT_KWARG_CONFIG_PATHS = {
+# Typed GeneratorConfig path of each init_kwargs key that a benchmark config may set. The benchmark JSON keeps these
+# keys because identity.py fingerprints init_kwargs into the benchmark recipe.
+_BENCHMARK_INIT_KWARG_PATHS = {
     "num_gpus": "engine.num_gpus",
     "sp_size": "engine.parallelism.sp_size",
     "tp_size": "engine.parallelism.tp_size",
     "text_encoder_precisions": "engine.precision.text_encoders",
     "flow_shift": "pipeline.flow_shift",
     "vae_sp": "pipeline.vae_sp",
+    "vae_tiling": "pipeline.vae_tiling",
 }
 # Request section that holds each field of the typed generation request configs.
 _REQUEST_SECTION_FIELDS = {
@@ -203,15 +205,17 @@ def _shutdown_executor(generator):
 
 
 def _generator_config(model_path: str, init_kwargs: Mapping[str, Any]) -> dict[str, Any]:
-    """Build the ``VideoGenerator.from_config`` mapping for a benchmark's flat init keywords.
+    """Build the ``VideoGenerator.from_config`` mapping for a benchmark's ``init_kwargs``.
 
-    This applies the placement rule for flat ``GeneratorConfig`` keywords: a keyword in
-    ``_INIT_KWARG_CONFIG_PATHS`` sets its typed ``GeneratorConfig`` path, and any other keyword, such as
-    ``vae_tiling``, goes to ``pipeline.experimental`` under its own name.
+    Each key sets the typed ``GeneratorConfig`` path that ``_BENCHMARK_INIT_KWARG_PATHS`` gives it. A key without an
+    entry in that table raises ``ValueError``.
     """
     generator_config: dict[str, Any] = {"model_path": model_path}
     for key, value in init_kwargs.items():
-        *parents, leaf = _INIT_KWARG_CONFIG_PATHS.get(key, f"pipeline.experimental.{key}").split(".")
+        if key not in _BENCHMARK_INIT_KWARG_PATHS:
+            raise ValueError(f"Benchmark init_kwargs key {key!r} has no GeneratorConfig path; "
+                             "add it to _BENCHMARK_INIT_KWARG_PATHS")
+        *parents, leaf = _BENCHMARK_INIT_KWARG_PATHS[key].split(".")
         section = generator_config
         for parent in parents:
             section = section.setdefault(parent, {})

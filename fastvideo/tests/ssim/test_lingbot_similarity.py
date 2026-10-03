@@ -187,9 +187,7 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrid
         },
         "pipeline": {
             "flow_shift": params["flow_shift"],
-            "experimental": {
-                "boundary_ratio": params["boundary_ratio"],
-            },
+            "boundary_ratio": params["boundary_ratio"],
         },
     }
     request = {

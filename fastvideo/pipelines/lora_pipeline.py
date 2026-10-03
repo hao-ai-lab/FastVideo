@@ -13,8 +13,8 @@ from safetensors.torch import load_file
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor import DTensor
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig, thaw
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.hooks.hooks import ModuleHookManager
 from fastvideo.hooks.layerwise_offload import LayerwiseOffloadHook
 from fastvideo.layers.lora.linear import (
@@ -157,7 +157,7 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_adapter_paths: dict[str, str] = {}
     # model_name -> layers
     lora_layers: dict[str, LoRAModelLayers] = {}
-    resolved_config: FastVideoArgs | TrainingArgs
+    resolved_config: ResolvedGeneratorConfig
     exclude_lora_layers: dict[str, list[str]] = {}
     device: torch.device = get_local_torch_device()
     lora_target_modules: list[str] | None = None
@@ -207,20 +207,19 @@ class LoRAPipeline(ComposedPipelineBase):
         # Only override the pipeline class's own default when the caller actually set
         # one. Assigning unconditionally erases per-model defaults, and a model that
         # declares one usually does so because wrapping every linear breaks its forward.
-        if self.resolved_config.lora_target_modules is not None:
-            self.lora_target_modules = self.resolved_config.lora_target_modules
-        self.lora_path = self.resolved_config.lora_path
-        self.lora_nickname = self.resolved_config.lora_nickname
-        self.lora_strength = self.resolved_config.lora_strength
+        components = self.resolved_config.pipeline.components
+        if components.lora_target_modules is not None:
+            self.lora_target_modules = thaw(components.lora_target_modules)
+        self.lora_path = components.lora_path
+        self.lora_nickname = components.lora_nickname
+        self.lora_strength = components.lora_strength
         constructor_patch = DenseLoRAPatch.from_adapter(self.lora_path) if self.lora_path else None
         self._constructor_dense_lora_path = self.lora_path if constructor_patch is not None else None
         self.training_mode = self.resolved_config.training_mode
-        if self.training_mode and getattr(self.resolved_config, "lora_training", False):
-            assert isinstance(self.resolved_config, TrainingArgs)
-            if self.resolved_config.lora_alpha is None:
-                self.resolved_config.lora_alpha = self.resolved_config.lora_rank
-            self.lora_rank = self.resolved_config.lora_rank  # type: ignore
-            self.lora_alpha = self.resolved_config.lora_alpha  # type: ignore
+        if self._lora_training_enabled():
+            # Resolution sets training.lora.alpha to training.lora.rank when it is unset.
+            self.lora_rank = self.resolved_config.training.lora.rank
+            self.lora_alpha = self.resolved_config.training.lora.alpha
             logger.info(
                 "Using LoRA training with rank %d and alpha %d",
                 self.lora_rank,
@@ -264,6 +263,11 @@ class LoRAPipeline(ComposedPipelineBase):
                 finally:
                     self._setting_constructor_adapter = False
 
+    def _lora_training_enabled(self) -> bool:
+        """Whether this pipeline trains LoRA adapters: a training run whose ``training.lora.enabled`` is set."""
+        training = getattr(self.resolved_config, "training", None)
+        return self.training_mode and training is not None and training.lora.enabled
+
     def is_target_layer(self, module_name: str) -> bool:
         if self.lora_target_modules is None:
             return True
@@ -279,8 +283,7 @@ class LoRAPipeline(ComposedPipelineBase):
                 layer.lora_A = nn.Parameter(DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
                 layer.lora_B = nn.Parameter(DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
 
-        is_lora_training = self.training_mode and getattr(self.resolved_config, "lora_training", False)
-        if not is_lora_training:
+        if not self._lora_training_enabled():
             super().set_trainable()
             return
 
@@ -349,7 +352,7 @@ class LoRAPipeline(ComposedPipelineBase):
                 list(self.lora_layers[transformer_name].block_mapping),
         ):
             if block_name is not None and (not self.resolved_config.training_mode
-                                           and self.resolved_config.dit_layerwise_offload):
+                                           and self.resolved_config.engine.offload.dit_layerwise):
                 scope_ctx = _get_hook_ctx(self.lora_layers[transformer_name].block_mapping[block_name])
             else:
                 scope_ctx = nullcontext()

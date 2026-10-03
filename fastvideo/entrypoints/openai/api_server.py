@@ -56,21 +56,21 @@ def _validate_default_request_against_preset(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Load model on startup, clean up on shutdown"""
-    args: ResolvedGeneratorConfig = app.state.resolved_config
+    resolved_config: ResolvedGeneratorConfig = app.state.resolved_config
     output_dir: str = app.state.output_dir
     served_model_name: str | None = app.state.served_model_name
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
 
-    logger.info("Initializing %s generation runtime for %s ...", app.state.runtime, args.model_path)
+    logger.info("Initializing %s generation runtime for %s ...", app.state.runtime, resolved_config.model_path)
     factory = app.state.generator_factory
-    generator = factory() if factory is not None else VideoGenerator.from_fastvideo_args(args)
+    generator = factory() if factory is not None else VideoGenerator._from_resolved_config(resolved_config)
     serving_engine = OpenAIServingEngine(generator, app.state.video_request_validator)
     logger.info("Generation runtime ready.")
 
     set_state(
         generator,
         serving_engine,
-        args,
+        resolved_config,
         output_dir,
         default_request=default_request,
         served_model_name=served_model_name,

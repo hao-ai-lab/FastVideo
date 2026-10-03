@@ -14,8 +14,7 @@ from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
 from fastvideo.utils import (DEPRECATED_HF_TOKEN_ENV_VARS, HF_TOKEN_ENV_VARS, get_ip, get_distributed_init_method,
                              get_open_port, get_loopback_ip)
-from fastvideo.api.resolution import ResolvedGeneratorConfig
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig, thaw
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.ray_utils import (
@@ -99,15 +98,17 @@ class RayDistributedExecutor(Executor):
     }
 
     def _init_executor(self) -> None:
-        initialize_ray_cluster(self.resolved_config)
-        placement_group = self.resolved_config.ray_placement_group
+        # The executor owns the Ray runtime environment, which pipeline.experimental.ray_runtime_env supplies, and
+        # the placement group of its workers.
+        self.ray_runtime_env = thaw(self.resolved_config.pipeline.experimental.get("ray_runtime_env"))
+        self.ray_placement_group = initialize_ray_cluster(self.resolved_config, runtime_env=self.ray_runtime_env)
 
         # Disable Ray usage stats collection.
         ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
         if ray_usage != "1":
             envs.set_external("RAY_USAGE_STATS_ENABLED", "0")
 
-        self._init_workers_ray(placement_group)
+        self._init_workers_ray(self.ray_placement_group)
 
     # child class could overwrite this to return actual env vars.
     def _get_env_vars_to_be_updated(self) -> list[dict[str, str]]:
@@ -127,7 +128,7 @@ class RayDistributedExecutor(Executor):
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if bundle.get(current_platform.ray_device_key, 0):
                 bundle_indices.append(bundle_id)
-        bundle_indices = bundle_indices[:self.resolved_config.num_gpus]
+        bundle_indices = bundle_indices[:self.resolved_config.engine.num_gpus]
 
         worker_metadata: list[RayWorkerMetaData] = []
         driver_ip = get_ip()
@@ -280,13 +281,13 @@ class RayDistributedExecutor(Executor):
         for index, worker in enumerate(self.workers):
             # The driver worker is rank 0 and not in self.workers.
             rank = index + 1
-            if rank % self.resolved_config.tp_size == 0:
+            if rank % self.resolved_config.engine.parallelism.tp_size == 0:
                 self.tp_driver_workers.append(worker)
             else:
                 self.non_driver_workers.append(worker)
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
+                                resolved_config: ResolvedGeneratorConfig) -> dict[str, Any]:
         responses: list[dict[str, Any]] = self.collective_rpc(
             "execute_streaming_reset",
             kwargs={
@@ -318,8 +319,7 @@ class RayDistributedExecutor(Executor):
     def execute_streaming_clear(self) -> None:
         self.collective_rpc("execute_streaming_clear")
 
-    def execute_forward(self, forward_batch: ForwardBatch,
-                        resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
+    def execute_forward(self, forward_batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         responses: list[ForwardBatch] = self.collective_rpc(
             "execute_forward",
             kwargs={

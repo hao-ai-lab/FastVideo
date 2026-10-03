@@ -99,12 +99,13 @@ def test_flux2_similarity(
         slice_cosine_threshold=SLICE_COSINE_THRESHOLD,
         full_cosine_threshold=FULL_COSINE_THRESHOLD,
         init_kwargs_override={
-            "workload_type": "t2i",
-            "use_fsdp_inference": False,
-            "dit_cpu_offload": False,
-            "vae_cpu_offload": True,
-            "text_encoder_cpu_offload": True,
-            "pin_cpu_memory": False,
-            "override_pipeline_cls_name": ("Flux2KleinPipeline" if "klein" in model_id.lower() else "Flux2Pipeline"),
+            "pipeline.workload_type": "t2i",
+            "engine.use_fsdp_inference": False,
+            "engine.offload.dit": False,
+            "engine.offload.vae": True,
+            "engine.offload.text_encoder": True,
+            "engine.offload.pin_cpu_memory": False,
+            "pipeline.components.override_pipeline_cls_name":
+            ("Flux2KleinPipeline" if "klein" in model_id.lower() else "Flux2Pipeline"),
         },
     )

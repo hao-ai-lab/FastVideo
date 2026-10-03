@@ -263,7 +263,6 @@ class TestNoInternalImports:
     _BANNED_PREFIXES = (
         "fastvideo.pipelines.",
         "fastvideo.configs.",
-        "fastvideo.fastvideo_args",
         "fastvideo.api.compat",
         "fastvideo.api.parser",
         "fastvideo.api.overrides",

@@ -172,17 +172,20 @@ def _build_video_request(request_id, req, output_dir, default_request=None) -> G
     """Adapt an OpenAI video request the way the video routes do, for a Wan T2V server."""
     from fastvideo.entrypoints.openai.request_adapter import build_generation_request
 
-    server_args = SimpleNamespace(
+    # Stand-in for the served resolved config with the typed paths that request adaptation reads.
+    resolved_config = SimpleNamespace(
         model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        lora_path=None,
-        lora_nickname="default",
-        lora_strength=1.0,
-        override_pipeline_cls_name=None,
+        pipeline=SimpleNamespace(components=SimpleNamespace(
+            lora_path=None,
+            lora_nickname="default",
+            lora_strength=1.0,
+            override_pipeline_cls_name=None,
+        )),
     )
     return build_generation_request(
         request_id,
         req,
-        server_args,
+        resolved_config,
         served_model_name="wan",
         output_dir=output_dir,
         default_request=default_request,

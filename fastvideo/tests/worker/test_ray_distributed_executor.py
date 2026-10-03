@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from inspect import signature
+from types import MappingProxyType, SimpleNamespace
 
+import fastvideo.envs as envs
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.ray_distributed_executor import (
     RayDistributedExecutor,
@@ -36,3 +38,27 @@ def test_ray_log_queue_stays_on_the_driver() -> None:
     executor.clear_log_queue()
     assert executor._log_queue is None
     assert "log_queue" in signature(Executor.set_log_queue).parameters
+
+
+def test_ray_executor_owns_runtime_env_and_placement_group(monkeypatch, env_overrides) -> None:
+    """The executor starts Ray with pipeline.experimental.ray_runtime_env and keeps the placement group it gets back."""
+    calls = {}
+
+    def fake_initialize_ray_cluster(resolved_config, *, runtime_env):
+        calls["runtime_env"] = runtime_env
+        return "placement-group"
+
+    env_overrides.enter_context(envs.override_external("RAY_USAGE_STATS_ENABLED", "1"))
+    monkeypatch.setattr("fastvideo.worker.ray_distributed_executor.initialize_ray_cluster", fake_initialize_ray_cluster)
+    monkeypatch.setattr(RayDistributedExecutor, "_init_workers_ray",
+                        lambda self, placement_group: calls.setdefault("workers", placement_group))
+    executor = RayDistributedExecutor.__new__(RayDistributedExecutor)
+    executor.workers = []
+    executor.resolved_config = SimpleNamespace(pipeline=SimpleNamespace(
+        experimental=MappingProxyType({"ray_runtime_env": MappingProxyType({"pip": ("x", )})})))
+
+    executor._init_executor()
+
+    assert calls == {"runtime_env": {"pip": ["x"]}, "workers": "placement-group"}
+    assert executor.ray_runtime_env == {"pip": ["x"]}
+    assert executor.ray_placement_group == "placement-group"

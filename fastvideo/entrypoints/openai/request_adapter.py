@@ -192,13 +192,14 @@ def _apply_aspect_ratio(
 
 def validate_served_model_name(
     model: str | None,
-    args: ResolvedGeneratorConfig,
+    resolved_config: ResolvedGeneratorConfig,
     served_model_name: str,
 ) -> None:
     """Reject a request model id that is not the one this server loaded."""
     if model is None:
         return
-    allowed_models = {args.lora_nickname} if args.lora_path else {served_model_name}
+    components = resolved_config.pipeline.components
+    allowed_models = {components.lora_nickname} if components.lora_path else {served_model_name}
     if model not in allowed_models:
         choices = ", ".join(sorted(allowed_models))
         raise RequestAdaptationError(f"Model mismatch: request specifies {model!r}; this server provides {choices}.")
@@ -206,7 +207,7 @@ def validate_served_model_name(
 
 def validate_model_and_lora(
     request: VideoGenerationRequest,
-    args: ResolvedGeneratorConfig,
+    resolved_config: ResolvedGeneratorConfig,
     served_model_name: str,
 ) -> None:
     """Validate vLLM-style model and LoRA selectors against startup state.
@@ -216,11 +217,12 @@ def validate_model_and_lora(
     loaded and cannot be swapped safely between concurrent requests. The API
     accepts vLLM's selector shape, but it must identify the startup adapter.
     """
-    validate_served_model_name(request.model, args, served_model_name)
+    validate_served_model_name(request.model, resolved_config, served_model_name)
 
     if request.lora is None:
         return
-    if not args.lora_path:
+    components = resolved_config.pipeline.components
+    if not components.lora_path:
         raise RequestAdaptationError(
             "This server has no startup LoRA. Configure generator.pipeline.components.lora_path before using "
             "the request lora selector.")
@@ -231,32 +233,34 @@ def validate_model_and_lora(
     scale = next((body[key] for key in ("scale", "lora_scale") if body.get(key) is not None), None)
     if name is None and path is None:
         raise RequestAdaptationError("lora must provide a name or path")
-    if name is not None and str(name) != args.lora_nickname:
-        raise RequestAdaptationError(f"Requested LoRA {name!r} is not the startup adapter {args.lora_nickname!r}.")
-    if path is not None and str(path) != args.lora_path:
+    if name is not None and str(name) != components.lora_nickname:
         raise RequestAdaptationError(
-            f"Requested LoRA path {path!r} does not match the startup adapter {args.lora_path!r}.")
+            f"Requested LoRA {name!r} is not the startup adapter {components.lora_nickname!r}.")
+    if path is not None and str(path) != components.lora_path:
+        raise RequestAdaptationError(
+            f"Requested LoRA path {path!r} does not match the startup adapter {components.lora_path!r}.")
     if scale is not None:
         try:
             scale_value = float(scale)
         except (TypeError, ValueError) as error:
             raise RequestAdaptationError(f"Invalid LoRA scale {scale!r}") from error
-        if not math.isclose(scale_value, args.lora_strength, rel_tol=0.0, abs_tol=1e-8):
+        if not math.isclose(scale_value, components.lora_strength, rel_tol=0.0, abs_tol=1e-8):
             raise RequestAdaptationError(
-                f"Requested LoRA scale {scale_value:g} does not match startup strength {args.lora_strength:g}.")
+                f"Requested LoRA scale {scale_value:g} does not match startup strength {components.lora_strength:g}.")
 
 
 def _apply_reference_inputs(
     kwargs: dict[str, Any],
     request: VideoGenerationRequest,
-    args: ResolvedGeneratorConfig,
+    resolved_config: ResolvedGeneratorConfig,
     *,
     model_family: str | None,
 ) -> None:
     images = _image_sources(request)
     videos = _video_sources(request)
     audios = _audio_sources(request)
-    ref2va = model_family == "minimax_h3" and "ref2va" in (args.override_pipeline_cls_name or "").lower()
+    ref2va = model_family == "minimax_h3" and "ref2va" in (
+        resolved_config.pipeline.components.override_pipeline_cls_name or "").lower()
 
     if model_family == "minimax_h3" and request.task is not None:
         normalized_task = request.task.lower()
@@ -310,14 +314,14 @@ def _apply_reference_inputs(
 def build_generation_request(
     request_id: str,
     request: VideoGenerationRequest,
-    args: ResolvedGeneratorConfig,
+    resolved_config: ResolvedGeneratorConfig,
     *,
     served_model_name: str,
     output_dir: str,
     default_request: GenerationRequest | None = None,
 ) -> GenerationRequest:
     """Build one tracked FastVideo request using explicit-field precedence."""
-    validate_model_and_lora(request, args, served_model_name)
+    validate_model_and_lora(request, resolved_config, served_model_name)
     # The operator's default_request fields, with their sections; the request body's fields override them.
     raw: dict[str, Any] = {}
     if default_request is not None:
@@ -383,7 +387,7 @@ def build_generation_request(
         kwargs["num_videos_per_prompt"] = request.resolved_num_outputs
 
     try:
-        _, model_family = get_preset_selection(args.model_path)
+        _, model_family = get_preset_selection(resolved_config.model_path)
     except (RuntimeError, ValueError):
         model_family = None
     if request.resolved_num_outputs != 1:
@@ -391,7 +395,7 @@ def build_generation_request(
     if "short_edge" in body_set and request.short_edge is not None and request.aspect_ratio is None:
         raise RequestAdaptationError("short_edge requires aspect_ratio.")
     _apply_aspect_ratio(kwargs, request, model_family=model_family)
-    _apply_reference_inputs(kwargs, request, args, model_family=model_family)
+    _apply_reference_inputs(kwargs, request, resolved_config, model_family=model_family)
 
     extension_fields = ("flow_shift", "sound_duration", "start_time_seconds")
     for name in extension_fields:
@@ -470,7 +474,7 @@ def build_generation_request(
     try:
         # Resolve once at admission time so unsupported model-specific fields
         # are a deterministic 400, rather than an asynchronous failed job.
-        request_to_sampling_param(generation_request, model_path=args.model_path)
+        request_to_sampling_param(generation_request, model_path=resolved_config.model_path)
     except (TypeError, ValueError) as error:
         raise RequestAdaptationError(str(error)) from error
     return generation_request

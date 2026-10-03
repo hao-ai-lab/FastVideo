@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for ``fastvideo.api.compat`` translation helpers covering the
-typed CompileConfig + PipelineSelection.vae_tiling surfaces promoted in
-PR 6.
+"""Tests for the ``fastvideo.api.compat`` keyword and request helpers, and
+for how resolution carries the typed CompileConfig and
+PipelineSelection.vae_tiling surfaces promoted in PR 6.
 """
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import pytest
 
 from fastvideo.api.compat import (
     from_pretrained_kwargs_to_config,
-    generator_config_to_fastvideo_args,
     request_to_sampling_param,
 )
+from fastvideo.api.inference_resolution import resolve_inference_config, torch_compile_kwargs
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import CompileConfig, GenerationRequest, GeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
@@ -38,24 +38,24 @@ class TestFromPretrainedKwargsTranslation:
 
 
 class TestCompileConfigRoundTrip:
-    """typed CompileConfig -> FastVideoArgs.torch_compile_kwargs
+    """typed CompileConfig -> ``torch_compile_kwargs(resolved_config)``
     reconstruction drops ``None`` typed fields and merges ``extras``."""
 
     def test_only_typed_fields_emitted(self, monkeypatch) -> None:
-        _stub_fastvideo_args_from_kwargs(monkeypatch)
+        _skip_model_definition(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
             engine=_engine_with_compile(CompileConfig(enabled=True, backend="inductor", fullgraph=True)),
         )
-        args = generator_config_to_fastvideo_args(config)
-        assert args.kwargs["enable_torch_compile"] is True
-        assert args.kwargs["torch_compile_kwargs"] == {
+        resolved = resolve_inference_config(config)
+        assert resolved.engine.compile.enabled is True
+        assert torch_compile_kwargs(resolved) == {
             "backend": "inductor",
             "fullgraph": True,
         }
 
     def test_extras_merged_into_torch_compile_kwargs(self, monkeypatch) -> None:
-        _stub_fastvideo_args_from_kwargs(monkeypatch)
+        _skip_model_definition(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
             engine=_engine_with_compile(
@@ -67,8 +67,8 @@ class TestCompileConfigRoundTrip:
                     }},
                 )),
         )
-        args = generator_config_to_fastvideo_args(config)
-        assert args.kwargs["torch_compile_kwargs"] == {
+        resolved = resolve_inference_config(config)
+        assert torch_compile_kwargs(resolved) == {
             "mode": "reduce-overhead",
             "options": {
                 "triton.cudagraphs": False
@@ -76,62 +76,61 @@ class TestCompileConfigRoundTrip:
         }
 
     def test_none_fields_suppressed(self, monkeypatch) -> None:
-        _stub_fastvideo_args_from_kwargs(monkeypatch)
+        _skip_model_definition(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
             engine=_engine_with_compile(CompileConfig()),
         )
-        args = generator_config_to_fastvideo_args(config)
-        assert args.kwargs["torch_compile_kwargs"] == {}
+        resolved = resolve_inference_config(config)
+        assert torch_compile_kwargs(resolved) == {}
 
 
-class TestLtx2VaeTilingFlattening:
-    """``generator.pipeline.vae_tiling`` reaches FastVideoArgs as the flat
-    keyword ``ltx2_vae_tiling``."""
+class TestVaeTilingResolution:
+    """``generator.pipeline.vae_tiling`` reaches the resolved config at
+    its typed path, and stays unset when neither the input nor a model
+    default sets it."""
 
-    def test_reverse_emits_legacy_name(self, monkeypatch) -> None:
-        _stub_fastvideo_args_from_kwargs(monkeypatch)
+    def test_explicit_value_is_kept(self, monkeypatch) -> None:
+        _skip_model_definition(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
             engine=_engine_with_compile(CompileConfig()),
         )
         config.pipeline.vae_tiling = False
-        args = generator_config_to_fastvideo_args(config)
-        assert args.kwargs["ltx2_vae_tiling"] is False
+        resolved = resolve_inference_config(config)
+        assert resolved.pipeline.vae_tiling is False
 
-    def test_reverse_unset_skips_key(self, monkeypatch) -> None:
-        _stub_fastvideo_args_from_kwargs(monkeypatch)
+    def test_unset_stays_unset(self, monkeypatch) -> None:
+        _skip_model_definition(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
             engine=_engine_with_compile(CompileConfig()),
         )
-        args = generator_config_to_fastvideo_args(config)
-        assert "ltx2_vae_tiling" not in args.kwargs
+        resolved = resolve_inference_config(config)
+        assert resolved.pipeline.vae_tiling is None
 
 
-class TestTextEncoderCompileFlattening:
-    """``generator.engine.compile.text_encoder_enabled`` reaches the
-    FastVideoArgs kwargs dict as ``enable_torch_compile_text_encoder`` so
-    realtime-runtime consumers can read it before FastVideoArgs filters
-    unknown fields."""
+class TestTextEncoderCompileResolution:
+    """``generator.engine.compile.text_encoder_enabled`` keeps an explicit
+    value, and resolution gives an unset value its runtime default."""
 
-    def test_reverse_emits_legacy_name(self, monkeypatch) -> None:
-        _stub_fastvideo_args_from_kwargs(monkeypatch)
+    def test_explicit_value_is_kept(self, monkeypatch) -> None:
+        _skip_model_definition(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
             engine=_engine_with_compile(CompileConfig(text_encoder_enabled=True)),
         )
-        args = generator_config_to_fastvideo_args(config)
-        assert args.kwargs["enable_torch_compile_text_encoder"] is True
+        resolved = resolve_inference_config(config)
+        assert resolved.engine.compile.text_encoder_enabled is True
 
-    def test_reverse_unset_emits_the_runtime_default(self, monkeypatch) -> None:
-        _stub_fastvideo_args_from_kwargs(monkeypatch)
+    def test_unset_takes_the_runtime_default(self, monkeypatch) -> None:
+        _skip_model_definition(monkeypatch)
         config = GeneratorConfig(
             model_path="/models/ltx2",
             engine=_engine_with_compile(CompileConfig()),
         )
-        args = generator_config_to_fastvideo_args(config)
-        assert args.kwargs["enable_torch_compile_text_encoder"] is False
+        resolved = resolve_inference_config(config)
+        assert resolved.engine.compile.text_encoder_enabled is False
 
 
 def test_batch_cfg_typed_request_reaches_sampling_param(monkeypatch) -> None:
@@ -167,21 +166,12 @@ def _engine_with_compile(compile_config):
     return engine
 
 
-def _stub_fastvideo_args_from_kwargs(monkeypatch):
-    """Swap ``FastVideoArgs.from_kwargs`` for a capture-only stub, and skip the
-    model definition (registry lookup, model defaults, and PipelineConfig
-    materialization), so translation tests need neither a valid FastVideoArgs
-    nor a resolvable model path."""
-    from fastvideo import fastvideo_args as fva
+def _skip_model_definition(monkeypatch):
+    """Skip the model definition (registry lookup, model defaults, and
+    PipelineConfig materialization), so resolution tests need no resolvable
+    model path."""
     from fastvideo.api import inference_resolution
 
     monkeypatch.setattr(inference_resolution, "build_model_pipeline_config", lambda config: None)
     monkeypatch.setattr(inference_resolution, "pipeline_config_defaults_step", lambda config, defaults=None: lambda view: {})
     monkeypatch.setattr(inference_resolution, "materialize_pipeline_config", lambda resolved, pipeline_config: None)
-
-    class _Captured:
-
-        def __init__(self, **kw):
-            self.kwargs = kw
-
-    monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", _Captured)

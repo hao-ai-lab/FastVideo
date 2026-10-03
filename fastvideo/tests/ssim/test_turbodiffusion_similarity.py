@@ -92,7 +92,7 @@ def test_turbodiffusion_inference_similarity(
         full_quality_params_map=(FULL_QUALITY_TURBODIFFUSION_MODEL_TO_PARAMS),
         min_acceptable_ssim=0.95,
         init_kwargs_override={
-            "override_pipeline_cls_name": "TurboDiffusionPipeline",
+            "pipeline.components.override_pipeline_cls_name": "TurboDiffusionPipeline",
         },
     )
 
@@ -167,6 +167,6 @@ def test_turbodiffusion_i2v_inference_similarity(
         full_quality_params_map=(FULL_QUALITY_TURBODIFFUSION_I2V_MODEL_TO_PARAMS),
         min_acceptable_ssim=0.95,
         init_kwargs_override={
-            "override_pipeline_cls_name": ("TurboDiffusionI2VPipeline"),
+            "pipeline.components.override_pipeline_cls_name": ("TurboDiffusionI2VPipeline"),
         },
     )

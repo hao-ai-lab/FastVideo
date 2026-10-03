@@ -24,8 +24,8 @@ from fastvideo.entrypoints.openai.request_adapter import (
 )
 from fastvideo.entrypoints.openai.state import (
     get_output_dir,
+    get_resolved_config,
     get_served_model_name,
-    get_server_args,
     get_serving_engine,
 )
 from fastvideo.entrypoints.openai.stores import IMAGE_STORE
@@ -56,7 +56,7 @@ def _validate_request_model(model: str | None) -> None:
     if model is None:
         return
     try:
-        validate_served_model_name(model, get_server_args(), get_served_model_name())
+        validate_served_model_name(model, get_resolved_config(), get_served_model_name())
     except RequestAdaptationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 

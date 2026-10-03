@@ -5,7 +5,6 @@ Base class for composed pipelines.
 This module defines the base class for pipelines that are composed of multiple stages.
 """
 
-import argparse
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -15,19 +14,19 @@ from typing import Any, cast
 import torch
 
 from fastvideo.api.device_policy import finalize_device_offload_policy
-from fastvideo.api.resolution import ResolvedGeneratorConfig
-from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.api.inference_resolution import torch_compile_kwargs
+from fastvideo.api.resolution import ResolvedGeneratorConfig, thaw
 from fastvideo.distributed import (
     get_local_torch_device,
     get_world_group,
     maybe_init_distributed_environment_and_model_parallel,
 )
 from fastvideo.distributed.communication_op import (warmup_sequence_parallel_communication)
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.hooks.activation_trace import attach_activation_trace, detach_activation_trace
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
+from fastvideo.pipelines.component_state import ComponentState
 from fastvideo.pipelines.lazy_module import LazyModule, is_lazy_module
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
@@ -83,8 +82,7 @@ class ComposedPipelineBase(ABC):
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: list[str] = []
     _extra_config_module_map: dict[str, str] = {}
-    training_args: TrainingArgs | None = None
-    resolved_config: ResolvedGeneratorConfig | FastVideoArgs | TrainingArgs | None = None
+    resolved_config: ResolvedGeneratorConfig | None = None
     modules: dict[str, Any] = {}
     # do not need to include moe related transformers
     trainable_transformer_names: list[str] = ["transformer"]
@@ -132,7 +130,7 @@ class ComposedPipelineBase(ABC):
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
-                 resolved_config: ResolvedGeneratorConfig | FastVideoArgs | TrainingArgs,
+                 resolved_config: ResolvedGeneratorConfig,
                  required_config_modules: list[str] | None = None,
                  loaded_modules: dict[str, torch.nn.Module] | None = None):
         """
@@ -140,6 +138,8 @@ class ComposedPipelineBase(ABC):
         use. The pipeline should be stateless and not hold any batch state.
         """
         self.resolved_config = resolved_config
+        # Where each component was loaded from and whether it is resident; every registered stage shares it.
+        self.component_state = ComponentState()
 
         self.model_path: str = model_path
         self._stages: list[PipelineStage] = []
@@ -152,7 +152,8 @@ class ComposedPipelineBase(ABC):
         if self._required_config_modules is None:
             raise NotImplementedError("Subclass must set _required_config_modules")
 
-        maybe_init_distributed_environment_and_model_parallel(resolved_config.tp_size, resolved_config.sp_size)
+        maybe_init_distributed_environment_and_model_parallel(resolved_config.engine.parallelism.tp_size,
+                                                              resolved_config.engine.parallelism.sp_size)
 
         # VideoGenerator applies this in each Worker before building the
         # pipeline. Keep direct from_pretrained/build_pipeline callers aligned,
@@ -161,11 +162,8 @@ class ComposedPipelineBase(ABC):
         if resolved_config.inference_mode:
             local_device = get_local_torch_device()
             device_id = local_device.index if local_device.index is not None else 0
-            if isinstance(resolved_config, ResolvedGeneratorConfig):
-                resolved_config = finalize_device_offload_policy(resolved_config, device_id)
-                self.resolved_config = resolved_config
-            else:
-                resolved_config.finalize_device_offload_policy(device_id)
+            resolved_config = finalize_device_offload_policy(resolved_config, device_id)
+            self.resolved_config = resolved_config
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
@@ -284,21 +282,22 @@ class ComposedPipelineBase(ABC):
         """
         if self.resolved_config is None:
             return
+        compile_config = self.resolved_config.engine.compile
         compile_requested = any((
-            self.resolved_config.enable_torch_compile,
-            self.resolved_config.enable_torch_compile_text_encoder,
-            self.resolved_config.enable_torch_compile_vae,
-            self.resolved_config.enable_torch_compile_audio_vae,
+            compile_config.enabled,
+            compile_config.text_encoder_enabled,
+            compile_config.vae_enabled,
+            compile_config.audio_vae_enabled,
         ))
         if self.resolved_config.training_mode and compile_requested:
             logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
         if self.resolved_config.training_mode:
             return
 
-        compile_transformer = self.resolved_config.enable_torch_compile
-        compile_text_encoder = self.resolved_config.enable_torch_compile_text_encoder
-        compile_vae = self.resolved_config.enable_torch_compile_vae
-        compile_audio_vae = self.resolved_config.enable_torch_compile_audio_vae
+        compile_transformer = compile_config.enabled
+        compile_text_encoder = compile_config.text_encoder_enabled
+        compile_vae = compile_config.vae_enabled
+        compile_audio_vae = compile_config.audio_vae_enabled
         if not (compile_transformer or compile_text_encoder or compile_vae or compile_audio_vae):
             return
 
@@ -314,14 +313,14 @@ class ComposedPipelineBase(ABC):
         except Exception:  # pragma: no cover - FSDP not always available
             fsdp_module_cls = None
 
-        global_compile_kwargs = (self.resolved_config.torch_compile_kwargs or {})
-        dit_compile_kwargs = (self.resolved_config.torch_compile_kwargs_dit or global_compile_kwargs)
-        text_compile_kwargs = (self.resolved_config.torch_compile_kwargs_text_encoder or global_compile_kwargs)
-        vae_compile_kwargs = (self.resolved_config.torch_compile_kwargs_vae or global_compile_kwargs)
-        audio_vae_compile_kwargs = (self.resolved_config.torch_compile_kwargs_audio_vae or global_compile_kwargs)
+        global_compile_kwargs = torch_compile_kwargs(self.resolved_config)
+        dit_compile_kwargs = (thaw(compile_config.dit_kwargs) or global_compile_kwargs)
+        text_compile_kwargs = (thaw(compile_config.text_encoder_kwargs) or global_compile_kwargs)
+        vae_compile_kwargs = (thaw(compile_config.vae_kwargs) or global_compile_kwargs)
+        audio_vae_compile_kwargs = (thaw(compile_config.audio_vae_kwargs) or global_compile_kwargs)
 
-        if compile_transformer and self.resolved_config.inference_torch_compile:
-            logger.info("inference_torch_compile already compiled the DiT regions in the "
+        if compile_transformer and compile_config.regional:
+            logger.info("engine.compile.regional already compiled the DiT regions in the "
                         "loader; skipping the pipeline-level DiT compile")
             compile_transformer = False
         if compile_transformer and any(_want(name) for name in ("transformer", "transformer_refine", "transformer_2")):
@@ -365,17 +364,14 @@ class ComposedPipelineBase(ABC):
                 logger.info("Torch Compile enabled for audio VAE")
 
     def post_init(self) -> None:
-        assert self.resolved_config is not None, "fastvideo_args must be set"
+        assert self.resolved_config is not None, "resolved_config must be set"
         if self.post_init_called:
             return
         self.post_init_called = True
         if self.resolved_config.training_mode:
-            assert isinstance(self.resolved_config, TrainingArgs)
-            self.training_args = self.resolved_config
-            assert self.training_args is not None
-            self.initialize_training_pipeline(self.training_args)
-            if self.training_args.log_validation:
-                self.initialize_validation_pipeline(self.training_args)
+            self.initialize_training_pipeline(self.resolved_config)
+            if self.resolved_config.training.validation.enabled:
+                self.initialize_validation_pipeline(self.resolved_config)
 
         self.initialize_pipeline(self.resolved_config)
         self._apply_inference_compile()
@@ -402,48 +398,38 @@ class ComposedPipelineBase(ABC):
             # slow first forward pass due to lazy initialization
             warmup_sequence_parallel_communication()
 
-    def initialize_training_pipeline(self, training_args: TrainingArgs):
+    def initialize_training_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         raise NotImplementedError("if training_mode is True, the pipeline must implement this method")
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        raise NotImplementedError("if log_validation is True, the pipeline must implement this method")
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
+        raise NotImplementedError("if training.validation.enabled is True, the pipeline must implement this method")
 
     @classmethod
     def from_pretrained(cls,
                         model_path: str,
-                        device: str | None = None,
-                        torch_dtype: torch.dtype | None = None,
-                        pipeline_config: str | PipelineConfig | None = None,
-                        args: argparse.Namespace | None = None,
-                        required_config_modules: list[str] | None = None,
-                        loaded_modules: dict[str, torch.nn.Module]
-                        | None = None,
-                        **kwargs) -> "ComposedPipelineBase":
+                        *,
+                        resolved_config: ResolvedGeneratorConfig,
+                        loaded_modules: dict[str, torch.nn.Module] | None = None,
+                        required_config_modules: list[str] | None = None) -> "ComposedPipelineBase":
         """
-        Load a pipeline from a pretrained model.
-        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
-        If provided, loaded_modules will be used instead of loading from config/pretrained weights.
+        Load a pipeline from a pretrained model with a resolved runtime config.
+
+        ``resolved_config`` comes from ``resolve_inference_config`` or, for a training run, from the training
+        resolver. If ``loaded_modules`` is provided, its modules are used instead of loading them from
+        config/pretrained weights.
         """
-        if args is None or args.inference_mode:
-
-            kwargs['model_path'] = model_path
-            resolved_config = FastVideoArgs.from_kwargs(**kwargs)
-        else:
-            assert args is not None, "args must be provided for training mode"
-            resolved_config = TrainingArgs.from_cli_args(args)
-            # TODO(will): fix this so that its not so ugly
-            resolved_config.model_path = model_path
-            for key, value in kwargs.items():
-                setattr(resolved_config, key, value)
-
-            resolved_config.dit_cpu_offload = False
+        if resolved_config.training_mode:
+            # Training keeps the DiT on the device.
+            if resolved_config.engine.offload.dit:
+                resolved_config = resolved_config.with_override("ComposedPipelineBase.from_pretrained:training",
+                                                                {"engine.offload.dit": False})
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
-            assert resolved_config.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
+            assert resolved_config.engine.precision.dit == 'fp32', 'only fp32 is supported for training'
 
-        logger.info("fastvideo_args in from_pretrained: %s", resolved_config)
+        logger.info("resolved_config in from_pretrained: %s", resolved_config)
 
         pipe = cls(model_path,
                    resolved_config,
@@ -467,14 +453,12 @@ class ComposedPipelineBase(ABC):
             self._install_lazy_release_hooks()
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
-        revision = getattr(self.resolved_config, "revision", None)
         model_path = maybe_download_model(
             self.model_path,
-            revision=revision,
+            revision=self.resolved_config.revision,
             allow_patterns=self.get_hf_download_allow_patterns(),
         )
         self.model_path = model_path
-        # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
         config = verify_model_config_and_directory(
             model_path,
@@ -508,26 +492,26 @@ class ComposedPipelineBase(ABC):
         return self._stages
 
     @abstractmethod
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """
         Create the inference pipeline stages.
         """
         raise NotImplementedError
 
-    def create_training_stages(self, training_args: TrainingArgs):
+    def create_training_stages(self, resolved_config: ResolvedGeneratorConfig):
         """
         Create the training pipeline stages.
         """
         raise NotImplementedError
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """
         Initialize the pipeline.
         """
         return
 
     def load_modules(self,
-                     resolved_config: FastVideoArgs,
+                     resolved_config: ResolvedGeneratorConfig,
                      loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
         """
         Load the modules from the config.
@@ -615,15 +599,19 @@ class ComposedPipelineBase(ABC):
 
             component_model_path = os.path.join(self.model_path, load_module_name)
 
-            def load_component(load_module_name: str = load_module_name,
+            def load_component(module_name: str = module_name,
+                               load_module_name: str = load_module_name,
                                component_model_path: str = component_model_path,
                                transformers_or_diffusers: str = transformers_or_diffusers) -> Any:
-                return PipelineComponentLoader.load_module(
+                """Load one component and record its path, so a stage that releases it can load it again."""
+                module = PipelineComponentLoader.load_module(
                     module_name=load_module_name,
                     component_model_path=component_model_path,
                     transformers_or_diffusers=transformers_or_diffusers,
                     resolved_config=resolved_config,
                 )
+                self.component_state.model_paths[module_name] = component_model_path
+                return module
 
             if self._lazy_module_load_enabled(resolved_config) and module_name in self._lazy_module_names:
                 module = LazyModule(module_name, load_component)
@@ -646,9 +634,9 @@ class ComposedPipelineBase(ABC):
         return modules
 
     @staticmethod
-    def _lazy_module_load_enabled(resolved_config: FastVideoArgs) -> bool:
+    def _lazy_module_load_enabled(resolved_config: ResolvedGeneratorConfig) -> bool:
         """Deferred loading is inference only; training needs every component."""
-        if not resolved_config.lazy_module_load:
+        if not resolved_config.engine.offload.lazy_module_load:
             return False
         if resolved_config.training_mode:
             logger.warning("lazy_module_load is not supported in training mode; loading all modules eagerly")
@@ -727,6 +715,7 @@ class ComposedPipelineBase(ABC):
         # Multiple stages can share the same class (for example LTX2 main
         # denoise and refine denoise), so class-name keys would collide.
         stage._pipeline_stage_name = stage_name
+        stage.component_state = self.component_state
         self._stages.append(stage)
         self._stage_name_mapping[stage_name] = stage
         setattr(self, stage_name, stage)
@@ -742,11 +731,10 @@ class ComposedPipelineBase(ABC):
                          stage_name)
             self._install_lazy_release_hooks()
 
-    def _post_init_before_forward(
-            self, resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> ResolvedGeneratorConfig | FastVideoArgs:
+    def _post_init_before_forward(self, resolved_config: ResolvedGeneratorConfig) -> ResolvedGeneratorConfig:
         """Run ``post_init`` before the first forward, and return the config that the stages read.
 
-        ``post_init`` can rebind ``self.fastvideo_args`` to an override of it, such as a schedule from the
+        ``post_init`` can rebind ``self.resolved_config`` to an override of it, such as a schedule from the
         checkpoint. A caller that passed the pipeline's own config then runs with the rebound one.
         """
         if self.post_init_called:
@@ -760,14 +748,14 @@ class ComposedPipelineBase(ABC):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Generate a video or image using the pipeline.
         
         Args:
             batch: The batch to generate from.
-            fastvideo_args: The resolved runtime config.
+            resolved_config: The resolved runtime config.
         Returns:
             ForwardBatch: The batch with the generated video or image.
         """

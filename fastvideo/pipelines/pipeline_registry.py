@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
 
-from fastvideo.fastvideo_args import WorkloadType
+from fastvideo.api.schema import WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline

@@ -400,7 +400,7 @@ def run_text_to_latent_similarity_test(
             init_kwargs.update(init_kwargs_override)
         # Always wins: the helper exists specifically to compare on latents,
         # so an override can never silently turn it back into a pixel run.
-        init_kwargs["output_type"] = "latent"
+        init_kwargs["pipeline.output_type"] = "latent"
 
         generation_kwargs = build_generation_kwargs(
             base_params,

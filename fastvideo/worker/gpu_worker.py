@@ -8,7 +8,6 @@ from fastvideo.api.device_policy import finalize_device_offload_policy
 from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import (cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.distributed.parallel_state import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, LoRAPipeline, build_pipeline
 
@@ -25,7 +24,7 @@ def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
 
 class Worker:
 
-    def __init__(self, resolved_config: ResolvedGeneratorConfig | FastVideoArgs, local_rank: int, rank: int,
+    def __init__(self, resolved_config: ResolvedGeneratorConfig, local_rank: int, rank: int,
                  distributed_init_method: str):
         self.resolved_config = resolved_config
         self.local_rank = local_rank
@@ -64,7 +63,7 @@ class Worker:
         # inherited or missing value here would bind every Ray actor to cuda:0.
         envs.set_external("LOCAL_RANK", str(self.local_rank))
         envs.set_external("RANK", str(self.rank))
-        envs.set_external("WORLD_SIZE", str(self.resolved_config.num_gpus))
+        envs.set_external("WORLD_SIZE", str(self.resolved_config.engine.num_gpus))
 
         # Platform-agnostic device initialization
         self.device = get_local_torch_device()
@@ -86,24 +85,20 @@ class Worker:
         # its own device. The worker keeps the config that the policy returns,
         # and every loader and pipeline stage below consumes it.
         device_id = self.device.index if self.device.index is not None else 0
-        if isinstance(self.resolved_config, ResolvedGeneratorConfig):
-            self.resolved_config = finalize_device_offload_policy(self.resolved_config, device_id)
-        else:
-            self.resolved_config.finalize_device_offload_policy(device_id)
+        self.resolved_config = finalize_device_offload_policy(self.resolved_config, device_id)
 
         # Initialize the distributed environment.
-        maybe_init_distributed_environment_and_model_parallel(self.resolved_config.tp_size,
-                                                              self.resolved_config.sp_size,
+        maybe_init_distributed_environment_and_model_parallel(self.resolved_config.engine.parallelism.tp_size,
+                                                              self.resolved_config.engine.parallelism.sp_size,
                                                               self.distributed_init_method)
 
         self.pipeline = build_pipeline(self.resolved_config)
 
-    def execute_forward(self, forward_batch: ForwardBatch,
-                        resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
+    def execute_forward(self, forward_batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         # The pipeline's config carries the overrides that the pipeline made from its checkpoint.
         output_batch = self.pipeline.forward(forward_batch, self.pipeline.resolved_config)
         needs_output = forward_batch.return_frames or (forward_batch.save_video
-                                                       and resolved_config.output_type != "latent"
+                                                       and resolved_config.pipeline.output_type != "latent"
                                                        and not output_batch.extra.get("audio_only"))
         if output_batch.output is not None and not needs_output:
             # Drop the decoded tensor before multiprocessing or Ray transports
@@ -143,7 +138,7 @@ class Worker:
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
+                                resolved_config: ResolvedGeneratorConfig) -> dict[str, Any]:
         self.pipeline.streaming_reset(forward_batch, self.pipeline.resolved_config)
         return {"status": "reset_complete"}
 

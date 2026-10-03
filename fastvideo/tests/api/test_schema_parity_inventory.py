@@ -298,12 +298,12 @@ def test_openai_seconds_mapping_preserves_duration_semantics(tmp_path) -> None:
     inventory = _load_inventory()
 
     request = VideoGenerationsRequest(prompt="test", seconds=4, fps=24)
-    server_args = types.SimpleNamespace(model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-                                        lora_path=None,
-                                        lora_nickname="default")
+    resolved_config = types.SimpleNamespace(model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+                                            pipeline=types.SimpleNamespace(components=types.SimpleNamespace(
+                                                lora_path=None, lora_nickname="default")))
     generation_request = build_generation_request("vid-test",
                                                   request,
-                                                  server_args,
+                                                  resolved_config,
                                                   served_model_name="wan",
                                                   output_dir=str(tmp_path))
     assert generation_request.sampling.fps == 24

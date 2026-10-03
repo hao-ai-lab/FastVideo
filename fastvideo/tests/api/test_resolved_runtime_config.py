@@ -105,23 +105,16 @@ def test_unknown_and_training_only_names_raise_attribute_error():
     assert resolved.preprocess_config is None
 
 
-def test_runtime_state_is_shared_by_overrides_and_survives_pickling():
-    resolved = _resolve({"model_path": WAN_T2V, "pipeline": {"experimental": {"ray_runtime_env": {"pip": ["x"]}}}})
+def test_overrides_and_pickling_carry_the_frozen_pipeline_config():
+    resolved = _resolve({"model_path": WAN_T2V})
 
-    resolved.model_loaded["vae"] = False
-    resolved.model_paths["transformer"] = "/weights/transformer"
-    resolved.ray_placement_group = "placement-group"
     overridden = resolved.with_override("test:source", {"engine.offload.vae": False})
     copy = pickle.loads(pickle.dumps(overridden))
 
-    assert overridden.model_loaded is resolved.model_loaded
-    assert copy.model_loaded == {"transformer": True, "vae": False, "upsampler": True}
-    assert copy.model_paths == {"transformer": "/weights/transformer"}
-    assert copy.ray_placement_group == "placement-group"
-    assert copy.ray_runtime_env == {"pip": ["x"]}
-    assert copy.pipeline_config._frozen and copy.vae_cpu_offload is False and resolved.vae_cpu_offload is True
+    assert copy.pipeline_config._frozen
+    assert copy.engine.offload.vae is False and resolved.engine.offload.vae is True
     with pytest.raises(AttributeError, match="read-only"):
-        resolved.num_gpus = 4
+        resolved.engine.num_gpus = 4
 
 
 def test_override_of_a_typed_home_updates_its_pipeline_config_mirror():
@@ -154,12 +147,12 @@ def test_unified_memory_policy_returns_recorded_overrides_once(monkeypatch):
         "engine.offload.image_encoder": False,
         "engine.offload.vae": False,
     }
-    assert decided.lazy_module_load is True and decided.dit_cpu_offload is False
+    assert decided.engine.offload.lazy_module_load is True and decided.engine.offload.dit is False
     assert again.override_log == decided.override_log
-    assert resolved.override_log == () and resolved.dit_cpu_offload is True
+    assert resolved.override_log == () and resolved.engine.offload.dit is True
     assert device_policy.offload_disabled_on_unified_memory(1, "text_encoder_cpu_offload")
     assert not device_policy.offload_disabled_on_unified_memory(0, "text_encoder_cpu_offload")
-    assert device_policy.finalize_device_offload_policy(resolved, 0).lazy_module_load is False
+    assert device_policy.finalize_device_offload_policy(resolved, 0).engine.offload.lazy_module_load is False
 
 
 def test_layerwise_offload_turns_off_conflicting_modes():
@@ -200,7 +193,95 @@ def test_direct_pipeline_keeps_the_policy_result_of_a_resolved_config(monkeypatc
     pipeline = _Pipeline("unused", resolved, required_config_modules=[])
 
     assert pipeline.resolved_config is pipeline.loaded_with
-    assert pipeline.resolved_config.lazy_module_load is True and resolved.lazy_module_load is None
+    assert pipeline.resolved_config.engine.offload.lazy_module_load is True
+    assert resolved.engine.offload.lazy_module_load is None
+
+
+def test_pipeline_records_component_paths_and_shares_its_component_state(monkeypatch, tmp_path):
+    import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
+    from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+    from fastvideo.pipelines.stages import PipelineStage
+
+    class _Pipeline(ComposedPipelineBase):
+        _required_config_modules = ["transformer", "vae"]
+
+        def create_pipeline_stages(self, resolved_config):
+            pass
+
+    class _Stage(PipelineStage):
+
+        def forward(self, batch, resolved_config):
+            return batch
+
+    profiler = SimpleNamespace(region=lambda name: nullcontext())
+    monkeypatch.setattr(composed_pipeline_base, "maybe_init_distributed_environment_and_model_parallel",
+                        lambda *args: None)
+    monkeypatch.setattr(composed_pipeline_base, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(composed_pipeline_base, "get_world_group", lambda: SimpleNamespace(local_rank=0))
+    monkeypatch.setattr(composed_pipeline_base, "get_or_create_profiler", lambda trace_dir: profiler)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: False)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+    monkeypatch.setattr(
+        _Pipeline, "_load_config", lambda self, model_path: {
+            "_class_name": "Probe",
+            "_diffusers_version": "0",
+            "transformer": ["diffusers", "Transformer"],
+            "vae": ["diffusers", "VAE"],
+        })
+    monkeypatch.setattr(composed_pipeline_base.PipelineComponentLoader, "load_module",
+                        staticmethod(lambda **kwargs: object()))
+    resolved = _resolve({"model_path": WAN_T2V})
+
+    pipeline = _Pipeline(str(tmp_path), resolved)
+    stage = _Stage()
+    pipeline.add_stage("probe_stage", stage)
+
+    assert pipeline.component_state.model_paths == {
+        "transformer": str(tmp_path / "transformer"),
+        "vae": str(tmp_path / "vae"),
+    }
+    assert stage.component_state is pipeline.component_state
+
+
+def test_from_pretrained_keeps_the_dit_on_the_device_for_training():
+    from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+
+    built = {}
+
+    class _Pipeline(ComposedPipelineBase):
+
+        def __init__(self, model_path, resolved_config, required_config_modules=None, loaded_modules=None):
+            built["resolved_config"] = resolved_config
+
+        def post_init(self):
+            pass
+
+        def create_pipeline_stages(self, resolved_config):
+            pass
+
+    with isolated_environment():
+        resolved = resolve_training_config({
+            "model_path": WAN_T2V,
+            "engine": {
+                "parallelism": {
+                    "sp_size": 1,
+                    "hsdp_shard_dim": 1
+                },
+                "precision": {
+                    "dit": "fp32"
+                },
+                "offload": {
+                    "dit": True
+                },
+            },
+        })
+
+    _Pipeline.from_pretrained(WAN_T2V, resolved_config=resolved)
+
+    assert resolved.engine.offload.dit is True
+    assert built["resolved_config"].engine.offload.dit is False
+    assert built["resolved_config"].provenance("engine.offload.dit").source == (
+        "ComposedPipelineBase.from_pretrained:training")
 
 
 def test_ltx2_checkpoint_refine_defaults_rebind_the_pipeline_config(tmp_path):
@@ -227,9 +308,13 @@ def test_ltx2_checkpoint_refine_defaults_rebind_the_pipeline_config(tmp_path):
     assert rebound.override_log == (("checkpoint:model_index.json", {
         "pipeline.ltx2.refine.lora_path": "FastVideo/LTX2-Distilled-LoRA",
         "pipeline.ltx2.refine.num_inference_steps": 2,
+        "pipeline.ltx2.refine.enabled": False,
+        "pipeline.ltx2.refine.add_noise": True,
+        "pipeline.ltx2.refine.guidance_scale": 1.0,
     }), )
-    assert rebound.ltx2_refine_lora_path == "FastVideo/LTX2-Distilled-LoRA"
-    assert rebound.ltx2_refine_num_inference_steps == 2 and resolved.ltx2_refine_num_inference_steps == 3
+    assert rebound.pipeline.ltx2.refine.lora_path == "FastVideo/LTX2-Distilled-LoRA"
+    assert rebound.pipeline.ltx2.refine.num_inference_steps == 2
+    assert resolved.pipeline.ltx2.refine.num_inference_steps is None
 
 
 def test_minimax_h3_checkpoint_schedule_rebinds_and_reaches_the_first_forward(tmp_path, monkeypatch):
@@ -270,7 +355,7 @@ def test_minimax_h3_checkpoint_schedule_rebinds_and_reaches_the_first_forward(tm
         "checkpoint:fastvideo_inference.json")
 
 
-def test_training_root_uses_command_line_defaults_and_flat_formats(tmp_path):
+def test_training_root_uses_command_line_defaults_and_typed_values(tmp_path):
     config_path = tmp_path / "train.json"
     config_path.write_text(
         json.dumps({
@@ -305,15 +390,16 @@ def test_training_root_uses_command_line_defaults_and_flat_formats(tmp_path):
 
     assert type(resolved.to_config()) is TrainingRunConfig
     assert resolved.mode is ExecutionMode.DISTILLATION and resolved.training_mode and not resolved.inference_mode
-    assert (resolved.dit_cpu_offload, resolved.dit_layerwise_offload, resolved.pin_cpu_memory) == (False, False, False)
-    assert (resolved.seed, resolved.ema_decay, resolved.lr_warmup_steps, resolved.learning_rate) == (42, 0.999, 5, 1e-5)
-    assert resolved.betas == "0.9,0.999" and resolved.validation_sampling_steps == "8,50"
-    assert resolved.validation_guidance_scale == "6.0"
-    assert resolved.lora_alpha == 32 and resolved.provenance("training.lora.alpha").source == (
+    offload = resolved.engine.offload
+    training = resolved.training
+    assert (offload.dit, offload.dit_layerwise, offload.pin_cpu_memory) == (False, False, False)
+    assert (training.data.seed, training.ema.decay, training.optimizer.lr_warmup_steps,
+            training.optimizer.learning_rate) == (42, 0.999, 5, 1e-5)
+    assert training.optimizer.betas == (0.9, 0.999) and training.validation.sampling_steps == (8, 50)
+    assert training.validation.guidance_scale == 6.0
+    assert training.lora.alpha == 32 and resolved.provenance("training.lora.alpha").source == (
         "derive_lora_alpha_from_rank")
-    assert resolved.pretrained_model_name_or_path == WAN_T2V and resolved.init_weights_from_safetensors is None
-    with pytest.raises(AttributeError, match="no readers"):
-        resolved.mixed_precision
+    assert resolved.model_path == WAN_T2V and resolved.pipeline.components.transformer_weights is None
 
 
 def test_training_root_requires_parallel_sizes():
@@ -335,8 +421,8 @@ def test_preprocess_root_fills_model_path_loads_the_encoder_and_validates():
 
     assert type(resolved.to_config()) is PreprocessRunConfig
     assert resolved.mode is ExecutionMode.PREPROCESS and resolved.inference_mode
-    assert resolved.preprocess_config.model_path == WAN_T2V
-    assert resolved.preprocess_config.dataset_type.value == "merged"
+    assert resolved.preprocess.model_path == WAN_T2V
+    assert resolved.preprocess.dataset_type.value == "merged"
     assert resolved.pipeline_config.vae_config.load_encoder is True
 
 

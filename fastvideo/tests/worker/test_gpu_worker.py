@@ -7,7 +7,6 @@ import torch
 
 import fastvideo.envs as envs
 from fastvideo.api.inference_resolution import resolve_inference_config
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.tests.api.config_snapshot import isolated_environment
 from fastvideo.worker.gpu_worker import Worker, _log_cuda_device_uuid
@@ -95,13 +94,18 @@ def _worker_returning(output_batch: ForwardBatch) -> Worker:
     return worker
 
 
+def _request_config(output_type: str = "pil") -> SimpleNamespace:
+    """Stand-in for the request's resolved config with the typed path that ``Worker.execute_forward`` reads."""
+    return SimpleNamespace(pipeline=SimpleNamespace(output_type=output_type))
+
+
 def test_execute_forward_drops_metadata_only_output_before_transport():
     output = torch.ones((1, 3, 2, 4, 4))
     output_batch = ForwardBatch(data_type="video", output=output)
     worker = _worker_returning(output_batch)
     request_batch = ForwardBatch(data_type="video", save_video=False, return_frames=False)
 
-    result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test"))
+    result = worker.execute_forward(request_batch, _request_config())
 
     assert result.output is not None
     assert result.output.device.type == "cpu"
@@ -113,7 +117,7 @@ def test_execute_forward_preserves_missing_metadata_only_output():
     worker = _worker_returning(output_batch)
     request_batch = ForwardBatch(data_type="video", save_video=False, return_frames=False)
 
-    result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test"))
+    result = worker.execute_forward(request_batch, _request_config())
 
     assert result.output is None
 
@@ -124,7 +128,7 @@ def test_execute_forward_drops_save_only_latent_output():
     worker = _worker_returning(output_batch)
     request_batch = ForwardBatch(data_type="video", save_video=True, return_frames=False)
 
-    result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test", output_type="latent"))
+    result = worker.execute_forward(request_batch, _request_config(output_type="latent"))
 
     assert result.output is not None
     assert result.output.device.type == "cpu"
@@ -137,7 +141,7 @@ def test_execute_forward_drops_save_only_audio_placeholder():
     worker = _worker_returning(output_batch)
     request_batch = ForwardBatch(data_type="audio", save_video=True, return_frames=False)
 
-    result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test"))
+    result = worker.execute_forward(request_batch, _request_config())
 
     assert result.output is not None
     assert result.output.device.type == "cpu"
@@ -158,6 +162,6 @@ def test_execute_forward_preserves_requested_output(save_video, return_frames):
     worker = _worker_returning(output_batch)
     request_batch = ForwardBatch(data_type="video", save_video=save_video, return_frames=return_frames)
 
-    result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test"))
+    result = worker.execute_forward(request_batch, _request_config())
 
     assert result.output is output

@@ -110,12 +110,12 @@ def test_sd35_similarity(
         full_quality_params_map={model_id: _sd35_full_quality_params(sd35_model_path)},
         min_acceptable_ssim=0.98,
         init_kwargs_override={
-            "workload_type": "t2v",
-            "use_fsdp_inference": False,
-            "text_encoder_cpu_offload": False,
-            "vae_cpu_offload": False,
-            "image_encoder_cpu_offload": False,
-            "pin_cpu_memory": False,
+            "pipeline.workload_type": "t2v",
+            "engine.use_fsdp_inference": False,
+            "engine.offload.text_encoder": False,
+            "engine.offload.vae": False,
+            "engine.offload.image_encoder": False,
+            "engine.offload.pin_cpu_memory": False,
         },
         generation_kwargs_override={
             "save_video": True,

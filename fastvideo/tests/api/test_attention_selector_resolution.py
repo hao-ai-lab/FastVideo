@@ -49,10 +49,8 @@ class _FakePlatform:
     @classmethod
     def is_mps(cls) -> bool:
         # Not decoration. The autouse fixture swaps this stub in process-wide,
-        # so anything that constructs FastVideoArgs under it reaches
-        # check_fastvideo_args, which calls current_platform.is_mps(). Without
-        # this, the two env-folding tests raise AttributeError before they
-        # assert anything.
+        # so any code under it that asks the platform about MPS gets an answer
+        # instead of an AttributeError.
         return False
 
     @classmethod
@@ -232,29 +230,35 @@ def test_active_device_is_part_of_the_cache_key(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_env_is_folded_into_the_typed_request_once(env_overrides):
-    """``FastVideoArgs.attention_backend`` is the parse-once adapter."""
-    from fastvideo.fastvideo_args import FastVideoArgs
+def _resolve_attention_backend(raw):
+    """Resolve ``engine.attention.backend`` with only the attention steps, so no model definition is needed."""
+    from fastvideo.api.inference_resolution import fill_attention_backend_from_env, validate_attention_backend
+    from fastvideo.api.resolution import resolve_generator_config
 
+    resolved = resolve_generator_config({"model_path": "x", **raw},
+                                        (fill_attention_backend_from_env, validate_attention_backend))
+    return resolved.engine.attention.backend
+
+
+def test_env_is_folded_into_the_typed_request_once(env_overrides):
+    """Resolution folds the environment into ``engine.attention.backend`` once."""
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
-    assert FastVideoArgs(model_path="x").attention_backend == "SAGE_ATTN"
+    assert _resolve_attention_backend({}) == "SAGE_ATTN"
 
     # An explicit request always wins over the environment.
-    assert FastVideoArgs(model_path="x", attention_backend="TORCH_SDPA").attention_backend == "TORCH_SDPA"
+    assert _resolve_attention_backend({"engine": {"attention": {"backend": "TORCH_SDPA"}}}) == "TORCH_SDPA"
 
 
 def test_unsupported_env_backend_raises(env_overrides):
     """An unsupported name raises from the environment variable and from an explicit request alike."""
-    from fastvideo.fastvideo_args import FastVideoArgs
-
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("flash_atn"))
     with pytest.raises(ValueError, match="FASTVIDEO_ATTENTION_BACKEND='flash_atn' is not a supported"):
-        FastVideoArgs(model_path="x")
+        _resolve_attention_backend({})
     with pytest.raises(ValueError, match="FASTVIDEO_ATTENTION_BACKEND='flash_atn' is not a supported"):
         selector.get_env_variable_attn_backend()
 
     with pytest.raises(ValueError, match="Unknown attention backend"):
-        FastVideoArgs(model_path="x", attention_backend="flash_atn")
+        _resolve_attention_backend({"engine": {"attention": {"backend": "flash_atn"}}})
 
 
 def test_recorded_decision_is_readable_from_the_component():

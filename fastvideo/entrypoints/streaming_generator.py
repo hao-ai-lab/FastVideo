@@ -11,7 +11,6 @@ from einops import rearrange
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.api.resolution import ResolvedGeneratorConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import align_to, pixels_to_uint8, shallow_asdict
@@ -78,7 +77,7 @@ class StreamingVideoGenerator(VideoGenerator):
     """
 
     def __init__(self,
-                 resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
+                 resolved_config: ResolvedGeneratorConfig,
                  executor_class: type[Executor],
                  log_stats: bool,
                  use_queue_mode: bool = True):
@@ -92,7 +91,7 @@ class StreamingVideoGenerator(VideoGenerator):
         self.block_idx: int = 0
 
     @classmethod
-    def from_fastvideo_args(cls, resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> "StreamingVideoGenerator":
+    def _from_resolved_config(cls, resolved_config: ResolvedGeneratorConfig) -> "StreamingVideoGenerator":
         executor_class = Executor.get_class(resolved_config)
         return cls(
             resolved_config=resolved_config,
@@ -148,7 +147,7 @@ class StreamingVideoGenerator(VideoGenerator):
             **shallow_asdict(self.sampling_param),
             eta=0.0,
             n_tokens=n_tokens,
-            VSA_sparsity=resolved_config.VSA_sparsity,
+            VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,
         )
 
         if self._use_queue_mode:

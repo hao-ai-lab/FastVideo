@@ -31,8 +31,9 @@ def image_client(monkeypatch, tmp_path):
     monkeypatch.setattr(image_api, "get_served_model_name", lambda: SERVED_MODEL_NAME)
     monkeypatch.setattr(
         image_api,
-        "get_server_args",
-        lambda: SimpleNamespace(lora_path=None, lora_nickname="default"),
+        "get_resolved_config",
+        lambda: SimpleNamespace(pipeline=SimpleNamespace(
+            components=SimpleNamespace(lora_path=None, lora_nickname="default"))),
     )
     monkeypatch.setattr(image_api, "IMAGE_STORE", AsyncDictStore())
     app = FastAPI()

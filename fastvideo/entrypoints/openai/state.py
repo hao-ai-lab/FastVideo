@@ -1,7 +1,7 @@
 """Global server state shared across API modules.
 
 Keeping state in a dedicated module gives every API module the same
-generator and server args. All modules that need them should import from here.
+generator and resolved config. All modules that need them should import from here.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ DEFAULT_OUTPUT_DIR = "outputs"
 
 _generator: ServingGenerator | None = None
 _serving_engine: OpenAIServingEngine | None = None
-_fastvideo_args: ResolvedGeneratorConfig | None = None
+_resolved_config: ResolvedGeneratorConfig | None = None
 _output_dir: str = DEFAULT_OUTPUT_DIR
 _served_model_name: str | None = None
 _default_request: GenerationRequest | None = None
@@ -35,10 +35,10 @@ def get_serving_engine() -> OpenAIServingEngine:
     return _serving_engine
 
 
-def get_server_args() -> ResolvedGeneratorConfig:
+def get_resolved_config() -> ResolvedGeneratorConfig:
     """Return the resolved runtime config of the served generator (set during startup)."""
-    assert _fastvideo_args is not None, "Server not initialized — args is None"
-    return _fastvideo_args
+    assert _resolved_config is not None, "Server not initialized — resolved config is None"
+    return _resolved_config
 
 
 def get_output_dir() -> str:
@@ -48,10 +48,11 @@ def get_output_dir() -> str:
 
 def get_served_model_name() -> str:
     """Return the public model id advertised by the OpenAI server."""
-    args = get_server_args()
-    if args.lora_path:
-        return args.lora_nickname
-    return _served_model_name or args.model_path
+    resolved_config = get_resolved_config()
+    components = resolved_config.pipeline.components
+    if components.lora_path:
+        return components.lora_nickname
+    return _served_model_name or resolved_config.model_path
 
 
 def get_default_request() -> GenerationRequest | None:
@@ -68,10 +69,10 @@ def set_state(
     served_model_name: str | None = None,
 ) -> None:
     """Set all server state at once (called from lifespan)."""
-    global _generator, _serving_engine, _fastvideo_args, _output_dir, _served_model_name, _default_request
+    global _generator, _serving_engine, _resolved_config, _output_dir, _served_model_name, _default_request
     _generator = generator
     _serving_engine = serving_engine
-    _fastvideo_args = resolved_config
+    _resolved_config = resolved_config
     _output_dir = output_dir
     _served_model_name = served_model_name
     _default_request = default_request
@@ -79,9 +80,9 @@ def set_state(
 
 def clear_state() -> None:
     """Clear server state on shutdown."""
-    global _generator, _serving_engine, _fastvideo_args, _served_model_name, _default_request
+    global _generator, _serving_engine, _resolved_config, _served_model_name, _default_request
     _generator = None
     _serving_engine = None
-    _fastvideo_args = None
+    _resolved_config = None
     _served_model_name = None
     _default_request = None

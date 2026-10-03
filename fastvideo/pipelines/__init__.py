@@ -8,7 +8,6 @@ This package contains diffusion pipelines for generating videos and images.
 from typing import cast
 
 from fastvideo.api.resolution import ResolvedGeneratorConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
@@ -25,7 +24,7 @@ class PipelineWithLoRA(LoRAPipeline, ComposedPipelineBase):
     pass
 
 
-def build_pipeline(resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
+def build_pipeline(resolved_config: ResolvedGeneratorConfig,
                    pipeline_type: PipelineType | str = PipelineType.BASIC) -> PipelineWithLoRA:
     """
     Only works with valid hf diffusers configs. (model_index.json)
@@ -43,8 +42,8 @@ def build_pipeline(resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
     model_info = get_model_info(
         model_path=model_path,
         pipeline_type=pipeline_type,
-        workload_type=resolved_config.workload_type,
-        override_pipeline_cls_name=resolved_config.override_pipeline_cls_name,
+        workload_type=resolved_config.pipeline.workload_type,
+        override_pipeline_cls_name=resolved_config.pipeline.components.override_pipeline_cls_name,
         revision=resolved_config.revision,
     )
     pipeline_cls = model_info.pipeline_cls

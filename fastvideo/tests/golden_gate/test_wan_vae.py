@@ -7,7 +7,7 @@ special first frame and two temporal-cache chunks; no DiT or encoder download.
 
 import torch
 
-from fastvideo.tests.golden_gate._harness import DEFAULT_SEED, distributed_runtime
+from fastvideo.tests.golden_gate._harness import DEFAULT_SEED, distributed_runtime, resolve_with_pipeline_config
 from fastvideo.tests.golden_gate._tensor_golden import assert_tensor_golden, deterministic_forward
 from fastvideo.tests.golden_gate._wan_checkpoint import checkpoint_identity, component_path
 
@@ -16,18 +16,27 @@ __all__ = ["distributed_runtime"]
 
 def vae_outputs(device):
     from fastvideo.configs.pipelines import PipelineConfig
-    from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import VAELoader
     from fastvideo.models.wan.vae_config import WanVAEConfig
     from fastvideo.pipelines.stages.decoding import DecodingStage
 
     path = component_path("vae")
-    args = FastVideoArgs(
-        model_path=str(path),
-        pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision="fp32", vae_decode_precision="bf16"),
-        vae_cpu_offload=False,
+    resolved_config = resolve_with_pipeline_config(
+        {
+            "model_path": str(path),
+            "engine": {
+                "offload": {
+                    "vae": False
+                },
+                "precision": {
+                    "vae": "fp32",
+                    "vae_decode": "bf16"
+                },
+            },
+        },
+        PipelineConfig(vae_config=WanVAEConfig(), vae_precision="fp32", vae_decode_precision="bf16"),
     )
-    vae = VAELoader().load(str(path), args)
+    vae = VAELoader().load(str(path), resolved_config)
     assert vae.use_feature_cache and not vae.use_tiling
     generator = torch.Generator(device="cpu").manual_seed(DEFAULT_SEED)
     video = torch.randn(1, 3, 9, 16, 24, generator=generator).clamp(-1, 1).to(device)
@@ -38,14 +47,14 @@ def vae_outputs(device):
         torch.testing.assert_close(repeated.mean, posterior.mean, atol=0, rtol=0)
         torch.testing.assert_close(repeated.logvar, posterior.logvar, atol=0, rtol=0)
         decoder = DecodingStage(vae)
-        decoded = decoder.decode(latent, args)
+        decoded = decoder.decode(latent, resolved_config)
         cache, chunks = None, []
         for index, chunk in enumerate(latent.split(1, dim=2)):
-            frames, cache = decoder.streaming_decode(chunk, args, cache=cache, is_first_chunk=index == 0)
+            frames, cache = decoder.streaming_decode(chunk, resolved_config, cache=cache, is_first_chunk=index == 0)
             chunks.append(frames)
         streamed = torch.cat(chunks, dim=2)
         torch.testing.assert_close(streamed, decoded, atol=0, rtol=0)
-        torch.testing.assert_close(decoder.decode(latent, args), decoded, atol=0, rtol=0)
+        torch.testing.assert_close(decoder.decode(latent, resolved_config), decoded, atol=0, rtol=0)
     return {"mean": posterior.mean, "logvar": posterior.logvar, "decoded": decoded, "streamed": streamed}, {
         **checkpoint_identity(path),
         "video_shape": list(video.shape),

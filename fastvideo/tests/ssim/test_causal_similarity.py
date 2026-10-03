@@ -76,5 +76,5 @@ def test_causal_similarity(
         default_params_map=MODEL_TO_PARAMS,
         full_quality_params_map=FULL_QUALITY_MODEL_TO_PARAMS,
         min_acceptable_ssim=0.98,
-        init_kwargs_override={"dit_cpu_offload": True},
+        init_kwargs_override={"engine.offload.dit": True},
     )

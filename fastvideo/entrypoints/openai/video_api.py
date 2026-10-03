@@ -34,8 +34,8 @@ from fastvideo.entrypoints.openai.request_adapter import (
 from fastvideo.entrypoints.openai.state import (
     get_default_request,
     get_output_dir,
+    get_resolved_config,
     get_served_model_name,
-    get_server_args,
     get_serving_engine,
 )
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
@@ -90,7 +90,7 @@ def _make_video_job(
     req: VideoGenerationRequest,
     generation_request: GenerationRequest,
 ) -> dict[str, Any]:
-    sampling = request_to_sampling_param(generation_request, model_path=get_server_args().model_path)
+    sampling = request_to_sampling_param(generation_request, model_path=get_resolved_config().model_path)
     size = f"{sampling.width}x{sampling.height}" if sampling.width and sampling.height else None
     seconds = int(round(sampling.num_frames / sampling.fps)) if sampling.fps else int(req.seconds or 4)
     return {
@@ -261,13 +261,13 @@ async def _parse_video_request(raw_request: Request) -> VideoGenerationRequest:
 async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> GenerationRequest:
     try:
         get_serving_engine().validate_video_request(request)
-        validate_model_and_lora(request, get_server_args(), get_served_model_name())
+        validate_model_and_lora(request, get_resolved_config(), get_served_model_name())
         await prepare_reference_media(request_id, request, get_output_dir())
         return await asyncio.to_thread(
             build_generation_request,
             request_id,
             request,
-            get_server_args(),
+            get_resolved_config(),
             served_model_name=get_served_model_name(),
             output_dir=get_output_dir(),
             default_request=get_default_request(),

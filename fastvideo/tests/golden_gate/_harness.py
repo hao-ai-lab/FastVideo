@@ -242,6 +242,23 @@ def _run_block_against_golden(spec: GateSpec) -> None:
     assert_close(out, golden["output"], atol=0.0, rtol=0.0)
 
 
+def resolve_with_pipeline_config(raw: dict[str, Any], pipeline_config: Any) -> Any:
+    """Resolve an inference config mapping with ``pipeline_config`` as the model definition.
+
+    The steps and the materialization are those of ``resolve_inference_config``; ``pipeline_config`` replaces the
+    registry lookup of the model's ``PipelineConfig``, so ``model_path`` can be a single component directory.
+    """
+    from fastvideo.api.inference_resolution import inference_resolution_steps, materialize_pipeline_config
+    from fastvideo.api.parser import parse_config
+    from fastvideo.api.resolution import resolve_generator_config
+    from fastvideo.api.schema import GeneratorConfig
+
+    steps = inference_resolution_steps(parse_config(GeneratorConfig, raw), pipeline_config)
+    return resolve_generator_config(raw,
+                                    steps,
+                                    materialize=lambda resolved: materialize_pipeline_config(resolved, pipeline_config))
+
+
 @pytest.fixture(scope="module")
 def distributed_runtime():
     """Single-process distributed init — required by DistributedAttention."""

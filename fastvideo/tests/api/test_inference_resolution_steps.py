@@ -138,7 +138,7 @@ def test_video_generator_keeps_the_resolved_config(monkeypatch):
     with isolated_environment():
         generator = video_generator.VideoGenerator.from_config({"model_path": WAN_T2V, "engine": {"num_gpus": 2}})
 
-    assert generator.resolved_config.sp_size == 2
+    assert generator.resolved_config.engine.parallelism.sp_size == 2
     provenance = generator.resolved_config.provenance("engine.parallelism.sp_size")
     assert (provenance.value, provenance.source) == (2, "derive_parallel_sizes")
 

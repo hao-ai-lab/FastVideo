@@ -5,7 +5,6 @@ from queue import Queue
 from typing import Any, TypeVar, cast
 
 from fastvideo.api.resolution import ResolvedGeneratorConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import init_logger
 
@@ -18,7 +17,7 @@ class Executor(ABC):
 
     def __init__(
         self,
-        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         *,
         log_queue=None,
     ):
@@ -32,21 +31,20 @@ class Executor(ABC):
         raise NotImplementedError
 
     @staticmethod
-    def get_class(resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> type["Executor"]:
-        if resolved_config.distributed_executor_backend == "mp":
+    def get_class(resolved_config: ResolvedGeneratorConfig) -> type["Executor"]:
+        if resolved_config.engine.execution_backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
-        elif resolved_config.distributed_executor_backend == "ray":
+        elif resolved_config.engine.execution_backend == "ray":
             from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
             return cast(type["Executor"], RayDistributedExecutor)
         else:
-            raise ValueError(
-                f"Unsupported distributed executor backend: {resolved_config.distributed_executor_backend}")
+            raise ValueError(f"Unsupported distributed executor backend: {resolved_config.engine.execution_backend}")
 
     def execute_forward(
         self,
         forward_batch: ForwardBatch,
-        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         outputs: list[dict[str, Any]] = self.collective_rpc("execute_forward",
                                                             kwargs={

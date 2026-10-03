@@ -51,24 +51,34 @@ class FileGenerator:
         pass
 
 
+def _served_config(model_path=MODEL, override_pipeline_cls_name=None):
+    """Stand-in for the served resolved config with the typed paths that the server reads."""
+    return SimpleNamespace(
+        model_path=model_path,
+        pipeline=SimpleNamespace(components=SimpleNamespace(
+            lora_path=None,
+            lora_nickname="default",
+            lora_strength=1.0,
+            override_pipeline_cls_name=override_pipeline_cls_name,
+        )),
+    )
+
+
 @pytest.fixture(params=["cuda", "mlx"])
 def local_server(request, monkeypatch, tmp_path):
     generator = FileGenerator()
     generator.runtime = request.param
     generator.native_calls = []
     generator.thread_ids = []
-    def load(args):
+    def load(resolved_config):
         generator.loads += 1
         return generator
 
     monkeypatch.setattr(
-        "fastvideo.entrypoints.openai.api_server.VideoGenerator.from_fastvideo_args",
+        "fastvideo.entrypoints.openai.api_server.VideoGenerator._from_resolved_config",
         load,
     )
-    args = SimpleNamespace(
-        model_path=MODEL, lora_path=None, lora_nickname="default",
-        lora_strength=1.0, override_pipeline_cls_name=None,
-    )
+    resolved_config = _served_config()
     config = build_serve_config(
         SimpleNamespace(config=str(ROOT / "examples/serving/openai_fasth3.yaml")),
         overrides=["--server.host", "127.0.0.1"],
@@ -76,7 +86,7 @@ def local_server(request, monkeypatch, tmp_path):
     assert config.server.host == "127.0.0.1"
     assert config.generator.model_path == MODEL
     assert config.generator.engine.num_gpus == 4
-    app = create_app(args, str(tmp_path / "server"), config.default_request, config.server.served_model_name)
+    app = create_app(resolved_config, str(tmp_path / "server"), config.default_request, config.server.served_model_name)
     if request.param == "mlx":
         def native_generate(prompt, **kwargs):
             generator.thread_ids.append(threading.get_ident())
@@ -227,8 +237,8 @@ def test_playground_does_not_advertise_implicit_defaults(local_server, monkeypat
 def test_playground_is_limited_to_h3_text_generation(local_server, monkeypatch, model, override):
     _, generator, base_url = local_server
     monkeypatch.setattr(
-        "fastvideo.entrypoints.openai.playground.get_server_args",
-        lambda: SimpleNamespace(model_path=model, override_pipeline_cls_name=override),
+        "fastvideo.entrypoints.openai.playground.get_resolved_config",
+        lambda: _served_config(model, override),
     )
     with pytest.raises(HTTPError) as error:
         urlopen(base_url.removesuffix("/v1") + "/playground/")

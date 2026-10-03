@@ -96,8 +96,8 @@ def test_kandinsky5_t2v_inference_similarity(
             # inference is not used for Kandinsky-5, and the Qwen2.5-VL text
             # encoder stays on CPU between encodes.
             init_kwargs_override={
-                "use_fsdp_inference": False,
-                "text_encoder_cpu_offload": True,
-                "pin_cpu_memory": True,
+                "engine.use_fsdp_inference": False,
+                "engine.offload.text_encoder": True,
+                "engine.offload.pin_cpu_memory": True,
             },
         )

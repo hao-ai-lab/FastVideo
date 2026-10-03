@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from fastvideo.api.compat import explicit_request_updates
-from fastvideo.entrypoints.openai.state import get_default_request, get_served_model_name, get_server_args
+from fastvideo.entrypoints.openai.state import get_default_request, get_resolved_config, get_served_model_name
 from fastvideo.registry import get_preset_selection
 
 ASSETS = Path(__file__).with_name("static")
@@ -23,9 +23,9 @@ HEADERS = {
 
 
 def require_h3() -> None:
-    args = get_server_args()
-    _, family = get_preset_selection(args.model_path)
-    override = getattr(args, "override_pipeline_cls_name", None)
+    resolved_config = get_resolved_config()
+    _, family = get_preset_selection(resolved_config.model_path)
+    override = resolved_config.pipeline.components.override_pipeline_cls_name
     if family != "minimax_h3" or (override and override != "MiniMaxH3ModularPipeline"):
         raise HTTPException(status_code=404, detail="The playground requires an H3 text-to-video/audio server.")
 

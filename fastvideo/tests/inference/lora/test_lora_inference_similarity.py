@@ -7,10 +7,10 @@ import pytest
 
 import fastvideo.envs as envs
 from fastvideo import VideoGenerator
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 from diffusers import DiffusionPipeline
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import build_pipeline
 from fastvideo.models.loader.utils import hf_to_custom_state_dict, get_param_names_mapping
 from torch.testing import assert_close
@@ -101,14 +101,20 @@ def test_merge_lora_weights(model_id):
     lora_nickname = lora_config["lora_nickname"]
     lora_path = lora_config["lora_path"]
     # When layerwise offload is enabled, placeholder tensors cannot be compared directly.
-    args = FastVideoArgs.from_kwargs(
-        model_path=model_id,
-        dit_layerwise_offload=False,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        dit_precision="bf16",
-    )
-    pipe = build_pipeline(args)
+    resolved_config = resolve_inference_config({
+        "model_path": model_id,
+        "engine": {
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": True,
+                "dit_layerwise": False
+            },
+            "precision": {
+                "dit": "bf16"
+            },
+        },
+    })
+    pipe = build_pipeline(resolved_config)
     pipe.set_lora_adapter(lora_nickname, lora_path)
     custom_transformer = pipe.modules["transformer"]
     custom_state_dict = custom_transformer.state_dict()

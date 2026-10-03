@@ -2,7 +2,7 @@
 """Contract tests for the inference-side regional torch.compile port.
 
 The loader applies a per-transformer-block fullgraph compile after the
-transformer loads (``FastVideoArgs.inference_torch_compile``, env
+transformer loads (``engine.compile.regional``, env
 ``FASTVIDEO_INFERENCE_TORCH_COMPILE=1``). These tests pin the two pieces that
 must not drift from the #1718 training-port semantics:
 

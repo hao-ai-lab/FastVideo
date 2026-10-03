@@ -136,7 +136,7 @@ def test_glm_image_similarity(
         min_acceptable_ssim=0.98,
         init_kwargs_override={
             "trust_remote_code": True,
-            "use_fsdp_inference": False,
+            "engine.use_fsdp_inference": False,
         },
         generation_kwargs_override={
             "save_video": True,

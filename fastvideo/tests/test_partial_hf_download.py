@@ -108,14 +108,17 @@ def test_build_pipeline_forwards_real_minimax_patterns(
         return "/tmp/minimax-h3"
 
     monkeypatch.setattr(pipelines, "maybe_download_model", fake_download)
-    args = SimpleNamespace(
+    # Stand-in for the resolved config with the typed paths that build_pipeline reads.
+    resolved_config = SimpleNamespace(
         model_path="MiniMaxAI/MiniMax-H3",
         revision="test-revision",
-        workload_type=None,
-        override_pipeline_cls_name=override_pipeline_cls_name,
+        pipeline=SimpleNamespace(
+            workload_type=None,
+            components=SimpleNamespace(override_pipeline_cls_name=override_pipeline_cls_name),
+        ),
     )
 
-    pipelines.build_pipeline(args)
+    pipelines.build_pipeline(resolved_config)
 
     assert included_transformer in captured["allow_patterns"]
     assert excluded_transformer not in captured["allow_patterns"]
