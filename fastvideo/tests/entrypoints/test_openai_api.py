@@ -1,6 +1,7 @@
 """Unit tests for the OpenAI-compatible API server helpers (no GPU needed)."""
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -110,11 +111,11 @@ class TestMergeImageInputList:
 
 
 # ---------------------------------------------------------------------------
-# image_api._build_generation_kwargs
+# image_api._build_generation_request
 # ---------------------------------------------------------------------------
 
 
-class TestImageBuildGenerationKwargs:
+class TestImageBuildGenerationRequest:
 
     @pytest.fixture(autouse=True)
     def _patch_output_dir(self, tmp_path):
@@ -126,86 +127,100 @@ class TestImageBuildGenerationKwargs:
 
     def _build(self, **overrides):
         from fastvideo.entrypoints.openai.image_api import (
-            _build_generation_kwargs, )
+            _build_generation_request, )
 
         defaults = dict(request_id="req-1", prompt="a cat")
         defaults.update(overrides)
-        return _build_generation_kwargs(**defaults)
+        return _build_generation_request(**defaults)
 
     def test_output_path_under_images_subdir(self, tmp_path):
-        kw = self._build()
-        assert kw["output_path"].startswith(os.path.join(str(tmp_path), "images"))
+        request = self._build()
+        assert request.output.output_path.startswith(os.path.join(str(tmp_path), "images"))
 
     def test_num_frames_always_one(self):
-        kw = self._build()
-        assert kw["num_frames"] == 1
+        request = self._build()
+        assert request.sampling.num_frames == 1
 
     def test_size_parsed(self):
-        kw = self._build(size="640x480")
-        assert kw["width"] == 640
-        assert kw["height"] == 480
+        request = self._build(size="640x480")
+        assert request.sampling.width == 640
+        assert request.sampling.height == 480
 
     def test_seed_forwarded(self):
-        kw = self._build(seed=42)
-        assert kw["seed"] == 42
+        request = self._build(seed=42)
+        assert request.sampling.seed == 42
 
     def test_n_clamped(self):
-        kw = self._build(n=20)
-        assert kw["num_videos_per_prompt"] == 10
+        request = self._build(n=20)
+        assert request.sampling.num_videos_per_prompt == 10
 
     def test_extension_jpg_default(self):
-        kw = self._build()
-        assert kw["output_path"].endswith(".jpg")
+        request = self._build()
+        assert request.output.output_path.endswith(".jpg")
 
     def test_extension_png_for_transparent(self):
-        kw = self._build(background="transparent")
-        assert kw["output_path"].endswith(".png")
+        request = self._build(background="transparent")
+        assert request.output.output_path.endswith(".png")
 
 
 # ---------------------------------------------------------------------------
-# video_api._build_generation_kwargs
+# request_adapter.build_generation_request
 # ---------------------------------------------------------------------------
 
 
-class TestVideoBuildGenerationKwargs:
+def _build_video_request(request_id, req, output_dir, default_request=None) -> GenerationRequest:
+    """Adapt an OpenAI video request the way the video routes do, for a Wan T2V server."""
+    from fastvideo.entrypoints.openai.request_adapter import build_generation_request
+
+    server_args = SimpleNamespace(
+        model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        lora_path=None,
+        lora_nickname="default",
+        lora_strength=1.0,
+        override_pipeline_cls_name=None,
+    )
+    return build_generation_request(
+        request_id,
+        req,
+        server_args,
+        served_model_name="wan",
+        output_dir=output_dir,
+        default_request=default_request,
+    )
+
+
+class TestVideoBuildGenerationRequest:
 
     @pytest.fixture(autouse=True)
-    def _patch_output_dir(self, tmp_path):
-        with patch(
-                "fastvideo.entrypoints.openai.video_api.get_output_dir",
-                return_value=str(tmp_path),
-        ):
-            yield tmp_path
+    def _output_dir(self, tmp_path):
+        self.output_dir = str(tmp_path)
 
     def _build(self, **overrides):
-        from fastvideo.entrypoints.openai.video_api import (
-            _build_generation_kwargs, )
-
         defaults = dict(prompt="a running dog", seconds=4)
         defaults.update(overrides)
         req = VideoGenerationsRequest(**defaults)
-        return _build_generation_kwargs("req-v1", req)
+        return _build_video_request("req-v1", req, self.output_dir)
 
     def test_output_path_under_videos_subdir(self, tmp_path):
-        kw = self._build()
-        assert kw["output_path"].startswith(os.path.join(str(tmp_path), "videos"))
-        assert kw["output_path"].endswith(".mp4")
+        request = self._build()
+        assert request.output.output_path.startswith(os.path.join(str(tmp_path), "videos"))
+        assert request.output.output_path.endswith(".mp4")
 
     def test_fps_defaults_24(self):
-        kw = self._build()
-        assert kw["fps"] == 24
+        request = self._build()
+        assert request.sampling.fps == 24
 
     def test_num_frames_from_seconds(self):
-        kw = self._build(seconds=2, fps=30)
-        assert kw["num_frames"] == 60
+        request = self._build(seconds=2, fps=30)
+        assert request.sampling.num_frames == 60
 
     def test_explicit_num_frames_overrides_seconds(self):
-        kw = self._build(seconds=10, num_frames=5)
-        assert kw["num_frames"] == 5
+        request = self._build(seconds=10, num_frames=5)
+        assert request.sampling.num_frames == 5
 
     def test_seed_forwarded(self):
-        kw = self._build(seed=123)
-        assert kw["seed"] == 123
+        request = self._build(seed=123)
+        assert request.sampling.seed == 123
 
     def test_client_output_path_is_rejected(self, tmp_path):
         with pytest.raises(Exception, match="output_path"):
@@ -213,7 +228,7 @@ class TestVideoBuildGenerationKwargs:
 
 
 # ---------------------------------------------------------------------------
-# video_api._build_generation_kwargs with ServeConfig.default_request
+# request_adapter.build_generation_request with ServeConfig.default_request
 # ---------------------------------------------------------------------------
 
 
@@ -225,104 +240,95 @@ def _make_default_request(raw: dict) -> GenerationRequest:
 class TestVideoDefaultRequestMerge:
 
     @pytest.fixture(autouse=True)
-    def _patch_output_dir(self, tmp_path):
-        with patch(
-                "fastvideo.entrypoints.openai.video_api.get_output_dir",
-                return_value=str(tmp_path),
-        ):
-            yield tmp_path
+    def _output_dir(self, tmp_path):
+        self.output_dir = str(tmp_path)
 
     def _build(self, default_raw=None, **body_overrides):
-        from fastvideo.entrypoints.openai.video_api import (
-            _build_generation_kwargs, )
-
         body_defaults = dict(prompt="a running dog", seconds=4)
         body_defaults.update(body_overrides)
         req = VideoGenerationsRequest(**body_defaults)
         default_request = _make_default_request(default_raw) if default_raw else None
-        return _build_generation_kwargs("req-v1", req, default_request=default_request)
+        return _build_video_request("req-v1", req, self.output_dir, default_request=default_request)
 
     def test_default_seed_flows_through_when_body_omits(self):
-        kw = self._build(default_raw={"sampling": {"seed": 42}})
-        assert kw["seed"] == 42
+        request = self._build(default_raw={"sampling": {"seed": 42}})
+        assert request.sampling.seed == 42
 
     def test_body_seed_overrides_default(self):
-        kw = self._build(
+        request = self._build(
             default_raw={"sampling": {
                 "seed": 42
             }},
             seed=7,
         )
-        assert kw["seed"] == 7
+        assert request.sampling.seed == 7
 
     def test_default_fps_used_for_num_frames_from_seconds(self):
         # Default fps=30, body only provides seconds=2 -> num_frames=60.
-        kw = self._build(default_raw={"sampling": {"fps": 30}}, seconds=2)
-        assert kw["fps"] == 30
-        assert kw["num_frames"] == 60
+        request = self._build(default_raw={"sampling": {"fps": 30}}, seconds=2)
+        assert request.sampling.fps == 30
+        assert request.sampling.num_frames == 60
 
     def test_default_guidance_scale_preserved_when_body_omits(self):
-        kw = self._build(default_raw={"sampling": {"guidance_scale": 5.5}})
-        assert kw["guidance_scale"] == 5.5
+        request = self._build(default_raw={"sampling": {"guidance_scale": 5.5}})
+        assert request.sampling.guidance_scale == 5.5
 
     def test_body_guidance_scale_overrides_default(self):
-        kw = self._build(
+        request = self._build(
             default_raw={"sampling": {
                 "guidance_scale": 5.5
             }},
             guidance_scale=9.0,
         )
-        assert kw["guidance_scale"] == 9.0
+        assert request.sampling.guidance_scale == 9.0
 
     def test_body_size_overrides_default_sampling_dims(self):
-        kw = self._build(
+        request = self._build(
             default_raw={"sampling": {
                 "width": 640,
                 "height": 360
             }},
             size="1024x576",
         )
-        assert kw["width"] == 1024
-        assert kw["height"] == 576
+        assert request.sampling.width == 1024
+        assert request.sampling.height == 576
 
     def test_default_width_height_preserved_when_body_omits_size(self):
-        kw = self._build(default_raw={"sampling": {"width": 640, "height": 360}})
-        assert kw["width"] == 640
-        assert kw["height"] == 360
+        request = self._build(default_raw={"sampling": {"width": 640, "height": 360}})
+        assert request.sampling.width == 640
+        assert request.sampling.height == 360
 
     def test_default_output_path_does_not_escape_server_directory(self, tmp_path):
         custom = str(tmp_path / "from_default")
-        kw = self._build(default_raw={"output": {"output_path": custom}})
-        assert kw["output_path"].startswith(os.path.join(str(tmp_path), "videos"))
+        request = self._build(default_raw={"output": {"output_path": custom}})
+        assert request.output.output_path.startswith(os.path.join(str(tmp_path), "videos"))
 
     def test_body_output_path_is_not_public(self, tmp_path):
         with pytest.raises(Exception, match="output_path"):
             self._build(output_path=str(tmp_path / "body"))
 
     def test_default_negative_prompt_flows_through(self):
-        kw = self._build(default_raw={"negative_prompt": "low quality, blur"})
-        assert kw["negative_prompt"] == "low quality, blur"
+        request = self._build(default_raw={"negative_prompt": "low quality, blur"})
+        assert request.negative_prompt == "low quality, blur"
 
     def test_body_negative_prompt_overrides_default(self):
-        kw = self._build(
+        request = self._build(
             default_raw={"negative_prompt": "low quality"},
             negative_prompt="watermark",
         )
-        assert kw["negative_prompt"] == "watermark"
+        assert request.negative_prompt == "watermark"
 
     def test_no_default_request_behaves_like_before(self):
-        kw = self._build(seed=123, fps=24)
-        assert kw["seed"] == 123
-        assert kw["fps"] == 24
+        request = self._build(seed=123, fps=24)
+        assert request.sampling.seed == 123
+        assert request.sampling.fps == 24
 
     def test_default_request_not_mutated_by_build(self):
         # Merge should operate on a fresh copy (caller supplies a clone);
         # the helper itself must not mutate the passed-in default.
         default_request = _make_default_request({"sampling": {"seed": 42, "fps": 30}})
-        from fastvideo.entrypoints.openai.video_api import (
-            _build_generation_kwargs, )
         req = VideoGenerationsRequest(prompt="p", seconds=1)
-        _ = _build_generation_kwargs("req-1", req, default_request=default_request)
+        _ = _build_video_request("req-1", req, self.output_dir, default_request=default_request)
         assert default_request.sampling.seed == 42
         assert default_request.sampling.fps == 30
 

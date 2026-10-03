@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 
-from fastvideo.api.compat import explicit_request_updates, request_to_sampling_param
+from fastvideo.api.compat import request_to_sampling_param
 from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.protocol import (
     VideoDeleteResponse,
@@ -39,7 +39,7 @@ from fastvideo.entrypoints.openai.state import (
     get_serving_engine,
 )
 from fastvideo.entrypoints.openai.stores import VIDEO_STORE
-from fastvideo.entrypoints.openai.utils import parse_size, save_image_to_path
+from fastvideo.entrypoints.openai.utils import save_image_to_path
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -56,77 +56,6 @@ _JSON_FORM_FIELDS = {
     "extra_params",
 }
 _VIDEO_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}
-
-
-def _build_generation_kwargs(
-    request_id: str,
-    req: VideoGenerationRequest,
-    default_request: GenerationRequest | None = None,
-) -> dict[str, Any]:
-    """Backward-compatible flat projection used by helper-level callers.
-
-    Runtime serving uses :func:`build_generation_request` and the typed
-    ``VideoGenerator.generate`` API. Keeping this helper avoids breaking code
-    that imported the original FastVideo adapter directly.
-    """
-    kwargs: dict[str, Any] = {}
-    if default_request is not None:
-        kwargs.update(explicit_request_updates(default_request))
-
-    body_set = req.model_fields_set
-    nested_set = req.video_params.model_fields_set if req.video_params is not None else set()
-    kwargs["prompt"] = req.prompt
-    if "size" in body_set and req.size:
-        width, height = parse_size(req.size)
-        if width is not None and height is not None:
-            kwargs["width"], kwargs["height"] = width, height
-    else:
-        if "width" in body_set and req.width is not None:
-            kwargs["width"] = req.width
-        elif "video_params" in body_set and "width" in nested_set and req.video_params.width is not None:
-            kwargs["width"] = req.video_params.width
-        if "height" in body_set and req.height is not None:
-            kwargs["height"] = req.height
-        elif "video_params" in body_set and "height" in nested_set and req.video_params.height is not None:
-            kwargs["height"] = req.video_params.height
-
-    if "fps" in body_set and req.fps is not None:
-        kwargs["fps"] = req.fps
-    elif "video_params" in body_set and "fps" in nested_set and req.video_params.fps is not None:
-        kwargs["fps"] = req.video_params.fps
-    kwargs.setdefault("fps", 24)
-
-    if "num_frames" in body_set and req.num_frames is not None:
-        kwargs["num_frames"] = req.num_frames
-    elif "video_params" in body_set and "num_frames" in nested_set and req.video_params.num_frames is not None:
-        kwargs["num_frames"] = req.video_params.num_frames
-    elif "seconds" in body_set and req.seconds is not None:
-        kwargs["num_frames"] = int(req.seconds) * int(kwargs["fps"])
-
-    for name in (
-            "seed",
-            "num_inference_steps",
-            "guidance_scale",
-            "guidance_scale_2",
-            "true_cfg_scale",
-            "negative_prompt",
-            "enable_teacache",
-            "max_sequence_length",
-            "boundary_ratio",
-    ):
-        if name in body_set and getattr(req, name) is not None:
-            kwargs[name] = getattr(req, name)
-    if "n" in body_set or "num_outputs_per_prompt" in body_set:
-        kwargs["num_videos_per_prompt"] = req.resolved_num_outputs
-    if "input_reference" in body_set and req.input_reference is not None:
-        kwargs["image_path"] = req.input_reference
-
-    kwargs.pop("output_path", None)
-    output_dir = os.path.join(os.path.abspath(get_output_dir()), "videos")
-    os.makedirs(output_dir, exist_ok=True)
-    kwargs["output_path"] = os.path.join(output_dir, f"{request_id}.mp4")
-    kwargs["save_video"] = True
-    return kwargs
 
 
 def _result_value(result: Any, name: str, default: Any = None) -> Any:
@@ -474,7 +403,6 @@ async def download_video_content(video_id: str = Path(...), variant: str | None 
 
 
 __all__ = [
-    "_build_generation_kwargs",
     "create_video",
     "create_video_sync",
     "delete_video",

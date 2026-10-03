@@ -421,8 +421,8 @@ class ServeConfig:
         body (client-explicit) > default_request (operator-explicit)
                                > hardcoded fallback (e.g. ``fps=24``)
 
-    See :func:`fastvideo.api.compat.explicit_request_updates` for the
-    projection and ``entrypoints/openai/video_api.py::_build_generation_kwargs``
+    See :func:`fastvideo.api.compat.explicit_request_raw` for the
+    projection and ``entrypoints/openai/request_adapter.py::build_generation_request``
     for the merge.
     """
     generator: GeneratorConfig

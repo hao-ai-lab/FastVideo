@@ -10,6 +10,8 @@ import aiofiles
 from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, UploadFile)
 from fastapi.responses import FileResponse
 
+from fastvideo.api.compat import normalize_generation_request
+from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.protocol import (
     ImageGenerationsRequest,
     ImageResponse,
@@ -59,7 +61,7 @@ def _validate_request_model(model: str | None) -> None:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
-def _build_generation_kwargs(
+def _build_generation_request(
     request_id: str,
     prompt: str,
     n: int = 1,
@@ -73,42 +75,43 @@ def _build_generation_kwargs(
     true_cfg_scale: float | None = None,
     negative_prompt: str | None = None,
     enable_teacache: bool | None = None,
-) -> dict:
-    """Convert API request params to VideoGenerator.generate_video kwargs"""
-    kwargs: dict = {"prompt": prompt}
+) -> GenerationRequest:
+    """Convert OpenAI image request params into the typed request that VideoGenerator.generate consumes."""
+    sampling: dict = {}
+    raw: dict = {"prompt": prompt, "sampling": sampling}
 
     if size:
         w, h = parse_size(size)
         if w is not None and h is not None:
-            kwargs["width"] = w
-            kwargs["height"] = h
+            sampling["width"] = w
+            sampling["height"] = h
 
     ext = choose_image_ext(output_format, background)
     output_dir = os.path.join(get_output_dir(), "images")
     os.makedirs(output_dir, exist_ok=True)
-    kwargs["output_path"] = os.path.join(output_dir, f"{request_id}.{ext}")
+    raw["output"] = {"output_path": os.path.join(output_dir, f"{request_id}.{ext}")}
 
     # Image generation
-    kwargs["num_frames"] = 1
-    kwargs["save_video"] = True
-    kwargs["num_videos_per_prompt"] = max(1, min(n, 10))
+    sampling["num_frames"] = 1
+    raw["output"]["save_video"] = True
+    sampling["num_videos_per_prompt"] = max(1, min(n, 10))
 
     if seed is not None:
-        kwargs["seed"] = seed
+        sampling["seed"] = seed
     if num_inference_steps is not None:
-        kwargs["num_inference_steps"] = num_inference_steps
+        sampling["num_inference_steps"] = num_inference_steps
     if guidance_scale is not None:
-        kwargs["guidance_scale"] = guidance_scale
+        sampling["guidance_scale"] = guidance_scale
     if true_cfg_scale is not None:
-        kwargs["true_cfg_scale"] = true_cfg_scale
+        sampling["true_cfg_scale"] = true_cfg_scale
     if negative_prompt is not None:
-        kwargs["negative_prompt"] = negative_prompt
+        raw["negative_prompt"] = negative_prompt
     if enable_teacache:
-        kwargs["enable_teacache"] = True
+        raw["runtime"] = {"enable_teacache": True}
     if image_path:
-        kwargs["image_path"] = image_path[0] if len(image_path) == 1 else image_path
+        raw["inputs"] = {"image_path": image_path[0] if len(image_path) == 1 else image_path}
 
-    return kwargs
+    return normalize_generation_request(raw)
 
 
 @router.post("/generations", response_model=ImageResponse)
@@ -120,7 +123,7 @@ async def generations(request: ImageGenerationsRequest):
     request_id = generate_request_id()
     engine = get_serving_engine()
 
-    gen_kwargs = _build_generation_kwargs(
+    generation_request = _build_generation_request(
         request_id=request_id,
         prompt=request.prompt,
         n=request.n or 1,
@@ -137,13 +140,13 @@ async def generations(request: ImageGenerationsRequest):
 
     start = time.perf_counter()
     try:
-        await engine.run_serialized(engine.generator.generate_video, **gen_kwargs)
+        await engine.run_serialized(engine.generator.generate, generation_request)
     except Exception as e:
         logger.error("Image generation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from None
     elapsed = time.perf_counter() - start
 
-    save_file_path = gen_kwargs["output_path"]
+    save_file_path = generation_request.output.output_path
 
     if resp_format == "b64_json":
         if not os.path.exists(save_file_path):
@@ -222,7 +225,7 @@ async def edits(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process image: {e}") from None
 
-    gen_kwargs = _build_generation_kwargs(
+    generation_request = _build_generation_request(
         request_id=request_id,
         prompt=prompt,
         n=n or 1,
@@ -240,13 +243,13 @@ async def edits(
 
     start = time.perf_counter()
     try:
-        await engine.run_serialized(engine.generator.generate_video, **gen_kwargs)
+        await engine.run_serialized(engine.generator.generate, generation_request)
     except Exception as e:
         logger.error("Image edit failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from None
     elapsed = time.perf_counter() - start
 
-    save_file_path = gen_kwargs["output_path"]
+    save_file_path = generation_request.output.output_path
 
     if resp_format == "b64_json":
         async with aiofiles.open(save_file_path, "rb") as f:

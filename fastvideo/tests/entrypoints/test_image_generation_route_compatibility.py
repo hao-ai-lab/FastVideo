@@ -24,13 +24,13 @@ from fastvideo.entrypoints.openai.stores import AsyncDictStore
 ])
 def test_image_generation_routes(path, response_format, monkeypatch, tmp_path):
     image_bytes = b"test-image-content"
-    generate = Mock(side_effect=lambda **kwargs: Path(kwargs["output_path"]).write_bytes(image_bytes))
+    generate = Mock(side_effect=lambda request: Path(request.output.output_path).write_bytes(image_bytes))
 
-    async def run_serialized(fn, **kwargs):
-        return fn(**kwargs)
+    async def run_serialized(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
 
     engine = SimpleNamespace(
-        generator=SimpleNamespace(generate_video=generate),
+        generator=SimpleNamespace(generate=generate),
         run_serialized=AsyncMock(side_effect=run_serialized),
     )
     monkeypatch.setattr(image_api, "get_serving_engine", lambda: engine)
@@ -53,6 +53,6 @@ def test_image_generation_routes(path, response_format, monkeypatch, tmp_path):
             assert content.content == image_bytes
 
     generate.assert_called_once()
-    assert generate.call_args.kwargs["prompt"] == "a cat"
-    assert generate.call_args.kwargs["num_frames"] == 1
+    assert generate.call_args.args[0].prompt == "a cat"
+    assert generate.call_args.args[0].sampling.num_frames == 1
     engine.run_serialized.assert_awaited_once()

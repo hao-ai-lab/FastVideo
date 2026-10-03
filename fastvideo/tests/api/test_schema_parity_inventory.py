@@ -15,11 +15,12 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
-from fastvideo.entrypoints.openai import image_api, video_api
+from fastvideo.entrypoints.openai import image_api
 from fastvideo.entrypoints.openai.protocol import (
     ImageGenerationsRequest,
     VideoGenerationsRequest,
 )
+from fastvideo.entrypoints.openai.request_adapter import build_generation_request
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.utils import FlexibleArgumentParser
 
@@ -279,13 +280,13 @@ def test_openai_size_mapping_preserves_width_height_ordering(
     inventory = _load_inventory()
 
     monkeypatch.setattr(image_api, "get_output_dir", lambda: str(tmp_path))
-    image_kwargs = image_api._build_generation_kwargs(
+    image_request = image_api._build_generation_request(
         request_id="img-test",
         prompt="test",
         size="640x360",
     )
-    assert image_kwargs["width"] == 640
-    assert image_kwargs["height"] == 360
+    assert image_request.sampling.width == 640
+    assert image_request.sampling.height == 360
 
     image_size = inventory["surfaces"]["openai_image_request"]["moved"]["size"]
     video_size = inventory["surfaces"]["openai_video_request"]["moved"]["size"]
@@ -293,17 +294,20 @@ def test_openai_size_mapping_preserves_width_height_ordering(
     assert video_size["target"] == "request.sampling.width,height"
 
 
-def test_openai_seconds_mapping_preserves_duration_semantics(
-    monkeypatch,
-    tmp_path,
-) -> None:
+def test_openai_seconds_mapping_preserves_duration_semantics(tmp_path) -> None:
     inventory = _load_inventory()
 
-    monkeypatch.setattr(video_api, "get_output_dir", lambda: str(tmp_path))
     request = VideoGenerationsRequest(prompt="test", seconds=4, fps=24)
-    kwargs = video_api._build_generation_kwargs("vid-test", request)
-    assert kwargs["fps"] == 24
-    assert kwargs["num_frames"] == 96
+    server_args = types.SimpleNamespace(model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+                                        lora_path=None,
+                                        lora_nickname="default")
+    generation_request = build_generation_request("vid-test",
+                                                  request,
+                                                  server_args,
+                                                  served_model_name="wan",
+                                                  output_dir=str(tmp_path))
+    assert generation_request.sampling.fps == 24
+    assert generation_request.sampling.num_frames == 96
 
     seconds_entry = inventory["surfaces"]["openai_video_request"]["compatibility_only"]["seconds"]
     assert seconds_entry["target"] == "request.sampling.num_frames"

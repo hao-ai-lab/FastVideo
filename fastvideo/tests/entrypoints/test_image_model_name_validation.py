@@ -17,13 +17,13 @@ SERVED_MODEL_NAME = "my-image-model"
 
 @pytest.fixture
 def image_client(monkeypatch, tmp_path):
-    generate = Mock(side_effect=lambda **kwargs: Path(kwargs["output_path"]).write_bytes(b"test-image-content"))
+    generate = Mock(side_effect=lambda request: Path(request.output.output_path).write_bytes(b"test-image-content"))
 
-    async def run_serialized(fn, **kwargs):
-        return fn(**kwargs)
+    async def run_serialized(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
 
     engine = SimpleNamespace(
-        generator=SimpleNamespace(generate_video=generate),
+        generator=SimpleNamespace(generate=generate),
         run_serialized=AsyncMock(side_effect=run_serialized),
     )
     monkeypatch.setattr(image_api, "get_serving_engine", lambda: engine)
@@ -50,7 +50,7 @@ def test_mismatched_model_does_not_generate(image_client, path, tmp_path):
     assert response.json()["detail"] == (
         "Model mismatch: request specifies 'other-model'; this server provides my-image-model.")
     engine.run_serialized.assert_not_awaited()
-    engine.generator.generate_video.assert_not_called()
+    engine.generator.generate.assert_not_called()
     assert not (tmp_path / "images").exists()
 
 
@@ -66,7 +66,7 @@ def test_edits_mismatched_model_does_not_generate(image_client, tmp_path):
     assert response.json()["detail"] == (
         "Model mismatch: request specifies 'other-model'; this server provides my-image-model.")
     engine.run_serialized.assert_not_awaited()
-    engine.generator.generate_video.assert_not_called()
+    engine.generator.generate.assert_not_called()
     assert not (tmp_path / "uploads").exists()
 
 
@@ -82,7 +82,7 @@ def test_omitted_or_matching_model_still_generates(image_client, path, model):
 
     assert response.status_code == 200, response.text
     engine.run_serialized.assert_awaited_once()
-    engine.generator.generate_video.assert_called_once()
+    engine.generator.generate.assert_called_once()
 
 
 @pytest.mark.parametrize("model", [None, SERVED_MODEL_NAME])
@@ -100,4 +100,4 @@ def test_edits_omitted_or_matching_model_still_generates(image_client, model):
 
     assert response.status_code == 200, response.text
     engine.run_serialized.assert_awaited_once()
-    engine.generator.generate_video.assert_called_once()
+    engine.generator.generate.assert_called_once()

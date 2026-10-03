@@ -16,13 +16,13 @@ from fastvideo.entrypoints.openai.stores import AsyncDictStore
 
 @pytest.fixture
 def image_client(monkeypatch, tmp_path):
-    generate = Mock(side_effect=lambda **kwargs: Path(kwargs["output_path"]).write_bytes(b"test-image-content"))
+    generate = Mock(side_effect=lambda request: Path(request.output.output_path).write_bytes(b"test-image-content"))
 
-    async def run_serialized(fn, **kwargs):
-        return fn(**kwargs)
+    async def run_serialized(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
 
     engine = SimpleNamespace(
-        generator=SimpleNamespace(generate_video=generate),
+        generator=SimpleNamespace(generate=generate),
         run_serialized=AsyncMock(side_effect=run_serialized),
     )
     monkeypatch.setattr(image_api, "get_serving_engine", lambda: engine)
@@ -42,7 +42,7 @@ def test_invalid_response_format_does_not_generate(image_client, response_format
     assert response.status_code == 400
     assert response.json()["detail"] == "response_format=invalid is not supported"
     engine.run_serialized.assert_not_awaited()
-    engine.generator.generate_video.assert_not_called()
+    engine.generator.generate.assert_not_called()
     assert not (tmp_path / "images").exists()
 
 
@@ -57,7 +57,7 @@ def test_edits_invalid_response_format_does_not_generate(image_client, tmp_path)
     assert response.status_code == 400
     assert response.json()["detail"] == "response_format=invalid is not supported"
     engine.run_serialized.assert_not_awaited()
-    engine.generator.generate_video.assert_not_called()
+    engine.generator.generate.assert_not_called()
     assert not (tmp_path / "uploads").exists()
 
 
@@ -84,7 +84,7 @@ def test_supported_response_formats_still_generate(image_client, payload, expect
     else:
         assert base64.b64decode(body["data"][0]["b64_json"]) == b"test-image-content"
     engine.run_serialized.assert_awaited_once()
-    engine.generator.generate_video.assert_called_once()
+    engine.generator.generate.assert_called_once()
 
 
 def test_edits_supported_response_format_still_generates(image_client):
@@ -98,4 +98,4 @@ def test_edits_supported_response_format_still_generates(image_client):
     assert response.status_code == 200, response.text
     assert base64.b64decode(response.json()["data"][0]["b64_json"]) == b"test-image-content"
     engine.run_serialized.assert_awaited_once()
-    engine.generator.generate_video.assert_called_once()
+    engine.generator.generate.assert_called_once()
