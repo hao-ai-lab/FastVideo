@@ -12,16 +12,7 @@ export RANK=0
 export WORLD_SIZE=1
 
 python fastvideo/pipelines/preprocess/v1_preprocess.py \
+    --config examples/training/finetune/MatrixGame2.0/preprocess_matrixgame_data_i2v.yaml \
     --model_path $MODEL_PATH \
-    --data_merge_path $DATA_MERGE_PATH \
-    --preprocess_video_batch_size 4 \
-    --seed 42 \
-    --max_height 352 \
-    --max_width 640 \
-    --num_frames 77 \
-    --dataloader_num_workers 0 \
-    --output_dir=$OUTPUT_DIR \
-    --samples_per_file 4 \
-    --train_fps 25 \
-    --flush_frequency 4 \
-    --preprocess_task matrixgame2
+    --preprocess.data_merge_path $DATA_MERGE_PATH \
+    --preprocess.dataset_output_dir=$OUTPUT_DIR

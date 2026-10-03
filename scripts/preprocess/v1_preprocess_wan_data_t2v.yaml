@@ -1,0 +1,19 @@
+# Read by v1_preprocess_wan_data_t2v.sh, which passes model_path, preprocess.data_merge_path, and
+# preprocess.dataset_output_dir.
+# Offload settings of the per-task preprocessing pipelines (v1_preprocess.py).
+engine:
+  offload:
+    dit_layerwise: true
+    image_encoder: true
+    pin_cpu_memory: true
+preprocess:
+  preprocess_video_batch_size: 1
+  max_height: 480
+  max_width: 832
+  num_frames: 81
+  dataloader_num_workers: 0
+  train_fps: 16
+  samples_per_file: 1
+  flush_frequency: 1
+  video_length_tolerance_range: 5
+  preprocess_task: t2v

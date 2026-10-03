@@ -1,11 +1,10 @@
-import argparse
 import os
 import warnings
-from typing import Any
+from collections.abc import Sequence
 
-from fastvideo import PipelineConfig
-from fastvideo.distributed import (get_world_size, maybe_init_distributed_environment_and_model_parallel)
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
+from fastvideo.api.training_schema import PreprocessRunConfig, load_resolved_run_config
+from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (PreprocessPipeline_I2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (PreprocessPipeline_ODE_Trajectory)
@@ -19,127 +18,65 @@ from fastvideo.utils import maybe_download_model
 logger = init_logger(__name__)
 
 
-def main(args) -> None:
-    args.model_path = maybe_download_model(args.model_path)
+def resolve_preprocess_task_config(argv: Sequence[str] | None = None) -> ResolvedGeneratorConfig:
+    """Load the ``PreprocessRunConfig`` of ``--config <yaml>`` plus dotted overrides for one preprocess task.
+
+    ``argv`` defaults to ``sys.argv[1:]``. Every task except ``text_only`` encodes video, so its VAE runs in fp32.
+    """
+    resolved_config = load_resolved_run_config(PreprocessRunConfig, argv)
+    if resolved_config.preprocess.preprocess_task != "text_only" and resolved_config.engine.precision.vae != "fp32":
+        resolved_config = resolved_config.with_override("v1_preprocess.video_task_vae_precision",
+                                                        {"engine.precision.vae": "fp32"})
+    return resolved_config
+
+
+def main(resolved_config: ResolvedGeneratorConfig) -> None:
+    """Download the model and run the pipeline of ``preprocess.preprocess_task`` on one GPU.
+
+    The local checkpoint directory becomes ``model_path`` and ``preprocess.model_path``, which the pipelines and the
+    dataset tokenizer read.
+    """
+    model_path = maybe_download_model(resolved_config.model_path)
+    resolved_config = resolved_config.with_override("v1_preprocess.main", {
+        "model_path": model_path,
+        "preprocess.model_path": model_path,
+    })
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     num_gpus = int(os.environ["WORLD_SIZE"])
     assert num_gpus == 1, "Only support 1 GPU"
 
-    pipeline_config = PipelineConfig.from_pretrained(args.model_path)
-
-    kwargs: dict[str, Any] = ({
-        "text_encoder_cpu_offload": False
-    } if args.preprocess_task == "text_only" else {
-        "vae_precision": "fp32"
-    })
-    pipeline_config.update_config_from_dict(kwargs)
-
-    if args.preprocess_task != "text_only":
-        # Set VAE encoder/decoder flags on the existing config (don't
-        # replace with WanVAEConfig — that breaks non-Wan models).
-        pipeline_config.vae_config.load_encoder = True
-        pipeline_config.vae_config.load_decoder = True
-
-    resolved_config = FastVideoArgs(
-        model_path=args.model_path,
-        num_gpus=get_world_size(),
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-        pipeline_config=pipeline_config,
-    )
-    if args.preprocess_task == "t2v":
+    preprocess_task = resolved_config.preprocess.preprocess_task
+    if preprocess_task == "t2v":
         PreprocessPipeline = PreprocessPipeline_T2V
-    elif args.preprocess_task == "i2v":
+    elif preprocess_task == "i2v":
         PreprocessPipeline = PreprocessPipeline_I2V
-    elif args.preprocess_task == "text_only":
+    elif preprocess_task == "text_only":
         PreprocessPipeline = PreprocessPipeline_Text
-    elif args.preprocess_task == "ode_trajectory":
-        assert args.flow_shift is not None, "flow_shift is required for ode_trajectory"
-        resolved_config.pipeline_config.flow_shift = args.flow_shift
+    elif preprocess_task == "ode_trajectory":
+        assert resolved_config.is_explicit("pipeline.flow_shift"), "pipeline.flow_shift is required for ode_trajectory"
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
-    elif args.preprocess_task in ("matrixgame2", "matrixgame"):
-        if args.preprocess_task == "matrixgame":
-            warnings.warn("--preprocess_task=matrixgame is deprecated; use matrixgame2",
+    elif preprocess_task in ("matrixgame2", "matrixgame"):
+        if preprocess_task == "matrixgame":
+            warnings.warn("preprocess.preprocess_task=matrixgame is deprecated; use matrixgame2",
                           DeprecationWarning,
                           stacklevel=2)
         PreprocessPipeline = PreprocessPipeline_MatrixGame2
-    elif args.preprocess_task in ("matrixgame2_ode_trajectory", "matrixgame_ode_trajectory"):
-        if args.preprocess_task == "matrixgame_ode_trajectory":
-            warnings.warn("--preprocess_task=matrixgame_ode_trajectory is deprecated; use matrixgame2_ode_trajectory",
-                          DeprecationWarning,
-                          stacklevel=2)
+    elif preprocess_task in ("matrixgame2_ode_trajectory", "matrixgame_ode_trajectory"):
+        if preprocess_task == "matrixgame_ode_trajectory":
+            warnings.warn(
+                "preprocess.preprocess_task=matrixgame_ode_trajectory is deprecated; use matrixgame2_ode_trajectory",
+                DeprecationWarning,
+                stacklevel=2)
         PreprocessPipeline = PreprocessPipeline_MatrixGame2_ODE_Trajectory
     else:
-        raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
+        raise ValueError(f"Invalid preprocess task: {preprocess_task}. "
                          f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame2, matrixgame2_ode_trajectory")
 
-    logger.info("Preprocess task: %s using %s", args.preprocess_task, PreprocessPipeline.__name__)
+    logger.info("Preprocess task: %s using %s", preprocess_task, PreprocessPipeline.__name__)
 
-    pipeline = PreprocessPipeline(args.model_path, resolved_config)
-    pipeline.forward(batch=None, resolved_config=resolved_config, args=args)
+    pipeline = PreprocessPipeline(model_path, resolved_config)
+    pipeline.forward(batch=None, resolved_config=pipeline.resolved_config)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    # dataset & dataloader
-    parser.add_argument("--model_path", type=str, default="data/mochi")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--data_merge_path", type=str, required=True)
-    parser.add_argument("--num_frames", type=int, default=163)
-    parser.add_argument(
-        "--dataloader_num_workers",
-        type=int,
-        default=1,
-        help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
-    )
-    parser.add_argument(
-        "--preprocess_video_batch_size",
-        type=int,
-        default=2,
-        help="Batch size (per device) for the training dataloader.",
-    )
-    parser.add_argument("--samples_per_file", type=int, default=64)
-    parser.add_argument("--flush_frequency", type=int, default=256, help="how often to save to parquet files")
-    parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
-    parser.add_argument("--max_height", type=int, default=480)
-    parser.add_argument("--max_width", type=int, default=848)
-    parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
-    parser.add_argument("--group_frame", action="store_true")  # TODO
-    parser.add_argument("--group_resolution", action="store_true")  # TODO
-    parser.add_argument("--flow_shift", type=float, default=None)
-    parser.add_argument(
-        "--preprocess_task",
-        type=str,
-        default="t2v",
-        choices=[
-            "t2v",
-            "i2v",
-            "text_only",
-            "ode_trajectory",
-            "matrixgame2",
-            "matrixgame2_ode_trajectory",
-            # Deprecated legacy values (warn on use):
-            "matrixgame",
-            "matrixgame_ode_trajectory",
-        ],
-        help="Type of preprocessing task to run")
-    parser.add_argument("--train_fps", type=int, default=30)
-    parser.add_argument("--use_image_num", type=int, default=0)
-    parser.add_argument("--text_max_length", type=int, default=256)
-    parser.add_argument("--speed_factor", type=float, default=1.0)
-    parser.add_argument("--drop_short_ratio", type=float, default=1.0)
-    parser.add_argument("--do_temporal_sample", default=False, action="store_true")
-    # text encoder & vae & diffusion model
-    parser.add_argument("--text_encoder_name", type=str, default="google/t5-v1_1-xxl")
-    parser.add_argument("--cache_dir", type=str, default="./cache_dir")
-    parser.add_argument("--training_cfg_rate", type=float, default=0.0)
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default=None,
-        help="The output directory where the model predictions and checkpoints will be written.",
-    )
-
-    args = parser.parse_args()
-    main(args)
+    main(resolve_preprocess_task_config())

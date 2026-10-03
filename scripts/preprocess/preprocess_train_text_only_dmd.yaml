@@ -1,0 +1,18 @@
+# Read by preprocess_train_text_only_dmd.sh, which passes model_path, preprocess.data_merge_path,
+# preprocess.preprocess_video_batch_size, preprocess.dataset_output_dir, preprocess.samples_per_file,
+# preprocess.flush_frequency, and preprocess.text_max_length.
+# Offload settings of the per-task preprocessing pipelines (v1_preprocess.py).
+engine:
+  offload:
+    dit_layerwise: true
+    image_encoder: true
+    pin_cpu_memory: true
+preprocess:
+  seed: 42
+  max_height: 448
+  max_width: 832
+  num_frames: 77
+  dataloader_num_workers: 0
+  train_fps: 16
+  video_length_tolerance_range: 5
+  preprocess_task: text_only

@@ -32,17 +32,7 @@ OUTPUT_DIR="data/cosmos2_5_processed_t2w/"
 torchrun --nproc_per_node=$GPU_NUM \
     --master_port=29514 \
     fastvideo/pipelines/preprocess/v1_preprocess.py \
+    --config examples/training/finetune/cosmos2_5/preprocess_cosmos2_5_t2w.yaml \
     --model_path $MODEL_PATH \
-    --data_merge_path $DATA_MERGE_PATH \
-    --preprocess_video_batch_size 1 \
-    --seed 42 \
-    --max_height 704 \
-    --max_width 1280 \
-    --num_frames 77 \
-    --dataloader_num_workers 0 \
-    --output_dir $OUTPUT_DIR \
-    --train_fps 24 \
-    --samples_per_file 4 \
-    --flush_frequency 4 \
-    --video_length_tolerance_range 5 \
-    --preprocess_task "t2v"
+    --preprocess.data_merge_path $DATA_MERGE_PATH \
+    --preprocess.dataset_output_dir $OUTPUT_DIR

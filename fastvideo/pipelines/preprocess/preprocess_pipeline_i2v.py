@@ -11,9 +11,9 @@ import numpy as np
 import torch
 from PIL import Image
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
 from fastvideo.pipelines.stages import ImageEncodingStage, TextEncodingStage
@@ -24,7 +24,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "image_encoder", "image_processor"]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
                            text_encoders=[self.get_module("text_encoder")],
@@ -42,7 +42,8 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         """Return the PyArrow schema for I2V pipeline."""
         return pyarrow_schema_i2v
 
-    def get_extra_features(self, valid_data: dict[str, Any], resolved_config: FastVideoArgs) -> dict[str, Any]:
+    def get_extra_features(self, valid_data: dict[str, Any],
+                           resolved_config: ResolvedGeneratorConfig) -> dict[str, Any]:
 
         # TODO(will): move these to cpu at some point
         self.get_module("vae").to(get_local_torch_device())

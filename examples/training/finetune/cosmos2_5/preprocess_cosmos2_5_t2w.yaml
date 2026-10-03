@@ -1,0 +1,20 @@
+# Read by preprocess_cosmos2_5_t2w.sh, which passes model_path, preprocess.data_merge_path, and
+# preprocess.dataset_output_dir.
+# Offload settings of the per-task preprocessing pipelines (v1_preprocess.py).
+engine:
+  offload:
+    dit_layerwise: true
+    image_encoder: true
+    pin_cpu_memory: true
+preprocess:
+  preprocess_video_batch_size: 1
+  seed: 42
+  max_height: 704
+  max_width: 1280
+  num_frames: 77
+  dataloader_num_workers: 0
+  train_fps: 24
+  samples_per_file: 4
+  flush_frequency: 4
+  video_length_tolerance_range: 5
+  preprocess_task: t2v

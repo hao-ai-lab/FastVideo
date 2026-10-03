@@ -1,0 +1,14 @@
+# Read by preprocess_mixkit_data.sh, which passes model_path, preprocess.dataset_path, and
+# preprocess.dataset_output_dir.
+mode: preprocess
+pipeline:
+  workload_type: t2v
+preprocess:
+  video_loader_type: torchvision
+  dataset_type: merged
+  preprocess_video_batch_size: 1
+  max_height: 480
+  max_width: 832
+  num_frames: 77
+  train_fps: 16
+  samples_per_file: 8

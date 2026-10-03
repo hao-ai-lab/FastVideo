@@ -91,10 +91,9 @@ def load_video(path: str, num_frames: int, target_fps: float, height: int,
 def main() -> None:
     _init_single_process_distributed()
 
-    from fastvideo.fastvideo_args import FastVideoArgs
+    from fastvideo.api.inference_resolution import resolve_inference_config
     from fastvideo.models.loader.component_loader import (
         PipelineComponentLoader, )
-    from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 
     data_dir = envs.FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR.get()
     caption_json = envs.FASTVIDEO_TEST_LTX2_OVERFIT_CAPTION_JSON.get()
@@ -119,17 +118,22 @@ def main() -> None:
     with open(os.path.join(data_dir, caption_json)) as f:
         caption_data = json.load(f)
 
-    pipeline_config = LTX2T2VConfig()
-    resolved_config = FastVideoArgs(
-        model_path=model_path,
-        pipeline_config=pipeline_config,
-        num_gpus=1,
-        tp_size=1,
-        sp_size=1,
-        hsdp_shard_dim=1,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-    )
+    resolved_config = resolve_inference_config({
+        "model_path": model_path,
+        "engine": {
+            "num_gpus": 1,
+            "parallelism": {
+                "tp_size": 1,
+                "sp_size": 1,
+                "hsdp_shard_dim": 1,
+            },
+            "offload": {
+                "vae": False,
+                "text_encoder": False,
+            },
+        },
+    })
+    pipeline_config = resolved_config.pipeline_config
 
     def load_component(name: str) -> Any:
         transformers_or_diffusers, _ = model_index[name]

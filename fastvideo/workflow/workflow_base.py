@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from fastvideo.fastvideo_args import ExecutionMode, FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
+from fastvideo.api.schema import ExecutionMode
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, build_pipeline
 from fastvideo.pipelines.pipeline_registry import PipelineType
@@ -37,20 +38,20 @@ class WorkflowBase(ABC):
     the overall processing flow.
     """
 
-    def __init__(self, resolved_config: FastVideoArgs):
+    def __init__(self, resolved_config: ResolvedGeneratorConfig):
         """
         Initialize the workflow with configuration arguments.
         
         Args:
-            fastvideo_args: Configuration object containing all parameters
+            resolved_config: Resolved configuration containing all parameters
                           needed for workflow and pipeline setup.
         """
         self.resolved_config = resolved_config
 
         # TODO: pipeline_config should be: dict[str, PipelineConfig]
         # pipeline_type should be included in the PipelineConfig
-        # pipeline_config[pipeline_name] = (pipeline_type, fastvideo_args)
-        self._pipeline_configs: dict[str, tuple[PipelineType, FastVideoArgs]] = {}
+        # pipeline_config[pipeline_name] = (pipeline_type, resolved_config)
+        self._pipeline_configs: dict[str, tuple[PipelineType, ResolvedGeneratorConfig]] = {}
         self._pipelines: dict[str, ComposedPipelineBase] = {}
         self._components: dict[str, Any] = {}
         self.register_pipelines()
@@ -73,7 +74,8 @@ class WorkflowBase(ABC):
             self._pipelines[pipeline_name] = pipeline
             setattr(self, pipeline_name, pipeline)
 
-    def add_pipeline_config(self, pipeline_name: str, pipeline_config: tuple[PipelineType, FastVideoArgs]) -> None:
+    def add_pipeline_config(self, pipeline_name: str, pipeline_config: tuple[PipelineType,
+                                                                             ResolvedGeneratorConfig]) -> None:
         """
         Register a pipeline configuration for later instantiation.
         
@@ -156,7 +158,7 @@ class WorkflowBase(ABC):
         pass
 
     @classmethod
-    def get_workflow_cls(cls, resolved_config: FastVideoArgs) -> Optional["WorkflowBase"]:
+    def get_workflow_cls(cls, resolved_config: ResolvedGeneratorConfig) -> Optional["WorkflowBase"]:
         """
         Factory method to get the appropriate workflow class based on execution mode.
         
@@ -165,7 +167,7 @@ class WorkflowBase(ABC):
         in the configuration arguments.
         
         Args:
-            fastvideo_args: Configuration object containing the execution mode
+            resolved_config: Resolved configuration containing the execution mode
                           and other parameters.
             
         Returns:

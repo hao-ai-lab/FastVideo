@@ -8,17 +8,7 @@ OUTPUT_DIR="data/crush-smol_processed_i2v/"
 
 torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/pipelines/preprocess/v1_preprocess.py \
+    --config examples/training/finetune/wan_i2v_14B_480p/crush_smol/preprocess_wan_data_i2v.yaml \
     --model_path $MODEL_PATH \
-    --data_merge_path $DATA_MERGE_PATH \
-    --preprocess_video_batch_size 8 \
-    --seed 42 \
-    --max_height 480 \
-    --max_width 832 \
-    --num_frames 77 \
-    --dataloader_num_workers 0 \
-    --output_dir=$OUTPUT_DIR \
-    --train_fps 16 \
-    --samples_per_file 8 \
-    --flush_frequency 8 \
-    --video_length_tolerance_range 5 \
-    --preprocess_task "i2v" 
+    --preprocess.data_merge_path $DATA_MERGE_PATH \
+    --preprocess.dataset_output_dir=$OUTPUT_DIR

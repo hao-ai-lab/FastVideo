@@ -8,17 +8,7 @@ OUTPUT_DIR="data/crush-smol_processed_ti2v/"
 
 torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/pipelines/preprocess/v1_preprocess.py \
+    --config examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/preprocess_wan_data_ti2v_5b.yaml \
     --model_path $MODEL_PATH \
-    --data_merge_path $DATA_MERGE_PATH \
-    --preprocess_video_batch_size 8 \
-    --seed 42 \
-    --max_height 704 \
-    --max_width 1280 \
-    --num_frames 121 \
-    --dataloader_num_workers 0 \
-    --output_dir=$OUTPUT_DIR \
-    --train_fps 24 \
-    --samples_per_file 8 \
-    --flush_frequency 8 \
-    --video_length_tolerance_range 5 \
-    --preprocess_task "t2v" 
+    --preprocess.data_merge_path $DATA_MERGE_PATH \
+    --preprocess.dataset_output_dir=$OUTPUT_DIR

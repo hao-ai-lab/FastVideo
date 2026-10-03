@@ -9,11 +9,11 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.dataset import getdataset
 from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
 from fastvideo.dataset.preprocessing_datasets import PreprocessBatch
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -25,7 +25,7 @@ logger = init_logger(__name__)
 class BasePreprocessPipeline(ComposedPipelineBase):
     """Base class for preprocessing pipelines that handles common functionality."""
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
@@ -37,8 +37,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
-        args,
+        resolved_config: ResolvedGeneratorConfig,
     ):
         if not self.post_init_called:
             self.post_init()
@@ -46,9 +45,10 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
-        self.preprocess_video_and_text(resolved_config, args)
+        self.preprocess_video_and_text(resolved_config)
 
-    def get_extra_features(self, valid_data: dict[str, Any], resolved_config: FastVideoArgs) -> dict[str, Any]:
+    def get_extra_features(self, valid_data: dict[str, Any],
+                           resolved_config: ResolvedGeneratorConfig) -> dict[str, Any]:
         """Get additional features specific to the pipeline type. Override in subclasses."""
         return {}
 
@@ -232,10 +232,13 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             record.update(extra_features)
         return record
 
-    def preprocess_video_and_text(self, resolved_config: FastVideoArgs, args):
-        os.makedirs(args.output_dir, exist_ok=True)
+    def preprocess_video_and_text(self, resolved_config: ResolvedGeneratorConfig):
+        """Encode every video and caption of ``preprocess.data_merge_path`` into parquet files under
+        ``preprocess.dataset_output_dir``."""
+        preprocess_config = resolved_config.preprocess
+        os.makedirs(preprocess_config.dataset_output_dir, exist_ok=True)
         # Create directory for combined data
-        combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
+        combined_parquet_dir = os.path.join(preprocess_config.dataset_output_dir, "combined_parquet_dataset")
         os.makedirs(combined_parquet_dir, exist_ok=True)
         local_rank = int(os.getenv("RANK", 0))
 
@@ -248,12 +251,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     start_idx += table.num_rows
 
         # Loading dataset
-        train_dataset = getdataset(args)
+        train_dataset = getdataset(preprocess_config)
 
         train_dataloader = DataLoader(
             train_dataset,
-            batch_size=args.preprocess_video_batch_size,
-            num_workers=args.dataloader_num_workers,
+            batch_size=preprocess_config.preprocess_video_batch_size,
+            num_workers=preprocess_config.dataloader_num_workers,
         )
 
         num_processed_samples = 0
@@ -370,12 +373,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 if not hasattr(self, 'dataset_writer'):
                     self.dataset_writer = ParquetDatasetWriter(
                         out_dir=combined_parquet_dir,
-                        samples_per_file=args.samples_per_file,
+                        samples_per_file=preprocess_config.samples_per_file,
                     )
                 self.dataset_writer.append_table(table)
                 logger.info("Collected batch with %s samples", len(table))
 
-            if num_processed_samples >= args.flush_frequency:
+            if num_processed_samples >= preprocess_config.flush_frequency:
                 written = self.dataset_writer.flush()
                 logger.info("Flushed %s samples to parquet", written)
                 num_processed_samples = 0

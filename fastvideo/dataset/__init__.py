@@ -9,14 +9,17 @@ from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255, Te
 from fastvideo.dataset.validation_dataset import ValidationDataset
 
 
-def getdataset(args) -> VideoCaptionMergedDataset:
-    temporal_sample = TemporalRandomCrop(args.num_frames) if args.do_temporal_sample else None  # 16 x
+def getdataset(preprocess_config) -> VideoCaptionMergedDataset:
+    """Build the video-caption dataset of ``preprocess_config``, the ``preprocess`` section of a resolved
+    ``PreprocessRunConfig``."""
+    temporal_sample = (TemporalRandomCrop(preprocess_config.num_frames)
+                       if preprocess_config.do_temporal_sample else None)  # 16 x
     norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
     resize_topcrop = [
-        CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True),
+        CenterCropResizeVideo((preprocess_config.max_height, preprocess_config.max_width), top_crop=True),
     ]
     resize = [
-        CenterCropResizeVideo((args.max_height, args.max_width)),
+        CenterCropResizeVideo((preprocess_config.max_height, preprocess_config.max_width)),
     ]
     transform = transforms.Compose([
         # Normalize255(),
@@ -27,16 +30,18 @@ def getdataset(args) -> VideoCaptionMergedDataset:
         *resize_topcrop,
         norm_fun,
     ])
-    return VideoCaptionMergedDataset(data_merge_path=args.data_merge_path,
-                                     args=args,
+    return VideoCaptionMergedDataset(data_merge_path=preprocess_config.data_merge_path,
+                                     preprocess_config=preprocess_config,
                                      transform=transform,
                                      temporal_sample=temporal_sample,
                                      transform_topcrop=transform_topcrop,
-                                     seed=args.seed)
+                                     seed=preprocess_config.seed)
 
 
-def gettextdataset(args) -> TextDataset:
-    return TextDataset(data_merge_path=args.data_merge_path, args=args, seed=args.seed)
+def gettextdataset(preprocess_config) -> TextDataset:
+    return TextDataset(data_merge_path=preprocess_config.data_merge_path,
+                       preprocess_config=preprocess_config,
+                       seed=preprocess_config.seed)
 
 
 __all__ = [

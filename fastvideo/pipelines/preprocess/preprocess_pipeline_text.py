@@ -15,11 +15,11 @@ from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.dataset import gettextdataset
 from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
 from fastvideo.dataset.dataloader.record_schema import text_only_record_creator
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_text_only
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (BasePreprocessPipeline)
@@ -41,7 +41,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
         """Return the PyArrow schema for text-only pipeline."""
         return pyarrow_schema_text_only
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
@@ -49,8 +49,9 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
-    def preprocess_text_only(self, resolved_config: FastVideoArgs, args):
+    def preprocess_text_only(self, resolved_config: ResolvedGeneratorConfig):
         """Preprocess text-only data."""
+        preprocess_config = resolved_config.preprocess
 
         for batch_idx, data in enumerate(self.pbar):
             if data is None:
@@ -118,13 +119,13 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                     if not hasattr(self, 'dataset_writer'):
                         self.dataset_writer = ParquetDatasetWriter(
                             out_dir=self.combined_parquet_dir,
-                            samples_per_file=args.samples_per_file,
+                            samples_per_file=preprocess_config.samples_per_file,
                         )
                     self.dataset_writer.append_table(table)
 
                     logger.info("Collected batch with %s samples", len(table))
 
-                if self.num_processed_samples >= args.flush_frequency:
+                if self.num_processed_samples >= preprocess_config.flush_frequency:
                     written = self.dataset_writer.flush()
                     logger.info("Flushed %s samples to parquet", written)
                     self.num_processed_samples = 0
@@ -137,23 +138,26 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
 
     # Text-only record creation moved to fastvideo.dataset.dataloader.record_schema
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs, args):
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig):
+        """Encode every prompt of ``preprocess.data_merge_path`` into parquet files under
+        ``preprocess.dataset_output_dir``."""
         if not self.post_init_called:
             self.post_init()
 
+        preprocess_config = resolved_config.preprocess
         self.local_rank = int(os.getenv("RANK", 0))
-        os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(preprocess_config.dataset_output_dir, exist_ok=True)
         # Create directory for combined data
-        self.combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
+        self.combined_parquet_dir = os.path.join(preprocess_config.dataset_output_dir, "combined_parquet_dataset")
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
         # Loading text dataset
-        train_dataset = gettextdataset(args)
+        train_dataset = gettextdataset(preprocess_config)
 
         self.preprocess_dataloader = DataLoader(
             train_dataset,
-            batch_size=args.preprocess_video_batch_size,
-            num_workers=args.dataloader_num_workers,
+            batch_size=preprocess_config.preprocess_video_batch_size,
+            num_workers=preprocess_config.dataloader_num_workers,
         )
 
         self.preprocess_loader_iter = iter(self.preprocess_dataloader)
@@ -168,7 +172,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
         # Initialize class variables for data sharing
         self.text_data: dict[str, Any] = {}  # Store text metadata and paths
 
-        self.preprocess_text_only(resolved_config, args)
+        self.preprocess_text_only(resolved_config)
 
 
 EntryClass = PreprocessPipeline_Text

@@ -66,20 +66,10 @@ for i in {1..8}; do
     # Run the text-only preprocessing command in background
     CUDA_VISIBLE_DEVICES=$gpu taskset -c ${start_cpu}-${end_cpu} torchrun --nnodes=1 --nproc_per_node=$GPU_NUM --master_port $port \
         fastvideo/pipelines/preprocess/v1_preprocess.py \
+        --config scripts/preprocess/syn_text.yaml \
         --model_path $MODEL_BASE \
-        --data_merge_path $DATA_MERGE_PATH \
-        --preprocess_video_batch_size 2 \
-        --seed 42 \
-        --max_height 480 \
-        --max_width 832 \
-        --num_frames 77 \
-        --dataloader_num_workers 0 \
-        --output_dir=$OUTPUT_DIR \
-        --train_fps 16 \
-        --samples_per_file 8 \
-        --flush_frequency 8 \
-        --video_length_tolerance_range 5 \
-        --preprocess_task "text_only" &
+        --preprocess.data_merge_path $DATA_MERGE_PATH \
+        --preprocess.dataset_output_dir=$OUTPUT_DIR &
 done
 
 # Wait for all jobs on this node to complete

@@ -1,0 +1,19 @@
+# Read by preprocess_matrixgame_data_i2v.sh, which passes model_path, preprocess.data_merge_path, and
+# preprocess.dataset_output_dir.
+# Offload settings of the per-task preprocessing pipelines (v1_preprocess.py).
+engine:
+  offload:
+    dit_layerwise: true
+    image_encoder: true
+    pin_cpu_memory: true
+preprocess:
+  preprocess_video_batch_size: 4
+  seed: 42
+  max_height: 352
+  max_width: 640
+  num_frames: 77
+  dataloader_num_workers: 0
+  samples_per_file: 4
+  train_fps: 25
+  flush_frequency: 4
+  preprocess_task: matrixgame2

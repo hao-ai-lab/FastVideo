@@ -114,8 +114,8 @@ class PreprocessWorkflowLTX2T2V(PreprocessWorkflow):
         return output_dir
 
     def register_components(self) -> None:
-        assert self.resolved_config.preprocess_config is not None
-        preprocess_cfg = self.resolved_config.preprocess_config
+        """Register the data validator, training dataloader, batch builder, and precomputed-tensor saver."""
+        preprocess_cfg = self.resolved_config.preprocess
 
         raw_data_validator = PreprocessingDataValidator(
             max_height=preprocess_cfg.max_height,
@@ -145,8 +145,7 @@ class PreprocessWorkflowLTX2T2V(PreprocessWorkflow):
         self.add_component("precomputed_saver", precomputed_saver)
 
     def prepare_system_environment(self) -> None:
-        assert self.resolved_config.preprocess_config is not None
-        preprocess_cfg = self.resolved_config.preprocess_config
+        preprocess_cfg = self.resolved_config.preprocess
         output_root = self._resolve_precomputed_output_dir(preprocess_cfg)
         output_root.mkdir(parents=True, exist_ok=True)
         self.precomputed_output_dir = output_root
@@ -156,7 +155,7 @@ class PreprocessWorkflowLTX2T2V(PreprocessWorkflow):
         total_samples = 0
         for batch in tqdm(self.training_dataloader, desc="Preprocessing LTX-2 training dataset", unit="batch"):
             forward_batch: PreprocessBatch = self.video_forward_batch_builder(batch)
-            forward_batch = self.preprocess_pipeline.forward(forward_batch, self.resolved_config)
+            forward_batch = self.preprocess_pipeline.forward(forward_batch, self.preprocess_pipeline.resolved_config)
             self.precomputed_saver.save_batch(forward_batch)
             total_samples += len(forward_batch.video_file_name)
         logger.info(

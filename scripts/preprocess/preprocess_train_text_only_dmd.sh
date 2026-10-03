@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Build a text-only Parquet dataset from a one-prompt-per-line file. The script
 # shards prompts across GPU_NUM single-GPU torchrun workers, runs
-# v1_preprocess.py with --preprocess_task text_only, and writes prompt
+# v1_preprocess.py with preprocess.preprocess_task text_only (set in
+# preprocess_train_text_only_dmd.yaml), and writes prompt
 # embeddings/captions under OUTPUT_DIR for DMD2/DiffusionNFT text-only runs.
 
 INPUT_FILE="${1:-train.txt}"
@@ -112,21 +113,14 @@ run_preprocess_worker() {
         --nproc_per_node=1
         --master_port "$master_port"
         fastvideo/pipelines/preprocess/v1_preprocess.py
+        --config scripts/preprocess/preprocess_train_text_only_dmd.yaml
         --model_path "$MODEL_PATH"
-        --data_merge_path "$shard_file"
-        --preprocess_video_batch_size "$BATCH_SIZE"
-        --seed 42
-        --max_height 448
-        --max_width 832
-        --num_frames 77
-        --dataloader_num_workers 0
-        --output_dir "$shard_output"
-        --train_fps 16
-        --samples_per_file "$SAMPLES_PER_FILE"
-        --flush_frequency "$FLUSH_FREQUENCY"
-        --text_max_length "$TEXT_MAX_LENGTH"
-        --video_length_tolerance_range 5
-        --preprocess_task text_only
+        --preprocess.data_merge_path "$shard_file"
+        --preprocess.preprocess_video_batch_size "$BATCH_SIZE"
+        --preprocess.dataset_output_dir "$shard_output"
+        --preprocess.samples_per_file "$SAMPLES_PER_FILE"
+        --preprocess.flush_frequency "$FLUSH_FREQUENCY"
+        --preprocess.text_max_length "$TEXT_MAX_LENGTH"
     )
 
     {

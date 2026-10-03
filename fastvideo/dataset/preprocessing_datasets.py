@@ -386,7 +386,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
 
     def __init__(self,
                  data_merge_path: str,
-                 args,
+                 preprocess_config,
                  transform,
                  temporal_sample,
                  transform_topcrop,
@@ -394,40 +394,40 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
                  seed: int = 42):
         self.data_merge_path = data_merge_path
         self.start_idx = start_idx
-        self.args = args
         self.temporal_sample = temporal_sample
         self.seed = seed
 
         # Initialize tokenizer
-        tokenizer_path = os.path.join(args.model_path, "tokenizer")
+        tokenizer_path = os.path.join(preprocess_config.model_path, "tokenizer")
         tokenizer = None
         if os.path.exists(tokenizer_path):
             try:
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, cache_dir=args.cache_dir)
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, cache_dir=preprocess_config.cache_dir)
             except (ValueError, OSError):
                 pass
 
         # Initialize processing stages
-        self._init_stages(args, transform, transform_topcrop, tokenizer)
+        self._init_stages(preprocess_config, transform, transform_topcrop, tokenizer)
 
         # Process metadata
         self.processed_batches = self._process_metadata()
 
-    def _init_stages(self, args, transform, transform_topcrop, tokenizer) -> None:
+    def _init_stages(self, preprocess_config, transform, transform_topcrop, tokenizer) -> None:
         """Initialize all processing stages."""
         self.validation_stage = DataValidationStage()
-        self.frame_sampling_stage = FrameSamplingStage(num_frames=args.num_frames,
-                                                       train_fps=args.train_fps,
-                                                       speed_factor=args.speed_factor,
-                                                       video_length_tolerance_range=args.video_length_tolerance_range,
-                                                       drop_short_ratio=args.drop_short_ratio,
-                                                       seed=self.seed)
+        self.frame_sampling_stage = FrameSamplingStage(
+            num_frames=preprocess_config.num_frames,
+            train_fps=preprocess_config.train_fps,
+            speed_factor=preprocess_config.speed_factor,
+            video_length_tolerance_range=preprocess_config.video_length_tolerance_range,
+            drop_short_ratio=preprocess_config.drop_short_ratio,
+            seed=self.seed)
         self.video_transform_stage = VideoTransformStage(transform)
         self.image_transform_stage = ImageTransformStage(transform, transform_topcrop)
         if tokenizer is not None:
             self.text_encoding_stage = TextEncodingStage(tokenizer=tokenizer,
-                                                         text_max_length=args.text_max_length,
-                                                         cfg_rate=args.training_cfg_rate,
+                                                         text_max_length=preprocess_config.text_max_length,
+                                                         cfg_rate=preprocess_config.training_cfg_rate,
                                                          seed=self.seed)
         else:
             self.text_encoding_stage = None
@@ -565,20 +565,19 @@ class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint
     This dataset processes text data through text encoding stages only.
     """
 
-    def __init__(self, data_merge_path: str, args, start_idx: int = 0, seed: int = 42):
+    def __init__(self, data_merge_path: str, preprocess_config, start_idx: int = 0, seed: int = 42):
         self.data_merge_path = data_merge_path
         self.start_idx = start_idx
-        self.args = args
         self.seed = seed
 
         # Initialize tokenizer
-        tokenizer_path = os.path.join(args.model_path, "tokenizer")
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, cache_dir=args.cache_dir)
+        tokenizer_path = os.path.join(preprocess_config.model_path, "tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, cache_dir=preprocess_config.cache_dir)
 
         # Initialize text encoding stage
         self.text_encoding_stage = TextEncodingStage(tokenizer=tokenizer,
-                                                     text_max_length=args.text_max_length,
-                                                     cfg_rate=getattr(args, 'training_cfg_rate', 0.0),
+                                                     text_max_length=preprocess_config.text_max_length,
+                                                     cfg_rate=preprocess_config.training_cfg_rate,
                                                      seed=self.seed)
 
         # Process text data

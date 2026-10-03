@@ -42,16 +42,15 @@ import torch
 from transformers import AutoTokenizer
 
 import fastvideo.envs as envs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.pipelines.base import preprocess_text
 from fastvideo.configs.pipelines.kandinsky5 import (
-    Kandinsky5T2VConfig,
     kandinsky5_clip_postprocess_text,
     kandinsky5_qwen_postprocess_text,
     kandinsky5_qwen_preprocess_text,
 )
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.loader.component_loader import TextEncoderLoader, VAELoader
 from fastvideo.utils import maybe_download_model
@@ -162,21 +161,27 @@ def main() -> None:
                          f"{{'path', 'cap'}} entries, got: {type(caption_data).__name__} "
                          f"with {len(caption_data) if isinstance(caption_data, list) else 'n/a'} entries")
 
-    pipeline_config = Kandinsky5T2VConfig()
     # Kandinsky5T2VConfig.__post_init__ sets load_encoder=False by default --
     # T2V inference only ever decodes generated latents, never encodes real
     # video. Preprocessing needs the encoder to turn real clips into latents.
-    pipeline_config.vae_config.load_encoder = True
-    resolved_config = FastVideoArgs(
-        model_path=model_path,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        use_fsdp_inference=False,
-        text_encoder_cpu_offload=False,
-        vae_cpu_offload=False,
-        pipeline_config=pipeline_config,
-    )
-    resolved_config.device = device
+    resolved_config = resolve_inference_config({
+        "model_path": model_path,
+        "engine": {
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "text_encoder": False,
+                "vae": False,
+            },
+            "use_fsdp_inference": False,
+        },
+        "pipeline": {
+            "vae": {
+                "load_encoder": True
+            }
+        },
+    })
+    pipeline_config = resolved_config.pipeline_config
 
     # --- Load VAE (shared with HunyuanVideo) ---
     print("Loading Kandinsky5 VAE...")

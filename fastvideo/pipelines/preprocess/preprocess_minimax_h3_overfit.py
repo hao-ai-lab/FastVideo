@@ -20,9 +20,9 @@ import pyarrow.parquet as pq
 import torch
 
 import fastvideo.envs as envs
-from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.api.inference_resolution import resolve_inference_config
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2va
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.pipelines.basic.minimax_h3.packing import MINIMAX_H3_FPS
@@ -120,7 +120,7 @@ def _load_component(
     name: str,
     model_path: Path,
     model_index: dict[str, Any],
-    resolved_config: FastVideoArgs,
+    resolved_config: ResolvedGeneratorConfig,
 ) -> Any:
     """Load one checkpoint component through the inference component registry.
 
@@ -142,7 +142,7 @@ def encode_video_latents(
     frames: np.ndarray,
     model_path: Path,
     model_index: dict[str, Any],
-    resolved_config: FastVideoArgs,
+    resolved_config: ResolvedGeneratorConfig,
 ) -> torch.Tensor:
     """Encode normalized ``[24, T, H, W]`` causal video VAE targets.
 
@@ -173,7 +173,7 @@ def encode_audio_latents(
     waveform: torch.Tensor,
     model_path: Path,
     model_index: dict[str, Any],
-    resolved_config: FastVideoArgs,
+    resolved_config: ResolvedGeneratorConfig,
 ) -> torch.Tensor:
     """Encode normalized ``[2, 32, T]`` stereo targets with the mono audio VAE.
 
@@ -198,7 +198,7 @@ def encode_text_embedding(
     caption: str,
     model_path: Path,
     model_index: dict[str, Any],
-    resolved_config: FastVideoArgs,
+    resolved_config: ResolvedGeneratorConfig,
 ) -> torch.Tensor:
     """Encode the caption through the H3 Qwen3-VL layer-50 inference path.
 
@@ -329,18 +329,22 @@ def main() -> None:
         DATA_DIR / "videos",
     )
     frames, waveform = load_training_media(video_path)
-    pipeline_config = MiniMaxH3PipelineConfig()
-    resolved_config = FastVideoArgs(
-        model_path=str(resolved_model_path),
-        pipeline_config=pipeline_config,
-        num_gpus=1,
-        tp_size=1,
-        sp_size=1,
-        hsdp_shard_dim=1,
-        use_fsdp_inference=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-    )
+    resolved_config = resolve_inference_config({
+        "model_path": str(resolved_model_path),
+        "engine": {
+            "num_gpus": 1,
+            "parallelism": {
+                "tp_size": 1,
+                "sp_size": 1,
+                "hsdp_shard_dim": 1,
+            },
+            "offload": {
+                "vae": False,
+                "text_encoder": False,
+            },
+            "use_fsdp_inference": False,
+        },
+    })
     video_latents = encode_video_latents(frames, resolved_model_path, model_index, resolved_config)
     audio_latents = encode_audio_latents(waveform, resolved_model_path, model_index, resolved_config)
     text_embedding = encode_text_embedding(caption, resolved_model_path, model_index, resolved_config)

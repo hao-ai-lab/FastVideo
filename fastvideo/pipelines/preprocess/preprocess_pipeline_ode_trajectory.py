@@ -18,12 +18,12 @@ from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset import gettextdataset
 from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter, records_to_table)
 from fastvideo.dataset.dataloader.record_schema import (ode_text_only_record_creator)
 from fastvideo.dataset.dataloader.schema import (pyarrow_schema_ode_trajectory_text_only)
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -48,10 +48,10 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         """Return the PyArrow schema for ODE Trajectory pipeline."""
         return pyarrow_schema_ode_trajectory_text_only
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up pipeline stages with proper dependency injection."""
-        assert resolved_config.pipeline_config.flow_shift == 5
-        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(shift=resolved_config.pipeline_config.flow_shift,
+        assert resolved_config.pipeline.flow_shift == 5
+        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(shift=resolved_config.pipeline.flow_shift,
                                                                   sigma_min=0.0,
                                                                   extra_one_step=True)
         self.modules["scheduler"].set_timesteps(num_inference_steps=48, denoising_strength=1.0)
@@ -75,8 +75,9 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                        ))
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
-    def preprocess_text_and_trajectory(self, resolved_config: FastVideoArgs, args):
+    def preprocess_text_and_trajectory(self, resolved_config: ResolvedGeneratorConfig):
         """Preprocess text-only data and generate trajectory information."""
+        preprocess_config = resolved_config.preprocess
 
         for batch_idx, data in enumerate(self.pbar):
             if data is None:
@@ -118,7 +119,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 prompt_attention_masks = prompt_masks_list[0]
                 assert prompt_embeds.shape[0] == prompt_attention_masks.shape[0]
 
-                sampling_params = SamplingParam.from_pretrained(args.model_path)
+                sampling_params = SamplingParam.from_pretrained(resolved_config.model_path)
 
                 # encode negative prompt for trajectory collection
                 if sampling_params.guidance_scale > 1 and sampling_params.negative_prompt is not None:
@@ -154,9 +155,9 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     # Enabling this will save the decoded trajectory videos.
                     # Used for debugging.
                     batch.return_trajectory_decoded = False
-                    batch.height = args.max_height
-                    batch.width = args.max_width
-                    batch.fps = args.train_fps
+                    batch.height = preprocess_config.max_height
+                    batch.width = preprocess_config.max_width
+                    batch.fps = preprocess_config.train_fps
                     batch.guidance_scale = 6.0
                     batch.do_classifier_free_guidance = True
 
@@ -181,7 +182,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         for j, decoded_frame in enumerate(decoded_frames):
                             save_decoded_latents_as_video(decoded_frame,
                                                           f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",
-                                                          args.train_fps)
+                                                          preprocess_config.train_fps)
 
                 # Prepare batch data for Parquet dataset
                 batch_data: list[dict[str, Any]] = []
@@ -227,13 +228,13 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     if not hasattr(self, 'dataset_writer'):
                         self.dataset_writer = ParquetDatasetWriter(
                             out_dir=self.combined_parquet_dir,
-                            samples_per_file=args.samples_per_file,
+                            samples_per_file=preprocess_config.samples_per_file,
                         )
                     self.dataset_writer.append_table(table)
 
                     logger.info("Collected batch with %s samples", len(table))
 
-                if self.num_processed_samples >= args.flush_frequency:
+                if self.num_processed_samples >= preprocess_config.flush_frequency:
                     written = self.dataset_writer.flush()
                     logger.info("Flushed %s samples to parquet", written)
                     self.num_processed_samples = 0
@@ -244,23 +245,26 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
             if written:
                 logger.info("Final flush wrote %s samples", written)
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs, args):
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig):
+        """Record the denoising trajectory of every prompt of ``preprocess.data_merge_path`` into parquet files under
+        ``preprocess.dataset_output_dir``."""
         if not self.post_init_called:
             self.post_init()
 
+        preprocess_config = resolved_config.preprocess
         self.local_rank = int(os.getenv("RANK", 0))
-        os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(preprocess_config.dataset_output_dir, exist_ok=True)
         # Create directory for combined data
-        self.combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
+        self.combined_parquet_dir = os.path.join(preprocess_config.dataset_output_dir, "combined_parquet_dataset")
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
         # Loading dataset
-        train_dataset = gettextdataset(args)
+        train_dataset = gettextdataset(preprocess_config)
 
         self.preprocess_dataloader = DataLoader(
             train_dataset,
-            batch_size=args.preprocess_video_batch_size,
-            num_workers=args.dataloader_num_workers,
+            batch_size=preprocess_config.preprocess_video_batch_size,
+            num_workers=preprocess_config.dataloader_num_workers,
         )
 
         self.preprocess_loader_iter = iter(self.preprocess_dataloader)
@@ -275,7 +279,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
-        self.preprocess_text_and_trajectory(resolved_config, args)
+        self.preprocess_text_and_trajectory(resolved_config)
 
 
 EntryClass = PreprocessPipeline_ODE_Trajectory

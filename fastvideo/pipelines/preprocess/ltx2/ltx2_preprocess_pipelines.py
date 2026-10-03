@@ -27,8 +27,8 @@ import torch
 import torchaudio
 from safetensors.torch import load_file as safetensors_load_file
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.audio.ltx2_audio_processing import AudioProcessor
 from fastvideo.models.audio.ltx2_audio_vae import LTX2AudioEncoder
@@ -62,7 +62,7 @@ class LTX2TextPrecomputeStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
         assert isinstance(batch.prompt, list)
@@ -128,7 +128,7 @@ class LTX2AudioEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
         assert isinstance(batch.video_loader, list)
@@ -172,7 +172,7 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         tokenizer = self.get_module("tokenizer")
         if tokenizer is not None:
             tokenizer.padding_side = "left"
@@ -218,10 +218,9 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
         ).to(next(target_module.parameters()).device)
         return target_module, audio_processor
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
-        assert resolved_config.preprocess_config is not None
-
-        preprocess_cfg = resolved_config.preprocess_config
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
+        """Add the text, video, optional audio, and VAE encoding stages that ``preprocess`` configures."""
+        preprocess_cfg = resolved_config.preprocess
         self.add_stage(
             stage_name="text_transform_stage",
             stage=TextTransformStage(

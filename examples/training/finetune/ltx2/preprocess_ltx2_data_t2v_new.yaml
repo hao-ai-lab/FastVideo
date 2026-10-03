@@ -1,0 +1,15 @@
+# Read by preprocess_ltx2_data_t2v_new.sh, which passes model_path, preprocess.dataset_path,
+# preprocess.dataset_output_dir, and preprocess.with_audio.
+mode: preprocess
+pipeline:
+  workload_type: t2v
+preprocess:
+  video_loader_type: torchvision
+  dataset_type: merged
+  preprocess_video_batch_size: 1
+  dataloader_num_workers: 0
+  max_height: 1088
+  max_width: 1920
+  num_frames: 121
+  train_fps: 24
+  video_length_tolerance_range: 5
