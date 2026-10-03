@@ -206,3 +206,53 @@ shared FP8 projections and sequential component restoration.
 At `9a8465ac4`, CPU-offloaded VAEs also remain on the host during denoising;
 the encode/decode stages move them on demand. This frees room for resident
 DiT blocks without changing any model arithmetic.
+
+## Six resident blocks and encoder priorities
+
+At `6d3c4cda5`, the opt-in BF16 fine kernel with six resident DiT blocks,
+cached components and the settings below measured **111.27 s** median for
+832×480, 243 frames. Timed requests were 111.61/110.92 s after one warmup.
+Conditioning, denoise and video decode medians were 11.20/67.56/25.49 s.
+Peak GPU allocation was 21.63 GiB, host anonymous memory 42.10 GiB and
+total cgroup usage 90.94 GiB, including file cache.
+
+```bash
+FASTVIDEO_SOURCE_COMMIT=6d3c4cda5 \
+FASTVIDEO_H3_PARK_MODULES=vae,audio_vae \
+FASTVIDEO_H3_FFN_CHUNK_TOKENS=16384 \
+FASTVIDEO_H3_VSA_TILE_FIRST=1 FASTVIDEO_H3_VSA_SM89_KERNEL=bf16 \
+FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=6 MAX_JOBS=4 \
+python -P /workspace/fastvideo/scripts/benchmarks/minimax_h3_4090/bench_pod.py \
+  sm89-bf16-480p-resident6 /workspace/vol/pruned_fp8_300 fp8 \
+  --offload-buffers --no-vae-compile \
+  --height 480 --width 832 --frames 243 --timed 2
+```
+
+The BF16 kernel changes floating-point reductions: the ceramics clip is
+visually coherent in the sampled contact sheet but is not identical to the
+original-kernel clip (decoded-video SSIM 0.597653). This is a speed candidate,
+not proof of quality equivalence. The original kernel remains the default.
+
+At `26390848b`, per-key-tile V scaling reduced experimental INT8-QK/FP8-PV
+real-tensor error to 0.84–1.54%, with 1.77× fine-kernel speedup. Dynamic
+per-query, per-key-block P scaling also preserves contributions that would
+underflow with the fixed P scale; it measured 0.80–1.52% error and 1.71×
+speedup. All 30 focused CUDA kernel/routing tests passed. These FP8-PV routes
+remain microbenchmark-only and need clip validation.
+
+The current text encoder is the trimmed 50-layer Qwen3-VL with serialized
+NVFP4 weights, dequantized to BF16 per linear on sm89. The existing serialized
+blockwise FP8 encoder requires sm100+ and FlashInfer's Blackwell GEMM; it
+cannot run on the 4090 as written. An Ada FP8 implementation would also need
+encoder streaming because its weights are larger. First try fused NVFP4
+dequantization and avoid per-linear GPU scalar synchronization; then compare
+a native sm89 FP8 encoder at equal prompts. Conditioning is only about
+11.2 s of the current 111.3 s clip, so encoder work alone cannot dominate the
+end-to-end gain.
+
+Remaining speed experiments: INT8-QK/BF16-PV same-seed clips; VAE compilation
+and tile-batch tuning; more resident blocks after streaming the encoder;
+fused FP8 GEMM epilogues and norm/activation quantization. The 16 GiB cap
+still needs encoder streaming and a completed memory-capped run. The cached
+recipe's 42 GiB anonymous host peak does not establish a 32 GB system-RAM
+minimum.
