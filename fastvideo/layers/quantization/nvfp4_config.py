@@ -80,6 +80,7 @@ _LTX2_NVFP4_LINEAR_PREFIXES = frozenset(f"ltx2.blocks.{block_idx}.{suffix}" for 
 _MINIMAX_H3_NVFP4_FF_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.ff\.(?:fc_in|fc_out)$")
 _MINIMAX_H3_NVFP4_DIT_PREFIX = re.compile(
     r"(?:^|\.)transformer_blocks\.\d+\.(?:attn\.to_(?:q|k|v|out)|ff\.(?:fc_in|fc_out))$")
+_H3_BLOCK_ATTN_PROJ = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.attn\.(?:to_q|to_k|to_v|to_out)$")
 _MINIMAX_H3_NVFP4_VSA_GATE_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.attn\.to_gate_compress$")
 H3_NVFP4_DIT_EXPORT_FILENAME = "nvfp4_weights.safetensors"
 H3_NVFP4_DIT_KEY_SEP = "::"
@@ -89,6 +90,9 @@ H3_NVFP4_DIT_BUFFER_NAMES = (
     "_nvfp4_alpha",
     "_weight_global_sf",
 )
+# Optional per-layer static activation global scale (448 * 6 / calibrated input amax).
+# Exports without it quantize activations with the unit global scale.
+H3_NVFP4_DIT_INPUT_SF_NAME = "_nvfp4_input_global_sf"
 
 
 def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
@@ -362,6 +366,18 @@ def _coerce_fp4_input_dtype(x: torch.Tensor) -> torch.Tensor:
     return x
 
 
+_AMAX_TABLES: dict[str, dict[str, float]] = {}
+
+
+def _load_amax_table(path: str) -> dict[str, float]:
+    if path not in _AMAX_TABLES:
+        import json
+        with open(path) as f:
+            raw = json.load(f)
+        _AMAX_TABLES[path] = {k: float(v["all"] if isinstance(v, dict) else v) for k, v in raw.items()}
+    return _AMAX_TABLES[path]
+
+
 class NVFP4QuantizeMethod(QuantizeMethodBase):
 
     def __init__(self, layer_prefix: str = ""):
@@ -388,6 +404,34 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
+
+    def _static_activation_global_sf(self) -> torch.Tensor | None:
+        """FASTVIDEO_NVFP4_ACT_AMAX: JSON of calibrated input amax per layer ("b<block>.<sub>" or full prefix)."""
+        if getattr(self, "_static_sf_checked", False):
+            return self._static_sf
+        self._static_sf_checked, self._static_sf = True, None
+        path = os.environ.get("FASTVIDEO_NVFP4_ACT_AMAX")
+        if path:
+            table = _load_amax_table(path)
+            prefix = self.layer_prefix or ""
+            match = re.search(r"transformer_blocks\.(\d+)\.(.+)$", prefix)
+            keys = [prefix] + ([f"b{match.group(1)}.{match.group(2)}"] if match else [])
+            amax = next((table[k] for k in keys if k in table), None)
+            if amax is not None:
+                self._static_sf = torch.tensor((448.0 * 6.0) / max(amax, 1e-12), dtype=torch.float32,
+                                               device="cuda")
+        return self._static_sf
+
+    def _dynamic_activation_scale(self) -> bool:
+        """FASTVIDEO_NVFP4_DYNAMIC_ACT: "all", or comma-separated layer-name suffixes (e.g. "ff.fc_out")."""
+        cached = getattr(self, "_dynamic_act_cached", None)
+        if cached is None:
+            selected = os.environ.get("FASTVIDEO_NVFP4_DYNAMIC_ACT", "")
+            suffixes = [part.strip() for part in selected.split(",") if part.strip()]
+            prefix = self.layer_prefix or ""
+            cached = "all" in suffixes or any(prefix.endswith(suffix) for suffix in suffixes)
+            self._dynamic_act_cached = cached
+        return cached
 
     def quantize_input(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         SfLayout, _, _ = _require_flashinfer()
@@ -448,7 +492,17 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         else:
             x = _coerce_fp4_input_dtype(x)
             x = x.view(-1, x.shape[-1])
-            x_global_sf = self.x_global_sf
+            static_sf = self._static_activation_global_sf()
+            if static_sf is None:
+                static_sf = getattr(layer, H3_NVFP4_DIT_INPUT_SF_NAME, None)
+            if static_sf is not None:
+                x_global_sf = static_sf
+            elif self._dynamic_activation_scale():
+                # A unit global scale caps FP8 block scales at |x| = 6 * 448; inputs such as H3's ff.fc_out
+                # (post-SwiGLU) exceed that, so derive the global scale from this call's amax.
+                x_global_sf = (448.0 * 6.0) / x.abs().amax().float().clamp(min=1e-12)
+            else:
+                x_global_sf = self.x_global_sf
             x_fp4, x_scale = _nvfp4_quantize(
                 x,
                 x_global_sf,
@@ -552,6 +606,11 @@ class NVFP4Config(QuantizationConfig):
             method = NVFP4QuantizeMethod(layer_prefix=prefix)
             method._retain_original_weights = self.retain_original_weights
             return method
+        if (self.layer_profile == "h3_dit_ffn" and os.environ.get("FASTVIDEO_H3_FP8_ATTENTION") == "1"
+                and _H3_BLOCK_ATTN_PROJ.search(prefix) is not None):
+            # Mixed precision: NVFP4 MLPs, FP8 (per-tensor weight, dynamic per-tensor activation) attention.
+            from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+            return FP8QuantizeMethod(granularity=os.environ.get("FASTVIDEO_H3_FP8_GRANULARITY", "tensor"))
         return None
 
 
@@ -650,7 +709,8 @@ def load_minimax_h3_nvfp4_dit_export(
     """Load a packed NVFP4H3 DiT export onto already-tagged NVFP4 linears.
 
     Keys are ``<module>::<buffer>`` with the four buffers
-    ``convert_model_to_nvfp4`` registers. Every export prefix must match an
+    ``convert_model_to_nvfp4`` registers, plus an optional calibrated
+    ``_nvfp4_input_global_sf``. Every export prefix must match an
     NVFP4 linear, and every NVFP4 linear must appear in the export.
     """
     from safetensors import safe_open
@@ -673,7 +733,7 @@ def load_minimax_h3_nvfp4_dit_export(
             missing_buffers = [name for name in H3_NVFP4_DIT_BUFFER_NAMES if name not in buffers]
             if missing_buffers:
                 raise ValueError(f"MiniMax-H3 NVFP4 DiT export layer {prefix!r} is missing {missing_buffers}")
-            extra_buffers = sorted(set(buffers) - set(H3_NVFP4_DIT_BUFFER_NAMES))
+            extra_buffers = sorted(set(buffers) - set(H3_NVFP4_DIT_BUFFER_NAMES) - {H3_NVFP4_DIT_INPUT_SF_NAME})
             if extra_buffers:
                 raise ValueError(f"MiniMax-H3 NVFP4 DiT export layer {prefix!r} has unknown buffers {extra_buffers}")
             module = _module_by_nvfp4_export_prefix(modules, prefix)
@@ -682,7 +742,9 @@ def load_minimax_h3_nvfp4_dit_export(
             if not isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod):
                 raise RuntimeError("MiniMax-H3 NVFP4 DiT export layer "
                                    f"{prefix!r} is not an NVFP4 linear; set NVFP4Config(layer_profile='h3_dit')")
-            for buffer_name in H3_NVFP4_DIT_BUFFER_NAMES:
+            for buffer_name in H3_NVFP4_DIT_BUFFER_NAMES + (H3_NVFP4_DIT_INPUT_SF_NAME, ):
+                if buffer_name not in buffers:
+                    continue
                 tensor = reader.get_tensor(buffers[buffer_name]).to(device=device)
                 module.register_buffer(buffer_name, tensor, persistent=False)
             module.register_parameter("weight", None)
@@ -700,6 +762,7 @@ def load_minimax_h3_nvfp4_dit_export(
 __all__ = [
     "H3_NVFP4_DIT_BUFFER_NAMES",
     "H3_NVFP4_DIT_EXPORT_FILENAME",
+    "H3_NVFP4_DIT_INPUT_SF_NAME",
     "NVFP4Config",
     "NVFP4QuantizeMethod",
     "convert_model_to_nvfp4",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import os
 import json
 import math
 from dataclasses import dataclass
@@ -73,6 +74,33 @@ def _checkpoint_has_vsa_gates(transformer_dir: Path) -> bool:
             if any(".to_gate_compress." in name for name in handle.keys()):  # noqa: SIM118
                 return True
     return False
+
+
+def _pinned_swap(module: Any, device: torch.device) -> None:
+    """Move a module's tensors between the GPU and a persistent pinned host copy.
+
+    Inference weights never change, so a parameter's pinned copy is made once and parking just repoints the
+    parameter at it (no transfer); restoring is one pinned host-to-device copy. Buffers are copied every time.
+    """
+    store = module.__dict__.setdefault("_pinned_host_tensors", {})
+    params = dict(module.named_parameters())
+    for name, tensor in list(params.items()) + list(module.named_buffers()):
+        if tensor is None:
+            continue
+        if device.type == "cpu":
+            if tensor.device.type == "cpu":
+                continue
+            host = store.get(name) if name in params else None
+            if host is None or host.shape != tensor.shape or host.dtype != tensor.dtype:
+                host = torch.empty(tensor.shape, dtype=tensor.dtype, pin_memory=True)
+                host.copy_(tensor)
+                if name in params:
+                    store[name] = host
+            tensor.data = host
+        elif tensor.device != device:
+            tensor.data = tensor.data.to(device, non_blocking=True)
+    if device.type != "cpu" and torch.cuda.is_available():
+        torch.cuda.current_stream(device).synchronize()
 
 
 def _module_has_dtensor_params(module: Any) -> bool:
@@ -429,12 +457,26 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
     def _move_module(self, module: Any, device: str | torch.device) -> bool:
         if _module_has_dtensor_params(module):
             return False
-        module.to(device)
+        if os.environ.get("FASTVIDEO_H3_PINNED_SWAP", "1") == "1":
+            _pinned_swap(module, torch.device(device))
+        else:
+            module.to(device)
         return True
+
+    @staticmethod
+    def _parked_module_names() -> tuple[str, ...]:
+        """Denoise modules parked on the host while the text encoder runs (FASTVIDEO_H3_PARK_MODULES).
+
+        Cards with room for the DiT next to the encoder park only the VAEs and keep the DiT resident.
+        """
+        requested = os.environ.get("FASTVIDEO_H3_PARK_MODULES")
+        if not requested:
+            return _DENOISE_MODULE_NAMES
+        return tuple(name for name in requested.split(",") if name in _DENOISE_MODULE_NAMES)
 
     def _park_denoise_modules(self) -> None:
         parked = False
-        for name in _DENOISE_MODULE_NAMES:
+        for name in self._parked_module_names():
             module = self.get_module(name)
             if module is None:
                 continue

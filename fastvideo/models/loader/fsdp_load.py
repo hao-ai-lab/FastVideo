@@ -36,6 +36,54 @@ def _summarize_param_names(names: set[str]) -> str:
     return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
 
 
+def _prequantized_fp8_prefixes(weight_files: list[str]) -> list[str]:
+    """Checkpoint prefixes stored as FP8 W8A8: float8_e4m3fn ``weight`` plus per-channel float32 ``weight_scale``."""
+    from safetensors import safe_open
+
+    fp8_weights: set[str] = set()
+    scales: set[str] = set()
+    for path in weight_files:
+        with safe_open(path, framework="pt", device="cpu") as reader:
+            for key in reader.keys():  # noqa: SIM118
+                if key.endswith(".weight") and reader.get_slice(key).get_dtype() == "F8_E4M3":
+                    fp8_weights.add(key[:-len(".weight")])
+                elif key.endswith(".weight_scale") and reader.get_slice(key).get_dtype() == "F32":
+                    scales.add(key[:-len(".weight_scale")])
+    if fp8_weights - scales:
+        raise ValueError(f"FP8 checkpoint weights without a weight_scale: {sorted(fp8_weights - scales)[:4]}")
+    return sorted(fp8_weights)
+
+
+def _load_prequantized_fp8(model: nn.Module, weight_files: list[str], targets: dict[str, str],
+                           device: torch.device) -> None:
+    """Attach FP8 W8A8 checkpoint tensors to their FP8 linears as ``convert_model_to_fp8`` would (per channel)."""
+    from safetensors import safe_open
+
+    from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+
+    modules = dict(model.named_modules())
+    wanted = {f"{prefix}.{suffix}" for prefix in targets for suffix in ("weight", "weight_scale")}
+    tensors: dict[str, torch.Tensor] = {}
+    for path in weight_files:
+        with safe_open(path, framework="pt", device="cpu") as reader:
+            for key in wanted.intersection(reader.keys()):
+                tensors[key] = reader.get_tensor(key)
+    for prefix, target in targets.items():
+        module = modules.get(target[:-len(".weight")])
+        quant_method = getattr(module, "quant_method", None)
+        if not isinstance(quant_method, FP8QuantizeMethod):
+            raise RuntimeError(f"Pre-quantized FP8 weight {prefix!r} maps to {target!r}, which is not an FP8 linear; "
+                               "load the checkpoint with an FP8 quant_config covering it.")
+        # The checkpoint scales are per output channel; activations then use per-token scales.
+        quant_method.granularity = "channel"
+        module.register_buffer("_fp8_weight", tensors[f"{prefix}.weight"].to(device).contiguous(), persistent=False)
+        module.register_buffer("_fp8_weight_scale",
+                               tensors[f"{prefix}.weight_scale"].reshape(-1).to(device=device, dtype=torch.float32),
+                               persistent=False)
+        module._parameters.pop("weight", None)
+    logger.info("Loaded %d pre-quantized FP8 linears", len(targets))
+
+
 def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lora_merge: bool = False) -> None:
     """Quantize inference linear weights after checkpoint loading.
 
@@ -80,16 +128,23 @@ def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lor
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QuantizeMethod):
+            mixed_fp8 = any(isinstance(getattr(m, "quant_method", None), FP8QuantizeMethod) for m in model.modules())
             if any(
                     getattr(module, "_nvfp4_weight", None) is not None for module in model.modules()
                     if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)):
                 logger.info("NVFP4 packed export already populated; skipping runtime weight conversion")
+                if mixed_fp8:
+                    logger.info("Converting the FP8 linears of a mixed NVFP4/FP8 model")
+                    convert_model_to_fp8(model)
                 return
             if defer_weight_conversion_until_lora_merge:
                 logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
                 return
             logger.info("Converting loaded model weights for NVFP4 linear layers")
             convert_model_to_nvfp4(model)
+            if any(isinstance(getattr(m, "quant_method", None), FP8QuantizeMethod) for m in model.modules()):
+                logger.info("Converting the FP8 linears of a mixed NVFP4/FP8 model")
+                convert_model_to_fp8(model)
             return
         if isinstance(qm, NVFP4QATQuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
@@ -324,6 +379,20 @@ def maybe_load_fsdp_model(
                 "This LoRA adapter provides MiniMax H3 VSA compression gates, but the selected attention backend "
                 "did not construct them. Use attention_backend='VIDEO_SPARSE_ATTN_H3'. Missing parameters: "
                 + ", ".join(missing_vsa_gates[:3]) + (" ..." if len(missing_vsa_gates) > 3 else ""))
+    skip_param_names = set(nvfp4_skip_param_names)
+    fp8_targets: dict[str, str] = {}
+    fp8_prefixes = _prequantized_fp8_prefixes(weight_dir_list)
+    if fp8_prefixes:
+        fp8_targets = {prefix: param_names_mapping_fn(f"{prefix}.weight")[0] for prefix in fp8_prefixes}
+        skip_param_names |= set(fp8_targets.values())
+        fp8_keys = {f"{prefix}.{suffix}" for prefix in fp8_prefixes for suffix in ("weight", "weight_scale")}
+        weight_iterator = ((name, tensor) for name, tensor in weight_iterator if name not in fp8_keys)
+    if os.environ.get("FASTVIDEO_H3_ADALN_TABLE"):
+        # Precomputed AdaLN modulation replaces the per-block projections; never read their weights.
+        skip_param_names |= {name for name, _ in model.named_parameters()
+                             if re.fullmatch(r"transformer_blocks\.\d+\.adaln_proj\.linear\.(weight|bias)", name)}
+        logger.info("Skipping %d AdaLN projection tensors (precomputed modulation tables)",
+                    sum("adaln_proj" in n for n in skip_param_names))
     load_model_from_full_model_state_dict(
         model,
         weight_iterator,
@@ -333,10 +402,12 @@ def maybe_load_fsdp_model(
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
         dense_lora_patch=dense_lora_patch,
-        skip_param_names=nvfp4_skip_param_names or None,
+        skip_param_names=skip_param_names or None,
     )
     if packed_nvfp4_export is not None:
         load_minimax_h3_nvfp4_dit_export(model, packed_nvfp4_export, device=device)
+    if fp8_targets:
+        _load_prequantized_fp8(model, weight_dir_list, fp8_targets, device=device)
     if hasattr(model, "materialize_non_persistent_buffers"):
         model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
     for n, p in chain(model.named_parameters(), model.named_buffers()):
