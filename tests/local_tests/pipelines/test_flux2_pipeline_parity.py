@@ -352,22 +352,23 @@ def _run_fastvideo_flux2_pipeline(
     sp_size: int | None = None,
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
     if sp_size is None:
         sp_size = num_gpus
-    generator = VideoGenerator.from_pretrained(
-        str(model_dir),
-        num_gpus=num_gpus,
-        tp_size=tp_size,
-        sp_size=sp_size,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        output_type="latent",
-        override_pipeline_cls_name="Flux2KleinPipeline",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(model_dir),
+        "engine": {
+            "num_gpus": num_gpus,
+            "parallelism": {"tp_size": tp_size, "sp_size": sp_size},
+            "use_fsdp_inference": False,
+            "offload": {"dit": False, "vae": True, "text_encoder": True, "pin_cpu_memory": False},
+        },
+        "pipeline": {
+            "components": {"override_pipeline_cls_name": "Flux2KleinPipeline"},
+            "experimental": {"output_type": "latent"},
+        },
+    })
     try:
         executor_world_size = getattr(generator.executor, "world_size", None)
         print("[FLUX2 PIPELINE] fastvideo parallel config "
@@ -381,25 +382,28 @@ def _run_fastvideo_flux2_pipeline(
         if executor_world_size is not None:
             assert executor_world_size == num_gpus
 
-        result = generator.generate_video(
-            prompt=PROMPT,
-            output_path="outputs_video/flux2_klein_pipeline_parity",
-            save_video=False,
-            return_frames=True,
-            height=HEIGHT,
-            width=WIDTH,
-            num_frames=NUM_FRAMES,
-            num_inference_steps=NUM_INFERENCE_STEPS,
-            guidance_scale=GUIDANCE_SCALE,
-            seed=SEED,
-            return_trajectory_latents=True,
-        )
-        assert isinstance(result, dict)
-        result_dict = cast(dict[str, Any], result)
-        latents = result_dict["samples"]
+        result = generator.generate({
+            "prompt": PROMPT,
+            "sampling": {
+                "height": HEIGHT,
+                "width": WIDTH,
+                "num_frames": NUM_FRAMES,
+                "num_inference_steps": NUM_INFERENCE_STEPS,
+                "guidance_scale": GUIDANCE_SCALE,
+                "seed": SEED,
+            },
+            "runtime": {"return_trajectory_latents": True},
+            "output": {
+                "output_path": "outputs_video/flux2_klein_pipeline_parity",
+                "save_video": False,
+                "return_frames": True,
+            },
+        })
+        assert isinstance(result, GenerationResult)
+        latents = result.samples
         assert torch.is_tensor(latents), "FastVideo did not return latent samples"
         trajectory: list[torch.Tensor] = []
-        trajectory_raw = result_dict.get("trajectory")
+        trajectory_raw = result.trajectory
         if torch.is_tensor(trajectory_raw):
             trajectory = [
                 _pack_fastvideo_flux2_latents(trajectory_raw[:, step].detach()).float().cpu()
@@ -499,39 +503,43 @@ def _run_fastvideo_flux2_full_pipeline(
     seed: int = SEED,
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
-    generator = VideoGenerator.from_pretrained(
-        str(model_dir),
-        num_gpus=num_gpus,
-        tp_size=tp_size,
-        sp_size=sp_size,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        output_type="latent",
-        override_pipeline_cls_name="Flux2Pipeline",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(model_dir),
+        "engine": {
+            "num_gpus": num_gpus,
+            "parallelism": {"tp_size": tp_size, "sp_size": sp_size},
+            "use_fsdp_inference": False,
+            "offload": {"dit": False, "vae": True, "text_encoder": True, "pin_cpu_memory": False},
+        },
+        "pipeline": {
+            "components": {"override_pipeline_cls_name": "Flux2Pipeline"},
+            "experimental": {"output_type": "latent"},
+        },
+    })
     try:
-        result = generator.generate_video(
-            prompt=prompt,
-            output_path="outputs_video/flux2_full_pipeline_parity",
-            save_video=False,
-            return_frames=True,
-            height=FULL_HEIGHT,
-            width=FULL_WIDTH,
-            num_frames=NUM_FRAMES,
-            num_inference_steps=FULL_NUM_INFERENCE_STEPS,
-            guidance_scale=FULL_GUIDANCE_SCALE,
-            max_sequence_length=FULL_MAX_SEQUENCE_LENGTH,
-            seed=seed,
-            return_trajectory_latents=True,
-        )
-        assert isinstance(result, dict)
-        result_dict = cast(dict[str, Any], result)
+        result = generator.generate({
+            "prompt": prompt,
+            "sampling": {
+                "height": FULL_HEIGHT,
+                "width": FULL_WIDTH,
+                "num_frames": NUM_FRAMES,
+                "num_inference_steps": FULL_NUM_INFERENCE_STEPS,
+                "guidance_scale": FULL_GUIDANCE_SCALE,
+                "max_sequence_length": FULL_MAX_SEQUENCE_LENGTH,
+                "seed": seed,
+            },
+            "runtime": {"return_trajectory_latents": True},
+            "output": {
+                "output_path": "outputs_video/flux2_full_pipeline_parity",
+                "save_video": False,
+                "return_frames": True,
+            },
+        })
+        assert isinstance(result, GenerationResult)
         trajectory: list[torch.Tensor] = []
-        trajectory_raw = result_dict.get("trajectory")
+        trajectory_raw = result.trajectory
         if torch.is_tensor(trajectory_raw):
             trajectory = [
                 _pack_fastvideo_flux2_latents(trajectory_raw[:, step].detach()).float().cpu()
@@ -540,7 +548,7 @@ def _run_fastvideo_flux2_full_pipeline(
         else:
             raise AssertionError("FastVideo full Flux2 trajectory latents unavailable")
 
-        samples = result_dict["samples"]
+        samples = result.samples
         assert torch.is_tensor(samples), "FastVideo did not return latent samples"
         if trajectory:
             return trajectory[-1], trajectory

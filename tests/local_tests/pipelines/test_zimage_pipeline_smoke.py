@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 import torch
@@ -128,28 +127,31 @@ def test_zimage_pipeline_load_generate_smoke() -> None:
         output_type="latent",
     )
     try:
-        result = generator.generate_video(
-            prompt="a red panda reading a book",
-            negative_prompt="",
-            output_path="outputs/zimage/smoke",
-            save_video=False,
-            return_frames=True,
-            height=64,
-            width=64,
-            num_frames=1,
-            fps=1,
-            num_inference_steps=1,
-            guidance_scale=0.0,
-            max_sequence_length=64,
-            cfg_normalization=False,
-            cfg_truncation=1.0,
-            seed=42,
-        )
+        result = generator.generate({
+            "prompt": "a red panda reading a book",
+            "negative_prompt": "",
+            "sampling": {
+                "height": 64,
+                "width": 64,
+                "num_frames": 1,
+                "fps": 1,
+                "num_inference_steps": 1,
+                "guidance_scale": 0.0,
+                "max_sequence_length": 64,
+                "cfg_normalization": False,
+                "cfg_truncation": 1.0,
+                "seed": 42,
+            },
+            "output": {
+                "output_path": "outputs/zimage/smoke",
+                "save_video": False,
+                "return_frames": True,
+            },
+        })
     finally:
         generator.shutdown()
 
-    result_dict = cast(dict[str, Any], result)
-    samples = result_dict["samples"]
+    samples = result.samples
     assert torch.is_tensor(samples)
     assert samples.ndim in (4, 5)
     assert torch.isfinite(samples).all()

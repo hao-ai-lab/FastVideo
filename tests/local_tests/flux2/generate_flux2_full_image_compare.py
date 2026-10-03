@@ -134,36 +134,35 @@ def _generate_fastvideo_image(
     max_sequence_length: int,
 ) -> Image.Image:
     from fastvideo import VideoGenerator
-    from fastvideo.api.sampling_param import SamplingParam
 
-    generator = VideoGenerator.from_pretrained(
-        str(model_dir),
-        num_gpus=1,
-        tp_size=1,
-        sp_size=1,
-        workload_type="t2i",
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        override_pipeline_cls_name="Flux2Pipeline",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(model_dir),
+        "engine": {
+            "num_gpus": 1,
+            "parallelism": {"tp_size": 1, "sp_size": 1},
+            "use_fsdp_inference": False,
+            "offload": {"dit": False, "vae": True, "text_encoder": True, "pin_cpu_memory": False},
+        },
+        "pipeline": {
+            "workload_type": "t2i",
+            "components": {"override_pipeline_cls_name": "Flux2Pipeline"},
+        },
+    })
     try:
-        sampling = SamplingParam.from_pretrained(str(model_dir))
-        sampling.prompt = prompt
-        sampling.height = size
-        sampling.width = size
-        sampling.num_frames = 1
-        sampling.fps = 1
-        sampling.num_inference_steps = steps
-        sampling.guidance_scale = guidance_scale
-        sampling.max_sequence_length = max_sequence_length
-        sampling.seed = seed
-        sampling.output_path = str(output_path)
-        sampling.save_video = True
-        sampling.return_frames = False
-        generator.generate_video(prompt, sampling_param=sampling, output_path=str(output_path))
+        generator.generate({
+            "prompt": prompt,
+            "sampling": {
+                "height": size,
+                "width": size,
+                "num_frames": 1,
+                "fps": 1,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance_scale,
+                "max_sequence_length": max_sequence_length,
+                "seed": seed,
+            },
+            "output": {"output_path": str(output_path), "save_video": True, "return_frames": False},
+        })
     finally:
         generator.shutdown()
         gc.collect()

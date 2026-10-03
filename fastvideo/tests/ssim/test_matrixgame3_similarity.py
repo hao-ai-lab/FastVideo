@@ -114,20 +114,27 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrid
         "pin_cpu_memory": True,
     }
 
-    generation_kwargs = {
-        "num_inference_steps": num_inference_steps,
-        "output_path": output_dir,
-        "image_path": TEST_IMAGE_PATHS[0],
-        "height": BASE_PARAMS["height"],
-        "width": BASE_PARAMS["width"],
-        "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "seed": BASE_PARAMS["seed"],
-        "save_video": True,
+    request = {
+        "prompt": prompt,
+        "inputs": {
+            "image_path": TEST_IMAGE_PATHS[0],
+        },
+        "sampling": {
+            "num_inference_steps": num_inference_steps,
+            "height": BASE_PARAMS["height"],
+            "width": BASE_PARAMS["width"],
+            "num_frames": BASE_PARAMS["num_frames"],
+            "guidance_scale": BASE_PARAMS["guidance_scale"],
+            "seed": BASE_PARAMS["seed"],
+        },
+        "output": {
+            "output_path": output_dir,
+            "save_video": True,
+        },
     }
 
     generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
+    generator.generate(request)
 
     if isinstance(generator.executor, MultiprocExecutor):
         generator.executor.shutdown()

@@ -120,23 +120,29 @@ def test_stable_audio_a2a_official_parity():
         text_encoder_cpu_offload=False,
     )
     try:
-        result = generator.generate_video(
-            prompt=prompt,
-            output_path="outputs_audio/sa_a2a_parity.mp4",
-            save_video=False,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            seed=seed,
-            audio_end_in_s=audio_end_in_s,
-            init_audio=init_audio,
-            init_noise_level=init_noise_level,
-        )
+        result = generator.generate({
+            "prompt": prompt,
+            "sampling": {
+                "num_inference_steps": num_inference_steps,
+                "guidance_scale": guidance_scale,
+                "seed": seed,
+            },
+            "output": {
+                "output_path": "outputs_audio/sa_a2a_parity.mp4",
+                "save_video": False,
+            },
+            "extensions": {
+                "audio_end_in_s": audio_end_in_s,
+                "init_audio": init_audio,
+                "init_noise_level": init_noise_level,
+            },
+        })
     finally:
         generator.shutdown()
 
-    fv_audio = result.get("audio")
+    fv_audio = result.audio
     if fv_audio is None:
-        ext = result.get("extra", {}) or {}
+        ext = result.extra.get("extra", {}) or {}
         fv_audio = ext.get("decoded_audio")
     assert fv_audio is not None
     if not torch.is_tensor(fv_audio):

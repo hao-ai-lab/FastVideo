@@ -76,23 +76,29 @@ def test_stable_audio_inpaint_kept_region_preserved():
         text_encoder_cpu_offload=False,
     )
     try:
-        result = generator.generate_video(
-            prompt="Steady lo-fi hip hop drum loop with vinyl crackle.",
-            output_path="outputs_audio/sa_inpaint_self.mp4",
-            save_video=False,
-            num_inference_steps=25,
-            guidance_scale=7.0,
-            seed=0,
-            audio_end_in_s=total_seconds,
-            inpaint_audio=padded_ref,
-            inpaint_mask=mask,
-        )
+        result = generator.generate({
+            "prompt": "Steady lo-fi hip hop drum loop with vinyl crackle.",
+            "sampling": {
+                "num_inference_steps": 25,
+                "guidance_scale": 7.0,
+                "seed": 0,
+            },
+            "output": {
+                "output_path": "outputs_audio/sa_inpaint_self.mp4",
+                "save_video": False,
+            },
+            "extensions": {
+                "audio_end_in_s": total_seconds,
+                "inpaint_audio": padded_ref,
+                "inpaint_mask": mask,
+            },
+        })
     finally:
         generator.shutdown()
 
-    fv_audio = result.get("audio")
+    fv_audio = result.audio
     if fv_audio is None:
-        fv_audio = (result.get("extra", {}) or {}).get("decoded_audio")
+        fv_audio = (result.extra.get("extra", {}) or {}).get("decoded_audio")
     if not torch.is_tensor(fv_audio):
         import numpy as np
         fv_audio = torch.from_numpy(np.asarray(fv_audio))

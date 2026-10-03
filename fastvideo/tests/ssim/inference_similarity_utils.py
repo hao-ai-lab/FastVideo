@@ -5,10 +5,13 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import fields
 from logging import Logger
+from typing import Any
 
 import fastvideo.envs as envs
 from fastvideo import VideoGenerator
+from fastvideo.api import InputConfig, OutputConfig, RequestRuntimeConfig, SamplingConfig
 from fastvideo.tests.ssim.bootstrap_references import (
     xfail_missing_reference_in_bootstrap_mode, )
 from fastvideo.tests.ssim.reference_utils import (
@@ -32,6 +35,46 @@ DEVICE_MAPPINGS = (
     ("GB200", "GB200"),
     ("B200", "B200"),
 )
+
+# Typed GeneratorConfig path of each flat init keyword that build_init_kwargs or an SSIM test's init override sets.
+_INIT_KWARG_CONFIG_PATHS = {
+    "num_gpus": "engine.num_gpus",
+    "sp_size": "engine.parallelism.sp_size",
+    "tp_size": "engine.parallelism.tp_size",
+    "use_fsdp_inference": "engine.use_fsdp_inference",
+    "dit_cpu_offload": "engine.offload.dit",
+    "dit_layerwise_offload": "engine.offload.dit_layerwise",
+    "text_encoder_cpu_offload": "engine.offload.text_encoder",
+    "image_encoder_cpu_offload": "engine.offload.image_encoder",
+    "vae_cpu_offload": "engine.offload.vae",
+    "pin_cpu_memory": "engine.offload.pin_cpu_memory",
+    "text_encoder_precisions": "engine.precision.text_encoders",
+    "revision": "revision",
+    "trust_remote_code": "trust_remote_code",
+    "workload_type": "pipeline.workload_type",
+    "flow_shift": "pipeline.flow_shift",
+    "vae_sp": "pipeline.vae_sp",
+    "override_pipeline_cls_name": "pipeline.components.override_pipeline_cls_name",
+    "ltx2_vae_tiling": "pipeline.vae_tiling",
+    "ltx2_vae_spatial_tile_size_in_pixels": "pipeline.ltx2.vae_spatial_tile_size_in_pixels",
+    "ltx2_vae_spatial_tile_overlap_in_pixels": "pipeline.ltx2.vae_spatial_tile_overlap_in_pixels",
+    "ltx2_vae_temporal_tile_size_in_frames": "pipeline.ltx2.vae_temporal_tile_size_in_frames",
+    "ltx2_vae_temporal_tile_overlap_in_frames": "pipeline.ltx2.vae_temporal_tile_overlap_in_frames",
+    "ltx2_legacy_native_noise_order": "pipeline.ltx2.legacy_native_noise_order",
+    "ltx2_use_distilled_sigmas": "pipeline.ltx2.use_distilled_sigmas",
+}
+
+# Request section that holds each field of the typed generation request configs.
+_REQUEST_SECTION_FIELDS = {
+    section_name: {config_field.name
+                   for config_field in fields(section_type)}
+    for section_name, section_type in (
+        ("inputs", InputConfig),
+        ("sampling", SamplingConfig),
+        ("runtime", RequestRuntimeConfig),
+        ("output", OutputConfig),
+    )
+}
 
 
 @contextmanager
@@ -181,7 +224,7 @@ def build_init_kwargs(base_params: dict[str, object], ) -> dict[str, object]:
         init_kwargs["vae_sp"] = True
         init_kwargs["vae_tiling"] = True
     if "text-encoder-precision" in base_params:
-        init_kwargs["text_encoder_precisions"] = base_params["text-encoder-precision"]
+        init_kwargs["text_encoder_precisions"] = list(base_params["text-encoder-precision"])
     if base_params.get("ltx2_vae_tiling"):
         init_kwargs["ltx2_vae_tiling"] = True
         init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = base_params.get("ltx2_vae_spatial_tile_size_in_pixels",
@@ -217,6 +260,44 @@ def build_generation_kwargs(
     if "neg_prompt" in base_params:
         generation_kwargs["neg_prompt"] = base_params["neg_prompt"]
     return generation_kwargs
+
+
+def build_generator_config(model_path: object, init_kwargs: dict[str, object]) -> dict[str, Any]:
+    """Build the ``VideoGenerator.from_config`` mapping for flat init keywords.
+
+    This applies the placement rule for flat ``GeneratorConfig`` keywords: a keyword in
+    ``_INIT_KWARG_CONFIG_PATHS`` sets its typed ``GeneratorConfig`` path, and any other keyword, such as
+    ``vae_tiling`` or ``output_type``, goes to ``pipeline.experimental`` under its own name.
+    """
+    generator_config: dict[str, Any] = {"model_path": model_path}
+    for key, value in init_kwargs.items():
+        *parents, leaf = _INIT_KWARG_CONFIG_PATHS.get(key, f"pipeline.experimental.{key}").split(".")
+        section = generator_config
+        for parent in parents:
+            section = section.setdefault(parent, {})
+        section[leaf] = value
+    return generator_config
+
+
+def build_generation_request(prompt: str, generation_kwargs: dict[str, object]) -> dict[str, Any]:
+    """Build the ``VideoGenerator.generate`` request mapping for flat generation keywords.
+
+    This applies the placement rule for flat generation keywords:
+    ``negative_prompt`` and ``neg_prompt`` set the top-level ``negative_prompt``, a field of ``InputConfig``,
+    ``SamplingConfig``, ``RequestRuntimeConfig``, or ``OutputConfig`` goes to the matching request section, and
+    any other keyword goes to ``extensions``.
+    """
+    request: dict[str, Any] = {"prompt": prompt}
+    for key, value in generation_kwargs.items():
+        if key in ("negative_prompt", "neg_prompt"):
+            request["negative_prompt"] = value
+            continue
+        section_name = next(
+            (name for name, field_names in _REQUEST_SECTION_FIELDS.items() if key in field_names),
+            "extensions",
+        )
+        request.setdefault(section_name, {})[key] = value
+    return request
 
 
 def run_text_to_video_similarity_test(
@@ -266,11 +347,8 @@ def run_text_to_video_similarity_test(
 
         generator: VideoGenerator | None = None
         try:
-            generator = VideoGenerator.from_pretrained(
-                model_path=base_params["model_path"],
-                **init_kwargs,
-            )
-            generator.generate_video(prompt, **generation_kwargs)
+            generator = VideoGenerator.from_config(build_generator_config(base_params["model_path"], init_kwargs))
+            generator.generate(build_generation_request(prompt, generation_kwargs))
         finally:
             shutdown_executor(generator)
 
@@ -344,11 +422,8 @@ def run_image_to_video_similarity_test(
 
         generator: VideoGenerator | None = None
         try:
-            generator = VideoGenerator.from_pretrained(
-                model_path=base_params["model_path"],
-                **init_kwargs,
-            )
-            generator.generate_video(prompt, **generation_kwargs)
+            generator = VideoGenerator.from_config(build_generator_config(base_params["model_path"], init_kwargs))
+            generator.generate(build_generation_request(prompt, generation_kwargs))
         finally:
             shutdown_executor(generator)
 

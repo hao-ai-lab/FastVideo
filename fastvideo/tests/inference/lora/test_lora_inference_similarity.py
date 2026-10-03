@@ -149,40 +149,52 @@ def test_lora_inference_similarity(ATTENTION_BACKEND, model_id, env_overrides):
     BASE_PARAMS = MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
-    init_kwargs = {
-        "num_gpus": BASE_PARAMS["num_gpus"],
-        "flow_shift": BASE_PARAMS["flow_shift"],
-        "dit_cpu_offload": BASE_PARAMS["dit_cpu_offload"],
+    generator_config = {
+        "model_path": BASE_PARAMS["model_path"],
+        "engine": {
+            "num_gpus": BASE_PARAMS["num_gpus"],
+            "offload": {
+                "dit": BASE_PARAMS["dit_cpu_offload"],
+            },
+        },
+        "pipeline": {
+            "flow_shift": BASE_PARAMS["flow_shift"],
+        },
     }
     if "text-encoder-precision" in BASE_PARAMS:
-        init_kwargs["text_encoder_precisions"] = BASE_PARAMS["text-encoder-precision"]
+        generator_config["engine"]["precision"] = {"text_encoders": list(BASE_PARAMS["text-encoder-precision"])}
 
-    generation_kwargs = {
-        "num_inference_steps": num_inference_steps,
-        "output_path": output_dir,
-        "height": BASE_PARAMS["height"],
-        "width": BASE_PARAMS["width"],
-        "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "seed": BASE_PARAMS["seed"],
-        "fps": BASE_PARAMS["fps"],
-        "save_video": True,
+    request = {
+        "sampling": {
+            "num_inference_steps": num_inference_steps,
+            "height": BASE_PARAMS["height"],
+            "width": BASE_PARAMS["width"],
+            "num_frames": BASE_PARAMS["num_frames"],
+            "guidance_scale": BASE_PARAMS["guidance_scale"],
+            "seed": BASE_PARAMS["seed"],
+            "fps": BASE_PARAMS["fps"],
+        },
+        "output": {
+            "output_path": output_dir,
+            "save_video": True,
+        },
     }
-    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
+    generator = VideoGenerator.from_config(generator_config)
     for lora_config in LORA_CONFIGS:
         lora_nickname = lora_config["lora_nickname"]
         lora_path = lora_config["lora_path"]
         prompt = lora_config["prompt"]
-        generation_kwargs["negative_prompt"] = lora_config["negative_prompt"]
+        request["prompt"] = prompt
+        request["negative_prompt"] = lora_config["negative_prompt"]
 
         generator.set_lora_adapter(lora_nickname=lora_nickname, lora_path=lora_path)
         # Sanitize the filename before adding .mp4 extension to match VideoGenerator's behavior
         output_video_name = f"{lora_path.split('/')[-1]}_{prompt[:50]}"
         output_video_name = _sanitize_filename_component(output_video_name)
         generated_video_path = os.path.join(output_dir, f"{output_video_name}.mp4")
-        generation_kwargs["output_path"] = generated_video_path
+        request["output"]["output_path"] = generated_video_path
 
-        generator.generate_video(prompt, **generation_kwargs)
+        generator.generate(request)
 
         assert os.path.exists(generated_video_path), f"Output video was not generated at {generated_video_path}"
 

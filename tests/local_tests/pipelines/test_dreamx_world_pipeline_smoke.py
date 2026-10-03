@@ -113,42 +113,43 @@ def test_dreamx_world_pipeline_load_generate_latent_smoke(tmp_path: Path) -> Non
         pytest.fail(f"DreamX-World converted model directory is missing: {MODEL_DIR}")
 
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
     image_path = tmp_path / "dreamx_world_smoke_input.png"
     _write_smoke_image(image_path)
 
-    generator = VideoGenerator.from_pretrained(
-        str(MODEL_DIR),
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        output_type="latent",
-        override_pipeline_cls_name="DreamXWorldPipeline",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(MODEL_DIR),
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": False,
+            "offload": {"dit": False, "vae": True, "text_encoder": True, "pin_cpu_memory": False},
+        },
+        "pipeline": {
+            "components": {"override_pipeline_cls_name": "DreamXWorldPipeline"},
+            "experimental": {"output_type": "latent"},
+        },
+    })
     try:
-        result = generator.generate_video(
-            prompt="a quiet road through a futuristic city at sunrise",
-            output_path="outputs_video/dreamx_world_smoke",
-            save_video=False,
-            return_frames=True,
-            height=64,
-            width=64,
-            num_frames=9,
-            num_inference_steps=1,
-            guidance_scale=1.0,
-            image_path=str(image_path),
-            action_list=["w"],
-            action_speed_list=[2.0],
-            seed=0,
-        )
+        result = generator.generate({
+            "prompt": "a quiet road through a futuristic city at sunrise",
+            "inputs": {"image_path": str(image_path)},
+            "sampling": {
+                "height": 64,
+                "width": 64,
+                "num_frames": 9,
+                "num_inference_steps": 1,
+                "guidance_scale": 1.0,
+                "seed": 0,
+            },
+            "output": {"output_path": "outputs_video/dreamx_world_smoke", "save_video": False, "return_frames": True},
+            "extensions": {"action_list": ["w"], "action_speed_list": [2.0]},
+        })
     finally:
         generator.shutdown()
 
-    assert isinstance(result, dict)
-    samples = cast(dict[str, Any], result)["samples"]
+    assert isinstance(result, GenerationResult)
+    samples = result.samples
     assert torch.is_tensor(samples)
     assert samples.ndim == 5
     assert samples.shape[1] == 48

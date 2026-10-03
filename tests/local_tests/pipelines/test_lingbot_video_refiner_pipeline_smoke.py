@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 import torch
@@ -21,6 +21,7 @@ def test_lingbot_video_moe_refiner_pipeline_smoke(tmp_path: Path) -> None:
     if not torch.cuda.is_available() or torch.cuda.device_count() < required_gpus:
         pytest.skip(f"LingBot-Video refiner smoke requires {required_gpus} CUDA devices.")
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
     model_dir = download_components(
         FASTVIDEO_MOE,
@@ -31,40 +32,44 @@ def test_lingbot_video_moe_refiner_pipeline_smoke(tmp_path: Path) -> None:
         "transformer_2",
         "vae",
     )
-    generator = VideoGenerator.from_pretrained(
-        str(model_dir),
-        num_gpus=required_gpus,
-        sp_size=required_gpus,
-        use_fsdp_inference=True,
-        refine_enabled=True,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(model_dir),
+        "engine": {
+            "num_gpus": required_gpus,
+            "parallelism": {"sp_size": required_gpus},
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "vae": False,
+                "text_encoder": True,
+                "pin_cpu_memory": False,
+            },
+        },
+        "pipeline": {"experimental": {"refine_enabled": True}},
+    })
     try:
-        result = generator.generate_video(
-            prompt="A red fox runs through fresh snow at sunrise.",
-            output_path=str(tmp_path),
-            save_video=False,
-            return_frames=True,
-            height=32,
-            width=32,
-            height_sr=64,
-            width_sr=64,
-            num_frames=5,
-            num_inference_steps=2,
-            num_inference_steps_sr=2,
-            guidance_scale=3.0,
-            guidance_scale_2=3.0,
-            t_thresh=0.85,
-            batch_cfg=True,
-            seed=42,
-        )
+        result = generator.generate({
+            "prompt": "A red fox runs through fresh snow at sunrise.",
+            "sampling": {
+                "height": 32,
+                "width": 32,
+                "height_sr": 64,
+                "width_sr": 64,
+                "num_frames": 5,
+                "num_inference_steps": 2,
+                "num_inference_steps_sr": 2,
+                "guidance_scale": 3.0,
+                "guidance_scale_2": 3.0,
+                "batch_cfg": True,
+                "seed": 42,
+            },
+            "output": {"output_path": str(tmp_path), "save_video": False, "return_frames": True},
+            "extensions": {"t_thresh": 0.85},
+        })
     finally:
         generator.shutdown()
-    samples = cast(dict[str, Any], result)["samples"]
+    samples = cast(GenerationResult, result).samples
     assert torch.is_tensor(samples)
     assert tuple(samples.shape) == (1, 3, 5, 64, 64)
     assert torch.isfinite(samples).all()

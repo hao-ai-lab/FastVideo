@@ -87,19 +87,23 @@ def _run_fastvideo_pipeline(model_path: Path, params: dict[str, Any]) -> Any:
         text_encoder_cpu_offload=False,
     )
     try:
-        return generator.generate_video(
-            prompt=params["prompt"],
-            negative_prompt=params.get("negative_prompt"),
-            output_path=f"outputs_{_MODEL_FAMILY}/pipeline_parity",
-            save_video=False,
-            height=params.get("height"),
-            width=params.get("width"),
-            num_frames=params.get("num_frames"),
-            fps=params.get("fps"),
-            num_inference_steps=params["num_inference_steps"],
-            guidance_scale=params.get("guidance_scale"),
-            seed=params["seed"],
-        )
+        return generator.generate({
+            "prompt": params["prompt"],
+            "negative_prompt": params.get("negative_prompt"),
+            "sampling": {
+                "height": params.get("height"),
+                "width": params.get("width"),
+                "num_frames": params.get("num_frames"),
+                "fps": params.get("fps"),
+                "num_inference_steps": params["num_inference_steps"],
+                "guidance_scale": params.get("guidance_scale"),
+                "seed": params["seed"],
+            },
+            "output": {
+                "output_path": f"outputs_{_MODEL_FAMILY}/pipeline_parity",
+                "save_video": False,
+            },
+        })
     finally:
         generator.shutdown()
 

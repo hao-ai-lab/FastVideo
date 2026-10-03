@@ -297,24 +297,28 @@ def test_zimage_pipeline_latents_match_pinned_native_repo(tmp_path: Path) -> Non
             output_type="latent",
         )
         try:
-            result = generator.generate_video(
-                prompt,
-                negative_prompt="",
-                output_path=str(tmp_path),
-                save_video=False,
-                return_frames=True,
-                height=64,
-                width=64,
-                num_frames=1,
-                fps=1,
-                num_inference_steps=1,
-                guidance_scale=0.0,
-                max_sequence_length=512,
-                seed=42,
-            )
+            result = generator.generate({
+                "prompt": prompt,
+                "negative_prompt": "",
+                "sampling": {
+                    "height": 64,
+                    "width": 64,
+                    "num_frames": 1,
+                    "fps": 1,
+                    "num_inference_steps": 1,
+                    "guidance_scale": 0.0,
+                    "max_sequence_length": 512,
+                    "seed": 42,
+                },
+                "output": {
+                    "output_path": str(tmp_path),
+                    "save_video": False,
+                    "return_frames": True,
+                },
+            })
         finally:
             generator.shutdown()
-        actual = result["samples"].squeeze(2).float()
+        actual = result.samples.squeeze(2).float()
         assert actual.shape == reference.shape
         diff = (actual - reference).abs()
         print(f"Z-Image pipeline latent parity: max={diff.max():.6f}, mean={diff.mean():.6f}")

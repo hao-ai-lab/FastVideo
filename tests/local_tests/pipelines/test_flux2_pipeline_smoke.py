@@ -232,37 +232,38 @@ def test_flux2_klein_pipeline_load_generate_smoke() -> None:
         pytest.skip("Set FLUX2_MODEL_DIR to activate Flux2 Klein load/generate smoke")
 
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
-    generator = VideoGenerator.from_pretrained(
-        str(MODEL_DIR),
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        output_type="latent",
-        override_pipeline_cls_name="Flux2KleinPipeline",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(MODEL_DIR),
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": False,
+            "offload": {"dit": False, "vae": True, "text_encoder": True, "pin_cpu_memory": False},
+        },
+        "pipeline": {
+            "components": {"override_pipeline_cls_name": "Flux2KleinPipeline"},
+            "experimental": {"output_type": "latent"},
+        },
+    })
     try:
-        result = generator.generate_video(
-            prompt="a photo of a banana on a wooden table, studio lighting",
-            output_path="outputs_video/flux2_klein_smoke",
-            save_video=False,
-            return_frames=True,
-            height=1024,
-            width=1024,
-            num_frames=1,
-            num_inference_steps=4,
-            guidance_scale=1.0,
-            seed=0,
-        )
+        result = generator.generate({
+            "prompt": "a photo of a banana on a wooden table, studio lighting",
+            "sampling": {
+                "height": 1024,
+                "width": 1024,
+                "num_frames": 1,
+                "num_inference_steps": 4,
+                "guidance_scale": 1.0,
+                "seed": 0,
+            },
+            "output": {"output_path": "outputs_video/flux2_klein_smoke", "save_video": False, "return_frames": True},
+        })
     finally:
         generator.shutdown()
 
-    assert isinstance(result, dict)
-    result_dict = cast(dict[str, Any], result)
-    samples = result_dict["samples"]
+    assert isinstance(result, GenerationResult)
+    samples = result.samples
     assert torch.is_tensor(samples)
     assert samples.ndim in (3, 5)
     assert torch.isfinite(samples).all()
@@ -281,40 +282,40 @@ def test_flux2_full_pipeline_load_generate_smoke() -> None:
                     f"found {torch.cuda.device_count()}")
 
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
-    generator = VideoGenerator.from_pretrained(
-        str(FULL_MODEL_DIR),
-        num_gpus=FULL_NUM_GPUS,
-        tp_size=FULL_TP_SIZE,
-        sp_size=FULL_SP_SIZE,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        output_type="latent",
-        override_pipeline_cls_name="Flux2Pipeline",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(FULL_MODEL_DIR),
+        "engine": {
+            "num_gpus": FULL_NUM_GPUS,
+            "parallelism": {"tp_size": FULL_TP_SIZE, "sp_size": FULL_SP_SIZE},
+            "use_fsdp_inference": False,
+            "offload": {"dit": False, "vae": True, "text_encoder": True, "pin_cpu_memory": False},
+        },
+        "pipeline": {
+            "components": {"override_pipeline_cls_name": "Flux2Pipeline"},
+            "experimental": {"output_type": "latent"},
+        },
+    })
     try:
-        result = generator.generate_video(
-            prompt="a photo of a banana on a wooden table, studio lighting",
-            output_path="outputs_video/flux2_full_smoke",
-            save_video=False,
-            return_frames=True,
-            height=FULL_HEIGHT,
-            width=FULL_WIDTH,
-            num_frames=1,
-            num_inference_steps=FULL_NUM_INFERENCE_STEPS,
-            guidance_scale=FULL_GUIDANCE_SCALE,
-            max_sequence_length=FULL_MAX_SEQUENCE_LENGTH,
-            seed=0,
-        )
+        result = generator.generate({
+            "prompt": "a photo of a banana on a wooden table, studio lighting",
+            "sampling": {
+                "height": FULL_HEIGHT,
+                "width": FULL_WIDTH,
+                "num_frames": 1,
+                "num_inference_steps": FULL_NUM_INFERENCE_STEPS,
+                "guidance_scale": FULL_GUIDANCE_SCALE,
+                "max_sequence_length": FULL_MAX_SEQUENCE_LENGTH,
+                "seed": 0,
+            },
+            "output": {"output_path": "outputs_video/flux2_full_smoke", "save_video": False, "return_frames": True},
+        })
     finally:
         generator.shutdown()
 
-    assert isinstance(result, dict)
-    result_dict = cast(dict[str, Any], result)
-    samples = result_dict["samples"]
+    assert isinstance(result, GenerationResult)
+    samples = result.samples
     assert torch.is_tensor(samples)
     assert samples.ndim in (3, 5)
     assert torch.isfinite(samples).all()

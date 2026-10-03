@@ -220,21 +220,22 @@ def test_gen3c_full_pipeline_smoke():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=False,
     )
-    result = generator.generate_video(
-        prompt=prompt,
-        output_path="outputs_video/gen3c_smoke",
-        save_video=False,
-        height=height,
-        width=width,
-        num_frames=num_frames,
-        fps=24,
-        num_inference_steps=steps,
-        guidance_scale=6.0,
-        seed=seed,
-    )
+    result = generator.generate({
+        "prompt": prompt,
+        "sampling": {
+            "height": height,
+            "width": width,
+            "num_frames": num_frames,
+            "fps": 24,
+            "num_inference_steps": steps,
+            "guidance_scale": 6.0,
+            "seed": seed,
+        },
+        "output": {"output_path": "outputs_video/gen3c_smoke", "save_video": False},
+    })
     generator.shutdown()
 
-    fastvideo_out = result["samples"]
+    fastvideo_out = result.samples
     fastvideo_out = fastvideo_out.to(device=device, dtype=torch.float32)
     _log_tensor_stats("gen3c_output", fastvideo_out)
 

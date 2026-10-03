@@ -99,17 +99,20 @@ def _fastvideo_edit_image(device) -> np.ndarray:
         pytest.skip(f"FastVideo VideoGenerator unavailable: {e}")
     condition = Image.open(CONDITION_IMAGE).convert("RGB")
     gen = VideoGenerator.from_pretrained(str(LOCAL_WEIGHTS_DIR), num_gpus=1, trust_remote_code=True)
-    result = gen.generate_video(prompt=EDIT_PROMPT,
-                                pil_image=condition,
-                                save_video=False,
-                                return_frames=True,
-                                height=HEIGHT,
-                                width=WIDTH,
-                                num_inference_steps=STEPS,
-                                guidance_scale=1.5,
-                                seed=SEED)
+    result = gen.generate({
+        "prompt": EDIT_PROMPT,
+        "inputs": {"pil_image": condition},
+        "sampling": {
+            "height": HEIGHT,
+            "width": WIDTH,
+            "num_inference_steps": STEPS,
+            "guidance_scale": 1.5,
+            "seed": SEED,
+        },
+        "output": {"save_video": False, "return_frames": True},
+    })
     gen.shutdown()
-    return _to_uint8_hwc(result["frames"][0])
+    return _to_uint8_hwc(result.frames[0])
 
 
 def test_edit_pipeline_produces_valid_image(device):

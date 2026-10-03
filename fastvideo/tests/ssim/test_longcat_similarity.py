@@ -215,29 +215,43 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrid
     output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
 
-    init_kwargs = {
-        "num_gpus": params["num_gpus"],
-        "use_fsdp_inference": True,
-        "dit_cpu_offload": True,
-        "vae_cpu_offload": True,
-        "text_encoder_cpu_offload": True,
-        "enable_bsa": False,
+    generator_config = {
+        "model_path": params["model_path"],
+        "engine": {
+            "num_gpus": params["num_gpus"],
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": True,
+                "vae": True,
+                "text_encoder": True,
+            },
+        },
+        "pipeline": {
+            "longcat": {
+                "enable_bsa": False,
+            },
+        },
     }
 
-    generation_kwargs = {
-        "output_path": output_dir,
-        "height": params["height"],
-        "width": params["width"],
-        "num_frames": params["num_frames"],
-        "num_inference_steps": params["num_inference_steps"],
-        "guidance_scale": params["guidance_scale"],
-        "fps": params["fps"],
-        "seed": params["seed"],
+    request = {
+        "prompt": prompt,
         "negative_prompt": params["negative_prompt"],
+        "sampling": {
+            "height": params["height"],
+            "width": params["width"],
+            "num_frames": params["num_frames"],
+            "num_inference_steps": params["num_inference_steps"],
+            "guidance_scale": params["guidance_scale"],
+            "fps": params["fps"],
+            "seed": params["seed"],
+        },
+        "output": {
+            "output_path": output_dir,
+        },
     }
 
-    generator = VideoGenerator.from_pretrained(model_path=params["model_path"], **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
+    generator = VideoGenerator.from_config(generator_config)
+    generator.generate(request)
     generator.shutdown()
 
     generated_video_path = os.path.join(output_dir, output_video_name)
@@ -307,30 +321,46 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrid
     prompt_idx = I2V_TEST_PROMPTS.index(prompt)
     image_path = _resolve_asset_path(I2V_IMAGE_PATHS[prompt_idx])
 
-    init_kwargs = {
-        "num_gpus": params["num_gpus"],
-        "use_fsdp_inference": True,
-        "dit_cpu_offload": True,
-        "vae_cpu_offload": True,
-        "text_encoder_cpu_offload": True,
-        "enable_bsa": False,
+    generator_config = {
+        "model_path": params["model_path"],
+        "engine": {
+            "num_gpus": params["num_gpus"],
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": True,
+                "vae": True,
+                "text_encoder": True,
+            },
+        },
+        "pipeline": {
+            "longcat": {
+                "enable_bsa": False,
+            },
+        },
     }
 
-    generation_kwargs = {
-        "output_path": output_dir,
-        "image_path": image_path,
-        "height": params["height"],
-        "width": params["width"],
-        "num_frames": params["num_frames"],
-        "num_inference_steps": params["num_inference_steps"],
-        "guidance_scale": params["guidance_scale"],
-        "fps": params["fps"],
-        "seed": params["seed"],
+    request = {
+        "prompt": prompt,
         "negative_prompt": params["negative_prompt"],
+        "inputs": {
+            "image_path": image_path,
+        },
+        "sampling": {
+            "height": params["height"],
+            "width": params["width"],
+            "num_frames": params["num_frames"],
+            "num_inference_steps": params["num_inference_steps"],
+            "guidance_scale": params["guidance_scale"],
+            "fps": params["fps"],
+            "seed": params["seed"],
+        },
+        "output": {
+            "output_path": output_dir,
+        },
     }
 
-    generator = VideoGenerator.from_pretrained(model_path=params["model_path"], **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
+    generator = VideoGenerator.from_config(generator_config)
+    generator.generate(request)
     generator.shutdown()
 
     generated_video_path = os.path.join(output_dir, output_video_name)
@@ -403,32 +433,50 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str, env_override
     if not os.path.exists(video_path):
         pytest.skip(f"Input video not found at {video_path}")
 
-    init_kwargs = {
-        "num_gpus": params["num_gpus"],
-        "use_fsdp_inference": False,
-        "dit_cpu_offload": False,
-        "vae_cpu_offload": True,
-        "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": False,
-        "enable_bsa": False,
+    generator_config = {
+        "model_path": params["model_path"],
+        "engine": {
+            "num_gpus": params["num_gpus"],
+            "use_fsdp_inference": False,
+            "offload": {
+                "dit": False,
+                "vae": True,
+                "text_encoder": True,
+                "pin_cpu_memory": False,
+            },
+        },
+        "pipeline": {
+            "longcat": {
+                "enable_bsa": False,
+            },
+        },
     }
 
-    generation_kwargs = {
-        "output_path": output_dir,
-        "video_path": video_path,
-        "num_cond_frames": params["num_cond_frames"],
-        "height": params["height"],
-        "width": params["width"],
-        "num_frames": params["num_frames"],
-        "num_inference_steps": params["num_inference_steps"],
-        "guidance_scale": params["guidance_scale"],
-        "fps": params["fps"],
-        "seed": params["seed"],
+    request = {
+        "prompt": prompt,
         "negative_prompt": params["negative_prompt"],
+        "inputs": {
+            "video_path": video_path,
+        },
+        "sampling": {
+            "height": params["height"],
+            "width": params["width"],
+            "num_frames": params["num_frames"],
+            "num_inference_steps": params["num_inference_steps"],
+            "guidance_scale": params["guidance_scale"],
+            "fps": params["fps"],
+            "seed": params["seed"],
+        },
+        "output": {
+            "output_path": output_dir,
+        },
+        "extensions": {
+            "num_cond_frames": params["num_cond_frames"],
+        },
     }
 
-    generator = VideoGenerator.from_pretrained(model_path=params["model_path"], **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
+    generator = VideoGenerator.from_config(generator_config)
+    generator.generate(request)
     generator.shutdown()
 
     generated_video_path = os.path.join(output_dir, output_video_name)

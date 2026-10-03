@@ -162,20 +162,24 @@ def _run_fastvideo(
 ) -> torch.Tensor:
     """Run the converted native pipeline with the same prompt, seed, shape, and schedule."""
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
-    generator = VideoGenerator.from_pretrained(
-        str(model_dir),
-        num_gpus=NUM_GPUS,
-        sp_size=SP_SIZE,
-        use_fsdp_inference=USE_FSDP,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        output_type=PARITY_OUTPUT_TYPE,
-        refine_enabled=False,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(model_dir),
+        "engine": {
+            "num_gpus": NUM_GPUS,
+            "parallelism": {"sp_size": SP_SIZE},
+            "use_fsdp_inference": USE_FSDP,
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "vae": True,
+                "text_encoder": True,
+                "pin_cpu_memory": False,
+            },
+        },
+        "pipeline": {"experimental": {"output_type": PARITY_OUTPUT_TYPE, "refine_enabled": False}},
+    })
     try:
         worker_backends = generator.executor.collective_rpc(_configure_worker_backends)
         for backend in worker_backends:
@@ -189,22 +193,22 @@ def _run_fastvideo(
                 assert backend["flash"] is False
                 assert backend["mem_efficient"] is False
                 assert backend["math"] is True
-        result = generator.generate_video(
-            prompt=PROMPT,
-            negative_prompt=negative_prompt,
-            output_path=str(output_dir),
-            save_video=False,
-            return_frames=True,
-            height=HEIGHT,
-            width=WIDTH,
-            num_frames=NUM_FRAMES,
-            num_inference_steps=NUM_INFERENCE_STEPS,
-            guidance_scale=3.0,
-            batch_cfg=BATCH_CFG,
-            seed=42,
-            latents=latents.clone(),
-        )
-        samples = cast(dict[str, Any], result)["samples"]
+        result = generator.generate({
+            "prompt": PROMPT,
+            "negative_prompt": negative_prompt,
+            "inputs": {"latents": latents.clone()},
+            "sampling": {
+                "height": HEIGHT,
+                "width": WIDTH,
+                "num_frames": NUM_FRAMES,
+                "num_inference_steps": NUM_INFERENCE_STEPS,
+                "guidance_scale": 3.0,
+                "batch_cfg": BATCH_CFG,
+                "seed": 42,
+            },
+            "output": {"output_path": str(output_dir), "save_video": False, "return_frames": True},
+        })
+        samples = cast(GenerationResult, result).samples
         return _as_channel_first_tensor(samples)
     finally:
         generator.shutdown()

@@ -172,37 +172,53 @@ def test_lingbot_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrid
     output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
 
-    init_kwargs = {
-        "num_gpus": params["num_gpus"],
-        "flow_shift": params["flow_shift"],
-        "boundary_ratio": params["boundary_ratio"],
-        "use_fsdp_inference": True,
-        "dit_cpu_offload": True,
-        "dit_layerwise_offload": False,
-        "text_encoder_cpu_offload": True,
-        "vae_cpu_offload": False,
-        "pin_cpu_memory": True,
+    generator_config = {
+        "model_path": params["model_path"],
+        "engine": {
+            "num_gpus": params["num_gpus"],
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": True,
+                "dit_layerwise": False,
+                "text_encoder": True,
+                "vae": False,
+                "pin_cpu_memory": True,
+            },
+        },
+        "pipeline": {
+            "flow_shift": params["flow_shift"],
+            "experimental": {
+                "boundary_ratio": params["boundary_ratio"],
+            },
+        },
     }
-    generation_kwargs = {
-        "output_path": output_dir,
-        "image_path": params["image_path"],
-        "height": params["height"],
-        "width": params["width"],
-        "num_frames": aligned_num_frames,
-        "num_inference_steps": params["num_inference_steps"],
-        "guidance_scale": params["guidance_scale"],
-        "guidance_scale_2": params["guidance_scale_2"],
-        "embedded_cfg_scale": params["embedded_cfg_scale"],
-        "seed": params["seed"],
-        "fps": params["fps"],
+    request = {
+        "prompt": prompt,
         "negative_prompt": params["negative_prompt"],
-        "c2ws_plucker_emb": c2ws_plucker_emb,
+        "inputs": {
+            "image_path": params["image_path"],
+            "c2ws_plucker_emb": c2ws_plucker_emb,
+        },
+        "sampling": {
+            "height": params["height"],
+            "width": params["width"],
+            "num_frames": aligned_num_frames,
+            "num_inference_steps": params["num_inference_steps"],
+            "guidance_scale": params["guidance_scale"],
+            "guidance_scale_2": params["guidance_scale_2"],
+            "embedded_cfg_scale": params["embedded_cfg_scale"],
+            "seed": params["seed"],
+            "fps": params["fps"],
+        },
+        "output": {
+            "output_path": output_dir,
+        },
     }
 
     generator: VideoGenerator | None = None
     try:
-        generator = VideoGenerator.from_pretrained(model_path=params["model_path"], **init_kwargs)
-        generator.generate_video(prompt, **generation_kwargs)
+        generator = VideoGenerator.from_config(generator_config)
+        generator.generate(request)
     finally:
         if generator is not None:
             generator.shutdown()

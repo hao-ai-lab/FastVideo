@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 import torch
@@ -72,42 +72,51 @@ def test_lingbotworld2_checkpoint_selects_expected_pipeline_and_defaults() -> No
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="LingBot World 2 heavy smoke requires CUDA")
 def test_lingbotworld2_14b_generates_finite_latents_on_8_gpus() -> None:
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
-    generator = VideoGenerator.from_pretrained(
-        str(MODEL_DIR),
-        num_gpus=8,
-        sp_size=8,
-        hsdp_shard_dim=8,
-        use_fsdp_inference=True,
-        dit_layerwise_offload=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-        pin_cpu_memory=True,
-        output_type="latent",
-        override_pipeline_cls_name="LingBotWorld2CausalFastPipeline",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(MODEL_DIR),
+        "engine": {
+            "num_gpus": 8,
+            "parallelism": {"sp_size": 8, "hsdp_shard_dim": 8},
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit_layerwise": False,
+                "dit": False,
+                "vae": False,
+                "text_encoder": False,
+                "pin_cpu_memory": True,
+            },
+        },
+        "pipeline": {
+            "components": {"override_pipeline_cls_name": "LingBotWorld2CausalFastPipeline"},
+            "experimental": {"output_type": "latent"},
+        },
+    })
     try:
-        result = generator.generate_video(
-            "A serene lakeside scene with a lone tree standing in calm water.",
-            image_path=str(ACTION_PATH / "image.jpg"),
-            action_path=str(ACTION_PATH),
-            output_path="/mnt/weka/shrd/wm/junda/fv-hub/lingbot-world-v2/outputs/fastvideo/heavy_smoke",
-            save_video=False,
-            return_frames=True,
-            height=480,
-            width=832,
-            num_frames=17,
-            num_inference_steps=4,
-            guidance_scale=1.0,
-            negative_prompt="",
-            fps=16,
-            seed=42,
-        )
+        result = generator.generate({
+            "prompt": "A serene lakeside scene with a lone tree standing in calm water.",
+            "negative_prompt": "",
+            "inputs": {"image_path": str(ACTION_PATH / "image.jpg"), "action_path": str(ACTION_PATH)},
+            "sampling": {
+                "height": 480,
+                "width": 832,
+                "num_frames": 17,
+                "num_inference_steps": 4,
+                "guidance_scale": 1.0,
+                "fps": 16,
+                "seed": 42,
+            },
+            "output": {
+                "output_path": "/mnt/weka/shrd/wm/junda/fv-hub/lingbot-world-v2/outputs/fastvideo/heavy_smoke",
+                "save_video": False,
+                "return_frames": True,
+            },
+        })
     finally:
         generator.shutdown()
 
-    samples = cast(dict[str, Any], result)["samples"]
+    samples = cast(GenerationResult, result).samples
     assert torch.is_tensor(samples)
     assert samples.ndim == 5
     assert samples.shape[1] == 16

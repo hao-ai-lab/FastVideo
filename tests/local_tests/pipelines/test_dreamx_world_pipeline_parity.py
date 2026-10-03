@@ -65,6 +65,7 @@ def test_dreamx_world_one_step_pipeline_latent_matches_manual_pass() -> None:
         pytest.fail(f"DreamX-World converted model directory is missing: {MODEL_DIR}")
 
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
     common_kwargs = dict(
         prompt="a quiet road through a futuristic city at sunrise",
         output_path="outputs_video/dreamx_world_parity",
@@ -80,20 +81,30 @@ def test_dreamx_world_one_step_pipeline_latent_matches_manual_pass() -> None:
         seed=123,
     )
 
-    generator = VideoGenerator.from_pretrained(
-        str(MODEL_DIR),
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        output_type="latent",
-        override_pipeline_cls_name="DreamXWorldPipeline",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": str(MODEL_DIR),
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": False,
+            "offload": {"dit": False, "vae": True, "text_encoder": True, "pin_cpu_memory": False},
+        },
+        "pipeline": {
+            "components": {"override_pipeline_cls_name": "DreamXWorldPipeline"},
+            "experimental": {"output_type": "latent"},
+        },
+    })
     try:
-        result = cast(dict[str, Any], generator.generate_video(**common_kwargs))
-        pipeline_latents = cast(torch.Tensor, result["samples"]).detach().cpu()
+        # The request carries the same values as common_kwargs, which the manual pass below also reads.
+        result = cast(GenerationResult, generator.generate({
+            "prompt": common_kwargs["prompt"],
+            "sampling": {
+                key: common_kwargs[key]
+                for key in ("height", "width", "num_frames", "num_inference_steps", "guidance_scale", "seed")
+            },
+            "output": {key: common_kwargs[key] for key in ("output_path", "save_video", "return_frames")},
+            "extensions": {key: common_kwargs[key] for key in ("action_list", "action_speed_list")},
+        }))
+        pipeline_latents = cast(torch.Tensor, result.samples).detach().cpu()
 
         manual_latents = generator.executor.collective_rpc(
             _run_worker_forward_batch,

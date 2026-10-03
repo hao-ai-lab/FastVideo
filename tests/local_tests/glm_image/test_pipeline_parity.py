@@ -201,16 +201,19 @@ def _fastvideo_image(device) -> np.ndarray:
     except ImportError as e:
         pytest.skip(f"FastVideo VideoGenerator unavailable: {e}")
     gen = VideoGenerator.from_pretrained(str(LOCAL_WEIGHTS_DIR), num_gpus=1, trust_remote_code=True)
-    result = gen.generate_video(prompt=SAMPLE_PROMPT,
-                                save_video=False,
-                                return_frames=True,
-                                height=HEIGHT,
-                                width=WIDTH,
-                                num_inference_steps=STEPS,
-                                guidance_scale=1.5,
-                                seed=SEED)
+    result = gen.generate({
+        "prompt": SAMPLE_PROMPT,
+        "sampling": {
+            "height": HEIGHT,
+            "width": WIDTH,
+            "num_inference_steps": STEPS,
+            "guidance_scale": 1.5,
+            "seed": SEED,
+        },
+        "output": {"save_video": False, "return_frames": True},
+    })
     gen.shutdown()
-    return _to_uint8_hwc(result["frames"][0])
+    return _to_uint8_hwc(result.frames[0])
 
 
 def test_fastvideo_pipeline_produces_valid_image(device):

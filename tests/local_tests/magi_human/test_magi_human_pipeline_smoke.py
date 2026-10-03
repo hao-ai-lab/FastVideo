@@ -10,7 +10,7 @@ Two tests:
     CI should run on every PR.
 
   * `test_magi_human_pipeline_smoke` — end-to-end pipeline construction +
-    a tiny generate_video call, gated on local converted-weights paths.
+    a tiny generate call, gated on local converted-weights paths.
     Skips cleanly when weights are missing.
 """
 from __future__ import annotations
@@ -219,20 +219,21 @@ def test_magi_human_pipeline_smoke() -> None:
         text_encoder_cpu_offload=False,
     )
     try:
-        result = generator.generate_video(
-            prompt=prompt,
-            output_path="outputs_video/magi_human_smoke",
-            save_video=False,
-            height=height,
-            width=width,
-            num_frames=num_frames,
-            fps=fps,
-            num_inference_steps=steps,
-            seed=seed,
-        )
+        result = generator.generate({
+            "prompt": prompt,
+            "sampling": {
+                "height": height,
+                "width": width,
+                "num_frames": num_frames,
+                "fps": fps,
+                "num_inference_steps": steps,
+                "seed": seed,
+            },
+            "output": {"output_path": "outputs_video/magi_human_smoke", "save_video": False},
+        })
     finally:
         generator.shutdown()
 
-    samples = result["samples"]
+    samples = result.samples
     assert samples.ndim == 5, f"expected [B,C,T,H,W], got {samples.shape}"
     assert samples.shape[0] == 1

@@ -168,22 +168,28 @@ def test_stable_audio_pipeline_official_parity():
         text_encoder_cpu_offload=False,
     )
     try:
-        result = generator.generate_video(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            output_path="outputs_audio/stable_audio_parity.mp4",
-            save_video=False,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            seed=seed,
-            audio_end_in_s=audio_end_in_s,
-        )
+        result = generator.generate({
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "sampling": {
+                "num_inference_steps": num_inference_steps,
+                "guidance_scale": guidance_scale,
+                "seed": seed,
+            },
+            "output": {
+                "output_path": "outputs_audio/stable_audio_parity.mp4",
+                "save_video": False,
+            },
+            "extensions": {
+                "audio_end_in_s": audio_end_in_s,
+            },
+        })
     finally:
         generator.shutdown()
 
-    fv_audio = result.get("audio")
+    fv_audio = result.audio
     if fv_audio is None:
-        ext = result.get("extra", {}) or {}
+        ext = result.extra.get("extra", {}) or {}
         fv_audio = ext.get("decoded_audio")
     assert fv_audio is not None, "FastVideo pipeline did not surface audio"
     if not torch.is_tensor(fv_audio):

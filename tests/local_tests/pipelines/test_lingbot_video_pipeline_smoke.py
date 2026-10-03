@@ -129,6 +129,7 @@ def test_lingbot_video_pipeline_load_generate_smoke(tmp_path: Path) -> None:
     if os.environ.get("LINGBOT_VIDEO_RUN_GPU_TESTS") != "1":
         pytest.skip("set LINGBOT_VIDEO_RUN_GPU_TESTS=1 on an allocated GPU")
     from fastvideo import VideoGenerator
+    from fastvideo.api import GenerationResult
 
     use_fsdp_inference = os.environ.get("LINGBOT_VIDEO_USE_FSDP") == "1"
     num_gpus = int(os.environ.get("LINGBOT_VIDEO_NUM_GPUS", "1"))
@@ -156,21 +157,21 @@ def test_lingbot_video_pipeline_load_generate_smoke(tmp_path: Path) -> None:
         output_type="latent",
     )
     try:
-        result = generator.generate_video(
-            prompt="A red fox runs through fresh snow at sunrise.",
-            output_path=str(tmp_path),
-            save_video=False,
-            return_frames=True,
-            height=32,
-            width=32,
-            num_frames=1,
-            num_inference_steps=1,
-            guidance_scale=3.0,
-            seed=42,
-        )
+        result = generator.generate({
+            "prompt": "A red fox runs through fresh snow at sunrise.",
+            "sampling": {
+                "height": 32,
+                "width": 32,
+                "num_frames": 1,
+                "num_inference_steps": 1,
+                "guidance_scale": 3.0,
+                "seed": 42,
+            },
+            "output": {"output_path": str(tmp_path), "save_video": False, "return_frames": True},
+        })
     finally:
         generator.shutdown()
-    samples = cast(dict[str, Any], result)["samples"]
+    samples = cast(GenerationResult, result).samples
     assert torch.is_tensor(samples)
     assert tuple(samples.shape) == (1, 16, 1, 4, 4)
     assert torch.isfinite(samples).all()

@@ -30,7 +30,7 @@ heterogeneous CI pool, so we move the assertion upstream of the VAE.
 Design
 ------
 * Inference is run with ``output_type='latent'`` so ``DecodingStage``
-  hands back the un-decoded latent on ``result["samples"]``.
+  hands back the un-decoded latent on ``result.samples``.
 * The reference artefact is a ``.pt`` bundle (tensor + metadata) hosted
   on the same HF dataset as the mp4 references, selected by
   ``<GPU>_reference_videos/<model_id>/<backend>/<prompt>.pt``.
@@ -63,11 +63,14 @@ import torch
 from torch.nn.functional import cosine_similarity
 
 from fastvideo import VideoGenerator
+from fastvideo.api import GenerationResult
 from fastvideo.tests.ssim.bootstrap_references import (
     xfail_missing_reference_in_bootstrap_mode, )
 from fastvideo.tests.ssim.inference_similarity_utils import (
     attention_backend,
     build_generation_kwargs,
+    build_generation_request,
+    build_generator_config,
     build_init_kwargs,
     shutdown_executor,
 )
@@ -332,12 +335,12 @@ def _assert_latent_similarity(
 
 def _extract_latent_from_result(result: Any) -> torch.Tensor:
     """Pull a fp32 cpu latent tensor (5-D video or 3-D audio) from
-    ``generate_video`` output.
+    ``generate`` output.
     """
-    if not isinstance(result, dict):
-        raise RuntimeError("VideoGenerator.generate_video returned unexpected payload "
-                           f"(type={type(result)!r}); expected dict with 'samples'.")
-    samples = result.get("samples")
+    if not isinstance(result, GenerationResult):
+        raise RuntimeError("VideoGenerator.generate returned unexpected payload "
+                           f"(type={type(result)!r}); expected GenerationResult with 'samples'.")
+    samples = result.samples
     if samples is None:
         raise RuntimeError("VideoGenerator did not return latent samples. Ensure "
                            "output_type='latent' and return_frames=True for this call.")
@@ -412,11 +415,8 @@ def run_text_to_latent_similarity_test(
 
         generator: VideoGenerator | None = None
         try:
-            generator = VideoGenerator.from_pretrained(
-                model_path=base_params["model_path"],
-                **init_kwargs,
-            )
-            result = generator.generate_video(prompt, **generation_kwargs)
+            generator = VideoGenerator.from_config(build_generator_config(base_params["model_path"], init_kwargs))
+            result = generator.generate(build_generation_request(prompt, generation_kwargs))
         finally:
             shutdown_executor(generator)
 

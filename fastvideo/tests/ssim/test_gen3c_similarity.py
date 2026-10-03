@@ -144,29 +144,41 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id, env_ove
             pytest.skip("FASTVIDEO_TEST_GEN3C_MODEL_PATH is not Diffusers-format "
                         f"(missing model_index.json): {model_path}")
 
-    init_kwargs = {
-        "num_gpus": BASE_PARAMS["num_gpus"],
-        "sp_size": BASE_PARAMS["sp_size"],
-        "tp_size": BASE_PARAMS["tp_size"],
+    generator_config = {
+        "model_path": model_path,
+        "engine": {
+            "num_gpus": BASE_PARAMS["num_gpus"],
+            "parallelism": {
+                "sp_size": BASE_PARAMS["sp_size"],
+                "tp_size": BASE_PARAMS["tp_size"],
+            },
+        },
     }
     if "flow_shift" in BASE_PARAMS:
-        init_kwargs["flow_shift"] = BASE_PARAMS["flow_shift"]
+        generator_config["pipeline"] = {"flow_shift": BASE_PARAMS["flow_shift"]}
 
-    generation_kwargs = {
-        "num_inference_steps": num_inference_steps,
-        "output_path": os.path.join(output_dir, output_video_name),
-        "height": BASE_PARAMS["height"],
-        "width": BASE_PARAMS["width"],
-        "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
-        "seed": BASE_PARAMS["seed"],
-        "image_path": _resolve_gen3c_test_image_path(),
-        "fps": BASE_PARAMS["fps"],
+    request = {
+        "prompt": prompt,
+        "inputs": {
+            "image_path": _resolve_gen3c_test_image_path(),
+        },
+        "sampling": {
+            "num_inference_steps": num_inference_steps,
+            "height": BASE_PARAMS["height"],
+            "width": BASE_PARAMS["width"],
+            "num_frames": BASE_PARAMS["num_frames"],
+            "guidance_scale": BASE_PARAMS["guidance_scale"],
+            "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
+            "seed": BASE_PARAMS["seed"],
+            "fps": BASE_PARAMS["fps"],
+        },
+        "output": {
+            "output_path": os.path.join(output_dir, output_video_name),
+        },
     }
 
-    if not os.path.exists(generation_kwargs["image_path"]):
-        pytest.skip(f"GEN3C test image not found: {generation_kwargs['image_path']}. "
+    if not os.path.exists(request["inputs"]["image_path"]):
+        pytest.skip(f"GEN3C test image not found: {request['inputs']['image_path']}. "
                     "Set FASTVIDEO_TEST_GEN3C_IMAGE_PATH to a valid local image.")
 
     # Keep local reruns deterministic: remove prior candidate outputs so
@@ -175,8 +187,8 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id, env_ove
     for stale_video in glob.glob(stale_pattern):
         os.remove(stale_video)
 
-    generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
+    generator = VideoGenerator.from_config(generator_config)
+    generator.generate(request)
 
     if isinstance(generator.executor, MultiprocExecutor):
         generator.executor.shutdown()

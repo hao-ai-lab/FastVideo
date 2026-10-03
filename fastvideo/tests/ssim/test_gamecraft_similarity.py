@@ -187,24 +187,31 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overr
         "pin_cpu_memory": True,
     }
 
-    generation_kwargs = {
-        "num_inference_steps": num_inference_steps,
-        "output_path": output_dir,
-        "height": BASE_PARAMS["height"],
-        "width": BASE_PARAMS["width"],
-        "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "seed": BASE_PARAMS["seed"],
-        "fps": 24,
-        "camera_states": camera_states,
+    request = {
+        "prompt": prompt,
         "negative_prompt": BASE_PARAMS.get("negative_prompt", ""),
-        "save_video": True,
+        "sampling": {
+            "num_inference_steps": num_inference_steps,
+            "height": BASE_PARAMS["height"],
+            "width": BASE_PARAMS["width"],
+            "num_frames": BASE_PARAMS["num_frames"],
+            "guidance_scale": BASE_PARAMS["guidance_scale"],
+            "seed": BASE_PARAMS["seed"],
+            "fps": 24,
+        },
+        "output": {
+            "output_path": output_dir,
+            "save_video": True,
+        },
+        "extensions": {
+            "camera_states": camera_states,
+        },
     }
 
     generator: VideoGenerator | None = None
     try:
         generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
-        generator.generate_video(prompt, **generation_kwargs)
+        generator.generate(request)
     finally:
         _shutdown_executor(generator)
 
@@ -310,25 +317,34 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overr
         "pin_cpu_memory": True,
     }
 
-    generation_kwargs = {
-        "num_inference_steps": num_inference_steps,
-        "output_path": output_dir,
-        "image_path": BASE_PARAMS["image_path"],
-        "height": BASE_PARAMS["height"],
-        "width": BASE_PARAMS["width"],
-        "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "seed": BASE_PARAMS["seed"],
-        "fps": 24,
-        "camera_states": camera_states,
+    request = {
+        "prompt": prompt,
         "negative_prompt": BASE_PARAMS.get("negative_prompt", ""),
-        "save_video": True,
+        "inputs": {
+            "image_path": BASE_PARAMS["image_path"],
+        },
+        "sampling": {
+            "num_inference_steps": num_inference_steps,
+            "height": BASE_PARAMS["height"],
+            "width": BASE_PARAMS["width"],
+            "num_frames": BASE_PARAMS["num_frames"],
+            "guidance_scale": BASE_PARAMS["guidance_scale"],
+            "seed": BASE_PARAMS["seed"],
+            "fps": 24,
+        },
+        "output": {
+            "output_path": output_dir,
+            "save_video": True,
+        },
+        "extensions": {
+            "camera_states": camera_states,
+        },
     }
 
     generator: VideoGenerator | None = None
     try:
         generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
-        generator.generate_video(prompt, **generation_kwargs)
+        generator.generate(request)
     finally:
         _shutdown_executor(generator)
 

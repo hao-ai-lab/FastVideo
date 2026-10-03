@@ -339,20 +339,21 @@ def test_gamecraft_pipeline_latent_parity():
     )
 
     # Run generation
-    result = generator.generate_video(
-        prompt=prompt,
-        output_path="outputs_video/gamecraft_test",
-        save_video=False,
-        height=height,
-        width=width,
-        num_frames=num_frames,
-        num_inference_steps=num_inference_steps,
-        seed=seed,
-        guidance_scale=1.0,
-        camera_states=plucker_embedding,
-    )
+    result = generator.generate({
+        "prompt": prompt,
+        "sampling": {
+            "height": height,
+            "width": width,
+            "num_frames": num_frames,
+            "num_inference_steps": num_inference_steps,
+            "seed": seed,
+            "guidance_scale": 1.0,
+        },
+        "output": {"output_path": "outputs_video/gamecraft_test", "save_video": False},
+        "extensions": {"camera_states": plucker_embedding},
+    })
 
-    fastvideo_latents = result.get("samples")
+    fastvideo_latents = result.samples
 
     _log_tensor_stats("FastVideo latents", fastvideo_latents)
 
@@ -488,20 +489,22 @@ def test_gamecraft_pipeline_smoke():
         pin_cpu_memory=False,
     )
 
-    result = generator.generate_video(
-        prompt="A test video.",
-        output_path="outputs_video/gamecraft_smoke",
-        save_video=False,
-        height=height,
-        width=width,
-        num_frames=num_frames,
-        num_inference_steps=num_inference_steps,
-        seed=123,
-        guidance_scale=1.0,
-    )
+    result = generator.generate({
+        "prompt": "A test video.",
+        "sampling": {
+            "height": height,
+            "width": width,
+            "num_frames": num_frames,
+            "num_inference_steps": num_inference_steps,
+            "seed": 123,
+            "guidance_scale": 1.0,
+        },
+        "output": {"output_path": "outputs_video/gamecraft_smoke", "save_video": False},
+    })
 
     assert result is not None, "Pipeline returned None"
-    assert "samples" in result or "latents" in result, "No output in result"
+    legacy_result = result.to_legacy_dict()
+    assert "samples" in legacy_result or "latents" in legacy_result, "No output in result"
 
     generator.shutdown()
 

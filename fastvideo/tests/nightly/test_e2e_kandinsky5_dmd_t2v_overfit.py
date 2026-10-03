@@ -19,9 +19,9 @@ The full validated chain, each arrow a hard assertion:
     -> dcp_to_diffusers --verify (strict reload)
     -> stage-2 train (student/teacher/critic init_from that export)
     -> stage-2 student DCP -> dcp_to_diffusers --verify (strict reload)
-    -> VideoGenerator.from_pretrained(export,
-           override_pipeline_cls_name="Kandinsky5DMDPipeline",
-           pipeline_config=Kandinsky5DMDConfig())   # the documented recipe
+    -> VideoGenerator.from_config({"model_path": export, "pipeline": {
+           "components": {"override_pipeline_cls_name": "Kandinsky5DMDPipeline"},
+           "experimental": {"pipeline_config": Kandinsky5DMDConfig()}}})   # the documented recipe
     -> deterministic (fixed-seed) 4-step generation
     -> degeneracy checks + MS-SSIM against the committed reference video.
 
@@ -362,22 +362,34 @@ def _generate_main(export_dir: str, output_dir: str) -> None:
     from fastvideo import VideoGenerator
     from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5DMDConfig
 
-    generator = VideoGenerator.from_pretrained(
-        export_dir,
-        num_gpus=1,
-        override_pipeline_cls_name="Kandinsky5DMDPipeline",
-        pipeline_config=Kandinsky5DMDConfig(),
-        use_fsdp_inference=False,
-    )
-    generator.generate_video(
-        GENERATION_PROMPT,
-        output_path=output_dir,
-        save_video=True,
-        seed=GENERATION_SEED,
-        height=512,
-        width=768,
-        num_frames=121,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": export_dir,
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": False,
+        },
+        "pipeline": {
+            "components": {
+                "override_pipeline_cls_name": "Kandinsky5DMDPipeline",
+            },
+            "experimental": {
+                "pipeline_config": Kandinsky5DMDConfig(),
+            },
+        },
+    })
+    generator.generate({
+        "prompt": GENERATION_PROMPT,
+        "sampling": {
+            "seed": GENERATION_SEED,
+            "height": 512,
+            "width": 768,
+            "num_frames": 121,
+        },
+        "output": {
+            "output_path": output_dir,
+            "save_video": True,
+        },
+    })
 
 
 def _decode_video(video_path: Path) -> np.ndarray:

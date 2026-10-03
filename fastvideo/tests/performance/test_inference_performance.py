@@ -11,6 +11,7 @@ import json
 import os
 import time
 from collections.abc import Mapping
+from dataclasses import fields
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,6 +20,7 @@ import pytest
 
 import fastvideo.envs as envs
 from fastvideo import VideoGenerator
+from fastvideo.api import InputConfig, OutputConfig, RequestRuntimeConfig, SamplingConfig
 from fastvideo.logger import init_logger
 from fastvideo.tests.performance.identity import (
     benchmark_identity_from_config,
@@ -56,6 +58,26 @@ V2_OPTIONAL_METADATA_FIELDS = ("quality_metadata", )
 COMMON_OBJECT_FIELDS = ("regression_thresholds", )
 RESULT_SCHEMA_VERSION = 2
 VALID_RUN_SOURCES = {"pr", "local", "scheduled_main", "unknown"}
+# Typed GeneratorConfig path of each flat init keyword that the benchmark configs set.
+_INIT_KWARG_CONFIG_PATHS = {
+    "num_gpus": "engine.num_gpus",
+    "sp_size": "engine.parallelism.sp_size",
+    "tp_size": "engine.parallelism.tp_size",
+    "text_encoder_precisions": "engine.precision.text_encoders",
+    "flow_shift": "pipeline.flow_shift",
+    "vae_sp": "pipeline.vae_sp",
+}
+# Request section that holds each field of the typed generation request configs.
+_REQUEST_SECTION_FIELDS = {
+    section_name: {config_field.name
+                   for config_field in fields(section_type)}
+    for section_name, section_type in (
+        ("inputs", InputConfig),
+        ("sampling", SamplingConfig),
+        ("runtime", RequestRuntimeConfig),
+        ("output", OutputConfig),
+    )
+}
 OPTIONAL_RESULT_METADATA_FIELDS = ("quality_metadata", "variant_metadata")
 
 # -- Config discovery -------------------------------------------------------
@@ -180,6 +202,44 @@ def _shutdown_executor(generator):
         generator.executor.shutdown()
 
 
+def _generator_config(model_path: str, init_kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the ``VideoGenerator.from_config`` mapping for a benchmark's flat init keywords.
+
+    This applies the placement rule for flat ``GeneratorConfig`` keywords: a keyword in
+    ``_INIT_KWARG_CONFIG_PATHS`` sets its typed ``GeneratorConfig`` path, and any other keyword, such as
+    ``vae_tiling``, goes to ``pipeline.experimental`` under its own name.
+    """
+    generator_config: dict[str, Any] = {"model_path": model_path}
+    for key, value in init_kwargs.items():
+        *parents, leaf = _INIT_KWARG_CONFIG_PATHS.get(key, f"pipeline.experimental.{key}").split(".")
+        section = generator_config
+        for parent in parents:
+            section = section.setdefault(parent, {})
+        section[leaf] = value
+    return generator_config
+
+
+def _generation_request(prompt: str, generation_kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the ``VideoGenerator.generate`` request mapping for a benchmark's flat generation keywords.
+
+    This applies the placement rule for flat generation keywords:
+    ``negative_prompt`` and ``neg_prompt`` set the top-level ``negative_prompt``, a field of ``InputConfig``,
+    ``SamplingConfig``, ``RequestRuntimeConfig``, or ``OutputConfig`` goes to the matching request section, and
+    any other keyword goes to ``extensions``.
+    """
+    request: dict[str, Any] = {"prompt": prompt}
+    for key, value in generation_kwargs.items():
+        if key in ("negative_prompt", "neg_prompt"):
+            request["negative_prompt"] = value
+            continue
+        section_name = next(
+            (name for name, field_names in _REQUEST_SECTION_FIELDS.items() if key in field_names),
+            "extensions",
+        )
+        request.setdefault(section_name, {})[key] = value
+    return request
+
+
 def _extract_component_times(result: dict) -> dict[str, float | None]:
     component_times: dict[str, float | None] = {
         "text_encoder_time_s": None,
@@ -227,11 +287,11 @@ def _run_generation(generator, prompt, generation_kwargs):
     """Run a single generation, return (elapsed_s, peak_memory_mb, component_times)."""
     torch.cuda.synchronize()
     start = time.perf_counter()
-    result = generator.generate_video(prompt, **generation_kwargs)
+    result = generator.generate(_generation_request(prompt, generation_kwargs))
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
-    peak_memory_mb = result.get("peak_memory_mb", 0.0) or 0.0
-    component_times = _extract_component_times(result)
+    peak_memory_mb = result.peak_memory_mb or 0.0
+    component_times = _extract_component_times(result.to_legacy_dict())
     return elapsed, peak_memory_mb, component_times
 
 
@@ -538,11 +598,6 @@ def _run_benchmark(cfg):
     num_warmup, num_measure = _validate_run_counts(run_config, cfg["benchmark_id"])
     thresholds = _get_thresholds(cfg)
 
-    # Remap JSON keys to VideoGenerator kwargs
-    text_enc_prec = init_kwargs.pop("text_encoder_precisions", None)
-    if text_enc_prec is not None:
-        init_kwargs["text_encoder_precisions"] = tuple(text_enc_prec)
-
     # Output directory for generated videos
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(script_dir, "generated_videos", cfg["benchmark_id"])
@@ -551,10 +606,7 @@ def _run_benchmark(cfg):
 
     generator = None
     try:
-        generator = VideoGenerator.from_pretrained(
-            model_path=model_info["model_path"],
-            **init_kwargs,
-        )
+        generator = VideoGenerator.from_config(_generator_config(model_info["model_path"], init_kwargs))
         runtime_identity = _runtime_identity_from_generator(generator)
 
         for i in range(num_warmup):

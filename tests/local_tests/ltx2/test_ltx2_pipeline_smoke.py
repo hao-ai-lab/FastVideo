@@ -164,30 +164,32 @@ def test_ltx2_pipeline_smoke():
     with tempfile.TemporaryDirectory() as tmpdir:
         latent_path = str(Path(tmpdir) / "ltx2_initial_latent.pt")
 
-        generator = VideoGenerator.from_pretrained(
-            diffusers_path,
-            num_gpus=1,
-            use_fsdp_inference=False,
-            dit_cpu_offload=False,
-            vae_cpu_offload=False,
-            text_encoder_cpu_offload=False,
-            pin_cpu_memory=False,
-            ltx2_vae_tiling=False,
-            ltx2_initial_latent_path=latent_path,
-        )
-        result = generator.generate_video(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            output_path="outputs_video/ltx2_smoke",
-            save_video=False,
-            height=height,
-            width=width,
-            num_frames=num_frames,
-            fps=fps,
-            num_inference_steps=steps,
-            guidance_scale=guidance_scale,
-            seed=seed,
-        )
+        generator = VideoGenerator.from_config({
+            "model_path": diffusers_path,
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {"dit": False, "vae": False, "text_encoder": False, "pin_cpu_memory": False},
+            },
+            "pipeline": {
+                "vae_tiling": False,
+                "ltx2": {"initial_latent_path": latent_path},
+            },
+        })
+        result = generator.generate({
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "sampling": {
+                "height": height,
+                "width": width,
+                "num_frames": num_frames,
+                "fps": fps,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance_scale,
+                "seed": seed,
+            },
+            "output": {"output_path": "outputs_video/ltx2_smoke", "save_video": False},
+        })
         generator.shutdown()
         _run_audio_decode_smoke(
             diffusers_path=diffusers_path,
@@ -197,7 +199,7 @@ def test_ltx2_pipeline_smoke():
             fps=fps,
         )
 
-        fastvideo_out = result["samples"]
+        fastvideo_out = result.samples
         fastvideo_out = fastvideo_out.to(device=device, dtype=torch.float32)
         _log_tensor_stats("fastvideo_video", fastvideo_out)
 
