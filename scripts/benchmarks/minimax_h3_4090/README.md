@@ -101,3 +101,57 @@ python -P /workspace/fastvideo/scripts/benchmarks/minimax_h3_4090/summarize.py \
 After a baseline works, measure FFN chunk sizes 16,384 and 8,192, then
 increase resident DiT blocks within the measured GPU budget. Kernel or
 decoder changes also need same-seed visual and auditory comparison.
+
+## Tile-first attention and full-resolution profiling
+
+Commit `c5d9f8132` shares compatible FP8 Q/K/V activation quantization and
+releases dead block activations before residual modulation. The opt-in
+`FASTVIDEO_H3_VSA_TILE_FIRST=1` scatters the attention input before projection,
+then uses the existing BF16 VSA kernel. It retains tile-64 selection, partial
+key validity and the learned compression branch. It supports eager,
+single-rank inference; grad, compile, and multi-rank requests use the generic
+path. Ten CUDA tests passed on the 4090, including mixed partial tiles,
+active/zero gates, fused/unfused RoPE and FP8/nonquantized projections.
+
+The original 1344×768 baseline failed with a GPU OOM in post-attention
+modulation before the FFN. No successful 768p timing is established yet.
+A profiling run was launched with the following command; retrieve its
+results when SSH access is restored. The server recognizes the public key; the
+local passphrase-protected private key needs its agent/keychain identity loaded. Profiling/capture timings are
+for diagnosis and must not be used as the final speed claim.
+
+```bash
+FASTVIDEO_SOURCE_COMMIT=c5d9f8132 \
+FASTVIDEO_H3_PARK_MODULES=vae,audio_vae \
+FASTVIDEO_H3_FFN_CHUNK_TOKENS=16384 \
+FASTVIDEO_H3_VSA_TILE_FIRST=1 \
+FASTVIDEO_H3_CAPTURE_QKV=/workspace/qkv-768p MAX_JOBS=4 \
+python -P /workspace/fastvideo/scripts/benchmarks/minimax_h3_4090/bench_pod.py \
+  tile-first-768p-profile /workspace/vol/pruned_fp8_300 fp8 \
+  --offload-buffers --lazy --no-vae-compile \
+  --height 768 --width 1344 --frames 243 --timed 2 --profile
+```
+
+`FASTVIDEO_H3_CAPTURE_QKV` saves the first inputs from layers 0, 20 and 41,
+two heads each, with full real sequences, masks, valid tile sizes and packed
+row indices. Disable both capture and profiling for final clip timings.
+
+The separate `minimax_h3_sparse_int8.py` prototype uses INT8 QK and FP8 PV,
+FP32 accumulators and the original 64-token mask. It has no automatic pipeline
+route. Offline compilation with Triton 3.8.0 for sm89 passed all four entry points
+and emitted native INT8 and FP8 MMA instructions (20,480 bytes of shared
+memory for the attention kernel). This is compilation evidence only. It must
+pass CUDA tests and real-QKV/clip checks before integration.
+Run its microbenchmark on an idle GPU:
+
+```bash
+python -P /workspace/fastvideo/scripts/benchmarks/minimax_h3_4090/bench_sparse_qkv.py \
+  /workspace/qkv-768p --output /workspace/sparse-qkv-results.json
+```
+
+SpargeAttn at `ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a` built on the pod
+with CUDA 12.8, `TORCH_CUDA_ARCH_LIST=8.9`, and `MAX_JOBS=4`. The upstream
+`-Xcompiler -include,cassert` workaround was removed from `setup.py` to
+avoid GCC 13 duplicate standard-library definitions. It is not selected by
+the pipeline: its public 128-query/64-key adapter also needs correct masking
+of partial H3 tiles before a meaningful parity comparison.
