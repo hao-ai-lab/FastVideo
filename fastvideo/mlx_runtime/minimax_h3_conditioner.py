@@ -78,18 +78,18 @@ class _ShardIndex:
         index_path = component_dir / "model.safetensors.index.json"
         self.key_to_shard: dict[str, str] = {}
         self._header_cache: dict[str, tuple[dict, int]] = {}
+
+        def needed(key: str) -> bool:
+            if key == "model.language_model.embed_tokens.weight":
+                return True
+            prefix = "model.language_model.layers."
+            if not key.startswith(prefix):
+                return False
+            layer = key[len(prefix):].split(".", 1)[0]
+            return layer.isdigit() and int(layer) < TEXT_ENCODER_LAYER
+
         if index_path.exists():
             weight_map = json.loads(index_path.read_text())["weight_map"]
-
-            def needed(key: str) -> bool:
-                if key == "model.language_model.embed_tokens.weight":
-                    return True
-                prefix = "model.language_model.layers."
-                if not key.startswith(prefix):
-                    return False
-                layer = key[len(prefix):].split(".", 1)[0]
-                return layer.isdigit() and int(layer) < TEXT_ENCODER_LAYER
-
             self.key_to_shard = {k: str(component_dir / s) for k, s in weight_map.items() if needed(k)}
         else:
             single = component_dir / "model.safetensors"
@@ -99,7 +99,7 @@ class _ShardIndex:
             with open(single, "rb") as handle:
                 (header_len, ) = struct.unpack("<Q", handle.read(8))
                 header = json.loads(handle.read(header_len))
-            self.key_to_shard = {k: str(single) for k in header if k != "__metadata__"}
+            self.key_to_shard = {k: str(single) for k in header if needed(k)}
         # Pre-cache only existing shard headers
         for shard_path in set(self.key_to_shard.values()):
             if Path(shard_path).exists():

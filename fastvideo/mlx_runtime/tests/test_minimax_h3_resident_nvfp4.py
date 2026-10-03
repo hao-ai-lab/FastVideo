@@ -134,3 +134,15 @@ def test_failed_preload_releases_encoder(monkeypatch):
         pipeline.prepare_resident()
     assert closed == [True]
     assert not pipeline._resident_components
+
+
+def test_single_shard_omits_unused_language_layers_and_vision(tmp_path):
+    from safetensors.numpy import save_file
+
+    kept = "model.language_model.layers.49.input_layernorm.weight"
+    dropped = "model.language_model.layers.50.input_layernorm.weight"
+    save_file({kept: np.ones(8, np.float32), dropped: np.ones(8, np.float32),
+               "model.visual.weight": np.ones((8, 8), np.float32)}, tmp_path / "model.safetensors")
+    index = _ResidentNVFP4Index(_ShardIndex(tmp_path))
+    assert set(index.weights) == {kept}
+    index.close()
