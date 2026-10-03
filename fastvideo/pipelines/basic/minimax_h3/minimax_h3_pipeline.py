@@ -497,12 +497,17 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 torch.cuda.empty_cache()
             logger.info("Parked MiniMax-H3 denoise modules on CPU for text encode")
 
-    def _restore_denoise_modules(self) -> None:
+    def _restore_denoise_modules(self, fastvideo_args: FastVideoArgs) -> None:
         from fastvideo.pipelines import composed_pipeline_base
 
         device = composed_pipeline_base.get_local_torch_device()
         restored = False
         for name in _DENOISE_MODULE_NAMES:
+            # Encode/decode stages move each VAE to the device when consumed.
+            # Keeping offloaded VAEs on the host leaves room for DiT activations
+            # and resident blocks throughout the denoising loop.
+            if name in {"vae", "audio_vae"} and fastvideo_args.vae_cpu_offload:
+                continue
             module = self.get_module(name)
             if module is None:
                 continue
@@ -517,7 +522,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         self._release_text_encoder()
         self._load_denoise_modules(fastvideo_args)
         if not self._unified_memory_host():
-            self._restore_denoise_modules()
+            self._restore_denoise_modules(fastvideo_args)
         if not self._denoise_stages_ready:
             self._add_denoise_stages(ref2va=self._ref2va)
         for name in (

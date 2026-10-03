@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
@@ -51,6 +52,8 @@ def _stub_module(name: str) -> SimpleNamespace:
 
 
 def _patch_pipeline_construction(monkeypatch, events: list, *, unified_memory: bool = False) -> None:
+    # These contract tests use lightweight objects, not tensor-bearing modules.
+    monkeypatch.setenv("FASTVIDEO_H3_PINNED_SWAP", "0")
     monkeypatch.setattr(
         composed_pipeline_base,
         "maybe_init_distributed_environment_and_model_parallel",
@@ -523,3 +526,15 @@ def test_resident_path_does_not_reread_encoder_on_later_request(monkeypatch) -> 
     assert first is not None and second is not None
     assert len(loads) == 1
     assert pipeline.get_module("text_encoder") is not None
+
+
+@pytest.mark.parametrize("vae_offload", [True, False])
+def test_sequential_restore_keeps_offloaded_vaes_on_host_until_consumed(monkeypatch, vae_offload):
+    """Do not occupy denoise VRAM with decoders that stages load on demand."""
+    pipeline = MiniMaxH3Pipeline.__new__(MiniMaxH3Pipeline)
+    pipeline.modules = {name: _stub_module(name) for name in _DENOISE_MODULE_NAMES}
+    moved = []
+    monkeypatch.setattr(composed_pipeline_base, "get_local_torch_device", lambda: torch.device("cuda", 0))
+    monkeypatch.setattr(pipeline, "_move_module", lambda module, device: moved.append(module.name) or True)
+    pipeline._restore_denoise_modules(SimpleNamespace(vae_cpu_offload=vae_offload))
+    assert moved == (["transformer"] if vae_offload else list(_DENOISE_MODULE_NAMES))
