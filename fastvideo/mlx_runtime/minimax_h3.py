@@ -766,12 +766,12 @@ def _feed_forward(weights: dict[str, Any], x):
     return linear(value * silu(gate), weights["ff.net.2.weight"])
 
 
-def _adaln_tables(weights: dict[str, Any], temb):
+def _adaln_tables(weights: dict[str, Any], temb, *, apply_silu: bool = True):
     """Six (n_t * 3, hidden) modulation tables from (n_t, time_embed_dim)."""
     import mlx.core as mx
 
     projected = linear(
-        silu(temb).astype(weight_dtype(weights["adaln_proj.linear.weight"])),
+        (silu(temb) if apply_silu else temb).astype(weight_dtype(weights["adaln_proj.linear.weight"])),
         weights["adaln_proj.linear.weight"],
         weights["adaln_proj.linear.bias"],
     )
@@ -914,6 +914,7 @@ class MLXMiniMaxH3DiT:
         self.qk_norm_eps = float(config["qk_norm_eps"])
         self.final_norm_eps = float(config["final_norm_eps"])
         self.patch_dim = self.in_channels * math.prod(self.patch_size)
+        self.adaln_rank = config.get("adaln_rank")
         self._adaln_cache: MiniMaxH3StepCache | None = None
         self.vsa_config = MiniMaxH3VSAConfig()
         self._vsa_geometry: MiniMaxH3VSAGeometry | None = None
@@ -932,11 +933,15 @@ class MLXMiniMaxH3DiT:
             self.weights["time_embedder.linear_1.weight"],
             self.weights["time_embedder.linear_1.bias"],
         )
-        return linear(
+        temb = linear(
             silu(temb),
             self.weights["time_embedder.linear_2.weight"],
             self.weights["time_embedder.linear_2.bias"],
         )
+        if self.adaln_rank is not None:
+            temb = linear(
+                silu(temb).astype(weight_dtype(self.weights["adaln_basis.weight"])), self.weights["adaln_basis.weight"])
+        return temb
 
     def refine_text(self, text_rows):
         hidden = linear(
@@ -969,9 +974,10 @@ class MLXMiniMaxH3DiT:
 
         timesteps = np.unique(np.asarray(timesteps, dtype=np.float32))
         temb = self.compute_temb(mx.array(timesteps))
-        block_tables = [_adaln_tables(block, temb) for block in self.blocks]
+        block_tables = [_adaln_tables(block, temb, apply_silu=self.adaln_rank is None) for block in self.blocks]
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(self.weights["norm_out.linear.weight"])),
+            (silu(temb) if self.adaln_rank is None else temb).astype(
+                weight_dtype(self.weights["norm_out.linear.weight"])),
             self.weights["norm_out.linear.weight"],
             self.weights["norm_out.linear.bias"],
         )
@@ -1107,7 +1113,7 @@ class MLXMiniMaxH3DiT:
         adaln_indices = (timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags).astype(mx.int32)
 
         for block_index, block in enumerate(self.blocks):
-            tables = _adaln_tables(block, temb)
+            tables = _adaln_tables(block, temb, apply_silu=self.adaln_rank is None)
             packed = _transformer_block(
                 block,
                 packed,
@@ -1124,7 +1130,8 @@ class MLXMiniMaxH3DiT:
             mx.eval(packed)  # per-block sync: see forward_with_cache note
 
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(self.weights["norm_out.linear.weight"])),
+            (silu(temb) if self.adaln_rank is None else temb).astype(
+                weight_dtype(self.weights["norm_out.linear.weight"])),
             self.weights["norm_out.linear.weight"],
             self.weights["norm_out.linear.bias"],
         )
@@ -1353,10 +1360,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
         for shard in _safetensors_shards(transformer_path):
             shard_arrays = mx.load(str(shard))
             for key, source in shard_arrays.items():
-                if not key.startswith("time_embedder."):
+                if not (key.startswith("time_embedder.") or key == "adaln_basis.weight"):
                     continue
                 keep_fp32 = key.split(".", 1)[0] in FP32_MODULE_PREFIXES
-                target_dtype = mx.float32 if keep_fp32 else cast_dtype
+                target_dtype = mx.float32 if keep_fp32 else (mx.float16 if key == "adaln_basis.weight" else cast_dtype)
                 assign(key, _load_array(source, target_dtype))
             del shard_arrays
         required_time_keys = {
@@ -1373,6 +1380,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
             weight_dtype(weights["time_embedder.linear_1.weight"]))
         temb = linear(t_freq, weights["time_embedder.linear_1.weight"], weights["time_embedder.linear_1.bias"])
         temb = linear(silu(temb), weights["time_embedder.linear_2.weight"], weights["time_embedder.linear_2.bias"])
+        if config.get("adaln_rank") is not None:
+            if "adaln_basis.weight" not in weights:
+                raise KeyError("Rank-reduced AdaLN checkpoint is missing adaln_basis.weight")
+            temb = linear(silu(temb).astype(weight_dtype(weights["adaln_basis.weight"])), weights["adaln_basis.weight"])
         mx.eval(temb)
         cached_block_tables = [None] * num_blocks
 
@@ -1381,7 +1392,7 @@ def mlx_h3_dit_from_diffusers_safetensors(
         for key, source in shard_arrays.items():
             if _is_ignored_dense_key(key, include_vsa=include_vsa):
                 continue
-            if temb is not None and key.startswith("time_embedder."):
+            if temb is not None and (key.startswith("time_embedder.") or key == "adaln_basis.weight"):
                 continue
             if key.startswith("transformer_blocks."):
                 index = int(key.split(".")[1])
@@ -1390,7 +1401,9 @@ def mlx_h3_dit_from_diffusers_safetensors(
             if key.startswith("rope."):
                 continue  # non-persistent analytic buffer, rebuilt on the fly
             keep_fp32 = key.split(".", 1)[0] in FP32_MODULE_PREFIXES
-            target_dtype = mx.float32 if keep_fp32 else cast_dtype
+            factorized_adaln = config.get("adaln_rank") is not None and (".adaln_proj." in key or key.startswith(
+                ("norm_out.linear.", "adaln_basis.")))
+            target_dtype = mx.float32 if keep_fp32 else (mx.float16 if factorized_adaln else cast_dtype)
             array = _load_array(source, target_dtype)
             if temb is not None and ".adaln_proj.linear." in key:
                 _, index_str, sub = key.split(".", 2)
@@ -1398,7 +1411,7 @@ def mlx_h3_dit_from_diffusers_safetensors(
                 block_pending = pending_adaln.setdefault(index, {})
                 block_pending[sub] = array
                 if {"adaln_proj.linear.weight", "adaln_proj.linear.bias"} <= block_pending.keys():
-                    tables = _adaln_tables(block_pending, temb)
+                    tables = _adaln_tables(block_pending, temb, apply_silu=config.get("adaln_rank") is None)
                     mx.eval(tables)
                     assert cached_block_tables is not None
                     cached_block_tables[index] = tables
@@ -1428,7 +1441,8 @@ def mlx_h3_dit_from_diffusers_safetensors(
         if missing_cache_blocks:
             raise KeyError(f"Missing AdaLN cache tables for blocks {missing_cache_blocks}")
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(weights["norm_out.linear.weight"])),
+            (silu(temb) if config.get("adaln_rank") is None else temb).astype(
+                weight_dtype(weights["norm_out.linear.weight"])),
             weights["norm_out.linear.weight"],
             weights["norm_out.linear.bias"],
         )
