@@ -52,7 +52,7 @@ def test_shared_fp8_projections_match_independent_quantization(granularity):
 @pytest.mark.parametrize("fp8", [False, True])
 @pytest.mark.parametrize("gate_active", [False, True])
 @pytest.mark.parametrize("fused_rope", [False, True])
-def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distributed_setup,
+def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distributed_setup, tmp_path,
                                                           fp8, gate_active, fused_rope, kernel):
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         pytest.skip("BF16 CUDA is required")
@@ -68,6 +68,9 @@ def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distribu
     monkeypatch.setenv("FASTVIDEO_H3_VSA_FP4", "0")
     monkeypatch.setenv("FASTVIDEO_H3_VSA_TILE_FIRST", "0")
     monkeypatch.setenv("FASTVIDEO_H3_VSA_SM89_KERNEL", "original")
+    capture = kernel == "int8" and fp8 and gate_active and fused_rope
+    if capture:
+        monkeypatch.setenv("FASTVIDEO_H3_CAPTURE_QKV", str(tmp_path))
     torch.manual_seed(21)
     attn = MiniMaxH3Attention(256, 2, 128, 1e-5, (AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3,), FP8Config("channel") if fp8 else None,
                              "transformer_blocks.0.attn", fuse_qknorm_rope=fused_rope)
@@ -79,8 +82,9 @@ def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distribu
     if fp8:
         for layer in (attn.to_q, attn.to_k, attn.to_v, attn.to_out):
             _install_fp8_buffers(layer)
-    meta = MiniMaxH3VSAMetadataBuilder().build(999, (4, 6, 10), (1, 1, 1), 0.8,
-                                               (65, 97), torch.device("cuda"), tile_size=64)
+    meta = MiniMaxH3VSAMetadataBuilder().build(current_timestep=999, patch_size=(1, 1, 1),
+                                               VSA_sparsity=0.8, packed_segments=(65, 97, (4, 6, 10)),
+                                               device=torch.device("cuda"), tile_size=64)
     length = meta.total_seq_length
     x = torch.randn(1, length, 256, device="cuda", dtype=torch.bfloat16)
     angles = torch.randn(length, 96, device="cuda")
@@ -95,3 +99,8 @@ def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distribu
     error = (actual.float() - reference.float()).norm() / reference.float().norm()
     assert error < (0.02 if fp8 else 0.005), float(error)
     torch.testing.assert_close(actual, reference, rtol=0.03, atol=0.05)
+    if capture:
+        data = torch.load(tmp_path / "layer-0.pt", weights_only=True)
+        torch.testing.assert_close(data["vbs"], meta.variable_block_sizes.cpu(), rtol=0, atol=0)
+        assert data["q"].shape == (1, 2, meta.variable_block_sizes.numel() * 64, 128)
+        assert data["mask"].dtype == torch.bool

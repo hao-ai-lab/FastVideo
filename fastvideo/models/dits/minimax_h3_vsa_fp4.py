@@ -183,7 +183,8 @@ def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
             k_pooled = _pool_tiles(key, meta.variable_block_sizes, meta.tile_elems)
             scores = torch.matmul(q_pooled, k_pooled.transpose(-2, -1)) / dim**0.5
             sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
-            mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt)
+            mask = _build_block_mask(scores, meta.num_prefix_tiles, sparsity, meta.exempt,
+                                     meta.video_tile_spans, meta.span_sparsities)
             # Two heads keep the artifact small while retaining all real keys,
             # query rows, per-tile selections and partial-tile validity.
             torch.save({"q": query[:, :, :2].transpose(1, 2).contiguous().cpu(),
