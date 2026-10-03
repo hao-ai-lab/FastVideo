@@ -70,3 +70,44 @@ def test_fp8_dynamic_probability_scale_preserves_small_blocks():
     assert reference.abs().min() > 0.1
     assert torch.count_nonzero(fixed) == 0
     torch.testing.assert_close(dynamic.float(), reference, rtol=0.02, atol=0.02)
+
+
+@pytest.mark.parametrize("batch,heads", [(1, 2), (2, 3)])
+@pytest.mark.parametrize("partner_pad", [False, True])
+def test_int8_bshd_views_match_contiguous_and_reduce_peak(batch, heads, partner_pad):
+    """Read production BSHD views without retaining three BHSD copies."""
+    _cuda_sm89()
+    from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
+
+    torch.manual_seed(113)
+    length, dim = 1024, 128
+    storage_length = length + (64 if partner_pad else 0)
+    tensors = [torch.randn(batch, storage_length, heads, dim, device="cuda", dtype=torch.bfloat16)
+               for _ in range(3)]
+    q, k, v = [tensor[:, :length].transpose(1, 2) for tensor in tensors]
+    vbs = torch.full((length // 64,), 64, device="cuda", dtype=torch.int32)
+    vbs[1], vbs[4] = 7, 31
+    valid = torch.arange(length, device="cuda") % 64 < vbs.repeat_interleave(64)
+    k[:, :, ~valid] = 0
+    v[:, :, ~valid] = 0
+    mask = torch.rand(batch, heads, length // 64, length // 64, device="cuda") > 0.8
+    mask[:, :, 0] = False
+    with torch.inference_mode():
+        # Populate autotuning/compilation caches before measuring allocations.
+        warm = sparse_sm89_attention(q, k, v, mask, vbs)
+        del warm
+        torch.cuda.synchronize()
+        baseline = torch.cuda.memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
+        reference = sparse_sm89_attention(q.contiguous(), k.contiguous(), v.contiguous(), mask, vbs)
+        torch.cuda.synchronize()
+        copy_peak = torch.cuda.max_memory_allocated() - baseline
+        expected = reference.cpu()
+        del reference
+        torch.cuda.reset_peak_memory_stats()
+        actual = sparse_sm89_attention(q, k, v, mask, vbs)
+        torch.cuda.synchronize()
+        view_peak = torch.cuda.max_memory_allocated() - baseline
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+    tensor_bytes = batch * heads * length * dim * 2
+    assert copy_peak - view_peak >= tensor_bytes, (copy_peak, view_peak)

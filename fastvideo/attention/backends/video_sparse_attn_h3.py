@@ -781,9 +781,14 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # kernels' granularity. These entries take BHSD ([B, H, S_pad, D]);
             # mirror block_sparse_attn_256_bshd's Triton branch and transpose
             # around the call.
-            q_bhsd = query.transpose(1, 2).contiguous()
-            k_bhsd = key.transpose(1, 2).contiguous()
-            v_bhsd = value.transpose(1, 2).contiguous()
+            sm89_strided = (self._sm89_kernel == "int8" and not torch.is_grad_enabled() and not compiling
+                            and query.dtype == torch.bfloat16 and query.shape[-1] == 128
+                            and torch.cuda.get_device_capability(query.device) == (8, 9))
+            q_bhsd = query.transpose(1, 2)
+            k_bhsd = key.transpose(1, 2)
+            v_bhsd = value.transpose(1, 2)
+            if not sm89_strided:
+                q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
 
             sm100a_mask = mask
             sm100a_variable_block_sizes = attn_metadata.variable_block_sizes
@@ -880,9 +885,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     )
             else:
                 if has_sm100a_pair:
-                    q_bhsd = q_bhsd[:, :, :logical_seq_len].contiguous()
-                    k_bhsd = k_bhsd[:, :, :logical_seq_len].contiguous()
-                    v_bhsd = v_bhsd[:, :, :logical_seq_len].contiguous()
+                    q_bhsd = q_bhsd[:, :, :logical_seq_len]
+                    k_bhsd = k_bhsd[:, :, :logical_seq_len]
+                    v_bhsd = v_bhsd[:, :, :logical_seq_len]
+                    if not sm89_strided:
+                        q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
                 if (self._sm89_kernel != "original" and not torch.is_grad_enabled() and not compiling
                         and q_bhsd.dtype == torch.bfloat16 and q_bhsd.shape[-1] == 128
                         and torch.cuda.get_device_capability(q_bhsd.device) == (8, 9)):

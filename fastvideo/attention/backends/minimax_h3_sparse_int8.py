@@ -16,11 +16,13 @@ import triton.language as tl
 
 
 @triton.jit
-def _quantize_qk(X, Mean, VBS, Y, Scale, L: tl.constexpr, D: tl.constexpr, CENTER: tl.constexpr, ROWS: tl.constexpr):
+def _quantize_qk(X, Mean, VBS, Y, Scale, L: tl.constexpr, D: tl.constexpr, H: tl.constexpr, XB: tl.constexpr,
+                 XH: tl.constexpr, XS: tl.constexpr, XD: tl.constexpr, CENTER: tl.constexpr, ROWS: tl.constexpr):
     hz = tl.program_id(1)
     rows = tl.program_id(0) * ROWS + tl.arange(0, ROWS)
     cols = tl.arange(0, D)
-    x = tl.load(X + (hz * L + rows[:, None]) * D + cols[None, :], rows[:, None] < L, 0).to(tl.float32)
+    offset = (hz // H) * XB + (hz % H) * XH + rows[:, None] * XS + cols[None, :] * XD
+    x = tl.load(X + offset, rows[:, None] < L, 0).to(tl.float32)
     if CENTER:
         mean = tl.load(Mean + hz * D + cols)
         valid_size = tl.load(VBS + rows // 64, rows < L, 0)
@@ -57,8 +59,9 @@ def _quantize_v_tiles(X, Y, Scale, L: tl.constexpr, D: tl.constexpr):
     configs=[triton.Config({}, num_warps=w, num_stages=s) for w, s in ((4, 2), (4, 3), (4, 4), (8, 2), (8, 3))],
     key=["L", "D"])
 @triton.jit
-def _sparse_int8_fp8(Q, K, V, QS, KS, VS, Index, Count, VBS, Out, L: tl.constexpr, D: tl.constexpr,
-                     INT8_QK: tl.constexpr, FP8_PV: tl.constexpr, V_TILE: tl.constexpr, P_DYNAMIC: tl.constexpr):
+def _sparse_int8_fp8(Q, K, V, QS, KS, VS, Index, Count, VBS, Out, L: tl.constexpr, D: tl.constexpr, H: tl.constexpr,
+                     VB: tl.constexpr, VH: tl.constexpr, VS_ROW: tl.constexpr, VD: tl.constexpr, INT8_QK: tl.constexpr,
+                     FP8_PV: tl.constexpr, V_TILE: tl.constexpr, P_DYNAMIC: tl.constexpr):
     tile, hz = tl.program_id(0), tl.program_id(1)
     nt: tl.constexpr = L // 64
     rows = tile * 64 + tl.arange(0, 64)
@@ -89,7 +92,7 @@ def _sparse_int8_fp8(Q, K, V, QS, KS, VS, Index, Count, VBS, Out, L: tl.constexp
             alpha = tl.exp2(m - new_m)
             den = den * alpha + tl.sum(p, 1)
             acc = acc * alpha[:, None]
-            v = tl.load(V + (hz * L + key_rows[:, None]) * D + cols[None, :])
+            v = tl.load(V + (hz // H) * VB + (hz % H) * VH + key_rows[:, None] * VS_ROW + cols[None, :] * VD)
             if FP8_PV:
                 if P_DYNAMIC:
                     pscale = tl.maximum(tl.exp2(block_max - new_m) / 448.0, 1e-30)
@@ -135,19 +138,26 @@ def sparse_sm89_attention(q: torch.Tensor,
         raise ValueError("Sparse INT8/FP8 attention requires a tile-64 mask and validity vector")
     from fastvideo_kernel.triton_kernels.index import map_to_index
 
-    q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
+    # The production INT8-QK/BF16-PV route reads BSHD-backed views directly.
+    # Quantized Q/K and the output remain contiguous BHSD. Other ablations
+    # retain their established layout and arithmetic.
+    if not int8_qk or fp8_pv:
+        q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
     vbs = vbs.to(device=q.device, dtype=torch.int32).contiguous()
     grid = (triton.cdiv(length, 16), b * h)
     qi, ki, vf = q, k, v
     qs, ks, vs = q, k, v  # unused pointers in BF16 ablations
     if int8_qk:
         # Tile pads are zero by contract; avoid a full FP32 copy for the reduction.
-        mean = k.sum(dim=2, dtype=torch.float32) / vbs.sum().clamp_min(1)
-        qi, ki = torch.empty_like(q, dtype=torch.int8), torch.empty_like(k, dtype=torch.int8)
+        # Preserve the exact reduction used by the old contiguous adapter;
+        # its temporary copy dies before Q/K quantization and fine attention.
+        mean = k.contiguous().sum(dim=2, dtype=torch.float32) / vbs.sum().clamp_min(1)
+        qi = torch.empty(q.shape, device=q.device, dtype=torch.int8)
+        ki = torch.empty(k.shape, device=k.device, dtype=torch.int8)
         qs = torch.empty((b, h, length), device=q.device, dtype=torch.float32)
         ks = torch.empty_like(qs)
-        _quantize_qk[grid](q, mean, vbs, qi, qs, length, dim, CENTER=False, ROWS=16, num_warps=4)
-        _quantize_qk[grid](k, mean, vbs, ki, ks, length, dim, CENTER=True, ROWS=16, num_warps=4)
+        _quantize_qk[grid](q, mean, vbs, qi, qs, length, dim, h, *q.stride(), CENTER=False, ROWS=16, num_warps=4)
+        _quantize_qk[grid](k, mean, vbs, ki, ks, length, dim, h, *k.stride(), CENTER=True, ROWS=16, num_warps=4)
     if fp8_pv:
         vf = torch.empty_like(v, dtype=torch.float8_e4m3fn)
         if fp8_v_tiles:
@@ -157,7 +167,7 @@ def sparse_sm89_attention(q: torch.Tensor,
             vs = (v.abs().amax(dim=2).float() / 448).clamp_min(1e-8)
             _quantize_v[grid](v, vs, vf, length, dim, ROWS=16, num_warps=4)
     index, count = map_to_index(mask.contiguous())
-    out = torch.empty_like(q)
+    out = torch.empty(q.shape, device=q.device, dtype=q.dtype)
     _sparse_int8_fp8[(length // 64, b * h)](qi,
                                             ki,
                                             vf,
@@ -170,6 +180,8 @@ def sparse_sm89_attention(q: torch.Tensor,
                                             out,
                                             length,
                                             dim,
+                                            h,
+                                            *vf.stride(),
                                             INT8_QK=int8_qk,
                                             FP8_PV=fp8_pv,
                                             V_TILE=fp8_v_tiles,
