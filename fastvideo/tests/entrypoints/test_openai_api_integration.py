@@ -59,21 +59,23 @@ def server():
     env.setdefault("MASTER_ADDR", "127.0.0.1")
     env.setdefault("MASTER_PORT", str(_find_free_port()))
 
+    config_path = os.path.join(output_dir, "serve.yaml")
+    with open(config_path, "w", encoding="utf-8") as config_file:
+        config_file.write(f"generator:\n  model_path: {MODEL_PATH}\n"
+                          "  engine:\n    num_gpus: 1\n    offload:\n      dit: true\n")
     cmd = [
         sys.executable,
         "-m",
-        "fastvideo.entrypoints.openai.api_server",
-        "--model-path",
-        MODEL_PATH,
-        "--host",
+        "fastvideo.entrypoints.cli.main",
+        "serve",
+        "--config",
+        config_path,
+        "--server.host",
         "127.0.0.1",
-        "--port",
+        "--server.port",
         str(port),
-        "--output-dir",
+        "--server.output_dir",
         output_dir,
-        "--num-gpus",
-        "1",
-        "--dit-cpu-offload",
     ]
 
     proc = subprocess.Popen(

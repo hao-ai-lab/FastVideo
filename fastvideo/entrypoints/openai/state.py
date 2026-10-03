@@ -1,8 +1,7 @@
 """Global server state shared across API modules.
 
-Keeping state in a dedicated module prevents the classic '__main__ vs package
-module' duplication that occurs when api_server.py is run with ``python -m``.
-All modules that need the generator or server args should import from here.
+Keeping state in a dedicated module gives every API module the same
+generator and server args. All modules that need them should import from here.
 """
 
 from __future__ import annotations

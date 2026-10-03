@@ -174,31 +174,6 @@ def create_app(
     return app
 
 
-def _parse_args() -> tuple[FastVideoArgs, str, int, str]:
-    """Parse CLI arguments and return (FastVideoArgs, host, port, output_dir)"""
-    from fastvideo.utils import FlexibleArgumentParser
-
-    logger.warning("python -m fastvideo.entrypoints.openai.api_server and its flat flags are deprecated and will be "
-                   "removed; use `fastvideo serve --config SERVE_CONFIG` with dotted overrides such as "
-                   "`--generator.engine.num_gpus 2` instead.")
-    parser = FlexibleArgumentParser(description="FastVideo OpenAI-compatible API server")
-    parser.add_argument("--host", type=str, default=DEFAULT_HOST)
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR)
-    parser = FastVideoArgs.add_cli_args(parser)
-
-    args = parser.parse_args()
-    host = args.host
-    port = args.port
-    output_dir = args.output_dir
-
-    # Build FastVideoArgs from the remaining CLI args
-    excluded = {"host", "port", "output_dir", "subparser", "config", "dispatch_function"}
-    cli_kwargs = {k: v for k, v in vars(args).items() if k not in excluded and v is not None}
-    fastvideo_args = FastVideoArgs.from_kwargs(**cli_kwargs)
-    return fastvideo_args, host, port, output_dir
-
-
 def run_server(
     fastvideo_args: FastVideoArgs,
     host: str = DEFAULT_HOST,
@@ -229,8 +204,3 @@ def run_server(
         log_level="info",
         timeout_keep_alive=300,
     )
-
-
-if __name__ == "__main__":
-    fastvideo_args, host, port, output_dir = _parse_args()
-    run_server(fastvideo_args, host, port, output_dir=output_dir)
