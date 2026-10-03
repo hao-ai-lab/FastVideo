@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import torch
 
 import fastvideo.envs as envs
+from fastvideo.tests.stages._resolved_config import make_resolved_config
 
 
 class RecordingLogger:
@@ -66,23 +67,43 @@ class TinyDenoiser(torch.nn.Module):
         return latent_model_input.float() * 0.2 + prompt_term * 0.5 + timestep_term * 0.001
 
 
+def _tiny_pipeline_config(boundary_ratio=None, **attributes):
+    """Stand-in for the model definition that the shared and Wan denoising stages read."""
+    return SimpleNamespace(**{
+        "embedded_cfg_scale": None,
+        "ti2v_task": False,
+        "lucy_edit_task": False,
+        "dit_config": SimpleNamespace(boundary_ratio=boundary_ratio, patch_size=(1, 1, 1)),
+        **attributes,
+    })
+
+
+def _resolved(pipeline_config, pipeline=None):
+    """A resolved config with the runtime settings of the tiny fixtures and ``pipeline_config`` as model definition.
+
+    ``pipeline`` holds typed ``pipeline.*`` values. Each one is also set on ``pipeline_config``, as materialization
+    mirrors a typed value onto the ``PipelineConfig`` attribute of the same name.
+    """
+    pipeline = dict(pipeline or {})
+    for name, value in pipeline.items():
+        setattr(pipeline_config, name, value)
+    return make_resolved_config(
+        pipeline_config, {
+            "engine": {
+                "disable_autocast": True,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": False,
+                    "dit_layerwise": False,
+                    "vae": True
+                },
+            },
+            "pipeline": pipeline,
+        })
+
+
 def _tiny_args():
-    return SimpleNamespace(
-        disable_autocast=True,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        use_fsdp_inference=False,
-        moba_config={},
-        VSA_sparsity=0.0,
-        model_loaded={"transformer": True},
-        model_paths={"transformer": "unused"},
-        pipeline_config=SimpleNamespace(
-            embedded_cfg_scale=None,
-            ti2v_task=False,
-            lucy_edit_task=False,
-            dit_config=SimpleNamespace(boundary_ratio=None, patch_size=(1, 1, 1)),
-        ),
-    )
+    return _resolved(_tiny_pipeline_config())
 
 
 def _tiny_batch():
@@ -170,11 +191,14 @@ def _batch(steps=4, cfg=True):
     return batch
 
 
-def _args():
-    args = _tiny_args()
-    args.vae_cpu_offload = True
-    arch = SimpleNamespace(patch_size=(1, 2, 2))
-    args.pipeline_config.dit_config.arch_config = arch
-    args.pipeline_config.vae_config = SimpleNamespace(
+def _args(pipeline=None, **attributes):
+    """The tiny fixtures' resolved config with the Wan patch and VAE geometry.
+
+    ``pipeline`` holds typed ``pipeline.*`` values; ``attributes`` set model-definition attributes of the stand-in
+    pipeline config (``boundary_ratio`` goes on its ``dit_config``).
+    """
+    pipeline_config = _tiny_pipeline_config(**attributes)
+    pipeline_config.dit_config.arch_config = SimpleNamespace(patch_size=(1, 2, 2))
+    pipeline_config.vae_config = SimpleNamespace(
         arch_config=SimpleNamespace(scale_factor_temporal=4, scale_factor_spatial=8))
-    return args
+    return _resolved(pipeline_config, pipeline)

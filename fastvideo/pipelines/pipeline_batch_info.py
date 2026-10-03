@@ -17,8 +17,8 @@ import torch
 if TYPE_CHECKING:
     from torchcodec.decoders import VideoDecoder
 
+    from fastvideo.api.resolution import ResolvedGeneratorConfig
     from fastvideo.api.schema import ContinuationState
-    from fastvideo.fastvideo_args import FastVideoArgs
 
 import time
 from collections import OrderedDict
@@ -68,7 +68,7 @@ class ForwardBatch:
     execution, allowing methods to update specific components without needing
     to manage numerous individual parameters.
     """
-    # TODO(will): double check that args are separate from fastvideo_args
+    # TODO(will): double check that args are separate from resolved_config
     # properly. Also maybe think about providing an abstraction for pipeline
     # specific arguments.
     data_type: str
@@ -116,7 +116,7 @@ class ForwardBatch:
     # and must not imply classic dual-forward CFG. Use ``true_cfg_scale > 1`` for true CFG.
     use_embedded_guidance: bool = False
     true_cfg_scale: float = 1.0
-    # Per-request embedded guidance scale; None uses pipeline_config.embedded_cfg_scale.
+    # Per-request embedded guidance scale; None uses the resolved pipeline.embedded_cfg_scale.
     # Read it through embedded_cfg_scale_for_batch().
     embedded_cfg_scale: float | None = None
 
@@ -285,11 +285,11 @@ class ForwardBatch:
         return pprint.pformat(asdict(self), indent=2, width=120)
 
 
-def embedded_cfg_scale_for_batch(batch: "ForwardBatch", resolved_config: "FastVideoArgs") -> float | None:
-    """The embedded guidance scale for ``batch``: the request's value, else the pipeline config's."""
+def embedded_cfg_scale_for_batch(batch: "ForwardBatch", resolved_config: "ResolvedGeneratorConfig") -> float | None:
+    """The embedded guidance scale for ``batch``: the request's value, else ``pipeline.embedded_cfg_scale``."""
     if batch.embedded_cfg_scale is not None:
         return batch.embedded_cfg_scale
-    return getattr(resolved_config.pipeline_config, "embedded_cfg_scale", None)
+    return resolved_config.pipeline.embedded_cfg_scale
 
 
 @dataclass

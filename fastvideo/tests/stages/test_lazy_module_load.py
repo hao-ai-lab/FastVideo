@@ -12,9 +12,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from fastvideo.api.schema import ExecutionMode, OffloadConfig
+from fastvideo.pipelines.component_state import ComponentState
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lazy_module import LazyModule, is_lazy_module
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.tests.stages._resolved_config import make_resolved_config
 
 
 class _Component:
@@ -238,6 +241,7 @@ class _FakePipeline(ComposedPipelineBase):
     def __init__(self, modules, stages):  # deliberately does not call super()
         self.modules = modules
         self._stages = stages
+        self.component_state = ComponentState()
         self._lazy_module_names = tuple(name for name, module in modules.items() if is_lazy_module(module))
 
     def create_pipeline_stages(self, resolved_config):
@@ -250,6 +254,10 @@ def _schedule(modules, stages):
 
 def _lazy(name):
     return LazyModule(name, lambda: _Component(name))
+
+
+def _config_without_verification():
+    return make_resolved_config(raw={"engine": {"enable_stage_verification": False}})
 
 
 def test_pipeline_compile_is_reapplied_after_lazy_release(monkeypatch):
@@ -421,15 +429,14 @@ def test_schedule_is_empty_without_lazy_modules():
     (None, False, False),
 ])
 def test_training_mode_never_defers(lazy, training, expected):
-    args = SimpleNamespace(lazy_module_load=lazy, training_mode=training)
+    mode = ExecutionMode.FINETUNING if training else ExecutionMode.INFERENCE
+    resolved_config = make_resolved_config(raw={"mode": mode, "engine": {"offload": {"lazy_module_load": lazy}}})
 
-    assert ComposedPipelineBase._lazy_module_load_enabled(args) is expected
+    assert ComposedPipelineBase._lazy_module_load_enabled(resolved_config) is expected
 
 
 def test_flag_defaults_to_auto():
-    from fastvideo.fastvideo_args import FastVideoArgs
-
-    fields = {f.name: f for f in dataclasses.fields(FastVideoArgs)}
+    fields = {f.name: f for f in dataclasses.fields(OffloadConfig)}
     assert fields["lazy_module_load"].default is None
 
 
@@ -474,8 +481,7 @@ def test_stage_call_releases_its_modules():
     assert text_encoder.is_materialized
 
     batch = object()
-    args = SimpleNamespace(enable_stage_verification=False)
-    assert stages[0](batch, args) is batch
+    assert stages[0](batch, _config_without_verification()) is batch
 
     assert not text_encoder.is_materialized
     assert calls == ["c"]
@@ -487,7 +493,7 @@ def test_stage_without_hooks_releases_nothing():
     stage = _EchoStage(vae=module)
     module.tag
 
-    stage(object(), SimpleNamespace(enable_stage_verification=False))
+    stage(object(), _config_without_verification())
 
     assert module.is_materialized
 
@@ -525,7 +531,7 @@ def test_a_stage_that_rebinds_through_to_can_still_be_released():
     assert stage.vae is vae
     assert vae.is_materialized
 
-    stage(object(), SimpleNamespace(enable_stage_verification=False))
+    stage(object(), _config_without_verification())
 
     assert not vae.is_materialized
 
@@ -595,7 +601,7 @@ def test_a_raising_stage_still_releases_its_modules():
     vae.materialize()
 
     with pytest.raises(RuntimeError, match="out of activation memory"):
-        stage(object(), SimpleNamespace(enable_stage_verification=False))
+        stage(object(), _config_without_verification())
 
     assert not vae.is_materialized
 
@@ -615,7 +621,7 @@ def test_a_failing_release_does_not_mask_the_original_error():
     stage._lazy_modules_to_release = (_BadRelease("vae", lambda: object()), )
 
     with pytest.raises(RuntimeError, match="original"):
-        stage(object(), SimpleNamespace(enable_stage_verification=False))
+        stage(object(), _config_without_verification())
 
 
 def test_deferral_is_opt_in_per_pipeline():
@@ -689,6 +695,7 @@ def _run_real_load_modules(monkeypatch, lazy_names, manifest_modules):
         def __init__(self):  # deliberately does not call super()
             self.model_path = "/nowhere"
             self.resolved_config = None
+            self.component_state = ComponentState()
 
         def _load_config(self, model_path):
             index = {"_class_name": "X", "_diffusers_version": "0"}
@@ -698,8 +705,8 @@ def _run_real_load_modules(monkeypatch, lazy_names, manifest_modules):
         def create_pipeline_stages(self, resolved_config):
             raise NotImplementedError
 
-    args = SimpleNamespace(lazy_module_load=True, training_mode=False, revision=None)
-    modules = _Pipeline().load_modules(args)
+    resolved_config = make_resolved_config(raw={"engine": {"offload": {"lazy_module_load": True}}})
+    modules = _Pipeline().load_modules(resolved_config)
     return modules, stub.loaded
 
 
@@ -738,6 +745,7 @@ def test_building_the_real_h3_stages_materializes_nothing():
     pipeline = MiniMaxH3Pipeline.__new__(MiniMaxH3Pipeline)
     pipeline._stages = []
     pipeline._stage_name_mapping = {}
+    pipeline.component_state = ComponentState()
     pipeline.modules = {
         "text_encoder": tracked("text_encoder"),
         "transformer": tracked("transformer"),
@@ -748,9 +756,9 @@ def test_building_the_real_h3_stages_materializes_nothing():
         "scheduler": object(),
         "audio_scheduler": object(),
     }
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    resolved_config = make_resolved_config(pipeline_config=MiniMaxH3PipelineConfig())
 
-    pipeline._add_stages(args, ref2va=False)
+    pipeline._add_stages(resolved_config, ref2va=False)
 
     assert loaded == [], f"building stages materialized {loaded}"
     assert len(pipeline._stages) == 6
@@ -773,6 +781,7 @@ def test_h3_lazy_release_drops_dit_before_vae_decode():
     pipeline = MiniMaxH3Pipeline.__new__(MiniMaxH3Pipeline)
     pipeline._stages = []
     pipeline._stage_name_mapping = {}
+    pipeline.component_state = ComponentState()
     pipeline.modules = {
         "text_encoder": LazyModule("text_encoder", lambda: _Component("text_encoder")),
         "transformer": LazyModule("transformer", lambda: _Component("transformer")),
@@ -783,8 +792,8 @@ def test_h3_lazy_release_drops_dit_before_vae_decode():
         "scheduler": object(),
         "audio_scheduler": object(),
     }
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
-    pipeline._add_stages(args, ref2va=False)
+    resolved_config = make_resolved_config(pipeline_config=MiniMaxH3PipelineConfig())
+    pipeline._add_stages(resolved_config, ref2va=False)
     schedule = pipeline._build_lazy_release_schedule()
     names = {pipeline._stages[index]._pipeline_stage_name: modules for index, modules in schedule.items()}
     assert names["conditioning_stage"] == ["text_encoder"]
@@ -800,10 +809,10 @@ def test_h3_checkpoint_json_updates_dit_patch_size_without_weights(tmp_path):
     transformer_dir = tmp_path / "transformer"
     transformer_dir.mkdir()
     (transformer_dir / "config.json").write_text('{"patch_size": [1, 1, 1]}')
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
-    assert tuple(args.pipeline_config.dit_config.patch_size) == (1, 2, 2)
-    _apply_h3_checkpoint_arch_configs(str(tmp_path), args, {})
-    assert tuple(args.pipeline_config.dit_config.patch_size) == (1, 1, 1)
+    resolved_config = make_resolved_config(pipeline_config=MiniMaxH3PipelineConfig())
+    assert tuple(resolved_config.pipeline_config.dit_config.patch_size) == (1, 2, 2)
+    _apply_h3_checkpoint_arch_configs(str(tmp_path), resolved_config, {})
+    assert tuple(resolved_config.pipeline_config.dit_config.patch_size) == (1, 1, 1)
 
 
 def test_h3_checkpoint_json_updates_audio_sampling_rate_without_weights(tmp_path):
@@ -813,11 +822,11 @@ def test_h3_checkpoint_json_updates_audio_sampling_rate_without_weights(tmp_path
     audio_dir = tmp_path / "audio_vae"
     audio_dir.mkdir()
     (audio_dir / "config.json").write_text('{"sampling_rate": 16000, "latent_channels": 16}')
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
-    assert int(args.pipeline_config.audio_vae_config.arch_config.sampling_rate) == 32000
-    _apply_h3_checkpoint_arch_configs(str(tmp_path), args, {})
-    assert int(args.pipeline_config.audio_vae_config.arch_config.sampling_rate) == 16000
-    assert int(args.pipeline_config.audio_vae_config.arch_config.latent_channels) == 16
+    resolved_config = make_resolved_config(pipeline_config=MiniMaxH3PipelineConfig())
+    assert int(resolved_config.pipeline_config.audio_vae_config.arch_config.sampling_rate) == 32000
+    _apply_h3_checkpoint_arch_configs(str(tmp_path), resolved_config, {})
+    assert int(resolved_config.pipeline_config.audio_vae_config.arch_config.sampling_rate) == 16000
+    assert int(resolved_config.pipeline_config.audio_vae_config.arch_config.latent_channels) == 16
 
 
 class _LoRAConfigComponent(torch.nn.Module):
@@ -833,23 +842,16 @@ class _LoRAConfigComponent(torch.nn.Module):
 def _build_stub_lora_pipeline(monkeypatch, transformer, excluded_layers=None):
     from fastvideo.pipelines import lora_pipeline as lora_module
 
-    args = SimpleNamespace(
-        lora_target_modules=None,
-        lora_path=None,
-        lora_nickname="default",
-        lora_strength=1.0,
-        training_mode=False,
-        lora_training=False,
-        dit_layerwise_offload=False,
-        pipeline_config=SimpleNamespace(
-            dit_config=SimpleNamespace(
-                arch_config=SimpleNamespace(exclude_lora_layers=list(excluded_layers or [])),
-            ),
+    # An inference config without a LoRA: no lora_path, the default nickname and strength, no layerwise offload.
+    pipeline_config = SimpleNamespace(
+        dit_config=SimpleNamespace(
+            arch_config=SimpleNamespace(exclude_lora_layers=list(excluded_layers or [])),
         ),
     )
+    resolved_config = make_resolved_config(pipeline_config, raw={"engine": {"offload": {"dit_layerwise": False}}})
 
     def initialize_base(pipeline, *unused_args, **unused_kwargs):
-        pipeline.resolved_config = args
+        pipeline.resolved_config = resolved_config
         pipeline.modules = {"transformer": transformer}
 
     monkeypatch.setattr(ComposedPipelineBase, "__init__", initialize_base)
@@ -860,7 +862,7 @@ def _build_stub_lora_pipeline(monkeypatch, transformer, excluded_layers=None):
         def create_pipeline_stages(self, resolved_config):
             raise NotImplementedError
 
-    return _Pipeline("unused", args)
+    return _Pipeline("unused", resolved_config)
 
 
 def test_no_lora_setup_keeps_the_transformer_deferred(monkeypatch):

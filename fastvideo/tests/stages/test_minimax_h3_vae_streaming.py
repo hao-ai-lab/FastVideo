@@ -17,6 +17,16 @@ from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation i
     MiniMaxH3LatentPreparationStage,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.tests.stages._resolved_config import make_resolved_config
+
+
+def _decode_config(*, pin: bool = False, vae_offload: bool = False, parallel_decode: bool = False, **minimax_h3):
+    """Resolved config with the decode settings these tests vary and a unit DiT patch size."""
+    pipeline_config = SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1)))
+    return make_resolved_config(pipeline_config, raw={
+        "engine": {"offload": {"pin_cpu_memory": pin, "vae": vae_offload}},
+        "pipeline": {"output_type": "pil", "minimax_h3": {"vae_parallel_decode": parallel_decode, **minimax_h3}},
+    })
 
 
 def _layout(rows: int, latent_shape: tuple[int, ...]) -> MiniMaxH3PackedLayout:
@@ -60,11 +70,11 @@ def test_reference_video_encode_keeps_pixels_on_cpu() -> None:
         media_type="video",
         frames=np.zeros((22, 16, 16, 3), dtype=np.uint8),
     )
-    args = SimpleNamespace(
-        vae_parallel_encode=False,
-        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+    resolved_config = make_resolved_config(
+        SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+        raw={"pipeline": {"minimax_h3": {"vae_parallel_encode": False}}},
     )
-    rows = stage._encode_visual_rows([reference], torch.device("cpu"), args)
+    rows = stage._encode_visual_rows([reference], torch.device("cpu"), resolved_config)
 
     assert observed["pixels"].dtype == torch.uint8
     assert observed["pixels"].device.type == "cpu"
@@ -101,16 +111,7 @@ def test_decode_stage_uses_cpu_output_buffer(monkeypatch) -> None:
             output[0, 0, 0, 0, :4] = torch.tensor([0.5, 1.0, 1.25, -0.25])
 
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
-    result = MiniMaxH3VideoDecodingStage(VAE()).forward(
-        batch,
-        SimpleNamespace(
-            output_type="pil",
-            pin_cpu_memory=False,
-            vae_cpu_offload=False,
-            vae_parallel_decode=False,
-            pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
-        ),
-    )
+    result = MiniMaxH3VideoDecodingStage(VAE()).forward(batch, _decode_config())
 
     torch.testing.assert_close(observed["latents"], latents)
     # The VAE still streams into the float32 CPU buffer the stage allocates;
@@ -156,16 +157,7 @@ def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch) -> None:
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(minimax_h3_decoding, "allocate_cpu_tensor_with_pin_fallback", fake_allocate)
 
-    MiniMaxH3VideoDecodingStage(VAE()).forward(
-        batch,
-        SimpleNamespace(
-            output_type="pil",
-            pin_cpu_memory=True,
-            vae_cpu_offload=False,
-            vae_parallel_decode=False,
-            pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
-        ),
-    )
+    MiniMaxH3VideoDecodingStage(VAE()).forward(batch, _decode_config(pin=True))
 
     assert observed == {
         "size": (1, 3, 5, 16, 16),
@@ -186,7 +178,7 @@ def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
     monkeypatch.setattr(minimax_h3_decoding, "get_sp_group",
                         lambda: SimpleNamespace(is_first_rank=True, world_size=4, rank_in_group=0))
     monkeypatch.setattr(minimax_h3_decoding, "get_world_group", lambda: SimpleNamespace(is_first_rank=False))
-    args = SimpleNamespace(output_type="pil", pin_cpu_memory=False, vae_cpu_offload=True, vae_parallel_decode=False)
+    args = _decode_config(vae_offload=True)
 
     video = MiniMaxH3VideoDecodingStage(VAE()).forward(ForwardBatch(data_type="video"), args)
     assert video.output.shape == (0, 3, 0, 0, 0)
@@ -229,14 +221,7 @@ def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
     monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
     monkeypatch.setattr(minimax_h3_decoding, "decode_to_pixels_parallel", fake_parallel)
-    args = SimpleNamespace(
-        output_type="pil",
-        pin_cpu_memory=False,
-        vae_cpu_offload=False,
-        vae_parallel_decode=True,
-        vae_parallel_decode_strategy="gather",
-        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
-    )
+    args = _decode_config(parallel_decode=True, vae_parallel_decode_strategy="gather")
 
     for rank, is_first in ((0, True), (2, False)):
         monkeypatch.setattr(

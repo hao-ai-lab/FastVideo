@@ -40,6 +40,7 @@ from fastvideo.configs.models.dits.kandinsky5 import (
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
+from fastvideo.pipelines.component_state import ComponentState
 
 DMD_STEPS = [1000, 750, 500, 250]
 TEXT_SEQ_LEN = 6
@@ -87,6 +88,8 @@ def _build_stage_and_spy(monkeypatch, env_overrides):
     monkeypatch.setattr(k5_stage_mod, "get_local_torch_device", lambda: torch.device("cpu"))
 
     stage = k5_stage_mod.Kandinsky5DmdDenoisingStage(transformer, FlowMatchEulerDiscreteScheduler(shift=5.0))
+    # ComposedPipelineBase.add_stage attaches the pipeline's component state; a stage built directly needs one.
+    stage.component_state = ComponentState()
 
     backend_calls: list[int] = []
     for module in transformer.modules():
@@ -116,13 +119,12 @@ def _make_batch() -> types.SimpleNamespace:
     )
 
 
-def _make_fastvideo_args(arch: Kandinsky5ArchConfig) -> types.SimpleNamespace:
+def _make_resolved_config(arch: Kandinsky5ArchConfig) -> types.SimpleNamespace:
+    """A stand-in for the resolved config that exposes the typed paths and model definition the stage reads."""
     return types.SimpleNamespace(
-        model_loaded={"transformer": True},
-        disable_autocast=True,
+        engine=types.SimpleNamespace(disable_autocast=True, precision=types.SimpleNamespace(dit="fp32")),
+        pipeline=types.SimpleNamespace(dmd_denoising_steps=tuple(DMD_STEPS)),
         pipeline_config=types.SimpleNamespace(
-            dit_precision="fp32",
-            dmd_denoising_steps=list(DMD_STEPS),
             dit_config=types.SimpleNamespace(arch_config=arch),
             vae_config=types.SimpleNamespace(arch_config=types.SimpleNamespace(
                 temporal_compression_ratio=4,
@@ -137,7 +139,7 @@ def test_dmd_stage_invokes_selected_backend_every_step(monkeypatch, env_override
     try:
         batch = _make_batch()
 
-        result = stage.forward(batch, _make_fastvideo_args(arch))
+        result = stage.forward(batch, _make_resolved_config(arch))
 
         # 3 LocalAttention modules (text self-attn, visual self-attn, visual
         # cross-attn) x one forward per DMD step. Any silent
@@ -201,7 +203,7 @@ def test_dmd_stage_with_context_and_raw_without_share_one_spy(monkeypatch, env_o
             )
         assert len(backend_calls) == 3, "context-wrapped raw call should hit all 3 attention layers"
 
-        stage.forward(_make_batch(), _make_fastvideo_args(arch))
+        stage.forward(_make_batch(), _make_resolved_config(arch))
         assert len(backend_calls) == 3 + 3 * len(DMD_STEPS)
     finally:
         _cached_get_attn_backend.cache_clear()

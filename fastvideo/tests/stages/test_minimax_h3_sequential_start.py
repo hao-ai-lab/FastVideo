@@ -8,14 +8,15 @@ from types import SimpleNamespace
 import torch
 
 import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
-from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.utils import FlexibleArgumentParser
+from fastvideo.api.overrides import apply_overrides, parse_cli_overrides
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import (
     MiniMaxH3Pipeline,
     _DENOISE_MODULE_NAMES,
 )
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.tests.stages._resolved_config import make_resolved_config
 
 
 class _Profiler:
@@ -37,6 +38,17 @@ def _stub_module(name: str) -> SimpleNamespace:
             config=SimpleNamespace(arch_config=SimpleNamespace(exclude_lora_layers=[])),
         )
     return SimpleNamespace(name=name)
+
+
+def _h3_config(*, enable_stage_verification: bool = True, lazy_module_load: bool | None = None, **minimax_h3):
+    """Resolved config for an unregistered model path, which carries the generic ``PipelineConfig``."""
+    return make_resolved_config(PipelineConfig(), raw={
+        "engine": {
+            "enable_stage_verification": enable_stage_verification,
+            "offload": {"lazy_module_load": lazy_module_load},
+        },
+        "pipeline": {"minimax_h3": minimax_h3},
+    })
 
 
 def _patch_pipeline_construction(monkeypatch, events: list) -> None:
@@ -69,12 +81,8 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
 
-    args = FastVideoArgs(
-        model_path="unused/for-this-test",
-        enable_stage_verification=False,
-        h3_sequential_load=True,
-    )
-    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", _h3_config(enable_stage_verification=False,
+                                                                     sequential_load=True))
     pipeline.post_init()
 
     assert loads, "condition modules should load during construction"
@@ -104,7 +112,7 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
     monkeypatch.setattr(pipeline, "_add_denoise_stages", fake_add_denoise)
 
     batch = ForwardBatch(data_type="video", prompt="alpine dancer")
-    out = pipeline.forward(batch, args)
+    out = pipeline.forward(batch, pipeline.resolved_config)
 
     assert out is batch
     assert len(loads) == 2
@@ -116,7 +124,7 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
     assert pipeline.get_module("transformer") is not None
     assert pipeline._denoise_stages_ready is True
 
-    second = pipeline.forward(ForwardBatch(data_type="video", prompt="second clip"), args)
+    second = pipeline.forward(ForwardBatch(data_type="video", prompt="second clip"), pipeline.resolved_config)
     assert second is not None
     assert len(loads) == 3
     assert loads[2] == ["text_encoder"]
@@ -136,8 +144,7 @@ def test_injected_denoise_weights_skip_the_deferred_split(monkeypatch) -> None:
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
     injected = {name: _stub_module(name) for name in MiniMaxH3Pipeline._required_config_modules}
-    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=True)
-    MiniMaxH3Pipeline("unused/for-this-test", args, loaded_modules=injected)
+    MiniMaxH3Pipeline("unused/for-this-test", _h3_config(sequential_load=True), loaded_modules=injected)
 
     assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
 
@@ -154,8 +161,7 @@ def test_explicit_false_loads_encoder_dit_and_vae_together(monkeypatch) -> None:
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
-    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=False)
-    MiniMaxH3Pipeline("unused/for-this-test", args)
+    MiniMaxH3Pipeline("unused/for-this-test", _h3_config(sequential_load=False))
 
     assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
     assert "text_encoder" in loads[0]
@@ -174,8 +180,7 @@ def test_auto_defers_on_unified_memory(monkeypatch) -> None:
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
-    args = FastVideoArgs(model_path="unused/for-this-test", lazy_module_load=False)
-    MiniMaxH3Pipeline("unused/for-this-test", args)
+    MiniMaxH3Pipeline("unused/for-this-test", _h3_config(lazy_module_load=False))
 
     assert loads
     assert "text_encoder" in loads[0]
@@ -194,8 +199,7 @@ def test_lazy_module_load_owns_deferral_when_both_would_arm(monkeypatch) -> None
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
-    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=True)
-    MiniMaxH3Pipeline("unused/for-this-test", args)
+    MiniMaxH3Pipeline("unused/for-this-test", _h3_config(sequential_load=True))
 
     assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
     assert all(name in loads[0] for name in _DENOISE_MODULE_NAMES)
@@ -212,17 +216,20 @@ def test_auto_loads_together_without_unified_memory(monkeypatch) -> None:
         return {name: _stub_module(name) for name in self.required_config_modules}
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
-    args = FastVideoArgs(model_path="unused/for-this-test")
-    MiniMaxH3Pipeline("unused/for-this-test", args)
+    MiniMaxH3Pipeline("unused/for-this-test", _h3_config())
 
     assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
 
 
 def test_cli_tri_state_h3_sequential_load() -> None:
-    parser = FastVideoArgs.add_cli_args(FlexibleArgumentParser())
-    assert parser.parse_args([]).h3_sequential_load is None
-    assert parser.parse_args(["--h3-sequential-load"]).h3_sequential_load is True
-    assert parser.parse_args(["--no-h3-sequential-load"]).h3_sequential_load is False
+
+    def sequential_load(argv: list[str]) -> bool | None:
+        raw = apply_overrides({}, parse_cli_overrides(argv))
+        return make_resolved_config(raw=raw).pipeline.minimax_h3.sequential_load
+
+    assert sequential_load([]) is None
+    assert sequential_load(["--pipeline.minimax_h3.sequential_load", "true"]) is True
+    assert sequential_load(["--pipeline.minimax_h3.sequential_load", "false"]) is False
 
 
 def test_taeh3_t2va_skips_video_vae_on_the_deferred_load(monkeypatch) -> None:
@@ -240,13 +247,8 @@ def test_taeh3_t2va_skips_video_vae_on_the_deferred_load(monkeypatch) -> None:
         return modules
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
-    args = FastVideoArgs(
-        model_path="unused/for-this-test",
-        enable_stage_verification=False,
-        h3_sequential_load=True,
-        video_decode_backend="taeh3",
-    )
-    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    resolved_config = _h3_config(enable_stage_verification=False, sequential_load=True, video_decode_backend="taeh3")
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", resolved_config)
     pipeline.post_init()
 
     condition_stage = pipeline._stage_name_mapping["conditioning_stage"]
@@ -266,7 +268,7 @@ def test_taeh3_t2va_skips_video_vae_on_the_deferred_load(monkeypatch) -> None:
             monkeypatch.setattr(pipeline._stage_name_mapping[name], "forward", passthrough)
 
     monkeypatch.setattr(pipeline, "_add_denoise_stages", fake_add_denoise)
-    pipeline.forward(ForwardBatch(data_type="video", prompt="alpine dancer"), args)
+    pipeline.forward(ForwardBatch(data_type="video", prompt="alpine dancer"), pipeline.resolved_config)
 
     assert "text_encoder" in loads[0]
     assert all(name not in loads[0] for name in _DENOISE_MODULE_NAMES)
@@ -285,8 +287,7 @@ def test_generic_pipeline_config_does_not_crash_geometry_overlay(monkeypatch) ->
         return {name: _stub_module(name) for name in self.required_config_modules}
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
-    args = FastVideoArgs(model_path="unused/for-this-test", h3_sequential_load=True)
-    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
+    pipeline = MiniMaxH3Pipeline("unused/for-this-test", _h3_config(sequential_load=True))
     pipeline.post_init()
     assert pipeline.get_module("text_encoder") is not None
 
@@ -306,20 +307,17 @@ def test_resident_path_does_not_reread_encoder_on_later_request(monkeypatch) -> 
         return modules
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
-    args = FastVideoArgs(
-        model_path="unused/for-this-test",
-        enable_stage_verification=False,
-        h3_sequential_load=False,
-        lazy_module_load=False,
+    pipeline = MiniMaxH3Pipeline(
+        "unused/for-this-test",
+        _h3_config(enable_stage_verification=False, lazy_module_load=False, sequential_load=False),
     )
-    pipeline = MiniMaxH3Pipeline("unused/for-this-test", args)
     pipeline.post_init()
     passthrough = lambda batch, _args: batch
     for stage in pipeline._stages:
         monkeypatch.setattr(stage, "forward", passthrough)
 
-    first = pipeline.forward(ForwardBatch(data_type="video", prompt="one"), args)
-    second = pipeline.forward(ForwardBatch(data_type="video", prompt="two"), args)
+    first = pipeline.forward(ForwardBatch(data_type="video", prompt="one"), pipeline.resolved_config)
+    second = pipeline.forward(ForwardBatch(data_type="video", prompt="two"), pipeline.resolved_config)
     assert first is not None and second is not None
     assert len(loads) == 1
     assert pipeline.get_module("text_encoder") is not None

@@ -49,9 +49,7 @@ def test_causal_standard_resets_scheduler_per_block_and_caches_per_request(monke
     model, scheduler = TinyCausalDenoiser(), RecordingUniPC()
     stage = causal_denoising.CausalDenoisingStage(model, scheduler)
     stage.progress_bar = lambda **kwargs: NullProgressBar()
-    args = _args()
-    args.pipeline_config.text_encoder_configs = [SimpleNamespace(arch_config=SimpleNamespace(text_len=8))]
-    args.pipeline_config.context_noise = 0
+    args = _args(text_encoder_configs=[SimpleNamespace(arch_config=SimpleNamespace(text_len=8))], context_noise=0)
 
     outputs = []
     for _ in range(2):

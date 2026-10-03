@@ -46,8 +46,7 @@ def test_pipeline_wires_family_sampler_and_owns_scheduler(monkeypatch, env_overr
     pipeline.get_module = lambda name, *default: pipeline.modules.get(name)
     stages = {}
     pipeline.add_stage = lambda *, stage_name, stage: stages.setdefault(stage_name, stage)
-    args = _args()
-    args.pipeline_config.flow_shift = 3.0
+    args = _args(pipeline={"flow_shift": 3.0})
     pipeline.initialize_pipeline(args)
     pipeline.create_pipeline_stages(args)
     stage = stages["denoising_stage"]
@@ -76,8 +75,7 @@ def test_pipeline_wires_family_sampler_and_owns_scheduler(monkeypatch, env_overr
 def test_first_frame_preparation_validates_and_clears_request_state(monkeypatch, causal):
     from fastvideo.pipelines.basic.wan.stages import conditioning
     monkeypatch.setattr(conditioning, "get_local_torch_device", lambda: torch.device("cpu"))
-    args, batch = _args(), _batch()
-    args.pipeline_config.ti2v_task = not causal
+    args, batch = _args(ti2v_task=not causal), _batch()
     batch.pil_image = torch.zeros(1, 3, 1, 16, 32)
     stage = conditioning.WanFirstFrameEncodingStage(TinyVAE(), causal=causal)
     assert stage.verify_input(batch, args).is_valid()

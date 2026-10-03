@@ -4,6 +4,7 @@
 import pytest
 import torch
 
+from fastvideo.pipelines.component_state import ComponentState
 from fastvideo.tests.stages._denoising_fixtures import (
     NullProgressBar, TinyDenoiser, TinyScheduler, _patch_denoising_module, _tiny_args, _tiny_batch,
 )
@@ -13,6 +14,7 @@ def _run_stage(monkeypatch, env_overrides, cfg_gate_step):
     denoising, logger = _patch_denoising_module(monkeypatch, env_overrides, cfg_gate_step)
     model = TinyDenoiser()
     stage = denoising.DenoisingStage(model, TinyScheduler())
+    stage.component_state = ComponentState()
     stage.progress_bar = lambda iterable=None, total=None: NullProgressBar()
 
     result = stage.forward(_tiny_batch(), _tiny_args())

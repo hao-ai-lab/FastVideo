@@ -7,7 +7,7 @@ import torch
 import torchvision.transforms.functional as TF
 from PIL import Image
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import load_image, load_video, pil_to_numpy, numpy_to_pt, normalize, resize
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -29,7 +29,7 @@ class InputValidationStage(PipelineStage):
     before proceeding with the diffusion process.
     """
 
-    def _generate_seeds(self, batch: ForwardBatch, resolved_config: FastVideoArgs):
+    def _generate_seeds(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig):
         """Generate seeds for the inference"""
         seed = batch.seed
         num_videos_per_prompt = batch.num_videos_per_prompt
@@ -44,14 +44,14 @@ class InputValidationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Validate and prepare inputs.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The validated batch information.
@@ -194,7 +194,7 @@ class InputValidationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify input validation stage inputs."""
         result = VerificationResult()
         # Cosmos-Predict2.5 default seed is 0; allow non-negative seeds here.
@@ -209,7 +209,7 @@ class InputValidationStage(PipelineStage):
                          lambda x: not batch.do_classifier_free_guidance or V.positive_float(x))
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify input validation stage outputs."""
         result = VerificationResult()
         result.add_check("seeds", batch.seeds, V.list_not_empty)

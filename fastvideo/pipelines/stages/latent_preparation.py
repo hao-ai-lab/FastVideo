@@ -10,8 +10,8 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 import fastvideo.envs as envs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.image_processor import ImageProcessor
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -39,14 +39,14 @@ class LatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Prepare initial latent variables for the diffusion process.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with prepared latent variables.
@@ -151,7 +151,7 @@ class LatentPreparationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify latent preparation stage inputs."""
         result = VerificationResult()
         result.add_check(
@@ -167,7 +167,7 @@ class LatentPreparationStage(PipelineStage):
         result.add_check("latents", batch.latents, V.none_or_tensor)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify latent preparation stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
@@ -192,7 +192,7 @@ class CosmosLatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         # Determine batch size
         if isinstance(batch.prompt, list):
@@ -378,7 +378,7 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -565,7 +565,7 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         batch.padding_mask = padding_mask
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify Cosmos latent preparation stage inputs."""
         result = VerificationResult()
         result.add_check("prompt_or_embeds", None,
@@ -579,7 +579,7 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         result.add_check("latents", batch.latents, V.none_or_tensor)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify latent preparation stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
@@ -598,7 +598,7 @@ class Cosmos25T2WLatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -651,10 +651,10 @@ class Cosmos25T2WLatentPreparationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         return Cosmos25LatentPreparationStage.verify_input(self, batch, resolved_config)  # type: ignore[misc]
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         return Cosmos25LatentPreparationStage.verify_output(self, batch, resolved_config)  # type: ignore[misc]
 
 
@@ -686,18 +686,18 @@ class Cosmos25AutoLatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         if self._has_conditioning_input(batch):
             return self._v2w.forward(batch, resolved_config)
         return self._t2w.forward(batch, resolved_config)
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         if self._has_conditioning_input(batch):
             return self._v2w.verify_input(batch, resolved_config)
         return self._t2w.verify_input(batch, resolved_config)
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         if self._has_conditioning_input(batch):
             return self._v2w.verify_output(batch, resolved_config)
         return self._t2w.verify_output(batch, resolved_config)

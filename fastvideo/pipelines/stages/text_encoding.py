@@ -10,8 +10,8 @@ from typing import Any
 
 from torch.distributed.tensor import DTensor
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -45,14 +45,14 @@ class TextEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Encode the prompt into text encoder hidden states.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with encoded prompt embeddings.
@@ -106,7 +106,7 @@ class TextEncodingStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify text encoding stage inputs."""
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, V.string_or_list_strings)
@@ -122,7 +122,7 @@ class TextEncodingStage(PipelineStage):
     def encode_text(
         self,
         text: str | list[str],
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         encoder_index: int | list[int] | None = None,
         return_attention_mask: bool = False,
         return_type: str = "list",  # one of: "list", "dict", "stack"
@@ -137,7 +137,7 @@ class TextEncodingStage(PipelineStage):
 
         Args:
             text: A single string or a list of strings to encode.
-            fastvideo_args: The inference arguments providing pipeline config,
+            resolved_config: The resolved runtime config providing the pipeline config,
                 including tokenizer and encoder settings, preprocess and postprocess
                 functions.
             encoder_index: Encoder selector by index. Accepts an int or list of ints.
@@ -331,7 +331,7 @@ class TextEncodingStage(PipelineStage):
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask.to(device=target_device))
-            if moved_for_forward and resolved_config.text_encoder_cpu_offload:
+            if moved_for_forward and resolved_config.engine.offload.text_encoder:
                 text_encoder.to("cpu")
         self._last_audio_embeds = audio_embeds_list if is_ltx2 else None
         return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
@@ -377,7 +377,7 @@ class TextEncodingStage(PipelineStage):
             return stacked_embeds, stacked_masks
         return stacked_embeds
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify text encoding stage outputs."""
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_min_dims(2))
@@ -399,7 +399,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
         self.text_encoder = text_encoder
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         assert batch.prompt is not None
         prompts = [batch.prompt] if isinstance(batch.prompt, str) else batch.prompt
 
@@ -423,7 +423,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, V.string_or_list_strings)
         result.add_check(
@@ -433,7 +433,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
         )
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_min_dims(2))
         result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,

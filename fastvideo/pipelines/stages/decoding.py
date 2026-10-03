@@ -7,8 +7,8 @@ import weakref
 
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.models.vaes.common import ParallelTiledVAE
@@ -34,14 +34,14 @@ class DecodingStage(PipelineStage):
         self.vae: ParallelTiledVAE = vae
         self.pipeline = weakref.ref(pipeline) if pipeline else None
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify decoding stage inputs."""
         result = VerificationResult()
         # Denoised latents for VAE decoding: [batch_size, channels, frames, height_latents, width_latents]
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify decoding stage outputs."""
         result = VerificationResult()
         # Decoded video/images: [batch_size, channels, frames, height, width]
@@ -68,7 +68,7 @@ class DecodingStage(PipelineStage):
     def _denormalize_latents(
         self,
         latents: torch.Tensor,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> torch.Tensor:
         """Convert normalized latents into the VAE's expected latent space."""
         # Some VAEs handle latent (de)normalization internally.
@@ -143,16 +143,17 @@ class DecodingStage(PipelineStage):
         return self._unpatchify_latents(latents)
 
     @torch.no_grad()
-    def decode(self, latents: torch.Tensor, resolved_config: FastVideoArgs) -> torch.Tensor:
+    def decode(self, latents: torch.Tensor, resolved_config: ResolvedGeneratorConfig) -> torch.Tensor:
         """
         Decode latent representations into pixel space using VAE.
         
         Args:
             latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
-            fastvideo_args: Configuration containing:
-                - disable_autocast: Whether to disable automatic mixed precision (default: False)
-                - pipeline_config.vae_precision: VAE computation precision ("fp32", "fp16", "bf16")
-                - pipeline_config.vae_tiling: Whether to enable VAE tiling for memory efficiency
+            resolved_config: The resolved runtime config, which provides:
+                - engine.disable_autocast: Whether to disable automatic mixed precision (default: False)
+                - engine.precision.vae_decode, else engine.precision.vae: VAE decode precision ("fp32", "fp16",
+                  "bf16")
+                - pipeline.vae_tiling: Whether to enable VAE tiling for memory efficiency
             
         Returns:
             Decoded video tensor with shape (batch, channels, frames, height, width), 
@@ -162,10 +163,9 @@ class DecodingStage(PipelineStage):
         latents = latents.to(get_local_torch_device())
 
         # Setup VAE precision (decode-only override falls back to vae_precision)
-        decode_precision = (resolved_config.pipeline_config.vae_decode_precision
-                            or resolved_config.pipeline_config.vae_precision)
+        decode_precision = (resolved_config.engine.precision.vae_decode or resolved_config.engine.precision.vae)
         vae_dtype = PRECISION_TO_TYPE[decode_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         # Flux2: skip denormalize on packed latents; BN denorm runs below instead
         if not (latents.ndim == 5 and self._is_flux2_packed(latents)):
@@ -178,9 +178,9 @@ class DecodingStage(PipelineStage):
 
         # Decode latents
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if resolved_config.pipeline_config.vae_tiling:
+            if resolved_config.pipeline.vae_tiling:
                 self.vae.enable_tiling()
-            # if fastvideo_args.vae_sp:
+            # if resolved_config.pipeline.vae_sp:
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
@@ -214,7 +214,7 @@ class DecodingStage(PipelineStage):
     def streaming_decode(
         self,
         latents: torch.Tensor,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         cache: list[torch.Tensor | None] | None = None,
         is_first_chunk: bool = False,
     ) -> tuple[torch.Tensor, list[torch.Tensor | None]]:
@@ -223,7 +223,7 @@ class DecodingStage(PipelineStage):
         
         Args:
             latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
-            fastvideo_args: Configuration object.
+            resolved_config: The resolved runtime config.
             cache: VAE cache from previous call, or None to initialize a new cache.
             is_first_chunk: Whether this is the first chunk.
             
@@ -234,10 +234,9 @@ class DecodingStage(PipelineStage):
         latents = latents.to(get_local_torch_device())
 
         # Setup VAE precision (decode-only override falls back to vae_precision)
-        decode_precision = (resolved_config.pipeline_config.vae_decode_precision
-                            or resolved_config.pipeline_config.vae_precision)
+        decode_precision = (resolved_config.engine.precision.vae_decode or resolved_config.engine.precision.vae)
         vae_dtype = PRECISION_TO_TYPE[decode_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         latents = self._denormalize_latents(latents, resolved_config)
 
@@ -247,7 +246,7 @@ class DecodingStage(PipelineStage):
 
         # Decode latents with streaming
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if resolved_config.pipeline_config.vae_tiling:
+            if resolved_config.pipeline.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
@@ -262,14 +261,15 @@ class DecodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Decode latent representations into pixel space.
         
         This method processes the batch through the VAE decoder, converting latent
         representations to pixel-space video/images. It also optionally decodes
-        trajectory latents for visualization purposes.
+        trajectory latents for visualization purposes. A VAE that was released is reloaded from the path in
+        ``self.component_state``.
         
         Args:
             batch: The current batch containing:
@@ -277,11 +277,9 @@ class DecodingStage(PipelineStage):
                 - return_trajectory_decoded (optional): Flag to decode trajectory latents
                 - trajectory_latents (optional): Latents at different timesteps
                 - trajectory_timesteps (optional): Corresponding timesteps
-            fastvideo_args: Configuration containing:
-                - output_type: "latent" to skip decoding, otherwise decode to pixels
-                - vae_cpu_offload: Whether to offload VAE to CPU after decoding
-                - model_loaded: Track VAE loading state
-                - model_paths: Path to VAE model if loading needed
+            resolved_config: The resolved runtime config, which provides:
+                - pipeline.output_type: "latent" to skip decoding, otherwise decode to pixels
+                - engine.offload.vae: Whether to offload VAE to CPU after decoding
             
         Returns:
             Modified batch with:
@@ -290,14 +288,14 @@ class DecodingStage(PipelineStage):
         """
         # load vae if not already loaded (used for memory constrained devices)
         pipeline = self.pipeline() if self.pipeline else None
-        if not resolved_config.model_loaded["vae"]:
+        if not self.component_state.model_loaded["vae"]:
             loader = VAELoader()
-            self.vae = loader.load(resolved_config.model_paths["vae"], resolved_config)
+            self.vae = loader.load(self.component_state.model_paths["vae"], resolved_config)
             if pipeline:
                 pipeline.add_module("vae", self.vae)
-            resolved_config.model_loaded["vae"] = True
+            self.component_state.model_loaded["vae"] = True
 
-        if resolved_config.output_type == "latent":
+        if resolved_config.pipeline.output_type == "latent":
             frames = batch.latents
             if frames.ndim == 5 and frames.shape[2] == 1 and self._is_flux2_packed(frames):
                 frames = self._flux2_bn_denorm_and_unpatchify(frames.squeeze(2))
@@ -337,13 +335,13 @@ class DecodingStage(PipelineStage):
         if hasattr(self, 'maybe_free_model_hooks'):
             self.maybe_free_model_hooks()
 
-        if resolved_config.vae_cpu_offload:
+        if resolved_config.engine.offload.vae:
             self.vae.to("cpu")
 
         if torch.backends.mps.is_available():
             del self.vae
             if pipeline is not None and "vae" in pipeline.modules:
                 del pipeline.modules["vae"]
-            resolved_config.model_loaded["vae"] = False
+            self.component_state.model_loaded["vae"] = False
 
         return batch

@@ -5,7 +5,7 @@ Conditioning stage for diffusion pipelines.
 
 import torch
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -24,14 +24,14 @@ class ConditioningStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Apply conditioning to the diffusion process.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with applied conditioning.
@@ -43,7 +43,7 @@ class ConditioningStage(PipelineStage):
         # disable CFG when prompt_embeds is empty.
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify conditioning stage inputs."""
         result = VerificationResult()
         if not batch.prompt_embeds:
@@ -60,7 +60,7 @@ class ConditioningStage(PipelineStage):
                              lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify conditioning stage outputs."""
         result = VerificationResult()
         if batch.prompt_embeds is None or not batch.prompt_embeds:

@@ -12,8 +12,9 @@ This module contains implementations of encoding stages for diffusion pipelines:
 import PIL
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
+from fastvideo.api.schema import ExecutionMode
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import ExecutionMode, FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import ParallelTiledVAE
@@ -52,14 +53,14 @@ class ImageEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with encoded prompt embeddings.
@@ -75,19 +76,19 @@ class ImageEncodingStage(PipelineStage):
 
         batch.image_embeds.append(image_embeds)
 
-        if resolved_config.image_encoder_cpu_offload:
+        if resolved_config.engine.offload.image_encoder:
             self.image_encoder.to('cpu')
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify image encoding stage inputs."""
         result = VerificationResult()
         result.add_check("pil_image", batch.pil_image, V.not_none)
         result.add_check("image_embeds", batch.image_embeds, V.is_list)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify image encoding stage outputs."""
         result = VerificationResult()
         result.add_check("image_embeds", batch.image_embeds, V.list_of_tensors_dims(3))
@@ -99,11 +100,11 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
     Stage for encoding image prompts into embeddings for HunyuanVideo1.5 models.
     """
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify image encoding stage inputs."""
         return VerificationResult()
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
         """
@@ -128,12 +129,12 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
         super().__init__(image_encoder=image_encoder, image_processor=image_processor)
         self.vae = vae
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify image encoding stage inputs."""
         return VerificationResult()
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states and VAE latents.
         
@@ -161,8 +162,8 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
         latent_height = raw_latent_shape[3]
         latent_width = raw_latent_shape[4]
 
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         if batch.pil_image is None:
             # T2V case: create zero embeddings for image_embeds
@@ -204,7 +205,7 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
                     image_embeds = outputs.last_hidden_state
                 batch.image_embeds = [image_embeds]
 
-                if resolved_config.image_encoder_cpu_offload:
+                if resolved_config.engine.offload.image_encoder:
                     self.image_encoder.to('cpu')
             else:
                 batch.image_embeds = [torch.zeros(1, num_vision_tokens, vision_dim, device=device)]
@@ -265,7 +266,7 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
                 # Concatenate latent and mask: [1, 33, T, H, W]
                 batch.image_latent = torch.cat([expanded_latent, mask], dim=1)
 
-                if resolved_config.vae_cpu_offload:
+                if resolved_config.engine.offload.vae:
                     self.vae.to('cpu')
             else:
                 # No VAE available, create zero latents with full temporal dimension
@@ -291,7 +292,7 @@ class MatrixGame2ImageEncodingStage(ImageEncodingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         assert batch.pil_image is not None
         self.image_encoder = self.image_encoder.to(get_local_torch_device())
@@ -330,7 +331,7 @@ class MatrixGame2ImageEncodingStage(ImageEncodingStage):
             image_embeds = outputs.last_hidden_state
 
         batch.image_embeds.append(image_embeds)
-        if resolved_config.image_encoder_cpu_offload:
+        if resolved_config.engine.offload.image_encoder:
             self.image_encoder.to('cpu')
         return batch
 
@@ -346,14 +347,14 @@ class RefImageEncodingStage(ImageEncodingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
 
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
 
         Returns:
             The batch with encoded prompt embeddings.
@@ -392,14 +393,14 @@ class ImageVAEEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Encode pixel representations into latent space.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with encoded outputs.
@@ -441,14 +442,14 @@ class ImageVAEEncodingStage(PipelineStage):
         video_condition = video_condition.to(device=get_local_torch_device(), dtype=torch.float32)
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         # Encode Image
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if resolved_config.pipeline_config.vae_tiling:
+            if resolved_config.pipeline.vae_tiling:
                 self.vae.enable_tiling()
-            # if fastvideo_args.vae_sp:
+            # if resolved_config.pipeline.vae_sp:
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
@@ -549,7 +550,7 @@ class ImageVAEEncodingStage(PipelineStage):
 
         return image
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify encoding stage inputs."""
         result = VerificationResult()
         result.add_check("generator", batch.generator, V.generator_or_list_generators)
@@ -563,7 +564,7 @@ class ImageVAEEncodingStage(PipelineStage):
             result.add_check("num_frames", batch.num_frames, V.positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify encoding stage outputs."""
         result = VerificationResult()
         result.add_check("image_latent", batch.image_latent, [V.is_tensor, V.with_dims(5)])
@@ -581,14 +582,14 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Encode video pixel representations into latent space.
 
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
 
         Returns:
             The batch with encoded outputs.
@@ -617,12 +618,12 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
                                                              width).to(get_local_torch_device(), dtype=torch.float32)
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         # Encode control video
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if resolved_config.pipeline_config.vae_tiling:
+            if resolved_config.pipeline.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
@@ -700,7 +701,7 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
 
         return video_tensor
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify video encoding stage inputs."""
         result = VerificationResult()
         result.add_check("video_latent", batch.video_latent, V.not_none)
@@ -715,7 +716,7 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
             result.add_check("num_frames", batch.num_frames, V.positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify video encoding stage outputs."""
         result = VerificationResult()
         result.add_check("video_latent", batch.video_latent, [V.is_tensor, V.with_dims(5)])
@@ -727,7 +728,7 @@ class MatrixGame2ImageVAEEncodingStage(ImageVAEEncodingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         assert batch.pil_image is not None
 
@@ -805,12 +806,12 @@ class MatrixGame2ImageVAEEncodingStage(ImageVAEEncodingStage):
             video_condition = video_condition.to(device=get_local_torch_device(), dtype=torch.float32)
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         # Encode Image
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if resolved_config.pipeline_config.vae_tiling:
+            if resolved_config.pipeline.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
@@ -887,7 +888,7 @@ class MatrixGame3ImageVAEEncodingStage(ImageVAEEncodingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         assert batch.pil_image is not None
 
@@ -923,11 +924,11 @@ class MatrixGame3ImageVAEEncodingStage(ImageVAEEncodingStage):
                                     width=width).to(get_local_torch_device(), dtype=torch.float32)
             video_condition = image.unsqueeze(2).to(get_local_torch_device(), dtype=torch.float32)
 
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if resolved_config.pipeline_config.vae_tiling:
+            if resolved_config.pipeline.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
@@ -958,6 +959,6 @@ class MatrixGame3ImageVAEEncodingStage(ImageVAEEncodingStage):
         if hasattr(self, 'maybe_free_model_hooks'):
             self.maybe_free_model_hooks()
 
-        if resolved_config.vae_cpu_offload:
+        if resolved_config.engine.offload.vae:
             self.vae.to("cpu")
         return batch

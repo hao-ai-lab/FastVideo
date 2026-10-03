@@ -21,6 +21,7 @@ from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedRefe
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import MINIMAX_H3_KEYFRAMES_KEY
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MiniMaxH3LatentPreparationStage
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.tests.stages._resolved_config import make_resolved_config
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 
@@ -75,17 +76,16 @@ def stage(distributed_setup, env_overrides):
     return MiniMaxH3LatentPreparationStage(video, audio, MiniMaxH3Scheduler())
 
 
-def _args(pin: bool, offload: bool = True) -> SimpleNamespace:
+def _args(pin: bool, offload: bool = True):
     """Provide encoding transfer flags and the tiny VAE's packing geometry."""
-    return SimpleNamespace(
-        pin_cpu_memory=pin,
-        vae_cpu_offload=offload,
-        vae_parallel_encode=False,
-        pipeline_config=SimpleNamespace(
-            dit_config=SimpleNamespace(patch_size=(1, 1, 1)),
-            vae_config=SimpleNamespace(arch_config=SimpleNamespace(latent_channels=4)),
-        ),
+    pipeline_config = SimpleNamespace(
+        dit_config=SimpleNamespace(patch_size=(1, 1, 1)),
+        vae_config=SimpleNamespace(arch_config=SimpleNamespace(latent_channels=4)),
     )
+    return make_resolved_config(pipeline_config, raw={
+        "engine": {"offload": {"pin_cpu_memory": pin, "vae": offload}},
+        "pipeline": {"minimax_h3": {"vae_parallel_encode": False}},
+    })
 
 
 def _batch(mode: str) -> ForwardBatch:
@@ -139,7 +139,7 @@ def _decode(stage, mode, args):
     """Exercise decoding between requests using the same frozen-weight cache."""
     device = get_local_torch_device()
     for model in _models(stage, mode):
-        pinned_offload.load(model, device, pin=args.pin_cpu_memory)
+        pinned_offload.load(model, device, pin=args.engine.offload.pin_cpu_memory)
         try:
             if model is stage.vae:
                 latents = torch.zeros(1, 4, 2, 4, 4, device=device)

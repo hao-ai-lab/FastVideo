@@ -9,8 +9,8 @@ import inspect
 
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -34,14 +34,14 @@ class TimestepPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Prepare timesteps for the diffusion process.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with prepared timesteps.
@@ -90,7 +90,7 @@ class TimestepPreparationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify timestep preparation stage inputs."""
         result = VerificationResult()
         result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
@@ -99,7 +99,7 @@ class TimestepPreparationStage(PipelineStage):
         result.add_check("n_tokens", batch.n_tokens, V.none_or_positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify timestep preparation stage outputs."""
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.with_dims(1)])
@@ -112,7 +112,7 @@ class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         scheduler = self.scheduler
         device = get_local_torch_device()
@@ -121,7 +121,7 @@ class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
         extra_kwargs: dict = {}
         sig = inspect.signature(scheduler.set_timesteps)
         if "shift" in sig.parameters:
-            extra_kwargs["shift"] = resolved_config.pipeline_config.flow_shift
+            extra_kwargs["shift"] = resolved_config.pipeline.flow_shift
         # Prefer the canonical diffusers kwarg name if available.
         if "use_karras_sigmas" in sig.parameters:
             extra_kwargs["use_karras_sigmas"] = True
@@ -155,7 +155,7 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         sig = inspect.signature(self.scheduler.set_timesteps)
 

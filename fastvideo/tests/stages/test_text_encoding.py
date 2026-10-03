@@ -3,11 +3,11 @@ import types
 import pytest
 
 from fastvideo.configs.models.encoders.clip import CLIPTextArchConfig, CLIPTextConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.models.encoders.base import TextEncoderArchConfig, TextEncoderConfig, BaseEncoderOutput
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
+from fastvideo.tests.stages._resolved_config import make_resolved_config
 
 
 class TensorDict(dict):
@@ -98,6 +98,10 @@ def take_mean_postprocess(outputs: BaseEncoderOutput) -> torch.Tensor:
 
 
 def make_args(num_encoders=2, text_len=4, hidden_size=8):
+    """A resolved config whose unfrozen ``PipelineConfig`` holds ``num_encoders`` fake text encoder configs.
+
+    The tests adjust the encoder configs and text functions of that model definition in place.
+    """
     enc_cfgs = []
     preprocess_fns = []
     postprocess_fns = []
@@ -112,7 +116,7 @@ def make_args(num_encoders=2, text_len=4, hidden_size=8):
         preprocess_text_funcs=tuple(preprocess_fns),
         postprocess_text_funcs=tuple(postprocess_fns),
     )
-    return FastVideoArgs(model_path="", pipeline_config=pipe_cfg), hidden_size
+    return make_resolved_config(pipe_cfg), hidden_size
 
 
 def make_stage(num_encoders=2, hidden_size=8):

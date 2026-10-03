@@ -16,14 +16,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import build_packed_sequence
 from fastvideo.pipelines.basic.minimax_h3.stages import minimax_h3_denoising as denoising
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-
-
-class _Args(SimpleNamespace):
-    """FastVideoArgs stand-in whose override() writes pipeline_config fields like FastVideoArgs.override."""
-
-    def override(self, source, values):
-        for key, value in values.items():
-            setattr(self.pipeline_config, key.removeprefix("pipeline_config."), value)
+from fastvideo.tests.stages._resolved_config import make_resolved_config
 
 
 DMD_STEPS = [999, 874, 749, 624, 500, 375, 250, 125]
@@ -54,8 +47,7 @@ def test_pipeline_preserves_shift10_from_checkpoint(tmp_path):
         "scheduler": MiniMaxH3Scheduler(shift=10.0),
         "audio_scheduler": MiniMaxH3Scheduler(shift=3.0),
     }
-    args = _Args(pipeline_config=MiniMaxH3PipelineConfig())
-    pipeline.initialize_pipeline(args)
+    pipeline.initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
     assert pipeline.modules["scheduler"].shift == 10.0
     assert pipeline.modules["audio_scheduler"].shift == 3.0
 
@@ -89,13 +81,17 @@ def _run_tiny_stage(monkeypatch, steps, grid_points, *, video_shift=10.0, offloa
 
     stage = denoising.MiniMaxH3DenoisingStage(transformer, MiniMaxH3Scheduler(shift=video_shift),
                                            MiniMaxH3Scheduler(shift=3.0))
-    args = _Args(pipeline_config=MiniMaxH3PipelineConfig(dmd_denoising_steps=steps),
-                           dit_cpu_offload=offloaded_transformer is not None,
-                           dit_layerwise_offload=False, use_fsdp_inference=False)
+    offload = {"dit": offloaded_transformer is not None, "dit_layerwise": False}
+    resolved_config = make_resolved_config(MiniMaxH3PipelineConfig(),
+                                           raw={"engine": {"offload": offload, "use_fsdp_inference": False}})
+    if steps is not None:
+        # A schedule decided after resolution, such as the checkpoint's, arrives through with_override, which does
+        # not type-check values, so the stage's own ladder validation is what rejects a malformed one.
+        resolved_config = resolved_config.with_override("test:dmd_schedule", {"pipeline.dmd_denoising_steps": steps})
     batch = ForwardBatch(
         data_type="video", prompt_embeds=[torch.zeros(1, 2, 8)], latents=torch.ones(2, 96), audio_latents=torch.ones(4, 32),
         num_inference_steps=grid_points, extra={MINIMAX_H3_LAYOUT_KEY: layout})
-    result = stage.forward(batch, args)
+    result = stage.forward(batch, resolved_config)
     return stage, transformer.calls, result
 
 
@@ -165,23 +161,26 @@ def test_eight_forward_schedule_uses_trained_rungs_for_both_modalities(monkeypat
 def test_pipeline_loads_the_exported_ladder_and_rejects_a_conflicting_one(tmp_path):
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps(CONTRACT))
     pipeline = _pipeline(tmp_path)
-    config = MiniMaxH3PipelineConfig()
-    pipeline.initialize_pipeline(_Args(pipeline_config=config))
-    assert config.dmd_denoising_steps == DMD_STEPS
+    pipeline.initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
+    assert list(pipeline.resolved_config.pipeline.dmd_denoising_steps) == DMD_STEPS
 
-    wrong = MiniMaxH3PipelineConfig(dmd_denoising_steps=[1000, 750, 500, 250])
+    wrong_steps = [1000, 750, 500, 250]
+    wrong = make_resolved_config(MiniMaxH3PipelineConfig(dmd_denoising_steps=wrong_steps),
+                                 raw={"pipeline": {"dmd_denoising_steps": wrong_steps}})
     with pytest.raises(ValueError, match="checkpoint.*DMD"):
-        pipeline.initialize_pipeline(_Args(pipeline_config=wrong))
+        pipeline.initialize_pipeline(wrong)
 
 
 @pytest.mark.parametrize("grid_points", [5, 50])
 def test_base_and_four_forward_schedules_are_unchanged(monkeypatch, tmp_path, grid_points):
     config = MiniMaxH3PipelineConfig()
+    resolved_config = make_resolved_config(config)
     pipeline = _pipeline(tmp_path, video_shift=12.0)
-    pipeline.initialize_pipeline(_Args(pipeline_config=config))
+    pipeline.initialize_pipeline(resolved_config)
     assert pipeline.modules["scheduler"].shift == 12.0
     assert pipeline.modules["audio_scheduler"].shift == 3.0
-    assert config.dmd_denoising_steps is None
+    # Without a sidecar the pipeline keeps the config it was given; a checkpoint schedule would rebind it.
+    assert (getattr(pipeline, "resolved_config", None) or resolved_config).pipeline.dmd_denoising_steps is None
     assert config.text_encoder_precisions == ("bf16",)
     stage, calls, _ = _run_tiny_stage(monkeypatch, None, grid_points, video_shift=12.0)
     assert len(calls) == grid_points - 1
@@ -211,7 +210,7 @@ def test_explicit_eight_forward_ladder_requires_nine_grid_points(monkeypatch, gr
 def test_checkpoint_schedule_metadata_must_be_self_consistent(tmp_path, field, value):
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps({**CONTRACT, field: value}))
     with pytest.raises(ValueError):
-        _pipeline(tmp_path).initialize_pipeline(_Args(pipeline_config=MiniMaxH3PipelineConfig()))
+        _pipeline(tmp_path).initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
 
 
 @pytest.mark.parametrize("module_name", ["scheduler", "audio_scheduler"])
@@ -220,7 +219,7 @@ def test_checkpoint_shifts_must_be_positive_and_finite(tmp_path, module_name, sh
     pipeline = _pipeline(tmp_path)
     pipeline.modules[module_name] = SimpleNamespace(shift=shift)
     with pytest.raises(ValueError, match="positive finite shift"):
-        pipeline.initialize_pipeline(_Args(pipeline_config=MiniMaxH3PipelineConfig()))
+        pipeline.initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
 
 
 def test_sidecar_without_shift_fields_uses_the_checkpoint_schedulers(tmp_path):
@@ -233,12 +232,11 @@ def test_sidecar_without_shift_fields_uses_the_checkpoint_schedulers(tmp_path):
     four_step.pop("audio_scheduler_shift")
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps(four_step))
     pipeline = _pipeline(tmp_path, video_shift=12.0)
-    config = MiniMaxH3PipelineConfig()
-    pipeline.initialize_pipeline(_Args(pipeline_config=config))
-    assert config.dmd_denoising_steps == [999, 749, 500, 250]
+    pipeline.initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
+    assert list(pipeline.resolved_config.pipeline.dmd_denoising_steps) == [999, 749, 500, 250]
     assert pipeline.modules["scheduler"].shift == 12.0
     assert pipeline.modules["audio_scheduler"].shift == 3.0
     # Explicit disagreement is still rejected.
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps({**four_step, "video_scheduler_shift": 10.0}))
     with pytest.raises(ValueError, match="disagrees"):
-        _pipeline(tmp_path, video_shift=12.0).initialize_pipeline(_Args(pipeline_config=MiniMaxH3PipelineConfig()))
+        _pipeline(tmp_path, video_shift=12.0).initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))

@@ -13,8 +13,9 @@ from abc import ABC, abstractmethod
 import torch
 
 import fastvideo.envs as envs
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
+from fastvideo.pipelines.component_state import ComponentState
 from fastvideo.pipelines.lazy_module import LazyModule
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -42,15 +43,19 @@ class PipelineStage(ABC):
     # that overrides forward still frees, since __call__ is the one entry
     # point subclasses are told not to override.
     _lazy_modules_to_release: tuple[LazyModule, ...] = ()
+    # Component paths and residency of the pipeline that owns this stage, attached by
+    # ``ComposedPipelineBase.add_stage``. A stage that releases a component to save memory reads it to reload the
+    # component from its recorded path.
+    component_state: ComponentState | None = None
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """
         Verify the input for the stage.
 
         Example:
             from fastvideo.pipelines.stages.validators import V, VerificationResult
             
-            def verify_input(self, batch, fastvideo_args):
+            def verify_input(self, batch, resolved_config):
                 result = VerificationResult()
                 result.add_check("height", batch.height, V.positive_int_divisible(8))
                 result.add_check("width", batch.width, V.positive_int_divisible(8))
@@ -59,7 +64,7 @@ class PipelineStage(ABC):
 
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
 
         Returns:
             A VerificationResult containing the verification status.
@@ -68,13 +73,13 @@ class PipelineStage(ABC):
         # Default implementation - no verification
         return VerificationResult()
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """
         Verify the output for the stage.
 
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
 
         Returns:
             A VerificationResult containing the verification status.
@@ -121,7 +126,7 @@ class PipelineStage(ABC):
     def __call__(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Execute the stage's processing on the batch with optional verification and logging.
@@ -129,7 +134,7 @@ class PipelineStage(ABC):
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The updated batch information after this stage's processing.
@@ -139,7 +144,7 @@ class PipelineStage(ABC):
         stage_name = f"{stage_key}|{stage_class_name}"
 
         # Check if verification is enabled (simple approach for prototype)
-        enable_verification = getattr(resolved_config, 'enable_stage_verification', False)
+        enable_verification = resolved_config.engine.enable_stage_verification
 
         if enable_verification:
             # Pre-execution input verification
@@ -172,7 +177,7 @@ class PipelineStage(ABC):
     def _execute(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         stage_key: str,
         stage_class_name: str,
         stage_name: str,
@@ -225,7 +230,7 @@ class PipelineStage(ABC):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Forward pass of the stage's processing.
@@ -235,7 +240,7 @@ class PipelineStage(ABC):
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The updated batch information after this stage's processing.

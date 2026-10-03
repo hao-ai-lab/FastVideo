@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import FlowUniPCMultistepScheduler
+from fastvideo.pipelines.component_state import ComponentState
 from fastvideo.tests.stages._denoising_fixtures import (
     NullProgressBar, RecordingDenoiser, TinyScheduler, TinyVAE, _args, _batch, _patch_denoising_module,
 )
@@ -19,6 +20,7 @@ def _stage(monkeypatch, env_overrides, model, scheduler, *, second=None, gate="1
     from fastvideo.pipelines.basic.wan.stages import denoising
     monkeypatch.setattr(denoising, "get_local_torch_device", lambda: torch.device("cpu"))
     stage = denoising.WanDenoisingStage(model, scheduler, transformer_2=second)
+    stage.component_state = ComponentState()
     stage.progress_bar = lambda **kwargs: NullProgressBar()
     return stage, logger
 
@@ -58,8 +60,7 @@ def test_wan_all_scheduler_steps_match_explicit_loop(monkeypatch, env_overrides,
 def test_wan_expert_boundary_invalidates_cfg_cache(monkeypatch, env_overrides):
     primary, secondary = RecordingDenoiser(), RecordingDenoiser(offset=0.125)
     stage, logger = _stage(monkeypatch, env_overrides, primary, TinyScheduler(), second=secondary, gate="0.0")
-    args, batch = _args(), _batch()
-    args.pipeline_config.dit_config.boundary_ratio = 0.9
+    args, batch = _args(boundary_ratio=0.9), _batch()
     batch.boundary_ratio = 0.5  # Per-request override wins; equality still uses the high-noise expert.
     batch.timesteps = torch.tensor([750.0, 500.0, 250.0, 1.0])
     batch.guidance_scale_2 = 3.0
@@ -71,14 +72,12 @@ def test_wan_expert_boundary_invalidates_cfg_cache(monkeypatch, env_overrides):
 
 @pytest.mark.parametrize("kind,channels", [("t2v", 2), ("i2v", 4), ("v2v", 6), ("lucy", 4), ("ti2v", 2)])
 def test_wan_conditioning_layout_and_first_frame(monkeypatch, env_overrides, kind, channels):
-    args, batch = _args(), _batch(cfg=False)
+    args, batch = _args(lucy_edit_task=kind == "lucy", ti2v_task=kind == "ti2v"), _batch(cfg=False)
     model, vae = RecordingDenoiser(), TinyVAE()
     if kind == "i2v":
         batch.image_latent = torch.full_like(batch.latents, 0.25)
     if kind in {"v2v", "lucy"}:
         batch.video_latent = torch.full_like(batch.latents, 0.375)
-    args.pipeline_config.lucy_edit_task = kind == "lucy"
-    args.pipeline_config.ti2v_task = kind == "ti2v"
     if kind == "ti2v":
         batch.pil_image = torch.zeros(1, 3, 1, 16, 32)
     stage, _ = _stage(monkeypatch, env_overrides, model, TinyScheduler())

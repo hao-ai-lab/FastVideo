@@ -16,8 +16,8 @@ def test_wan_dmd_uses_full_training_table_and_preserves_rng_order(monkeypatch, e
     from fastvideo.pipelines.basic.wan.stages import dmd
     monkeypatch.setattr(dmd, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(dmd, "set_forward_context", lambda **kwargs: nullcontext())
-    args, batch = _args(), _batch(steps=3, cfg=False)
-    args.pipeline_config.dmd_denoising_steps = [1000, 750, 500]
+    timesteps = [1000, 750, 500]
+    args, batch = _args(pipeline={"dmd_denoising_steps": timesteps}), _batch(steps=3, cfg=False)
     batch.latents = batch.latents.permute(0, 2, 1, 3, 4)
     batch.generator = [torch.Generator().manual_seed(123)]
     expected_generator = torch.Generator().manual_seed(123)
@@ -27,7 +27,6 @@ def test_wan_dmd_uses_full_training_table_and_preserves_rng_order(monkeypatch, e
     expected_scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
     table = scheduler.timesteps.clone()
     sigmas = scheduler.sigmas.clone()
-    timesteps = args.pipeline_config.dmd_denoising_steps
     for index, timestep in enumerate(timesteps):
         t = torch.tensor([timestep], dtype=torch.long)
         noise = reference(expected.to(torch.bfloat16).permute(0, 2, 1, 3, 4), batch.prompt_embeds, t)

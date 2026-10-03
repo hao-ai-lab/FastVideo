@@ -13,13 +13,14 @@ import torch
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
+from fastvideo.api.resolution import ResolvedGeneratorConfig, thaw
 from fastvideo.attention import get_attn_backend
 from fastvideo.attention.selector import component_attention_backend
 from fastvideo.distributed import (get_local_torch_device, get_world_group)
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
+from fastvideo.pipelines.component_state import ComponentState
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, embedded_cfg_scale_for_batch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -84,25 +85,25 @@ class DenoisingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Run the denoising loop.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with denoised latents.
         """
         pipeline = self.pipeline() if self.pipeline else None
-        if not resolved_config.model_loaded["transformer"]:
+        if not self.component_state.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
+            self.transformer = loader.load(self.component_state.model_paths["transformer"], resolved_config)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            resolved_config.model_loaded["transformer"] = True
+            self.component_state.model_loaded["transformer"] = True
 
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -115,7 +116,7 @@ class DenoisingStage(PipelineStage):
 
         # Setup precision and autocast settings
         # TODO(will): make the precision configurable for inference
-        # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
+        # target_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
         target_dtype = torch.bfloat16
         # Flux2-only denoising compensations.
         #
@@ -144,7 +145,8 @@ class DenoisingStage(PipelineStage):
             # Gate 1: tighten bf16 matmul accumulation for the 4-step Klein model (opt-in via env var).
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
         # Gate 2: Flux2 runs its bf16 transformer WITHOUT autocast — autocast perturbs long-sequence attention enough to break 4-step latent parity.
-        autocast_enabled = ((target_dtype != torch.float32) and not resolved_config.disable_autocast and not _is_flux)
+        autocast_enabled = ((target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
+                            and not _is_flux)
         scheduler_fp32 = getattr(resolved_config.pipeline_config, "scheduler_step_in_fp32", False)
         local_device = get_local_torch_device()
 
@@ -373,7 +375,7 @@ class DenoisingStage(PipelineStage):
                                 raw_latent_shape=batch.raw_latent_shape[2:5],  # type: ignore
                                 patch_size=resolved_config.pipeline_config.  # type: ignore
                                 dit_config.patch_size,  # type: ignore
-                                VSA_sparsity=resolved_config.VSA_sparsity,  # type: ignore
+                                VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,  # type: ignore
                                 device=get_local_torch_device(),
                             )
                             assert attn_metadata is not None, "attn_metadata cannot be None"
@@ -384,7 +386,7 @@ class DenoisingStage(PipelineStage):
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
                             # Prepare V-MoBA parameters from config
-                            moba_params = resolved_config.moba_config.copy()
+                            moba_params = thaw(resolved_config.engine.attention.moba_config)
                             moba_params.update({
                                 "current_timestep": i,
                                 "raw_latent_shape": batch.raw_latent_shape[2:5],
@@ -400,13 +402,13 @@ class DenoisingStage(PipelineStage):
                     # TODO(will): finalize the interface. vLLM uses this to
                     # support torch dynamo compilation. They pass in
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
-                    # fastvideo_args or training_args, and attn_metadata.
+                    # resolved_config and attn_metadata.
                     batch.is_cfg_negative = False
                     with set_forward_context(
                             current_timestep=i,
                             attn_metadata=attn_metadata,
                             forward_batch=batch,
-                            # fastvideo_args=fastvideo_args
+                            # resolved_config=resolved_config
                     ):
                         # Run transformer
                         noise_pred = current_model(
@@ -537,7 +539,7 @@ class DenoisingStage(PipelineStage):
         # Update batch with final latents
         batch.latents = latents
 
-        if resolved_config.dit_layerwise_offload:
+        if resolved_config.engine.offload.dit_layerwise:
             mgr = getattr(self.transformer, "_layerwise_offload_manager", None)
             if mgr is not None and getattr(mgr, "enabled", False):
                 mgr.release_all()
@@ -552,7 +554,7 @@ class DenoisingStage(PipelineStage):
             del self.transformer
             if pipeline is not None and "transformer" in pipeline.modules:
                 del pipeline.modules["transformer"]
-            resolved_config.model_loaded["transformer"] = False
+            self.component_state.model_loaded["transformer"] = False
             logger.info("Memory after deallocating transformer: %s", torch.mps.current_allocated_memory())
 
         return batch
@@ -570,10 +572,10 @@ class DenoisingStage(PipelineStage):
     def activate_transformer(self, model, inactive_model, resolved_config) -> None:
         """Keep CPU/layerwise/FSDP offload decisions independent of the sampling recipe."""
         assert model is not None, "current_model is None"
-        if resolved_config.dit_cpu_offload and not resolved_config.dit_layerwise_offload:
+        if resolved_config.engine.offload.dit and not resolved_config.engine.offload.dit_layerwise:
             if inactive_model is not None and next(inactive_model.parameters()).device.type == "cuda":
                 inactive_model.to("cpu")
-            if not resolved_config.use_fsdp_inference and next(model.parameters()).device.type == "cpu":
+            if not resolved_config.engine.use_fsdp_inference and next(model.parameters()).device.type == "cpu":
                 model.to(get_local_torch_device())
 
     def select_model(self, timestep, batch, resolved_config, state) -> tuple[Any, float]:
@@ -653,7 +655,7 @@ class DenoisingStage(PipelineStage):
         noise_cfg = (guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg)
         return noise_cfg
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify denoising stage inputs."""
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
@@ -670,7 +672,7 @@ class DenoisingStage(PipelineStage):
                          lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify denoising stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
@@ -717,25 +719,25 @@ class CosmosDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         pipeline = self.pipeline() if self.pipeline else None
-        if not resolved_config.model_loaded["transformer"]:
+        if not self.component_state.model_loaded["transformer"]:
             loader = TransformerLoader()
             self.transformer = loader.load(
-                resolved_config.model_paths["transformer"],
+                self.component_state.model_paths["transformer"],
                 resolved_config,
             )
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            resolved_config.model_loaded["transformer"] = True
+            self.component_state.model_loaded["transformer"] = True
 
         if hasattr(self.transformer, "module"):
             transformer_dtype = next(self.transformer.module.parameters()).dtype
         else:
             transformer_dtype = next(self.transformer.parameters()).dtype
         target_dtype = transformer_dtype
-        autocast_enabled = (target_dtype != torch.float32 and not resolved_config.disable_autocast)
+        autocast_enabled = (target_dtype != torch.float32 and not resolved_config.engine.disable_autocast)
 
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
@@ -906,7 +908,7 @@ class CosmosDenoisingStage(DenoisingStage):
         batch.latents = latents
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify Cosmos denoising stage inputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
@@ -918,7 +920,7 @@ class CosmosDenoisingStage(DenoisingStage):
                          lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify Cosmos denoising stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
@@ -931,15 +933,15 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         pipeline = self.pipeline() if self.pipeline else None
-        if not resolved_config.model_loaded["transformer"]:
+        if not self.component_state.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
+            self.transformer = loader.load(self.component_state.model_paths["transformer"], resolved_config)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            resolved_config.model_loaded["transformer"] = True
+            self.component_state.model_loaded["transformer"] = True
 
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -958,7 +960,7 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
             if p.dtype != torch.float32:
                 target_dtype = p.dtype
                 break
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         latents = batch.latents
         if latents is None:
@@ -1128,7 +1130,7 @@ class Cosmos25T2WDenoisingStage(Cosmos25DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         for name in self._CONDITIONING_FIELDS:
             if hasattr(batch, name):
@@ -1142,7 +1144,7 @@ class Cosmos25V2WDenoisingStage(Cosmos25DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         return super().forward(batch, resolved_config)
 
@@ -1159,23 +1161,33 @@ class Cosmos25AutoDenoisingStage(PipelineStage):
     def pipeline(self):
         return self._v2w.pipeline() if self._v2w.pipeline else None
 
+    @property
+    def component_state(self) -> ComponentState | None:
+        return self._v2w.component_state
+
+    @component_state.setter
+    def component_state(self, component_state: ComponentState | None) -> None:
+        # The routed stages reload the transformer through the pipeline's component state.
+        self._t2w.component_state = component_state
+        self._v2w.component_state = component_state
+
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         conditioning_latents = getattr(batch, "conditioning_latents", None)
         if conditioning_latents is not None:
             return self._v2w.forward(batch, resolved_config)
         return self._t2w.forward(batch, resolved_config)
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         conditioning_latents = getattr(batch, "conditioning_latents", None)
         if conditioning_latents is not None:
             return self._v2w.verify_input(batch, resolved_config)
         return self._t2w.verify_input(batch, resolved_config)
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         conditioning_latents = getattr(batch, "conditioning_latents", None)
         if conditioning_latents is not None:
             return self._v2w.verify_output(batch, resolved_config)
