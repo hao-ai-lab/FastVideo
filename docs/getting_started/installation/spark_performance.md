@@ -277,10 +277,21 @@ the closest legal count above five seconds at 24 fps. For the secondary
 10-second setting, set `--request.sampling.width 1344` and
 `--request.sampling.height 768`, keeping 243 frames. Use the two prompts in
 `handoff_spark_mac/benchmark_prompts.json` from the local release handoff.
-Warm up once, then time at least two `generate_video` calls per prompt in one
-process. Record the median wall time, denoise and decode stage times, peak
-memory, exact command and commit, and retain every MP4 for review. The V2
-configuration must pass a visual and audio quality check before publication.
+The benchmark script runs one warmup and at least two timed generations for
+each prompt in one process. It saves the MP4s and prints the wall time, stage
+times, peak memory, and median. Use the same environment variables as above:
+
+```bash
+nice -n 19 python examples/inference/basic/benchmark_fasth3_spark_nvfp4.py \
+  --config examples/inference/basic/basic_fasth3_spark_v2_nvfp4.yaml \
+  --prompts /path/to/fasth3-local-release/handoff_spark_mac/benchmark_prompts.json \
+  --output-dir outputs/fasth3_spark_v2_nvfp4/benchmark-243 --frames 243
+
+# Repeat with --frames 124 and a different output directory for the five-second check.
+```
+
+Record the exact command and commit with the measurements. Review every clip's
+video and audio before publishing a quality or speed claim.
 
 After the V2 baseline works, sweep `FASTVIDEO_H3_VAE_TILE_BATCH` and
 `FASTVIDEO_NVFP4_MM_BACKEND` on the same prompts. Compare the optional AdaLN
