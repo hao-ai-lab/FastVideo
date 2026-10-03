@@ -58,8 +58,8 @@ hf download FastVideo/FastH3-Pruned-8Step-BF16-ckpt300 \
   --local-dir ./FastH3-Pruned-8Step-BF16-ckpt300 \
   --exclude 'text_encoder/*'
 
-# The pruned repo's packed NVFP4 encoder is for Blackwell. MLX reads the
-# official BF16 encoder through layer 50. The last three shards are unused.
+# Optional BF16 encoder fallback: stream the first 50 language layers.
+# The last three shards are unused. The packed NVFP4 option is described below.
 hf download MiniMaxAI/MiniMax-H3 \
   --local-dir ./FastH3-Pruned-8Step-BF16-ckpt300 \
   --include 'text_encoder/model-0000[1-9]-of-00014.safetensors' \
@@ -86,6 +86,47 @@ Use `--num-frames 124` and a separate output path for that run. The `--fast`
 and `--fast-spatial` options change the workload and are not part of the
 native-resolution benchmark. A 36 GB Mac may need INT6 and phased loading;
 measure memory before claiming all-resident operation.
+
+### Packed encoder and resident loading
+
+The experimental MLX conditioner can read the released FastVideo NVFP4
+text encoder directly, using native `nvfp4` matrix multiplication. It keeps
+the packed weights and BF16 embedding table in memory, with FP32
+activations. CUDA uses quantized activations, so the two encoders are not
+bit-exact. Validate generated video and audio before publishing a timing.
+MLX 0.32.2 supports the required operator on Apple Silicon.
+
+Pass the packed encoder directory as `conditioner_dir`; `conditioner_mode="auto"`
+selects it from `config.json`. The BF16 fallback continues to stream layers.
+To request all-resident generation through the Python API:
+
+```python
+from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
+
+pipeline = MiniMaxH3MLXPipeline(
+    model_root="./FastH3-Pruned-8Step-BF16-ckpt300",
+    mlx_dit_checkpoint="./FastH3-Pruned-MLX-vsa/int6",
+    conditioner_dir="./FastH3-NVFP4-encoder",
+    conditioner_mode="nvfp4",
+    resident=True,
+    vae_dtype="fp16",
+)
+try:
+    pipeline.prepare_resident()  # Load encoder, DiT, video VAE and audio VAE.
+    result = pipeline.generate(
+        "(S1) A potter asks <d>[English] Is the rim ready?</d>",
+        output_path="./outputs/fasth3_pruned_resident.mp4",
+        height=480, width=832, num_frames=243, num_steps=8,
+        vsa=True, vsa_sparsity=0.8, vsa_tile_size=64,
+    )
+finally:
+    pipeline.close()
+```
+
+Resident placement requires space for activations as well as all four
+components. On a 36 GiB Mac, try INT6 first and measure peak allocation.
+If loading or inference runs out of memory, use phased loading by leaving
+`resident=False`. Changing placement does not change frames or resolution.
 
 ## Hardware
 

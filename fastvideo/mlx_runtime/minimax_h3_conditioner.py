@@ -22,6 +22,7 @@ import gc
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import mlx.core as mx
@@ -146,7 +147,7 @@ class _ShardIndex:
         gc.collect()
 
 
-_DTYPES = {"F32": np.float32, "F16": np.float16, "I64": np.int64, "I32": np.int32}
+_DTYPES = {"F32": np.float32, "F16": np.float16, "I64": np.int64, "I32": np.int32, "U8": np.uint8}
 
 
 def _read_bf16_words(path: str, key: str, header: dict, data_start: int) -> np.ndarray:
@@ -215,8 +216,20 @@ def _rms_norm(x, weight, eps: float):
     return x / mx.sqrt(mx.mean(x * x, axis=-1, keepdims=True) + eps) * weight
 
 
+@dataclass(frozen=True)
+class NVFP4Matrix:
+    """MLX row-major E2M1/E4M3 weights and the export's inverse global scale."""
+
+    weight: mx.array
+    scales: mx.array
+    global_scale: float
+
+    def matmul(self, x):
+        return mx.quantized_matmul(x, self.weight, self.scales, mode="nvfp4") / self.global_scale
+
+
 def _linear(x, weight, bias=None):
-    y = x @ weight.T
+    y = weight.matmul(x) if isinstance(weight, NVFP4Matrix) else x @ weight.T
     if bias is not None:
         y = y + bias
     return y
@@ -248,7 +261,7 @@ class StreamedMiniMaxH3TextConditioner:
     def __init__(self, component_dir: str | Path, tokenizer_dir: str | Path | None = None):
         self.component_dir = Path(component_dir)
         self.config = ConditionerConfig.from_config_json(self.component_dir / "config.json")
-        self.index = _ShardIndex(self.component_dir)
+        self.index: Any = _ShardIndex(self.component_dir)
         self.tokenizer = self._load_tokenizer(tokenizer_dir)
 
     def _load_tokenizer(self, tokenizer_dir: str | Path | None):
@@ -294,8 +307,22 @@ class StreamedMiniMaxH3TextConditioner:
         ])
         cos, sin = _mrope_cos_sin(positions, cfg)
 
-        # Embedding rows gathered individually; the (151936, 5120) table is
-        # never fully materialized.
+        hidden = self._embed_tokens(token_ids)
+
+        if cfg.num_layers < TEXT_ENCODER_LAYER:
+            raise ValueError(f"Conditioner needs at least {TEXT_ENCODER_LAYER} layers, has {cfg.num_layers}.")
+        for layer in range(TEXT_ENCODER_LAYER):
+            hidden = self._decoder_layer(layer, hidden, cos, sin)
+            # Per-layer sync keeps the 50-layer activation graph bounded.
+            mx.eval(hidden)
+            gc.collect()
+
+        tags = np.full((seq_len, ), 1, dtype=np.int64)  # MINIMAX_H3_TEXT_TAG
+        return np.asarray(hidden).astype(np.float32), tags
+
+    def _embed_tokens(self, token_ids: list[int]):
+        # Embedding rows gathered individually; the full table is never
+        # materialized by the BF16 streaming path.
         rows = []
         for token in token_ids:
             key = "model.language_model.embed_tokens.weight"
@@ -303,18 +330,7 @@ class StreamedMiniMaxH3TextConditioner:
         hidden = mx.array(np.stack(rows).astype(np.float32))
         del rows
         gc.collect()
-
-        if cfg.num_layers < TEXT_ENCODER_LAYER:
-            raise ValueError(f"Conditioner needs at least {TEXT_ENCODER_LAYER} layers, has {cfg.num_layers}.")
-        for layer in range(TEXT_ENCODER_LAYER):
-            hidden = self._decoder_layer(layer, hidden, cos, sin)
-            # Per-layer sync: without this the whole 50-layer graph accumulates
-            # and the machine runs out of memory (same failure mode as the DiT).
-            mx.eval(hidden)
-            gc.collect()
-
-        tags = np.full((seq_len, ), 1, dtype=np.int64)  # MINIMAX_H3_TEXT_TAG
-        return np.asarray(hidden).astype(np.float32), tags
+        return hidden
 
     # -- layers ----------------------------------------------------------
 
@@ -376,6 +392,96 @@ class StreamedMiniMaxH3TextConditioner:
 
     def close(self) -> None:
         self.index.close()
+
+
+def unswizzle_nvfp4_scales(scale: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    """FlashInfer 128x4 scale bytes -> MLX row-major group-16 scale bytes."""
+    pad_rows, pad_cols = -(-rows // 128) * 128, -(-cols // 4) * 4
+    if scale.size != pad_rows * pad_cols:
+        raise ValueError(f"NVFP4 scales need {pad_rows * pad_cols} bytes, got {scale.size}.")
+    tiles = scale.reshape(pad_rows // 128, pad_cols // 4, 32, 4, 4)
+    return np.ascontiguousarray(tiles.transpose(0, 3, 2, 1, 4).reshape(pad_rows, pad_cols)[:rows, :cols])
+
+
+class _ResidentNVFP4Index:
+    """Load the released 50-layer encoder without expanding packed matrices."""
+
+    def __init__(self, source: _ShardIndex):
+        self.weights: dict[str, mx.array | NVFP4Matrix] = {}
+        for key in sorted(source.key_to_shard):
+            if key.endswith(".weight_packed"):
+                prefix = key.removesuffix(".weight_packed")
+                packed = np.array(source.get(key), copy=True)
+                if packed.dtype != np.uint8 or packed.ndim != 2 or packed.shape[1] % 4:
+                    raise ValueError(f"Invalid packed NVFP4 matrix {key}: {packed.shape}, {packed.dtype}")
+                rows, cols = packed.shape[0], packed.shape[1] * 2
+                if cols % 16:
+                    raise ValueError(f"NVFP4 input width must be divisible by 16: {key}")
+                scales = unswizzle_nvfp4_scales(source.get(prefix + ".weight_scale"), rows, cols // 16)
+                global_scale = float(source.get(prefix + ".weight_global_scale").reshape(-1)[0])
+                if not np.isfinite(global_scale) or global_scale <= 0:
+                    raise ValueError(f"Invalid NVFP4 global scale for {prefix}: {global_scale}")
+                weight = mx.array(packed).view(mx.uint32)
+                scale_bytes = mx.array(scales)
+                if not bool(mx.all(mx.isfinite(mx.from_fp8(scale_bytes, dtype=mx.float32)))):
+                    raise ValueError(f"Non-finite NVFP4 block scales for {prefix}")
+                mx.eval(weight, scale_bytes)
+                self.weights[prefix + ".weight"] = NVFP4Matrix(weight, scale_bytes, global_scale)
+            elif key.endswith(".weight"):
+                if key == "model.language_model.embed_tokens.weight":
+                    shard = source.key_to_shard[key]
+                    header, data_start = source._cache_header(shard)
+                    if header[key]["dtype"] == "BF16":
+                        value = mx.array(_read_bf16_words(shard, key, header, data_start)).view(mx.bfloat16)
+                    else:
+                        value = mx.array(source.get(key))
+                else:
+                    value = source.get_mlx(key)
+                mx.eval(value)
+                self.weights[key] = value
+        source.close()
+
+    def get_mlx(self, key: str):
+        return self.weights[key]
+
+    def close(self) -> None:
+        self.weights.clear()
+        gc.collect()
+
+
+class ResidentNVFP4MiniMaxH3TextConditioner(StreamedMiniMaxH3TextConditioner):
+    """Released NVFP4 encoder weights with floating-point MLX activations.
+
+    The packed weights and embedding table stay resident. CUDA quantizes
+    activations to FP4; this path keeps FP32 activations, so hidden states are
+    not expected to be bit-exact with the CUDA encoder.
+    """
+
+    def __init__(self, component_dir: str | Path, tokenizer_dir: str | Path | None = None):
+        raw = json.loads((Path(component_dir) / "config.json").read_text())
+        quant = raw.get("quantization_config", {})
+        expected = {
+            "quant_method": "nvfp4",
+            "fmt": "e2m1",
+            "group_size": 16,
+            "scale_fmt": "e4m3",
+            "scale_layout": "128x4",
+            "activation_scheme": "dynamic"
+        }
+        if any(quant.get(key) != value for key, value in expected.items()):
+            raise ValueError("MLX NVFP4 conditioning requires the FastVideo group-16, 128x4 encoder export.")
+        # Fail on an older MLX before reading the encoder's large shards.
+        try:
+            packed, scales = mx.quantize(mx.ones((1, 64)), mode="nvfp4")
+            mx.eval(mx.quantized_matmul(mx.ones((1, 64)), packed, scales, mode="nvfp4"))
+        except (ValueError, RuntimeError) as error:
+            raise RuntimeError("Native NVFP4 conditioning requires an MLX build with nvfp4 matmul support.") from error
+        super().__init__(component_dir, tokenizer_dir)
+        self.index = _ResidentNVFP4Index(self.index)
+
+    def _embed_tokens(self, token_ids: list[int]):
+        table = self.index.get_mlx("model.language_model.embed_tokens.weight")
+        return table[mx.array(token_ids, dtype=mx.int32)].astype(mx.float32)
 
 
 def _apply_mrope(q_or_k, cos, sin):

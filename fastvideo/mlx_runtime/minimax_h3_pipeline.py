@@ -49,6 +49,7 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     MINIMAX_H3_MIN_DURATION,
     MINIMAX_H3_VIDEO_SHIFT,
     MiniMaxH3SchedulerState,
+    _eval_value,
     adaln_timestep_union,
     align_num_frames,
     audio_latent_num_frames,
@@ -328,6 +329,8 @@ class MiniMaxH3MLXPipeline:
         video_decode_backend: str = "h3-vae",
         taeh3_checkpoint: str | Path | None = None,
         taeh3_chunk_size: int = 5,
+        conditioner_mode: str = "auto",
+        resident: bool = False,
     ) -> None:
         import mlx.core as mx
 
@@ -343,6 +346,13 @@ class MiniMaxH3MLXPipeline:
             except Exception as error:  # noqa: BLE001 - best effort on older MLX
                 logger.info("Could not raise the Metal wired limit: %s", error)
         self.model_root = Path(model_root)
+        if conditioner_mode not in ("auto", "streamed", "nvfp4"):
+            raise ValueError(f"Unknown H3 conditioner mode: {conditioner_mode}")
+        if resident and video_decode_backend != "h3-vae":
+            raise ValueError("Resident H3 generation requires the H3 video VAE.")
+        self.conditioner_mode = conditioner_mode
+        self.resident = resident
+        self._resident_components: dict[str, Any] = {}
         self.dit_checkpoint = Path(mlx_dit_checkpoint)
         self.vae_dtype = vae_dtype
         if video_decode_backend not in ("h3-vae", "taeh3"):
@@ -414,20 +424,70 @@ class MiniMaxH3MLXPipeline:
 
     # -- phase 1: conditioning -------------------------------------------
 
+    def prepare_resident(self) -> None:
+        """Load the encoder, DiT, and both decoders once, before timed requests."""
+        if not self.resident or self._resident_components:
+            return
+        from fastvideo.mlx_runtime.minimax_h3_conditioner import ResidentNVFP4MiniMaxH3TextConditioner
+        from fastvideo.mlx_runtime.minimax_h3_audio_vae import mlx_h3_audio_vae_from_dir
+        from fastvideo.mlx_runtime.minimax_h3_video_vae import mlx_h3_video_vae_from_dir
+
+        import mlx.core as mx
+
+        try:
+            conditioner = self._load_conditioner()
+            if not isinstance(conditioner, ResidentNVFP4MiniMaxH3TextConditioner):
+                conditioner.close()
+                raise ValueError("All-resident generation requires the packed NVFP4 text encoder.")
+            self._resident_components["conditioner"] = conditioner
+            dit = load_mlx_h3_checkpoint(self.dit_checkpoint)
+            self._resident_components["dit"] = dit
+            for group in [dit.weights, *dit.blocks, *dit.refiner]:
+                for value in group.values():
+                    _eval_value(value)
+            cache = dit._adaln_cache
+            if cache is not None:
+                mx.eval(cache.block_tables, cache.norm_out_shift, cache.norm_out_scale)
+            self._resident_components["video_vae"] = mlx_h3_video_vae_from_dir(self.model_root / "vae",
+                                                                               include_encoder=False,
+                                                                               storage_dtype=self.vae_dtype)
+            self._resident_components["audio_vae"] = mlx_h3_audio_vae_from_dir(self.model_root / "audio_vae",
+                                                                               include_encoder=False)
+            mx.eval(list(self._resident_components["audio_vae"].weights.values()))
+            logger.info("H3 components resident: %.2f GiB active MLX memory", mx.get_active_memory() / 2**30)
+        except Exception:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        conditioner = self._resident_components.get("conditioner")
+        if conditioner is not None:
+            conditioner.close()
+        self._resident_components.clear()
+        _cleanup_mlx()
+
     def encode_prompt(self, prompt: str) -> tuple[np.ndarray, np.ndarray]:
         """Returns (hidden states (S, hidden), token tags). Uses the cache or
         the streamed conditioner."""
         cache_key = None
         if self.prompt_cache_dir is not None:
-            cache_key = prompt_cache_path(self.prompt_cache_dir, self.model_root, prompt)
+            identity = (f"{self.model_root}::conditioner="
+                        f"{getattr(self, 'conditioner_dir', self.model_root / 'text_encoder')}::"
+                        f"{getattr(self, 'conditioner_mode', 'auto')}")
+            cache_key = prompt_cache_path(self.prompt_cache_dir, identity, prompt)
             if cache_key.exists():
                 data = np.load(cache_key)
                 logger.info("Loaded prompt embeddings from cache %s", cache_key)
                 return data["hidden_states"], data["token_tags"]
 
-        conditioner = self._load_conditioner()
+        if getattr(self, "resident", False):
+            self.prepare_resident()
+            conditioner = self._resident_components["conditioner"]
+        else:
+            conditioner = self._load_conditioner()
         hidden, tags = conditioner.encode_prompt(prompt)
-        conditioner.close()
+        if not getattr(self, "resident", False):
+            conditioner.close()
         _cleanup_mlx()
         if cache_key is not None:
             cache_key.parent.mkdir(parents=True, exist_ok=True)
@@ -450,8 +510,17 @@ class MiniMaxH3MLXPipeline:
         return marker.exists() or single.exists()
 
     def _load_conditioner(self):
-        from fastvideo.mlx_runtime.minimax_h3_conditioner import StreamedMiniMaxH3TextConditioner
+        from fastvideo.mlx_runtime.minimax_h3_conditioner import (
+            ResidentNVFP4MiniMaxH3TextConditioner,
+            StreamedMiniMaxH3TextConditioner,
+        )
 
+        config = json.loads((self.conditioner_dir / "config.json").read_text())
+        packed = config.get("quantization_config", {}).get("quant_method") == "nvfp4"
+        if self.conditioner_mode == "nvfp4" or (self.conditioner_mode == "auto" and packed):
+            return ResidentNVFP4MiniMaxH3TextConditioner(self.conditioner_dir, self.tokenizer_dir)
+        if packed:
+            raise ValueError("The streamed conditioner requires BF16 weights; use conditioner_mode='nvfp4'.")
         return StreamedMiniMaxH3TextConditioner(self.conditioner_dir, self.tokenizer_dir)
 
     # -- phase 2: denoise --------------------------------------------------
@@ -478,6 +547,10 @@ class MiniMaxH3MLXPipeline:
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=audio_num_frames is None)
         audio_frames = geometry["num_frames"] if audio_num_frames is None else align_num_frames(audio_num_frames)
 
+        if dit is None and getattr(self, "resident", False):
+            _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps, model_root=self.model_root)
+            self.prepare_resident()
+            dit = self._resident_components["dit"]
         owned_dit = dit is None
         if owned_dit:
             _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps, model_root=self.model_root)
@@ -624,7 +697,13 @@ class MiniMaxH3MLXPipeline:
                 raise RuntimeError(f"TAEH3 produced unexpected frame shape: {frames.shape}")
             _cleanup_mlx()
             return frames
-        vae = mlx_h3_video_vae_from_dir(self.model_root / "vae", include_encoder=False, storage_dtype=self.vae_dtype)
+        if getattr(self, "resident", False):
+            self.prepare_resident()
+            vae = self._resident_components["video_vae"]
+        else:
+            vae = mlx_h3_video_vae_from_dir(self.model_root / "vae",
+                                            include_encoder=False,
+                                            storage_dtype=self.vae_dtype)
         expected_height = height // vae.spatial_compression_ratio
         expected_width = width // vae.spatial_compression_ratio
         if (geometry["latent_height"], geometry["latent_width"]) != (expected_height, expected_width):
@@ -666,7 +745,11 @@ class MiniMaxH3MLXPipeline:
 
         num_audio_latents = audio_latent_num_frames(align_num_frames(num_frames))
         latents = unpack_audio_tokens(audio_rows, num_audio_latents)
-        vae = mlx_h3_audio_vae_from_dir(self.model_root / "audio_vae", include_encoder=False)
+        if getattr(self, "resident", False):
+            self.prepare_resident()
+            vae = self._resident_components["audio_vae"]
+        else:
+            vae = mlx_h3_audio_vae_from_dir(self.model_root / "audio_vae", include_encoder=False)
         z = vae.denormalize_latents(mx.array(latents))
         waveform = np.asarray(vae.decode(z))[:, 0, :]  # (B, 1, S) -> (B, S)
         del vae, z
