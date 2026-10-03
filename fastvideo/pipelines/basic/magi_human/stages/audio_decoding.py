@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from scipy.signal import resample as _scipy_resample
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -81,7 +81,7 @@ class MagiHumanAudioDecodingStage(PipelineStage):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         latent_audio = getattr(batch, "audio_latents", None)
         if latent_audio is None:
             # Joint AV: missing audio latents means the denoising stage broke.

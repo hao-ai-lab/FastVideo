@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Native MMAudio video/text-to-audio pipeline."""
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.basic.mmaudio.stages import (
     MMAudioDecodingStage,
     MMAudioDenoisingStage,
@@ -27,7 +27,7 @@ class MMAudioPipeline(ComposedPipelineBase):
         "vocoder",
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         transformer = self.get_module("transformer")
         self.add_stage("input_validation_stage", MMAudioInputValidationStage())
         self.add_stage(

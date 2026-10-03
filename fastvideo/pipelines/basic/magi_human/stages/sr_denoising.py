@@ -7,7 +7,7 @@ import copy
 import torch
 from tqdm import tqdm
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.basic.magi_human.stages.denoising import (
@@ -60,9 +60,9 @@ class MagiHumanSRDenoisingStage(PipelineStage):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         device = batch.latents.device
-        shift = resolved_config.pipeline_config.flow_shift
+        shift = resolved_config.pipeline.flow_shift
         video_scheduler = copy.deepcopy(self.scheduler)
         video_scheduler.set_timesteps(
             self.sr_num_inference_steps,
@@ -99,8 +99,7 @@ class MagiHumanSRDenoisingStage(PipelineStage):
                 self.sr_video_txt_guidance_scale,
             )
 
-        disable_tqdm = not getattr(resolved_config, "log_level_progress", True)
-        for idx, t in enumerate(tqdm(video_scheduler.timesteps, disable=disable_tqdm)):
+        for idx, t in enumerate(tqdm(video_scheduler.timesteps)):
             video_latent = _overwrite_first_frame(video_latent, image_latent)
             static_packed = build_static_packed_inputs(
                 video_latent=video_latent,

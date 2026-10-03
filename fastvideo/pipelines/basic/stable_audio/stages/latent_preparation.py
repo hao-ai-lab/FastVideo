@@ -12,7 +12,7 @@ import os
 import torch
 import torch.nn.functional as F
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -42,7 +42,7 @@ class StableAudioLatentPreparationStage(PipelineStage):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         ext = batch.extra or {}
         device = ext["cross_attn_cond"].device
         latent_sample_size = self.sample_size // self._hop_length()

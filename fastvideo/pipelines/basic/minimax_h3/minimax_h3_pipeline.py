@@ -16,7 +16,6 @@ from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEArchConfig
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEArchConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.pipelines.basic.minimax_h3.stages import (
@@ -62,7 +61,7 @@ def _default_audio_geometry() -> _H3AudioGeometry:
     return _H3AudioGeometry(sampling_rate=int(MiniMaxH3AudioVAEArchConfig().sampling_rate))
 
 
-def _apply_h3_checkpoint_arch_configs(model_path: str, resolved_config: FastVideoArgs,
+def _apply_h3_checkpoint_arch_configs(model_path: str, resolved_config: ResolvedGeneratorConfig,
                                       extra_config_module_map: dict[str, str]) -> None:
     """Overlay checkpoint config.json onto pipeline configs without loading weights."""
     root = Path(model_path)
@@ -88,8 +87,9 @@ def _apply_h3_checkpoint_arch_configs(model_path: str, resolved_config: FastVide
         )
 
 
-def _use_taeh3_t2va(resolved_config: FastVideoArgs | None, *, ref2va: bool) -> bool:
-    return (not ref2va) and getattr(resolved_config, "video_decode_backend", "h3-vae") == "taeh3"
+def _use_taeh3_t2va(resolved_config: ResolvedGeneratorConfig | None, *, ref2va: bool) -> bool:
+    return (not ref2va and resolved_config is not None
+            and resolved_config.pipeline.minimax_h3.video_decode_backend == "taeh3")
 
 
 class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
@@ -151,7 +151,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         # selected transformer partition. Otherwise Hub and local loads differ.
         return [*patterns, "fastvideo_inference.json"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig) -> None:
         _apply_h3_checkpoint_arch_configs(self.model_path, resolved_config, self._extra_config_module_map)
         # Each modality's scheduler_config.json owns its shift. Base H3 keeps
         # 12/3; a distilled checkpoint can serialize a different trained pair
@@ -162,7 +162,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose a positive finite shift, got {shift}.")
         self._load_checkpoint_schedule(resolved_config)
 
-    def _load_checkpoint_schedule(self, resolved_config: FastVideoArgs) -> None:
+    def _load_checkpoint_schedule(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """A distilled export's schedule is explicit; never silently use a uniform grid."""
         path = Path(self.model_path) / "fastvideo_inference.json"
         if not path.is_file():
@@ -189,22 +189,18 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             if (isinstance(declared, bool) or not isinstance(declared, int | float) or not math.isfinite(declared)
                     or declared <= 0 or float(self.get_module(name).shift) != float(declared)):
                 raise ValueError(f"FastH3 checkpoint {key}={declared!r} disagrees with {name}/scheduler_config.json.")
-        config = resolved_config.pipeline_config
-        if config.dmd_denoising_steps is not None and config.dmd_denoising_steps != steps:
+        configured_steps = resolved_config.pipeline.dmd_denoising_steps
+        if configured_steps is not None and list(configured_steps) != steps:
             raise ValueError("Explicit DMD schedule disagrees with the checkpoint's trained DMD rungs.")
-        if isinstance(resolved_config, ResolvedGeneratorConfig):
-            self.resolved_config = resolved_config.with_override("checkpoint:fastvideo_inference.json",
-                                                                 {"pipeline.dmd_denoising_steps": list(steps)})
-        else:
-            resolved_config.override("checkpoint:fastvideo_inference.json",
-                                     {"pipeline_config.dmd_denoising_steps": list(steps)})
+        self.resolved_config = resolved_config.with_override("checkpoint:fastvideo_inference.json",
+                                                             {"pipeline.dmd_denoising_steps": list(steps)})
         logger.info("FastH3 checkpoint schedule: %d transformer forwards, DMD rungs=%s, video/audio shifts=%s/%s",
                     len(steps), steps,
                     self.get_module("scheduler").shift,
                     self.get_module("audio_scheduler").shift)
 
-    def _defer_denoise_modules(self, resolved_config: FastVideoArgs) -> bool:
-        if not resolved_config.inference_mode or bool(getattr(resolved_config, "training_mode", False)):
+    def _defer_denoise_modules(self, resolved_config: ResolvedGeneratorConfig) -> bool:
+        if resolved_config.training_mode:
             return False
         # Both mechanisms defer the same four modules and both decide when to
         # free them. Running them together strips DiT/VAEs from the first load
@@ -213,10 +209,10 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         # the more general owner — including auto-on for unified memory — so it
         # wins whenever it is on. Sequential remains the H3-only fallback when
         # lazy is off.
-        if bool(getattr(resolved_config, "lazy_module_load", False)):
+        if resolved_config.engine.offload.lazy_module_load:
             logger.info("MiniMax-H3 sequential module load off: lazy_module_load owns deferral")
             return False
-        requested = resolved_config.h3_sequential_load
+        requested = resolved_config.pipeline.minimax_h3.sequential_load
         if requested is True:
             return True
         if requested is False:
@@ -230,9 +226,10 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         logger.info("MiniMax-H3 sequential module load auto=%s (unified_memory=%s)", unified, unified)
         return unified
 
-    def _denoise_module_names(self, resolved_config: FastVideoArgs | None = None) -> tuple[str, ...]:
-        args = resolved_config if resolved_config is not None else getattr(self, "resolved_config", None)
-        if _use_taeh3_t2va(args, ref2va=self._ref2va):
+    def _denoise_module_names(self, resolved_config: ResolvedGeneratorConfig | None = None) -> tuple[str, ...]:
+        if resolved_config is None:
+            resolved_config = getattr(self, "resolved_config", None)
+        if _use_taeh3_t2va(resolved_config, ref2va=self._ref2va):
             return tuple(name for name in _DENOISE_MODULE_NAMES if name != "vae")
         return _DENOISE_MODULE_NAMES
 
@@ -240,7 +237,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         return all(self.get_module(name) is not None for name in self._denoise_module_names())
 
     def load_modules(self,
-                     resolved_config: FastVideoArgs,
+                     resolved_config: ResolvedGeneratorConfig,
                      loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
         """Load the Qwen3-VL conditioner first; defer DiT and VAEs until after encode."""
         if not self._defer_denoise_modules(resolved_config):
@@ -266,7 +263,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         finally:
             self._required_config_modules = saved
 
-    def _load_denoise_modules(self, resolved_config: FastVideoArgs) -> None:
+    def _load_denoise_modules(self, resolved_config: ResolvedGeneratorConfig) -> None:
         if self._denoise_modules_loaded():
             return
         saved = list(self.required_config_modules)
@@ -297,7 +294,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    def _ensure_text_encoder(self, resolved_config: FastVideoArgs) -> None:
+    def _ensure_text_encoder(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Reload Qwen3-VL after `_release_text_encoder` so a later request can encode."""
         encoder = self.get_module("text_encoder")
         stage = self._stage_name_mapping.get("conditioning_stage")
@@ -318,7 +315,8 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if stage is not None:
             stage.conditioner = self.get_module("text_encoder")
 
-    def _run_condition_then_denoise(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def _run_condition_then_denoise(self, batch: ForwardBatch,
+                                    resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         for name in ("input_preparation_stage", "conditioning_stage"):
             batch = self._stage_name_mapping[name](batch, resolved_config)
         self._release_text_encoder()
@@ -334,7 +332,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             batch = self._stage_name_mapping[name](batch, resolved_config)
         return batch
 
-    def _input_video_geometry(self, resolved_config: FastVideoArgs) -> Any:
+    def _input_video_geometry(self, resolved_config: ResolvedGeneratorConfig) -> Any:
         """Read canvas scalars from checkpoint JSON, not a live VAE proxy."""
         arch = getattr(getattr(resolved_config.pipeline_config, "vae_config", None), "arch_config", None)
         if arch is not None:
@@ -347,7 +345,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             return live
         return self._input_video_geometry(self.resolved_config)
 
-    def _input_audio_vae(self, resolved_config: FastVideoArgs, *, ref2va: bool) -> Any | None:
+    def _input_audio_vae(self, resolved_config: ResolvedGeneratorConfig, *, ref2va: bool) -> Any | None:
         if not ref2va:
             return None
         arch = getattr(getattr(resolved_config.pipeline_config, "audio_vae_config", None), "arch_config", None)
@@ -355,7 +353,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             return arch
         return _default_audio_geometry()
 
-    def _add_condition_stages(self, resolved_config: FastVideoArgs, *, ref2va: bool) -> None:
+    def _add_condition_stages(self, resolved_config: ResolvedGeneratorConfig, *, ref2va: bool) -> None:
         self.add_stage(
             "input_preparation_stage",
             MiniMaxH3InputPreparationStage(
@@ -407,18 +405,18 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage("audio_decoding_stage", MiniMaxH3AudioDecodingStage(audio_vae=audio_vae))
         self._denoise_stages_ready = True
 
-    def _add_stages(self, resolved_config: FastVideoArgs, *, ref2va: bool) -> None:
+    def _add_stages(self, resolved_config: ResolvedGeneratorConfig, *, ref2va: bool) -> None:
         self._ref2va = ref2va
         self._add_condition_stages(resolved_config, ref2va=ref2va)
         if self._denoise_modules_loaded():
             self._add_denoise_stages(ref2va=ref2va)
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         resolved_config = self._post_init_before_forward(resolved_config)
 
         # Sequential encode-then-release is the H3-only fallback. Lazy and the
         # fully-resident discrete-GPU path both keep a complete stage list and
-        # must use the base forward so abort cleanup and text_encoder_cpu_offload
+        # must use the base forward so abort cleanup and engine.offload.text_encoder
         # still apply. Releasing Qwen on every request was re-reading it from disk
         # when neither deferral flag was on.
         if self._defer_denoise_modules(resolved_config):
@@ -438,7 +436,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
 class MiniMaxH3Pipeline(MiniMaxH3BasePipeline):
     """One-request joint video/stereo-audio pipeline for T2VA and FL2VA."""
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         self._add_stages(resolved_config, ref2va=False)
 
 
@@ -448,7 +446,7 @@ class MiniMaxH3RefPipeline(MiniMaxH3BasePipeline):
     _extra_config_module_map = {"transformer": "transformer_ref"}
     _ref2va_default = True
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         self._add_stages(resolved_config, ref2va=True)
 
 

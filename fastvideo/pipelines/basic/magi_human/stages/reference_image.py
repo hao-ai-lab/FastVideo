@@ -16,7 +16,7 @@ from diffusers.video_processor import VideoProcessor
 from PIL import Image
 
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -55,7 +55,7 @@ class MagiHumanReferenceImageStage(PipelineStage):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         image = getattr(batch, "image", None) or batch.pil_image
         if image is None and batch.image_path is not None:
             image = load_image(batch.image_path)

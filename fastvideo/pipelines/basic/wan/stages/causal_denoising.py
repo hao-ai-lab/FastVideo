@@ -2,7 +2,7 @@
 import torch  # type: ignore
 
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
@@ -110,7 +110,7 @@ class WanCausalDenoisingBase(DenoisingStage):
             })
         return crossattn_cache
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify denoising stage inputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
@@ -135,10 +135,10 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
         patch_ratio = self.transformer.config.arch_config.patch_size[
@@ -148,7 +148,7 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
         independent_first_frame = self.transformer.independent_first_frame if hasattr(
             self.transformer, 'independent_first_frame') else False
         # Timesteps for DMD
-        timesteps = torch.tensor(resolved_config.pipeline_config.dmd_denoising_steps, dtype=torch.long).cpu()
+        timesteps = torch.tensor(resolved_config.pipeline.dmd_denoising_steps, dtype=torch.long).cpu()
         if resolved_config.pipeline_config.warp_denoising_step:
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
@@ -288,7 +288,7 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                                 current_timestep=i,  # type: ignore
                                 raw_latent_shape=(current_num_frames, h, w),  # type: ignore
                                 patch_size=resolved_config.pipeline_config.dit_config.patch_size,  # type: ignore
-                                VSA_sparsity=resolved_config.VSA_sparsity,  # type: ignore
+                                VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,  # type: ignore
                                 device=get_local_torch_device(),  # type: ignore
                             )  # type: ignore
                             assert attn_metadata is not None, "attn_metadata cannot be None"
@@ -423,10 +423,10 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32 and not resolved_config.disable_autocast)
+        autocast_enabled = (target_dtype != torch.float32 and not resolved_config.engine.disable_autocast)
 
         latent_seq_length = (batch.latents.shape[-1] * batch.latents.shape[-2])
         patch_ratio = (self.transformer.config.arch_config.patch_size[-1] *

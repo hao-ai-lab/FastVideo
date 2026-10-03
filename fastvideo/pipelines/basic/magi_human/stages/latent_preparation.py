@@ -20,7 +20,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -127,7 +127,7 @@ class MagiHumanLatentPreparationStage(PipelineStage):
     def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         fps = self.fps
         # Prefer the caller-provided `batch.num_frames` (the standard

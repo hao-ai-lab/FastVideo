@@ -10,7 +10,7 @@ This avoids I/O contention from all ranks loading the Gemma model simultaneously
 import torch
 
 from fastvideo.distributed.parallel_state import get_sp_group
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
@@ -32,7 +32,7 @@ class LTX2TextEncodingStage(TextEncodingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         sp_group = get_sp_group()
         sp_world_size = sp_group.world_size

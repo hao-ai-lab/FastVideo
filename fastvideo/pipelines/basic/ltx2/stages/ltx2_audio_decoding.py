@@ -9,7 +9,7 @@ import torch
 
 import fastvideo.envs as envs
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -43,7 +43,7 @@ class LTX2AudioDecodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         audio_latents = batch.extra.get("ltx2_audio_latents")
         if audio_latents is None:
@@ -68,7 +68,7 @@ class LTX2AudioDecodingStage(PipelineStage):
         batch.extra["audio_sample_rate"] = _resolve_audio_sample_rate(self.vocoder)
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("audio_latents", batch.extra.get("ltx2_audio_latents"), V.none_or_tensor)
         return result

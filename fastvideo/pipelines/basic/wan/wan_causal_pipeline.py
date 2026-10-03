@@ -6,7 +6,7 @@ scheduler timestep schedule (40-50 steps) rather than DMD few-step.
 """
 
 from fastvideo.pipelines.basic.wan.stages.causal_denoising import CausalDenoisingStage
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
@@ -38,13 +38,13 @@ class WanCausalPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def initialize_pipeline(
         self,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ):
-        self.modules["scheduler"] = (FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift, ))
+        self.modules["scheduler"] = (FlowUniPCMultistepScheduler(shift=resolved_config.pipeline.flow_shift, ))
 
     def create_pipeline_stages(
         self,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> None:
         self.add_stage(
             stage_name="input_validation_stage",

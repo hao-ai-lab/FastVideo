@@ -7,7 +7,7 @@ using the modular pipeline architecture.
 """
 
 from fastvideo.pipelines.basic.wan.stages.dmd import DmdDenoisingStage
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.wan.definition import DMD_TRAINING_NOISE_SHIFT
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
@@ -28,11 +28,11 @@ class WanDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
 
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=resolved_config.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=resolved_config.pipeline.flow_shift)
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

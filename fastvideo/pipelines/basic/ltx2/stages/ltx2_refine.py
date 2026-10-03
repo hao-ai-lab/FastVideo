@@ -30,7 +30,7 @@ from typing import Any
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import AudioLatentShape, VideoLatentShape
 from fastvideo.models.upsamplers import upsample_video
@@ -65,9 +65,9 @@ class LTX2RefineInitStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
-        if not resolved_config.ltx2_refine_enabled:
+        if not resolved_config.pipeline.ltx2.refine.enabled:
             return batch
 
         height = batch.height
@@ -105,7 +105,7 @@ class LTX2RefineInitStage(PipelineStage):
     def verify_output(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> VerificationResult:
         # Only meaningful checks live downstream of the upsample stage;
         # the init stage just rewrites height/width which the existing
@@ -135,9 +135,9 @@ class LTX2UpsampleStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
-        if not resolved_config.ltx2_refine_enabled:
+        if not resolved_config.pipeline.ltx2.refine.enabled:
             return batch
 
         if batch.latents is None:
@@ -212,7 +212,7 @@ class LTX2UpsampleStage(PipelineStage):
             if patchifier is not None:
                 video_shape = VideoLatentShape.from_torch_shape(latents.shape)
                 patch_noise_shape = patchifier.patchify(latents).shape
-            noise_path = resolved_config.ltx2_refine_noise_path
+            noise_path = resolved_config.pipeline.ltx2.refine.noise_path
             noise = self._load_noise(
                 noise_path,
                 device=latents.device,
@@ -251,7 +251,7 @@ class LTX2UpsampleStage(PipelineStage):
                     audio_shape = AudioLatentShape.from_torch_shape(audio_latents.shape)
                     audio_patch = audio_patchifier.patchify(audio_latents)
                     audio_noise_shape = audio_patch.shape
-                    audio_noise_path = (resolved_config.ltx2_refine_audio_noise_path)
+                    audio_noise_path = (resolved_config.pipeline.ltx2.refine.audio_noise_path)
                     audio_noise = self._load_noise(
                         audio_noise_path,
                         device=audio_latents.device,
@@ -273,7 +273,7 @@ class LTX2UpsampleStage(PipelineStage):
                     audio_noised_patch = audio_noise * sigma0 + audio_patch * (1.0 - sigma0)
                     audio_latents = audio_patchifier.unpatchify(audio_noised_patch, audio_shape)
                 else:
-                    audio_noise_path = (resolved_config.ltx2_refine_audio_noise_path)
+                    audio_noise_path = (resolved_config.pipeline.ltx2.refine.audio_noise_path)
                     audio_noise = self._load_noise(
                         audio_noise_path,
                         device=audio_latents.device,
@@ -303,10 +303,10 @@ class LTX2UpsampleStage(PipelineStage):
     def verify_input(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> VerificationResult:
         result = VerificationResult()
-        if resolved_config.ltx2_refine_enabled:
+        if resolved_config.pipeline.ltx2.refine.enabled:
             result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         return result
 
@@ -368,11 +368,11 @@ class LTX2RefineLoRAStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
-        if not resolved_config.ltx2_refine_enabled:
+        if not resolved_config.pipeline.ltx2.refine.enabled:
             return batch
-        lora_path = resolved_config.ltx2_refine_lora_path or self._lora_path
+        lora_path = resolved_config.pipeline.ltx2.refine.lora_path or self._lora_path
         if not lora_path or self._applied:
             return batch
 

@@ -4,7 +4,7 @@
 import torch
 
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, embedded_cfg_scale_for_batch
@@ -29,23 +29,23 @@ class DmdDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Run the denoising loop.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with denoised latents.
         """
         # Setup precision and autocast settings
         # TODO(will): make the precision configurable for inference
-        # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
+        # target_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
@@ -85,7 +85,7 @@ class DmdDenoisingStage(DenoisingStage):
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
-        timesteps = torch.tensor(resolved_config.pipeline_config.dmd_denoising_steps,
+        timesteps = torch.tensor(resolved_config.pipeline.dmd_denoising_steps,
                                  dtype=torch.long,
                                  device=get_local_torch_device())
 
@@ -126,7 +126,7 @@ class DmdDenoisingStage(DenoisingStage):
                                 raw_latent_shape=batch.raw_latent_shape[2:5],  # type: ignore
                                 patch_size=resolved_config.pipeline_config.  # type: ignore
                                 dit_config.patch_size,  # type: ignore
-                                VSA_sparsity=resolved_config.VSA_sparsity,  # type: ignore
+                                VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,  # type: ignore
                                 device=get_local_torch_device(),  # type: ignore
                             )  # type: ignore
                             assert attn_metadata is not None, "attn_metadata cannot be None"
@@ -140,7 +140,7 @@ class DmdDenoisingStage(DenoisingStage):
                             current_timestep=i,
                             attn_metadata=attn_metadata,
                             forward_batch=batch,
-                            # fastvideo_args=fastvideo_args
+                            # resolved_config=resolved_config
                     ):
                         # Run transformer
                         pred_noise = self.transformer(

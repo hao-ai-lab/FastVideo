@@ -216,10 +216,9 @@ class LTX2RefineOptions:
     """Stage-2 refine settings. ``pipeline.components.upsampler_weights`` holds the refine upsampler.
 
     Resolution copies ``pipeline.preset_overrides.refine`` into the fields of the same name. When the pipeline loads,
-    the ``fastvideo_refine_*`` defaults of the checkpoint's ``model_index.json`` override them: ``enabled`` unless
-    ``preset_overrides.refine.enabled`` or a ``refine_enabled`` key set it, ``num_inference_steps`` while it is 3,
-    ``guidance_scale`` and ``add_noise`` unless a ``refine_guidance_scale`` or ``refine_add_noise`` key set them, and
-    each path while it is ``None``.
+    the ``fastvideo_refine_*`` defaults of the checkpoint's ``model_index.json`` fill each field that is still ``None``
+    (``fastvideo_refine_enabled`` can only turn refine on); ``enabled``, ``add_noise``, ``guidance_scale``, and
+    ``num_inference_steps`` that are still ``None`` then become ``False``, ``True``, 1.0, and 3.
     """
 
     enabled: bool | None = flat_field("ltx2_refine_enabled", None)

@@ -8,7 +8,7 @@ using the modular pipeline architecture.
 
 from fastvideo.pipelines.basic.wan.stages.conditioning import WanFirstFrameEncodingStage
 from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
@@ -25,11 +25,11 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         # We use UniPCMScheduler from Wan2.1 official repo, not the one in diffusers.
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline.flow_shift)
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

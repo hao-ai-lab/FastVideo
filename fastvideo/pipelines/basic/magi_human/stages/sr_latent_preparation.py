@@ -13,7 +13,7 @@ from diffusers.video_processor import VideoProcessor
 from PIL import Image
 
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.basic.magi_human.stages.reference_image import (
     _resizecrop, )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -126,7 +126,7 @@ class MagiHumanSRLatentPreparationStage(PipelineStage):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         device = batch.latents.device
         _, _, latent_t, _, _ = batch.latents.shape
         _, vh, vw = self.vae_stride

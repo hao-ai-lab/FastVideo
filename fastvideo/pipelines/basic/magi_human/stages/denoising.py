@@ -13,7 +13,7 @@ import copy
 import torch
 from tqdm import tqdm
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.hooks.activation_trace import trace_step
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -107,9 +107,9 @@ class MagiHumanDenoisingStage(PipelineStage):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         device = batch.latents.device
-        shift = resolved_config.pipeline_config.flow_shift
+        shift = resolved_config.pipeline.flow_shift
         # Video and audio use independent FlowUniPC state (upstream
         # inference/pipeline/video_generate.py:404-407 instantiates two
         # separate schedulers). Sharing one scheduler causes the
@@ -150,8 +150,7 @@ class MagiHumanDenoisingStage(PipelineStage):
 
         audio_feat_len = int(audio_latent.shape[1])
 
-        disable_tqdm = not getattr(resolved_config, "log_level_progress", True)
-        for idx, t in enumerate(tqdm(timesteps, disable=disable_tqdm)):
+        for idx, t in enumerate(tqdm(timesteps)):
             video_latent = _overwrite_first_frame(video_latent, image_latent)
             # Precompute packed video+audio tokens after any TI2V first-frame
             # overwrite. Text varies per cond/uncond call and is attached in

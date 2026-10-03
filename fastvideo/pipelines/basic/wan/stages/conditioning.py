@@ -26,7 +26,7 @@ class WanFirstFrameEncodingStage(PipelineStage):
         latent = self.vae.encode(batch.pil_image).mean.float()
         # Preserve dense TI2V's restore-before-normalization order and causal
         # DMD's explicit CPU offload after normalization.
-        offload = getattr(resolved_config, "vae_cpu_offload", False)
+        offload = resolved_config.engine.offload.vae
         if offload and not self.causal:
             self.vae = self.vae.to(original_device)
         shift = getattr(self.vae, "shift_factor", None)

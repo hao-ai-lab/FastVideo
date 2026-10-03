@@ -8,9 +8,7 @@ from typing import Any
 
 from transformers import AutoTokenizer
 
-from fastvideo.api.flat_name_fallback import typed_path_of_flat_name
 from fastvideo.api.resolution import ResolvedGeneratorConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
@@ -19,6 +17,21 @@ from fastvideo.pipelines.stages import (DecodingStage, InputValidationStage, LTX
                                         LTX2TextEncodingStage, LTX2UpsampleStage, STAGE_2_DISTILLED_SIGMA_VALUES)
 
 logger = init_logger(__name__)
+
+# Values of the stage-2 refine settings that neither the input nor the checkpoint's model_index.json decided.
+_REFINE_DEFAULTS: dict[str, Any] = {
+    "pipeline.ltx2.refine.enabled": False,
+    "pipeline.ltx2.refine.add_noise": True,
+    "pipeline.ltx2.refine.guidance_scale": 1.0,
+    "pipeline.ltx2.refine.num_inference_steps": 3,
+}
+# Refine component paths, by the model_index.json key that supplies the checkpoint's default.
+_REFINE_PATH_KEYS = {
+    "pipeline.ltx2.refine.transformer_path": "fastvideo_refine_transformer_path",
+    "pipeline.ltx2.refine.lora_path": "fastvideo_refine_lora_path",
+    "pipeline.ltx2.refine.noise_path": "fastvideo_refine_noise_path",
+    "pipeline.ltx2.refine.audio_noise_path": "fastvideo_refine_audio_noise_path",
+}
 
 
 def _resolve_refine_path(model_path: str, value: str | None) -> str | None:
@@ -54,6 +67,40 @@ def _resolve_refine_upsampler_path(model_path: str, model_index: dict[str, Any])
     return path
 
 
+def _checkpoint_refine_values(resolved_config: ResolvedGeneratorConfig, model_path: str,
+                              model_index: dict[str, Any]) -> dict[str, Any]:
+    """The refine settings that the checkpoint's ``model_index.json`` and the refine defaults change.
+
+    Distilled checkpoints bundle ``fastvideo_refine_*`` defaults so the pipeline can configure itself. Each one fills
+    its setting only while the setting is ``None``, so a value from the input always wins; ``fastvideo_refine_enabled``
+    can only turn refine on. The upsampler falls back to a directory in the snapshot. The four switches that are still
+    ``None`` afterwards take ``_REFINE_DEFAULTS``. The result holds only the paths whose value changes.
+    """
+
+    def current(path: str) -> Any:
+        return resolved_config.provenance(path).value
+
+    values: dict[str, Any] = {}
+    if model_index.get("fastvideo_refine_enabled") is True and current("pipeline.ltx2.refine.enabled") is None:
+        values["pipeline.ltx2.refine.enabled"] = True
+    if current("pipeline.components.upsampler_weights") is None:
+        values["pipeline.components.upsampler_weights"] = _resolve_refine_upsampler_path(model_path, model_index)
+    for path, key in _REFINE_PATH_KEYS.items():
+        if current(path) is None:
+            values[path] = _resolve_refine_path(model_path, model_index.get(key))
+    for path, key, convert in (
+        ("pipeline.ltx2.refine.num_inference_steps", "fastvideo_refine_num_inference_steps", int),
+        ("pipeline.ltx2.refine.guidance_scale", "fastvideo_refine_guidance_scale", float),
+        ("pipeline.ltx2.refine.add_noise", "fastvideo_refine_add_noise", bool),
+    ):
+        if current(path) is None and model_index.get(key) is not None:
+            values[path] = convert(model_index[key])
+    for path, default in _REFINE_DEFAULTS.items():
+        if values.get(path, current(path)) is None:
+            values[path] = default
+    return {path: value for path, value in values.items() if value != current(path)}
+
+
 class LTX2Pipeline(LoRAPipeline):
 
     _required_config_modules = [
@@ -65,8 +112,8 @@ class LTX2Pipeline(LoRAPipeline):
         "vocoder",
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
-        refine_enabled = resolved_config.ltx2_refine_enabled
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
+        refine_enabled = resolved_config.pipeline.ltx2.refine.enabled
 
         self.add_stage(
             stage_name="input_validation_stage",
@@ -101,7 +148,7 @@ class LTX2Pipeline(LoRAPipeline):
         )
 
         if refine_enabled:
-            stage2_steps = resolved_config.ltx2_refine_num_inference_steps
+            stage2_steps = resolved_config.pipeline.ltx2.refine.num_inference_steps
             # LTX-2 refine currently supports two explicitly tested step
             # counts:
             # - 3 steps: official distilled schedule
@@ -122,7 +169,7 @@ class LTX2Pipeline(LoRAPipeline):
             else:
                 logger.warning(
                     "For LTX-2 refinement, "
-                    "ltx2_refine_num_inference_steps=%s is not a tested "
+                    "pipeline.ltx2.refine.num_inference_steps=%s is not a tested "
                     "setting. Using denoising steps other than 2 or 3 "
                     "may cause quality degradation.",
                     stage2_steps,
@@ -139,16 +186,16 @@ class LTX2Pipeline(LoRAPipeline):
                     vae=self.get_module("vae"),
                     transformer=transformer_refine,
                     sigmas=stage2_sigmas,
-                    add_noise=resolved_config.ltx2_refine_add_noise,
+                    add_noise=resolved_config.pipeline.ltx2.refine.add_noise,
                 ),
             )
 
-            if resolved_config.ltx2_refine_lora_path:
+            if resolved_config.pipeline.ltx2.refine.lora_path:
                 self.add_stage(
                     stage_name="ltx2_refine_lora_stage",
                     stage=LTX2RefineLoRAStage(
                         pipeline=self,
-                        lora_path=resolved_config.ltx2_refine_lora_path,
+                        lora_path=resolved_config.pipeline.ltx2.refine.lora_path,
                     ),
                 )
 
@@ -158,7 +205,7 @@ class LTX2Pipeline(LoRAPipeline):
                     transformer=transformer_refine,
                     sigmas_override=stage2_sigmas,
                     num_inference_steps_override=len(stage2_sigmas) - 1,
-                    force_guidance_scale=(resolved_config.ltx2_refine_guidance_scale),
+                    force_guidance_scale=(resolved_config.pipeline.ltx2.refine.guidance_scale),
                     initial_audio_latents_key="ltx2_audio_latents",
                 ),
             )
@@ -176,7 +223,7 @@ class LTX2Pipeline(LoRAPipeline):
             stage=DecodingStage(vae=self.get_module("vae")),
         )
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         tokenizer = self.get_module("tokenizer")
         if tokenizer is not None:
             tokenizer.padding_side = "left"
@@ -185,58 +232,18 @@ class LTX2Pipeline(LoRAPipeline):
 
     def load_modules(
         self,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         loaded_modules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         model_index = self._load_config(self.model_path)
         logger.info("Loading pipeline modules from config: %s", model_index)
 
-        # Apply optional FastVideo-specific refine defaults embedded in
-        # model_index.json. These are bundled with distilled checkpoints
-        # so the pipeline can self-configure without explicit user kwargs.
-        refine_defaults: dict[str, Any] = {}
-        if (model_index.get("fastvideo_refine_enabled") is True and resolved_config.refine_enabled is None):
-            refine_defaults["ltx2_refine_enabled"] = True
-        if (resolved_config.refine_upsampler_path is None and resolved_config.ltx2_refine_upsampler_path is None):
-            refine_defaults["ltx2_refine_upsampler_path"] = (_resolve_refine_upsampler_path(
-                self.model_path, model_index))
-        if (resolved_config.refine_transformer_path is None and resolved_config.ltx2_refine_transformer_path is None):
-            refine_defaults["ltx2_refine_transformer_path"] = (_resolve_refine_path(
-                self.model_path, model_index.get("fastvideo_refine_transformer_path")))
-        if (resolved_config.refine_lora_path is None and resolved_config.ltx2_refine_lora_path is None):
-            refine_defaults["ltx2_refine_lora_path"] = _resolve_refine_path(
-                self.model_path, model_index.get("fastvideo_refine_lora_path"))
-        if (resolved_config.refine_num_inference_steps is None
-                and resolved_config.ltx2_refine_num_inference_steps == FastVideoArgs.ltx2_refine_num_inference_steps
-                and model_index.get("fastvideo_refine_num_inference_steps") is not None):
-            # Only apply the model-index default when the caller didn't
-            # explicitly set either refine_num_inference_steps (generic)
-            # or ltx2_refine_num_inference_steps (LTX-2-specific). This
-            # prevents bundled defaults from overwriting explicit caller
-            # intent (e.g. requesting 2-step refinement).
-            refine_defaults["ltx2_refine_num_inference_steps"] = int(
-                model_index["fastvideo_refine_num_inference_steps"])
-        if (resolved_config.refine_guidance_scale is None
-                and model_index.get("fastvideo_refine_guidance_scale") is not None):
-            refine_defaults["ltx2_refine_guidance_scale"] = float(model_index["fastvideo_refine_guidance_scale"])
-        if (resolved_config.refine_add_noise is None and model_index.get("fastvideo_refine_add_noise") is not None):
-            refine_defaults["ltx2_refine_add_noise"] = bool(model_index["fastvideo_refine_add_noise"])
-        if (resolved_config.refine_noise_path is None and resolved_config.ltx2_refine_noise_path is None):
-            refine_defaults["ltx2_refine_noise_path"] = _resolve_refine_path(
-                self.model_path, model_index.get("fastvideo_refine_noise_path"))
-        if (resolved_config.refine_audio_noise_path is None and resolved_config.ltx2_refine_audio_noise_path is None):
-            refine_defaults["ltx2_refine_audio_noise_path"] = (_resolve_refine_path(
-                self.model_path, model_index.get("fastvideo_refine_audio_noise_path")))
-        changed = {key: value for key, value in refine_defaults.items() if getattr(resolved_config, key) != value}
-        if changed and isinstance(resolved_config, ResolvedGeneratorConfig):
-            # The pipeline owns its config; later stages read the rebound one.
-            resolved_config = resolved_config.with_override("checkpoint:model_index.json", {
-                typed_path_of_flat_name(key): value
-                for key, value in changed.items()
-            })
+        # Apply the refine defaults bundled in model_index.json, then the remaining refine defaults. The pipeline owns
+        # its config; later stages read the rebound one.
+        refine_values = _checkpoint_refine_values(resolved_config, self.model_path, model_index)
+        if refine_values:
+            resolved_config = resolved_config.with_override("checkpoint:model_index.json", refine_values)
             self.resolved_config = resolved_config
-        elif changed:
-            resolved_config.override("checkpoint:model_index.json", changed)
 
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
@@ -289,18 +296,18 @@ class LTX2Pipeline(LoRAPipeline):
             if module_name not in modules or modules[module_name] is None:
                 raise ValueError(f"Required module {module_name} was not loaded properly")
 
-        if resolved_config.ltx2_refine_enabled:
-            upsampler_path = resolved_config.ltx2_refine_upsampler_path
+        if resolved_config.pipeline.ltx2.refine.enabled:
+            upsampler_path = resolved_config.pipeline.components.upsampler_weights
             if upsampler_path is None:
-                raise ValueError("ltx2_refine_enabled is True but "
-                                 "ltx2_refine_upsampler_path was not provided.")
+                raise ValueError("pipeline.ltx2.refine.enabled is True but "
+                                 "pipeline.components.upsampler_weights was not provided.")
             if not os.path.isdir(upsampler_path):
-                raise ValueError("ltx2_refine_upsampler_path must be a directory "
+                raise ValueError("pipeline.components.upsampler_weights must be a directory "
                                  "containing Diffusers-style upsampler weights; "
                                  f"got {upsampler_path}")
             config_path = os.path.join(upsampler_path, "config.json")
             if not os.path.exists(config_path):
-                raise ValueError("ltx2_refine_upsampler_path must contain a Diffusers "
+                raise ValueError("pipeline.components.upsampler_weights must contain a Diffusers "
                                  f"config.json; missing {config_path}")
             if (loaded_modules is not None and "spatial_upsampler" in loaded_modules):
                 modules["spatial_upsampler"] = loaded_modules["spatial_upsampler"]
@@ -315,16 +322,16 @@ class LTX2Pipeline(LoRAPipeline):
 
             if (loaded_modules is not None and "transformer_refine" in loaded_modules):
                 modules["transformer_refine"] = loaded_modules["transformer_refine"]
-            elif resolved_config.ltx2_refine_transformer_path:
+            elif resolved_config.pipeline.ltx2.refine.transformer_path:
                 modules["transformer_refine"] = (PipelineComponentLoader.load_module(
                     module_name="transformer_refine",
-                    component_model_path=(resolved_config.ltx2_refine_transformer_path),
+                    component_model_path=(resolved_config.pipeline.ltx2.refine.transformer_path),
                     transformers_or_diffusers="diffusers",
                     resolved_config=resolved_config,
                 ))
                 logger.info(
                     "Loaded module transformer_refine from %s",
-                    resolved_config.ltx2_refine_transformer_path,
+                    resolved_config.pipeline.ltx2.refine.transformer_path,
                 )
 
         return modules

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import torch
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -29,7 +29,7 @@ class StableAudioDecodingStage(PipelineStage):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         pc = resolved_config.pipeline_config
         latents = batch.latents
 
@@ -38,11 +38,11 @@ class StableAudioDecodingStage(PipelineStage):
         # numerics. Mirrors the bypass in `pipelines/stages/decoding.py`
         # used by the video DiTs. Skips the `.to(device)` VAE move so we
         # don't pay decoder load cost on this shortcut path.
-        if resolved_config.output_type == "latent":
+        if resolved_config.pipeline.output_type == "latent":
             batch.output = latents.detach().cpu()
             return batch
 
-        # VAE may be CPU-parked under `vae_cpu_offload=True`.
+        # VAE may be CPU-parked under `engine.offload.vae=True`.
         from fastvideo.distributed.parallel_state import get_local_torch_device
         self.vae = self.vae.to(get_local_torch_device())
         decoded = self.vae.decode(latents)

@@ -8,7 +8,7 @@ from typing import Any
 from PIL import Image, ImageOps
 import torch
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.models.vision_utils import load_image
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_CANVAS_MULTIPLE,
@@ -114,7 +114,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         self.audio_vae = audio_vae
         self.ref2va = ref2va
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, lambda value: isinstance(value, str))
         result.add_check("num_frames", batch.num_frames, V.positive_int)
@@ -126,7 +126,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
             result.add_check("references", batch.references, V.list_not_empty)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("generator", batch.generator, V.generator_or_list_generators)
         result.add_check("height", batch.height, V.positive_int)
@@ -208,7 +208,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         batch.extra[MINIMAX_H3_KEYFRAME_ANCHORS_KEY] = ()
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         del resolved_config
         prepare_common_request(batch)
         if self.ref2va:

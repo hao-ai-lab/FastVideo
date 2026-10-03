@@ -10,7 +10,7 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -83,7 +83,7 @@ class LTX2LatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         latent_num_frames = self._adjust_video_length(batch, resolved_config)
         if not batch.prompt_embeds:
@@ -114,7 +114,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         dtype = batch.prompt_embeds[0].dtype
         device = get_local_torch_device()
         generator = batch.generator
-        if generator is not None and not resolved_config.ltx2_legacy_native_noise_order:
+        if generator is not None and not resolved_config.pipeline.ltx2.legacy_native_noise_order:
             if isinstance(generator, list):
                 if generator and generator[0].device.type != device.type:
                     seeds = batch.seeds
@@ -134,7 +134,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames
         height = batch.height
         width = batch.width
-        latent_path = resolved_config.ltx2_initial_latent_path
+        latent_path = resolved_config.pipeline.ltx2.initial_latent_path
 
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
@@ -160,7 +160,7 @@ class LTX2LatentPreparationStage(PipelineStage):
                 loaded_latents = self._load_initial_latent(latent_path, device, dtype)
                 if loaded_latents is not None:
                     latents = loaded_latents
-                elif resolved_config.ltx2_legacy_native_noise_order:
+                elif resolved_config.pipeline.ltx2.legacy_native_noise_order:
                     latents = randn_tensor(
                         shape,
                         generator=generator,
@@ -178,7 +178,7 @@ class LTX2LatentPreparationStage(PipelineStage):
                     )
                     self._save_initial_latent(latent_path, latents)
             else:
-                if resolved_config.ltx2_legacy_native_noise_order:
+                if resolved_config.pipeline.ltx2.legacy_native_noise_order:
                     latents = randn_tensor(
                         shape,
                         generator=generator,
@@ -225,7 +225,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         batch.raw_latent_shape = shape
         return batch
 
-    def _adjust_video_length(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> int | None:
+    def _adjust_video_length(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> int | None:
         if not resolved_config.pipeline_config.vae_config.use_temporal_scaling_frames:
             return None
         temporal_scale_factor = (resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
@@ -264,7 +264,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         torch.save({"video_latent": latents.detach().cpu()}, path)
         logger.info("[LTX2] Saved initial latent to %s", path)
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check(
             "prompt_or_embeds",
@@ -282,7 +282,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         result.add_check("latents", batch.latents, V.none_or_tensor)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("raw_latent_shape", batch.raw_latent_shape, V.is_tuple)

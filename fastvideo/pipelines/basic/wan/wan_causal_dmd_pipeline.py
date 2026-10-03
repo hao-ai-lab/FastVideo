@@ -7,7 +7,7 @@ This module wires the causal DMD denoising stage into the modular pipeline.
 
 from fastvideo.pipelines.basic.wan.stages.conditioning import WanFirstFrameEncodingStage
 from fastvideo.pipelines.basic.wan.stages.causal_denoising import CausalDMDDenosingStage
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
@@ -23,7 +23,7 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

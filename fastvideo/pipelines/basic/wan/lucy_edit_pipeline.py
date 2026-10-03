@@ -7,7 +7,7 @@ but the model repo does not include CLIP image-encoder components.
 """
 
 from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.wan.wan_v2v_pipeline import WanVideoToVideoPipeline
 from fastvideo.pipelines.stages import (
@@ -34,7 +34,7 @@ class LucyEditPipeline(WanVideoToVideoPipeline):
         "scheduler",
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(
