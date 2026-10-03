@@ -609,7 +609,8 @@ def _attn_bwd_dkdv(
         fake_quant_P: tl.constexpr = True,
         SMOOTH_Q: tl.constexpr = False,
         use_global_sf_P: tl.constexpr = True,
-        warp_specialize: tl.constexpr = False):
+        warp_specialize: tl.constexpr = False,
+        COMPUTE_DV: tl.constexpr = True):
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -637,17 +638,18 @@ def _attn_bwd_dkdv(
             qk = tl.where(mask, qk, -1.0e6)
         p = tl.math.exp2(qk - m[:, None])
         do = tl.load(do_ptrs, mask=q_valid[:, None])
-        # Compute dV.
-        p_quant = p
-        if IS_QAT and fake_quant_P:
-            p_quant, _ = fake_quantize(src_tensor=p,
-                                       valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
-                                       BLOCK_SIZE_OUT_DIM=BLOCK_M1,
-                                       BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
-                                       dst_dtype=p.dtype,
-                                       two_level_quant_P=two_level_quant_P,
-                                       use_global_sf=use_global_sf_P)
-        dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
+        # Compute dV. Skipped when the SM121 forward-consistent kernel overwrites dV.
+        if COMPUTE_DV:
+            p_quant = p
+            if IS_QAT and fake_quant_P:
+                p_quant, _ = fake_quantize(src_tensor=p,
+                                           valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
+                                           BLOCK_SIZE_OUT_DIM=BLOCK_M1,
+                                           BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
+                                           dst_dtype=p.dtype,
+                                           two_level_quant_P=two_level_quant_P,
+                                           use_global_sf=use_global_sf_P)
+            dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m, mask=q_valid)
         # Compute dP and dS.
@@ -951,7 +953,8 @@ def _attn_bwd_dkdv_cross(Q,
                          SMOOTH_Q: tl.constexpr = False,
                          use_global_sf_P: tl.constexpr = True,
                          warp_specialize: tl.constexpr = False,
-                         SPLIT_FULL_TILES: tl.constexpr = False):
+                         SPLIT_FULL_TILES: tl.constexpr = False,
+                         COMPUTE_DV: tl.constexpr = True):
     # Apply scale AFTER dot product for better precision
     RCP_LN2: tl.constexpr = 1.4426950408889634  # = 1.0 / ln(2)
     qk_scale = sm_scale * RCP_LN2
@@ -1017,16 +1020,18 @@ def _attn_bwd_dkdv_cross(Q,
             # Apply scale AFTER dot product (matches forward pass, better precision)
             qk = qk * qk_scale
             p = tl.math.exp2(qk - m[:, None])
-            p_quant = p
-            if IS_QAT and fake_quant_P:
-                p_quant, _ = fake_quantize(src_tensor=p,
-                                           valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
-                                           BLOCK_SIZE_OUT_DIM=BLOCK_M1,
-                                           BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
-                                           dst_dtype=p.dtype,
-                                           two_level_quant_P=two_level_quant_P,
-                                           use_global_sf=use_global_sf_P)
-            dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
+            # Skipped when the SM121 forward-consistent kernel overwrites dV.
+            if COMPUTE_DV:
+                p_quant = p
+                if IS_QAT and fake_quant_P:
+                    p_quant, _ = fake_quantize(src_tensor=p,
+                                               valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
+                                               BLOCK_SIZE_OUT_DIM=BLOCK_M1,
+                                               BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
+                                               dst_dtype=p.dtype,
+                                               two_level_quant_P=two_level_quant_P,
+                                               use_global_sf=use_global_sf_P)
+                dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
 
             dp = tl.dot(do, tl.trans(v_block))
             Di = tl.load(D + offs_m, mask=q_valid)
@@ -1038,8 +1043,9 @@ def _attn_bwd_dkdv_cross(Q,
                 q_m = tl.load(Q_MEAN + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
                 dk += tl.sum(ds, axis=1, keep_dims=True) * q_m
 
-    dv_ptrs = DV + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
-    tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
+    if COMPUTE_DV:
+        dv_ptrs = DV + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
+        tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
 
     dk *= sm_scale
     dk_ptrs = DK + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
@@ -1080,7 +1086,8 @@ def _attn_bwd(
         fake_quant_P: tl.constexpr = True,
         SMOOTH_Q: tl.constexpr = False,
         use_global_sf_P: tl.constexpr = True,
-        warp_specialize: tl.constexpr = False):
+        warp_specialize: tl.constexpr = False,
+        COMPUTE_DV: tl.constexpr = True):
 
     bhid = tl.program_id(2)
     off_chz = (bhid * N_CTX).to(tl.int64)
@@ -1156,7 +1163,8 @@ def _attn_bwd(
                                 fake_quant_P=fake_quant_P,
                                 SMOOTH_Q=SMOOTH_Q,
                                 use_global_sf_P=use_global_sf_P,
-                                warp_specialize=warp_specialize)
+                                warp_specialize=warp_specialize,
+                                COMPUTE_DV=COMPUTE_DV)
 
         start_m += num_steps * MASK_BLOCK_M1
         num_steps = (N_CTX - start_m + BLOCK_M1 - 1) // BLOCK_M1
@@ -1192,10 +1200,12 @@ def _attn_bwd(
                             fake_quant_P=fake_quant_P,
                             SMOOTH_Q=SMOOTH_Q,
                             use_global_sf_P=use_global_sf_P,
-                            warp_specialize=warp_specialize)
+                            warp_specialize=warp_specialize,
+                            COMPUTE_DV=COMPUTE_DV)
 
-    dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-    tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
+    if COMPUTE_DV:
+        dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+        tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
 
     # Write back dK.
     dk *= sm_scale
@@ -1842,6 +1852,7 @@ class _attention(torch.autograd.Function):
                             SMOOTH_Q=ctx.smooth_q,
                             use_global_sf_P=ctx.use_global_sf_P,
                             warp_specialize=ctx.warp_specialize,
+                            COMPUTE_DV=not ctx.forward_consistent_dv,
                             num_warps=NUM_WARPS,
                             num_stages=NUM_STAGES)
         else:
@@ -1908,6 +1919,7 @@ class _attention(torch.autograd.Function):
                 SMOOTH_Q=ctx.smooth_q,
                 use_global_sf_P=ctx.use_global_sf_P,
                 warp_specialize=ctx.warp_specialize,
+                COMPUTE_DV=not ctx.forward_consistent_dv,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES,
             )
