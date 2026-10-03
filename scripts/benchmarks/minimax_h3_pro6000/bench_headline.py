@@ -53,6 +53,15 @@ def main():
     if os.environ.get("HEADLINE_VAE_PARALLEL") == "1" and a.num_gpus > 1:
         # Decode VAE tiles on every GPU instead of rank 0 only.
         experimental.update(vae_parallel_decode=True, vae_parallel_decode_strategy="gather")
+    # Placement overrides for memory-limited GPUs, e.g. on a 32 GB RTX 5090:
+    # HEADLINE_ENGINE_JSON='{"offload": {"text_encoder": true, "pin_cpu_memory": true}}'
+    # HEADLINE_EXPERIMENTAL_JSON='{"h3_sequential_load": true}'
+    for key, value in json.loads(os.environ.get("HEADLINE_ENGINE_JSON", "{}")).items():
+        if isinstance(value, dict) and isinstance(engine.get(key), dict):
+            engine[key].update(value)
+        else:
+            engine[key] = value
+    experimental.update(json.loads(os.environ.get("HEADLINE_EXPERIMENTAL_JSON", "{}")))
     config = {"model_path": a.model_dir, "engine": engine, "pipeline": {"experimental": experimental}}
     env = {k: v for k, v in os.environ.items() if k.startswith(("FASTVIDEO_", "PYTORCH_CUDA"))}
     run = None
