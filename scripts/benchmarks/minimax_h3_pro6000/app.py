@@ -536,3 +536,68 @@ def main(step: str = "all", ladder: str = "base"):
                 print("FAILED", v[0], repr(result)[:3000])
             else:
                 print("RESULT", json.dumps(result))
+
+
+# --- Headline benchmark (480p 5 s, 768p 10 s) on 1 / 4 / 8 GPUs from a FastVideo HF repo. ---
+# MODAL_PROFILE=aryan5v modal run --detach app.py::headline --repo FastVideo/<repo> --profile h3_dit_ffn --gpus 1,4,8
+HERE = pathlib.Path(__file__).resolve().parent
+headline_image = (image.add_local_file(HERE / "bench_headline.py", "/root/bench_headline.py")
+                  .add_local_file(HERE / "headline_prompts.json", "/root/headline_prompts.json"))
+SECRETS = [modal.Secret.from_name("hf-fastvideo")]
+
+
+@app.function(cpu=8, memory=32768, timeout=3600, volumes={"/vol": volume}, secrets=SECRETS, image=headline_image)
+def headline_fetch(repo: str) -> str:
+    from huggingface_hub import snapshot_download
+    local = f"/vol/models/{repo.split('/')[-1]}"
+    snapshot_download(repo, local_dir=local, token=os.environ["HF_TOKEN"], max_workers=16)
+    volume.commit()
+    return _sh(f"du -sh {local}/*")
+
+
+def _headline(repo: str, gpus: int, profile: str, extra_env: dict | None) -> dict:
+    _install_kernel()
+    model = f"/vol/models/{repo.split('/')[-1]}"
+    run_name = f"pro6000x{gpus}-{repo.split('/')[-1]}"
+    env = dict(os.environ, **FAST_ENV, **(extra_env or {}), HEADLINE_OUT="/vol/outputs/headline",
+               HEADLINE_DEVICE=f"{gpus}x RTX PRO 6000", PYTHONPATH="/src/fastvideo")
+    proc = subprocess.run(["python", "/root/bench_headline.py", run_name, model, str(gpus), profile,
+                           "--prompts", "/root/headline_prompts.json"], env=env, capture_output=True, text=True,
+                          cwd="/root")
+    volume.commit()
+    tail = (proc.stdout + proc.stderr)[-6000:]
+    result_path = pathlib.Path("/vol/outputs/headline") / run_name / "results.json"
+    results = json.loads(result_path.read_text()) if result_path.exists() else {}
+    return {"run": run_name, "returncode": proc.returncode, "results": results,
+            "log_tail": tail if proc.returncode else tail[-1500:]}
+
+
+@app.function(image=headline_image, gpu="RTX-PRO-6000", memory=131072, cpu=8, timeout=2 * 3600, volumes={"/vol": volume})
+def headline1(repo: str, profile: str, extra_env: dict | None = None) -> dict:
+    return _headline(repo, 1, profile, extra_env)
+
+
+@app.function(image=headline_image, gpu="RTX-PRO-6000:4", memory=196608, cpu=16, timeout=2 * 3600, volumes={"/vol": volume})
+def headline4(repo: str, profile: str, extra_env: dict | None = None) -> dict:
+    return _headline(repo, 4, profile, extra_env)
+
+
+@app.function(image=headline_image, gpu="RTX-PRO-6000:8", memory=262144, cpu=32, timeout=2 * 3600, volumes={"/vol": volume})
+def headline8(repo: str, profile: str, extra_env: dict | None = None) -> dict:
+    return _headline(repo, 8, profile, extra_env)
+
+
+@app.local_entrypoint()
+def headline(repo: str, profile: str = "h3_dit_ffn", gpus: str = "1,4,8", skip_fetch: bool = False):
+    if not skip_fetch:
+        print(headline_fetch.remote(repo))
+    fns = {"1": headline1, "4": headline4, "8": headline8}
+    calls = [fns[g].spawn(repo, profile) for g in gpus.split(",")]
+    out = HERE / "headline_results"
+    out.mkdir(exist_ok=True)
+    for call in calls:
+        res = call.get()
+        print(json.dumps({k: v for k, v in res.items() if k != "log_tail"}, indent=1)[:3000])
+        if res["returncode"]:
+            print(res["log_tail"])
+        (out / f"{res['run']}.json").write_text(json.dumps(res, indent=1))
