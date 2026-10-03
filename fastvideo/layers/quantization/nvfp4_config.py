@@ -432,6 +432,15 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             self._dynamic_act_cached = cached
         return cached
 
+    def uses_unit_activation_scale(self, layer: torch.nn.Module) -> bool:
+        """Whether ``apply`` quantizes this layer's input with the unit global scale.
+
+        False when a calibrated scale (env table or the export's ``_nvfp4_input_global_sf``) or a dynamic
+        per-call scale applies; such inputs cannot share one pre-quantized copy across layers.
+        """
+        return (self._static_activation_global_sf() is None and getattr(layer, H3_NVFP4_DIT_INPUT_SF_NAME, None) is None
+                and not self._dynamic_activation_scale())
+
     def quantize_input(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         SfLayout, _, _ = _require_flashinfer()
         x = _coerce_fp4_input_dtype(x)
