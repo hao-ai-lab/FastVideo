@@ -104,6 +104,7 @@ class Int8ConvRotLinear(nn.Module):
         self.out_features = out_features
         self.convrot = convrot
         self.group_size = group_size
+        self._transpose_view = os.environ.get("FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW", "0") == "1"
         self.register_buffer("weight", torch.empty(out_features, in_features, dtype=torch.int8))
         self.register_buffer("weight_scale", torch.empty(out_features, 1, dtype=torch.float32))
         if bias:
@@ -123,30 +124,58 @@ class Int8ConvRotLinear(nn.Module):
         # int32 acc is ~K·127² and overflows fp16 before 1/127 scales land.
         return acc.float() * x_scale.float() * weight_scale.t().float()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        original_shape = x.shape
-        x_2d = x.reshape(-1, original_shape[-1]).contiguous()
+    def quantize_input(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x_2d = x.reshape(-1, x.shape[-1]).contiguous()
         if self.convrot:
             x_2d = rotate_activation(x_2d, self.group_size)
-        if x_2d.device.type == "cuda" and x_2d.shape[-1] % 8 == 0:
-            row_max = x_2d.abs().amax(dim=-1, keepdim=True).clamp_min(1e-30)
-            x_scale = row_max / 127.0
-            x_q = (x_2d / x_scale).round().clamp(-128, 127).to(torch.int8)
-            # torch._int_mm requires M > 16. VAE decode is far above that;
-            # pad only the leftover short rows.
-            rows = x_q.shape[0]
-            if rows <= 16:
-                pad = 17 - rows
-                x_q = F.pad(x_q, (0, 0, 0, pad))
-                x_scale = F.pad(x_scale, (0, 0, 0, pad))
-            acc = torch._int_mm(x_q, self.weight.t().contiguous())[:rows]
-            x_scale = x_scale[:rows]
-            out = self._dequant_int8_gemm(acc, x_scale, self.weight_scale)
+        row_max = x_2d.abs().amax(dim=-1, keepdim=True).clamp_min(1e-30)
+        x_scale = row_max / 127.0
+        x_q = (x_2d / x_scale).round().clamp(-128, 127).to(torch.int8)
+        rows = x_q.shape[0]
+        if rows <= 16:
+            pad = 17 - rows
+            x_q = F.pad(x_q, (0, 0, 0, pad))
+            x_scale = F.pad(x_scale, (0, 0, 0, pad))
+        return x_q, x_scale
+
+    def forward_quantized(self, x_q: torch.Tensor, x_scale: torch.Tensor,
+                          original_shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
+        rows = math.prod(original_shape[:-1])
+        weight = self.weight.t()
+        if not self._transpose_view:
+            weight = weight.contiguous()
+        acc = torch._int_mm(x_q, weight)[:rows]
+        out = self._dequant_int8_gemm(acc, x_scale[:rows], self.weight_scale)
+        if self.bias is not None:
+            out = out + self.bias.float()
+        return out.to(dtype=dtype).view(*original_shape[:-1], self.out_features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        original_shape = x.shape
+        if x.device.type == "cuda" and x.shape[-1] % 8 == 0:
+            return self.forward_quantized(*self.quantize_input(x), original_shape, x.dtype)
         else:
+            x_2d = x.reshape(-1, original_shape[-1]).contiguous()
+            if self.convrot:
+                x_2d = rotate_activation(x_2d, self.group_size)
             out = F.linear(x_2d.float(), self._dequant_weight(torch.float32))
         if self.bias is not None:
             out = out + self.bias.float()
         return out.to(dtype=x.dtype).view(*original_shape[:-1], self.out_features)
+
+
+def shared_int8_projections(layers: tuple[nn.Module, ...], x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    """Reuse identical ConvRot/row quantization while retaining each projection's INT8 GEMM."""
+    first = layers[0]
+    compatible = (x.is_cuda and x.shape[-1] % 8 == 0
+                  and all(isinstance(layer, Int8ConvRotLinear) for layer in layers))
+    if compatible:
+        compatible = all((layer.in_features, layer.convrot, layer.group_size)
+                         == (first.in_features, first.convrot, first.group_size) for layer in layers)
+    if not compatible:
+        return tuple(layer(x) for layer in layers)
+    x_q, x_scale = first.quantize_input(x)
+    return tuple(layer.forward_quantized(x_q, x_scale, x.shape, x.dtype) for layer in layers)
 
 
 def _int8_linear_from_tensors(

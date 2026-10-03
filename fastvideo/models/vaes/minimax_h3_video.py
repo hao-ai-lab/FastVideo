@@ -301,6 +301,7 @@ class MiniMaxH3VideoAttention(nn.Module):
         self.heads = heads
         self.dim_head = dim_head
         self.use_bias = bias
+        self._share_int8_qkv = os.environ.get("FASTVIDEO_H3_VAE_INT8_SHARED_QKV", "0") == "1"
         inner_dim = heads * dim_head
         self.norm_q = nn.RMSNorm(dim_head, eps=eps, elementwise_affine=False)
         self.norm_k = nn.RMSNorm(dim_head, eps=eps, elementwise_affine=False)
@@ -340,9 +341,13 @@ class MiniMaxH3VideoAttention(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """Apply dense self-attention to one spatial VAE token sequence."""
-        query = self.to_q(hidden_states).unflatten(2, (self.heads, -1))
-        key = self.to_k(hidden_states).unflatten(2, (self.heads, -1))
-        value = self.to_v(hidden_states).unflatten(2, (self.heads, -1))
+        if self._share_int8_qkv and not torch.is_grad_enabled() and not torch.compiler.is_compiling():
+            from fastvideo.models.vaes.minimax_h3_int8_convrot import shared_int8_projections
+            projections = shared_int8_projections((self.to_q, self.to_k, self.to_v), hidden_states)
+        else:
+            projections = tuple(layer(hidden_states) for layer in (self.to_q, self.to_k, self.to_v))
+        query, key, value = (projection.unflatten(2, (self.heads, -1)) for projection in projections)
+        del projections
 
         query = self.norm_q(query.float()).to(query.dtype)
         key = self.norm_k(key.float()).to(key.dtype)
