@@ -564,12 +564,17 @@ def _headline(repo: str, gpus: int, profile: str, extra_env: dict | None) -> dic
     proc = subprocess.run(["python", "/root/bench_headline.py", run_name, model, str(gpus), profile,
                            "--prompts", "/root/headline_prompts.json"], env=env, capture_output=True, text=True,
                           cwd="/root")
+    log_text = proc.stdout + proc.stderr
+    run_dir = pathlib.Path("/vol/outputs/headline") / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.log").write_text(log_text)
     volume.commit()
-    tail = (proc.stdout + proc.stderr)[-6000:]
-    result_path = pathlib.Path("/vol/outputs/headline") / run_name / "results.json"
+    errors = [line for line in log_text.splitlines()
+              if any(k in line for k in ("Error", "error:", "Traceback", "Killed", "OOM", "out of memory"))][-40:]
+    result_path = run_dir / "results.json"
     results = json.loads(result_path.read_text()) if result_path.exists() else {}
-    return {"run": run_name, "returncode": proc.returncode, "results": results,
-            "log_tail": tail if proc.returncode else tail[-1500:]}
+    return {"run": run_name, "returncode": proc.returncode, "results": results, "errors": errors,
+            "log_tail": log_text[-1500:]}
 
 
 @app.function(image=headline_image, gpu="RTX-PRO-6000", memory=131072, cpu=8, timeout=2 * 3600, volumes={"/vol": volume})
