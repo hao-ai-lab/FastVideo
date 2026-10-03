@@ -76,6 +76,28 @@ height to 768, and width to 1344; retain 243 frames. Layerwise offload,
 lazy component loading, and eager VAE decode are the starting configuration.
 Do not compare these numbers with a different frame count or decoder.
 
+Completed baseline at source commit `ce877b200`, checkpoint revision
+`f2ef54f9ff2091762ab8689b6514dcab5bc1d383`:
+
+| Configuration | Median e2e | Denoise stage | Video decode stage | Peak GPU allocated | Peak host anon | Peak total cgroup |
+| --- | --- | --- | --- | --- | --- | --- |
+| FP8, layerwise, lazy, eager H3 VAE, 832×480, 243 frames | 163.34 s | 91.72 s | 34.54 s | 17.47 GiB | 28.91 GiB | 76.95 GiB |
+
+Two timed requests took 163.67 s and 163.00 s after one warmup.
+Stage times are medians and include deferred loading. Memory columns are
+maxima across the timed requests. Total cgroup usage includes file cache.
+The GPU peak occurs during conditioning. The saved clip contains 243 frames
+at 24 fps (10.125 seconds) and an AAC audio track. A contact-sheet inspection
+confirms a coherent pottery scene; speech and same-seed reference parity
+still need review before claiming quality equivalence.
+
+Summarize a completed run while excluding warmup:
+
+```bash
+python -P /workspace/fastvideo/scripts/benchmarks/minimax_h3_4090/summarize.py \
+  /workspace/outputs/baseline-480p/results.json /workspace/baseline-480p.log
+```
+
 After a baseline works, measure FFN chunk sizes 16,384 and 8,192, then
 increase resident DiT blocks within the measured GPU budget. Kernel or
 decoder changes also need same-seed visual and auditory comparison.
