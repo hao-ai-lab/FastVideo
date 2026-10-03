@@ -15,8 +15,7 @@ import fastvideo.envs as envs
 from fastvideo.utils import logger
 # Import the training pipeline
 from fastvideo.training.wan_training_pipeline import main
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.utils import FlexibleArgumentParser
+from fastvideo.api.training_schema import resolve_training_config
 from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
 
 MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
@@ -37,94 +36,71 @@ envs.setdefault_external("MASTER_PORT", MASTER_PORT)
 
 def run_worker():
     """Worker function that will be run on each GPU"""
-    # Create and populate args
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-
     # Set the arguments as they are in finetune_t2v.sh
-    args = parser.parse_args([
-        "--model_path",
-        MODEL_PATH,
-        "--inference_mode",
-        "False",
-        "--pretrained_model_name_or_path",
-        MODEL_PATH,
-        "--data_path",
-        DATA_PATH,
-        "--dataloader_num_workers",
-        "1",
-        "--train_batch_size",
-        "4",
-        "--train_sp_batch_size",
-        "1",
-        "--gradient_accumulation_steps",
-        GRAD_ACCUM,
-        "--num_latent_t",
-        "20",
-        "--num_height",
-        "720",
-        "--num_width",
-        "1280",
-        "--num_frames",
-        "77",
-        "--enable_gradient_checkpointing_type",
-        "full",
-        "--max_train_steps",
-        "20",
-        "--learning_rate",
-        "5e-5",
-        "--mixed_precision",
-        "bf16",
-        "--weight_only_checkpointing_steps",
-        "250",
-        "--training_state_checkpointing_steps",
-        "250",
-        "--weight_decay",
-        "1e-4",
-        "--max_grad_norm",
-        "1.0",
-        "--num_euler_timesteps",
-        "50",
-        "--multi_phased_distill_schedule",
-        "4000-1",
-        "--not_apply_cfg_solver",
-        "--training_cfg_rate",
-        "0.1",
-        "--ema_start_step",
-        "0",
-        "--dit_precision",
-        "fp32",
-        "--output_dir",
-        str(OUTPUT_DIR),
-        "--tracker_project_name",
-        "wan_t2v_finetune",
-        "--checkpoints_total_limit",
-        "3",
-        "--validation_dataset_file",
-        VALIDATION_DATASET_FILE,
-        "--validation_steps",
-        "200",
-        "--validation_sampling_steps",
-        "50",
-        "--validation_guidance_scale",
-        "6.0",
-        #"--enable_torch_compile",
-        #"--log_validation",
-        "--num_gpus",
-        NUM_GPUS_PER_NODE,
-        "--sp_size",
-        NUM_GPUS_PER_NODE,
-        "--tp_size",
-        "1",
-        "--hsdp_replicate_dim",
-        NUM_GPUS_PER_NODE,
-        "--hsdp_shard_dim",
-        "1"
-    ])
+    training_run_config = {
+        "model_path": MODEL_PATH,
+        "engine": {
+            "num_gpus": int(NUM_GPUS_PER_NODE),
+            "parallelism": {
+                "sp_size": int(NUM_GPUS_PER_NODE),
+                "tp_size": 1,
+                "hsdp_replicate_dim": int(NUM_GPUS_PER_NODE),
+                "hsdp_shard_dim": 1,
+            },
+            #"compile": {"enabled": True},
+            "precision": {
+                "dit": "fp32",
+            },
+        },
+        "training": {
+            "data": {
+                "data_path": DATA_PATH,
+                "dataloader_num_workers": 1,
+                "train_batch_size": 4,
+                "train_sp_batch_size": 1,
+                "num_latent_t": 20,
+                "num_height": 720,
+                "num_width": 1280,
+                "num_frames": 77,
+                "training_cfg_rate": 0.1,
+            },
+            "optimizer": {
+                "learning_rate": 5e-5,
+                "weight_decay": 1e-4,
+                "max_grad_norm": 1.0,
+            },
+            "loop": {
+                "gradient_accumulation_steps": int(GRAD_ACCUM),
+                "max_train_steps": 20,
+            },
+            "checkpoint": {
+                "weight_only_checkpointing_steps": 250,
+                "training_state_checkpointing_steps": 250,
+                "output_dir": str(OUTPUT_DIR),
+                "checkpoints_total_limit": 3,
+            },
+            "tracker": {
+                "project_name": "wan_t2v_finetune",
+            },
+            "validation": {
+                "dataset_file": VALIDATION_DATASET_FILE,
+                "every_steps": 200,
+                "sampling_steps": [50],
+                "guidance_scale": 6.0,
+                #"enabled": True,
+            },
+            "ema": {
+                "start_step": 0,
+            },
+            "model": {
+                "enable_gradient_checkpointing_type": "full",
+            },
+        },
+    }
+    resolved_config = resolve_training_config(training_run_config)
     # Call the main training function
-    pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
+    pipeline = WanTrainingPipeline.from_pretrained(resolved_config.model_path, resolved_config=resolved_config)
+    resolved_config = pipeline.resolved_config
     pipeline.train()
     logger.info("Training pipeline done")
 

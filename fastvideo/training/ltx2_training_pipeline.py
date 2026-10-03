@@ -1,21 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
-import sys
-from copy import deepcopy
 from pathlib import Path
 import torch
 import torch.distributed as dist
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
+from fastvideo.api.schema import ExecutionMode
+from fastvideo.api.training_schema import TrainingRunConfig, load_resolved_run_config
 from fastvideo.dataset import (build_ltx2_precomputed_dataloader, build_parquet_map_style_dataloader)
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_text_only
 from fastvideo.distributed import get_local_torch_device, get_sp_group, get_world_group
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines.basic.ltx2.ltx2_pipeline import LTX2Pipeline
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
-from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.training.training_pipeline import TrainingPipeline, resolve_validation_config
 from fastvideo.training.trackers import (DummyTracker, TrackerType, Trackers, initialize_trackers)
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler)
 from fastvideo.utils import set_random_seed
@@ -39,15 +39,14 @@ class LTX2TrainingPipeline(TrainingPipeline):
     with_audio: bool = False
     tracker: TrackerType
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         # TODO (David): Change to port LTX2 scheduler into self.modules["scheduler"]
         if "scheduler" in self.modules:
             del self.modules["scheduler"]
 
-    def initialize_training_pipeline(self, training_args: TrainingArgs):
+    def initialize_training_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         logger.info("Initializing LTX-2 training pipeline...")
         self.device = get_local_torch_device()
-        self.training_args = training_args
         world_group = get_world_group()
         self.world_size = world_group.world_size
         self.global_rank = world_group.rank
@@ -60,27 +59,27 @@ class LTX2TrainingPipeline(TrainingPipeline):
         self.text_encoder = self.get_module("text_encoder")
         self.text_encoder.eval()
         self.text_encoder.to(self.device)
-        self.seed = training_args.seed
+        self.seed = resolved_config.training.data.seed
 
         assert self.seed is not None, "seed must be set"
         set_random_seed(self.seed + self.global_rank)
         self.transformer.train()
 
-        if training_args.enable_gradient_checkpointing_type is not None:
+        if resolved_config.training.model.enable_gradient_checkpointing_type is not None:
             from fastvideo.training.activation_checkpoint import (apply_activation_checkpointing)
             self.transformer.model = apply_activation_checkpointing(
-                self.transformer.model, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+                self.transformer.model,
+                checkpointing_type=resolved_config.training.model.enable_gradient_checkpointing_type)
 
         self.set_trainable()
         params_to_optimize = list(filter(lambda p: p.requires_grad, self.transformer.parameters()))
-        betas_str = training_args.betas
-        betas = tuple(float(x.strip()) for x in betas_str.split(","))
+        betas = resolved_config.training.optimizer.betas
 
         self.optimizer = torch.optim.AdamW(
             params_to_optimize,
-            lr=training_args.learning_rate,
+            lr=resolved_config.training.optimizer.learning_rate,
             betas=betas,
-            weight_decay=training_args.weight_decay,
+            weight_decay=resolved_config.training.optimizer.weight_decay,
             eps=1e-8,
         )
 
@@ -88,23 +87,23 @@ class LTX2TrainingPipeline(TrainingPipeline):
         logger.info("optimizer: %s", self.optimizer)
 
         self.lr_scheduler = get_scheduler(
-            training_args.lr_scheduler,
+            resolved_config.training.optimizer.lr_scheduler,
             optimizer=self.optimizer,
-            num_warmup_steps=training_args.lr_warmup_steps,
-            num_training_steps=training_args.max_train_steps,
-            num_cycles=training_args.lr_num_cycles,
-            power=training_args.lr_power,
-            min_lr_ratio=training_args.min_lr_ratio,
+            num_warmup_steps=resolved_config.training.optimizer.lr_warmup_steps,
+            num_training_steps=resolved_config.training.loop.max_train_steps,
+            num_cycles=resolved_config.training.optimizer.lr_num_cycles,
+            power=resolved_config.training.optimizer.lr_power,
+            min_lr_ratio=resolved_config.training.optimizer.min_lr_ratio,
             last_epoch=self.init_steps - 1,
         )
 
-        if self._has_precomputed_pt_data(training_args.data_path):
-            data_sources = self._get_ltx2_data_sources(training_args.data_path)
+        if self._has_precomputed_pt_data(resolved_config.training.data.data_path):
+            data_sources = self._get_ltx2_data_sources(resolved_config.training.data.data_path)
             self.with_audio = "audio_latents" in data_sources
             self.train_dataset, self.train_dataloader = (build_ltx2_precomputed_dataloader(
-                training_args.data_path,
-                training_args.train_batch_size,
-                num_data_workers=training_args.dataloader_num_workers,
+                resolved_config.training.data.data_path,
+                resolved_config.training.data.train_batch_size,
+                num_data_workers=resolved_config.training.data.dataloader_num_workers,
                 data_sources=data_sources,
                 drop_last=True,
                 seed=self.seed,
@@ -112,14 +111,14 @@ class LTX2TrainingPipeline(TrainingPipeline):
             self._use_parquet_data = False
             logger.info("Using precomputed .pt data")
         else:
-            text_padding_length = (training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len)
+            text_padding_length = (resolved_config.pipeline_config.text_encoder_configs[0].arch_config.text_len)
             self.with_audio = False
             self.train_dataset, self.train_dataloader = (build_parquet_map_style_dataloader(
-                training_args.data_path,
-                training_args.train_batch_size,
-                num_data_workers=training_args.dataloader_num_workers,
+                resolved_config.training.data.data_path,
+                resolved_config.training.data.train_batch_size,
+                num_data_workers=resolved_config.training.data.dataloader_num_workers,
                 parquet_schema=pyarrow_schema_text_only,
-                cfg_rate=training_args.training_cfg_rate,
+                cfg_rate=resolved_config.training.data.training_cfg_rate,
                 drop_last=True,
                 text_padding_length=text_padding_length,
                 seed=self.seed,
@@ -127,24 +126,25 @@ class LTX2TrainingPipeline(TrainingPipeline):
             self._use_parquet_data = True
             logger.info("No precomputed .pt data found, using parquet data")
 
-        self.num_update_steps_per_epoch = max(1,
-                                              len(self.train_dataloader) // training_args.gradient_accumulation_steps)
-        self.num_train_epochs = max(1, training_args.max_train_steps // self.num_update_steps_per_epoch)
+        self.num_update_steps_per_epoch = max(
+            1,
+            len(self.train_dataloader) // resolved_config.training.loop.gradient_accumulation_steps)
+        self.num_train_epochs = max(1, resolved_config.training.loop.max_train_steps // self.num_update_steps_per_epoch)
         self.current_epoch = 0
 
-        trackers = list(training_args.trackers)
-        if not trackers and training_args.tracker_project_name:
+        trackers = list(resolved_config.training.tracker.trackers)
+        if not trackers and resolved_config.training.tracker.project_name:
             trackers.append(Trackers.WANDB.value)
         if self.global_rank != 0:
             trackers = []
 
-        tracker_log_dir = training_args.output_dir or os.getcwd()
+        tracker_log_dir = resolved_config.training.checkpoint.output_dir or os.getcwd()
         if trackers:
             tracker_log_dir = os.path.join(tracker_log_dir, "tracker")
 
-        tracker_config = training_args.__dict__ if trackers else None
-        tracker_run_name = training_args.wandb_run_name or None
-        project = training_args.tracker_project_name or "fastvideo"
+        tracker_config = resolved_config.to_dict() if trackers else None
+        tracker_run_name = resolved_config.training.tracker.run_name or None
+        project = resolved_config.training.tracker.project_name or "fastvideo"
         self.tracker = initialize_trackers(
             trackers,
             experiment_name=project,
@@ -153,14 +153,22 @@ class LTX2TrainingPipeline(TrainingPipeline):
             run_name=tracker_run_name,
         ) if trackers else DummyTracker()
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         logger.info("Initializing LTX-2 validation pipeline...")
-        args_copy = deepcopy(training_args)
-        args_copy.inference_mode = True
+        # The text encoder and the VAE are the training pipeline's own, so the validation stages move them as the
+        # training run does.
+        validation_config = resolve_validation_config(
+            resolved_config,
+            offload={
+                "pin_cpu_memory": resolved_config.engine.offload.pin_cpu_memory,
+                "dit": resolved_config.engine.offload.dit,
+                "text_encoder": resolved_config.engine.offload.text_encoder,
+                "vae": resolved_config.engine.offload.vae,
+            },
+        )
         validation_pipeline = LTX2Pipeline.from_pretrained(
-            training_args.model_path,
-            args=args_copy,
-            inference_mode=True,
+            resolved_config.model_path,
+            resolved_config=validation_config,
             loaded_modules={
                 "transformer": self.get_module("transformer"),
                 "text_encoder": self.get_module("text_encoder"),
@@ -169,11 +177,6 @@ class LTX2TrainingPipeline(TrainingPipeline):
                 "audio_vae": self.get_module("audio_vae"),
                 "vocoder": self.get_module("vocoder"),
             },
-            tp_size=training_args.tp_size,
-            sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus,
-            pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=training_args.dit_cpu_offload,
         )
         self.validation_pipeline = validation_pipeline
 
@@ -228,14 +231,14 @@ class LTX2TrainingPipeline(TrainingPipeline):
 
         # Parquet text-only data has no latents; create zeros.
         batch_size = video_embeds.shape[0]
-        vae_cfg = (self.training_args.pipeline_config.vae_config.arch_config)
+        vae_cfg = (self.resolved_config.pipeline_config.vae_config.arch_config)
         num_channels = vae_cfg.z_dim
         scr = vae_cfg.spatial_compression_ratio
-        latent_h = self.training_args.num_height // scr
-        latent_w = self.training_args.num_width // scr
+        latent_h = self.resolved_config.training.data.num_height // scr
+        latent_w = self.resolved_config.training.data.num_width // scr
         latents = torch.zeros(batch_size,
                               num_channels,
-                              self.training_args.num_latent_t,
+                              self.resolved_config.training.data.num_latent_t,
                               latent_h,
                               latent_w,
                               device=device,
@@ -255,7 +258,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
     ) -> TrainingBatch:
         """Extract training data from a precomputed .pt batch."""
         latents = batch["latents"]["latents"].to(get_local_torch_device(), dtype=torch.bfloat16)
-        latents = latents[:, :, :self.training_args.num_latent_t]
+        latents = latents[:, :, :self.resolved_config.training.data.num_latent_t]
         conditions = batch["conditions"]
         if ("video_prompt_embeds" in conditions and "audio_prompt_embeds" in conditions
                 and "prompt_attention_mask" in conditions):
@@ -323,7 +326,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
         noisy_model_input = (1.0 - sigmas_expanded) * latents + sigmas_expanded * noise
 
         conditioning_mask = None
-        first_frame_p = self.training_args.ltx2_first_frame_conditioning_p
+        first_frame_p = self.resolved_config.training.model.ltx2_first_frame_conditioning_p
         if (first_frame_p > 0 and torch.rand(
                 1,
                 generator=self.noise_random_generator,
@@ -447,7 +450,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
             else:
                 logger.warning("Audio denoised is None")
 
-            loss = loss / self.training_args.gradient_accumulation_steps
+            loss = loss / self.resolved_config.training.loop.gradient_accumulation_steps
             with torch.autograd.set_detect_anomaly(True):
                 loss.backward()
             avg_loss = loss.detach().clone()
@@ -460,7 +463,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
         return training_batch
 
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
-        max_grad_norm = self.training_args.max_grad_norm
+        max_grad_norm = self.resolved_config.training.optimizer.max_grad_norm
         if max_grad_norm is not None:
             with self.tracker.timed("timing/clip_grad_norm"):
                 grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
@@ -475,22 +478,12 @@ class LTX2TrainingPipeline(TrainingPipeline):
         return training_batch
 
 
-def main(args) -> None:
+def main(resolved_config: ResolvedGeneratorConfig) -> None:
     logger.info("Starting LTX-2 training pipeline...")
-    pipeline = LTX2TrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
+    pipeline = LTX2TrainingPipeline.from_pretrained(resolved_config.model_path, resolved_config=resolved_config)
     pipeline.train()
     logger.info("Training pipeline done")
 
 
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    args.dit_cpu_offload = False
-    main(args)
+    main(load_resolved_run_config(TrainingRunConfig, mode=ExecutionMode.FINETUNING))

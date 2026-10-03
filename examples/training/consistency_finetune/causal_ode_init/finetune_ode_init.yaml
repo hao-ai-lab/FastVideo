@@ -1,0 +1,43 @@
+# Read by finetune_ode_init.sh, which passes model_path, engine.num_gpus, engine.parallelism.hsdp_shard_dim, and
+# training.data.data_path on the command line.
+engine:
+  parallelism:
+    tp_size: 1
+    sp_size: 1
+    hsdp_replicate_dim: 1
+  precision:
+    dit: fp32
+training:
+  data:
+    dataloader_num_workers: 1
+    num_height: 480
+    num_width: 832
+    num_frames: 77
+    train_batch_size: 1
+    num_latent_t: 21
+    training_cfg_rate: 0.1
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 1.0e-05
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 6000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: wan_ode_init_crush_smol
+    training_state_checkpointing_steps: 1000
+    weight_only_checkpointing_steps: 1000
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: wan_ode_init
+    run_name: wan_ode_init_crush_smol
+  validation:
+    log_visualization: true
+    visualization_steps: 100
+  distillation:
+    warp_denoising_step: true
+  ema:
+    start_step: 0
+  model:
+    enable_gradient_checkpointing_type: full

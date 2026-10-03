@@ -1,0 +1,50 @@
+# Read by distill_dmd_qat.sh, which passes model_path, engine.num_gpus, engine.parallelism.hsdp_replicate_dim,
+# training.distillation.real_score_model_path, training.distillation.fake_score_model_path,
+# pipeline.components.transformer_weights, training.data.data_path, and training.validation.dataset_file on the command
+# line.
+engine:
+  parallelism:
+    tp_size: 1
+    sp_size: 1
+    hsdp_shard_dim: 1
+  precision:
+    dit: fp32
+pipeline:
+  dmd_denoising_steps: [1000, 757, 522]
+training:
+  data:
+    dataloader_num_workers: 4
+    num_height: 480
+    num_width: 832
+    num_frames: 77
+    train_batch_size: 1
+    num_latent_t: 20
+    training_cfg_rate: 0.0
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 2.0e-06
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 2000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: checkpoints/wan_t2v_distill_dmd_qat
+    training_state_checkpointing_steps: 500
+    weight_only_checkpointing_steps: 500
+  tracker:
+    project_name: wan_t2v_distill_dmd_qat
+  validation:
+    enabled: true
+    sampling_steps: [3]
+    guidance_scale: 6.0
+    every_steps: 200
+  distillation:
+    generator_update_interval: 5
+    min_timestep_ratio: 0.02
+    max_timestep_ratio: 0.98
+    real_score_guidance_scale: 2.0
+  ema:
+    start_step: 0
+  model:
+    enable_gradient_checkpointing_type: full

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from fastvideo.api.training_schema import resolve_training_config
 from fastvideo.training import wan_i2v_distillation_pipeline
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.training.wan_i2v_distillation_pipeline import (
@@ -15,11 +16,23 @@ from fastvideo.training.wan_i2v_distillation_pipeline import (
 
 def test_i2v_prepare_inputs_does_not_pre_shard_conditioning(monkeypatch: pytest.MonkeyPatch) -> None:
     pipeline = WanI2VDistillationPipeline.__new__(WanI2VDistillationPipeline)
-    arch_config = SimpleNamespace(temporal_compression_ratio=4)
-    pipeline.training_args = SimpleNamespace(
-        num_latent_t=4,
-        pipeline_config=SimpleNamespace(vae_config=SimpleNamespace(arch_config=arch_config)),
-    )
+    pipeline.resolved_config = resolve_training_config({
+        "model_path": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+        "mode": "distillation",
+        "engine": {
+            "parallelism": {
+                "sp_size": 1,
+                "hsdp_shard_dim": 1,
+                "hsdp_replicate_dim": 1
+            }
+        },
+        "training": {
+            "data": {
+                "num_latent_t": 4
+            }
+        },
+    })
+    assert pipeline.resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio == 4
     pipeline.sp_world_size = 8
     pipeline.rank_in_sp_group = 0
     batch = SimpleNamespace(image_latents=torch.zeros(1, 16, 4, 2, 3))

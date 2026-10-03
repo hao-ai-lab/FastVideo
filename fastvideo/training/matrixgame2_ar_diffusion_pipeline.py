@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import sys
-from copy import deepcopy
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.nn.functional as F
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.schema import ExecutionMode
+from fastvideo.api.training_schema import TrainingRunConfig, load_resolved_run_config
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame2
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
@@ -18,7 +18,7 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
 from fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline import (
     MatrixGame2CausalDMDPipeline, )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
-from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.training.training_pipeline import TrainingPipeline, resolve_validation_config
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases, )
 from fastvideo.utils import shallow_asdict
@@ -30,9 +30,9 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
 
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         scheduler = SelfForcingFlowMatchScheduler(
-            shift=resolved_config.pipeline_config.flow_shift,
+            shift=resolved_config.pipeline.flow_shift,
             sigma_min=0.0,
             extra_one_step=True,
         )
@@ -47,19 +47,19 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         self.train_dataset_schema = pyarrow_schema_matrixgame2
 
     def _get_temporal_compression_ratio(self) -> int:
-        assert self.training_args is not None
-        return int(self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+        assert self.resolved_config is not None
+        return int(self.resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
 
-    def _resolve_num_frame_per_block(self, training_args: TrainingArgs) -> int:
+    def _resolve_num_frame_per_block(self, resolved_config: ResolvedGeneratorConfig) -> int:
         transformer_num_frame_per_block = getattr(self.transformer, "num_frame_per_block", None)
-        requested_num_frame_per_block = getattr(training_args, "num_frame_per_block", None)
+        requested_num_frame_per_block = resolved_config.training.self_forcing.num_frame_per_block
 
         if (transformer_num_frame_per_block is not None and requested_num_frame_per_block is not None
                 and transformer_num_frame_per_block != requested_num_frame_per_block):
             raise ValueError("num_frame_per_block mismatch between loaded transformer and "
-                             "training args: "
+                             "training config: "
                              f"transformer={transformer_num_frame_per_block}, "
-                             f"training_args={requested_num_frame_per_block}")
+                             f"training.self_forcing.num_frame_per_block={requested_num_frame_per_block}")
 
         if transformer_num_frame_per_block is not None:
             return int(transformer_num_frame_per_block)
@@ -67,45 +67,42 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             return int(requested_num_frame_per_block)
         return 3
 
-    def initialize_training_pipeline(self, training_args: TrainingArgs):
-        super().initialize_training_pipeline(training_args)
+    def initialize_training_pipeline(self, resolved_config: ResolvedGeneratorConfig):
+        super().initialize_training_pipeline(resolved_config)
 
         self.vae = self.get_module("vae")
         self.vae.requires_grad_(False)
 
-        self.num_frame_per_block = self._resolve_num_frame_per_block(training_args)
+        self.num_frame_per_block = self._resolve_num_frame_per_block(resolved_config)
 
         logger.info(
             "Matrix-Game 2.0 AR diffusion pipeline initialized with "
             "num_frame_per_block=%d, diffusion_forcing_shift=%.1f",
             self.num_frame_per_block,
-            training_args.pipeline_config.flow_shift,
+            resolved_config.pipeline.flow_shift,
         )
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         logger.info("Initializing Matrix-Game 2.0 AR validation pipeline...")
-        args_copy = deepcopy(training_args)
-        args_copy.inference_mode = True
 
         validation_scheduler = SelfForcingFlowMatchScheduler(
-            shift=args_copy.pipeline_config.flow_shift,
+            shift=self.resolved_config.pipeline.flow_shift,
             sigma_min=0.0,
             extra_one_step=True,
         )
         validation_scheduler.set_timesteps(num_inference_steps=1000, training=False)
 
-        num_val_steps = int(training_args.validation_sampling_steps.split(",")[0])
+        num_val_steps = self.resolved_config.training.validation.sampling_steps[0]
         step_size = 1000 // num_val_steps
-        args_copy.pipeline_config.dmd_denoising_steps = list(range(1000, 0, -step_size))
-        args_copy.pipeline_config.warp_denoising_step = True
-        training_args.pipeline_config.dmd_denoising_steps = (args_copy.pipeline_config.dmd_denoising_steps)
-        training_args.pipeline_config.warp_denoising_step = True
+        # The validation denoising stage runs these timesteps and warps them with the scheduler shift, because the
+        # Matrix-Game 2.0 model definition sets warp_denoising_step.
+        dmd_denoising_steps = list(range(1000, 0, -step_size))
 
         logger.info(
             "Validation: %d-step Matrix-Game 2.0 causal denoising, "
             "dmd_denoising_steps has %d entries",
             num_val_steps,
-            len(args_copy.pipeline_config.dmd_denoising_steps),
+            len(dmd_denoising_steps),
         )
 
         loaded_modules = {
@@ -120,16 +117,20 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         if image_processor is not None:
             loaded_modules["image_processor"] = image_processor
 
+        # The VAE is the training pipeline's own, so the validation stages move it as the training run does.
+        validation_config = resolve_validation_config(
+            self.resolved_config,
+            offload={
+                "pin_cpu_memory": self.resolved_config.engine.offload.pin_cpu_memory,
+                "dit": True,
+                "vae": self.resolved_config.engine.offload.vae,
+            },
+            pipeline={"dmd_denoising_steps": dmd_denoising_steps},
+        )
         self.validation_pipeline = MatrixGame2CausalDMDPipeline.from_pretrained(
-            training_args.model_path,
-            args=args_copy,
-            inference_mode=True,
+            self.resolved_config.model_path,
+            resolved_config=validation_config,
             loaded_modules=loaded_modules,
-            tp_size=training_args.tp_size,
-            sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus,
-            pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True,
         )
 
     def _get_timestep(
@@ -168,10 +169,10 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             batch = next(self.train_loader_iter)
 
         latents = batch["vae_latent"]
-        latents = latents[:, :, :self.training_args.num_latent_t]
+        latents = latents[:, :, :self.resolved_config.training.data.num_latent_t]
         clip_features = batch["clip_feature"]
         image_latents = batch["first_frame_latent"]
-        image_latents = image_latents[:, :, :self.training_args.num_latent_t]
+        image_latents = image_latents[:, :, :self.resolved_config.training.data.num_latent_t]
         pil_image = batch["pil_image"]
         infos = batch["info_list"]
 
@@ -194,7 +195,7 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             training_batch.keyboard_cond = None
 
         temporal_compression_ratio = self._get_temporal_compression_ratio()
-        expected_num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
+        expected_num_frames = (self.resolved_config.training.data.num_latent_t - 1) * temporal_compression_ratio + 1
         if training_batch.keyboard_cond is not None:
             assert training_batch.keyboard_cond.shape[1] >= expected_num_frames, (
                 f"keyboard_cond has {training_batch.keyboard_cond.shape[1]} "
@@ -210,7 +211,7 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
 
     def _prepare_dit_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Prepare diffusion-forcing inputs and Matrix-Game 2.0 I2V concat."""
-        assert self.training_args is not None
+        assert self.resolved_config is not None
         latents = training_batch.latents
         assert latents is not None
         batch_size = latents.shape[0]
@@ -231,7 +232,8 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             device=latents_btchw.device,
             dtype=latents_btchw.dtype,
         )
-        if (self.training_args.sp_size > 1 and self.sp_group is not None and hasattr(self.sp_group, "broadcast")):
+        if (self.resolved_config.engine.parallelism.sp_size > 1 and self.sp_group is not None
+                and hasattr(self.sp_group, "broadcast")):
             self.sp_group.broadcast(timesteps, src=0)
             self.sp_group.broadcast(noise, src=0)
 
@@ -334,7 +336,7 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             weight = self.noise_scheduler.training_weight(timesteps.flatten(0, 1)).to(per_frame_loss.dtype).reshape(
                 per_frame_loss.shape)
             loss = (per_frame_loss * weight).mean()
-            loss = loss / self.training_args.gradient_accumulation_steps
+            loss = loss / self.resolved_config.training.loop.gradient_accumulation_steps
             loss.backward()
 
         avg_loss = loss.detach().clone()
@@ -346,9 +348,9 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         self.transformer.train()
         self.optimizer.zero_grad()
         training_batch.total_loss = 0.0
-        args = cast(TrainingArgs, self.training_args)
+        max_grad_norm = self.resolved_config.training.optimizer.max_grad_norm
 
-        for _ in range(args.gradient_accumulation_steps):
+        for _ in range(self.resolved_config.training.loop.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
             training_batch = self._normalize_dit_input(training_batch)
             training_batch = self._prepare_dit_inputs(training_batch)
@@ -357,7 +359,7 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
 
         grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
             [p for p in self.transformer.parameters() if p.requires_grad],
-            args.max_grad_norm if args.max_grad_norm is not None else 0.0,
+            max_grad_norm if max_grad_norm is not None else 0.0,
         )
 
         self.optimizer.step()
@@ -381,13 +383,13 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
     def _prepare_validation_batch(
         self,
         sampling_param: SamplingParam,
-        training_args: TrainingArgs,
+        resolved_config: ResolvedGeneratorConfig,
         validation_batch: dict[str, Any],
         num_inference_steps: int,
     ) -> ForwardBatch:
         sampling_param.prompt = validation_batch["prompt"]
-        sampling_param.height = training_args.num_height
-        sampling_param.width = training_args.num_width
+        sampling_param.height = resolved_config.training.data.num_height
+        sampling_param.width = resolved_config.training.data.num_width
         sampling_param.image_path = validation_batch.get("image_path") or validation_batch.get("video_path")
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
@@ -400,15 +402,16 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
             sampling_param.width // 8,
         ]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        temporal_compression_factor = (training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
-        num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        temporal_compression_factor = (
+            resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+        num_frames = (resolved_config.training.data.num_latent_t - 1) * temporal_compression_factor + 1
         sampling_param.num_frames = num_frames
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
             n_tokens=n_tokens,
             eta=0.0,
-            VSA_sparsity=training_args.VSA_sparsity,
+            VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,
         )
         if "image" in validation_batch and validation_batch["image"] is not None:
             batch.pil_image = validation_batch["image"]
@@ -428,23 +431,14 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
         return batch
 
 
-def main(args) -> None:
+def main(resolved_config: ResolvedGeneratorConfig) -> None:
     logger.info("Starting Matrix-Game 2.0 AR diffusion training pipeline...")
 
-    pipeline = MatrixGame2ARDiffusionPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
+    pipeline = MatrixGame2ARDiffusionPipeline.from_pretrained(resolved_config.model_path,
+                                                              resolved_config=resolved_config)
     pipeline.train()
     logger.info("Matrix-Game 2.0 AR diffusion training pipeline done")
 
 
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    args.dit_cpu_offload = False
-    main(args)
+    main(load_resolved_run_config(TrainingRunConfig, mode=ExecutionMode.FINETUNING))

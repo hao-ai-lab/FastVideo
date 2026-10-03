@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
-from copy import deepcopy
-
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
+from fastvideo.api.schema import ExecutionMode
+from fastvideo.api.training_schema import TrainingRunConfig, load_resolved_run_config
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (WanCausalDMDPipeline)
 from fastvideo.training.self_forcing_distillation_pipeline import (SelfForcingDistillationPipeline)
+from fastvideo.training.training_pipeline import resolve_validation_config
 from fastvideo.utils import is_vsa_available
 
 try:
@@ -27,50 +27,40 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
         "vae",
     ]
 
-    def create_training_stages(self, training_args: TrainingArgs):
+    def create_training_stages(self, resolved_config: ResolvedGeneratorConfig):
         """
         May be used in future refactors.
         """
         pass
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         logger.info("Initializing validation pipeline...")
-        args_copy = deepcopy(training_args)
-
-        args_copy.inference_mode = True
-        validation_pipeline = WanCausalDMDPipeline.from_pretrained(
-            training_args.model_path,
-            args=args_copy,  # type: ignore
-            inference_mode=True,
-            loaded_modules={
-                "transformer": self.get_module("transformer"),
-                "transformer_2": self.get_module("transformer_2")
+        validation_config = resolve_validation_config(
+            self.resolved_config,
+            offload={
+                "pin_cpu_memory": self.resolved_config.engine.offload.pin_cpu_memory,
+                "dit": True
             },
-            tp_size=training_args.tp_size,
-            sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus,
-            pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True)
+        )
+        validation_pipeline = WanCausalDMDPipeline.from_pretrained(self.resolved_config.model_path,
+                                                                   resolved_config=validation_config,
+                                                                   loaded_modules={
+                                                                       "transformer": self.get_module("transformer"),
+                                                                       "transformer_2": self.get_module("transformer_2")
+                                                                   })
 
         self.validation_pipeline = validation_pipeline
 
 
-def main(args) -> None:
+def main(resolved_config: ResolvedGeneratorConfig) -> None:
     logger.info("Starting Wan self-forcing distillation pipeline...")
 
-    pipeline = WanSelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
+    pipeline = WanSelfForcingDistillationPipeline.from_pretrained(resolved_config.model_path,
+                                                                  resolved_config=resolved_config)
 
-    args = pipeline.training_args
     pipeline.train()
     logger.info("Wan self-forcing distillation pipeline completed")
 
 
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    main(args)
+    main(load_resolved_run_config(TrainingRunConfig, mode=ExecutionMode.DISTILLATION))

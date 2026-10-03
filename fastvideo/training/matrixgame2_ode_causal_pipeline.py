@@ -1,23 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
-from copy import deepcopy
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.schema import ExecutionMode
+from fastvideo.api.training_schema import TrainingRunConfig, load_resolved_run_config
 from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame2_ode_trajectory)
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
 from fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline import (MatrixGame2CausalDMDPipeline)
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
-from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.training.training_pipeline import TrainingPipeline, resolve_validation_config
 from fastvideo.training.training_utils import (clip_grad_norm_while_handling_failing_dtensor_cases)
 from fastvideo.utils import shallow_asdict
 
@@ -36,9 +36,9 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
 
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         # Match the preprocess/generation scheduler for consistent stepping
-        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(shift=resolved_config.pipeline_config.flow_shift,
+        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(shift=resolved_config.pipeline.flow_shift,
                                                                   sigma_min=0.0,
                                                                   extra_one_step=True)
         self.modules["scheduler"].set_timesteps(num_inference_steps=1000, training=True)
@@ -46,14 +46,14 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_matrixgame2_ode_trajectory
 
-    def initialize_training_pipeline(self, training_args: TrainingArgs):
-        super().initialize_training_pipeline(training_args)
+    def initialize_training_pipeline(self, resolved_config: ResolvedGeneratorConfig):
+        super().initialize_training_pipeline(resolved_config)
 
         self.noise_scheduler = self.get_module("scheduler")
         self.vae = self.get_module("vae")
         self.vae.requires_grad_(False)
 
-        self.timestep_shift = self.training_args.pipeline_config.flow_shift
+        self.timestep_shift = self.resolved_config.pipeline.flow_shift
         self.noise_scheduler = SelfForcingFlowMatchScheduler(shift=self.timestep_shift,
                                                              sigma_min=0.0,
                                                              extra_one_step=True)
@@ -61,11 +61,12 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
-        logger.info("dmd_denoising_steps: %s", self.training_args.pipeline_config.dmd_denoising_steps)
+        logger.info("dmd_denoising_steps: %s", self.resolved_config.pipeline.dmd_denoising_steps)
         self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250, 0],
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
-        if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
+        # Warp the denoising step according to the scheduler time shift
+        if resolved_config.training.distillation.warp_denoising_step:
             timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32))).cuda()
             logger.info("timesteps: %s", timesteps)
             self.dmd_denoising_steps = timesteps[1000 - self.dmd_denoising_steps]
@@ -83,30 +84,33 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
         self.num_train_timestep = self.noise_scheduler.num_train_timesteps
         self.manual_idx = 0
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         logger.info("Initializing validation pipeline...")
-        args_copy = deepcopy(training_args)
-        args_copy.inference_mode = True
         # Use the same flow-matching scheduler as training for consistent validation.
-        validation_scheduler = SelfForcingFlowMatchScheduler(shift=args_copy.pipeline_config.flow_shift,
+        validation_scheduler = SelfForcingFlowMatchScheduler(shift=self.resolved_config.pipeline.flow_shift,
                                                              sigma_min=0.0,
                                                              extra_one_step=True)
         validation_scheduler.set_timesteps(num_inference_steps=1000, training=True)
-        # Warm start validation with current transformer
-        self.validation_pipeline = MatrixGame2CausalDMDPipeline.from_pretrained(
-            training_args.model_path,
-            args=args_copy,  # type: ignore
-            inference_mode=True,
-            loaded_modules={
-                "transformer": self.get_module("transformer"),
-                "vae": self.get_module("vae"),
-                "scheduler": validation_scheduler,
+        # The VAE is the training pipeline's own, so the validation stages move it as the training run does.
+        validation_config = resolve_validation_config(
+            self.resolved_config,
+            offload={
+                "pin_cpu_memory": self.resolved_config.engine.offload.pin_cpu_memory,
+                "dit": True,
+                "vae": self.resolved_config.engine.offload.vae,
             },
-            tp_size=training_args.tp_size,
-            sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus,
-            pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True)
+        )
+        # Warm start validation with current transformer
+        self.validation_pipeline = MatrixGame2CausalDMDPipeline.from_pretrained(self.resolved_config.model_path,
+                                                                                resolved_config=validation_config,
+                                                                                loaded_modules={
+                                                                                    "transformer":
+                                                                                    self.get_module("transformer"),
+                                                                                    "vae":
+                                                                                    self.get_module("vae"),
+                                                                                    "scheduler":
+                                                                                    validation_scheduler,
+                                                                                })
 
     def _get_next_batch(self, training_batch) -> tuple[TrainingBatch, torch.Tensor, torch.Tensor]:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -160,7 +164,7 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
             training_batch.mouse_cond = None
         training_batch.infos = infos
 
-        return training_batch, trajectory_latents[:, :, :self.training_args.num_latent_t].to(
+        return training_batch, trajectory_latents[:, :, :self.resolved_config.training.data.num_latent_t].to(
             device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
 
     def _get_timestep(self,
@@ -276,11 +280,12 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
         self.transformer.train()
         self.optimizer.zero_grad()
         training_batch.total_loss = 0.0
-        args = cast(TrainingArgs, self.training_args)
+        gradient_accumulation_steps = self.resolved_config.training.loop.gradient_accumulation_steps
+        max_grad_norm = self.resolved_config.training.optimizer.max_grad_norm
 
         # Using cached nearest index per DMD step; computation happens in _step_predict_next_latent
 
-        for _ in range(args.gradient_accumulation_steps):
+        for _ in range(gradient_accumulation_steps):
             training_batch, traj_latents, traj_timesteps = self._get_next_batch(training_batch)
             image_embeds = training_batch.image_embeds
             image_latents = training_batch.image_latents
@@ -303,7 +308,7 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
 
             # Compute loss
             loss = F.mse_loss(noise_pred[mask], target_latent[mask], reduction="mean")
-            loss = loss / args.gradient_accumulation_steps
+            loss = loss / gradient_accumulation_steps
 
             with set_forward_context(current_timestep=t, attn_metadata=None, forward_batch=None):
                 loss.backward()
@@ -313,7 +318,7 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
         # Clip grad and step optimizers
         grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
             [p for p in self.transformer.parameters() if p.requires_grad],
-            args.max_grad_norm if args.max_grad_norm is not None else 0.0)
+            max_grad_norm if max_grad_norm is not None else 0.0)
 
         self.optimizer.step()
         self.lr_scheduler.step()
@@ -333,11 +338,11 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
         training_batch.raw_latent_shape = (B, C, T, H, W)
         return training_batch
 
-    def _prepare_validation_batch(self, sampling_param: SamplingParam, training_args: TrainingArgs,
+    def _prepare_validation_batch(self, sampling_param: SamplingParam, resolved_config: ResolvedGeneratorConfig,
                                   validation_batch: dict[str, Any], num_inference_steps: int) -> ForwardBatch:
         sampling_param.prompt = validation_batch['prompt']
-        sampling_param.height = training_args.num_height
-        sampling_param.width = training_args.num_width
+        sampling_param.height = resolved_config.training.data.num_height
+        sampling_param.width = resolved_config.training.data.num_width
         sampling_param.image_path = validation_batch.get('image_path') or validation_batch.get('video_path')
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
@@ -346,15 +351,15 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
 
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        temporal_compression_factor = resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (resolved_config.training.data.num_latent_t - 1) * temporal_compression_factor + 1
         sampling_param.num_frames = num_frames
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
             n_tokens=n_tokens,
             eta=0.0,
-            VSA_sparsity=training_args.VSA_sparsity,
+            VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,
         )
         if "image" in validation_batch and validation_batch["image"] is not None:
             batch.pil_image = validation_batch["image"]
@@ -373,14 +378,15 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
 
         return batch
 
-    def visualize_intermediate_latents(self, training_batch: TrainingBatch, training_args: TrainingArgs, step: int):
+    def visualize_intermediate_latents(self, training_batch: TrainingBatch, resolved_config: ResolvedGeneratorConfig,
+                                       step: int):
         tracker_loss_dict: dict[str, Any] = {}
         latents_vis_dict = training_batch.latent_vis_dict
         latent_log_keys = ['noisy_input', 'x0', 'pred_video']
         for latent_key in latent_log_keys:
             assert latent_key in latents_vis_dict and latents_vis_dict[latent_key] is not None
             latent = latents_vis_dict[latent_key]
-            pixel_latent = self.decoding_stage.decode(latent, training_args)
+            pixel_latent = self.decoding_stage.decode(latent, resolved_config)
 
             video = pixel_latent.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)
@@ -395,21 +401,13 @@ class MatrixGame2ODEInitTrainingPipeline(TrainingPipeline):
             self.tracker.log_artifacts(tracker_loss_dict, step)
 
 
-def main(args) -> None:
+def main(resolved_config: ResolvedGeneratorConfig) -> None:
     logger.info("Starting ODE-init training pipeline...")
-    pipeline = MatrixGame2ODEInitTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
+    pipeline = MatrixGame2ODEInitTrainingPipeline.from_pretrained(resolved_config.model_path,
+                                                                  resolved_config=resolved_config)
     pipeline.train()
     logger.info("ODE-init training pipeline done")
 
 
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    args.dit_cpu_offload = False
-    main(args)
+    main(load_resolved_run_config(TrainingRunConfig, mode=ExecutionMode.FINETUNING))

@@ -1,0 +1,42 @@
+# Read by finetune_v1.sh, which passes training.data.data_path, training.validation.dataset_file, engine.num_gpus, and
+# training.checkpoint.output_dir on the command line.
+model_path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+engine:
+  parallelism:
+    tp_size: 1
+    sp_size: 4
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+  precision:
+    dit: fp32
+training:
+  data:
+    dataloader_num_workers: 10
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+    train_batch_size: 4
+    num_latent_t: 20
+    training_cfg_rate: 0.0
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 1.0e-06
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 5000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    training_state_checkpointing_steps: 6000
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: wan_finetune
+  validation:
+    enabled: true
+    sampling_steps: [2, 4, 8]
+    guidance_scale: 6.0
+    every_steps: 200
+  ema:
+    start_step: 0
+  model:
+    enable_gradient_checkpointing_type: full

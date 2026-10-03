@@ -1,0 +1,68 @@
+# Read by distill_dmd_t2v_1.3B.sh, which passes model_path, engine.num_gpus, engine.parallelism.hsdp_shard_dim,
+# training.distillation.real_score_model_path, training.distillation.fake_score_model_path, training.data.data_path, and
+# training.validation.dataset_file on the command line.
+engine:
+  parallelism:
+    tp_size: 1
+    sp_size: 1
+    hsdp_replicate_dim: 1  # 64
+  precision:
+    dit: fp32
+pipeline:
+  components:
+    transformer_weights: your_ode_init_weights_path
+  flow_shift: 5.0
+  dmd_denoising_steps: [1000, 750, 500, 250]
+training:
+  data:
+    dataloader_num_workers: 4
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+    train_batch_size: 1
+    num_latent_t: 21
+    training_cfg_rate: 0.0
+    seed: 1000
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 1.0e-05
+    betas: [0.0, 0.999]
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: your_output_dir
+    training_state_checkpointing_steps: 500
+    weight_only_checkpointing_steps: 500
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: SFwan_t2v_distill_self_forcing_dmd
+  validation:
+    enabled: true
+    sampling_steps: [4]
+    guidance_scale: 6.0  # not used for dmd inference
+    every_steps: 50
+    log_visualization: true
+  distillation:
+    min_timestep_ratio: 0.02
+    max_timestep_ratio: 0.98
+    real_score_guidance_scale: 3.0
+    fake_score_learning_rate: 8.0e-06
+    fake_score_betas: [0.0, 0.999]
+    simulate_generator_forward: true
+    warp_denoising_step: true
+  ema:
+    enabled: true
+    decay: 0.99
+    start_step: 100
+  self_forcing:
+    dfake_gen_update_ratio: 5
+    num_frame_per_block: 3  # Frame generation block size for self-forcing
+    independent_first_frame: false  # Whether to treat first frame independently
+    same_step_across_blocks: true  # Whether to use same denoising step across all blocks
+    last_step_only: false  # Whether to only use the last denoising step
+    context_noise: 0  # Amount of noise to add during context caching (0 = no noise)
+  model:
+    enable_gradient_checkpointing_type: full

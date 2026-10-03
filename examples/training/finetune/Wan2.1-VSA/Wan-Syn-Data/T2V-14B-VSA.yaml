@@ -1,0 +1,52 @@
+# Read by T2V-14B-VSA.slurm, which passes model_path, training.data.data_path, and training.validation.dataset_file on
+# the command line.
+engine:
+  num_gpus: 64
+  parallelism:
+    tp_size: 1
+    sp_size: 1
+    hsdp_replicate_dim: 8
+    hsdp_shard_dim: 8
+  attention:
+    vsa_sparsity: 0.9
+  precision:
+    dit: fp32
+pipeline:
+  flow_shift: 5.0
+training:
+  data:
+    dataloader_num_workers: 4
+    num_height: 720
+    num_width: 1280
+    num_frames: 81
+    train_batch_size: 1
+    num_latent_t: 21
+    training_cfg_rate: 0.1
+    seed: 1000
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 1.0e-06
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: checkpoints/wan_t2v_finetune_VSA
+    training_state_checkpointing_steps: 1000
+    weight_only_checkpointing_steps: 1000
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: wan_t2v_VSA
+  validation:
+    enabled: true
+    sampling_steps: [50]
+    guidance_scale: 5.0
+    every_steps: 200
+  ema:
+    start_step: 0
+  vsa:
+    decay_rate: 0.03
+    decay_interval_steps: 30
+  model:
+    enable_gradient_checkpointing_type: full

@@ -44,83 +44,6 @@ VALIDATION_DATASET_FILE=your_validation_dataset_file
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
-# Core training arguments
-core_training_args=(
-  --tracker_project_name wan_t2v_VSA
-  --output_dir "checkpoints/wan_t2v_finetune_VSA"
-  --max_train_steps 4000
-  --train_batch_size 1
-  --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
-  --num_latent_t 21
-  # --enable_gradient_checkpointing_type "full" # if OOM enable this
-)
-
-# Validation generation shape arguments (used during training validation)
-validation_generation_shape_args=(
-  --num_height 480
-  --num_width 832
-  --num_frames 81
-)
-
-# Parallel arguments
-parallel_args=(
-  --num_gpus 64
-  --sp_size 1
-  --tp_size 1
-  --hsdp_replicate_dim 64
-  --hsdp_shard_dim 1
-)
-
-# Model arguments
-model_args=(
-  --model_path $MODEL_PATH
-  --pretrained_model_name_or_path $MODEL_PATH
-)
-
-# Dataset arguments
-dataset_args=(
-  --data_path "$DATA_DIR"
-  --dataloader_num_workers 4
-)
-
-# Validation arguments
-validation_args=(
-  --log_validation
-  --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 200
-  --validation_sampling_steps "50"
-  --validation_guidance_scale "5.0"
-)
-
-# Optimizer arguments
-optimizer_args=(
-  --learning_rate 1e-6
-  --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
-  --weight_decay 0.01
-  --max_grad_norm 1.0
-)
-
-# Miscellaneous arguments
-miscellaneous_args=(
-  --inference_mode False
-  --checkpoints_total_limit 3
-  --training_cfg_rate 0.1
-  --dit_precision "fp32"
-  --ema_start_step 0
-  --flow_shift 1
-  --seed 1000
-)
-
-# VSA arguments
-vsa_args=(
-  --VSA_decay_rate 0.03 \
-  --VSA_decay_interval_steps 50 \
-  --VSA_sparsity 0.9 \
-)
-
 srun torchrun \
 --nnodes $SLURM_JOB_NUM_NODES \
 --nproc_per_node $NUM_GPUS \
@@ -128,12 +51,7 @@ srun torchrun \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
     fastvideo/training/wan_training_pipeline.py \
-    "${parallel_args[@]}" \
-    "${model_args[@]}" \
-    "${dataset_args[@]}" \
-    "${core_training_args[@]}" \
-    "${validation_generation_shape_args[@]}" \
-    "${optimizer_args[@]}" \
-    "${validation_args[@]}" \
-    "${miscellaneous_args[@]}" \
-    "${vsa_args[@]}"  
+    --config examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/T2V-1.3B-VSA.yaml \
+    --model_path "$MODEL_PATH" \
+    --training.data.data_path "$DATA_DIR" \
+    --training.validation.dataset_file "$VALIDATION_DATASET_FILE"

@@ -7,7 +7,7 @@ import time
 from abc import abstractmethod
 from collections import deque
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any
 
 import imageio
 import numpy as np
@@ -20,10 +20,10 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import (cleanup_dist_env_and_memory, get_local_torch_device, get_sp_group, get_world_group)
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
@@ -87,23 +87,29 @@ class DistillationPipeline(TrainingPipeline):
             setattr(cloned_batch, key, self._clone_batch_value(value))
         return cloned_batch
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         raise RuntimeError("create_pipeline_stages should not be called for training pipeline")
 
-    def load_modules(self, resolved_config: FastVideoArgs, loaded_modules: dict[str, torch.nn.Module] | None = None):
+    def load_modules(self,
+                     resolved_config: ResolvedGeneratorConfig,
+                     loaded_modules: dict[str, torch.nn.Module] | None = None):
         modules = super().load_modules(resolved_config, loaded_modules)
-        training_args = cast(TrainingArgs, resolved_config)
+        distillation = resolved_config.training.distillation
+        # The teacher (real score) and the critic (fake score) load as the base Wan transformer, whatever class the
+        # student uses.
+        teacher_critic_config = resolved_config.with_override(
+            "DistillationPipeline.load_modules",
+            {"pipeline.components.override_transformer_cls_name": "WanTransformer3DModel"})
 
-        if training_args.real_score_model_path:
-            logger.info("Loading real score transformer from: %s", training_args.real_score_model_path)
-            training_args.override_transformer_cls_name = "WanTransformer3DModel"
+        if distillation.real_score_model_path:
+            logger.info("Loading real score transformer from: %s", distillation.real_score_model_path)
             # TODO(will): can use deepcopy instead if the model is the same
-            self.real_score_transformer = self.load_module_from_path(training_args.real_score_model_path, "transformer",
-                                                                     training_args)
+            self.real_score_transformer = self.load_module_from_path(distillation.real_score_model_path, "transformer",
+                                                                     teacher_critic_config)
             modules["real_score_transformer"] = self.real_score_transformer
             try:
-                self.real_score_transformer_2 = self.load_module_from_path(training_args.real_score_model_path,
-                                                                           "transformer_2", training_args)
+                self.real_score_transformer_2 = self.load_module_from_path(distillation.real_score_model_path,
+                                                                           "transformer_2", teacher_critic_config)
                 logger.info("Loaded real score transformer_2 for MoE support")
                 modules["real_score_transformer_2"] = self.real_score_transformer_2
             except Exception:
@@ -112,15 +118,14 @@ class DistillationPipeline(TrainingPipeline):
         else:
             raise ValueError("real_score_model_path is required for DMD distillation pipeline")
 
-        if training_args.fake_score_model_path:
-            logger.info("Loading fake score transformer from: %s", training_args.fake_score_model_path)
-            training_args.override_transformer_cls_name = "WanTransformer3DModel"
-            self.fake_score_transformer = self.load_module_from_path(training_args.fake_score_model_path, "transformer",
-                                                                     training_args)
+        if distillation.fake_score_model_path:
+            logger.info("Loading fake score transformer from: %s", distillation.fake_score_model_path)
+            self.fake_score_transformer = self.load_module_from_path(distillation.fake_score_model_path, "transformer",
+                                                                     teacher_critic_config)
             modules["fake_score_transformer"] = self.fake_score_transformer
             try:
-                self.fake_score_transformer_2 = self.load_module_from_path(training_args.fake_score_model_path,
-                                                                           "transformer_2", training_args)
+                self.fake_score_transformer_2 = self.load_module_from_path(distillation.fake_score_model_path,
+                                                                           "transformer_2", teacher_critic_config)
                 logger.info("Loaded fake score transformer_2 for MoE support")
                 modules["fake_score_transformer_2"] = self.fake_score_transformer_2
             except Exception:
@@ -131,21 +136,22 @@ class DistillationPipeline(TrainingPipeline):
 
         return modules
 
-    def initialize_training_pipeline(self, training_args: TrainingArgs):
+    def initialize_training_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Initialize the distillation training pipeline with multiple models."""
         logger.info("Initializing distillation pipeline...")
 
-        super().initialize_training_pipeline(training_args)
+        super().initialize_training_pipeline(resolved_config)
+        training = resolved_config.training
 
         self.noise_scheduler = self.get_module("scheduler")
         self.vae = self.get_module("vae")
         self.vae.requires_grad_(False)
 
-        self.timestep_shift = self.training_args.pipeline_config.flow_shift
+        self.timestep_shift = resolved_config.pipeline.flow_shift
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
 
-        if self.training_args.boundary_ratio is not None:
-            self.boundary_timestep = self.training_args.boundary_ratio * self.noise_scheduler.num_train_timesteps
+        if resolved_config.pipeline.boundary_ratio is not None:
+            self.boundary_timestep = resolved_config.pipeline.boundary_ratio * self.noise_scheduler.num_train_timesteps
         else:
             self.boundary_timestep = None
 
@@ -156,46 +162,46 @@ class DistillationPipeline(TrainingPipeline):
             self.real_score_transformer_2.requires_grad_(False)
             self.real_score_transformer_2.eval()
 
-        if training_args.enable_gradient_checkpointing_type is not None:
-            self.fake_score_transformer = apply_activation_checkpointing(
-                self.fake_score_transformer, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+        checkpointing_type = training.model.enable_gradient_checkpointing_type
+        if checkpointing_type is not None:
+            self.fake_score_transformer = apply_activation_checkpointing(self.fake_score_transformer,
+                                                                         checkpointing_type=checkpointing_type)
             if self.fake_score_transformer_2 is not None:
-                self.fake_score_transformer_2 = apply_activation_checkpointing(
-                    self.fake_score_transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+                self.fake_score_transformer_2 = apply_activation_checkpointing(self.fake_score_transformer_2,
+                                                                               checkpointing_type=checkpointing_type)
 
-            self.real_score_transformer = apply_activation_checkpointing(
-                self.real_score_transformer, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+            self.real_score_transformer = apply_activation_checkpointing(self.real_score_transformer,
+                                                                         checkpointing_type=checkpointing_type)
             if self.real_score_transformer_2 is not None:
-                self.real_score_transformer_2 = apply_activation_checkpointing(
-                    self.real_score_transformer_2, checkpointing_type=training_args.enable_gradient_checkpointing_type)
+                self.real_score_transformer_2 = apply_activation_checkpointing(self.real_score_transformer_2,
+                                                                               checkpointing_type=checkpointing_type)
 
         # Initialize optimizers
         fake_score_params = list(filter(lambda p: p.requires_grad, self.fake_score_transformer.parameters()))
 
         # Use separate learning rate for fake_score_transformer if specified
-        fake_score_lr = training_args.fake_score_learning_rate
+        fake_score_lr = training.distillation.fake_score_learning_rate
         if fake_score_lr == 0.0:
-            fake_score_lr = training_args.learning_rate
+            fake_score_lr = training.optimizer.learning_rate
 
-        betas_str = training_args.fake_score_betas
-        betas = tuple(float(x.strip()) for x in betas_str.split(","))
+        betas = tuple(training.distillation.fake_score_betas)
 
         self.fake_score_optimizer = torch.optim.AdamW(
             fake_score_params,
             lr=fake_score_lr,
             betas=betas,
-            weight_decay=training_args.weight_decay,
+            weight_decay=training.optimizer.weight_decay,
             eps=1e-8,
         )
 
         self.fake_score_lr_scheduler = get_scheduler(
-            training_args.fake_score_lr_scheduler,
+            training.distillation.fake_score_lr_scheduler,
             optimizer=self.fake_score_optimizer,
-            num_warmup_steps=training_args.lr_warmup_steps,
-            num_training_steps=training_args.max_train_steps,
-            num_cycles=training_args.lr_num_cycles,
-            power=training_args.lr_power,
-            min_lr_ratio=training_args.min_lr_ratio,
+            num_warmup_steps=training.optimizer.lr_warmup_steps,
+            num_training_steps=training.loop.max_train_steps,
+            num_cycles=training.optimizer.lr_num_cycles,
+            power=training.optimizer.lr_power,
+            min_lr_ratio=training.optimizer.min_lr_ratio,
             last_epoch=self.init_steps - 1,
         )
 
@@ -205,31 +211,31 @@ class DistillationPipeline(TrainingPipeline):
                 fake_score_params_2,
                 lr=fake_score_lr,
                 betas=betas,
-                weight_decay=training_args.weight_decay,
+                weight_decay=training.optimizer.weight_decay,
                 eps=1e-8,
             )
             self.fake_score_lr_scheduler_2 = get_scheduler(
-                training_args.fake_score_lr_scheduler,
+                training.distillation.fake_score_lr_scheduler,
                 optimizer=self.fake_score_optimizer_2,
-                num_warmup_steps=training_args.lr_warmup_steps,
-                num_training_steps=training_args.max_train_steps,
-                num_cycles=training_args.lr_num_cycles,
-                power=training_args.lr_power,
-                min_lr_ratio=training_args.min_lr_ratio,
+                num_warmup_steps=training.optimizer.lr_warmup_steps,
+                num_training_steps=training.loop.max_train_steps,
+                num_cycles=training.optimizer.lr_num_cycles,
+                power=training.optimizer.lr_power,
+                min_lr_ratio=training.optimizer.min_lr_ratio,
                 last_epoch=self.init_steps - 1,
             )
 
         logger.info("Distillation optimizers initialized: generator and fake_score")
 
-        self.generator_update_interval = self.training_args.generator_update_interval
+        self.generator_update_interval = training.distillation.generator_update_interval
         logger.info("Distillation pipeline initialized with generator_update_interval=%s",
                     self.generator_update_interval)
 
-        self.denoising_step_list = torch.tensor(self.training_args.pipeline_config.dmd_denoising_steps,
+        self.denoising_step_list = torch.tensor(resolved_config.pipeline.dmd_denoising_steps,
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
 
-        if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
+        if training.distillation.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
             timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32))).cuda()
             self.denoising_step_list = timesteps[1000 - self.denoising_step_list]
             logger.info("Warping denoising_step_list")
@@ -239,15 +245,15 @@ class DistillationPipeline(TrainingPipeline):
                     self.denoising_step_list)
         self.num_train_timestep = self.noise_scheduler.num_train_timesteps
 
-        self.min_timestep = int(self.training_args.min_timestep_ratio * self.num_train_timestep)
-        self.max_timestep = int(self.training_args.max_timestep_ratio * self.num_train_timestep)
+        self.min_timestep = int(training.distillation.min_timestep_ratio * self.num_train_timestep)
+        self.max_timestep = int(training.distillation.max_timestep_ratio * self.num_train_timestep)
 
-        self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
+        self.real_score_guidance_scale = training.distillation.real_score_guidance_scale
 
         self.generator_ema: EMA_FSDP | None = None
         self.generator_ema_2: EMA_FSDP | None = None
-        ema_enabled = (self.training_args.ema_decay is not None) and (self.training_args.ema_decay > 0.0)
-        if ema_enabled and (self.training_args.ema_start_step <= 0):
+        ema_enabled = (training.ema.decay is not None) and (training.ema.decay > 0.0)
+        if ema_enabled and (training.ema.start_step <= 0):
             # Only eager-construct from the cold init weights when averaging starts at step 0.
             self._build_generator_emas(context="eager init, ema_start_step<=0")
         elif ema_enabled:
@@ -255,67 +261,63 @@ class DistillationPipeline(TrainingPipeline):
             # ema_start_step from the already-trained weights. Eager-constructing here would anchor
             # the shadow to the cold init and leave it base-contaminated (blurry) on short runs.
             logger.info("Generator EMA deferred: built lazily at ema_start_step=%s from trained weights",
-                        self.training_args.ema_start_step)
+                        training.ema.start_step)
         else:
             logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
-    def load_module_from_path(self, model_path: str, module_type: str, training_args: "TrainingArgs"):
+    def load_module_from_path(self, model_path: str, module_type: str, resolved_config: ResolvedGeneratorConfig):
         """
-        Load a module from a specific path using the same loading logic as the pipeline.
-        
+        Load a teacher (real score) or critic (fake score) module from a specific path using the same loading logic as
+        the pipeline.
+
+        The loader skips the custom student weights (``pipeline.components.transformer_weights``) for these modules.
+
         Args:
             model_path: Path to the model
             module_type: Type of module to load (e.g., "transformer")
-            training_args: Training arguments
-            
+            resolved_config: The config to load the module with
+
         Returns:
             The loaded module
         """
         logger.info("Loading %s from custom path: %s", module_type, model_path)
-        # Set flag to prevent custom weight loading for teacher/critic models
-        training_args._loading_teacher_critic_model = True
+        from fastvideo.models.loader.component_loader import (PipelineComponentLoader)
 
-        try:
-            from fastvideo.models.loader.component_loader import (PipelineComponentLoader)
+        # Download the model if it's a Hugging Face model ID
+        local_model_path = maybe_download_model(model_path)
+        logger.info("Model downloaded/found at: %s", local_model_path)
+        config = verify_model_config_and_directory(local_model_path)
 
-            # Download the model if it's a Hugging Face model ID
-            local_model_path = maybe_download_model(model_path)
-            logger.info("Model downloaded/found at: %s", local_model_path)
-            config = verify_model_config_and_directory(local_model_path)
-
-            if module_type not in config:
-                if hasattr(self, '_extra_config_module_map') and module_type in self._extra_config_module_map:
-                    extra_module = self._extra_config_module_map[module_type]
-                    if extra_module in config:
-                        module_type = extra_module
-                        logger.info("Using %s for %s", extra_module, module_type)
-                    else:
-                        raise ValueError(f"Module {module_type} not found in config at {local_model_path}")
+        if module_type not in config:
+            if hasattr(self, '_extra_config_module_map') and module_type in self._extra_config_module_map:
+                extra_module = self._extra_config_module_map[module_type]
+                if extra_module in config:
+                    module_type = extra_module
+                    logger.info("Using %s for %s", extra_module, module_type)
                 else:
                     raise ValueError(f"Module {module_type} not found in config at {local_model_path}")
+            else:
+                raise ValueError(f"Module {module_type} not found in config at {local_model_path}")
 
-            module_info = config[module_type]
-            if module_info is None:
-                raise ValueError(f"Module {module_type} has null value in config at {local_model_path}")
+        module_info = config[module_type]
+        if module_info is None:
+            raise ValueError(f"Module {module_type} has null value in config at {local_model_path}")
 
-            transformers_or_diffusers, architecture = module_info
-            component_path = os.path.join(local_model_path, module_type)
-            module = PipelineComponentLoader.load_module(
-                module_name=module_type,
-                component_model_path=component_path,
-                transformers_or_diffusers=transformers_or_diffusers,
-                resolved_config=training_args,
-            )
+        transformers_or_diffusers, architecture = module_info
+        component_path = os.path.join(local_model_path, module_type)
+        module = PipelineComponentLoader.load_module(
+            module_name=module_type,
+            component_model_path=component_path,
+            transformers_or_diffusers=transformers_or_diffusers,
+            resolved_config=resolved_config,
+            loading_teacher_critic_model=True,
+        )
 
-            logger.info("Successfully loaded %s from %s", module_type, component_path)
-            return module
-        finally:
-            # Always clean up the flag
-            if hasattr(training_args, '_loading_teacher_critic_model'):
-                delattr(training_args, '_loading_teacher_critic_model')
+        logger.info("Successfully loaded %s from %s", module_type, component_path)
+        return module
 
     @abstractmethod
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Initialize validation pipeline - must be implemented by subclasses."""
         raise NotImplementedError("Distillation pipelines must implement this method")
 
@@ -333,7 +335,7 @@ class DistillationPipeline(TrainingPipeline):
         """Check if EMA is ready for use (after ema_start_step)."""
         if current_step is None:
             current_step = getattr(self, 'current_trainstep', 0)
-        return (self.generator_ema is not None and current_step >= self.training_args.ema_start_step)
+        return (self.generator_ema is not None and current_step >= self.resolved_config.training.ema.start_step)
 
     def save_ema_weights(self, output_dir: str, step: int):
         """Save EMA weights separately for inference purposes."""
@@ -417,7 +419,7 @@ class DistillationPipeline(TrainingPipeline):
                 "ema_enabled": False,
                 "ema_2_enabled": False,
                 "ema_decay": None,
-                "ema_start_step": self.training_args.ema_start_step,
+                "ema_start_step": self.resolved_config.training.ema.start_step,
                 "ema_ready": False,
                 "ema_2_ready": False,
                 "ema_step": self.current_trainstep,
@@ -426,8 +428,8 @@ class DistillationPipeline(TrainingPipeline):
         return {
             "ema_enabled": ema_enabled,
             "ema_2_enabled": ema_2_enabled,
-            "ema_decay": self.training_args.ema_decay,
-            "ema_start_step": self.training_args.ema_start_step,
+            "ema_decay": self.resolved_config.training.ema.decay,
+            "ema_start_step": self.resolved_config.training.ema.start_step,
             "ema_ready": self.is_ema_ready() if ema_enabled else False,
             "ema_2_ready": self.is_ema_ready() if ema_2_enabled else False,
             "ema_step": self.current_trainstep,
@@ -672,7 +674,7 @@ class DistillationPipeline(TrainingPipeline):
     def faker_score_forward(self, training_batch: TrainingBatch) -> tuple[TrainingBatch, torch.Tensor]:
         with torch.no_grad(), set_forward_context(current_timestep=training_batch.timesteps,
                                                   attn_metadata=training_batch.attn_metadata_vsa):
-            if self.training_args.simulate_generator_forward:
+            if self.resolved_config.training.distillation.simulate_generator_forward:
                 generator_pred_video = self._generator_multi_step_simulation_forward(training_batch)
             else:
                 generator_pred_video = self._generator_forward(training_batch)
@@ -713,7 +715,7 @@ class DistillationPipeline(TrainingPipeline):
 
     def _clip_model_grad_norm_(self, training_batch: TrainingBatch, transformer) -> TrainingBatch:
 
-        max_grad_norm = self.training_args.max_grad_norm
+        max_grad_norm = self.resolved_config.training.optimizer.max_grad_norm
 
         if max_grad_norm is not None:
             model_parts = [transformer]
@@ -774,19 +776,20 @@ class DistillationPipeline(TrainingPipeline):
             encoder_attention_mask = batch['text_attention_mask']
             infos = batch['info_list']
 
-            if self.training_args.simulate_generator_forward:
+            data_options = self.resolved_config.training.data
+            if self.resolved_config.training.distillation.simulate_generator_forward:
                 batch_size = encoder_hidden_states.shape[0]
-                vae_config = self.training_args.pipeline_config.vae_config.arch_config
+                vae_config = self.resolved_config.pipeline_config.vae_config.arch_config
                 num_channels = vae_config.z_dim
                 spatial_compression_ratio = vae_config.spatial_compression_ratio
 
-                latent_height = self.training_args.num_height // spatial_compression_ratio
-                latent_width = self.training_args.num_width // spatial_compression_ratio
+                latent_height = data_options.num_height // spatial_compression_ratio
+                latent_width = data_options.num_width // spatial_compression_ratio
 
                 latents = torch.zeros(
                     batch_size,
                     num_channels,
-                    self.training_args.num_latent_t,
+                    data_options.num_latent_t,
                     latent_height,
                     latent_width,
                     device=device,
@@ -796,7 +799,7 @@ class DistillationPipeline(TrainingPipeline):
                 if 'vae_latent' not in batch:
                     raise ValueError("vae_latent not found in batch and simulate_generator_forward is False")
                 latents = batch['vae_latent']
-                latents = latents[:, :, :self.training_args.num_latent_t]
+                latents = latents[:, :, :data_options.num_latent_t]
                 latents = latents.to(device, dtype=dtype)
 
             training_batch.latents = latents
@@ -806,7 +809,7 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
-        gradient_accumulation_steps = getattr(self.training_args, 'gradient_accumulation_steps', 1)
+        gradient_accumulation_steps = self.resolved_config.training.loop.gradient_accumulation_steps
         batches = []
         # Collect N batches for gradient accumulation
         for _ in range(gradient_accumulation_steps):
@@ -829,7 +832,7 @@ class DistillationPipeline(TrainingPipeline):
 
                 with set_forward_context(current_timestep=batch_gen.timesteps,
                                          attn_metadata=batch_gen.attn_metadata_vsa):
-                    if self.training_args.simulate_generator_forward:
+                    if self.resolved_config.training.distillation.simulate_generator_forward:
                         generator_pred_video = self._generator_multi_step_simulation_forward(batch_gen)
                     else:
                         generator_pred_video = self._generator_forward(batch_gen)
@@ -902,39 +905,42 @@ class DistillationPipeline(TrainingPipeline):
     def _build_generator_emas(self, context: str = "") -> None:
         # Idempotently construct whichever generator EMA shadows are missing, per-expert and
         # decoupled. Safe to call repeatedly; no-op once both exist or when EMA is disabled.
-        if (self.training_args.ema_decay is None) or (self.training_args.ema_decay <= 0.0):
+        ema_decay = self.resolved_config.training.ema.decay
+        if (ema_decay is None) or (ema_decay <= 0.0):
             return
         suffix = f" [{context}]" if context else ""
         if self.generator_ema is None:
-            self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
-            logger.info("Built generator EMA (decay=%s)%s", self.training_args.ema_decay, suffix)
+            self.generator_ema = EMA_FSDP(self.transformer, decay=ema_decay)
+            logger.info("Built generator EMA (decay=%s)%s", ema_decay, suffix)
         if self.transformer_2 is not None and self.generator_ema_2 is None:
-            self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
-            logger.info("Built generator EMA_2 (decay=%s)%s", self.training_args.ema_decay, suffix)
+            self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=ema_decay)
+            logger.info("Built generator EMA_2 (decay=%s)%s", ema_decay, suffix)
 
     def _build_deferred_ema_for_resume(self) -> None:
         # Build a deferred EMA before checkpoint load only when a saved shard exists, so the
         # shadow reloads instead of being skipped and rebuilt fresh. Gating on shard existence
         # matters: building when none exists would reintroduce cold-init contamination.
-        if (self.training_args.ema_decay is None) or (self.training_args.ema_decay <= 0.0):
+        ema_decay = self.resolved_config.training.ema.decay
+        if (ema_decay is None) or (ema_decay <= 0.0):
             return
 
-        ema_shard_dir = os.path.join(self.training_args.resume_from_checkpoint, "ema_local_shard")
+        ema_shard_dir = os.path.join(self.resolved_config.training.checkpoint.resume_from_checkpoint, "ema_local_shard")
 
         if (self.generator_ema is None
                 and os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_rank{self.global_rank}.pt"))):
-            self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
+            self.generator_ema = EMA_FSDP(self.transformer, decay=ema_decay)
             logger.info("Pre-built generator EMA for resume from existing shard")
 
         if (self.transformer_2 is not None and self.generator_ema_2 is None
                 and os.path.exists(os.path.join(ema_shard_dir, f"generator_ema_2_rank{self.global_rank}.pt"))):
-            self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=self.training_args.ema_decay)
+            self.generator_ema_2 = EMA_FSDP(self.transformer_2, decay=ema_decay)
             logger.info("Pre-built generator EMA_2 for resume from existing shard")
 
     def _resume_from_checkpoint(self) -> None:
         """Resume training from checkpoint with distillation models."""
 
-        logger.info("Loading distillation checkpoint from %s", self.training_args.resume_from_checkpoint)
+        resume_from_checkpoint = self.resolved_config.training.checkpoint.resume_from_checkpoint
+        logger.info("Loading distillation checkpoint from %s", resume_from_checkpoint)
 
         self._build_deferred_ema_for_resume()
 
@@ -942,7 +948,7 @@ class DistillationPipeline(TrainingPipeline):
             self.transformer,
             self.fake_score_transformer,
             self.global_rank,
-            self.training_args.resume_from_checkpoint,
+            resume_from_checkpoint,
             self.optimizer,
             self.fake_score_optimizer,
             self.train_dataloader,
@@ -975,8 +981,8 @@ class DistillationPipeline(TrainingPipeline):
         # Then add distillation-specific information
         logger.info("Distillation-specific settings:")
         logger.info("  Generator update ratio: %s", self.generator_update_interval)
-        assert isinstance(self.training_args, TrainingArgs)
-        logger.info("  Max gradient norm: %s", self.training_args.max_grad_norm)
+        ema_options = self.resolved_config.training.ema
+        logger.info("  Max gradient norm: %s", self.resolved_config.training.optimizer.max_grad_norm)
 
         logger.info("  Real score transformer (high noise expert) parameters: %s B",
                     sum(p.numel() for p in self.real_score_transformer.parameters()) / 1e9)
@@ -995,22 +1001,20 @@ class DistillationPipeline(TrainingPipeline):
             logger.info("  Fake score MoE enabled with boundary_timestep: %s", self.boundary_timestep)
 
         if self.generator_ema is not None:
-            logger.info("  Generator EMA enabled with decay: %s", self.training_args.ema_decay)
-            logger.info("  Generator EMA start step: %s", self.training_args.ema_start_step)
+            logger.info("  Generator EMA enabled with decay: %s", ema_options.decay)
+            logger.info("  Generator EMA start step: %s", ema_options.start_step)
         else:
             logger.info("  Generator EMA disabled")
 
         if self.generator_ema is not None:
-            logger.info("  Generator EMA enabled with decay: %s", self.training_args.ema_decay)
-            logger.info("  Generator EMA start step: %s", self.training_args.ema_start_step)
+            logger.info("  Generator EMA enabled with decay: %s", ema_options.decay)
+            logger.info("  Generator EMA start step: %s", ema_options.start_step)
         else:
             logger.info("  Generator EMA disabled")
 
     @torch.no_grad()
-    def _log_validation(self, transformer, training_args, global_step) -> None:
-        training_args.inference_mode = True
-        training_args.dit_cpu_offload = True
-        if not training_args.log_validation:
+    def _log_validation(self, transformer, resolved_config, global_step) -> None:
+        if not resolved_config.training.validation.enabled:
             return
         if self.validation_pipeline is None:
             raise ValueError("Validation pipeline is not set")
@@ -1018,18 +1022,18 @@ class DistillationPipeline(TrainingPipeline):
         logger.info("Starting validation")
 
         # Create sampling parameters if not provided
-        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+        sampling_param = SamplingParam.from_pretrained(resolved_config.model_path)
 
         # Set deterministic seed for validation
 
         logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
-        logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
+        logger.info('rank: %s: validation dataset file: %s',
                     self.global_rank,
-                    training_args.validation_dataset_file,
+                    resolved_config.training.validation.dataset_file,
                     local_main_process_only=False)
-        validation_dataset = ValidationDataset(training_args.validation_dataset_file)
+        validation_dataset = ValidationDataset(resolved_config.training.validation.dataset_file)
         validation_dataloader = DataLoader(validation_dataset, batch_size=None, num_workers=0)
 
         # Set both transformers to eval mode
@@ -1038,7 +1042,7 @@ class DistillationPipeline(TrainingPipeline):
             self.transformer_2.eval()
 
         # Optionally use EMA model for validation if available and ready
-        use_ema_for_validation = (self.training_args.use_ema and self.is_ema_ready(global_step))
+        use_ema_for_validation = (self.resolved_config.training.ema.enabled and self.is_ema_ready(global_step))
         ema_context = None
         ema_2_context = None
 
@@ -1057,9 +1061,7 @@ class DistillationPipeline(TrainingPipeline):
             # Use self.transformer for consistency, but the passed transformer should be the same
             validation_transformer = self.transformer
 
-        validation_steps = training_args.validation_sampling_steps.split(",")
-        validation_steps = [int(step) for step in validation_steps]
-        validation_steps = [step for step in validation_steps if step > 0]
+        validation_steps = [step for step in resolved_config.training.validation.sampling_steps if step > 0]
         # Log validation results for this step
         world_group = get_world_group()
         num_sp_groups = world_group.world_size // self.sp_group.world_size
@@ -1079,7 +1081,7 @@ class DistillationPipeline(TrainingPipeline):
                 audios: list[Any] = []
                 audio_sample_rates: list[Any] = []
                 for validation_batch in validation_dataloader:
-                    batch = self._prepare_validation_batch(sampling_param, training_args, validation_batch, steps)
+                    batch = self._prepare_validation_batch(sampling_param, resolved_config, validation_batch, steps)
 
                     negative_prompt = batch.negative_prompt
                     batch_negative = ForwardBatch(
@@ -1089,7 +1091,7 @@ class DistillationPipeline(TrainingPipeline):
                         prompt_attention_mask=[],
                     )
                     result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
-                        batch_negative, training_args)
+                        batch_negative, self.validation_pipeline.resolved_config)
                     self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
                         0], result_batch.prompt_attention_mask[0]
 
@@ -1104,7 +1106,7 @@ class DistillationPipeline(TrainingPipeline):
 
                     # Run validation inference
                     with torch.no_grad():
-                        output_batch = self.validation_pipeline.forward(batch, training_args)
+                        output_batch = self.validation_pipeline.forward(batch, self.validation_pipeline.resolved_config)
                     samples = output_batch.output.cpu()
                     if self.rank_in_sp_group != 0:
                         continue
@@ -1168,9 +1170,10 @@ class DistillationPipeline(TrainingPipeline):
                     video_filenames = []
                     for i, (video, caption, audio, audio_sample_rate) in enumerate(
                             zip(all_videos, all_captions, all_audios, all_audio_sample_rates, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        output_dir = resolved_config.training.checkpoint.output_dir
+                        os.makedirs(output_dir, exist_ok=True)
                         filename = os.path.join(
-                            training_args.output_dir,
+                            output_dir,
                             f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4")
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
                         if (audio is not None and audio_sample_rate is not None
@@ -1201,7 +1204,8 @@ class DistillationPipeline(TrainingPipeline):
         gc.collect()
         torch.cuda.empty_cache()
 
-    def visualize_intermediate_latents(self, training_batch: TrainingBatch, training_args: TrainingArgs, step: int):
+    def visualize_intermediate_latents(self, training_batch: TrainingBatch, resolved_config: ResolvedGeneratorConfig,
+                                       step: int):
         """Add visualization data to tracker logging and save frames to disk."""
 
         def _prepare_vae_latents(latents: torch.Tensor) -> torch.Tensor:
@@ -1254,7 +1258,7 @@ class DistillationPipeline(TrainingPipeline):
             for latent_key in dmd_log_keys:
                 latents = dmd_latents_vis_dict[latent_key]
                 latents = _prepare_vae_latents(latents)
-                # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), resolved_config)
                 latents = _apply_vae_scale(latents)
 
                 # Apply shifting if needed
@@ -1281,8 +1285,9 @@ class DistillationPipeline(TrainingPipeline):
 
     def train(self) -> None:
         """Main training loop with distillation-specific logging."""
-        assert self.training_args.seed is not None, "seed must be set"
-        seed = self.training_args.seed
+        training = self.resolved_config.training
+        assert training.data.seed is not None, "seed must be set"
+        seed = training.data.seed
 
         # Set the same seed within each SP group to ensure reproducibility
         if self.sp_world_size > 1:
@@ -1304,7 +1309,7 @@ class DistillationPipeline(TrainingPipeline):
         self.current_trainstep = self.init_steps
 
         # Resume from checkpoint if specified (this will restore random states)
-        if self.training_args.resume_from_checkpoint:
+        if training.checkpoint.resume_from_checkpoint:
             self._resume_from_checkpoint()
             logger.info("Resumed from checkpoint, random states restored")
         else:
@@ -1315,25 +1320,25 @@ class DistillationPipeline(TrainingPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, self.init_steps)
+        self._log_validation(self.transformer, self.resolved_config, self.init_steps)
 
         progress_bar = tqdm(
-            range(0, self.training_args.max_train_steps),
+            range(0, training.loop.max_train_steps),
             initial=self.init_steps,
             desc="Steps",
             disable=self.local_rank > 0,
         )
 
         use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND.get() == "VIDEO_SPARSE_ATTN"
-        for step in range(self.init_steps + 1, self.training_args.max_train_steps + 1):
+        for step in range(self.init_steps + 1, training.loop.max_train_steps + 1):
             if step % 5 == 0:
                 gc.collect()
                 torch.cuda.empty_cache()
             start_time = time.perf_counter()
             if use_vsa:
-                vsa_sparsity = self.training_args.VSA_sparsity
-                vsa_decay_rate = self.training_args.VSA_decay_rate
-                vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
+                vsa_sparsity = self.resolved_config.engine.attention.vsa_sparsity
+                vsa_decay_rate = training.vsa.decay_rate
+                vsa_decay_interval_steps = training.vsa.decay_interval_steps
                 if vsa_decay_interval_steps > 1:
                     current_decay_times = min(step // vsa_decay_interval_steps, vsa_sparsity // vsa_decay_rate)
                     current_vsa_sparsity = current_decay_times * vsa_decay_rate
@@ -1346,7 +1351,7 @@ class DistillationPipeline(TrainingPipeline):
             self.current_trainstep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
 
-            if step >= self.training_args.ema_start_step:
+            if step >= training.ema.start_step:
                 self._build_generator_emas(context=f"lazy @ step {step}")
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -1392,7 +1397,7 @@ class DistillationPipeline(TrainingPipeline):
                 if self.generator_ema is not None or self.generator_ema_2 is not None:
                     log_data["ema_enabled"] = self.generator_ema is not None
                     log_data["ema_2_enabled"] = self.generator_ema_2 is not None
-                    log_data["ema_decay"] = self.training_args.ema_decay
+                    log_data["ema_decay"] = training.ema.decay
                 else:
                     log_data["ema_enabled"] = False
                     log_data["ema_2_enabled"] = False
@@ -1415,14 +1420,14 @@ class DistillationPipeline(TrainingPipeline):
                 self.tracker.log(log_data, step)
 
             # Save training state checkpoint (for resuming training)
-            if (self.training_args.training_state_checkpointing_steps > 0
-                    and step % self.training_args.training_state_checkpointing_steps == 0):
+            if (training.checkpoint.training_state_checkpointing_steps > 0
+                    and step % training.checkpoint.training_state_checkpointing_steps == 0):
                 print("rank", self.global_rank, "save training state checkpoint at step", step)
                 save_distillation_checkpoint(
                     self.transformer,
                     self.fake_score_transformer,
                     self.global_rank,
-                    self.training_args.output_dir,
+                    training.checkpoint.output_dir,
                     step,
                     self.optimizer,
                     self.fake_score_optimizer,
@@ -1446,14 +1451,14 @@ class DistillationPipeline(TrainingPipeline):
                 self.sp_group.barrier()
 
             # Save weight-only checkpoint
-            if (self.training_args.weight_only_checkpointing_steps > 0
-                    and step % self.training_args.weight_only_checkpointing_steps == 0):
+            if (training.checkpoint.weight_only_checkpointing_steps > 0
+                    and step % training.checkpoint.weight_only_checkpointing_steps == 0):
                 print("rank", self.global_rank, "save weight-only checkpoint at step", step)
                 save_distillation_checkpoint(
                     self.transformer,
                     self.fake_score_transformer,
                     self.global_rank,
-                    self.training_args.output_dir,
+                    training.checkpoint.output_dir,
                     f"{step}_weight_only",
                     only_save_generator_weight=True,
                     generator_ema=self.generator_ema,
@@ -1467,25 +1472,24 @@ class DistillationPipeline(TrainingPipeline):
                     fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
                     generator_ema_2=getattr(self, 'generator_ema_2', None))
 
-                if self.training_args.use_ema and self.is_ema_ready():
-                    self.save_ema_weights(self.training_args.output_dir, step)
+                if training.ema.enabled and self.is_ema_ready():
+                    self.save_ema_weights(training.checkpoint.output_dir, step)
 
-            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                if self.training_args.log_visualization:
-                    self.visualize_intermediate_latents(training_batch, self.training_args, step)
-                self._log_validation(self.transformer, self.training_args, step)
+            if training.validation.enabled and step % training.validation.every_steps == 0:
+                if training.validation.log_visualization:
+                    self.visualize_intermediate_latents(training_batch, self.resolved_config, step)
+                self._log_validation(self.transformer, self.resolved_config, step)
 
         self.tracker.finish()
 
         # Save final training state checkpoint
-        print("rank", self.global_rank, "save final training state checkpoint at step",
-              self.training_args.max_train_steps)
+        print("rank", self.global_rank, "save final training state checkpoint at step", training.loop.max_train_steps)
         save_distillation_checkpoint(
             self.transformer,
             self.fake_score_transformer,
             self.global_rank,
-            self.training_args.output_dir,
-            self.training_args.max_train_steps,
+            training.checkpoint.output_dir,
+            training.loop.max_train_steps,
             self.optimizer,
             self.fake_score_optimizer,
             self.train_dataloader,
@@ -1503,8 +1507,8 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
             generator_ema_2=getattr(self, 'generator_ema_2', None))
 
-        if self.training_args.use_ema and self.is_ema_ready():
-            self.save_ema_weights(self.training_args.output_dir, self.training_args.max_train_steps)
+        if training.ema.enabled and self.is_ema_ready():
+            self.save_ema_weights(training.checkpoint.output_dir, training.loop.max_train_steps)
 
         if envs.FASTVIDEO_TORCH_PROFILER_DIR.get():
             logger.info("Stopping profiler...")

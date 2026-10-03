@@ -30,22 +30,12 @@ NUM_GPUS=${NUM_GPUS:-4}
 
 torchrun --nnodes 1 --nproc_per_node "${NUM_GPUS}" \
     fastvideo/training/wan_distillation_pipeline.py \
-    --num_gpus "${NUM_GPUS}" --sp_size 1 --tp_size 1 \
-    --hsdp_replicate_dim "${NUM_GPUS}" --hsdp_shard_dim 1 \
-    --model_path "${BASE}" --pretrained_model_name_or_path "${BASE}" \
-    --real_score_model_path "${BASE}" --fake_score_model_path "${BASE}" \
-    --init_weights_from_safetensors "${INIT_WEIGHTS}" \
-    --data_path "${DATA_DIR}" --dataloader_num_workers 4 \
-    --max_train_steps 2000 --train_batch_size 1 --train_sp_batch_size 1 \
-    --gradient_accumulation_steps 1 \
-    --num_latent_t 20 --num_height 480 --num_width 832 --num_frames 77 \
-    --enable_gradient_checkpointing_type full \
-    --log_validation --validation_dataset_file "${VALIDATION_FILE}" \
-    --validation_steps 200 --validation_sampling_steps 3 --validation_guidance_scale 6.0 \
-    --learning_rate 2e-6 --mixed_precision bf16 --weight_decay 0.01 --max_grad_norm 1.0 \
-    --weight_only_checkpointing_steps 500 --training_state_checkpointing_steps 500 \
-    --tracker_project_name wan_t2v_distill_dmd_qat \
-    --output_dir checkpoints/wan_t2v_distill_dmd_qat \
-    --inference_mode False --dit_precision fp32 --ema_start_step 0 --training_cfg_rate 0.0 \
-    --generator_update_interval 5 --real_score_guidance_scale 2.0 \
-    --dmd_denoising_steps '1000,757,522' --min_timestep_ratio 0.02 --max_timestep_ratio 0.98
+    --config examples/training/finetune/wan_t2v_1.3B/mixkit/distill_dmd_qat.yaml \
+    --model_path "${BASE}" \
+    --engine.num_gpus "${NUM_GPUS}" \
+    --engine.parallelism.hsdp_replicate_dim "${NUM_GPUS}" \
+    --training.distillation.real_score_model_path "${BASE}" \
+    --training.distillation.fake_score_model_path "${BASE}" \
+    --pipeline.components.transformer_weights "${INIT_WEIGHTS}" \
+    --training.data.data_path "${DATA_DIR}" \
+    --training.validation.dataset_file "${VALIDATION_FILE}"

@@ -1,0 +1,53 @@
+# Read by distill_dmd_t2v_1.3B.slurm, which passes model_path, training.distillation.real_score_model_path,
+# training.distillation.fake_score_model_path, training.data.data_path, training.checkpoint.output_dir, and
+# training.validation.dataset_file on the command line.
+engine:
+  num_gpus: 64
+  parallelism:
+    tp_size: 1
+    sp_size: 1
+    hsdp_replicate_dim: 64
+    hsdp_shard_dim: 1
+  precision:
+    dit: fp32
+pipeline:
+  flow_shift: 8.0
+  dmd_denoising_steps: [1000, 757, 522]
+training:
+  data:
+    dataloader_num_workers: 4
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+    train_batch_size: 1
+    num_latent_t: 21
+    training_cfg_rate: 0.0
+    seed: 1000
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 2.0e-06
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    training_state_checkpointing_steps: 500
+    weight_only_checkpointing_steps: 500
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: wan_t2v_distill_dmd
+  validation:
+    enabled: true
+    sampling_steps: [3]
+    guidance_scale: 6.0  # not used for dmd inference
+    every_steps: 200
+  distillation:
+    generator_update_interval: 5
+    min_timestep_ratio: 0.02
+    max_timestep_ratio: 0.98
+    real_score_guidance_scale: 3.5
+  ema:
+    start_step: 0
+  model:
+    enable_gradient_checkpointing_type: full

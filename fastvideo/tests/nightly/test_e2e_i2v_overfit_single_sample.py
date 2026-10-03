@@ -4,6 +4,7 @@ from huggingface_hub import snapshot_download
 import shutil
 import subprocess
 import sys
+import yaml
 import fastvideo.envs as envs
 from fastvideo.tests.utils import compute_video_ssim_torchvision
 
@@ -63,6 +64,35 @@ def download_data():
 
 
 def run_preprocessing():
+    # PreprocessRunConfig of the preprocessing run; the engine block holds the offload settings of the per-task
+    # preprocessing pipelines.
+    preprocess_config = {
+        "model_path": MODEL_PATH,
+        "engine": {
+            "offload": {
+                "dit_layerwise": True,
+                "image_encoder": True,
+                "pin_cpu_memory": True,
+            },
+        },
+        "preprocess": {
+            "data_merge_path": os.path.join(LOCAL_RAW_DATA_DIR, "merge_1_sample.txt"),
+            "preprocess_video_batch_size": 1,
+            "max_height": 480,
+            "max_width": 832,
+            "num_frames": 77,
+            "dataloader_num_workers": 0,
+            "dataset_output_dir": str(LOCAL_PREPROCESSED_DATA_DIR),
+            "train_fps": 16,
+            "samples_per_file": 1,
+            "flush_frequency": 1,
+            "video_length_tolerance_range": 5,
+            "preprocess_task": "i2v",
+        },
+    }
+    preprocess_config_path = Path(DATA_DIR) / "cats_i2v_preprocess_config.yaml"
+    preprocess_config_path.write_text(yaml.safe_dump(preprocess_config, sort_keys=False))
+
     # Run torchrun command
     cmd = [
         "torchrun",
@@ -71,38 +101,74 @@ def run_preprocessing():
         "--nproc_per_node",
         NUM_GPUS_PER_NODE_PREPROCESSING,
         PREPROCESSING_ENTRY_FILE_PATH,
-        "--model_path",
-        MODEL_PATH,
-        "--data_merge_path",
-        os.path.join(LOCAL_RAW_DATA_DIR, "merge_1_sample.txt"),
-        "--preprocess_video_batch_size",
-        "1",
-        "--max_height",
-        "480",
-        "--max_width",
-        "832",
-        "--num_frames",
-        "77",
-        "--dataloader_num_workers",
-        "0",
-        "--output_dir",
-        LOCAL_PREPROCESSED_DATA_DIR,
-        "--train_fps",
-        "16",
-        "--samples_per_file",
-        "1",
-        "--flush_frequency",
-        "1",
-        "--video_length_tolerance_range",
-        "5",
-        "--preprocess_task",
-        "i2v",
+        "--config",
+        str(preprocess_config_path),
     ]
 
     process = subprocess.run(cmd, check=True)
 
 
 def run_training():
+    training_config = {
+        "model_path": MODEL_PATH,
+        "engine": {
+            "num_gpus": int(NUM_GPUS_PER_NODE_TRAINING),
+            "parallelism": {
+                "sp_size": int(NUM_GPUS_PER_NODE_TRAINING),
+                "tp_size": 1,
+                "hsdp_replicate_dim": 1,
+                "hsdp_shard_dim": int(NUM_GPUS_PER_NODE_TRAINING),
+            },
+            "precision": {
+                "dit": "fp32",
+            },
+        },
+        "training": {
+            "data": {
+                "data_path": LOCAL_TRAINING_DATA_DIR,
+                "train_batch_size": 1,
+                "num_latent_t": 8,
+                "train_sp_batch_size": 1,
+                "dataloader_num_workers": 10,
+                "training_cfg_rate": 0.1,
+                "num_height": 480,
+                "num_width": 832,
+                "num_frames": 81,
+            },
+            "optimizer": {
+                "learning_rate": 1e-5,
+                "weight_decay": 0.01,
+                "max_grad_norm": 1.0,
+            },
+            "loop": {
+                "gradient_accumulation_steps": 1,
+                "max_train_steps": 901,
+            },
+            "checkpoint": {
+                "output_dir": str(LOCAL_OUTPUT_DIR),
+                "weight_only_checkpointing_steps": 6000,
+                "training_state_checkpointing_steps": 6000,
+                "checkpoints_total_limit": 3,
+            },
+            "tracker": {
+                "project_name": "wan_i2v_finetune_overfit_ci",
+            },
+            "validation": {
+                "enabled": True,
+                "dataset_file": LOCAL_VALIDATION_DATASET_FILE,
+                "every_steps": 100,
+                "sampling_steps": [50],
+                "guidance_scale": 6.0,
+            },
+            "ema": {
+                "start_step": 0,
+            },
+        },
+    }
+    LOCAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    training_config_path = LOCAL_OUTPUT_DIR / "training_config.yaml"
+    training_config_path.write_text(yaml.safe_dump(training_config, sort_keys=False))
+
     cmd = [
         "torchrun",
         "--nnodes",
@@ -110,82 +176,8 @@ def run_training():
         "--nproc_per_node",
         NUM_GPUS_PER_NODE_TRAINING,
         TRAINING_ENTRY_FILE_PATH,
-        "--model_path",
-        MODEL_PATH,
-        "--inference_mode",
-        "False",
-        "--pretrained_model_name_or_path",
-        MODEL_PATH,
-        "--data_path",
-        LOCAL_TRAINING_DATA_DIR,
-        "--validation_dataset_file",
-        LOCAL_VALIDATION_DATASET_FILE,
-        "--train_batch_size",
-        "1",
-        "--num_latent_t",
-        "8",
-        "--num_gpus",
-        NUM_GPUS_PER_NODE_TRAINING,
-        "--sp_size",
-        NUM_GPUS_PER_NODE_TRAINING,
-        "--tp_size",
-        "1",
-        "--hsdp_replicate_dim",
-        "1",
-        "--hsdp_shard_dim",
-        NUM_GPUS_PER_NODE_TRAINING,
-        "--num_gpus",
-        NUM_GPUS_PER_NODE_TRAINING,
-        "--train_sp_batch_size",
-        "1",
-        "--dataloader_num_workers",
-        "10",
-        "--gradient_accumulation_steps",
-        "1",
-        "--max_train_steps",
-        "901",
-        "--learning_rate",
-        "1e-5",
-        "--mixed_precision",
-        "bf16",
-        "--weight_only_checkpointing_steps",
-        "6000",
-        "--training_state_checkpointing_steps",
-        "6000",
-        "--validation_steps",
-        "100",
-        "--validation_sampling_steps",
-        "50",
-        "--log_validation",
-        "--checkpoints_total_limit",
-        "3",
-        "--ema_start_step",
-        "0",
-        "--training_cfg_rate",
-        "0.1",
-        "--output_dir",
-        LOCAL_OUTPUT_DIR,
-        "--tracker_project_name",
-        "wan_i2v_finetune_overfit_ci",
-        "--num_height",
-        "480",
-        "--num_width",
-        "832",
-        "--num_frames",
-        "81",
-        "--validation_guidance_scale",
-        "6.0",
-        "--num_euler_timesteps",
-        "50",
-        "--multi_phased_distill_schedule",
-        "4000-1",
-        "--weight_decay",
-        "0.01",
-        "--not_apply_cfg_solver",
-        "--dit_precision",
-        "fp32",
-        "--max_grad_norm",
-        "1.0",
+        "--config",
+        str(training_config_path),
     ]
 
     print(f"Running training with command: {cmd}")

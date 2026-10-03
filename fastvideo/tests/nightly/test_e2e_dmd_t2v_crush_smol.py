@@ -4,6 +4,7 @@ from huggingface_hub import snapshot_download
 import subprocess
 import sys
 import shutil
+import yaml
 import fastvideo.envs as envs
 from fastvideo.tests.utils import compute_video_ssim_torchvision
 
@@ -68,6 +69,36 @@ def run_preprocessing():
         print(f"Removing local_preprocessed_data_dir: {LOCAL_PREPROCESSED_DATA_DIR}")
         shutil.rmtree(LOCAL_PREPROCESSED_DATA_DIR)
 
+    # PreprocessRunConfig of the preprocessing run; the engine block holds the offload settings of the per-task
+    # preprocessing pipelines.
+    preprocess_config = {
+        "model_path": MODEL_PATH,
+        "engine": {
+            "offload": {
+                "dit_layerwise": True,
+                "image_encoder": True,
+                "pin_cpu_memory": True,
+            },
+        },
+        "preprocess": {
+            "seed": 42,
+            "data_merge_path": os.path.join(LOCAL_RAW_DATA_DIR, "merge.txt"),
+            "preprocess_video_batch_size": 1,
+            "max_height": 480,
+            "max_width": 832,
+            "num_frames": 81,
+            "dataloader_num_workers": 0,
+            "dataset_output_dir": str(LOCAL_PREPROCESSED_DATA_DIR),
+            "train_fps": 16,
+            "samples_per_file": 1,
+            "flush_frequency": 1,
+            "video_length_tolerance_range": 5,
+            "preprocess_task": "t2v",
+        },
+    }
+    preprocess_config_path = Path(DATA_DIR) / "crush_smol_preprocess_config.yaml"
+    preprocess_config_path.write_text(yaml.safe_dump(preprocess_config, sort_keys=False))
+
     # Run torchrun command
     cmd = [
         "torchrun",
@@ -76,40 +107,90 @@ def run_preprocessing():
         "--nproc_per_node",
         NUM_GPUS_PER_NODE_PREPROCESSING,
         PREPROCESSING_ENTRY_FILE_PATH,
-        "--model_path",
-        MODEL_PATH,
-        "--seed",
-        "42",
-        "--data_merge_path",
-        os.path.join(LOCAL_RAW_DATA_DIR, "merge.txt"),
-        "--preprocess_video_batch_size",
-        "1",
-        "--max_height",
-        "480",
-        "--max_width",
-        "832",
-        "--num_frames",
-        "81",
-        "--dataloader_num_workers",
-        "0",
-        "--output_dir",
-        LOCAL_PREPROCESSED_DATA_DIR,
-        "--train_fps",
-        "16",
-        "--samples_per_file",
-        "1",
-        "--flush_frequency",
-        "1",
-        "--video_length_tolerance_range",
-        "5",
-        "--preprocess_task",
-        "t2v",
+        "--config",
+        str(preprocess_config_path),
     ]
 
     process = subprocess.run(cmd, check=True)
 
 
 def run_training():
+    training_config = {
+        "model_path": MODEL_PATH,
+        "mode": "distillation",
+        "engine": {
+            "num_gpus": int(NUM_GPUS_PER_NODE_TRAINING),
+            "parallelism": {
+                "sp_size": 1,
+                "tp_size": 1,
+                "hsdp_replicate_dim": 1,
+                "hsdp_shard_dim": int(NUM_GPUS_PER_NODE_TRAINING),
+            },
+            "precision": {
+                "dit": "fp32",
+            },
+        },
+        "pipeline": {
+            "flow_shift": 8.0,
+            "dmd_denoising_steps": [1000, 757, 522],
+        },
+        "training": {
+            "data": {
+                "data_path": LOCAL_TRAINING_DATA_DIR,
+                "train_batch_size": 1,
+                "num_latent_t": 8,
+                "train_sp_batch_size": 1,
+                "dataloader_num_workers": 10,
+                "training_cfg_rate": 0.0,
+                "num_height": 480,
+                "num_width": 832,
+                "num_frames": 81,
+                "seed": 1000,
+            },
+            "optimizer": {
+                "learning_rate": 2e-6,
+                "weight_decay": 0.01,
+                "max_grad_norm": 1.0,
+            },
+            "loop": {
+                "gradient_accumulation_steps": 1,
+                "max_train_steps": 501,
+            },
+            "checkpoint": {
+                "output_dir": str(LOCAL_OUTPUT_DIR),
+                "training_state_checkpointing_steps": 1000,
+                "weight_only_checkpointing_steps": 1000,
+                "checkpoints_total_limit": 3,
+            },
+            "tracker": {
+                "project_name": "ci_wan_t2v_dmd_overfit",
+            },
+            "validation": {
+                "enabled": True,
+                "dataset_file": LOCAL_VALIDATION_DATASET_FILE,
+                "every_steps": 50,
+                "sampling_steps": [3],
+                "guidance_scale": 6.0,
+            },
+            "distillation": {
+                "fake_score_learning_rate": 2e-6,
+                "generator_update_interval": 5,
+                "min_timestep_ratio": 0.02,
+                "max_timestep_ratio": 0.98,
+                "real_score_guidance_scale": 3.5,
+            },
+            "ema": {
+                "start_step": 0,
+            },
+            "model": {
+                "enable_gradient_checkpointing_type": "full",
+            },
+        },
+    }
+    LOCAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    training_config_path = LOCAL_OUTPUT_DIR / "training_config.yaml"
+    training_config_path.write_text(yaml.safe_dump(training_config, sort_keys=False))
+
     cmd = [
         "torchrun",
         "--nnodes",
@@ -117,93 +198,8 @@ def run_training():
         "--nproc_per_node",
         NUM_GPUS_PER_NODE_TRAINING,
         TRAINING_ENTRY_FILE_PATH,
-        "--model_path",
-        MODEL_PATH,
-        "--inference_mode",
-        "False",
-        "--pretrained_model_name_or_path",
-        MODEL_PATH,
-        "--data_path",
-        LOCAL_TRAINING_DATA_DIR,
-        "--validation_dataset_file",
-        LOCAL_VALIDATION_DATASET_FILE,
-        "--train_batch_size",
-        "1",
-        "--num_latent_t",
-        "8",
-        "--num_gpus",
-        NUM_GPUS_PER_NODE_TRAINING,
-        "--sp_size",
-        "1",
-        "--tp_size",
-        "1",
-        "--hsdp_replicate_dim",
-        "1",
-        "--hsdp_shard_dim",
-        NUM_GPUS_PER_NODE_TRAINING,
-        "--train_sp_batch_size",
-        "1",
-        "--dataloader_num_workers",
-        "10",
-        "--gradient_accumulation_steps",
-        "1",
-        "--max_train_steps",
-        "501",
-        "--learning_rate",
-        "2e-6",
-        "--fake_score_learning_rate",
-        "2e-6",
-        "--mixed_precision",
-        "bf16",
-        "--training_state_checkpointing_steps",
-        "1000",
-        "--weight_only_checkpointing_steps",
-        "1000",
-        "--validation_steps",
-        "50",
-        "--validation_sampling_steps",
-        "3",
-        "--log_validation",
-        "--checkpoints_total_limit",
-        "3",
-        "--ema_start_step",
-        "0",
-        "--training_cfg_rate",
-        "0.0",
-        "--output_dir",
-        LOCAL_OUTPUT_DIR,
-        "--tracker_project_name",
-        "ci_wan_t2v_dmd_overfit",
-        "--num_height",
-        "480",
-        "--num_width",
-        "832",
-        "--num_frames",
-        "81",
-        "--flow_shift",
-        "8",
-        "--validation_guidance_scale",
-        "6.0",
-        "--weight_decay",
-        "0.01",
-        "--generator_update_interval",
-        "5",
-        "--dmd_denoising_steps",
-        "1000,757,522",
-        "--min_timestep_ratio",
-        "0.02",
-        "--max_timestep_ratio",
-        "0.98",
-        "--seed",
-        "1000",
-        "--real_score_guidance_scale",
-        "3.5",
-        "--dit_precision",
-        "fp32",
-        "--max_grad_norm",
-        "1.0",
-        "--enable_gradient_checkpointing_type",
-        "full",
+        "--config",
+        str(training_config_path),
     ]
 
     print(f"Running training with command: {cmd}")

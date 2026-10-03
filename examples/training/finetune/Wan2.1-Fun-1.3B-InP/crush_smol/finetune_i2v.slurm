@@ -46,74 +46,6 @@ VALIDATION_DATASET_FILE="examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_sm
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 
-# Training arguments
-training_args=(
-  --tracker_project_name wan_i2v_finetune
-  --output_dir "checkpoints/wan_i2v_finetune"
-  --max_train_steps 2000
-  --train_batch_size 2
-  --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
-  --num_latent_t 8
-  --num_height 480
-  --num_width 832
-  --num_frames 77
-  --enable_gradient_checkpointing_type "full"
-)
-
-# Parallel arguments
-parallel_args=(
-  --num_gpus $NUM_GPUS
-  --sp_size $NUM_GPUS
-  --tp_size $NUM_GPUS
-  --hsdp_replicate_dim $SLURM_JOB_NUM_NODES
-  --hsdp_shard_dim $NUM_GPUS
-)
-
-# Model arguments
-model_args=(
-  --model_path $MODEL_PATH
-  --pretrained_model_name_or_path $MODEL_PATH
-)
-
-# Dataset arguments
-dataset_args=(
-  --data_path "$DATA_DIR"
-  --dataloader_num_workers 10
-)
-
-# Validation arguments
-validation_args=(
-  --log_validation
-  --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
-  --validation_sampling_steps "40"
-  --validation_guidance_scale "6.0"
-)
-
-# Optimizer arguments
-optimizer_args=(
-  --learning_rate 1e-5
-  --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
-  --weight_decay 1e-4
-  --max_grad_norm 1.0
-)
-
-# Miscellaneous arguments
-miscellaneous_args=(
-  --inference_mode False
-  --checkpoints_total_limit 3
-  --training_cfg_rate 0.1
-  --multi_phased_distill_schedule "4000-1"
-  --not_apply_cfg_solver
-  --dit_precision "fp32"
-  --num_euler_timesteps 50
-  --ema_start_step 0
-  --enable_gradient_checkpointing_type "full"
-)
-
 srun torchrun \
 --nnodes $SLURM_JOB_NUM_NODES \
 --nproc_per_node $NUM_GPUS \
@@ -121,10 +53,12 @@ srun torchrun \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
     fastvideo/training/wan_i2v_training_pipeline.py \
-    "${parallel_args[@]}" \
-    "${model_args[@]}" \
-    "${dataset_args[@]}" \
-    "${training_args[@]}" \
-    "${optimizer_args[@]}" \
-    "${validation_args[@]}" \
-    "${miscellaneous_args[@]}"
+    --config examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/finetune_i2v_slurm.yaml \
+    --model_path "$MODEL_PATH" \
+    --engine.num_gpus "$NUM_GPUS" \
+    --engine.parallelism.sp_size "$NUM_GPUS" \
+    --engine.parallelism.tp_size "$NUM_GPUS" \
+    --engine.parallelism.hsdp_replicate_dim "$SLURM_JOB_NUM_NODES" \
+    --engine.parallelism.hsdp_shard_dim "$NUM_GPUS" \
+    --training.data.data_path "$DATA_DIR" \
+    --training.validation.dataset_file "$VALIDATION_DATASET_FILE"

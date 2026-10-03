@@ -1,0 +1,52 @@
+# Read by v1_distill_dmd_wan.sh, which passes training.data.data_path, training.validation.dataset_file,
+# engine.num_gpus, and engine.parallelism.hsdp_replicate_dim on the command line.
+model_path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+engine:
+  parallelism:
+    tp_size: 1
+    sp_size: 1
+    hsdp_shard_dim: 1
+  precision:
+    dit: fp32
+    vae: bf16
+pipeline:
+  flow_shift: 8.0
+  dmd_denoising_steps: [1000, 757, 522]
+training:
+  data:
+    dataloader_num_workers: 0
+    num_height: 448
+    num_width: 832
+    num_frames: 77
+    train_batch_size: 1
+    num_latent_t: 20
+    training_cfg_rate: 0.0
+    seed: 1024
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 2.0e-06
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 30000
+    gradient_accumulation_steps: 8
+  checkpoint:
+    output_dir: outputs_dmd/wan_finetune
+    training_state_checkpointing_steps: 400
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: Wan_distillation
+  validation:
+    enabled: true
+    sampling_steps: [3]
+    guidance_scale: 6.0
+    every_steps: 100
+  distillation:
+    real_score_model_path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    fake_score_model_path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    generator_update_interval: 5
+    min_timestep_ratio: 0.02
+    max_timestep_ratio: 0.98
+    real_score_guidance_scale: 3.5
+  ema:
+    start_step: 0

@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
-from copy import deepcopy
 from typing import Any
 
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.schema import ExecutionMode
+from fastvideo.api.training_schema import TrainingRunConfig, load_resolved_run_config
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame2
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 from fastvideo.pipelines.basic.matrixgame2.matrixgame2_i2v_pipeline import (MatrixGame2I2VPipeline)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
-from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.training.training_pipeline import TrainingPipeline, resolve_validation_config
 from fastvideo.utils import is_vsa_available, shallow_asdict
 
 try:
@@ -30,10 +30,10 @@ class MatrixGame2TrainingPipeline(TrainingPipeline):
     """
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift)
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline.flow_shift)
 
-    def create_training_stages(self, training_args: TrainingArgs):
+    def create_training_stages(self, resolved_config: ResolvedGeneratorConfig):
         """
         May be used in future refactors.
         """
@@ -42,25 +42,16 @@ class MatrixGame2TrainingPipeline(TrainingPipeline):
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_matrixgame2
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         logger.info("Initializing validation pipeline...")
-        args_copy = deepcopy(training_args)
-
-        args_copy.inference_mode = True
-        args_copy.dit_cpu_offload = True
-        # args_copy.pipeline_config.vae_config.load_encoder = False
+        validation_config = resolve_validation_config(resolved_config, offload={"dit": True})
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
-        self.validation_pipeline = MatrixGame2I2VPipeline.from_pretrained(training_args.model_path,
-                                                                          args=None,
-                                                                          inference_mode=True,
+        self.validation_pipeline = MatrixGame2I2VPipeline.from_pretrained(resolved_config.model_path,
+                                                                          resolved_config=validation_config,
                                                                           loaded_modules={
                                                                               "transformer":
                                                                               self.get_module("transformer"),
-                                                                          },
-                                                                          tp_size=training_args.tp_size,
-                                                                          sp_size=training_args.sp_size,
-                                                                          num_gpus=training_args.num_gpus,
-                                                                          dit_cpu_offload=True)
+                                                                          })
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -73,12 +64,12 @@ class MatrixGame2TrainingPipeline(TrainingPipeline):
             batch = next(self.train_loader_iter)
 
         latents = batch['vae_latent']
-        latents = latents[:, :, :self.training_args.num_latent_t]
+        latents = latents[:, :, :self.resolved_config.training.data.num_latent_t]
         # encoder_hidden_states = batch['text_embedding']
         # encoder_attention_mask = batch['text_attention_mask']
         clip_features = batch['clip_feature']
         image_latents = batch['first_frame_latent']
-        image_latents = image_latents[:, :, :self.training_args.num_latent_t]
+        image_latents = image_latents[:, :, :self.resolved_config.training.data.num_latent_t]
         pil_image = batch['pil_image']
         infos = batch['info_list']
 
@@ -113,8 +104,9 @@ class MatrixGame2TrainingPipeline(TrainingPipeline):
         assert isinstance(training_batch.image_latents, torch.Tensor)
         image_latents = training_batch.image_latents.to(get_local_torch_device(), dtype=torch.bfloat16)
 
-        temporal_compression_ratio = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_ratio + 1
+        temporal_compression_ratio = (
+            self.resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+        num_frames = (self.resolved_config.training.data.num_latent_t - 1) * temporal_compression_ratio + 1
         batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
         mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height, latent_width)
         mask_lat_size[:, :, 1:] = 0
@@ -154,11 +146,11 @@ class MatrixGame2TrainingPipeline(TrainingPipeline):
         }
         return training_batch
 
-    def _prepare_validation_batch(self, sampling_param: SamplingParam, training_args: TrainingArgs,
+    def _prepare_validation_batch(self, sampling_param: SamplingParam, resolved_config: ResolvedGeneratorConfig,
                                   validation_batch: dict[str, Any], num_inference_steps: int) -> ForwardBatch:
         sampling_param.prompt = validation_batch['prompt']
-        sampling_param.height = training_args.num_height
-        sampling_param.width = training_args.num_width
+        sampling_param.height = resolved_config.training.data.num_height
+        sampling_param.width = resolved_config.training.data.num_width
         sampling_param.image_path = validation_batch.get('image_path') or validation_batch.get('video_path')
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
@@ -167,15 +159,15 @@ class MatrixGame2TrainingPipeline(TrainingPipeline):
 
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        temporal_compression_factor = resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (resolved_config.training.data.num_latent_t - 1) * temporal_compression_factor + 1
         sampling_param.num_frames = num_frames
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
             n_tokens=n_tokens,
             eta=0.0,
-            VSA_sparsity=training_args.VSA_sparsity,
+            VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,
         )
         if "image" in validation_batch and validation_batch["image"] is not None:
             batch.pil_image = validation_batch["image"]
@@ -195,22 +187,13 @@ class MatrixGame2TrainingPipeline(TrainingPipeline):
         return batch
 
 
-def main(args) -> None:
+def main(resolved_config: ResolvedGeneratorConfig) -> None:
     logger.info("Starting training pipeline...")
 
-    pipeline = MatrixGame2TrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
+    pipeline = MatrixGame2TrainingPipeline.from_pretrained(resolved_config.model_path, resolved_config=resolved_config)
     pipeline.train()
     logger.info("Training pipeline done")
 
 
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    args.dit_cpu_offload = False
-    main(args)
+    main(load_resolved_run_config(TrainingRunConfig, mode=ExecutionMode.FINETUNING))

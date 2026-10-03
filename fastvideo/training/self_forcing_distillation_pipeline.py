@@ -11,8 +11,8 @@ from einops import rearrange
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import (cleanup_dist_env_and_memory, get_local_torch_device, get_sp_group, get_world_group)
-from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 
@@ -43,7 +43,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     3. Critic loss trains the fake score model to distinguish real vs fake
     """
 
-    def initialize_training_pipeline(self, training_args: TrainingArgs):
+    def initialize_training_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Initialize the self-forcing training pipeline."""
         # Check if FSDP2 auto wrap is enabled - not supported for self-forcing distillation
         if envs.FASTVIDEO_FSDP2_AUTOWRAP.get():
@@ -55,7 +55,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.generator_ema: EMA_FSDP | None = None
         self.generator_ema_2: EMA_FSDP | None = None
 
-        super().initialize_training_pipeline(training_args)
+        super().initialize_training_pipeline(resolved_config)
         try:
             logger.info("RANK: %s, entered initialize_training_pipeline",
                         self.global_rank,
@@ -68,13 +68,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                                              sigma_min=0.0,
                                                              extra_one_step=True,
                                                              training=True)
-        self.dfake_gen_update_ratio = getattr(training_args, 'dfake_gen_update_ratio', 5)
+        self.dfake_gen_update_ratio = resolved_config.training.self_forcing.dfake_gen_update_ratio
 
-        self.num_frame_per_block = getattr(training_args, 'num_frame_per_block', 3)
-        self.independent_first_frame = getattr(training_args, 'independent_first_frame', False)
-        self.same_step_across_blocks = getattr(training_args, 'same_step_across_blocks', False)
-        self.last_step_only = getattr(training_args, 'last_step_only', False)
-        self.context_noise = getattr(training_args, 'context_noise', 0)
+        self.num_frame_per_block = resolved_config.training.self_forcing.num_frame_per_block
+        self.independent_first_frame = resolved_config.training.self_forcing.independent_first_frame
+        self.same_step_across_blocks = resolved_config.training.self_forcing.same_step_across_blocks
+        self.last_step_only = resolved_config.training.self_forcing.last_step_only
+        self.context_noise = resolved_config.training.self_forcing.context_noise
 
         self.kv_cache1: list[dict[str, Any]] | None = None
         self.crossattn_cache: list[dict[str, Any]] | None = None
@@ -151,7 +151,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         initial_latent = getattr(training_batch, 'image_latent', None)
 
         # Dynamic frame generation logic (adapted from _run_generator)
-        num_training_frames = getattr(self.training_args, 'num_latent_t', 21)
+        num_training_frames = self.resolved_config.training.data.num_latent_t
 
         # During training, the number of generated frames should be uniformly sampled from
         # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
@@ -538,14 +538,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         infos = batch['info_list']
 
         batch_size = encoder_hidden_states.shape[0]
-        vae_config = self.training_args.pipeline_config.vae_config.arch_config
+        vae_config = self.resolved_config.pipeline_config.vae_config.arch_config
         num_channels = vae_config.z_dim
         spatial_compression_ratio = vae_config.spatial_compression_ratio
 
-        latent_height = self.training_args.num_height // spatial_compression_ratio
-        latent_width = self.training_args.num_width // spatial_compression_ratio
+        latent_height = self.resolved_config.training.data.num_height // spatial_compression_ratio
+        latent_width = self.resolved_config.training.data.num_width // spatial_compression_ratio
 
-        latents = torch.randn(batch_size, num_channels, self.training_args.num_latent_t, latent_height,
+        latents = torch.randn(batch_size, num_channels, self.resolved_config.training.data.num_latent_t, latent_height,
                               latent_width).to(get_local_torch_device(), dtype=torch.bfloat16)
 
         training_batch.latents = latents.to(get_local_torch_device(), dtype=torch.bfloat16)
@@ -559,7 +559,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         """
         Self-forcing training step that alternates between generator and critic training.
         """
-        gradient_accumulation_steps = getattr(self.training_args, 'gradient_accumulation_steps', 1)
+        gradient_accumulation_steps = self.resolved_config.training.loop.gradient_accumulation_steps
         train_generator = (self.current_trainstep % self.dfake_gen_update_ratio == 0)
 
         batches = []
@@ -685,7 +685,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         logger.info("Self-forcing specific settings:")
         logger.info("  Generator update ratio: %s", self.dfake_gen_update_ratio)
 
-    def visualize_intermediate_latents(self, training_batch: TrainingBatch, training_args: TrainingArgs, step: int):
+    def visualize_intermediate_latents(self, training_batch: TrainingBatch, resolved_config: ResolvedGeneratorConfig,
+                                       step: int):
         """Add visualization data to tracker logging and save frames to disk."""
         tracker_loss_dict: dict[str, Any] = {}
 
@@ -794,8 +795,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     @profile_region("profiler_region_training_train")
     def train(self) -> None:
         """Main training loop with self-forcing specific logging."""
-        assert self.training_args.seed is not None, "seed must be set"
-        seed = self.training_args.seed
+        assert self.resolved_config.training.data.seed is not None, "seed must be set"
+        seed = self.resolved_config.training.data.seed
 
         # Set the same seed within each SP group to ensure reproducibility
         if self.sp_world_size > 1:
@@ -812,7 +813,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         self.current_trainstep = self.init_steps
 
-        if self.training_args.resume_from_checkpoint:
+        if self.resolved_config.training.checkpoint.resume_from_checkpoint:
             self._resume_from_checkpoint()
             logger.info("Resumed from checkpoint, random states restored")
         else:
@@ -823,22 +824,22 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, self.init_steps)
+        self._log_validation(self.transformer, self.resolved_config, self.init_steps)
 
         progress_bar = tqdm(
-            range(0, self.training_args.max_train_steps),
+            range(0, self.resolved_config.training.loop.max_train_steps),
             initial=self.init_steps,
             desc="Steps",
             disable=self.local_rank > 0,
         )
 
         use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND.get() == "VIDEO_SPARSE_ATTN"
-        for step in range(self.init_steps + 1, self.training_args.max_train_steps + 1):
+        for step in range(self.init_steps + 1, self.resolved_config.training.loop.max_train_steps + 1):
             start_time = time.perf_counter()
             if use_vsa:
-                vsa_sparsity = self.training_args.VSA_sparsity
-                vsa_decay_rate = self.training_args.VSA_decay_rate
-                vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
+                vsa_sparsity = self.resolved_config.engine.attention.vsa_sparsity
+                vsa_decay_rate = self.resolved_config.training.vsa.decay_rate
+                vsa_decay_interval_steps = self.resolved_config.training.vsa.decay_interval_steps
                 if vsa_decay_interval_steps > 1:
                     current_decay_times = min(step // vsa_decay_interval_steps, vsa_sparsity // vsa_decay_rate)
                     current_vsa_sparsity = current_decay_times * vsa_decay_rate
@@ -851,7 +852,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             self.current_trainstep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
 
-            if step >= self.training_args.ema_start_step:
+            if step >= self.resolved_config.training.ema.start_step:
                 self._build_generator_emas(context=f"lazy @ step {step}")
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -895,7 +896,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 if self.generator_ema is not None or self.generator_ema_2 is not None:
                     log_data["ema_enabled"] = self.generator_ema is not None
                     log_data["ema_2_enabled"] = self.generator_ema_2 is not None
-                    log_data["ema_decay"] = self.training_args.ema_decay
+                    log_data["ema_decay"] = self.resolved_config.training.ema.decay
                 else:
                     log_data["ema_enabled"] = False
                     log_data["ema_2_enabled"] = False
@@ -917,17 +918,19 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                 self.tracker.log(log_data, step)
 
-                if self.training_args.log_validation and step % self.training_args.validation_steps == 0 and self.training_args.log_visualization:
-                    self.visualize_intermediate_latents(training_batch, self.training_args, step)
+                if (self.resolved_config.training.validation.enabled
+                        and step % self.resolved_config.training.validation.every_steps == 0
+                        and self.resolved_config.training.validation.log_visualization):
+                    self.visualize_intermediate_latents(training_batch, self.resolved_config, step)
 
-            if (self.training_args.training_state_checkpointing_steps > 0
-                    and step % self.training_args.training_state_checkpointing_steps == 0):
+            if (self.resolved_config.training.checkpoint.training_state_checkpointing_steps > 0
+                    and step % self.resolved_config.training.checkpoint.training_state_checkpointing_steps == 0):
                 print("rank", self.global_rank, "save training state checkpoint at step", step)
                 save_distillation_checkpoint(
                     self.transformer,
                     self.fake_score_transformer,
                     self.global_rank,
-                    self.training_args.output_dir,
+                    self.resolved_config.training.checkpoint.output_dir,
                     step,
                     self.optimizer,
                     self.fake_score_optimizer,
@@ -950,14 +953,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     self.transformer.train()
                 self.sp_group.barrier()
 
-            if (self.training_args.weight_only_checkpointing_steps > 0
-                    and step % self.training_args.weight_only_checkpointing_steps == 0):
+            if (self.resolved_config.training.checkpoint.weight_only_checkpointing_steps > 0
+                    and step % self.resolved_config.training.checkpoint.weight_only_checkpointing_steps == 0):
                 print("rank", self.global_rank, "save weight-only checkpoint at step", step)
                 save_distillation_checkpoint(
                     self.transformer,
                     self.fake_score_transformer,
                     self.global_rank,
-                    self.training_args.output_dir,
+                    self.resolved_config.training.checkpoint.output_dir,
                     f"{step}_weight_only",
                     only_save_generator_weight=True,
                     generator_ema=self.generator_ema,
@@ -971,22 +974,23 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
                     generator_ema_2=getattr(self, 'generator_ema_2', None))
 
-                if self.training_args.use_ema and self.is_ema_ready():
-                    self.save_ema_weights(self.training_args.output_dir, step)
+                if self.resolved_config.training.ema.enabled and self.is_ema_ready():
+                    self.save_ema_weights(self.resolved_config.training.checkpoint.output_dir, step)
 
-            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self._log_validation(self.transformer, self.training_args, step)
+            if (self.resolved_config.training.validation.enabled
+                    and step % self.resolved_config.training.validation.every_steps == 0):
+                self._log_validation(self.transformer, self.resolved_config, step)
 
         self.tracker.finish()
 
         print("rank", self.global_rank, "save final training state checkpoint at step",
-              self.training_args.max_train_steps)
+              self.resolved_config.training.loop.max_train_steps)
         save_distillation_checkpoint(
             self.transformer,
             self.fake_score_transformer,
             self.global_rank,
-            self.training_args.output_dir,
-            self.training_args.max_train_steps,
+            self.resolved_config.training.checkpoint.output_dir,
+            self.resolved_config.training.loop.max_train_steps,
             self.optimizer,
             self.fake_score_optimizer,
             self.train_dataloader,
@@ -1004,8 +1008,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
             generator_ema_2=getattr(self, 'generator_ema_2', None))
 
-        if self.training_args.use_ema and self.is_ema_ready():
-            self.save_ema_weights(self.training_args.output_dir, self.training_args.max_train_steps)
+        if self.resolved_config.training.ema.enabled and self.is_ema_ready():
+            self.save_ema_weights(self.resolved_config.training.checkpoint.output_dir,
+                                  self.resolved_config.training.loop.max_train_steps)
 
         if envs.FASTVIDEO_TORCH_PROFILER_DIR.get():
             logger.info("Stopping profiler...")

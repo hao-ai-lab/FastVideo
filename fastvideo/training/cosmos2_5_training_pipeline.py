@@ -9,17 +9,17 @@ Follows the same structure as wan_training_pipeline.py. Key Cosmos 2.5 specifics
 - Timesteps are sigma values in [0, 1] (flow matching); (B,) is auto-expanded
   inside the model to (B, 1).
 """
-from copy import deepcopy
-
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
+from fastvideo.api.schema import ExecutionMode
+from fastvideo.api.training_schema import TrainingRunConfig, load_resolved_run_config
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (FlowUniPCMultistepScheduler)
 from fastvideo.pipelines.basic.cosmos.cosmos2_5_pipeline import Cosmos2_5Pipeline
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
-from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.training.training_pipeline import TrainingPipeline, resolve_validation_config
 
 logger = init_logger(__name__)
 
@@ -35,28 +35,27 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
 
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Create the flow-matching scheduler with Cosmos 2.5's shift=5.0."""
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline.flow_shift)
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Build a full Cosmos2_5Pipeline that reuses the training transformer."""
         logger.info("Initializing Cosmos 2.5 validation pipeline...")
-        args_copy = deepcopy(training_args)
-        args_copy.inference_mode = True
+        validation_config = resolve_validation_config(
+            resolved_config,
+            offload={
+                "pin_cpu_memory": resolved_config.engine.offload.pin_cpu_memory,
+                "dit": True
+            },
+        )
 
         validation_pipeline = Cosmos2_5Pipeline.from_pretrained(
-            training_args.model_path,
-            args=args_copy,
-            inference_mode=True,
+            resolved_config.model_path,
+            resolved_config=validation_config,
             loaded_modules={
                 "transformer": self.get_module("transformer"),
             },
-            tp_size=training_args.tp_size,
-            sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus,
-            pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True,
         )
         self.validation_pipeline = validation_pipeline
 
@@ -134,21 +133,12 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
 # ---------------------------------------------------------------------------
 
 
-def main(args) -> None:
+def main(resolved_config: ResolvedGeneratorConfig) -> None:
     logger.info("Starting Cosmos 2.5 training pipeline...")
-    pipeline = Cosmos25TrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
+    pipeline = Cosmos25TrainingPipeline.from_pretrained(resolved_config.model_path, resolved_config=resolved_config)
     pipeline.train()
     logger.info("Training pipeline done")
 
 
 if __name__ == "__main__":
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    args.dit_cpu_offload = False
-    main(args)
+    main(load_resolved_run_config(TrainingRunConfig, mode=ExecutionMode.FINETUNING))

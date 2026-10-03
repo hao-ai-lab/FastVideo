@@ -14,8 +14,7 @@ from fastvideo.utils import logger
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 from fastvideo.training.wan_training_pipeline import main
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.utils import FlexibleArgumentParser
+from fastvideo.api.training_schema import resolve_training_config
 from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
 
 wandb_name = "test_training_loss"
@@ -29,31 +28,71 @@ NUM_GPUS_PER_NODE = "2"
 
 def run_worker():
     """Worker function that will be run on each GPU"""
-    # Create and populate args
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-
     # Set the arguments as they are in finetune_v1_test.sh
-    args = parser.parse_args([
-        "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--inference_mode", "False",
-        "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--data_path",
-        "data/crush-smol_processed_t2v/combined_parquet_dataset", "--validation_dataset_file",
-        "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json", "--train_batch_size", "2",
-        "--num_latent_t", "4", "--num_gpus", "2", "--sp_size", "2", "--tp_size", "2", "--hsdp_replicate_dim", "1",
-        "--hsdp_shard_dim", "2", "--train_sp_batch_size", "1", "--dataloader_num_workers", "1",
-        "--gradient_accumulation_steps", "2", "--max_train_steps", "5", "--learning_rate", "1e-6", "--mixed_precision",
-        "bf16", "--weight_only_checkpointing_steps", "30", "--training_state_checkpointing_steps", "30",
-        "--validation_steps", "10", "--validation_sampling_steps", "8", "--log_validation", "--checkpoints_total_limit",
-        "3", "--ema_start_step", "0", "--training_cfg_rate", "0.0", "--output_dir", "data/wan_finetune_test",
-        "--tracker_project_name", "wan_finetune_ci", "--wandb_run_name", wandb_name, "--num_height", "480",
-        "--num_width", "832", "--num_frames", "81", "--flow_shift", "3", "--validation_guidance_scale", "3.0",
-        "--num_euler_timesteps", "50", "--multi_phased_distill_schedule", "4000-1", "--weight_decay", "0.01",
-        "--not_apply_cfg_solver", "--dit_precision", "fp32", "--max_grad_norm", "1.0"
-    ])
+    training_run_config = {
+        "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "engine": {
+            "num_gpus": 2,
+            "parallelism": {
+                "sp_size": 2,
+                "tp_size": 2,
+                "hsdp_replicate_dim": 1,
+                "hsdp_shard_dim": 2,
+            },
+            "precision": {
+                "dit": "fp32",
+            },
+        },
+        "pipeline": {
+            "flow_shift": 3.0,
+        },
+        "training": {
+            "data": {
+                "data_path": "data/crush-smol_processed_t2v/combined_parquet_dataset",
+                "train_batch_size": 2,
+                "num_latent_t": 4,
+                "train_sp_batch_size": 1,
+                "dataloader_num_workers": 1,
+                "training_cfg_rate": 0.0,
+                "num_height": 480,
+                "num_width": 832,
+                "num_frames": 81,
+            },
+            "optimizer": {
+                "learning_rate": 1e-6,
+                "weight_decay": 0.01,
+                "max_grad_norm": 1.0,
+            },
+            "loop": {
+                "gradient_accumulation_steps": 2,
+                "max_train_steps": 5,
+            },
+            "checkpoint": {
+                "output_dir": "data/wan_finetune_test",
+                "weight_only_checkpointing_steps": 30,
+                "training_state_checkpointing_steps": 30,
+                "checkpoints_total_limit": 3,
+            },
+            "tracker": {
+                "project_name": "wan_finetune_ci",
+                "run_name": wandb_name,
+            },
+            "validation": {
+                "enabled": True,
+                "dataset_file": "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json",
+                "every_steps": 10,
+                "sampling_steps": [8],
+                "guidance_scale": 3.0,
+            },
+            "ema": {
+                "start_step": 0,
+            },
+        },
+    }
+    resolved_config = resolve_training_config(training_run_config)
     # Call the main training function
-    pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
+    pipeline = WanTrainingPipeline.from_pretrained(resolved_config.model_path, resolved_config=resolved_config)
+    resolved_config = pipeline.resolved_config
     pipeline.train()
     logger.info("Training pipeline done")
 

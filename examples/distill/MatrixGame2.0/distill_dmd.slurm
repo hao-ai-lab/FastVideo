@@ -63,93 +63,6 @@ FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
 DATA_DIR="data/matrixgame2"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
 
-training_args=(
-  --tracker_project_name "matrixgame2_sf"
-  --output_dir "checkpoints/matrixgame2_sf_${RUN_NAME}"
-  --wandb_run_name "${RUN_NAME}_test"
-  --max_train_steps 1200
-  --train_batch_size 1
-  --train_sp_batch_size 1
-  --gradient_accumulation_steps 2
-  --num_latent_t 21
-  --num_height 352
-  --num_width 640
-  --simulate_generator_forward
-  --num_frames 81
-  --num_frame_per_block 3
-  # --init_weights_from_safetensors "path/to/generator_ema.safetensors"
-)
-
-parallel_args=(
-  --num_gpus "${TOTAL_GPUS}"
-  --sp_size 1
-  --tp_size 1
-  --hsdp_replicate_dim 1
-  --hsdp_shard_dim "${TOTAL_GPUS}"
-)
-
-model_args=(
-  --model_path "${GENERATOR_MODEL_PATH}"
-  --pretrained_model_name_or_path "${GENERATOR_MODEL_PATH}"
-  --real_score_model_path "${REAL_SCORE_MODEL_PATH}"
-  --fake_score_model_path "${FAKE_SCORE_MODEL_PATH}"
-)
-
-dataset_args=(
-  --data_path "${DATA_DIR}"
-  --dataloader_num_workers 4
-)
-
-validation_args=(
-  --log_validation
-  --log_visualization
-  --visualization-steps 100
-  --validation_dataset_file "${VALIDATION_DATASET_FILE}"
-  --validation_steps 100
-  --validation_sampling_steps "4"
-  --validation_guidance_scale "6.0"
-)
-
-optimizer_args=(
-  --learning_rate 3e-6
-  --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 400
-  --training_state_checkpointing_steps 400
-  --weight_decay 0
-  --betas "0.9,0.95"
-  --max_grad_norm 1.0
-)
-
-miscellaneous_args=(
-  --inference_mode False
-  --checkpoints_total_limit 3
-  --training_cfg_rate 0.0
-  --dit_precision "fp32"
-  --flow_shift 5
-  --seed 1000
-  --use_ema True
-  --ema_decay 0.99
-  --ema_start_step 200
-)
-
-dmd_args=(
-  --dmd_denoising_steps "1000,750,500,250"
-  --min_timestep_ratio 0.02
-  --max_timestep_ratio 0.98
-  --dfake_gen_update_ratio 5
-  --real_score_guidance_scale 3.0
-  --fake_score_learning_rate 3e-7
-  --fake_score_betas "0.9,0.95"
-  --warp_denoising_step
-)
-
-self_forcing_args=(
-  --independent_first_frame False
-  --same_step_across_blocks True
-  --last_step_only False
-  --context_noise 0
-)
-
 srun python -m torch.distributed.run \
   --nnodes "${SLURM_JOB_NUM_NODES}" \
   --nproc_per_node "${GPUS_PER_NODE}" \
@@ -157,12 +70,13 @@ srun python -m torch.distributed.run \
   --rdzv_backend=c10d \
   --rdzv_endpoint="${MASTER_ADDR}:${MASTER_PORT}" \
   fastvideo/training/matrixgame2_self_forcing_distillation_pipeline.py \
-  "${parallel_args[@]}" \
-  "${model_args[@]}" \
-  "${dataset_args[@]}" \
-  "${training_args[@]}" \
-  "${optimizer_args[@]}" \
-  "${validation_args[@]}" \
-  "${miscellaneous_args[@]}" \
-  "${dmd_args[@]}" \
-  "${self_forcing_args[@]}"
+  --config examples/distill/MatrixGame2.0/distill_dmd_slurm.yaml \
+  --model_path "${GENERATOR_MODEL_PATH}" \
+  --engine.num_gpus "${TOTAL_GPUS}" \
+  --engine.parallelism.hsdp_shard_dim "${TOTAL_GPUS}" \
+  --training.distillation.real_score_model_path "${REAL_SCORE_MODEL_PATH}" \
+  --training.distillation.fake_score_model_path "${FAKE_SCORE_MODEL_PATH}" \
+  --training.data.data_path "${DATA_DIR}" \
+  --training.checkpoint.output_dir "checkpoints/matrixgame2_sf_${RUN_NAME}" \
+  --training.tracker.run_name "${RUN_NAME}_test" \
+  --training.validation.dataset_file "${VALIDATION_DATASET_FILE}"

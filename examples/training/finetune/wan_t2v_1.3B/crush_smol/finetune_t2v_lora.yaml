@@ -1,0 +1,43 @@
+# Read by finetune_t2v_lora.sh, which passes model_path, engine.num_gpus, engine.parallelism.sp_size,
+# engine.parallelism.tp_size, engine.parallelism.hsdp_shard_dim, training.data.data_path, and
+# training.validation.dataset_file on the command line.
+engine:
+  parallelism:
+    hsdp_replicate_dim: 1
+  precision:
+    dit: fp32
+training:
+  data:
+    dataloader_num_workers: 1
+    num_height: 480
+    num_width: 832
+    num_frames: 77
+    train_batch_size: 1
+    num_latent_t: 20
+    training_cfg_rate: 0.1
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 5.0e-05
+    weight_decay: 0.0001
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 5000
+    gradient_accumulation_steps: 8
+  checkpoint:
+    output_dir: checkpoints/wan_t2v_finetune_lora
+    resume_from_checkpoint: checkpoints/wan_t2v_finetune_lora/checkpoint-160
+    training_state_checkpointing_steps: 400
+    weight_only_checkpointing_steps: 400
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: wan_t2v_finetune
+  validation:
+    enabled: true
+    sampling_steps: [50]
+    guidance_scale: 6.0
+    every_steps: 200
+  ema:
+    start_step: 0
+  lora:
+    enabled: true
+    rank: 32

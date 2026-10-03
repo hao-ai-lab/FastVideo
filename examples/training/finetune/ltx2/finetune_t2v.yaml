@@ -1,0 +1,45 @@
+# Read by finetune_t2v.sh, which passes model_path, engine.num_gpus, engine.parallelism.hsdp_shard_dim,
+# training.data.data_path, training.data.num_height, training.data.num_width, training.data.num_frames, and
+# training.validation.dataset_file on the command line.
+engine:
+  parallelism:
+    tp_size: 1
+    sp_size: 2
+    hsdp_replicate_dim: 1
+  offload:
+    dit: false
+    dit_layerwise: false
+    text_encoder: false
+    image_encoder: false
+    vae: false
+  precision:
+    dit: fp32
+training:
+  data:
+    dataloader_num_workers: 1
+    train_batch_size: 1
+    num_latent_t: 16
+    train_sp_batch_size: 1
+  optimizer:
+    learning_rate: 1.0e-05
+    weight_decay: 0.0001
+    lr_scheduler: linear
+    max_grad_norm: 1.0
+  loop:
+    max_train_steps: 5000
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: checkpoints/ltx2_t2v_finetune
+    training_state_checkpointing_steps: 1000
+    weight_only_checkpointing_steps: 1000
+    checkpoints_total_limit: 3
+  tracker:
+    project_name: ltx2_t2v_finetune
+  validation:
+    enabled: true
+    sampling_steps: [8]
+    guidance_scale: 1.0
+    every_steps: 20
+  model:
+    enable_gradient_checkpointing_type: full
+    ltx2_first_frame_conditioning_p: 0.0

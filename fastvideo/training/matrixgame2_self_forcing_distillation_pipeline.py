@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from collections.abc import Iterable
-from copy import deepcopy
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from einops import rearrange
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.api.schema import ExecutionMode
+from fastvideo.api.training_schema import TrainingRunConfig, load_resolved_run_config
 from fastvideo.dataset.dataloader.schema import (pyarrow_schema_matrixgame2)
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
@@ -21,6 +21,7 @@ from fastvideo.pipelines import ComposedPipelineBase
 from fastvideo.pipelines.basic.matrixgame2.matrixgame2_causal_dmd_pipeline import (MatrixGame2CausalDMDPipeline)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.self_forcing_distillation_pipeline import (SelfForcingDistillationPipeline)
+from fastvideo.training.training_pipeline import resolve_validation_config
 from fastvideo.training.training_utils import shift_timestep
 from fastvideo.utils import is_vsa_available, shallow_asdict
 
@@ -47,7 +48,7 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
     def load_modules(
         self,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         loaded_modules: dict[str, torch.nn.Module] | None = None,
     ) -> dict[str, Any]:
         modules = ComposedPipelineBase.load_modules(
@@ -55,43 +56,42 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             resolved_config,
             loaded_modules,
         )
-        training_args = cast(TrainingArgs, resolved_config)
-        old_override = training_args.override_transformer_cls_name
-        training_args.override_transformer_cls_name = "MatrixGame2WanModel"
-        try:
-            if loaded_modules is not None and "real_score_transformer" in loaded_modules:
-                self.real_score_transformer = loaded_modules["real_score_transformer"]
-            elif training_args.real_score_model_path:
-                logger.info(
-                    "Loading real score transformer from: %s",
-                    training_args.real_score_model_path,
-                )
-                self.real_score_transformer = self.load_module_from_path(
-                    training_args.real_score_model_path,
-                    "transformer",
-                    training_args,
-                )
-            else:
-                raise ValueError("real_score_model_path is required for DMD distillation pipeline")
-            modules["real_score_transformer"] = self.real_score_transformer
+        # The teacher (real score) and critic (fake score) load as the bidirectional MatrixGame2WanModel class.
+        teacher_config = resolved_config.with_override(
+            "MatrixGame2SelfForcingDistillationPipeline.load_modules",
+            {"pipeline.components.override_transformer_cls_name": "MatrixGame2WanModel"},
+        )
+        if loaded_modules is not None and "real_score_transformer" in loaded_modules:
+            self.real_score_transformer = loaded_modules["real_score_transformer"]
+        elif resolved_config.training.distillation.real_score_model_path:
+            logger.info(
+                "Loading real score transformer from: %s",
+                resolved_config.training.distillation.real_score_model_path,
+            )
+            self.real_score_transformer = self.load_module_from_path(
+                resolved_config.training.distillation.real_score_model_path,
+                "transformer",
+                teacher_config,
+            )
+        else:
+            raise ValueError("real_score_model_path is required for DMD distillation pipeline")
+        modules["real_score_transformer"] = self.real_score_transformer
 
-            if loaded_modules is not None and "fake_score_transformer" in loaded_modules:
-                self.fake_score_transformer = loaded_modules["fake_score_transformer"]
-            elif training_args.fake_score_model_path:
-                logger.info(
-                    "Loading fake score transformer from: %s",
-                    training_args.fake_score_model_path,
-                )
-                self.fake_score_transformer = self.load_module_from_path(
-                    training_args.fake_score_model_path,
-                    "transformer",
-                    training_args,
-                )
-            else:
-                raise ValueError("fake_score_model_path is required for DMD distillation pipeline")
-            modules["fake_score_transformer"] = self.fake_score_transformer
-        finally:
-            training_args.override_transformer_cls_name = old_override
+        if loaded_modules is not None and "fake_score_transformer" in loaded_modules:
+            self.fake_score_transformer = loaded_modules["fake_score_transformer"]
+        elif resolved_config.training.distillation.fake_score_model_path:
+            logger.info(
+                "Loading fake score transformer from: %s",
+                resolved_config.training.distillation.fake_score_model_path,
+            )
+            self.fake_score_transformer = self.load_module_from_path(
+                resolved_config.training.distillation.fake_score_model_path,
+                "transformer",
+                teacher_config,
+            )
+        else:
+            raise ValueError("fake_score_model_path is required for DMD distillation pipeline")
+        modules["fake_score_transformer"] = self.fake_score_transformer
 
         self.real_score_transformer_2 = None
         self.fake_score_transformer_2 = None
@@ -109,7 +109,7 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                              f"first_frame_latent, got {image_latents.shape[1]} channels.")
 
         temporal_compression_ratio = (
-            self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
+            self.resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio)
         num_latent_t = image_latents.shape[2]
         num_frames = ((num_latent_t - 1) * temporal_compression_ratio + 1)
         batch_size, _, _, latent_height, latent_width = image_latents.shape
@@ -320,7 +320,7 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         dtype = latents.dtype
         batch_size = latents.shape[0]
 
-        num_training_frames = getattr(self.training_args, 'num_latent_t', 21)
+        num_training_frames = self.resolved_config.training.data.num_latent_t
         min_num_frames = 20 if self.independent_first_frame else 21
         max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
         assert max_num_frames % self.num_frame_per_block == 0
@@ -581,34 +581,37 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         return final_output if gradient_mask is not None else pred_image_or_video
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         logger.info("Initializing validation pipeline...")
-        args_copy = deepcopy(training_args)
-        args_copy.inference_mode = True
         # Use the same flow-matching scheduler as training for consistent validation.
-        validation_scheduler = SelfForcingFlowMatchScheduler(shift=args_copy.pipeline_config.flow_shift,
+        validation_scheduler = SelfForcingFlowMatchScheduler(shift=self.resolved_config.pipeline.flow_shift,
                                                              sigma_min=0.0,
                                                              extra_one_step=True)
         validation_scheduler.set_timesteps(num_inference_steps=1000, training=True)
-        # Warm start validation with current transformer
-        self.validation_pipeline = MatrixGame2CausalDMDPipeline.from_pretrained(
-            training_args.model_path,
-            args=args_copy,  # type: ignore
-            inference_mode=True,
-            loaded_modules={
-                "transformer": self.get_module("transformer"),
-                "vae": self.get_module("vae"),
-                "scheduler": validation_scheduler,
+        # The VAE is the training pipeline's own, so the validation stages move it as the training run does.
+        validation_config = resolve_validation_config(
+            self.resolved_config,
+            offload={
+                "pin_cpu_memory": self.resolved_config.engine.offload.pin_cpu_memory,
+                "dit": True,
+                "vae": self.resolved_config.engine.offload.vae,
             },
-            tp_size=training_args.tp_size,
-            sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus,
-            pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True)
+        )
+        # Warm start validation with current transformer
+        self.validation_pipeline = MatrixGame2CausalDMDPipeline.from_pretrained(self.resolved_config.model_path,
+                                                                                resolved_config=validation_config,
+                                                                                loaded_modules={
+                                                                                    "transformer":
+                                                                                    self.get_module("transformer"),
+                                                                                    "vae":
+                                                                                    self.get_module("vae"),
+                                                                                    "scheduler":
+                                                                                    validation_scheduler,
+                                                                                })
 
         if not hasattr(self.validation_pipeline, "prompt_encoding_stage"):
             # validation expects a prompt stage
-            def _prompt_encoding_stage(batch: ForwardBatch, _args: TrainingArgs) -> ForwardBatch:
+            def _prompt_encoding_stage(batch: ForwardBatch, _args: ResolvedGeneratorConfig) -> ForwardBatch:
                 if not batch.prompt_embeds:
                     batch.prompt_embeds = [None]
                 if batch.prompt_attention_mask is None or not batch.prompt_attention_mask:
@@ -633,14 +636,14 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         infos = batch['info_list']
 
         batch_size = clip_feature.shape[0]
-        vae_config = self.training_args.pipeline_config.vae_config.arch_config
+        vae_config = self.resolved_config.pipeline_config.vae_config.arch_config
         num_channels = vae_config.z_dim
         spatial_compression_ratio = vae_config.spatial_compression_ratio
 
-        latent_height = self.training_args.num_height // spatial_compression_ratio
-        latent_width = self.training_args.num_width // spatial_compression_ratio
+        latent_height = self.resolved_config.training.data.num_height // spatial_compression_ratio
+        latent_width = self.resolved_config.training.data.num_width // spatial_compression_ratio
 
-        latents = torch.randn(batch_size, num_channels, self.training_args.num_latent_t, latent_height,
+        latents = torch.randn(batch_size, num_channels, self.resolved_config.training.data.num_latent_t, latent_height,
                               latent_width).to(get_local_torch_device(), dtype=torch.bfloat16)
 
         training_batch.latents = latents.to(get_local_torch_device(), dtype=torch.bfloat16)
@@ -680,7 +683,7 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         if self.sp_world_size > 1:
             total_frames = image_latents.shape[2]
             # Split cond latents to local SP shard only when tensor is still global.
-            if total_frames == self.training_args.num_latent_t:
+            if total_frames == self.resolved_config.training.data.num_latent_t:
                 if total_frames % self.sp_world_size != 0:
                     raise ValueError("image_latents temporal dim is not divisible by SP world size: "
                                      f"frames={total_frames}, sp_world_size={self.sp_world_size}")
@@ -798,7 +801,7 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         """Forward pass for critic training with Matrix-Game 2.0 action conditioning."""
         with torch.no_grad(), set_forward_context(current_timestep=training_batch.timesteps,
                                                   attn_metadata=training_batch.attn_metadata_vsa):
-            if self.training_args.simulate_generator_forward:
+            if self.resolved_config.training.distillation.simulate_generator_forward:
                 generator_pred_video = self._generator_multi_step_simulation_forward(training_batch)
             else:
                 generator_pred_video = self._generator_forward(training_batch)
@@ -835,11 +838,11 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         return training_batch, flow_matching_loss
 
-    def _prepare_validation_batch(self, sampling_param: SamplingParam, training_args: TrainingArgs,
+    def _prepare_validation_batch(self, sampling_param: SamplingParam, resolved_config: ResolvedGeneratorConfig,
                                   validation_batch: dict[str, Any], num_inference_steps: int) -> ForwardBatch:
         sampling_param.prompt = validation_batch['prompt']
-        sampling_param.height = training_args.num_height
-        sampling_param.width = training_args.num_width
+        sampling_param.height = resolved_config.training.data.num_height
+        sampling_param.width = resolved_config.training.data.num_width
         sampling_param.image_path = validation_batch.get('image_path') or validation_batch.get('video_path')
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
@@ -848,15 +851,15 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1, sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        temporal_compression_factor = resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (resolved_config.training.data.num_latent_t - 1) * temporal_compression_factor + 1
         sampling_param.num_frames = num_frames
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
             n_tokens=n_tokens,
             eta=0.0,
-            VSA_sparsity=training_args.VSA_sparsity,
+            VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,
         )
         if "image" in validation_batch and validation_batch["image"] is not None:
             batch.pil_image = validation_batch["image"]
@@ -876,22 +879,15 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         return batch
 
 
-def main(args) -> None:
+def main(resolved_config: ResolvedGeneratorConfig) -> None:
     logger.info("Starting Matrix-Game 2.0 self-forcing distillation pipeline...")
 
-    pipeline = MatrixGame2SelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
+    pipeline = MatrixGame2SelfForcingDistillationPipeline.from_pretrained(resolved_config.model_path,
+                                                                          resolved_config=resolved_config)
 
-    args = pipeline.training_args
     pipeline.train()
     logger.info("Matrix-Game 2.0 self-forcing distillation pipeline completed")
 
 
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    main(args)
+    main(load_resolved_run_config(TrainingRunConfig, mode=ExecutionMode.DISTILLATION))
