@@ -114,10 +114,13 @@ path. Ten CUDA tests passed on the 4090, including mixed partial tiles,
 active/zero gates, fused/unfused RoPE and FP8/nonquantized projections.
 
 The original 1344×768 baseline failed with a GPU OOM in post-attention
-modulation before the FFN. No successful 768p timing is established yet.
-A profiling run was launched with the following command; retrieve its
-results when SSH access is restored. The server recognizes the public key; the
-local passphrase-protected private key needs its agent/keychain identity loaded. Profiling/capture timings are
+modulation before the FFN. The tile-first/FFN-16384 profiling run subsequently completed all three
+768p clips without OOM: diagnostic median 349.76 s, denoise stage 244.07 s,
+video decode stage 65.94 s, peak GPU allocated 17.55 GiB. A run without
+profiling is still required for a release speed claim.
+The profiling run used the following command. For SSH on macOS,
+`-o UseKeychain=yes` retrieves the stored passphrase when the agent has no
+loaded identities. Profiling/capture timings are
 for diagnosis and must not be used as the final speed claim.
 
 ```bash
@@ -138,7 +141,10 @@ row indices. Disable both capture and profiling for final clip timings.
 
 The separate `minimax_h3_sparse_int8.py` prototype uses INT8 QK and FP8 PV,
 FP32 accumulators and the original 64-token mask. It has no automatic pipeline
-route. Offline compilation with Triton 3.8.0 for sm89 passed all four entry points
+route. Initial real-QKV tests found approximately 1.9× fine-kernel speedup
+but 4.3–13.4% relative L2 error and a strict partial-tile elementwise test
+failure. Do not select it for shipping. The microbenchmark now includes
+BF16 QK/PV ablations to isolate that error. Offline compilation with Triton 3.8.0 for sm89 passed all four entry points
 and emitted native INT8 and FP8 MMA instructions (20,480 bytes of shared
 memory for the attention kernel). This is compilation evidence only. It must
 pass CUDA tests and real-QKV/clip checks before integration.
@@ -155,3 +161,48 @@ with CUDA 12.8, `TORCH_CUDA_ARCH_LIST=8.9`, and `MAX_JOBS=4`. The upstream
 avoid GCC 13 duplicate standard-library definitions. It is not selected by
 the pipeline: its public 128-query/64-key adapter also needs correct masking
 of partial H3 tiles before a meaningful parity comparison.
+
+## Cached-component 480p result
+
+At `4d9846573`, retain components between requests (omit `--lazy`), and set
+`FASTVIDEO_H3_VSA_TILE_FIRST=1` and `FASTVIDEO_H3_FFN_CHUNK_TOKENS=16384`.
+Keep all other baseline settings, including the eager light VAE and original
+BF16 attention kernel. After one warmup the two timed requests took 115.87 s
+and 115.03 s, median **115.45 s** (29.3% less wall time than the lazy baseline).
+Conditioning/denoise/video-decode stage medians were 10.85/72.62/24.98 s.
+Peak GPU allocation was 19.02 GiB, host anon 43.96 GiB, total cgroup 92.72 GiB
+including file cache. This recipe requires more host RAM than the 32 GB target;
+its minimum RAM has not been tested under a smaller host limit.
+
+Decoded raw video and PCM audio SHA256 hashes match the baseline exactly for
+both ceramics and harbor at seed 20260929. This establishes output identity
+for these two prompts; it does not establish the checkpoint's BF16-reference
+quality on other prompts. Raw results, clips and hash evidence are saved in
+`output/fasth3-4090-20261003/` beside the workspace.
+
+## sm89 kernel precision choices
+
+`FASTVIDEO_H3_VSA_SM89_KERNEL=bf16` opts into the new entirely BF16 tile-64
+fine kernel. `int8` uses per-token INT8 QK with BF16 PV. `original` is the
+unchanged default. Resolution happens when the backend is constructed;
+unsupported devices, grad and compile requests retain the original route.
+Both preserve the original tile selection, partial key masks and gated
+compression. The rejected FP8-PV experiment is only exposed in the diagnostic
+microbenchmark, never the pipeline route.
+
+Two-head real-QKV captures at 1344×768, layers 0/20/41, measured:
+
+| QK / PV | Fine-kernel speedup including input quantization | Relative L2 vs original BF16 |
+| --- | --- | --- |
+| BF16 / BF16 | 1.23× | 0.005–0.008% |
+| INT8 / BF16 | 1.59× | 0.58–0.62% |
+| INT8 / FP8 (rejected) | 1.91× | 4.3–13.4% |
+
+These are fine-kernel microbenchmarks, not end-to-end clip speedups. Same-seed
+clip checks are required for the INT8 route. All 44 targeted CUDA/CPU checks
+passed for native/tile-first routing, partial tiles, learned compression,
+shared FP8 projections and sequential component restoration.
+
+At `9a8465ac4`, CPU-offloaded VAEs also remain on the host during denoising;
+the encode/decode stages move them on demand. This frees room for resident
+DiT blocks without changing any model arithmetic.
