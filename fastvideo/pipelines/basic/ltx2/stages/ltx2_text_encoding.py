@@ -32,7 +32,7 @@ class LTX2TextEncodingStage(TextEncodingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         sp_group = get_sp_group()
         sp_world_size = sp_group.world_size
@@ -40,13 +40,13 @@ class LTX2TextEncodingStage(TextEncodingStage):
 
         # Single GPU or no SP: use parent implementation
         if sp_world_size <= 1:
-            return super().forward(batch, fastvideo_args)
+            return super().forward(batch, resolved_config)
 
         # SP enabled: only rank 0 encodes, then broadcasts
         if sp_rank == 0:
             logger.info("[LTX2TextEncodingStage] SP rank 0: running text encoding")
             # Run encoding on rank 0
-            result_batch = super().forward(batch, fastvideo_args)
+            result_batch = super().forward(batch, resolved_config)
 
             # Build broadcast dict from batch
             broadcast_dict = self._build_broadcast_dict(result_batch)

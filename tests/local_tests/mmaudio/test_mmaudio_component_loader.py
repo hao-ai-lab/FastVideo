@@ -33,12 +33,12 @@ def test_indexed_image_encoder_uses_matching_config_and_precision(tmp_path) -> N
             model_path,
             model_config,
             target_device,
-            fastvideo_args,
+            resolved_config,
             dtype="fp16",
             use_text_encoder_override=False,
             cpu_offload=None,
         ):
-            del model_path, target_device, fastvideo_args, use_text_encoder_override
+            del model_path, target_device, resolved_config, use_text_encoder_override
             return model_config, dtype, cpu_offload
 
     vision_config = MMAudioDFNCLIPVisionConfig()

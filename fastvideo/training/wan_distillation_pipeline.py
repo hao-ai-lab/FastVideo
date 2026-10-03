@@ -24,9 +24,9 @@ class WanDistillationPipeline(DistillationPipeline):
     """
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         """Initialize Wan-specific scheduler."""
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=resolved_config.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         """

@@ -25,7 +25,7 @@ logger = init_logger(__name__)
 class BasePreprocessPipeline(ComposedPipelineBase):
     """Base class for preprocessing pipelines that handles common functionality."""
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
@@ -37,7 +37,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         args,
     ):
         if not self.post_init_called:
@@ -46,9 +46,9 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
-        self.preprocess_video_and_text(fastvideo_args, args)
+        self.preprocess_video_and_text(resolved_config, args)
 
-    def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def get_extra_features(self, valid_data: dict[str, Any], resolved_config: FastVideoArgs) -> dict[str, Any]:
         """Get additional features specific to the pipeline type. Override in subclasses."""
         return {}
 
@@ -232,7 +232,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             record.update(extra_features)
         return record
 
-    def preprocess_video_and_text(self, fastvideo_args: FastVideoArgs, args):
+    def preprocess_video_and_text(self, resolved_config: FastVideoArgs, args):
         os.makedirs(args.output_dir, exist_ok=True)
         # Create directory for combined data
         combined_parquet_dir = os.path.join(args.output_dir, "combined_parquet_dataset")
@@ -293,7 +293,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                         get_local_torch_device())).mean
 
                 # Get extra features if needed
-                extra_features = self.get_extra_features(valid_data, fastvideo_args)
+                extra_features = self.get_extra_features(valid_data, resolved_config)
 
                 batch_captions = valid_data["text"]
                 batch = ForwardBatch(
@@ -304,7 +304,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 )
 
                 if hasattr(self, "prompt_encoding_stage"):
-                    result_batch = self.prompt_encoding_stage(batch, fastvideo_args)
+                    result_batch = self.prompt_encoding_stage(batch, resolved_config)
                     prompt_embeds, prompt_attention_mask = result_batch.prompt_embeds[
                         0], result_batch.prompt_attention_mask[0]
                     assert prompt_embeds.shape[0] == prompt_attention_mask.shape[0]

@@ -17,10 +17,10 @@ class MatrixGame3I2VPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "text_encoder", "tokenizer"]
     _extra_config_module_map = {"vae": "light_vae"}
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift)
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(stage_name="prompt_encoding_stage",

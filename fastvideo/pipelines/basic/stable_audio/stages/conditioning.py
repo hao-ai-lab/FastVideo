@@ -20,15 +20,15 @@ class StableAudioConditioningStage(PipelineStage):
         super().__init__()
         self.conditioner = conditioner
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        pc = fastvideo_args.pipeline_config
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+        pc = resolved_config.pipeline_config
         device = next(self.conditioner.parameters()).device
 
         start_attr = getattr(batch, "audio_start_in_s", None)

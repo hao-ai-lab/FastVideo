@@ -30,10 +30,10 @@ class GlmImagePipeline(LoRAPipeline, ComposedPipelineBase):
 
     _optional_config_modules: list[str] = []
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
+    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=1.0)
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         self.add_stage(
             stage_name="input_validation_stage",
             stage=InputValidationStage(),

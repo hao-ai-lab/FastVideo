@@ -27,12 +27,12 @@ class TurboDiffusionPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         # Use RCM scheduler for TurboDiffusion
         logger.info("Initializing RCM scheduler for TurboDiffusion")
         self.modules["scheduler"] = RCMScheduler(sigma_max=80.0)
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

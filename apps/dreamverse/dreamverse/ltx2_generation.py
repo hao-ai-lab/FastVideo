@@ -407,7 +407,7 @@ class LTX2GenerationBackend:
             return
 
         loader = ComponentLoader.for_module_type("audio_encoder", "diffusers")
-        enc = loader.load(audio_vae_path, self.generator.fastvideo_args)
+        enc = loader.load(audio_vae_path, self.generator.resolved_config)
         target = getattr(enc, "model", enc)
 
         proc = AudioProcessor(

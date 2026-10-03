@@ -123,7 +123,7 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
             self.vl_processor = processor
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         device = get_local_torch_device()
         dtype = torch.bfloat16
         th, tw, pth, ptw = _grid_dims(batch.height, batch.width)
@@ -258,12 +258,12 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
         batch.extra["glm_prior_token_image_ids"] = torch.cat(upsampled, dim=0)
         batch.extra["glm_source_image_grid_thw"] = src_grids_up
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, V.string_not_empty)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prior_token_id", batch.prior_token_id, V.is_tensor)
         return result

@@ -76,15 +76,15 @@ class StableAudioDenoisingStage(PipelineStage):
         s = max(0.0, min(1.0, float(strength) if strength is not None else 0.6))
         return float(math.exp(self._LOG_SIGMA_MAX - s * (self._LOG_SIGMA_MAX - self._LOG_SIGMA_MIN)))
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        pc = fastvideo_args.pipeline_config
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+        pc = resolved_config.pipeline_config
         ext = batch.extra
         device = batch.latents.device
         guidance_scale = float(batch.guidance_scale or pc.guidance_scale)

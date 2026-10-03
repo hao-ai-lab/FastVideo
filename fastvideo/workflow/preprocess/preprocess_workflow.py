@@ -20,11 +20,11 @@ logger = init_logger(__name__)
 class PreprocessWorkflow(WorkflowBase):
 
     def register_pipelines(self) -> None:
-        self.add_pipeline_config("preprocess_pipeline", (PipelineType.PREPROCESS, self.fastvideo_args))
+        self.add_pipeline_config("preprocess_pipeline", (PipelineType.PREPROCESS, self.resolved_config))
 
     def register_components(self) -> None:
-        assert self.fastvideo_args.preprocess_config is not None
-        preprocess_config: PreprocessConfig = self.fastvideo_args.preprocess_config
+        assert self.resolved_config.preprocess_config is not None
+        preprocess_config: PreprocessConfig = self.resolved_config.preprocess_config
 
         # raw data validator
         raw_data_validator = PreprocessingDataValidator(
@@ -72,27 +72,27 @@ class PreprocessWorkflow(WorkflowBase):
         self.add_component("validation_dataloader", validation_dataloader)
 
         # forward batch builder
-        video_forward_batch_builder = VideoForwardBatchBuilder(seed=self.fastvideo_args.preprocess_config.seed)
+        video_forward_batch_builder = VideoForwardBatchBuilder(seed=self.resolved_config.preprocess_config.seed)
         self.add_component("video_forward_batch_builder", video_forward_batch_builder)
 
         # record creator
-        if self.fastvideo_args.workload_type == WorkloadType.I2V:
+        if self.resolved_config.workload_type == WorkloadType.I2V:
             record_creator = i2v_record_creator
             schema = pyarrow_schema_i2v
         else:
             record_creator = basic_t2v_record_creator
             schema = pyarrow_schema_t2v
         processed_dataset_saver = ParquetDatasetSaver(
-            flush_frequency=self.fastvideo_args.preprocess_config.flush_frequency,
-            samples_per_file=self.fastvideo_args.preprocess_config.samples_per_file,
+            flush_frequency=self.resolved_config.preprocess_config.flush_frequency,
+            samples_per_file=self.resolved_config.preprocess_config.samples_per_file,
             schema=schema,
             record_creator=record_creator,
         )
         self.add_component("processed_dataset_saver", processed_dataset_saver)
 
     def prepare_system_environment(self) -> None:
-        assert self.fastvideo_args.preprocess_config is not None
-        dataset_output_dir = self.fastvideo_args.preprocess_config.dataset_output_dir
+        assert self.resolved_config.preprocess_config is not None
+        dataset_output_dir = self.resolved_config.preprocess_config.dataset_output_dir
         os.makedirs(dataset_output_dir, exist_ok=True)
 
         validation_dataset_output_dir = os.path.join(dataset_output_dir, "validation_dataset",
@@ -105,18 +105,18 @@ class PreprocessWorkflow(WorkflowBase):
         self.training_dataset_output_dir = training_dataset_output_dir
 
     @classmethod
-    def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> "PreprocessWorkflow":
-        is_ltx2_t2v = (fastvideo_args.workload_type == WorkloadType.T2V
-                       and fastvideo_args.pipeline_config.__class__.__name__ == "LTX2T2VConfig")
+    def get_workflow_cls(cls, resolved_config: FastVideoArgs) -> "PreprocessWorkflow":
+        is_ltx2_t2v = (resolved_config.workload_type == WorkloadType.T2V
+                       and resolved_config.pipeline_config.__class__.__name__ == "LTX2T2VConfig")
         if is_ltx2_t2v:
             from fastvideo.workflow.preprocess.preprocess_workflow_ltx2_t2v import (PreprocessWorkflowLTX2T2V)
             return cast(PreprocessWorkflow, PreprocessWorkflowLTX2T2V)
-        if fastvideo_args.workload_type == WorkloadType.T2V:
+        if resolved_config.workload_type == WorkloadType.T2V:
             from fastvideo.workflow.preprocess.preprocess_workflow_t2v import (PreprocessWorkflowT2V)
             return cast(PreprocessWorkflow, PreprocessWorkflowT2V)
-        elif fastvideo_args.workload_type == WorkloadType.I2V:
+        elif resolved_config.workload_type == WorkloadType.I2V:
             from fastvideo.workflow.preprocess.preprocess_workflow_i2v import (PreprocessWorkflowI2V)
             return cast(PreprocessWorkflow, PreprocessWorkflowI2V)
         else:
             raise ValueError(
-                f"Workload type: {fastvideo_args.workload_type} is not supported in preprocessing workflow.")
+                f"Workload type: {resolved_config.workload_type} is not supported in preprocessing workflow.")

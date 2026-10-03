@@ -131,14 +131,14 @@ def test_video_generator_keeps_the_resolved_config(monkeypatch):
     class _NoExecutor:
         """Executor stand-in so that VideoGenerator.__init__ runs without starting workers."""
 
-        def __init__(self, fastvideo_args, log_queue=None):
+        def __init__(self, resolved_config, log_queue=None):
             pass
 
-    monkeypatch.setattr(video_generator.Executor, "get_class", staticmethod(lambda fastvideo_args: _NoExecutor))
+    monkeypatch.setattr(video_generator.Executor, "get_class", staticmethod(lambda resolved_config: _NoExecutor))
     with isolated_environment():
         generator = video_generator.VideoGenerator.from_config({"model_path": WAN_T2V, "engine": {"num_gpus": 2}})
 
-    assert generator.fastvideo_args.sp_size == 2
+    assert generator.resolved_config.sp_size == 2
     provenance = generator.resolved_config.provenance("engine.parallelism.sp_size")
     assert (provenance.value, provenance.source) == (2, "derive_parallel_sizes")
 

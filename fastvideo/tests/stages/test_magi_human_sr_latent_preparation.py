@@ -63,7 +63,7 @@ def test_sr_latent_prep_invalidates_static_packed_layout():
     sentinel = object()
     batch.magi_static_packed_layout = sentinel  # type: ignore[attr-defined]
 
-    out = stage.forward(batch, fastvideo_args=None)  # type: ignore[arg-type]
+    out = stage.forward(batch, resolved_config=None)  # type: ignore[arg-type]
 
     assert out is batch
     # Sanity: SR actually upsampled to a different spatial grid.

@@ -30,8 +30,8 @@ class WanDenoisingStage(DenoisingStage):
     first-frame latents; it does not load or execute a VAE.
     """
 
-    def prepare_denoising(self, batch, fastvideo_args, target_dtype) -> WanDenoisingState:
-        config = fastvideo_args.pipeline_config
+    def prepare_denoising(self, batch, resolved_config, target_dtype) -> WanDenoisingState:
+        config = resolved_config.pipeline_config
         latents = batch.latents
         assert latents is not None
         assert latents.shape[0] == 1, "only support batch size 1"
@@ -70,12 +70,12 @@ class WanDenoisingStage(DenoisingStage):
             state.video_padding = torch.zeros_like(state.latents)
         return state
 
-    def select_model(self, timestep, batch, fastvideo_args, state):
+    def select_model(self, timestep, batch, resolved_config, state):
         if state.boundary_timestep is None or timestep >= state.boundary_timestep:
             model, inactive, guidance = self.transformer, self.transformer_2, batch.guidance_scale
         else:
             model, inactive, guidance = self.transformer_2, self.transformer, batch.guidance_scale_2
-        self.activate_transformer(model, inactive, fastvideo_args)
+        self.activate_transformer(model, inactive, resolved_config)
         return model, guidance
 
     def prepare_model_input(self, latents, batch, target_dtype, state):

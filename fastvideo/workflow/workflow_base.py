@@ -37,7 +37,7 @@ class WorkflowBase(ABC):
     the overall processing flow.
     """
 
-    def __init__(self, fastvideo_args: FastVideoArgs):
+    def __init__(self, resolved_config: FastVideoArgs):
         """
         Initialize the workflow with configuration arguments.
         
@@ -45,7 +45,7 @@ class WorkflowBase(ABC):
             fastvideo_args: Configuration object containing all parameters
                           needed for workflow and pipeline setup.
         """
-        self.fastvideo_args = fastvideo_args
+        self.resolved_config = resolved_config
 
         # TODO: pipeline_config should be: dict[str, PipelineConfig]
         # pipeline_type should be included in the PipelineConfig
@@ -68,8 +68,8 @@ class WorkflowBase(ABC):
         attributes for convenient access.
         """
         for pipeline_name, pipeline_config in self._pipeline_configs.items():
-            pipeline_type, fastvideo_args = pipeline_config
-            pipeline = build_pipeline(fastvideo_args, pipeline_type)
+            pipeline_type, resolved_config = pipeline_config
+            pipeline = build_pipeline(resolved_config, pipeline_type)
             self._pipelines[pipeline_name] = pipeline
             setattr(self, pipeline_name, pipeline)
 
@@ -156,7 +156,7 @@ class WorkflowBase(ABC):
         pass
 
     @classmethod
-    def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> Optional["WorkflowBase"]:
+    def get_workflow_cls(cls, resolved_config: FastVideoArgs) -> Optional["WorkflowBase"]:
         """
         Factory method to get the appropriate workflow class based on execution mode.
         
@@ -172,8 +172,8 @@ class WorkflowBase(ABC):
             The appropriate workflow class for the specified execution mode,
             or None if no workflow is available for the given mode.
         """
-        if fastvideo_args.mode == ExecutionMode.PREPROCESS:
+        if resolved_config.mode == ExecutionMode.PREPROCESS:
             from fastvideo.workflow.preprocess.preprocess_workflow import (PreprocessWorkflow)
-            return PreprocessWorkflow.get_workflow_cls(fastvideo_args)
+            return PreprocessWorkflow.get_workflow_cls(resolved_config)
         else:
-            raise ValueError(f"Execution mode: {fastvideo_args.mode} is not supported in workflow.")
+            raise ValueError(f"Execution mode: {resolved_config.mode} is not supported in workflow.")

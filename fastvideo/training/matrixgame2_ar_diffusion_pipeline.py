@@ -30,9 +30,9 @@ class MatrixGame2ARDiffusionPipeline(TrainingPipeline):
 
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         scheduler = SelfForcingFlowMatchScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift,
+            shift=resolved_config.pipeline_config.flow_shift,
             sigma_min=0.0,
             extra_one_step=True,
         )

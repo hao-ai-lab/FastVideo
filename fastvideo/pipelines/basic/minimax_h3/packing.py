@@ -41,9 +41,9 @@ MINIMAX_H3_KEYFRAME_ENCODE_SEED = 42
 _PATCH_SIZE_CACHE: dict[int, tuple[int, int, int]] = {}
 
 
-def h3_dit_patch_size(fastvideo_args: Any) -> tuple[int, int, int]:
+def h3_dit_patch_size(resolved_config: Any) -> tuple[int, int, int]:
     """Read DiT patch size from pipeline config, not live transformer weights."""
-    dit_config = getattr(getattr(fastvideo_args, "pipeline_config", None), "dit_config", None)
+    dit_config = getattr(getattr(resolved_config, "pipeline_config", None), "dit_config", None)
     cached = _PATCH_SIZE_CACHE.get(id(dit_config)) if dit_config is not None else None
     if cached is not None:
         return cached

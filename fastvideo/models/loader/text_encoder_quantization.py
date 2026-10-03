@@ -19,10 +19,10 @@ from fastvideo.models.encoders.base import TextEncoder
 
 def _resolve_text_encoder_checkpoint_path(
     model_path: str,
-    fastvideo_args: FastVideoArgs,
+    resolved_config: FastVideoArgs,
     use_text_encoder_override: bool,
 ) -> str:
-    override = fastvideo_args.override_text_encoder_safetensors if use_text_encoder_override else None
+    override = resolved_config.override_text_encoder_safetensors if use_text_encoder_override else None
     checkpoint_path = override or model_path
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Text-encoder checkpoint does not exist: {checkpoint_path}")

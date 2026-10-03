@@ -65,8 +65,8 @@ class LTX2Pipeline(LoRAPipeline):
         "vocoder",
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
-        refine_enabled = fastvideo_args.ltx2_refine_enabled
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+        refine_enabled = resolved_config.ltx2_refine_enabled
 
         self.add_stage(
             stage_name="input_validation_stage",
@@ -101,7 +101,7 @@ class LTX2Pipeline(LoRAPipeline):
         )
 
         if refine_enabled:
-            stage2_steps = fastvideo_args.ltx2_refine_num_inference_steps
+            stage2_steps = resolved_config.ltx2_refine_num_inference_steps
             # LTX-2 refine currently supports two explicitly tested step
             # counts:
             # - 3 steps: official distilled schedule
@@ -139,16 +139,16 @@ class LTX2Pipeline(LoRAPipeline):
                     vae=self.get_module("vae"),
                     transformer=transformer_refine,
                     sigmas=stage2_sigmas,
-                    add_noise=fastvideo_args.ltx2_refine_add_noise,
+                    add_noise=resolved_config.ltx2_refine_add_noise,
                 ),
             )
 
-            if fastvideo_args.ltx2_refine_lora_path:
+            if resolved_config.ltx2_refine_lora_path:
                 self.add_stage(
                     stage_name="ltx2_refine_lora_stage",
                     stage=LTX2RefineLoRAStage(
                         pipeline=self,
-                        lora_path=fastvideo_args.ltx2_refine_lora_path,
+                        lora_path=resolved_config.ltx2_refine_lora_path,
                     ),
                 )
 
@@ -158,7 +158,7 @@ class LTX2Pipeline(LoRAPipeline):
                     transformer=transformer_refine,
                     sigmas_override=stage2_sigmas,
                     num_inference_steps_override=len(stage2_sigmas) - 1,
-                    force_guidance_scale=(fastvideo_args.ltx2_refine_guidance_scale),
+                    force_guidance_scale=(resolved_config.ltx2_refine_guidance_scale),
                     initial_audio_latents_key="ltx2_audio_latents",
                 ),
             )
@@ -176,7 +176,7 @@ class LTX2Pipeline(LoRAPipeline):
             stage=DecodingStage(vae=self.get_module("vae")),
         )
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         tokenizer = self.get_module("tokenizer")
         if tokenizer is not None:
             tokenizer.padding_side = "left"
@@ -185,7 +185,7 @@ class LTX2Pipeline(LoRAPipeline):
 
     def load_modules(
         self,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         loaded_modules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         model_index = self._load_config(self.model_path)
@@ -195,19 +195,19 @@ class LTX2Pipeline(LoRAPipeline):
         # model_index.json. These are bundled with distilled checkpoints
         # so the pipeline can self-configure without explicit user kwargs.
         refine_defaults: dict[str, Any] = {}
-        if (model_index.get("fastvideo_refine_enabled") is True and fastvideo_args.refine_enabled is None):
+        if (model_index.get("fastvideo_refine_enabled") is True and resolved_config.refine_enabled is None):
             refine_defaults["ltx2_refine_enabled"] = True
-        if (fastvideo_args.refine_upsampler_path is None and fastvideo_args.ltx2_refine_upsampler_path is None):
+        if (resolved_config.refine_upsampler_path is None and resolved_config.ltx2_refine_upsampler_path is None):
             refine_defaults["ltx2_refine_upsampler_path"] = (_resolve_refine_upsampler_path(
                 self.model_path, model_index))
-        if (fastvideo_args.refine_transformer_path is None and fastvideo_args.ltx2_refine_transformer_path is None):
+        if (resolved_config.refine_transformer_path is None and resolved_config.ltx2_refine_transformer_path is None):
             refine_defaults["ltx2_refine_transformer_path"] = (_resolve_refine_path(
                 self.model_path, model_index.get("fastvideo_refine_transformer_path")))
-        if (fastvideo_args.refine_lora_path is None and fastvideo_args.ltx2_refine_lora_path is None):
+        if (resolved_config.refine_lora_path is None and resolved_config.ltx2_refine_lora_path is None):
             refine_defaults["ltx2_refine_lora_path"] = _resolve_refine_path(
                 self.model_path, model_index.get("fastvideo_refine_lora_path"))
-        if (fastvideo_args.refine_num_inference_steps is None
-                and fastvideo_args.ltx2_refine_num_inference_steps == FastVideoArgs.ltx2_refine_num_inference_steps
+        if (resolved_config.refine_num_inference_steps is None
+                and resolved_config.ltx2_refine_num_inference_steps == FastVideoArgs.ltx2_refine_num_inference_steps
                 and model_index.get("fastvideo_refine_num_inference_steps") is not None):
             # Only apply the model-index default when the caller didn't
             # explicitly set either refine_num_inference_steps (generic)
@@ -216,27 +216,27 @@ class LTX2Pipeline(LoRAPipeline):
             # intent (e.g. requesting 2-step refinement).
             refine_defaults["ltx2_refine_num_inference_steps"] = int(
                 model_index["fastvideo_refine_num_inference_steps"])
-        if (fastvideo_args.refine_guidance_scale is None
+        if (resolved_config.refine_guidance_scale is None
                 and model_index.get("fastvideo_refine_guidance_scale") is not None):
             refine_defaults["ltx2_refine_guidance_scale"] = float(model_index["fastvideo_refine_guidance_scale"])
-        if (fastvideo_args.refine_add_noise is None and model_index.get("fastvideo_refine_add_noise") is not None):
+        if (resolved_config.refine_add_noise is None and model_index.get("fastvideo_refine_add_noise") is not None):
             refine_defaults["ltx2_refine_add_noise"] = bool(model_index["fastvideo_refine_add_noise"])
-        if (fastvideo_args.refine_noise_path is None and fastvideo_args.ltx2_refine_noise_path is None):
+        if (resolved_config.refine_noise_path is None and resolved_config.ltx2_refine_noise_path is None):
             refine_defaults["ltx2_refine_noise_path"] = _resolve_refine_path(
                 self.model_path, model_index.get("fastvideo_refine_noise_path"))
-        if (fastvideo_args.refine_audio_noise_path is None and fastvideo_args.ltx2_refine_audio_noise_path is None):
+        if (resolved_config.refine_audio_noise_path is None and resolved_config.ltx2_refine_audio_noise_path is None):
             refine_defaults["ltx2_refine_audio_noise_path"] = (_resolve_refine_path(
                 self.model_path, model_index.get("fastvideo_refine_audio_noise_path")))
-        changed = {key: value for key, value in refine_defaults.items() if getattr(fastvideo_args, key) != value}
-        if changed and isinstance(fastvideo_args, ResolvedGeneratorConfig):
+        changed = {key: value for key, value in refine_defaults.items() if getattr(resolved_config, key) != value}
+        if changed and isinstance(resolved_config, ResolvedGeneratorConfig):
             # The pipeline owns its config; later stages read the rebound one.
-            fastvideo_args = fastvideo_args.with_override("checkpoint:model_index.json", {
+            resolved_config = resolved_config.with_override("checkpoint:model_index.json", {
                 typed_path_of_flat_name(key): value
                 for key, value in changed.items()
             })
-            self.fastvideo_args = fastvideo_args
+            self.resolved_config = resolved_config
         elif changed:
-            fastvideo_args.override("checkpoint:model_index.json", changed)
+            resolved_config.override("checkpoint:model_index.json", changed)
 
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
@@ -275,7 +275,7 @@ class LTX2Pipeline(LoRAPipeline):
                 module_name=module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
-                fastvideo_args=fastvideo_args,
+                resolved_config=resolved_config,
             )
             logger.info("Loaded module %s from %s", module_name, component_model_path)
             modules[module_name] = module
@@ -289,8 +289,8 @@ class LTX2Pipeline(LoRAPipeline):
             if module_name not in modules or modules[module_name] is None:
                 raise ValueError(f"Required module {module_name} was not loaded properly")
 
-        if fastvideo_args.ltx2_refine_enabled:
-            upsampler_path = fastvideo_args.ltx2_refine_upsampler_path
+        if resolved_config.ltx2_refine_enabled:
+            upsampler_path = resolved_config.ltx2_refine_upsampler_path
             if upsampler_path is None:
                 raise ValueError("ltx2_refine_enabled is True but "
                                  "ltx2_refine_upsampler_path was not provided.")
@@ -309,22 +309,22 @@ class LTX2Pipeline(LoRAPipeline):
                     module_name="spatial_upsampler",
                     component_model_path=upsampler_path,
                     transformers_or_diffusers="diffusers",
-                    fastvideo_args=fastvideo_args,
+                    resolved_config=resolved_config,
                 ))
             logger.info("Loaded module spatial_upsampler from %s", upsampler_path)
 
             if (loaded_modules is not None and "transformer_refine" in loaded_modules):
                 modules["transformer_refine"] = loaded_modules["transformer_refine"]
-            elif fastvideo_args.ltx2_refine_transformer_path:
+            elif resolved_config.ltx2_refine_transformer_path:
                 modules["transformer_refine"] = (PipelineComponentLoader.load_module(
                     module_name="transformer_refine",
-                    component_model_path=(fastvideo_args.ltx2_refine_transformer_path),
+                    component_model_path=(resolved_config.ltx2_refine_transformer_path),
                     transformers_or_diffusers="diffusers",
-                    fastvideo_args=fastvideo_args,
+                    resolved_config=resolved_config,
                 ))
                 logger.info(
                     "Loaded module transformer_refine from %s",
-                    fastvideo_args.ltx2_refine_transformer_path,
+                    resolved_config.ltx2_refine_transformer_path,
                 )
 
         return modules

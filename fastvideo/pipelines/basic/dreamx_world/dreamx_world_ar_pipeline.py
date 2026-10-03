@@ -31,11 +31,11 @@ class DreamXWorldARPipeline(LoRAPipeline, ComposedPipelineBase):
     pipeline_config_cls = DreamXWorld5BARPipelineConfig
     sampling_params_cls = SamplingParam
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=resolved_config.pipeline_config.flow_shift)
         self.modules["scheduler"].set_timesteps(1000)
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(

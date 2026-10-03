@@ -47,7 +47,7 @@ class GameCraftDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Run the denoising loop with camera/action conditioning.
@@ -64,12 +64,12 @@ class GameCraftDenoisingStage(DenoisingStage):
             The batch with denoised latents.
         """
         pipeline = self.pipeline() if self.pipeline else None
-        if not fastvideo_args.model_loaded["transformer"]:
+        if not resolved_config.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            fastvideo_args.model_loaded["transformer"] = True
+            resolved_config.model_loaded["transformer"] = True
 
         # Extract GameCraft-specific parameters
         camera_states = getattr(batch, "camera_states", None)
@@ -95,7 +95,7 @@ class GameCraftDenoisingStage(DenoisingStage):
 
         # Setup precision and autocast settings
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         # Get timesteps
         timesteps = batch.timesteps
@@ -302,7 +302,7 @@ class GameCraftDenoisingStage(DenoisingStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify that required inputs are present."""
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
@@ -311,7 +311,7 @@ class GameCraftDenoisingStage(DenoisingStage):
         result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify that outputs are properly set."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])

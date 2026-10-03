@@ -22,15 +22,15 @@ class _Profiler:
 class _Pipeline(ComposedPipelineBase):
     events = []
 
-    def load_modules(self, fastvideo_args, loaded_modules=None):
+    def load_modules(self, resolved_config, loaded_modules=None):
         del loaded_modules
-        policy_state = {flag: getattr(fastvideo_args, flag) for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS}
-        policy_state["use_fsdp_inference"] = fastvideo_args.use_fsdp_inference
+        policy_state = {flag: getattr(resolved_config, flag) for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS}
+        policy_state["use_fsdp_inference"] = resolved_config.use_fsdp_inference
         self.events.append(("load_modules", policy_state))
         return {}
 
-    def create_pipeline_stages(self, fastvideo_args):
-        del fastvideo_args
+    def create_pipeline_stages(self, resolved_config):
+        del resolved_config
 
 
 def test_direct_pipeline_applies_policy_after_device_initialization(monkeypatch) -> None:

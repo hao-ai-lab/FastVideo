@@ -103,7 +103,7 @@ def load_module_from_path(
     bind their backend during construction, so the requested backend remains
     scoped to this load call.
     """
-    fastvideo_args: Any = _make_training_args(training_config, model_path=model_path)
+    resolved_config: Any = _make_training_args(training_config, model_path=model_path)
 
     local_model_path = maybe_download_model(model_path)
     config = verify_model_config_and_directory(local_model_path)
@@ -125,10 +125,10 @@ def load_module_from_path(
     # fastvideo_args is freshly built above and never escapes this function,
     # so overrides are plain assignments — nothing to save or restore.
     if override_transformer_cls_name is not None:
-        fastvideo_args.override_transformer_cls_name = str(override_transformer_cls_name)
+        resolved_config.override_transformer_cls_name = str(override_transformer_cls_name)
 
     if transformer_override_safetensor:
-        fastvideo_args.init_weights_from_safetensors = str(transformer_override_safetensor)
+        resolved_config.init_weights_from_safetensors = str(transformer_override_safetensor)
 
     if attention_backend is not None and module_type != "transformer":
         raise ValueError("attention_backend can only be set when loading "
@@ -141,7 +141,7 @@ def load_module_from_path(
         resolved_attention_backend, component=module_type))
 
     if disable_custom_init_weights:
-        fastvideo_args._loading_teacher_critic_model = True
+        resolved_config._loading_teacher_critic_model = True
     # Attention implementations are bound while transformer layers are
     # constructed. Scope the override to this one role so student,
     # teacher, and critic can use independent backends in one process.
@@ -150,7 +150,7 @@ def load_module_from_path(
             module_name=module_type,
             component_model_path=component_path,
             transformers_or_diffusers=(transformers_or_diffusers),
-            fastvideo_args=fastvideo_args,
+            resolved_config=resolved_config,
         )
 
     if not isinstance(module, torch.nn.Module):

@@ -84,7 +84,7 @@ class SRDenoisingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Run the denoising loop.
@@ -97,27 +97,27 @@ class SRDenoisingStage(PipelineStage):
             The batch with denoised latents.
         """
         pipeline = self.pipeline() if self.pipeline else None
-        if not fastvideo_args.model_loaded["transformer"]:
+        if not resolved_config.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            fastvideo_args.model_loaded["transformer"] = True
+            resolved_config.model_loaded["transformer"] = True
 
-        if not fastvideo_args.model_loaded["upsampler"]:
+        if not resolved_config.model_loaded["upsampler"]:
             loader = UpsamplerLoader()
-            self.upsampler = loader.load(fastvideo_args.model_paths["upsampler"], fastvideo_args)
+            self.upsampler = loader.load(resolved_config.model_paths["upsampler"], resolved_config)
             if pipeline:
                 pipeline.add_module("upsampler", self.upsampler)
-            fastvideo_args.model_loaded["upsampler"] = True
+            resolved_config.model_loaded["upsampler"] = True
 
         # Setup precision and autocast settings
         # TODO(will): make the precision configurable for inference
         # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
-        self.scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift_sr)
+        self.scheduler.set_shift(resolved_config.pipeline_config.flow_shift_sr)
         sigmas = np.linspace(1.0, 0.0, batch.num_inference_steps_sr + 1)[:-1]
         self.scheduler.set_timesteps(sigmas=sigmas, device=get_local_torch_device())
         timesteps = self.scheduler.timesteps
@@ -199,7 +199,7 @@ class SRDenoisingStage(PipelineStage):
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 # Prepare inputs for transformer
-                embedded_cfg_scale = embedded_cfg_scale_for_batch(batch, fastvideo_args)
+                embedded_cfg_scale = embedded_cfg_scale_for_batch(batch, resolved_config)
                 guidance_expand = (torch.tensor(
                     [embedded_cfg_scale] * latent_model_input.shape[0],
                     dtype=torch.float32,
@@ -217,9 +217,9 @@ class SRDenoisingStage(PipelineStage):
                             attn_metadata = self.attn_metadata_builder.build(  # type: ignore
                                 current_timestep=i,  # type: ignore
                                 raw_latent_shape=batch.raw_latent_shape[2:5],  # type: ignore
-                                patch_size=fastvideo_args.pipeline_config.  # type: ignore
+                                patch_size=resolved_config.pipeline_config.  # type: ignore
                                 dit_config.patch_size,  # type: ignore
-                                VSA_sparsity=fastvideo_args.VSA_sparsity,  # type: ignore
+                                VSA_sparsity=resolved_config.VSA_sparsity,  # type: ignore
                                 device=get_local_torch_device(),
                             )
                             assert attn_metadata is not None, "attn_metadata cannot be None"
@@ -230,11 +230,11 @@ class SRDenoisingStage(PipelineStage):
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls()
                             # Prepare V-MoBA parameters from config
-                            moba_params = fastvideo_args.moba_config.copy()
+                            moba_params = resolved_config.moba_config.copy()
                             moba_params.update({
                                 "current_timestep": i,
                                 "raw_latent_shape": batch.raw_latent_shape[2:5],
-                                "patch_size": fastvideo_args.pipeline_config.dit_config.patch_size,
+                                "patch_size": resolved_config.pipeline_config.dit_config.patch_size,
                                 "device": get_local_torch_device(),
                             })
                             attn_metadata = self.attn_metadata_builder.build(**moba_params)
@@ -280,7 +280,7 @@ class SRDenoisingStage(PipelineStage):
             del self.transformer
             if pipeline is not None and "transformer" in pipeline.modules:
                 del pipeline.modules["transformer"]
-            fastvideo_args.model_loaded["transformer"] = False
+            resolved_config.model_loaded["transformer"] = False
             logger.info("Memory after deallocating transformer: %s", torch.mps.current_allocated_memory())
 
         return batch
@@ -320,7 +320,7 @@ class SRDenoisingStage(PipelineStage):
         else:
             return tqdm(iterable=iterable, total=total, disable=True)
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify denoising stage inputs."""
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
@@ -337,7 +337,7 @@ class SRDenoisingStage(PipelineStage):
                          lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify denoising stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])

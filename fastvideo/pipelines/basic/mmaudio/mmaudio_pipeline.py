@@ -27,7 +27,7 @@ class MMAudioPipeline(ComposedPipelineBase):
         "vocoder",
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         transformer = self.get_module("transformer")
         self.add_stage("input_validation_stage", MMAudioInputValidationStage())
         self.add_stage(

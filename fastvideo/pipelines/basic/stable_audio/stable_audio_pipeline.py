@@ -80,14 +80,14 @@ class StableAudioPipeline(ComposedPipelineBase):
         "conditioner",
     ]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
+    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
         """Apply Stable Audio's process-global numerics overrides BEFORE
         the standard component loaders run (TF32 off for A2A renoise
         determinism)."""
         _disable_tf32_for_stable_audio()
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        pc = fastvideo_args.pipeline_config
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+        pc = resolved_config.pipeline_config
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 

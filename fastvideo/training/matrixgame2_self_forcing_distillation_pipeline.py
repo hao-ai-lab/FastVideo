@@ -47,15 +47,15 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
     def load_modules(
         self,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         loaded_modules: dict[str, torch.nn.Module] | None = None,
     ) -> dict[str, Any]:
         modules = ComposedPipelineBase.load_modules(
             self,
-            fastvideo_args,
+            resolved_config,
             loaded_modules,
         )
-        training_args = cast(TrainingArgs, fastvideo_args)
+        training_args = cast(TrainingArgs, resolved_config)
         old_override = training_args.override_transformer_cls_name
         training_args.override_transformer_cls_name = "MatrixGame2WanModel"
         try:

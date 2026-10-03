@@ -17,7 +17,7 @@ logger = init_logger(__name__)
 class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "image_encoder", "image_processor"]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         if (self.get_module("text_encoder", None) is not None and self.get_module("tokenizer", None) is not None):
@@ -56,7 +56,7 @@ class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         logger.info("MatrixGame2CausalDMDPipeline initialized with action support")
 
     @torch.no_grad()
-    def streaming_reset(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs):
+    def streaming_reset(self, batch: ForwardBatch, resolved_config: FastVideoArgs):
         if not self.post_init_called:
             self.post_init()
 
@@ -68,11 +68,11 @@ class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
         for stage_name in stages_to_run:
             if stage_name in self._stage_name_mapping:
-                batch = self._stage_name_mapping[stage_name].forward(batch, fastvideo_args)
+                batch = self._stage_name_mapping[stage_name].forward(batch, resolved_config)
 
         # 2. Reset Denoising Stage
         denoiser = self._stage_name_mapping["denoising_stage"]
-        denoiser.streaming_reset(batch, fastvideo_args)
+        denoiser.streaming_reset(batch, resolved_config)
 
         # 3. Initialize VAE cache
         self._vae_cache = None
@@ -89,7 +89,7 @@ class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         # Decode only the new generated block
         if end_idx > start_idx:
             current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
-            args = ctx.fastvideo_args
+            args = ctx.resolved_config
             decoder = self._stage_name_mapping["decoding_stage"]
             decoded_frames, self._vae_cache = decoder.streaming_decode(current_latents,
                                                                        args,

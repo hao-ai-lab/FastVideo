@@ -42,7 +42,7 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """Encode video frames to latent for VC conditioning."""
 
@@ -97,11 +97,11 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
         self.vae = self.vae.to(get_local_torch_device())
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
 
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if fastvideo_args.pipeline_config.vae_tiling:
+            if resolved_config.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
 
             if not vae_autocast_enabled:
@@ -128,7 +128,7 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
                     num_cond_latents)
 
         # Offload VAE if needed
-        if fastvideo_args.vae_cpu_offload:
+        if resolved_config.vae_cpu_offload:
             self.vae.to("cpu")
 
         return batch

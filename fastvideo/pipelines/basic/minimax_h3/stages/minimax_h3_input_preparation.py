@@ -114,7 +114,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         self.audio_vae = audio_vae
         self.ref2va = ref2va
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, lambda value: isinstance(value, str))
         result.add_check("num_frames", batch.num_frames, V.positive_int)
@@ -126,7 +126,7 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
             result.add_check("references", batch.references, V.list_not_empty)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("generator", batch.generator, V.generator_or_list_generators)
         result.add_check("height", batch.height, V.positive_int)
@@ -208,8 +208,8 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         batch.extra[MINIMAX_H3_KEYFRAME_ANCHORS_KEY] = ()
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        del fastvideo_args
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+        del resolved_config
         prepare_common_request(batch)
         if self.ref2va:
             self._prepare_ref2va(batch)

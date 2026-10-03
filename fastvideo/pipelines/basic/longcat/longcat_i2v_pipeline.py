@@ -42,10 +42,10 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         """Initialize LongCat-specific components."""
         # Same BSA initialization as base LongCat pipeline
-        pipeline_config = fastvideo_args.pipeline_config
+        pipeline_config = resolved_config.pipeline_config
         transformer = self.get_module("transformer", None)
         if transformer is None:
             return
@@ -88,7 +88,7 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
             if hasattr(transformer, 'disable_bsa'):
                 transformer.disable_bsa()
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """Set up I2V-specific pipeline stages."""
 
         # 1. Input validation

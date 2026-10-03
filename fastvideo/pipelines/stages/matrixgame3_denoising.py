@@ -33,7 +33,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             return 1 + max(0, (batch.num_frames - 57 + 39) // 40)
         return 1
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
@@ -51,14 +51,14 @@ class MatrixGame3DenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         assert batch.latents is not None, "latents must be prepared before MatrixGame3 denoising"
         assert batch.image_latent is not None, "MatrixGame3 requires first-frame VAE latents"
         assert batch.prompt_embeds, "MatrixGame3 requires text embeddings"
 
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
         device = batch.latents.device
 
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -95,7 +95,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             img_cond = img_cond[:, :, :, :latent_h_aligned, :latent_w_aligned]
             latent_h = latent_h_aligned
             latent_w = latent_w_aligned
-        spatial_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio
+        spatial_ratio = resolved_config.pipeline_config.vae_config.arch_config.spatial_compression_ratio
         target_h = latent_h * spatial_ratio
         target_w = latent_w * spatial_ratio
         num_iterations = self._infer_num_iterations(batch)
@@ -135,7 +135,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                 self.scheduler.set_timesteps(
                     batch.num_inference_steps,
                     device=device,
-                    shift=fastvideo_args.pipeline_config.flow_shift,
+                    shift=resolved_config.pipeline_config.flow_shift,
                 )
             except TypeError:
                 self.scheduler.set_timesteps(batch.num_inference_steps, device=device)

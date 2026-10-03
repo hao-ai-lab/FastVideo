@@ -43,7 +43,7 @@ class HunyuanGameCraftPipeline(ComposedPipelineBase):
         "scheduler",
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(

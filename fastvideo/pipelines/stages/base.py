@@ -43,7 +43,7 @@ class PipelineStage(ABC):
     # point subclasses are told not to override.
     _lazy_modules_to_release: tuple[LazyModule, ...] = ()
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """
         Verify the input for the stage.
 
@@ -68,7 +68,7 @@ class PipelineStage(ABC):
         # Default implementation - no verification
         return VerificationResult()
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """
         Verify the output for the stage.
 
@@ -121,7 +121,7 @@ class PipelineStage(ABC):
     def __call__(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Execute the stage's processing on the batch with optional verification and logging.
@@ -139,12 +139,12 @@ class PipelineStage(ABC):
         stage_name = f"{stage_key}|{stage_class_name}"
 
         # Check if verification is enabled (simple approach for prototype)
-        enable_verification = getattr(fastvideo_args, 'enable_stage_verification', False)
+        enable_verification = getattr(resolved_config, 'enable_stage_verification', False)
 
         if enable_verification:
             # Pre-execution input verification
             try:
-                input_result = self.verify_input(batch, fastvideo_args)
+                input_result = self.verify_input(batch, resolved_config)
                 self._run_verification(input_result, stage_name, "input")
             except Exception as e:
                 logger.error("Input verification failed for %s: %s", stage_name, str(e))
@@ -154,10 +154,10 @@ class PipelineStage(ABC):
         # One BaseException net: KeyboardInterrupt inside verify_output must
         # still free this stage's deferred modules (OOM is already an Exception).
         try:
-            result = self._execute(batch, fastvideo_args, stage_key, stage_class_name, stage_name)
+            result = self._execute(batch, resolved_config, stage_key, stage_class_name, stage_name)
             if enable_verification:
                 try:
-                    output_result = self.verify_output(result, fastvideo_args)
+                    output_result = self.verify_output(result, resolved_config)
                     self._run_verification(output_result, stage_name, "output")
                 except Exception as e:
                     logger.error("Output verification failed for %s: %s", stage_name, str(e))
@@ -172,7 +172,7 @@ class PipelineStage(ABC):
     def _execute(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         stage_key: str,
         stage_class_name: str,
         stage_name: str,
@@ -184,7 +184,7 @@ class PipelineStage(ABC):
             start_time = time.perf_counter()
 
             try:
-                result = self.forward(batch, fastvideo_args)
+                result = self.forward(batch, resolved_config)
                 torch.cuda.synchronize()
                 execution_time = time.perf_counter() - start_time
                 logger.info("[%s] Execution completed in %s ms", stage_name, execution_time * 1000)
@@ -201,7 +201,7 @@ class PipelineStage(ABC):
                 raise
         else:
             # Direct execution (current behavior)
-            result = self.forward(batch, fastvideo_args)
+            result = self.forward(batch, resolved_config)
 
         return result
 
@@ -225,7 +225,7 @@ class PipelineStage(ABC):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Forward pass of the stage's processing.

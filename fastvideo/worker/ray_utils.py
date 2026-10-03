@@ -61,7 +61,7 @@ def assert_ray_available() -> None:
                          "Please install Ray with `uv pip install ray`.")
 
 
-def _verify_bundles(placement_group: "PlacementGroup", fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+def _verify_bundles(placement_group: "PlacementGroup", resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
                     device_str: str):
     """Verify a given placement group has bundles located in the right place.
 
@@ -91,7 +91,7 @@ def _verify_bundles(placement_group: "PlacementGroup", fastvideo_args: ResolvedG
                            "GPUs in a node `{driver_node_id}` before starting an FastVideo engine.")
 
     for node_id, bundles in node_id_to_bundle.items():
-        if len(bundles) < fastvideo_args.tp_size:
+        if len(bundles) < resolved_config.tp_size:
             logger.warning(
                 "tensor_parallel_size=%d "
                 "is bigger than a reserved number of %ss (%d "
@@ -99,8 +99,8 @@ def _verify_bundles(placement_group: "PlacementGroup", fastvideo_args: ResolvedG
                 "spread out to 2+ nodes which can degrade the performance "
                 "unless you have fast interconnect across nodes, like "
                 "Infiniband. To resolve this issue, make sure you have more "
-                "than %d GPUs available at each node.", fastvideo_args.tp_size, device_str, len(bundles), device_str,
-                node_id, fastvideo_args.tp_size)
+                "than %d GPUs available at each node.", resolved_config.tp_size, device_str, len(bundles), device_str,
+                node_id, resolved_config.tp_size)
 
 
 def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
@@ -143,7 +143,7 @@ def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
 
 
 def initialize_ray_cluster(
-    fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+    resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
     ray_address: str | None = None,
 ):
     """Initialize the distributed cluster with Ray.
@@ -169,9 +169,11 @@ def initialize_ray_cluster(
         except ConnectionError:
             logger.warning("No existing RAY instance detected. "
                            "A new instance will be launched with current node resources.")
-            ray.init(address=ray_address, num_gpus=fastvideo_args.num_gpus, runtime_env=fastvideo_args.ray_runtime_env)
+            ray.init(address=ray_address,
+                     num_gpus=resolved_config.num_gpus,
+                     runtime_env=resolved_config.ray_runtime_env)
     else:
-        ray.init(address=ray_address, runtime_env=fastvideo_args.ray_runtime_env)
+        ray.init(address=ray_address, runtime_env=resolved_config.ray_runtime_env)
 
     device_str = current_platform.ray_device_key
     if not device_str:
@@ -179,7 +181,7 @@ def initialize_ray_cluster(
                          "support ray.")
 
     # Create or get the placement group for worker processes
-    current_placement_group = fastvideo_args.ray_placement_group or ray.util.get_current_placement_group()
+    current_placement_group = resolved_config.ray_placement_group or ray.util.get_current_placement_group()
 
     if current_placement_group:
         logger.info("Using the existing placement group")
@@ -195,10 +197,10 @@ def initialize_ray_cluster(
                                  f"{device_str}.")
             if bundle_devices:
                 device_bundles += 1
-        if fastvideo_args.num_gpus > device_bundles:
+        if resolved_config.num_gpus > device_bundles:
             raise ValueError(f"The number of required {device_str}s exceeds the total "
                              f"number of available {device_str}s in the placement group. "
-                             f"Required number of devices: {fastvideo_args.num_gpus}. "
+                             f"Required number of devices: {resolved_config.num_gpus}. "
                              f"Total number of devices: {device_bundles}.")
     else:
         logger.info("No current placement group found. "
@@ -207,12 +209,12 @@ def initialize_ray_cluster(
         # Log a warning message and delay resource allocation failure response.
         # Avoid immediate rejection to allow user-initiated placement group
         # created and wait cluster to be ready
-        if fastvideo_args.num_gpus > num_devices_in_cluster:
+        if resolved_config.num_gpus > num_devices_in_cluster:
             logger.warning(
                 "The number of required %ss exceeds the total "
                 "number of available %ss in the placement group.", device_str, device_str)
         # Create a new placement group
-        placement_group_specs: list[dict[str, float]] = ([{device_str: 1.0} for _ in range(fastvideo_args.num_gpus)])
+        placement_group_specs: list[dict[str, float]] = ([{device_str: 1.0} for _ in range(resolved_config.num_gpus)])
 
         # FastVideo engine is also a worker to execute model with an accelerator,
         # so it requires to have the device in a current node. Check if
@@ -234,9 +236,9 @@ def initialize_ray_cluster(
         _wait_until_pg_ready(current_placement_group)
 
     assert current_placement_group is not None
-    _verify_bundles(current_placement_group, fastvideo_args, device_str)
+    _verify_bundles(current_placement_group, resolved_config, device_str)
     # Set the placement group in the fastvideo args
-    fastvideo_args.ray_placement_group = current_placement_group
+    resolved_config.ray_placement_group = current_placement_group
 
 
 def is_in_ray_actor():

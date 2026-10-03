@@ -29,7 +29,7 @@ class ZImagePipeline(ComposedPipelineBase):
         "vae",
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         scheduler = self.get_module("scheduler")
         transformer = self.get_module("transformer")
 

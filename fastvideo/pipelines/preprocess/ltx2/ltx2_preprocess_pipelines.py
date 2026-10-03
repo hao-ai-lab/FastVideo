@@ -62,7 +62,7 @@ class LTX2TextPrecomputeStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
         assert isinstance(batch.prompt, list)
@@ -128,7 +128,7 @@ class LTX2AudioEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
         assert isinstance(batch.video_loader, list)
@@ -172,7 +172,7 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         tokenizer = self.get_module("tokenizer")
         if tokenizer is not None:
             tokenizer.padding_side = "left"
@@ -218,10 +218,10 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
         ).to(next(target_module.parameters()).device)
         return target_module, audio_processor
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
-        assert fastvideo_args.preprocess_config is not None
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+        assert resolved_config.preprocess_config is not None
 
-        preprocess_cfg = fastvideo_args.preprocess_config
+        preprocess_cfg = resolved_config.preprocess_config
         self.add_stage(
             stage_name="text_transform_stage",
             stage=TextTransformStage(
@@ -232,7 +232,7 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
 
         text_encoder = self.get_module("text_encoder")
         tokenizer = self.get_module("tokenizer")
-        encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
+        encoder_config = resolved_config.pipeline_config.text_encoder_configs[0]
         tokenizer_kwargs = dict(encoder_config.tokenizer_kwargs)
         if "max_length" not in tokenizer_kwargs:
             tokenizer_kwargs["max_length"] = encoder_config.arch_config.text_len
@@ -241,7 +241,7 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
             stage=LTX2TextPrecomputeStage(
                 text_encoder=text_encoder,
                 tokenizer=tokenizer,
-                preprocess_text_fn=fastvideo_args.pipeline_config.preprocess_text_funcs[0],
+                preprocess_text_fn=resolved_config.pipeline_config.preprocess_text_funcs[0],
                 tokenizer_kwargs=tokenizer_kwargs,
                 padding_side=encoder_config.arch_config.padding_side,
             ),

@@ -167,7 +167,7 @@ def main() -> None:
     # T2V inference only ever decodes generated latents, never encodes real
     # video. Preprocessing needs the encoder to turn real clips into latents.
     pipeline_config.vae_config.load_encoder = True
-    fastvideo_args = FastVideoArgs(
+    resolved_config = FastVideoArgs(
         model_path=model_path,
         dit_cpu_offload=False,
         dit_layerwise_offload=False,
@@ -176,11 +176,11 @@ def main() -> None:
         vae_cpu_offload=False,
         pipeline_config=pipeline_config,
     )
-    fastvideo_args.device = device
+    resolved_config.device = device
 
     # --- Load VAE (shared with HunyuanVideo) ---
     print("Loading Kandinsky5 VAE...")
-    vae = VAELoader().load(os.path.join(model_path, "vae"), fastvideo_args)
+    vae = VAELoader().load(os.path.join(model_path, "vae"), resolved_config)
     vae = vae.to(device=device, dtype=torch.float16).eval()
     print(f"VAE loaded ({sum(p.numel() for p in vae.parameters()) / 1e6:.0f}M)")
 
@@ -188,7 +188,7 @@ def main() -> None:
     print("Loading Qwen/Reason1 text encoder...")
     qwen_enc = TextEncoderLoader().load(
         os.path.join(model_path, "text_encoder"),
-        fastvideo_args,
+        resolved_config,
     ).to(device).eval()
     qwen_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
     qwen_tok_kwargs = dict(pipeline_config.text_encoder_configs[0].tokenizer_kwargs)
@@ -202,7 +202,7 @@ def main() -> None:
     print("Loading CLIP text encoder...")
     clip_enc = TextEncoderLoader().load(
         os.path.join(model_path, "text_encoder_2"),
-        fastvideo_args,
+        resolved_config,
     ).to(device).eval()
     clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
     clip_tok_kwargs = dict(pipeline_config.text_encoder_configs[1].tokenizer_kwargs)

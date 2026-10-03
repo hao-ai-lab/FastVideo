@@ -120,7 +120,7 @@ def main() -> None:
         caption_data = json.load(f)
 
     pipeline_config = LTX2T2VConfig()
-    fastvideo_args = FastVideoArgs(
+    resolved_config = FastVideoArgs(
         model_path=model_path,
         pipeline_config=pipeline_config,
         num_gpus=1,
@@ -137,7 +137,7 @@ def main() -> None:
             module_name=name,
             component_model_path=os.path.join(model_path, name),
             transformers_or_diffusers=transformers_or_diffusers,
-            fastvideo_args=fastvideo_args,
+            resolved_config=resolved_config,
         )
 
     print("Loading LTX-2 VAE...")

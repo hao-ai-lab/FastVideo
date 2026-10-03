@@ -22,15 +22,15 @@ class StableAudioDecodingStage(PipelineStage):
         super().__init__()
         self.vae = vae
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        pc = fastvideo_args.pipeline_config
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+        pc = resolved_config.pipeline_config
         latents = batch.latents
 
         # Latent regression path: hand back the un-decoded denoised latent
@@ -38,7 +38,7 @@ class StableAudioDecodingStage(PipelineStage):
         # numerics. Mirrors the bypass in `pipelines/stages/decoding.py`
         # used by the video DiTs. Skips the `.to(device)` VAE move so we
         # don't pay decoder load cost on this shortcut path.
-        if fastvideo_args.output_type == "latent":
+        if resolved_config.output_type == "latent":
             batch.output = latents.detach().cpu()
             return batch
 

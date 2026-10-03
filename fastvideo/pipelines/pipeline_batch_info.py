@@ -285,11 +285,11 @@ class ForwardBatch:
         return pprint.pformat(asdict(self), indent=2, width=120)
 
 
-def embedded_cfg_scale_for_batch(batch: "ForwardBatch", fastvideo_args: "FastVideoArgs") -> float | None:
+def embedded_cfg_scale_for_batch(batch: "ForwardBatch", resolved_config: "FastVideoArgs") -> float | None:
     """The embedded guidance scale for ``batch``: the request's value, else the pipeline config's."""
     if batch.embedded_cfg_scale is not None:
         return batch.embedded_cfg_scale
-    return getattr(fastvideo_args.pipeline_config, "embedded_cfg_scale", None)
+    return getattr(resolved_config.pipeline_config, "embedded_cfg_scale", None)
 
 
 @dataclass

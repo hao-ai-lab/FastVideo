@@ -48,14 +48,14 @@ class MagiHumanReferenceImageStage(PipelineStage):
         self.vae = vae
         self.video_processor = VideoProcessor(vae_scale_factor=vae_scale_factor)
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         image = getattr(batch, "image", None) or batch.pil_image
         if image is None and batch.image_path is not None:
             image = load_image(batch.image_path)

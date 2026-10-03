@@ -49,9 +49,9 @@ class ServeSubcommand(CLISubcommand):
             serve_config.server.port,
         )
 
-        fastvideo_args = resolve_inference_config(serve_config.generator)
+        resolved_config = resolve_inference_config(serve_config.generator)
         run_server(
-            fastvideo_args,
+            resolved_config,
             host=serve_config.server.host,
             port=serve_config.server.port,
             output_dir=serve_config.server.output_dir,

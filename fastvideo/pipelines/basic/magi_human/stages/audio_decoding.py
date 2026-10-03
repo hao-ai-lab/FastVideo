@@ -74,14 +74,14 @@ class MagiHumanAudioDecodingStage(PipelineStage):
         self.audio_vae = audio_vae
         self.time_stretching = time_stretching
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         latent_audio = getattr(batch, "audio_latents", None)
         if latent_audio is None:
             # Joint AV: missing audio latents means the denoising stage broke.

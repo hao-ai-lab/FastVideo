@@ -16,7 +16,7 @@ class Cosmos2_5Pipeline(ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler", "safety_checker"]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         logger.info("Creating Cosmos 2.5 pipeline stages...")
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

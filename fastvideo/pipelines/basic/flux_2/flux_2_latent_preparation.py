@@ -28,14 +28,14 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """Prepare latents with Flux2 packed half-spatial shape."""
         from fastvideo.distributed import get_local_torch_device
 
         latent_num_frames = None
         if hasattr(self, "adjust_video_length"):
-            latent_num_frames = self.adjust_video_length(batch, fastvideo_args)
+            latent_num_frames = self.adjust_video_length(batch, resolved_config)
 
         if not batch.prompt_embeds:
             if batch.keyboard_cond is not None:
@@ -80,7 +80,7 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
 
-        vae_arch = fastvideo_args.pipeline_config.vae_config.arch_config
+        vae_arch = resolved_config.pipeline_config.vae_config.arch_config
         scale = vae_arch.spatial_compression_ratio
         # Flux2 packed: half spatial (2x2 patch packing)
         latent_h = (height // scale) // 2

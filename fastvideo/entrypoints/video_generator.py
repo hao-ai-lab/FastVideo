@@ -128,7 +128,7 @@ class VideoGenerator:
 
     def __init__(
         self,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
         executor_class: type[Executor],
         log_stats: bool,
         *,
@@ -138,17 +138,15 @@ class VideoGenerator:
         Initialize the video generator.
 
         Args:
-            fastvideo_args: The resolved runtime config that the workers run with
+            resolved_config: The resolved runtime config that the workers run with
             executor_class: The executor class to use for inference
             log_stats: Whether to log statistics
             log_queue: Optional multiprocessing.Queue to forward worker logs to
         """
         self.config: GeneratorConfig | None = None
         # Resolved startup values with the provenance of each path and the model's PipelineConfig.
-        self.resolved_config: ResolvedGeneratorConfig | None = (fastvideo_args if isinstance(
-            fastvideo_args, ResolvedGeneratorConfig) else getattr(fastvideo_args, "resolved_config", None))
-        self.fastvideo_args = fastvideo_args
-        self.executor = executor_class(fastvideo_args, log_queue=log_queue)
+        self.resolved_config = resolved_config
+        self.executor = executor_class(resolved_config, log_queue=log_queue)
 
     @classmethod
     def from_pretrained(
@@ -226,7 +224,7 @@ class VideoGenerator:
     @classmethod
     def from_fastvideo_args(
         cls,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
         *,
         log_queue=None,
     ) -> "VideoGenerator":
@@ -243,17 +241,17 @@ class VideoGenerator:
         # Initialize distributed environment if needed
         # initialize_distributed_and_parallelism(fastvideo_args)
 
-        if (not isinstance(fastvideo_args, ResolvedGeneratorConfig)
-                and getattr(fastvideo_args, "resolved_config", None) is None):
+        if (not isinstance(resolved_config, ResolvedGeneratorConfig)
+                and getattr(resolved_config, "resolved_config", None) is None):
             warnings.warn(
                 "VideoGenerator.from_fastvideo_args(...) with a FastVideoArgs that was not built from a typed "
                 "config is deprecated; use VideoGenerator.from_config(GeneratorConfig(...)) instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
-        executor_class = Executor.get_class(fastvideo_args)
+        executor_class = Executor.get_class(resolved_config)
         return cls(
-            fastvideo_args=fastvideo_args,
+            resolved_config=resolved_config,
             executor_class=executor_class,
             log_stats=False,  # TODO: implement
             log_queue=log_queue,
@@ -364,7 +362,7 @@ class VideoGenerator:
         self,
         request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
-        _validate_request_stage_overrides(self.fastvideo_args.model_path, request)
+        _validate_request_stage_overrides(self.resolved_config.model_path, request)
         if isinstance(request.prompt, list):
             if request.inputs.prompt_path is not None:
                 raise ValueError("request.prompt list cannot be combined with request.inputs.prompt_path")
@@ -389,14 +387,14 @@ class VideoGenerator:
     ) -> GenerationResult | list[GenerationResult]:
         sampling_param = request_to_sampling_param(
             request,
-            model_path=self.fastvideo_args.model_path,
+            model_path=self.resolved_config.model_path,
         )
-        resolved_request = resolve_request(request, model_path=self.fastvideo_args.model_path)
+        resolved_request = resolve_request(request, model_path=self.resolved_config.model_path)
         batch_extra = request_to_batch_extra(request)
         result = self._generate_video_impl(
             prompt=request.prompt,
             sampling_param=sampling_param,
-            fastvideo_args=self.fastvideo_args,
+            resolved_config=self.resolved_config,
             **batch_extra,
         )
         wrapped = self._wrap_legacy_result(result)
@@ -412,16 +410,16 @@ class VideoGenerator:
         keyboard_cond: torch.Tensor | None = None,
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | None = None,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs | None = None,
         **kwargs,
     ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
         """Run one prompt, or each prompt of a prompt file, through the pipeline with ``sampling_param``."""
-        if fastvideo_args is None:
-            fastvideo_args = self.fastvideo_args
+        if resolved_config is None:
+            resolved_config = self.resolved_config
 
         # Handle batch processing from text file
         if sampling_param is None:
-            sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
+            sampling_param = SamplingParam.from_pretrained(resolved_config.model_path)
 
         # Add action control inputs to kwargs if provided
         if mouse_cond is not None:
@@ -440,8 +438,8 @@ class VideoGenerator:
         sampling_param.update(kwargs)
         kwargs["_extra_overrides"] = extra_overrides
 
-        if fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
-            prompt_txt_path = sampling_param.prompt_path or fastvideo_args.prompt_txt
+        if resolved_config.prompt_txt is not None or sampling_param.prompt_path is not None:
+            prompt_txt_path = sampling_param.prompt_path or resolved_config.prompt_txt
             if not prompt_txt_path or not os.path.exists(prompt_txt_path):
                 raise FileNotFoundError(f"Prompt text file not found: {prompt_txt_path}")
 
@@ -464,7 +462,7 @@ class VideoGenerator:
                     result = self._generate_single_video(
                         prompt=batch_prompt,
                         sampling_param=sampling_param,
-                        fastvideo_args=fastvideo_args,
+                        resolved_config=resolved_config,
                         **kwargs,
                     )
 
@@ -484,7 +482,7 @@ class VideoGenerator:
 
         # Single prompt generation (original behavior)
         if prompt is None:
-            if fastvideo_args.workload_type is WorkloadType.V2A:
+            if resolved_config.workload_type is WorkloadType.V2A:
                 # Video semantics are sufficient conditioning for V2A models;
                 # model-specific text stages interpret the empty string using
                 # their native tokenizer/empty-prompt contract.
@@ -498,20 +496,20 @@ class VideoGenerator:
         return self._generate_single_video(
             prompt=prompt,
             sampling_param=sampling_param,
-            fastvideo_args=fastvideo_args,
+            resolved_config=resolved_config,
             **kwargs,
         )
 
     def _is_image_workload(self) -> bool:
         """Return True when the workload produces a single image (t2i, i2i …)."""
-        args = getattr(self, "fastvideo_args", None)
+        args = getattr(self, "resolved_config", None)
         if args is None:
             return False
         return args.workload_type.value.endswith("2i")
 
     def _is_audio_workload(self) -> bool:
         """Return True when the workload produces standalone audio."""
-        args = getattr(self, "fastvideo_args", None)
+        args = getattr(self, "resolved_config", None)
         if args is None:
             return False
         return args.workload_type.value.endswith("2a")
@@ -596,12 +594,12 @@ class VideoGenerator:
         self,
         prompt: str,
         sampling_param: SamplingParam | None = None,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | None = None,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """Internal method for single video generation"""
-        if fastvideo_args is None:
-            fastvideo_args = self.fastvideo_args
+        if resolved_config is None:
+            resolved_config = self.resolved_config
 
         # Validate inputs
         if not isinstance(prompt, str):
@@ -630,7 +628,7 @@ class VideoGenerator:
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         # Log parameters
-        embedded_cfg_scale = (fastvideo_args.pipeline_config.embedded_cfg_scale
+        embedded_cfg_scale = (resolved_config.pipeline_config.embedded_cfg_scale
                               if sampling_param.embedded_cfg_scale is None else sampling_param.embedded_cfg_scale)
         debug_str = f"""
                       height: {target_height}
@@ -644,7 +642,7 @@ class VideoGenerator:
        num_videos_per_prompt: {sampling_param.num_videos_per_prompt}
               guidance_scale: {sampling_param.guidance_scale}
                     n_tokens: {n_tokens}
-                  flow_shift: {fastvideo_args.pipeline_config.flow_shift}
+                  flow_shift: {resolved_config.pipeline_config.flow_shift}
      embedded_guidance_scale: {embedded_cfg_scale}
                   save_video: {sampling_param.save_video}
                   output_path: {output_path}
@@ -656,7 +654,7 @@ class VideoGenerator:
             **shallow_asdict(sampling_param),
             eta=0.0,
             n_tokens=n_tokens,
-            VSA_sparsity=fastvideo_args.VSA_sparsity,
+            VSA_sparsity=resolved_config.VSA_sparsity,
         )
         # Allow precomputed prompt_embeds (e.g. from diffusers) to skip text encoding
         if prompt_embeds is not None:
@@ -679,7 +677,7 @@ class VideoGenerator:
         def execute_forward_thread():
             import traceback
             try:
-                result_container["output_batch"] = self.executor.execute_forward(batch, fastvideo_args)
+                result_container["output_batch"] = self.executor.execute_forward(batch, resolved_config)
             except BaseException as error:  # noqa: BLE001
                 thread_error["error"] = error
                 thread_error_traceback["traceback"] = traceback.format_exc()
@@ -687,7 +685,7 @@ class VideoGenerator:
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
         latent_batch_size = _infer_latent_batch_size(batch)
-        is_latent_output = fastvideo_args.output_type == "latent"
+        is_latent_output = resolved_config.output_type == "latent"
         needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
         # A populated ``samples`` has exactly one consumer — the result
         # dict (``"samples": samples if batch.return_frames else None``).
@@ -707,7 +705,7 @@ class VideoGenerator:
         else:
             samples = allocate_cpu_tensor_with_pin_fallback(
                 (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
-                pin_memory=fastvideo_args.pin_cpu_memory)
+                pin_memory=resolved_config.pin_cpu_memory)
         thread.join()
 
         if thread_error["error"] is not None:

@@ -223,7 +223,7 @@ def test_set_lora_adapter_mxfp8_requantizes_after_adapter_merge(monkeypatch: pyt
         },
         lora_initialized=True,
         lora_layers={"transformer": transformer_lora_layers},
-        fastvideo_args=SimpleNamespace(training_mode=False),
+        resolved_config=SimpleNamespace(training_mode=False),
         trainable_transformer_modules={"transformer": transformer},
     )
     monkeypatch.setattr("fastvideo.pipelines.lora_pipeline.dist.get_rank", lambda: 0)

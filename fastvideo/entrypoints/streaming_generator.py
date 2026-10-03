@@ -78,11 +78,11 @@ class StreamingVideoGenerator(VideoGenerator):
     """
 
     def __init__(self,
-                 fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+                 resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
                  executor_class: type[Executor],
                  log_stats: bool,
                  use_queue_mode: bool = True):
-        super().__init__(fastvideo_args, executor_class, log_stats)
+        super().__init__(resolved_config, executor_class, log_stats)
         self.accumulated_frames: list[np.ndarray] = []
         self.sampling_param: SamplingParam | None = None
         self.batch: ForwardBatch | None = None
@@ -92,10 +92,10 @@ class StreamingVideoGenerator(VideoGenerator):
         self.block_idx: int = 0
 
     @classmethod
-    def from_fastvideo_args(cls, fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> "StreamingVideoGenerator":
-        executor_class = Executor.get_class(fastvideo_args)
+    def from_fastvideo_args(cls, resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> "StreamingVideoGenerator":
+        executor_class = Executor.get_class(resolved_config)
         return cls(
-            fastvideo_args=fastvideo_args,
+            resolved_config=resolved_config,
             executor_class=executor_class,
             log_stats=False,
         )
@@ -116,7 +116,7 @@ class StreamingVideoGenerator(VideoGenerator):
 
         # Handle batch processing from text file
         if self.sampling_param is None:
-            self.sampling_param = SamplingParam.from_pretrained(self.fastvideo_args.model_path)
+            self.sampling_param = SamplingParam.from_pretrained(self.resolved_config.model_path)
 
         self.sampling_param.update(kwargs)
         self.sampling_param.prompt = prompt
@@ -132,7 +132,7 @@ class StreamingVideoGenerator(VideoGenerator):
             self.block_dir = block_dir
             self.writer = IncrementalVideoWriter(output_path, fps=24, block_dir=block_dir)
 
-        fastvideo_args = self.fastvideo_args
+        resolved_config = self.resolved_config
 
         self.sampling_param.height = align_to(self.sampling_param.height, 16)
         self.sampling_param.width = align_to(self.sampling_param.width, 16)
@@ -148,16 +148,16 @@ class StreamingVideoGenerator(VideoGenerator):
             **shallow_asdict(self.sampling_param),
             eta=0.0,
             n_tokens=n_tokens,
-            VSA_sparsity=fastvideo_args.VSA_sparsity,
+            VSA_sparsity=resolved_config.VSA_sparsity,
         )
 
         if self._use_queue_mode:
-            self.executor.submit_reset(self.batch, fastvideo_args)
+            self.executor.submit_reset(self.batch, resolved_config)
             result = self.executor.wait_result()
             if result.error:
                 raise result.error
         else:
-            self.executor.execute_streaming_reset(self.batch, fastvideo_args)
+            self.executor.execute_streaming_reset(self.batch, resolved_config)
 
     def step(self, keyboard_cond: torch.Tensor, mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
         if self.batch is None:

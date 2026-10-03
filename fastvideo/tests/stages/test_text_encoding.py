@@ -122,33 +122,33 @@ def make_stage(num_encoders=2, hidden_size=8):
 
 
 def test_encode_text_selection_and_shapes():
-    fastvideo_args, hidden = make_args(num_encoders=2, text_len=4, hidden_size=8)
+    resolved_config, hidden = make_args(num_encoders=2, text_len=4, hidden_size=8)
     stage = make_stage(num_encoders=2, hidden_size=hidden)
 
     # list return, two encoders
-    embeds = stage.encode_text(["a", "b"], fastvideo_args, encoder_index=[0, 1])
+    embeds = stage.encode_text(["a", "b"], resolved_config, encoder_index=[0, 1])
     assert isinstance(embeds, list) and len(embeds) == 2
     for e in embeds:
         assert e.shape == (2, hidden)
 
     # with masks
-    embeds2, masks2 = stage.encode_text("a", fastvideo_args, encoder_index=[1], return_attention_mask=True)
+    embeds2, masks2 = stage.encode_text("a", resolved_config, encoder_index=[1], return_attention_mask=True)
     assert len(embeds2) == 1 and len(masks2) == 1
     assert embeds2[0].shape == (1, hidden)
     assert masks2[0].shape == (1, 4)
 
     # dict return
-    d = stage.encode_text(["a", "b"], fastvideo_args, encoder_index=[0, 1], return_type="dict")
+    d = stage.encode_text(["a", "b"], resolved_config, encoder_index=[0, 1], return_type="dict")
     assert set(d.keys()) == {"0", "1"}
     assert d["0"].shape == (2, hidden)
 
     # stack return
-    s = stage.encode_text(["a", "b"], fastvideo_args, encoder_index=[0, 1], return_type="stack")
+    s = stage.encode_text(["a", "b"], resolved_config, encoder_index=[0, 1], return_type="stack")
     assert s.shape == (2, 2, hidden)  # [encoders, batch, hidden]
 
     # overrides: dtype + max_length
     e3, m3 = stage.encode_text(["a"],
-                               fastvideo_args,
+                               resolved_config,
                                encoder_index=[0],
                                dtype=torch.float16,
                                return_attention_mask=True,
@@ -158,7 +158,7 @@ def test_encode_text_selection_and_shapes():
 
 
 def test_forward_integration_cfg_off_and_on():
-    fastvideo_args, hidden = make_args(num_encoders=2, text_len=4, hidden_size=8)
+    resolved_config, hidden = make_args(num_encoders=2, text_len=4, hidden_size=8)
     stage = make_stage(num_encoders=2, hidden_size=hidden)
 
     # CFG off
@@ -172,7 +172,7 @@ def test_forward_integration_cfg_off_and_on():
         prompt_attention_mask=[],
         negative_attention_mask=None,
     )
-    out = stage.forward(batch, fastvideo_args)
+    out = stage.forward(batch, resolved_config)
     assert len(out.prompt_embeds) == 2
     for e in out.prompt_embeds:
         assert e.shape[1] == hidden
@@ -188,7 +188,7 @@ def test_forward_integration_cfg_off_and_on():
         prompt_attention_mask=[],
         negative_attention_mask=[],
     )
-    out2 = stage.forward(batch2, fastvideo_args)
+    out2 = stage.forward(batch2, resolved_config)
     assert len(out2.prompt_embeds) == 2
     assert len(out2.negative_prompt_embeds) == 2
     assert len(out2.prompt_attention_mask) == 2
@@ -196,37 +196,37 @@ def test_forward_integration_cfg_off_and_on():
 
 
 def test_encode_text_hidden_state_flag_follows_encoder_config():
-    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    resolved_config, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
     stage = make_stage(num_encoders=1, hidden_size=hidden)
-    cfg = fastvideo_args.pipeline_config.text_encoder_configs[0].arch_config
+    cfg = resolved_config.pipeline_config.text_encoder_configs[0].arch_config
 
     cfg.output_hidden_states = False
-    stage.encode_text("a", fastvideo_args, encoder_index=[0])
+    stage.encode_text("a", resolved_config, encoder_index=[0])
     assert stage.text_encoders[0].last_output_hidden_states is False
 
     cfg.output_hidden_states = True
-    stage.encode_text("a", fastvideo_args, encoder_index=[0])
+    stage.encode_text("a", resolved_config, encoder_index=[0])
     assert stage.text_encoders[0].last_output_hidden_states is True
 
 
 def test_encode_text_does_not_force_hidden_states_for_ltx2_prefix():
-    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
-    fastvideo_args.pipeline_config.dit_config.prefix = "ltx2"
-    cfg = fastvideo_args.pipeline_config.text_encoder_configs[0].arch_config
+    resolved_config, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    resolved_config.pipeline_config.dit_config.prefix = "ltx2"
+    cfg = resolved_config.pipeline_config.text_encoder_configs[0].arch_config
     cfg.output_hidden_states = False
 
     stage = make_stage(num_encoders=1, hidden_size=hidden)
-    stage.encode_text("a", fastvideo_args, encoder_index=[0])
+    stage.encode_text("a", resolved_config, encoder_index=[0])
 
     assert stage.text_encoders[0].last_output_hidden_states is False
 
 
 def test_chat_list_preprocess_output_is_not_stripped():
-    fastvideo_args, hidden = make_args(num_encoders=1, text_len=5, hidden_size=8)
-    encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
+    resolved_config, hidden = make_args(num_encoders=1, text_len=5, hidden_size=8)
+    encoder_config = resolved_config.pipeline_config.text_encoder_configs[0]
     encoder_config.is_chat_model = True
     encoder_config.treat_empty_as_dot = True
-    fastvideo_args.pipeline_config.preprocess_text_funcs = (chat_list_preprocess, )
+    resolved_config.pipeline_config.preprocess_text_funcs = (chat_list_preprocess, )
 
     tokenizer = FakeChatTokenizer()
     stage = TextEncodingStage(
@@ -236,7 +236,7 @@ def test_chat_list_preprocess_output_is_not_stripped():
 
     embeds, masks = stage.encode_text(
         "a robotic arm welding a metal structure",
-        fastvideo_args,
+        resolved_config,
         encoder_index=[0],
         return_attention_mask=True,
     )
@@ -298,13 +298,13 @@ def test_chat_template_thinking_is_keyword_only_and_preserves_subclass_positions
 
 @pytest.mark.parametrize("enable_thinking", [False, True])
 def test_encode_text_forwards_chat_template_thinking_config(enable_thinking):
-    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
-    encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
+    resolved_config, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    encoder_config = resolved_config.pipeline_config.text_encoder_configs[0]
     encoder_config.is_chat_model = True
     encoder_config.chat_template_enable_thinking = enable_thinking
 
     stage = make_stage(num_encoders=1, hidden_size=hidden)
-    stage.encode_text("a", fastvideo_args, encoder_index=[0])
+    stage.encode_text("a", resolved_config, encoder_index=[0])
 
     assert stage.tokenizers[0].last_chat_template_kwargs == {
         "tokenize": False,
@@ -314,7 +314,7 @@ def test_encode_text_forwards_chat_template_thinking_config(enable_thinking):
 
 
 def test_encode_text_uses_hf_passthrough_input_device(monkeypatch):
-    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    resolved_config, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
     stage = make_stage(num_encoders=1, hidden_size=hidden)
     stage.text_encoders[0]._fastvideo_input_device = torch.device("cpu")
 
@@ -332,7 +332,7 @@ def test_encode_text_uses_hf_passthrough_input_device(monkeypatch):
         prompt_attention_mask=[],
         negative_attention_mask=None,
     )
-    output = stage.forward(batch, fastvideo_args)
+    output = stage.forward(batch, resolved_config)
 
     # The marker governs where the encoder *receives* its tokens...
     assert stage.text_encoders[0].last_input_device == torch.device("cpu")
@@ -342,13 +342,13 @@ def test_encode_text_uses_hf_passthrough_input_device(monkeypatch):
 
 
 def test_encode_text_explicit_device_overrides_hf_passthrough_marker():
-    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    resolved_config, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
     stage = make_stage(num_encoders=1, hidden_size=hidden)
     stage.text_encoders[0]._fastvideo_input_device = torch.device("cpu")
 
     output = stage.encode_text(
         "a",
-        fastvideo_args,
+        resolved_config,
         encoder_index=[0],
         device=torch.device("meta"),
     )
@@ -389,16 +389,16 @@ def test_encode_text_output_does_not_alias_encoder_static_buffers():
     # "accessing tensor output of CUDAGraphs that has been overwritten by a
     # subsequent run". encode_text must copy every embedding it retains out
     # of encoder-owned storage.
-    fastvideo_args, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
-    fastvideo_args.pipeline_config.dit_config.prefix = "ltx2"
-    fastvideo_args.pipeline_config.postprocess_text_funcs = (identity_postprocess, )
-    cfg = fastvideo_args.pipeline_config.text_encoder_configs[0].arch_config
+    resolved_config, hidden = make_args(num_encoders=1, text_len=4, hidden_size=8)
+    resolved_config.pipeline_config.dit_config.prefix = "ltx2"
+    resolved_config.pipeline_config.postprocess_text_funcs = (identity_postprocess, )
+    cfg = resolved_config.pipeline_config.text_encoder_configs[0].arch_config
     cfg.output_hidden_states = True
 
     encoder = StaticBufferTextEncoder(text_len=4, hidden_size=hidden)
     stage = TextEncodingStage(text_encoders=[encoder], tokenizers=[FakeTokenizer()])
 
-    embeds = stage.encode_text("a cat", fastvideo_args, encoder_index=[0], device="cpu")
+    embeds = stage.encode_text("a cat", resolved_config, encoder_index=[0], device="cpu")
     prompt_embeds = embeds[0]
     audio_embeds = stage._last_audio_embeds[0]
 
@@ -410,6 +410,6 @@ def test_encode_text_output_does_not_alias_encoder_static_buffers():
     # that overwrites the encoder's static buffers in place.
     expected_prompt = prompt_embeds.clone()
     expected_audio = audio_embeds.clone()
-    stage.encode_text("bad quality", fastvideo_args, encoder_index=[0], device="cpu")
+    stage.encode_text("bad quality", resolved_config, encoder_index=[0], device="cpu")
     torch.testing.assert_close(prompt_embeds, expected_prompt)
     torch.testing.assert_close(audio_embeds, expected_audio)

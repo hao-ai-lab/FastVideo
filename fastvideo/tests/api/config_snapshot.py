@@ -134,13 +134,13 @@ def to_jsonable(value: Any) -> Any:
     return _normalize_text(repr(value))
 
 
-def snapshot_fastvideo_args(fastvideo_args: Any) -> dict[str, Any]:
+def snapshot_fastvideo_args(resolved_config: Any) -> dict[str, Any]:
     """FastVideoArgs fields, with its PipelineConfig as a separate top-level entry."""
     fields = {
-        field.name: to_jsonable(getattr(fastvideo_args, field.name))
-        for field in dataclasses.fields(fastvideo_args) if field.name != "pipeline_config"
+        field.name: to_jsonable(getattr(resolved_config, field.name))
+        for field in dataclasses.fields(resolved_config) if field.name != "pipeline_config"
     }
-    pipeline_config = fastvideo_args.pipeline_config
+    pipeline_config = resolved_config.pipeline_config
     return {
         "fastvideo_args": fields,
         "pipeline_config_class": f"{type(pipeline_config).__module__}.{type(pipeline_config).__qualname__}",

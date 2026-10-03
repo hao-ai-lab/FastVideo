@@ -99,8 +99,8 @@ class RayDistributedExecutor(Executor):
     }
 
     def _init_executor(self) -> None:
-        initialize_ray_cluster(self.fastvideo_args)
-        placement_group = self.fastvideo_args.ray_placement_group
+        initialize_ray_cluster(self.resolved_config)
+        placement_group = self.resolved_config.ray_placement_group
 
         # Disable Ray usage stats collection.
         ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
@@ -127,7 +127,7 @@ class RayDistributedExecutor(Executor):
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if bundle.get(current_platform.ray_device_key, 0):
                 bundle_indices.append(bundle_id)
-        bundle_indices = bundle_indices[:self.fastvideo_args.num_gpus]
+        bundle_indices = bundle_indices[:self.resolved_config.num_gpus]
 
         worker_metadata: list[RayWorkerMetaData] = []
         driver_ip = get_ip()
@@ -145,7 +145,7 @@ class RayDistributedExecutor(Executor):
                     num_gpus=num_gpus,
                     scheduling_strategy=scheduling_strategy,
                     **ray_remote_kwargs,
-                )(RayWorkerWrapper).remote(fastvideo_args=self.fastvideo_args, rpc_rank=rank)
+                )(RayWorkerWrapper).remote(resolved_config=self.resolved_config, rpc_rank=rank)
             else:
                 worker = ray.remote(
                     num_cpus=0,
@@ -153,7 +153,7 @@ class RayDistributedExecutor(Executor):
                     resources={current_platform.ray_device_key: num_gpus},
                     scheduling_strategy=scheduling_strategy,
                     **ray_remote_kwargs,
-                )(RayWorkerWrapper).remote(fastvideo_args=self.fastvideo_args, rpc_rank=rank)
+                )(RayWorkerWrapper).remote(resolved_config=self.resolved_config, rpc_rank=rank)
             worker_metadata.append(RayWorkerMetaData(worker=worker, created_rank=rank))
 
         worker_ips = ray.get([
@@ -258,7 +258,7 @@ class RayDistributedExecutor(Executor):
         for rank, (node_id, _) in enumerate(worker_node_and_gpu_ids):
             local_rank = node_workers[node_id].index(rank)
             kwargs = dict(
-                fastvideo_args=self.fastvideo_args,
+                resolved_config=self.resolved_config,
                 local_rank=local_rank,
                 rank=rank,
                 distributed_init_method=distributed_init_method,
@@ -280,18 +280,18 @@ class RayDistributedExecutor(Executor):
         for index, worker in enumerate(self.workers):
             # The driver worker is rank 0 and not in self.workers.
             rank = index + 1
-            if rank % self.fastvideo_args.tp_size == 0:
+            if rank % self.resolved_config.tp_size == 0:
                 self.tp_driver_workers.append(worker)
             else:
                 self.non_driver_workers.append(worker)
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
+                                resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
         responses: list[dict[str, Any]] = self.collective_rpc(
             "execute_streaming_reset",
             kwargs={
                 "forward_batch": forward_batch,
-                "fastvideo_args": fastvideo_args,
+                "resolved_config": resolved_config,
             },
         )
         return responses[0]
@@ -319,12 +319,12 @@ class RayDistributedExecutor(Executor):
         self.collective_rpc("execute_streaming_clear")
 
     def execute_forward(self, forward_batch: ForwardBatch,
-                        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
+                        resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
         responses: list[ForwardBatch] = self.collective_rpc(
             "execute_forward",
             kwargs={
                 "forward_batch": forward_batch,
-                "fastvideo_args": fastvideo_args,
+                "resolved_config": resolved_config,
             },
         )
         output = responses[0].output.cpu()

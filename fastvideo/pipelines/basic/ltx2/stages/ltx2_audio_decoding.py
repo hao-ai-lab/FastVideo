@@ -43,7 +43,7 @@ class LTX2AudioDecodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         audio_latents = batch.extra.get("ltx2_audio_latents")
         if audio_latents is None:
@@ -68,7 +68,7 @@ class LTX2AudioDecodingStage(PipelineStage):
         batch.extra["audio_sample_rate"] = _resolve_audio_sample_rate(self.vocoder)
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("audio_latents", batch.extra.get("ltx2_audio_latents"), V.none_or_tensor)
         return result

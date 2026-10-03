@@ -25,7 +25,7 @@ class PipelineWithLoRA(LoRAPipeline, ComposedPipelineBase):
     pass
 
 
-def build_pipeline(fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+def build_pipeline(resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
                    pipeline_type: PipelineType | str = PipelineType.BASIC) -> PipelineWithLoRA:
     """
     Only works with valid hf diffusers configs. (model_index.json)
@@ -36,28 +36,28 @@ def build_pipeline(fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
     """
     # Resolve the concrete pipeline from the small Hub manifest before
     # downloading large component weights.
-    model_path = fastvideo_args.model_path
+    model_path = resolved_config.model_path
     logger.info("Building pipeline of type: %s",
                 pipeline_type.value if isinstance(pipeline_type, PipelineType) else pipeline_type)
 
     model_info = get_model_info(
         model_path=model_path,
         pipeline_type=pipeline_type,
-        workload_type=fastvideo_args.workload_type,
-        override_pipeline_cls_name=fastvideo_args.override_pipeline_cls_name,
-        revision=fastvideo_args.revision,
+        workload_type=resolved_config.workload_type,
+        override_pipeline_cls_name=resolved_config.override_pipeline_cls_name,
+        revision=resolved_config.revision,
     )
     pipeline_cls = model_info.pipeline_cls
 
     model_path = maybe_download_model(
         model_path,
-        revision=fastvideo_args.revision,
+        revision=resolved_config.revision,
         allow_patterns=pipeline_cls.get_hf_download_allow_patterns(),
     )
     logger.info("Model path: %s", model_path)
 
     # instantiate the pipelines
-    pipeline = pipeline_cls(model_path, fastvideo_args)
+    pipeline = pipeline_cls(model_path, resolved_config)
 
     logger.info("Pipelines instantiated")
 

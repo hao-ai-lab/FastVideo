@@ -18,11 +18,11 @@ class Executor(ABC):
 
     def __init__(
         self,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
         *,
         log_queue=None,
     ):
-        self.fastvideo_args = fastvideo_args
+        self.resolved_config = resolved_config
         self._log_queue = log_queue
 
         self._init_executor()
@@ -32,25 +32,26 @@ class Executor(ABC):
         raise NotImplementedError
 
     @staticmethod
-    def get_class(fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> type["Executor"]:
-        if fastvideo_args.distributed_executor_backend == "mp":
+    def get_class(resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> type["Executor"]:
+        if resolved_config.distributed_executor_backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
-        elif fastvideo_args.distributed_executor_backend == "ray":
+        elif resolved_config.distributed_executor_backend == "ray":
             from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
             return cast(type["Executor"], RayDistributedExecutor)
         else:
-            raise ValueError(f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}")
+            raise ValueError(
+                f"Unsupported distributed executor backend: {resolved_config.distributed_executor_backend}")
 
     def execute_forward(
         self,
         forward_batch: ForwardBatch,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
     ) -> ForwardBatch:
         outputs: list[dict[str, Any]] = self.collective_rpc("execute_forward",
                                                             kwargs={
                                                                 "forward_batch": forward_batch,
-                                                                "fastvideo_args": fastvideo_args
+                                                                "resolved_config": resolved_config
                                                             })
         return cast(ForwardBatch, outputs[0]["output_batch"])
 

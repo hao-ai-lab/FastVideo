@@ -120,7 +120,7 @@ def _load_component(
     name: str,
     model_path: Path,
     model_index: dict[str, Any],
-    fastvideo_args: FastVideoArgs,
+    resolved_config: FastVideoArgs,
 ) -> Any:
     """Load one checkpoint component through the inference component registry.
 
@@ -134,7 +134,7 @@ def _load_component(
         module_name=name,
         component_model_path=str(model_path / name),
         transformers_or_diffusers=transformers_or_diffusers,
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
     )
 
 
@@ -142,7 +142,7 @@ def encode_video_latents(
     frames: np.ndarray,
     model_path: Path,
     model_index: dict[str, Any],
-    fastvideo_args: FastVideoArgs,
+    resolved_config: FastVideoArgs,
 ) -> torch.Tensor:
     """Encode normalized ``[24, T, H, W]`` causal video VAE targets.
 
@@ -152,7 +152,7 @@ def encode_video_latents(
     channels into patch-major features.
     """
     print("Loading MiniMax H3 video VAE")
-    vae = _load_component("vae", model_path, model_index, fastvideo_args)
+    vae = _load_component("vae", model_path, model_index, resolved_config)
     # Feed [B, C, T, H, W] pixels and retain [C, T, H, W] latents; H3 later
     # flattens every video token in (C, patch_t, patch_h, patch_w) order.
     pixels = torch.from_numpy(frames.copy()).permute(3, 0, 1, 2)[None]
@@ -173,7 +173,7 @@ def encode_audio_latents(
     waveform: torch.Tensor,
     model_path: Path,
     model_index: dict[str, Any],
-    fastvideo_args: FastVideoArgs,
+    resolved_config: FastVideoArgs,
 ) -> torch.Tensor:
     """Encode normalized ``[2, 32, T]`` stereo targets with the mono audio VAE.
 
@@ -181,7 +181,7 @@ def encode_audio_latents(
     encoder to both synchronized channels while preserving channel identity.
     """
     print("Loading MiniMax H3 audio VAE")
-    audio_vae = _load_component("audio_vae", model_path, model_index, fastvideo_args)
+    audio_vae = _load_component("audio_vae", model_path, model_index, resolved_config)
     waveform = waveform.to(device=torch.device("cuda:0"), dtype=torch.float32)
     with torch.no_grad():
         posterior = audio_vae.encode(waveform[:, None]).latent_dist
@@ -198,7 +198,7 @@ def encode_text_embedding(
     caption: str,
     model_path: Path,
     model_index: dict[str, Any],
-    fastvideo_args: FastVideoArgs,
+    resolved_config: FastVideoArgs,
 ) -> torch.Tensor:
     """Encode the caption through the H3 Qwen3-VL layer-50 inference path.
 
@@ -206,9 +206,9 @@ def encode_text_embedding(
     selected hidden-state layer identical to validation conditioning.
     """
     print("Loading MiniMax H3 tokenizer, processor, and Qwen3-VL encoder")
-    tokenizer = _load_component("tokenizer", model_path, model_index, fastvideo_args)
-    processor = _load_component("processor", model_path, model_index, fastvideo_args)
-    conditioner = _load_component("text_encoder", model_path, model_index, fastvideo_args)
+    tokenizer = _load_component("tokenizer", model_path, model_index, resolved_config)
+    processor = _load_component("processor", model_path, model_index, resolved_config)
+    conditioner = _load_component("text_encoder", model_path, model_index, resolved_config)
     stage = MiniMaxH3ConditioningStage(
         conditioner=conditioner,
         tokenizer=tokenizer,
@@ -216,7 +216,7 @@ def encode_text_embedding(
     )
     batch = ForwardBatch(data_type="video", prompt=caption)
     batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []
-    batch = stage.forward(batch, fastvideo_args)
+    batch = stage.forward(batch, resolved_config)
     if not batch.prompt_embeds:
         raise RuntimeError("MiniMax H3 conditioning returned no prompt embedding")
     text_embedding = batch.prompt_embeds[0].squeeze(0).float().cpu().contiguous()
@@ -330,7 +330,7 @@ def main() -> None:
     )
     frames, waveform = load_training_media(video_path)
     pipeline_config = MiniMaxH3PipelineConfig()
-    fastvideo_args = FastVideoArgs(
+    resolved_config = FastVideoArgs(
         model_path=str(resolved_model_path),
         pipeline_config=pipeline_config,
         num_gpus=1,
@@ -341,9 +341,9 @@ def main() -> None:
         vae_cpu_offload=False,
         text_encoder_cpu_offload=False,
     )
-    video_latents = encode_video_latents(frames, resolved_model_path, model_index, fastvideo_args)
-    audio_latents = encode_audio_latents(waveform, resolved_model_path, model_index, fastvideo_args)
-    text_embedding = encode_text_embedding(caption, resolved_model_path, model_index, fastvideo_args)
+    video_latents = encode_video_latents(frames, resolved_model_path, model_index, resolved_config)
+    audio_latents = encode_audio_latents(waveform, resolved_model_path, model_index, resolved_config)
+    text_embedding = encode_text_embedding(caption, resolved_model_path, model_index, resolved_config)
     record = build_parquet_record(
         file_name=TRAINING_VIDEO_NAME,
         caption=caption,

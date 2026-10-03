@@ -50,16 +50,16 @@ def _prepare_flux2_text_ids(prompt_embeds: torch.Tensor) -> torch.Tensor:
 class Flux2TextEncodingStage(TextEncodingStage):
     """Text encoding for Flux2 full and Klein variants."""
 
-    def _uses_embedded_guidance(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> bool:
-        return embedded_cfg_scale_for_batch(batch, fastvideo_args) is not None
+    def _uses_embedded_guidance(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> bool:
+        return embedded_cfg_scale_for_batch(batch, resolved_config) is not None
 
     @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
-        if self._uses_embedded_guidance(batch, fastvideo_args):
+        if self._uses_embedded_guidance(batch, resolved_config):
             batch.do_classifier_free_guidance = False
             batch.negative_prompt_embeds = []
 
@@ -68,13 +68,13 @@ class Flux2TextEncodingStage(TextEncodingStage):
                 batch.extra["flux2_txt_ids"] = _prepare_flux2_text_ids(batch.prompt_embeds[0])
             return batch
 
-        if getattr(fastvideo_args.pipeline_config, "flux2_text_encoder_type", "") != "mistral3":
-            return super().forward(batch, fastvideo_args)
+        if getattr(resolved_config.pipeline_config, "flux2_text_encoder_type", "") != "mistral3":
+            return super().forward(batch, resolved_config)
 
         assert batch.prompt is not None
         prompt_embeds, attention_mask = self.encode_flux2_full_text(
             batch.prompt,
-            fastvideo_args,
+            resolved_config,
             max_length=batch.max_sequence_length,
         )
         batch.prompt_embeds.append(prompt_embeds)
@@ -87,23 +87,23 @@ class Flux2TextEncodingStage(TextEncodingStage):
     def encode_flux2_full_text(
         self,
         text: str | list[str],
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         max_length: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         tokenizer = self.tokenizers[0]
         text_encoder = self.text_encoders[0]
-        encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
+        encoder_config = resolved_config.pipeline_config.text_encoder_configs[0]
         arch_config = encoder_config.arch_config
 
         prompts = [text] if isinstance(text, str) else text
         max_sequence_length = max_length or getattr(arch_config, "text_len", 512) or 512
         hidden_state_layers = getattr(
-            fastvideo_args.pipeline_config,
+            resolved_config.pipeline_config,
             "text_encoder_out_layers",
             (10, 20, 30),
         )
         system_message = getattr(
-            fastvideo_args.pipeline_config,
+            resolved_config.pipeline_config,
             "flux2_system_message",
             FLUX2_SYSTEM_MESSAGE,
         )

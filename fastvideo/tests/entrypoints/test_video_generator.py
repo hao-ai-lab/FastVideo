@@ -47,7 +47,7 @@ class _FakeFastVideoArgs(SimpleNamespace):
 
 def _new_runtime_video_generator() -> VideoGenerator:
     generator = _new_video_generator()
-    generator.fastvideo_args = _FakeFastVideoArgs(
+    generator.resolved_config = _FakeFastVideoArgs(
         model_path="test-model",
         prompt_txt=None,
         workload_type=SimpleNamespace(value="t2v"),
@@ -63,12 +63,12 @@ def _new_runtime_video_generator() -> VideoGenerator:
 def _patch_from_fastvideo_args(monkeypatch):
     captured = {}
 
-    def fake_from_fastvideo_args(cls, fastvideo_args, *, log_queue=None):
+    def fake_from_fastvideo_args(cls, resolved_config, *, log_queue=None):
         generator = cls.__new__(cls)
-        generator.fastvideo_args = fastvideo_args
+        generator.resolved_config = resolved_config
         generator.executor = None
         generator.config = None
-        captured["fastvideo_args"] = fastvideo_args
+        captured["resolved_config"] = resolved_config
         captured["log_queue"] = log_queue
         return generator
 
@@ -144,9 +144,9 @@ def _single_video_output_batch(output, *, extra=None):
     )
 
 
-def _single_video_generator(output_batch, fastvideo_args):
+def _single_video_generator(output_batch, resolved_config):
     generator = _new_video_generator()
-    generator.fastvideo_args = fastvideo_args
+    generator.resolved_config = resolved_config
     generator.executor = SimpleNamespace(execute_forward=lambda batch, args: output_batch)
     generator.config = None
     return generator
@@ -233,8 +233,8 @@ def test_generate_single_video_metadata_only_skips_output_materialization(monkey
         _NoCpuMaterializationOutput(),
         extra={"peak_memory_mb": 42.0},
     )
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
     empty_calls = []
     real_empty = video_generator_module.torch.empty
 
@@ -251,7 +251,7 @@ def test_generate_single_video_metadata_only_skips_output_materialization(monkey
     result = generator._generate_single_video(
         prompt="metadata only",
         sampling_param=_small_sampling_param(save_video=False, return_frames=False),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "unused.mp4"),
     )
 
@@ -265,13 +265,13 @@ def test_generate_single_video_metadata_only_skips_output_materialization(monkey
 def test_generate_single_video_return_frames_still_materializes_output(tmp_path):
     output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
     output_batch = _single_video_output_batch(output)
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
 
     result = generator._generate_single_video(
         prompt="return frames",
         sampling_param=_small_sampling_param(save_video=False, return_frames=True),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "unused.mp4"),
     )
 
@@ -283,9 +283,9 @@ def test_generate_single_video_return_frames_still_materializes_output(tmp_path)
 def test_generate_single_video_retries_pageable_output_when_pinned_allocation_fails(monkeypatch, tmp_path):
     output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
     output_batch = _single_video_output_batch(output)
-    fastvideo_args = _single_video_args()
-    fastvideo_args.pin_cpu_memory = True
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    resolved_config.pin_cpu_memory = True
+    generator = _single_video_generator(output_batch, resolved_config)
     real_empty = torch.empty
     allocation_attempts = []
     warnings = []
@@ -303,7 +303,7 @@ def test_generate_single_video_retries_pageable_output_when_pinned_allocation_fa
     result = generator._generate_single_video(
         prompt="pinned allocation fallback",
         sampling_param=_small_sampling_param(save_video=False, return_frames=True),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "unused.mp4"),
     )
 
@@ -323,8 +323,8 @@ def test_generate_single_video_frames_match_legacy_cpu_loop(tmp_path):
     torch.manual_seed(0)
     output = torch.rand((2, 3, 3, 16, 16), dtype=torch.float32)
     output_batch = _single_video_output_batch(output)
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
     sampling_param = _small_sampling_param(save_video=False, return_frames=True)
     sampling_param.num_frames = 3
     sampling_param.num_videos_per_prompt = 2
@@ -332,7 +332,7 @@ def test_generate_single_video_frames_match_legacy_cpu_loop(tmp_path):
     result = generator._generate_single_video(
         prompt="grid parity",
         sampling_param=sampling_param,
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "unused.mp4"),
     )
 
@@ -357,13 +357,13 @@ def test_generate_single_video_frames_clamp_out_of_range_pixels(tmp_path):
     output = torch.full((1, 3, 2, 16, 16), 1.5, dtype=torch.float32)
     output[:, :, 1] = -0.5
     output_batch = _single_video_output_batch(output)
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
 
     result = generator._generate_single_video(
         prompt="clamp",
         sampling_param=_small_sampling_param(save_video=False, return_frames=True),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "unused.mp4"),
     )
 
@@ -386,13 +386,13 @@ def test_generate_single_video_accepts_uint8_worker_output(tmp_path):
     pixels = torch.rand((1, 3, 2, 16, 16), dtype=torch.float32)
     output_u8 = (pixels * 255).clamp_(0, 255).to(torch.uint8)
     output_batch = _single_video_output_batch(output_u8)
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
 
     result = generator._generate_single_video(
         prompt="uint8 worker output",
         sampling_param=_small_sampling_param(save_video=False, return_frames=True),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "unused.mp4"),
     )
 
@@ -407,8 +407,8 @@ def test_generate_single_video_accepts_uint8_worker_output(tmp_path):
 def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_path):
     output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
     output_batch = _single_video_output_batch(output)
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
     saved = {}
 
     def fake_mimsave(path, frames, *, fps, format):
@@ -423,7 +423,7 @@ def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_p
     result = generator._generate_single_video(
         prompt="save only",
         sampling_param=_small_sampling_param(save_video=True, return_frames=False),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=output_path,
     )
 
@@ -447,8 +447,8 @@ def test_generate_single_video_save_only_reports_refined_output_size(monkeypatch
     # produces 5 frames of 32x48.
     output = torch.full((1, 3, 5, 32, 48), 0.5, dtype=torch.float32)
     output_batch = _single_video_output_batch(output)
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
     saved = {}
 
     def fake_mimsave(path, frames, *, fps, format):
@@ -459,7 +459,7 @@ def test_generate_single_video_save_only_reports_refined_output_size(monkeypatch
     result = generator._generate_single_video(
         prompt="refined save",
         sampling_param=_small_sampling_param(save_video=True, return_frames=False),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "refined.mp4"),
     )
 
@@ -479,13 +479,13 @@ def test_generate_single_video_audio_only_metadata_returns_audio_without_frames(
             "audio_sample_rate": 44100,
         },
     )
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
 
     result = generator._generate_single_video(
         prompt="audio only",
         sampling_param=_small_sampling_param(save_video=False, return_frames=False),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "unused.mp4"),
     )
 
@@ -505,14 +505,14 @@ def test_generate_single_video_audio_only_save_skips_placeholder_materialization
             "audio_sample_rate": 44100,
         },
     )
-    fastvideo_args = _single_video_args()
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args()
+    generator = _single_video_generator(output_batch, resolved_config)
     output_path = str(tmp_path / "audio.mp4")
 
     result = generator._generate_single_video(
         prompt="audio only",
         sampling_param=_small_sampling_param(save_video=True, return_frames=False),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=output_path,
     )
 
@@ -535,8 +535,8 @@ def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(mon
         },
     )
     worker = Worker.__new__(Worker)
-    worker.fastvideo_args = SimpleNamespace()
-    worker.pipeline = SimpleNamespace(fastvideo_args=SimpleNamespace(), forward=lambda batch, args: worker_output)
+    worker.resolved_config = SimpleNamespace()
+    worker.pipeline = SimpleNamespace(resolved_config=SimpleNamespace(), forward=lambda batch, args: worker_output)
 
     monkeypatch.setattr(RayDistributedExecutor, "__abstractmethods__", frozenset())
     executor = RayDistributedExecutor.__new__(RayDistributedExecutor)
@@ -547,9 +547,9 @@ def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(mon
         return [worker.execute_forward(**kwargs)]
 
     executor.collective_rpc = collective_rpc
-    fastvideo_args = _single_video_args()
+    resolved_config = _single_video_args()
     generator = _new_video_generator()
-    generator.fastvideo_args = fastvideo_args
+    generator.resolved_config = resolved_config
     generator.executor = executor
     generator.config = None
     written = {}
@@ -564,7 +564,7 @@ def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(mon
     result = generator._generate_single_video(
         prompt="audio only",
         sampling_param=sampling_param,
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "audio.mp4"),
     )
 
@@ -582,13 +582,13 @@ def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(mon
 
 def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_path):
     output_batch = _single_video_output_batch(_NoCpuMaterializationOutput())
-    fastvideo_args = _single_video_args(output_type="latent")
-    generator = _single_video_generator(output_batch, fastvideo_args)
+    resolved_config = _single_video_args(output_type="latent")
+    generator = _single_video_generator(output_batch, resolved_config)
 
     result = generator._generate_single_video(
         prompt="latent metadata",
         sampling_param=_small_sampling_param(save_video=False, return_frames=False),
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
         output_path=str(tmp_path / "unused.mp4"),
     )
 
@@ -606,7 +606,7 @@ def test_from_config_normalizes_and_resolves(monkeypatch):
 
     generator = VideoGenerator.from_config(config)
 
-    resolved = captured["fastvideo_args"]
+    resolved = captured["resolved_config"]
     assert isinstance(resolved, ResolvedGeneratorConfig)
     assert resolved.model_path == "test-model"
     assert resolved.engine.num_gpus == 2
@@ -630,8 +630,8 @@ def test_from_file_loads_generator_from_run_config(tmp_path, monkeypatch):
 
     VideoGenerator.from_file(str(config_path))
 
-    assert captured["fastvideo_args"].model_path == "test-model"
-    assert captured["fastvideo_args"].engine.num_gpus == 3
+    assert captured["resolved_config"].model_path == "test-model"
+    assert captured["resolved_config"].engine.num_gpus == 3
 
 
 def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
@@ -651,7 +651,7 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
         )
 
     assert not caught
-    resolved = captured["fastvideo_args"]
+    resolved = captured["resolved_config"]
     assert resolved.model_path == "test-model"
     assert resolved.engine.num_gpus == 4
     assert resolved.engine.use_fsdp_inference is False
@@ -675,7 +675,7 @@ def test_from_pretrained_rejects_other_kwargs_with_their_config_path(monkeypatch
             workload_type="t2v",
         )
 
-    assert "fastvideo_args" not in captured
+    assert "resolved_config" not in captured
 
 
 def test_generate_uses_typed_request_path(monkeypatch):

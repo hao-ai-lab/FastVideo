@@ -35,7 +35,7 @@ class HYWorldPipeline(ComposedPipelineBase):
         "image_encoder", "feature_extractor"
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """Set up pipeline stages with HYWorld-specific denoising stage."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

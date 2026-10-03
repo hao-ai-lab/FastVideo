@@ -85,13 +85,13 @@ def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypa
     assert os.environ["LOCAL_RANK"] == "3"
     assert worker.device == torch.device("cuda:3")
     assert worker.init_gpu_memory == 123
-    assert worker.fastvideo_args is decided
+    assert worker.resolved_config is decided
 
 
 def _worker_returning(output_batch: ForwardBatch) -> Worker:
     worker = Worker.__new__(Worker)
-    worker.fastvideo_args = SimpleNamespace()
-    worker.pipeline = SimpleNamespace(fastvideo_args=SimpleNamespace(), forward=lambda batch, args: output_batch)
+    worker.resolved_config = SimpleNamespace()
+    worker.pipeline = SimpleNamespace(resolved_config=SimpleNamespace(), forward=lambda batch, args: output_batch)
     return worker
 
 

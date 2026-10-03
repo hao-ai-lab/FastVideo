@@ -34,9 +34,9 @@ class Gen3CCFGPolicyStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
-        pipeline_config = fastvideo_args.pipeline_config
+        pipeline_config = resolved_config.pipeline_config
         policy = getattr(pipeline_config, "cfg_behavior", "legacy")
 
         if policy == "legacy":
@@ -92,10 +92,10 @@ class Gen3CConditioningStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """Run 3D cache conditioning pipeline."""
-        pipeline_config = fastvideo_args.pipeline_config
+        pipeline_config = resolved_config.pipeline_config
         device = get_local_torch_device()
         batch_extra = getattr(batch, "extra", {}) or {}
 
@@ -223,10 +223,10 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """Prepare latents and encode 3D cache buffers."""
-        pipeline_config = fastvideo_args.pipeline_config
+        pipeline_config = resolved_config.pipeline_config
         device = get_local_torch_device()
 
         if isinstance(batch.prompt, list):
@@ -353,7 +353,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             conditioning_latents[:, :, :first_latent.shape[2], :, :] = first_latent
             batch.conditioning_latents = conditioning_latents
 
-            if fastvideo_args.vae_cpu_offload:
+            if resolved_config.vae_cpu_offload:
                 self.vae.to("cpu")
 
             batch.condition_video_input_mask = torch.zeros(
@@ -556,15 +556,15 @@ class Gen3CDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         pipeline = self.pipeline() if self.pipeline else None
-        if not fastvideo_args.model_loaded["transformer"]:
+        if not resolved_config.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            fastvideo_args.model_loaded["transformer"] = True
+            resolved_config.model_loaded["transformer"] = True
 
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -579,14 +579,14 @@ class Gen3CDenoisingStage(DenoisingStage):
         else:
             transformer_dtype = next(self.transformer.parameters()).dtype
         target_dtype = transformer_dtype
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
-        fps = getattr(fastvideo_args.pipeline_config, 'fps', 24)
-        sigma_data = float(getattr(fastvideo_args.pipeline_config, "sigma_data", 0.5))
-        condition_augment_sigma = float(getattr(fastvideo_args.pipeline_config, "sigma_conditional", 0.001))
+        fps = getattr(resolved_config.pipeline_config, 'fps', 24)
+        sigma_data = float(getattr(resolved_config.pipeline_config, "sigma_data", 0.5))
+        condition_augment_sigma = float(getattr(resolved_config.pipeline_config, "sigma_conditional", 0.001))
 
         self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
         timesteps = self.scheduler.timesteps

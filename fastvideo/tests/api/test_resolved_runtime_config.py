@@ -82,15 +82,15 @@ def test_resolution_builds_and_freezes_the_pipeline_config_once(monkeypatch):
 def test_flat_names_return_the_values_that_fastvideo_args_held(raw):
     resolved = _resolve(raw)
     with isolated_environment():
-        fastvideo_args = generator_config_to_fastvideo_args(resolved)
+        resolved_config = generator_config_to_fastvideo_args(resolved)
 
     # disable_autocast and boundary_ratio held their FastVideoArgs defaults; the typed field holds the input.
     skipped = {"pipeline_config", "disable_autocast", "boundary_ratio"}
     for config_field in dataclasses.fields(FastVideoArgs):
         if config_field.name not in skipped:
-            expected = to_jsonable(getattr(fastvideo_args, config_field.name))
+            expected = to_jsonable(getattr(resolved_config, config_field.name))
             assert to_jsonable(getattr(resolved, config_field.name)) == expected, config_field.name
-    assert to_jsonable(resolved.pipeline_config) == to_jsonable(fastvideo_args.pipeline_config)
+    assert to_jsonable(resolved.pipeline_config) == to_jsonable(resolved_config.pipeline_config)
     assert resolved.workload_type is WorkloadType.T2V
     assert resolved.mode is ExecutionMode.INFERENCE and resolved.inference_mode and not resolved.training_mode
 
@@ -180,11 +180,11 @@ def test_direct_pipeline_keeps_the_policy_result_of_a_resolved_config(monkeypatc
 
     class _Pipeline(ComposedPipelineBase):
 
-        def load_modules(self, fastvideo_args, loaded_modules=None):
-            self.loaded_with = fastvideo_args
+        def load_modules(self, resolved_config, loaded_modules=None):
+            self.loaded_with = resolved_config
             return {}
 
-        def create_pipeline_stages(self, fastvideo_args):
+        def create_pipeline_stages(self, resolved_config):
             pass
 
     profiler = SimpleNamespace(region=lambda name: nullcontext())
@@ -199,8 +199,8 @@ def test_direct_pipeline_keeps_the_policy_result_of_a_resolved_config(monkeypatc
 
     pipeline = _Pipeline("unused", resolved, required_config_modules=[])
 
-    assert pipeline.fastvideo_args is pipeline.loaded_with
-    assert pipeline.fastvideo_args.lazy_module_load is True and resolved.lazy_module_load is None
+    assert pipeline.resolved_config is pipeline.loaded_with
+    assert pipeline.resolved_config.lazy_module_load is True and resolved.lazy_module_load is None
 
 
 def test_ltx2_checkpoint_refine_defaults_rebind_the_pipeline_config(tmp_path):
@@ -209,7 +209,7 @@ def test_ltx2_checkpoint_refine_defaults_rebind_the_pipeline_config(tmp_path):
     resolved = _resolve({"model_path": LTX2})
     pipeline = object.__new__(LTX2Pipeline)
     pipeline.model_path = str(tmp_path)
-    pipeline.fastvideo_args = resolved
+    pipeline.resolved_config = resolved
     pipeline._required_config_modules = list(LTX2Pipeline._required_config_modules)
     model_index = {name: ["diffusers", "Model"] for name in pipeline._required_config_modules}
     pipeline._load_config = lambda model_path: {
@@ -222,7 +222,7 @@ def test_ltx2_checkpoint_refine_defaults_rebind_the_pipeline_config(tmp_path):
 
     pipeline.load_modules(resolved, {name: object() for name in model_index})
 
-    rebound = pipeline.fastvideo_args
+    rebound = pipeline.resolved_config
     assert rebound is not resolved
     assert rebound.override_log == (("checkpoint:model_index.json", {
         "pipeline.ltx2.refine.lora_path": "FastVideo/LTX2-Distilled-LoRA",
@@ -248,25 +248,25 @@ def test_minimax_h3_checkpoint_schedule_rebinds_and_reaches_the_first_forward(tm
     resolved = _resolve({"model_path": FASTH3})
     pipeline = object.__new__(MiniMaxH3ModularPipeline)
     pipeline.model_path = str(tmp_path)
-    pipeline.fastvideo_args = resolved
+    pipeline.resolved_config = resolved
     pipeline.modules = {"scheduler": MiniMaxH3Scheduler(shift=10.0), "audio_scheduler": MiniMaxH3Scheduler(shift=3.0)}
     pipeline.post_init_called = False
     seen = []
     monkeypatch.setattr(ComposedPipelineBase, "post_init",
                         lambda self: (setattr(self, "post_init_called", True), self._load_checkpoint_schedule(
-                            self.fastvideo_args)))
+                            self.resolved_config)))
     monkeypatch.setattr(MiniMaxH3ModularPipeline, "_defer_denoise_modules", lambda self, args: False)
     monkeypatch.setattr(ComposedPipelineBase, "_stages", [], raising=False)
     monkeypatch.setattr(ComposedPipelineBase, "_stage_name_mapping", {}, raising=False)
     monkeypatch.setattr(ComposedPipelineBase, "stages",
                         property(lambda self: [lambda batch, args: seen.append(args) or batch]))
 
-    pipeline.forward(SimpleNamespace(), pipeline.fastvideo_args)
+    pipeline.forward(SimpleNamespace(), pipeline.resolved_config)
 
-    assert seen == [pipeline.fastvideo_args] and pipeline.fastvideo_args is not resolved
-    assert pipeline.fastvideo_args.pipeline.dmd_denoising_steps == tuple(steps)
-    assert pipeline.fastvideo_args.pipeline_config.dmd_denoising_steps == steps
-    assert pipeline.fastvideo_args.provenance("pipeline.dmd_denoising_steps").source == (
+    assert seen == [pipeline.resolved_config] and pipeline.resolved_config is not resolved
+    assert pipeline.resolved_config.pipeline.dmd_denoising_steps == tuple(steps)
+    assert pipeline.resolved_config.pipeline_config.dmd_denoising_steps == steps
+    assert pipeline.resolved_config.provenance("pipeline.dmd_denoising_steps").source == (
         "checkpoint:fastvideo_inference.json")
 
 

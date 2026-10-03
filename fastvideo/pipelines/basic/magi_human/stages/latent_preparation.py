@@ -121,13 +121,13 @@ class MagiHumanLatentPreparationStage(PipelineStage):
         self.text_offset = text_offset
         self.audio_in_channels = audio_in_channels
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         fps = self.fps
         # Prefer the caller-provided `batch.num_frames` (the standard

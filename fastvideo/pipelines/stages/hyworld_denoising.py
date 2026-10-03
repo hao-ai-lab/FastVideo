@@ -48,7 +48,7 @@ class HYWorldDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Run the chunk-based denoising loop with context frame selection.
@@ -67,12 +67,12 @@ class HYWorldDenoisingStage(DenoisingStage):
         """
 
         pipeline = self.pipeline() if self.pipeline else None
-        if not fastvideo_args.model_loaded["transformer"]:
+        if not resolved_config.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            fastvideo_args.model_loaded["transformer"] = True
+            resolved_config.model_loaded["transformer"] = True
 
         # Extract HYWorld-specific parameters from batch.extra or batch attributes
         viewmats = getattr(batch, "viewmats", None) or batch.extra.get("viewmats", None)
@@ -118,7 +118,7 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         # Setup precision and autocast settings
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
@@ -367,7 +367,7 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify HYWorld denoising stage inputs."""
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
@@ -404,7 +404,7 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify HYWorld denoising stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])

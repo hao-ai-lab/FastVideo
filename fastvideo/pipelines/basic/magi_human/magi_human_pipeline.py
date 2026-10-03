@@ -90,7 +90,7 @@ class MagiHumanPipeline(ComposedPipelineBase):
 
     def load_modules(
         self,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         loaded_modules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Load the variant-specific transformer + scheduler from the
@@ -143,7 +143,7 @@ class MagiHumanPipeline(ComposedPipelineBase):
                 deferred.append(key)
 
         try:
-            modules = super().load_modules(fastvideo_args, loaded_modules)
+            modules = super().load_modules(resolved_config, loaded_modules)
         finally:
             for key in deferred:
                 if key not in self.required_config_modules:
@@ -185,11 +185,11 @@ class MagiHumanPipeline(ComposedPipelineBase):
             modules["audio_vae"] = SAAudioVAEModel(audio_config)
 
         if not _resolve("vae"):
-            modules["vae"] = self._load_video_vae(fastvideo_args)
+            modules["vae"] = self._load_video_vae(resolved_config)
 
         return modules
 
-    def _load_video_vae(self, fastvideo_args: FastVideoArgs) -> Any:
+    def _load_video_vae(self, resolved_config: FastVideoArgs) -> Any:
         """Resolve the video VAE: prefer a bundled ``vae/`` subfolder in
         the converted repo (legacy), fall back to lazy-downloading the
         Wan 2.2 TI2V-5B VAE shards from upstream.
@@ -203,7 +203,7 @@ class MagiHumanPipeline(ComposedPipelineBase):
         bundled = Path(self.model_path) / "vae"
         if bundled.is_dir() and (bundled / "config.json").is_file():
             logger.info("Loading bundled video VAE from %s", bundled)
-            return VAELoader().load(str(bundled), fastvideo_args)
+            return VAELoader().load(str(bundled), resolved_config)
 
         from huggingface_hub import snapshot_download
 
@@ -222,19 +222,19 @@ class MagiHumanPipeline(ComposedPipelineBase):
                 f"snapshot_download returned {snapshot} but no vae/ "
                 f"subfolder was found inside it. Check that {_WAN_VAE_HF_ID} "
                 "still exposes a Diffusers-format vae/ folder.", )
-        return VAELoader().load(vae_dir, fastvideo_args)
+        return VAELoader().load(vae_dir, resolved_config)
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
+    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
         # MagiHuman applies `flow_shift` during timestep setup; keep the
         # scheduler constructor at its default no-op shift.
         self.modules["scheduler"] = FlowUniPCMultistepScheduler()
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        self._add_input_and_conditioning_stages(fastvideo_args)
-        self._add_base_latent_and_denoising_stages(fastvideo_args)
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+        self._add_input_and_conditioning_stages(resolved_config)
+        self._add_base_latent_and_denoising_stages(resolved_config)
         self._add_decode_stages()
 
-    def _add_input_and_conditioning_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def _add_input_and_conditioning_stages(self, resolved_config: FastVideoArgs) -> None:
         self.add_stage(
             stage_name="input_validation_stage",
             stage=InputValidationStage(),
@@ -248,10 +248,10 @@ class MagiHumanPipeline(ComposedPipelineBase):
             ),
         )
 
-        self._add_reference_image_stage(fastvideo_args)
+        self._add_reference_image_stage(resolved_config)
 
-    def _add_base_latent_and_denoising_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        pc = fastvideo_args.pipeline_config
+    def _add_base_latent_and_denoising_stages(self, resolved_config: FastVideoArgs) -> None:
+        pc = resolved_config.pipeline_config
         dit_arch = pc.dit_config.arch_config
 
         # Data-proxy + eval knobs come from the PipelineConfig (`pc`).
@@ -298,15 +298,15 @@ class MagiHumanPipeline(ComposedPipelineBase):
             stage=MagiHumanAudioDecodingStage(audio_vae=self.get_module("audio_vae"), ),
         )
 
-    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
+    def _add_reference_image_stage(self, resolved_config: FastVideoArgs) -> None:
         return
 
 
 class MagiHumanI2VPipeline(MagiHumanPipeline):
     """MagiHuman text+image-to-AV pipeline using the T2V DiT weights."""
 
-    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
-        pc = fastvideo_args.pipeline_config
+    def _add_reference_image_stage(self, resolved_config: FastVideoArgs) -> None:
+        pc = resolved_config.pipeline_config
         self.add_stage(
             stage_name="reference_image_stage",
             stage=MagiHumanReferenceImageStage(
@@ -329,14 +329,14 @@ class MagiHumanSRPipeline(MagiHumanPipeline):
         "audio_vae",
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        self._add_input_and_conditioning_stages(fastvideo_args)
-        self._add_base_latent_and_denoising_stages(fastvideo_args)
-        self._add_sr_latent_and_denoising_stages(fastvideo_args)
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+        self._add_input_and_conditioning_stages(resolved_config)
+        self._add_base_latent_and_denoising_stages(resolved_config)
+        self._add_sr_latent_and_denoising_stages(resolved_config)
         self._add_decode_stages()
 
-    def _add_sr_latent_and_denoising_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        pc = fastvideo_args.pipeline_config
+    def _add_sr_latent_and_denoising_stages(self, resolved_config: FastVideoArgs) -> None:
+        pc = resolved_config.pipeline_config
         dit_arch = pc.dit_config.arch_config
         sr_transformer = self.get_module("sr_transformer")
         sr_local_attn_layers = tuple(getattr(pc, "sr_local_attn_layers", ()))
@@ -381,8 +381,8 @@ class MagiHumanSRPipeline(MagiHumanPipeline):
 class MagiHumanSRI2VPipeline(MagiHumanSRPipeline):
     """Two-stage MagiHuman base + SR-540p text+image-to-AV pipeline."""
 
-    def _add_reference_image_stage(self, fastvideo_args: FastVideoArgs) -> None:
-        pc = fastvideo_args.pipeline_config
+    def _add_reference_image_stage(self, resolved_config: FastVideoArgs) -> None:
+        pc = resolved_config.pipeline_config
         self.add_stage(
             stage_name="reference_image_stage",
             stage=MagiHumanReferenceImageStage(

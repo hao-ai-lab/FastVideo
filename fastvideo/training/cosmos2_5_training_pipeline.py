@@ -35,9 +35,9 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
 
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         """Create the flow-matching scheduler with Cosmos 2.5's shift=5.0."""
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift)
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Build a full Cosmos2_5Pipeline that reuses the training transformer."""

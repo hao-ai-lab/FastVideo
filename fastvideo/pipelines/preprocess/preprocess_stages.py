@@ -33,7 +33,7 @@ class VideoTransformStage(PipelineStage):
             CenterCropResizeVideo((max_height, max_width)),
         ])
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
         assert isinstance(batch.fps, list)
         assert isinstance(batch.num_frames, list)
@@ -57,13 +57,13 @@ class VideoTransformStage(PipelineStage):
                 else:
                     frame_indices = frame_indices[:self.num_frames]
 
-            if fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
+            if resolved_config.preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
                 video = batch.video_loader[i].get_frames_at(frame_indices).data
-            elif fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHVISION:
+            elif resolved_config.preprocess_config.video_loader_type == VideoLoaderType.TORCHVISION:
                 video, _, _ = torchvision.io.read_video(batch.video_loader[i], output_format="TCHW")
                 video = video[frame_indices]
             else:
-                raise ValueError(f"Invalid video loader type: {fastvideo_args.preprocess_config.video_loader_type}")
+                raise ValueError(f"Invalid video loader type: {resolved_config.preprocess_config.video_loader_type}")
             video = self.video_transform(video)
             video_pixel_batch.append(video)
 
@@ -71,7 +71,7 @@ class VideoTransformStage(PipelineStage):
         video_pixel_values = rearrange(video_pixel_values, "b t c h w -> b c t h w")
         video_pixel_values = video_pixel_values.to(torch.uint8)
 
-        if fastvideo_args.workload_type == WorkloadType.I2V:
+        if resolved_config.workload_type == WorkloadType.I2V:
             batch.pil_image = video_pixel_values[:, :, 0, :, :]
 
         video_pixel_values = video_pixel_values.float() / 255.0
@@ -91,7 +91,7 @@ class TextTransformStage(PipelineStage):
         self.cfg_rate = cfg_uncondition_drop_rate
         self.rng = random.Random(seed)
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         batch = cast(PreprocessBatch, batch)
 
         prompts = []

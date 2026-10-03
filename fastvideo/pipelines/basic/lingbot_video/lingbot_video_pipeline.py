@@ -27,27 +27,27 @@ class LingBotVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def load_modules(
         self,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         loaded_modules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Load the optional refiner DiT and the VAE encoder only when declared."""
         model_index = self._load_config(self.model_path)
         required = list(type(self)._required_config_modules)
-        load_refiner = "transformer_2" in model_index and getattr(fastvideo_args, "refine_enabled", None) is not False
+        load_refiner = "transformer_2" in model_index and getattr(resolved_config, "refine_enabled", None) is not False
         if load_refiner:
             required.append("transformer_2")
-            fastvideo_args.pipeline_config.vae_config.load_encoder = True
+            resolved_config.pipeline_config.vae_config.load_encoder = True
         self._required_config_modules = required
-        return super().load_modules(fastvideo_args, loaded_modules)
+        return super().load_modules(resolved_config, loaded_modules)
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
+    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
         """Apply the released runtime flow shift to the loaded scheduler."""
-        shift = fastvideo_args.pipeline_config.flow_shift
+        shift = resolved_config.pipeline_config.flow_shift
         if shift is None:
             raise ValueError("LingBot-Video requires a flow shift")
         self.get_module("scheduler").set_shift(float(shift))
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         """Create base generation and the optional decoded-video refiner stages."""
         refiner = self.get_module("transformer_2")
         self.add_stage(

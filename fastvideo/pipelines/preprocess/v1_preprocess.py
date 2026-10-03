@@ -40,7 +40,7 @@ def main(args) -> None:
         pipeline_config.vae_config.load_encoder = True
         pipeline_config.vae_config.load_decoder = True
 
-    fastvideo_args = FastVideoArgs(
+    resolved_config = FastVideoArgs(
         model_path=args.model_path,
         num_gpus=get_world_size(),
         dit_cpu_offload=False,
@@ -56,7 +56,7 @@ def main(args) -> None:
         PreprocessPipeline = PreprocessPipeline_Text
     elif args.preprocess_task == "ode_trajectory":
         assert args.flow_shift is not None, "flow_shift is required for ode_trajectory"
-        fastvideo_args.pipeline_config.flow_shift = args.flow_shift
+        resolved_config.pipeline_config.flow_shift = args.flow_shift
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     elif args.preprocess_task in ("matrixgame2", "matrixgame"):
         if args.preprocess_task == "matrixgame":
@@ -76,8 +76,8 @@ def main(args) -> None:
 
     logger.info("Preprocess task: %s using %s", args.preprocess_task, PreprocessPipeline.__name__)
 
-    pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
-    pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)
+    pipeline = PreprocessPipeline(args.model_path, resolved_config)
+    pipeline.forward(batch=None, resolved_config=resolved_config, args=args)
 
 
 if __name__ == "__main__":

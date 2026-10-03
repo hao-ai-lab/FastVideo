@@ -173,7 +173,7 @@ class LTX2DenoisingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         if batch.latents is None:
             raise ValueError("Latents must be provided before denoising.")
@@ -233,7 +233,7 @@ class LTX2DenoisingStage(PipelineStage):
             neg_prompt_mask = neg_prompt_mask.to(latents.device)
 
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         if self.sigmas_override is not None:
             sigmas = torch.tensor(
@@ -244,7 +244,7 @@ class LTX2DenoisingStage(PipelineStage):
             logger.info("[LTX2] Using override sigma schedule, %s", self.sigmas_override)
         else:
             # Use distilled hardcoded schedule (or subsets) when enabled.
-            use_distilled_sigmas = (fastvideo_args.ltx2_use_distilled_sigmas
+            use_distilled_sigmas = (resolved_config.ltx2_use_distilled_sigmas
                                     and envs.FASTVIDEO_LTX2_USE_DISTILLED_SIGMAS.get())
             max_distilled_steps = len(DISTILLED_SIGMA_VALUES) - 1
             if use_distilled_sigmas and num_inference_steps <= max_distilled_steps:
@@ -341,7 +341,7 @@ class LTX2DenoisingStage(PipelineStage):
                 audio_shape.frames,
                 audio_shape.mel_bins,
             )
-            audio_latent_path = fastvideo_args.ltx2_audio_latent_path
+            audio_latent_path = resolved_config.ltx2_audio_latent_path
             audio_latents = self._load_audio_latents(
                 audio_latent_path,
                 device=latents.device,
@@ -350,7 +350,7 @@ class LTX2DenoisingStage(PipelineStage):
             ) if audio_latent_path else None
             if audio_latents is None:
                 audio_generator = None
-                if fastvideo_args.ltx2_initial_latent_path and batch.seed is not None:
+                if resolved_config.ltx2_initial_latent_path and batch.seed is not None:
                     audio_generator = torch.Generator(device=latents.device).manual_seed(batch.seed)
                 elif batch.generator is not None:
                     audio_generator = (batch.generator[0] if isinstance(batch.generator, list) else batch.generator)
@@ -487,8 +487,8 @@ class LTX2DenoisingStage(PipelineStage):
                 attn_metadata = vsa_metadata_builder.build(
                     current_timestep=step_index,
                     raw_latent_shape=latents.shape[2:5],
-                    patch_size=fastvideo_args.pipeline_config.dit_config.patch_size,
-                    VSA_sparsity=fastvideo_args.VSA_sparsity,
+                    patch_size=resolved_config.pipeline_config.dit_config.patch_size,
+                    VSA_sparsity=resolved_config.VSA_sparsity,
                     device=latents.device,
                 )
 
@@ -687,7 +687,7 @@ class LTX2DenoisingStage(PipelineStage):
         torch.save({"audio_latent": latents.detach().cpu()}, path)
         logger.info("[LTX2] Saved audio latent to %s", path)
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)

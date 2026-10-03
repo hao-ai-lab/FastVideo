@@ -45,7 +45,7 @@ class LongCatRefineInitStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Initialize latents for refinement.
@@ -109,7 +109,7 @@ class LongCatRefineInitStage(PipelineStage):
 
         # Use bucket system to select resolution (exactly like LongCat)
         # Calculate scale_factor_spatial considering SP split
-        sp_size = fastvideo_args.sp_size if fastvideo_args.sp_size > 0 else 1
+        sp_size = resolved_config.sp_size if resolved_config.sp_size > 0 else 1
         vae_scale_factor_spatial = 8  # VAE spatial downsampling
         patch_size_spatial = 2  # LongCat patch size
         bsa_latent_granularity = 4

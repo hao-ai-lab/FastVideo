@@ -12,19 +12,19 @@ from fastvideo.utils import PRECISION_TO_TYPE
 class GlmImageDecodingStage(DecodingStage):
 
     @torch.no_grad()
-    def decode(self, latents: torch.Tensor, fastvideo_args: FastVideoArgs) -> torch.Tensor:
+    def decode(self, latents: torch.Tensor, resolved_config: FastVideoArgs) -> torch.Tensor:
         self.vae.to(get_local_torch_device())
         latents = latents.to(get_local_torch_device())
 
-        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast = (vae_dtype != torch.float32 and not fastvideo_args.disable_autocast)
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
+        vae_autocast = (vae_dtype != torch.float32 and not resolved_config.disable_autocast)
 
-        latents = self._denormalize_latents(latents, fastvideo_args)
+        latents = self._denormalize_latents(latents, resolved_config)
         if latents.dim() == 5:
             latents = latents.squeeze(2)
 
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast):
-            if fastvideo_args.pipeline_config.vae_tiling:
+            if resolved_config.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast:
                 latents = latents.to(vae_dtype)

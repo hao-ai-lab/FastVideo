@@ -25,9 +25,9 @@ class DreamXWorldCameraConditioningStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
-        del fastvideo_args
+        del resolved_config
         if DREAMX_Y_CAMERA_KEY in batch.extra:
             return batch
 
@@ -67,9 +67,9 @@ class DreamXWorldCameraConditioningStage(PipelineStage):
     def verify_output(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> VerificationResult:
-        del fastvideo_args
+        del resolved_config
         result = VerificationResult()
         y_camera = batch.extra.get(DREAMX_Y_CAMERA_KEY)
         result.add_check("dreamx_y_camera", y_camera, lambda value: isinstance(value, dict))
@@ -97,7 +97,7 @@ class DreamXWorldImageVAEEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         if batch.pil_image is None:
             # No conditioning image: the causal denoiser falls back to
@@ -130,8 +130,8 @@ class DreamXWorldImageVAEEncodingStage(PipelineStage):
             image = image[:, :, :1]
         image = image.to(device=device, dtype=torch.float32)
 
-        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
         self.vae = self.vae.to(device)
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
             if not vae_autocast_enabled:
@@ -151,6 +151,6 @@ class DreamXWorldImageVAEEncodingStage(PipelineStage):
         batch.image_latent = latent
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         return result

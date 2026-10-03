@@ -58,8 +58,8 @@ def test_inference_defers_dit_and_vae_until_after_conditioning(monkeypatch) -> N
     _patch_pipeline_construction(monkeypatch, events)
     loads: list[list[str]] = []
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config
         requested = list(self.required_config_modules)
         loads.append(requested)
         modules = dict(loaded_modules or {})
@@ -129,8 +129,8 @@ def test_injected_denoise_weights_skip_the_deferred_split(monkeypatch) -> None:
     _patch_pipeline_construction(monkeypatch, events)
     loads: list[list[str]] = []
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config
         loads.append(list(self.required_config_modules))
         return dict(loaded_modules or {})
 
@@ -147,8 +147,8 @@ def test_explicit_false_loads_encoder_dit_and_vae_together(monkeypatch) -> None:
     _patch_pipeline_construction(monkeypatch, events)
     loads: list[list[str]] = []
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args, loaded_modules
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config, loaded_modules
         loads.append(list(self.required_config_modules))
         return {name: _stub_module(name) for name in self.required_config_modules}
 
@@ -167,8 +167,8 @@ def test_auto_defers_on_unified_memory(monkeypatch) -> None:
     _patch_pipeline_construction(monkeypatch, events)
     loads: list[list[str]] = []
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args, loaded_modules
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config, loaded_modules
         loads.append(list(self.required_config_modules))
         return {name: _stub_module(name) for name in self.required_config_modules}
 
@@ -187,8 +187,8 @@ def test_lazy_module_load_owns_deferral_when_both_would_arm(monkeypatch) -> None
     _patch_pipeline_construction(monkeypatch, events)
     loads: list[list[str]] = []
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args, loaded_modules
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config, loaded_modules
         loads.append(list(self.required_config_modules))
         return {name: _stub_module(name) for name in self.required_config_modules}
 
@@ -206,8 +206,8 @@ def test_auto_loads_together_without_unified_memory(monkeypatch) -> None:
     _patch_pipeline_construction(monkeypatch, events)
     loads: list[list[str]] = []
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args, loaded_modules
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config, loaded_modules
         loads.append(list(self.required_config_modules))
         return {name: _stub_module(name) for name in self.required_config_modules}
 
@@ -230,8 +230,8 @@ def test_taeh3_t2va_skips_video_vae_on_the_deferred_load(monkeypatch) -> None:
     _patch_pipeline_construction(monkeypatch, events)
     loads: list[list[str]] = []
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config
         requested = list(self.required_config_modules)
         loads.append(requested)
         modules = dict(loaded_modules or {})
@@ -280,8 +280,8 @@ def test_generic_pipeline_config_does_not_crash_geometry_overlay(monkeypatch) ->
     events: list = []
     _patch_pipeline_construction(monkeypatch, events)
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args, loaded_modules
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config, loaded_modules
         return {name: _stub_module(name) for name in self.required_config_modules}
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
@@ -296,8 +296,8 @@ def test_resident_path_does_not_reread_encoder_on_later_request(monkeypatch) -> 
     _patch_pipeline_construction(monkeypatch, events)
     loads: list[list[str]] = []
 
-    def fake_load(self, fastvideo_args, loaded_modules=None):
-        del fastvideo_args
+    def fake_load(self, resolved_config, loaded_modules=None):
+        del resolved_config
         requested = list(self.required_config_modules)
         loads.append(requested)
         modules = dict(loaded_modules or {})

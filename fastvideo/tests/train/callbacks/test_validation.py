@@ -339,7 +339,7 @@ class TestH3ValidationContract:
         class FakeH3Pipeline:
             """Return deterministic video and stereo audio for each prompt."""
 
-            fastvideo_args = SimpleNamespace(pipeline_config=SimpleNamespace())
+            resolved_config = SimpleNamespace(pipeline_config=SimpleNamespace())
 
             def forward(self, batch, inference_args):
                 """Produce media whose values identify the source prompt."""
@@ -399,7 +399,7 @@ class TestH3ValidationContract:
         class FakeH3Pipeline:
             """Return the given decoded pixels for every prompt."""
 
-            fastvideo_args = SimpleNamespace(pipeline_config=SimpleNamespace())
+            resolved_config = SimpleNamespace(pipeline_config=SimpleNamespace())
 
             def forward(self, batch, inference_args):
                 return SimpleNamespace(output=output, extra={})

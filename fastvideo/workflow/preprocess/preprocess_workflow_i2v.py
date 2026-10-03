@@ -25,7 +25,7 @@ class PreprocessWorkflowI2V(PreprocessWorkflow):
         for batch in tqdm(self.training_dataloader, desc="Preprocessing training dataset", unit="batch"):
             forward_batch: PreprocessBatch = self.video_forward_batch_builder(batch)
 
-            forward_batch = self.preprocess_pipeline.forward(forward_batch, self.fastvideo_args)
+            forward_batch = self.preprocess_pipeline.forward(forward_batch, self.resolved_config)
 
             self.processed_dataset_saver.save_and_write_parquet_batch(forward_batch, self.training_dataset_output_dir)
 
@@ -37,7 +37,7 @@ class PreprocessWorkflowI2V(PreprocessWorkflow):
             for batch in tqdm(self.validation_dataloader, desc="Preprocessing validation dataset", unit="batch"):
                 forward_batch = self.video_forward_batch_builder(batch)
 
-                forward_batch = self.preprocess_pipeline.forward(forward_batch, self.fastvideo_args)
+                forward_batch = self.preprocess_pipeline.forward(forward_batch, self.resolved_config)
 
                 self.processed_dataset_saver.save_and_write_parquet_batch(forward_batch,
                                                                           self.validation_dataset_output_dir)

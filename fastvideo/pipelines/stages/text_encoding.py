@@ -45,7 +45,7 @@ class TextEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Encode the prompt into text encoder hidden states.
@@ -58,7 +58,7 @@ class TextEncodingStage(PipelineStage):
             The batch with encoded prompt embeddings.
         """
         assert len(self.tokenizers) == len(self.text_encoders)
-        assert len(self.text_encoders) == len(fastvideo_args.pipeline_config.text_encoder_configs)
+        assert len(self.text_encoders) == len(resolved_config.pipeline_config.text_encoder_configs)
 
         # Skip encoding if precomputed prompt_embeds were provided
         if batch.prompt_embeds is not None and len(batch.prompt_embeds) > 0:
@@ -70,7 +70,7 @@ class TextEncodingStage(PipelineStage):
         all_indices: list[int] = list(range(len(self.text_encoders)))
         prompt_embeds_list, prompt_masks_list = self.encode_text(
             prompt_text,
-            fastvideo_args,
+            resolved_config,
             encoder_index=all_indices,
             return_attention_mask=True,
             max_length=batch.max_sequence_length,
@@ -89,7 +89,7 @@ class TextEncodingStage(PipelineStage):
             assert isinstance(batch.negative_prompt, str)
             neg_embeds_list, neg_masks_list = self.encode_text(
                 batch.negative_prompt,
-                fastvideo_args,
+                resolved_config,
                 encoder_index=all_indices,
                 return_attention_mask=True,
                 max_length=batch.max_sequence_length,
@@ -106,7 +106,7 @@ class TextEncodingStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify text encoding stage inputs."""
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, V.string_or_list_strings)
@@ -122,7 +122,7 @@ class TextEncodingStage(PipelineStage):
     def encode_text(
         self,
         text: str | list[str],
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         encoder_index: int | list[int] | None = None,
         return_attention_mask: bool = False,
         return_type: str = "list",  # one of: "list", "dict", "stack"
@@ -161,10 +161,10 @@ class TextEncodingStage(PipelineStage):
         """
 
         assert len(self.tokenizers) == len(self.text_encoders)
-        assert len(self.text_encoders) == len(fastvideo_args.pipeline_config.text_encoder_configs)
+        assert len(self.text_encoders) == len(resolved_config.pipeline_config.text_encoder_configs)
 
         # Resolve selection into indices
-        encoder_cfgs = fastvideo_args.pipeline_config.text_encoder_configs
+        encoder_cfgs = resolved_config.pipeline_config.text_encoder_configs
         if encoder_index is None:
             indices: list[int] = [0]
         elif isinstance(encoder_index, int):
@@ -191,10 +191,10 @@ class TextEncodingStage(PipelineStage):
         attn_masks_list: list[torch.Tensor] = []
         audio_embeds_list: list[torch.Tensor] = []
 
-        preprocess_funcs = fastvideo_args.pipeline_config.preprocess_text_funcs
-        postprocess_funcs = fastvideo_args.pipeline_config.postprocess_text_funcs
-        encoder_cfgs = fastvideo_args.pipeline_config.text_encoder_configs
-        is_ltx2 = getattr(fastvideo_args.pipeline_config.dit_config, "prefix", "") == "ltx2"
+        preprocess_funcs = resolved_config.pipeline_config.preprocess_text_funcs
+        postprocess_funcs = resolved_config.pipeline_config.postprocess_text_funcs
+        encoder_cfgs = resolved_config.pipeline_config.text_encoder_configs
+        is_ltx2 = getattr(resolved_config.pipeline_config.dit_config, "prefix", "") == "ltx2"
 
         if return_type not in ("list", "dict", "stack"):
             raise ValueError(f"Invalid return_type '{return_type}'. Expected one of: 'list', 'dict', 'stack'")
@@ -240,8 +240,8 @@ class TextEncodingStage(PipelineStage):
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
                 tok_kwargs["max_length"] = max_length
-            elif hasattr(fastvideo_args.pipeline_config, "text_encoder_max_lengths"):
-                tok_kwargs["max_length"] = fastvideo_args.pipeline_config.text_encoder_max_lengths[i]
+            elif hasattr(resolved_config.pipeline_config, "text_encoder_max_lengths"):
+                tok_kwargs["max_length"] = resolved_config.pipeline_config.text_encoder_max_lengths[i]
 
             if truncation is not None:
                 tok_kwargs["truncation"] = truncation
@@ -331,7 +331,7 @@ class TextEncodingStage(PipelineStage):
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask.to(device=target_device))
-            if moved_for_forward and fastvideo_args.text_encoder_cpu_offload:
+            if moved_for_forward and resolved_config.text_encoder_cpu_offload:
                 text_encoder.to("cpu")
         self._last_audio_embeds = audio_embeds_list if is_ltx2 else None
         return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
@@ -377,7 +377,7 @@ class TextEncodingStage(PipelineStage):
             return stacked_embeds, stacked_masks
         return stacked_embeds
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify text encoding stage outputs."""
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_min_dims(2))
@@ -399,7 +399,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
         self.text_encoder = text_encoder
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         assert batch.prompt is not None
         prompts = [batch.prompt] if isinstance(batch.prompt, str) else batch.prompt
 
@@ -423,7 +423,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, V.string_or_list_strings)
         result.add_check(
@@ -433,7 +433,7 @@ class Cosmos25TextEncodingStage(PipelineStage):
         )
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_min_dims(2))
         result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,

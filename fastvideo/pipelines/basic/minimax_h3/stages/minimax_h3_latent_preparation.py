@@ -61,13 +61,13 @@ def _sample_visual_posterior(posterior: Any) -> torch.Tensor:
     return posterior.sample(generator=generator)
 
 
-def _video_latent_channels(fastvideo_args: FastVideoArgs) -> int:
-    return h3_latent_channels(fastvideo_args.pipeline_config.vae_config, "vae_config")
+def _video_latent_channels(resolved_config: FastVideoArgs) -> int:
+    return h3_latent_channels(resolved_config.pipeline_config.vae_config, "vae_config")
 
 
-def _audio_latent_channels(fastvideo_args: FastVideoArgs) -> int:
+def _audio_latent_channels(resolved_config: FastVideoArgs) -> int:
     return h3_latent_channels(
-        getattr(fastvideo_args.pipeline_config, "audio_vae_config", None),
+        getattr(resolved_config.pipeline_config, "audio_vae_config", None),
         "audio_vae_config",
     )
 
@@ -91,7 +91,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         self.scheduler = scheduler
         self.ref2va = ref2va
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_dims(3))
         result.add_check("text_token_tags", batch.extra.get(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY), V.with_dims(1))
@@ -102,7 +102,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             result.add_check("references", batch.references, V.list_not_empty)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("layout", batch.extra.get(MINIMAX_H3_LAYOUT_KEY), V.not_none)
         result.add_check("latents", batch.latents, V.with_dims(2))
@@ -121,15 +121,15 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         self,
         references: list[MiniMaxH3PreparedReference],
         device: torch.device,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> list[torch.Tensor]:
-        patch_size = h3_dit_patch_size(fastvideo_args)
+        patch_size = h3_dit_patch_size(resolved_config)
         # Reference encode runs on every rank (all ranks hold identical
         # prepared references), so clip-parallel encode keeps participation
         # uniform by construction: each rank encodes a clip subset and the
         # all-gather leaves the identical full posterior everywhere.
         parallel_group = None
-        if fastvideo_args.vae_parallel_encode and model_parallel_is_initialized():
+        if resolved_config.vae_parallel_encode and model_parallel_is_initialized():
             sp_group = get_sp_group()
             if sp_group.world_size > 1:
                 parallel_group = sp_group
@@ -180,7 +180,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
     def _encode_fl2va_conditions(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         device: torch.device,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         """Encode keyframes while reusing the video VAE's host-weight cache."""
@@ -194,23 +194,23 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                                "FL2VA keyframes still need --video-decode-backend h3-vae.")
 
         vae_device = get_local_torch_device()
-        pinned_offload.load(self.vae, vae_device, pin=fastvideo_args.pin_cpu_memory)
+        pinned_offload.load(self.vae, vae_device, pin=resolved_config.pin_cpu_memory)
         try:
             clean_rows: list[torch.Tensor] = []
             for image in keyframes:
                 clean_rows.append(
                     patchify_video_latents(self._encode_keyframe_latents(image, vae_device),
-                                           h3_dit_patch_size(fastvideo_args)))
+                                           h3_dit_patch_size(resolved_config)))
         finally:
-            if fastvideo_args.vae_cpu_offload:
+            if resolved_config.vae_cpu_offload:
                 pinned_offload.unload(self.vae)
 
         _, _, latent_height, latent_width = _video_geometry(batch)
         shapes = ((1, latent_height, latent_width), ) * len(keyframes)
         noise = keyframe_condition_noise(
             shapes,
-            h3_dit_patch_size(fastvideo_args),
-            _video_latent_channels(fastvideo_args),
+            h3_dit_patch_size(resolved_config),
+            _video_latent_channels(resolved_config),
             generator=batch.generator,
             device=device,
         )
@@ -226,7 +226,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
     def _encode_ref2va_conditions(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
         device: torch.device,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Encode reference media while reusing the video and audio VAE host caches."""
@@ -235,21 +235,21 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             raise TypeError("MiniMax-H3 Ref2VA latent preparation requires prepared references.")
 
         vae_device = get_local_torch_device()
-        pinned_offload.load(self.vae, vae_device, pin=fastvideo_args.pin_cpu_memory)
+        pinned_offload.load(self.vae, vae_device, pin=resolved_config.pin_cpu_memory)
         try:
-            video_rows = self._encode_visual_rows(references, vae_device, fastvideo_args)
+            video_rows = self._encode_visual_rows(references, vae_device, resolved_config)
         finally:
-            if fastvideo_args.vae_cpu_offload:
+            if resolved_config.vae_cpu_offload:
                 pinned_offload.unload(self.vae)
 
         audio_rows: list[torch.Tensor] = []
         if any(reference.has_audio for reference in references):
             audio_device = get_local_torch_device()
-            pinned_offload.load(self.audio_vae, audio_device, pin=fastvideo_args.pin_cpu_memory)
+            pinned_offload.load(self.audio_vae, audio_device, pin=resolved_config.pin_cpu_memory)
             try:
                 audio_rows = self._encode_audio_rows(references, audio_device)
             finally:
-                if fastvideo_args.vae_cpu_offload:
+                if resolved_config.vae_cpu_offload:
                     pinned_offload.unload(self.audio_vae)
 
         if not video_rows:
@@ -258,8 +258,8 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                        for reference in references if reference.media_type != "audio")
         noise = keyframe_condition_noise(
             shapes,
-            h3_dit_patch_size(fastvideo_args),
-            _video_latent_channels(fastvideo_args),
+            h3_dit_patch_size(resolved_config),
+            _video_latent_channels(resolved_config),
             generator=batch.generator,
             device=device,
         )
@@ -276,7 +276,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             reference.waveform = None
         return video_conditions, audio_conditions
 
-    def _build_layout(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> MiniMaxH3PackedLayout:
+    def _build_layout(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> MiniMaxH3PackedLayout:
         text_token_tags = batch.extra.get(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY)
         if not isinstance(text_token_tags, torch.Tensor):
             raise ValueError("MiniMax-H3 conditioning must produce text token tags.")
@@ -293,7 +293,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                 height,
                 width,
                 num_audio_latents,
-                h3_dit_patch_size(fastvideo_args),
+                h3_dit_patch_size(resolved_config),
             )
         anchors = batch.extra.get(MINIMAX_H3_KEYFRAME_ANCHORS_KEY, ())
         if not isinstance(anchors, tuple):
@@ -304,21 +304,21 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             height,
             width,
             num_audio_latents,
-            h3_dit_patch_size(fastvideo_args),
+            h3_dit_patch_size(resolved_config),
             anchors,
         )
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         video_noise = batch.latents
         audio_noise = batch.audio_latents
         device = get_local_torch_device()
         if self.ref2va:
-            condition_video, condition_audio = self._encode_ref2va_conditions(batch, fastvideo_args, device)
+            condition_video, condition_audio = self._encode_ref2va_conditions(batch, resolved_config, device)
         else:
-            condition_video, condition_audio = self._encode_fl2va_conditions(batch, fastvideo_args, device)
+            condition_video, condition_audio = self._encode_fl2va_conditions(batch, resolved_config, device)
 
-        layout = self._build_layout(batch, fastvideo_args)
+        layout = self._build_layout(batch, resolved_config)
         video_channels, num_frames, height, width = _video_geometry(batch)
         expected_video_shape = (1, video_channels, num_frames, height, width)
         if video_noise is None:
@@ -332,10 +332,10 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
             raise ValueError(f"MiniMax-H3 injected video latents must have shape {expected_video_shape}, "
                              f"got {tuple(video_noise.shape)}.")
         video_rows = patchify_video_latents(video_noise.to(device=device, dtype=torch.float32),
-                                            h3_dit_patch_size(fastvideo_args))
+                                            h3_dit_patch_size(resolved_config))
 
         num_audio_latents = layout.num_audio_latents
-        audio_channels = _audio_latent_channels(fastvideo_args)
+        audio_channels = _audio_latent_channels(resolved_config)
         expected_audio_shape = (MINIMAX_H3_AUDIO_CHANNELS, audio_channels, num_audio_latents)
         if audio_noise is None:
             audio_rows = randn_tensor(

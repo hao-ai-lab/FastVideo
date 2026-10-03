@@ -37,11 +37,11 @@ logger = init_logger(__name__)
 class LingBotWorld2TextEncodingStage(TextEncodingStage):
     """Keep LingBot World 2 T5 attention masks so DiT context matches the source pipeline."""
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         """Initialize mask storage before running the shared text-encoding stage."""
         if batch.prompt_attention_mask is None:
             batch.prompt_attention_mask = []
-        return super().forward(batch, fastvideo_args)
+        return super().forward(batch, resolved_config)
 
 
 class LingBotWorld2CausalFastGenerationStage(PipelineStage):
@@ -187,7 +187,7 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
         w: int,
         frames: int,
         mask: torch.Tensor,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> torch.Tensor:
         """Encode the first-frame conditioning video and prepend mask channels."""
         device = get_local_torch_device()
@@ -212,15 +212,15 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
                 latent_condition -= self.vae.shift_factor.to(latent_condition.device, latent_condition.dtype)
             latent_condition = latent_condition * self.vae.scaling_factor.to(latent_condition.device,
                                                                              latent_condition.dtype)
-        if fastvideo_args.vae_cpu_offload:
+        if resolved_config.vae_cpu_offload:
             self.vae.to("cpu")
         return torch.concat([mask, latent_condition[0]], dim=0)
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         """Execute LingBot World 2 causal-fast generation and store final latents on the batch."""
         device = get_local_torch_device()
-        cfg = fastvideo_args.pipeline_config.dit_config.arch_config
+        cfg = resolved_config.pipeline_config.dit_config.arch_config
         chunk_size = int(cfg.chunk_size)
         max_sequence_length = int(batch.max_sequence_length or cfg.text_len)
         action_path = batch.action_path
@@ -272,8 +272,8 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
             torch.bfloat16,
             device,
         )
-        y = self._encode_condition_video(img, h, w, frames, mask, fastvideo_args).to(device=device,
-                                                                                     dtype=torch.bfloat16)
+        y = self._encode_condition_video(img, h, w, frames, mask, resolved_config).to(device=device,
+                                                                                      dtype=torch.bfloat16)
 
         transformer_dtype = torch.bfloat16
         frame_seqlen = int(noise.shape[-2] * noise.shape[-1] // 4)
@@ -336,11 +336,11 @@ class LingBotWorld2CausalFastPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         if "scheduler" not in self.modules:
             self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=1.0, use_dynamic_shifting=False)
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         """Set up the LingBot World 2 causal-fast pipeline stages."""
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
         self.add_stage(

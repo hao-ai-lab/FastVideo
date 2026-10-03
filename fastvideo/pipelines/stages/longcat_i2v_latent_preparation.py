@@ -31,7 +31,7 @@ class LongCatI2VLatentPreparationStage(LatentPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """Prepare latents with I2V conditioning."""
 
@@ -50,8 +50,8 @@ class LongCatI2VLatentPreparationStage(LatentPreparationStage):
 
         # Get VAE compression factors
         # IMPORTANT: Use VAE's temporal compression (4), NOT transformer's patch_size[0] (1)
-        vae_temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
-        vae_spatial_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+        vae_temporal_scale = resolved_config.pipeline_config.vae_config.arch_config.scale_factor_temporal
+        vae_spatial_scale = resolved_config.pipeline_config.vae_config.arch_config.scale_factor_spatial
 
         num_latent_frames = (num_frames - 1) // vae_temporal_scale + 1
         latent_height = height // vae_spatial_scale

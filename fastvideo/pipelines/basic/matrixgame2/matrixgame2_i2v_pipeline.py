@@ -18,10 +18,10 @@ logger = init_logger(__name__)
 class MatrixGame2I2VPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "image_encoder", "image_processor"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift)
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         if (self.get_module("text_encoder", None) is not None and self.get_module("tokenizer", None) is not None):

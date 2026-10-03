@@ -181,7 +181,7 @@ def _fastvideo_denoise_latents(device, dtype, *, prompt_embeds, prior_token_ids,
     batch.seed = SEED
     batch.extra = {}  # no glm_kv_caches -> T2I denoise path
 
-    out = stage.forward(batch, fastvideo_args=None)
+    out = stage.forward(batch, resolved_config=None)
     latents = out.latents
     if latents.dim() == 5:
         latents = latents.squeeze(2)

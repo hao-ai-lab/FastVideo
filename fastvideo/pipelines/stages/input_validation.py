@@ -29,7 +29,7 @@ class InputValidationStage(PipelineStage):
     before proceeding with the diffusion process.
     """
 
-    def _generate_seeds(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs):
+    def _generate_seeds(self, batch: ForwardBatch, resolved_config: FastVideoArgs):
         """Generate seeds for the inference"""
         seed = batch.seed
         num_videos_per_prompt = batch.num_videos_per_prompt
@@ -44,7 +44,7 @@ class InputValidationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Validate and prepare inputs.
@@ -57,7 +57,7 @@ class InputValidationStage(PipelineStage):
             The validated batch information.
         """
 
-        self._generate_seeds(batch, fastvideo_args)
+        self._generate_seeds(batch, resolved_config)
 
         # Ensure prompt is properly formatted
         if batch.prompt is None and batch.prompt_embeds is None:
@@ -93,19 +93,19 @@ class InputValidationStage(PipelineStage):
             batch.pil_image = image
 
         # further processing for ti2v task
-        if (fastvideo_args.pipeline_config.ti2v_task
-                or fastvideo_args.pipeline_config.is_causal) and batch.pil_image is not None:
+        if (resolved_config.pipeline_config.ti2v_task
+                or resolved_config.pipeline_config.is_causal) and batch.pil_image is not None:
             img = batch.pil_image
             ih, iw = img.height, img.width
 
-            pipeline_class_name = type(fastvideo_args.pipeline_config).__name__
+            pipeline_class_name = type(resolved_config.pipeline_config).__name__
             if 'MatrixGame' in pipeline_class_name or 'MatrixCausal' in pipeline_class_name:
                 oh, ow = batch.height, batch.width
                 img = img.resize((ow, oh), Image.LANCZOS)
             else:
                 # Standard Wan logic
-                patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
-                vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+                patch_size = resolved_config.pipeline_config.dit_config.arch_config.patch_size
+                vae_stride = resolved_config.pipeline_config.vae_config.arch_config.scale_factor_spatial
                 dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
                 max_area = 480 * 832
                 ow, oh = best_output_size(iw, ih, dw, dh, max_area)
@@ -194,7 +194,7 @@ class InputValidationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify input validation stage inputs."""
         result = VerificationResult()
         # Cosmos-Predict2.5 default seed is 0; allow non-negative seeds here.
@@ -209,7 +209,7 @@ class InputValidationStage(PipelineStage):
                          lambda x: not batch.do_classifier_free_guidance or V.positive_float(x))
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify input validation stage outputs."""
         result = VerificationResult()
         result.add_check("seeds", batch.seeds, V.list_not_empty)

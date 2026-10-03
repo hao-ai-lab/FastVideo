@@ -228,7 +228,7 @@ class _EchoStage(PipelineStage):
         for name, value in held.items():
             setattr(self, name, value)
 
-    def forward(self, batch, fastvideo_args):
+    def forward(self, batch, resolved_config):
         return batch
 
 
@@ -240,7 +240,7 @@ class _FakePipeline(ComposedPipelineBase):
         self._stages = stages
         self._lazy_module_names = tuple(name for name, module in modules.items() if is_lazy_module(module))
 
-    def create_pipeline_stages(self, fastvideo_args):
+    def create_pipeline_stages(self, resolved_config):
         raise NotImplementedError
 
 
@@ -558,8 +558,8 @@ class _CompositeStage(PipelineStage):
     def __init__(self, **held):
         self._child = _EchoStage(**held)
 
-    def forward(self, batch, fastvideo_args):
-        return self._child.forward(batch, fastvideo_args)
+    def forward(self, batch, resolved_config):
+        return self._child.forward(batch, resolved_config)
 
 
 def test_schedule_walks_into_nested_stages():
@@ -585,7 +585,7 @@ def test_a_raising_stage_still_releases_its_modules():
     # worse position than the request that just failed.
     class _Boom(_EchoStage):
 
-        def forward(self, batch, fastvideo_args):
+        def forward(self, batch, resolved_config):
             raise RuntimeError("out of activation memory")
 
     vae = LazyModule("vae", lambda: torch.nn.Linear(2, 2))
@@ -603,7 +603,7 @@ def test_a_raising_stage_still_releases_its_modules():
 def test_a_failing_release_does_not_mask_the_original_error():
     class _Boom(_EchoStage):
 
-        def forward(self, batch, fastvideo_args):
+        def forward(self, batch, resolved_config):
             raise RuntimeError("original")
 
     class _BadRelease(LazyModule):
@@ -636,7 +636,7 @@ def test_an_aborted_run_releases_everything_already_materialized():
 
     class _Boom(_EchoStage):
 
-        def forward(self, batch, fastvideo_args):
+        def forward(self, batch, resolved_config):
             raise RuntimeError("out of activation memory")
 
     early = _EchoStage(vae=vae)
@@ -671,7 +671,7 @@ class _StubLoader:
     def __init__(self):
         self.loaded: list[str] = []
 
-    def load_module(self, *, module_name, component_model_path, transformers_or_diffusers, fastvideo_args):
+    def load_module(self, *, module_name, component_model_path, transformers_or_diffusers, resolved_config):
         self.loaded.append(module_name)
         return _Component(module_name)
 
@@ -688,14 +688,14 @@ def _run_real_load_modules(monkeypatch, lazy_names, manifest_modules):
 
         def __init__(self):  # deliberately does not call super()
             self.model_path = "/nowhere"
-            self.fastvideo_args = None
+            self.resolved_config = None
 
         def _load_config(self, model_path):
             index = {"_class_name": "X", "_diffusers_version": "0"}
             index.update({name: ["diffusers", "Cls", {}] for name in manifest_modules})
             return index
 
-        def create_pipeline_stages(self, fastvideo_args):
+        def create_pipeline_stages(self, resolved_config):
             raise NotImplementedError
 
     args = SimpleNamespace(lazy_module_load=True, training_mode=False, revision=None)
@@ -849,7 +849,7 @@ def _build_stub_lora_pipeline(monkeypatch, transformer, excluded_layers=None):
     )
 
     def initialize_base(pipeline, *unused_args, **unused_kwargs):
-        pipeline.fastvideo_args = args
+        pipeline.resolved_config = args
         pipeline.modules = {"transformer": transformer}
 
     monkeypatch.setattr(ComposedPipelineBase, "__init__", initialize_base)
@@ -857,7 +857,7 @@ def _build_stub_lora_pipeline(monkeypatch, transformer, excluded_layers=None):
 
     class _Pipeline(lora_module.LoRAPipeline):
 
-        def create_pipeline_stages(self, fastvideo_args):
+        def create_pipeline_stages(self, resolved_config):
             raise NotImplementedError
 
     return _Pipeline("unused", args)

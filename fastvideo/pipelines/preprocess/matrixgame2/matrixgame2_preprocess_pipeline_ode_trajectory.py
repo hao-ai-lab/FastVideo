@@ -54,10 +54,10 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
         """Return the PyArrow schema for ODE Trajectory pipeline."""
         return pyarrow_schema_matrixgame2_ode_trajectory
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
-        assert fastvideo_args.pipeline_config.flow_shift == 5
-        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(shift=fastvideo_args.pipeline_config.flow_shift,
+        assert resolved_config.pipeline_config.flow_shift == 5
+        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(shift=resolved_config.pipeline_config.flow_shift,
                                                                   sigma_min=0.0,
                                                                   extra_one_step=True)
         self.modules["scheduler"].set_timesteps(num_inference_steps=48, denoising_strength=1.0)
@@ -82,7 +82,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                        ))
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 
-    def get_extra_features(self, valid_data: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def get_extra_features(self, valid_data: dict[str, Any], resolved_config: FastVideoArgs) -> dict[str, Any]:
 
         # TODO(will): move these to cpu at some point
         self.get_module("image_encoder").to(get_local_torch_device())
@@ -188,7 +188,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                 features["mouse_cond"] = mouse_cond_list
         return features
 
-    def preprocess_action_and_trajectory(self, fastvideo_args: FastVideoArgs, args):
+    def preprocess_action_and_trajectory(self, resolved_config: FastVideoArgs, args):
         """Preprocess data and generate trajectory information."""
 
         for batch_idx, data in enumerate(self.pbar):
@@ -225,7 +225,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                     valid_data["pixel_values"] = pixel_values
 
                 # Get extra features if needed
-                extra_features = self.get_extra_features(valid_data, fastvideo_args)
+                extra_features = self.get_extra_features(valid_data, resolved_config)
 
                 clip_features = extra_features['clip_feature']
                 image_latents = extra_features['first_frame_latent']
@@ -263,12 +263,12 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
                     batch.do_classifier_free_guidance = False
                     batch.prompt = ""
 
-                    result_batch = self.input_validation_stage(batch, fastvideo_args)
-                    result_batch = self.timestep_preparation_stage(batch, fastvideo_args)
+                    result_batch = self.input_validation_stage(batch, resolved_config)
+                    result_batch = self.timestep_preparation_stage(batch, resolved_config)
                     result_batch.timesteps = result_batch.timesteps.to(device)
-                    result_batch = self.latent_preparation_stage(result_batch, fastvideo_args)
-                    result_batch = self.denoising_stage(result_batch, fastvideo_args)
-                    result_batch = self.decoding_stage(result_batch, fastvideo_args)
+                    result_batch = self.latent_preparation_stage(result_batch, resolved_config)
+                    result_batch = self.denoising_stage(result_batch, resolved_config)
+                    result_batch = self.decoding_stage(result_batch, resolved_config)
 
                     trajectory_latents.append(result_batch.trajectory_latents.cpu())
                     trajectory_timesteps.append(result_batch.trajectory_timesteps.cpu())
@@ -348,7 +348,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
             if written:
                 logger.info("Final flush wrote %s samples", written)
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs, args):
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs, args):
         if not self.post_init_called:
             self.post_init()
 
@@ -379,7 +379,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
         # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
-        self.preprocess_action_and_trajectory(fastvideo_args, args)
+        self.preprocess_action_and_trajectory(resolved_config, args)
 
 
 EntryClass = PreprocessPipeline_MatrixGame2_ODE_Trajectory

@@ -34,12 +34,12 @@ class LongCatKVCacheInitStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """Initialize KV cache from conditioning latents."""
 
         # Check if KV cache is enabled
-        use_kv_cache = getattr(fastvideo_args.pipeline_config, 'use_kv_cache', True)
+        use_kv_cache = getattr(resolved_config.pipeline_config, 'use_kv_cache', True)
         if not use_kv_cache:
             batch.kv_cache_dict = {}
             batch.use_kv_cache = False
@@ -47,7 +47,7 @@ class LongCatKVCacheInitStage(PipelineStage):
             return batch
 
         batch.use_kv_cache = True
-        offload_kv_cache = getattr(fastvideo_args.pipeline_config, 'offload_kv_cache', False)
+        offload_kv_cache = getattr(resolved_config.pipeline_config, 'offload_kv_cache', False)
 
         # Get conditioning latents
         num_cond_latents = batch.num_cond_latents

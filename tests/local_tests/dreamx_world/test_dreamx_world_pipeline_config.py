@@ -118,9 +118,9 @@ def test_dreamx_world_default_preset_is_registered(dreamx_model_manifests):
 def test_dreamx_world_pipeline_initializes_official_flow_scheduler():
     pipeline = DreamXWorldPipeline.__new__(DreamXWorldPipeline)
     pipeline.modules = {}
-    fastvideo_args = SimpleNamespace(pipeline_config=DreamXWorld5BCamPipelineConfig())
+    resolved_config = SimpleNamespace(pipeline_config=DreamXWorld5BCamPipelineConfig())
 
-    pipeline.initialize_pipeline(fastvideo_args)
+    pipeline.initialize_pipeline(resolved_config)
 
     scheduler = pipeline.modules["scheduler"]
     assert isinstance(scheduler, FlowMatchEulerDiscreteScheduler)
@@ -139,7 +139,7 @@ def test_dreamx_world_camera_conditioning_stage_sets_y_camera_extra():
     )
     stage = DreamXWorldCameraConditioningStage()
 
-    out = stage.forward(batch, fastvideo_args=object())
+    out = stage.forward(batch, resolved_config=object())
     y_camera = out.extra[DREAMX_Y_CAMERA_KEY]
     expected = build_dreamx_camera_condition(
         ["wj", "d"],
@@ -155,7 +155,7 @@ def test_dreamx_world_camera_conditioning_stage_sets_y_camera_extra():
     for key, expected_value in expected.items():
         assert y_camera[key].shape == (1, *expected_value.shape)
         torch.testing.assert_close(y_camera[key][0], expected_value)
-    assert stage.verify_output(out, fastvideo_args=object()).is_valid()
+    assert stage.verify_output(out, resolved_config=object()).is_valid()
 
 
 def test_dreamx_world_denoising_kwargs_filter_for_y_camera():
@@ -208,7 +208,7 @@ def test_dreamx_world_camera_conditioning_stage_expands_scalar_speed():
     )
     stage = DreamXWorldCameraConditioningStage()
 
-    out = stage.forward(batch, fastvideo_args=object())
+    out = stage.forward(batch, resolved_config=object())
 
     assert set(out.extra[DREAMX_Y_CAMERA_KEY]) == {"viewmats", "K"}
 

@@ -53,16 +53,16 @@ class MagiHumanSRDenoisingStage(PipelineStage):
         self.cfg_number = cfg_number
         self.coords_style = coords_style
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         device = batch.latents.device
-        shift = fastvideo_args.pipeline_config.flow_shift
+        shift = resolved_config.pipeline_config.flow_shift
         video_scheduler = copy.deepcopy(self.scheduler)
         video_scheduler.set_timesteps(
             self.sr_num_inference_steps,
@@ -99,7 +99,7 @@ class MagiHumanSRDenoisingStage(PipelineStage):
                 self.sr_video_txt_guidance_scale,
             )
 
-        disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
+        disable_tqdm = not getattr(resolved_config, "log_level_progress", True)
         for idx, t in enumerate(tqdm(video_scheduler.timesteps, disable=disable_tqdm)):
             video_latent = _overwrite_first_frame(video_latent, image_latent)
             static_packed = build_static_packed_inputs(

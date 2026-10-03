@@ -87,12 +87,12 @@ class DistillationPipeline(TrainingPipeline):
             setattr(cloned_batch, key, self._clone_batch_value(value))
         return cloned_batch
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         raise RuntimeError("create_pipeline_stages should not be called for training pipeline")
 
-    def load_modules(self, fastvideo_args: FastVideoArgs, loaded_modules: dict[str, torch.nn.Module] | None = None):
-        modules = super().load_modules(fastvideo_args, loaded_modules)
-        training_args = cast(TrainingArgs, fastvideo_args)
+    def load_modules(self, resolved_config: FastVideoArgs, loaded_modules: dict[str, torch.nn.Module] | None = None):
+        modules = super().load_modules(resolved_config, loaded_modules)
+        training_args = cast(TrainingArgs, resolved_config)
 
         if training_args.real_score_model_path:
             logger.info("Loading real score transformer from: %s", training_args.real_score_model_path)
@@ -304,7 +304,7 @@ class DistillationPipeline(TrainingPipeline):
                 module_name=module_type,
                 component_model_path=component_path,
                 transformers_or_diffusers=transformers_or_diffusers,
-                fastvideo_args=training_args,
+                resolved_config=training_args,
             )
 
             logger.info("Successfully loaded %s from %s", module_type, component_path)

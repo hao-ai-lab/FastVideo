@@ -114,7 +114,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         self.processor = processor
         self.ref2va = ref2va
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, lambda value: isinstance(value, str))
         if self.ref2va:
@@ -123,7 +123,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
             result.add_check("keyframes", batch.extra.get(MINIMAX_H3_KEYFRAMES_KEY), V.is_list)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_dims(3))
         result.add_check("text_token_tags", batch.extra.get(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY), V.with_dims(1))
@@ -256,11 +256,11 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         )
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         """Encode one H3 prompt presentation and attach its packed text features."""
         device = get_local_torch_device()
         first_param = next(self.conditioner.parameters(), None)
-        moved_for_forward = (fastvideo_args.text_encoder_cpu_offload and first_param is not None
+        moved_for_forward = (resolved_config.text_encoder_cpu_offload and first_param is not None
                              and not isinstance(first_param, DTensor))
         if moved_for_forward:
             self.conditioner.to(device)

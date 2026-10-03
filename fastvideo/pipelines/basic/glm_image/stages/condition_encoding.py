@@ -23,7 +23,7 @@ class GlmImageConditionEncodingStage(PipelineStage):
         self.image_processor = ImageProcessor(vae_scale_factor=_CONDITION_MULTIPLE_OF)
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         if batch.pil_image is None:
             return batch
 

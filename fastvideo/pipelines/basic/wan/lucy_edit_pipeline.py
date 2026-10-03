@@ -34,7 +34,7 @@ class LucyEditPipeline(WanVideoToVideoPipeline):
         "scheduler",
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(

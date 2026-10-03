@@ -34,7 +34,7 @@ class TimestepPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Prepare timesteps for the diffusion process.
@@ -90,7 +90,7 @@ class TimestepPreparationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify timestep preparation stage inputs."""
         result = VerificationResult()
         result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
@@ -99,7 +99,7 @@ class TimestepPreparationStage(PipelineStage):
         result.add_check("n_tokens", batch.n_tokens, V.none_or_positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify timestep preparation stage outputs."""
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.with_dims(1)])
@@ -112,7 +112,7 @@ class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         scheduler = self.scheduler
         device = get_local_torch_device()
@@ -121,7 +121,7 @@ class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
         extra_kwargs: dict = {}
         sig = inspect.signature(scheduler.set_timesteps)
         if "shift" in sig.parameters:
-            extra_kwargs["shift"] = fastvideo_args.pipeline_config.flow_shift
+            extra_kwargs["shift"] = resolved_config.pipeline_config.flow_shift
         # Prefer the canonical diffusers kwarg name if available.
         if "use_karras_sigmas" in sig.parameters:
             extra_kwargs["use_karras_sigmas"] = True
@@ -155,7 +155,7 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         sig = inspect.signature(self.scheduler.set_timesteps)
 
@@ -164,8 +164,8 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
             use_dynamic = bool(getattr(cfg, "use_dynamic_shifting", False)) if cfg is not None else False
 
             if use_dynamic:
-                arch = fastvideo_args.pipeline_config.dit_config.arch_config
-                vae_arch = fastvideo_args.pipeline_config.vae_config.arch_config
+                arch = resolved_config.pipeline_config.dit_config.arch_config
+                vae_arch = resolved_config.pipeline_config.vae_config.arch_config
                 patch_size = getattr(arch, "patch_size", None)
                 spatial_ratio = getattr(vae_arch, "spatial_compression_ratio", None)
 
@@ -200,4 +200,4 @@ class SD35TimestepPreparationStage(TimestepPreparationStage):
                 batch.timesteps = self.scheduler.timesteps
                 return batch
 
-        return super().forward(batch, fastvideo_args)
+        return super().forward(batch, resolved_config)

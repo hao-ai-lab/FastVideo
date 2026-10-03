@@ -176,12 +176,12 @@ def test_zimage_text_stage_honors_request_max_length(monkeypatch: pytest.MonkeyP
 
     def fake_encode_text(
         text,
-        fastvideo_args,
+        resolved_config,
         encoder_index,
         return_attention_mask,
         max_length=None,
     ):
-        del text, fastvideo_args, encoder_index, return_attention_mask
+        del text, resolved_config, encoder_index, return_attention_mask
         observed.append(max_length)
         return [torch.zeros(1, 4, 8)], [torch.ones(1, 4, dtype=torch.long)]
 

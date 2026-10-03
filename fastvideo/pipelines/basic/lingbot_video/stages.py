@@ -50,9 +50,9 @@ class LingBotVideoInputValidationStage(InputValidationStage):
     def __init__(self, refiner_enabled: bool = False) -> None:
         self.refiner_enabled = refiner_enabled
 
-    def _generate_seeds(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> None:
+    def _generate_seeds(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> None:
         """Use one device-local generator, matching the official production runner."""
-        del fastvideo_args
+        del resolved_config
         if batch.seed is None:
             raise ValueError("LingBot-Video requires a seed")
         if batch.num_videos_per_prompt != 1:
@@ -60,9 +60,9 @@ class LingBotVideoInputValidationStage(InputValidationStage):
         batch.seeds = [batch.seed]
         batch.generator = torch.Generator(device=get_local_torch_device()).manual_seed(batch.seed)
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         """Run shared validation, then enforce LingBot temporal and spatial geometry."""
-        batch = super().forward(batch, fastvideo_args)
+        batch = super().forward(batch, resolved_config)
         if not isinstance(batch.num_frames, int):
             raise TypeError("LingBot-Video num_frames must be an integer")
         if batch.num_frames != 1 and (batch.num_frames - 1) % 4 != 0:
@@ -73,7 +73,7 @@ class LingBotVideoInputValidationStage(InputValidationStage):
             raise ValueError(f"height and width must be divisible by 16, got {batch.height}x{batch.width}")
         if isinstance(batch.prompt, list) and len(batch.prompt) != 1:
             raise ValueError("LingBot-Video currently supports prompt batch size one")
-        if self.refiner_enabled and fastvideo_args.output_type == "latent":
+        if self.refiner_enabled and resolved_config.output_type == "latent":
             raise ValueError("LingBot-Video refinement requires decoded pixel output")
         return batch
 
@@ -84,9 +84,9 @@ class LingBotVideoLatentPreparationStage(PipelineStage):
     def __init__(self, transformer) -> None:
         self.transformer = transformer
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         """Generate or validate one normalized fp32 latent video."""
-        del fastvideo_args
+        del resolved_config
         if not all(isinstance(value, int) for value in (batch.num_frames, batch.height, batch.width)):
             raise TypeError("latent geometry must contain integer frames, height, and width")
         shape = (
@@ -151,7 +151,7 @@ class LingBotVideoRefinerPreparationStage(PipelineStage):
         std = torch.tensor(self.vae.config.latents_std, device=device, dtype=torch.float32).view(1, -1, 1, 1, 1)
         return ((latents.float() - mean) / std).to(latents)
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         """Prepare high-resolution refiner latents and its exact truncated sigma schedule."""
         if batch.output is None or batch.output.ndim != 5:
             raise ValueError("LingBot-Video refinement requires a decoded base video")
@@ -176,7 +176,7 @@ class LingBotVideoRefinerPreparationStage(PipelineStage):
         batch.extra["lingbot_video_base_shape"] = tuple(batch.output.shape)
         batch.output = None
 
-        shift = fastvideo_args.pipeline_config.flow_shift
+        shift = resolved_config.pipeline_config.flow_shift
         if shift is None:
             raise ValueError("LingBot-Video refinement requires a flow shift")
         sigmas = _compute_refiner_sigmas(
@@ -188,7 +188,7 @@ class LingBotVideoRefinerPreparationStage(PipelineStage):
         )
         self.scheduler.set_timesteps(len(sigmas), device=device, sigmas=sigmas, shift=1.0)
         batch.timesteps = self.scheduler.timesteps
-        if getattr(fastvideo_args, "vae_cpu_offload", False):
+        if getattr(resolved_config, "vae_cpu_offload", False):
             self.vae.to("cpu")
         return batch
 
@@ -277,7 +277,7 @@ class LingBotVideoDenoisingStage(PipelineStage):
         scale = batch.guidance_scale_2 if self.refiner else batch.guidance_scale
         return scale is not None and scale > 1.0
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         """Denoise latents while keeping scheduler samples and predictions in fp32."""
         if batch.latents is None or batch.timesteps is None:
             raise ValueError("LingBot-Video denoising requires latents and timesteps")

@@ -25,21 +25,21 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
         self.num_frame_per_block = int(getattr(self.transformer, "num_frame_per_block", 3))
         self.local_attn_size = int(getattr(self.transformer, "local_attn_size", 12))
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         assert batch.latents is not None, "latents must be prepared before DreamX AR denoising"
         assert batch.prompt_embeds, "prompt embeds must be prepared before DreamX AR denoising"
         latents = batch.latents
         device = latents.device
         target_dtype = torch.bfloat16
-        autocast_enabled = device.type == "cuda" and not fastvideo_args.disable_autocast
+        autocast_enabled = device.type == "cuda" and not resolved_config.disable_autocast
 
         frame_seq_length = (latents.shape[-2] // self.transformer.patch_size[1]) * (latents.shape[-1] //
                                                                                     self.transformer.patch_size[2])
         timesteps = torch.tensor(
-            tuple(getattr(fastvideo_args.pipeline_config, "dmd_denoising_steps", (1000, 750, 500, 250))),
+            tuple(getattr(resolved_config.pipeline_config, "dmd_denoising_steps", (1000, 750, 500, 250))),
             dtype=torch.long,
         ).cpu()
-        if getattr(fastvideo_args.pipeline_config, "warp_denoising_step", True):
+        if getattr(resolved_config.pipeline_config, "warp_denoising_step", True):
             self.scheduler.set_timesteps(1000)
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
@@ -125,7 +125,7 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
                 latents[:, :, start:start + current_num_frames] = block_latents
                 self._update_context_cache(block_latents, context, camera_block, kv_cache, crossattn_cache, start,
                                            frame_seq_length, target_dtype, autocast_enabled,
-                                           float(getattr(fastvideo_args.pipeline_config, "context_noise", 0.1)))
+                                           float(getattr(resolved_config.pipeline_config, "context_noise", 0.1)))
                 start += current_num_frames
 
         batch.latents = latents

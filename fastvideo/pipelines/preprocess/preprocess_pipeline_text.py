@@ -41,7 +41,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
         """Return the PyArrow schema for text-only pipeline."""
         return pyarrow_schema_text_only
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
@@ -49,7 +49,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
-    def preprocess_text_only(self, fastvideo_args: FastVideoArgs, args):
+    def preprocess_text_only(self, resolved_config: FastVideoArgs, args):
         """Preprocess text-only data."""
 
         for batch_idx, data in enumerate(self.pbar):
@@ -78,7 +78,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                 # Encode text using the standalone TextEncodingStage API
                 prompt_embeds_list, prompt_masks_list = self.prompt_encoding_stage.encode_text(
                     batch_captions,
-                    fastvideo_args,
+                    resolved_config,
                     encoder_index=[0],
                     return_attention_mask=True,
                 )
@@ -137,7 +137,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
 
     # Text-only record creation moved to fastvideo.dataset.dataloader.record_schema
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs, args):
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs, args):
         if not self.post_init_called:
             self.post_init()
 
@@ -168,7 +168,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
         # Initialize class variables for data sharing
         self.text_data: dict[str, Any] = {}  # Store text metadata and paths
 
-        self.preprocess_text_only(fastvideo_args, args)
+        self.preprocess_text_only(resolved_config, args)
 
 
 EntryClass = PreprocessPipeline_Text

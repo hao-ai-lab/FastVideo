@@ -24,7 +24,7 @@ class ConditioningStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Apply conditioning to the diffusion process.
@@ -43,7 +43,7 @@ class ConditioningStage(PipelineStage):
         # disable CFG when prompt_embeds is empty.
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify conditioning stage inputs."""
         result = VerificationResult()
         if not batch.prompt_embeds:
@@ -60,7 +60,7 @@ class ConditioningStage(PipelineStage):
                              lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify conditioning stage outputs."""
         result = VerificationResult()
         if batch.prompt_embeds is None or not batch.prompt_embeds:

@@ -31,7 +31,7 @@ class Gen3CPipeline(ComposedPipelineBase):
         "scheduler",
     ]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         scheduler = self.modules.get("scheduler")
         if scheduler is not None and hasattr(scheduler, "precondition_inputs"):
             return
@@ -46,10 +46,10 @@ class Gen3CPipeline(ComposedPipelineBase):
         self.modules["scheduler"] = EDMEulerScheduler(
             sigma_max=80.0,
             sigma_min=0.0002,
-            sigma_data=float(getattr(fastvideo_args.pipeline_config, "sigma_data", 0.5)),
+            sigma_data=float(getattr(resolved_config.pipeline_config, "sigma_data", 0.5)),
         )
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="cfg_policy_stage", stage=Gen3CCFGPolicyStage())

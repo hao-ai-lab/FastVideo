@@ -213,9 +213,9 @@ def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(monkeypatch: pytes
 
     captured: dict[str, Any] = {}
 
-    def fake_super_load(self, fastvideo_args, loaded_modules=None):
+    def fake_super_load(self, resolved_config, loaded_modules=None):
         """Capture the required module list after LingBot-specific discovery."""
-        del fastvideo_args, loaded_modules
+        del resolved_config, loaded_modules
         captured["required"] = list(self.required_config_modules)
         return {name: object() for name in self.required_config_modules}
 

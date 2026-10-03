@@ -1320,19 +1320,19 @@ class ValidationCallback(Callback):
             **kwargs,
         )
         if tc.pipeline_config is not None:
-            loaded_config = self._pipeline.fastvideo_args.pipeline_config
+            loaded_config = self._pipeline.resolved_config.pipeline_config
             validation_config = self._validation_pipeline_config(transformer)
             self._keep_loaded_encoder_widths(
                 validation_config,
                 loaded_config,
             )
-            self._pipeline.fastvideo_args.pipeline_config = validation_config
-            arch_config = self._pipeline.fastvideo_args.pipeline_config.dit_config.arch_config
+            self._pipeline.resolved_config.pipeline_config = validation_config
+            arch_config = self._pipeline.resolved_config.pipeline_config.dit_config.arch_config
             logger.info(
                 "Validation pipeline runtime config: local_attn_size=%s sink_size=%s boundary_ratio=%s",
                 getattr(arch_config, "local_attn_size", None),
                 getattr(arch_config, "sink_size", None),
-                getattr(self._pipeline.fastvideo_args.pipeline_config.dit_config, "boundary_ratio", None),
+                getattr(self._pipeline.resolved_config.pipeline_config.dit_config, "boundary_ratio", None),
             )
 
         self._pipeline_key = key
@@ -1500,7 +1500,7 @@ class ValidationCallback(Callback):
         )
         self._keep_loaded_encoder_widths(
             inference_args.pipeline_config,
-            pipeline.fastvideo_args.pipeline_config,
+            pipeline.resolved_config.pipeline_config,
         )
 
         # Propagate sampling_timesteps to pipeline_config so

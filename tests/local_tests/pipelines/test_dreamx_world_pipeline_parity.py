@@ -32,8 +32,8 @@ def _run_worker_forward_batch(worker_wrapper: Any, request_kwargs: dict[str, Any
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
     from fastvideo.utils import shallow_asdict
 
-    fastvideo_args = worker_wrapper.worker.fastvideo_args
-    sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
+    resolved_config = worker_wrapper.worker.resolved_config
+    sampling_param = SamplingParam.from_pretrained(resolved_config.model_path)
     sampling_param.update({key: value for key, value in request_kwargs.items() if key not in {"prompt", "output_path"}})
     sampling_param.prompt = request_kwargs["prompt"]
 
@@ -47,9 +47,9 @@ def _run_worker_forward_batch(worker_wrapper: Any, request_kwargs: dict[str, Any
         **shallow_asdict(sampling_param),
         eta=0.0,
         n_tokens=n_tokens,
-        VSA_sparsity=fastvideo_args.VSA_sparsity,
+        VSA_sparsity=resolved_config.VSA_sparsity,
     )
-    output_batch = worker_wrapper.worker.pipeline.forward(batch, fastvideo_args)
+    output_batch = worker_wrapper.worker.pipeline.forward(batch, resolved_config)
     assert output_batch.output is not None
     return output_batch.output.detach().cpu()
 

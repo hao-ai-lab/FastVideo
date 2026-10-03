@@ -17,7 +17,7 @@ from fastvideo.platforms import AttentionBackendEnum
 
 class GlmImageDenoisingStage(DenoisingStage):
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
         latents = getattr(batch, "latent", getattr(batch, "latents", None))
@@ -26,7 +26,7 @@ class GlmImageDenoisingStage(DenoisingStage):
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
         return result
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         device = get_local_torch_device()
         dtype = torch.bfloat16
         guidance_scale = batch.guidance_scale

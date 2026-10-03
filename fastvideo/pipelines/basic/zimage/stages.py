@@ -20,17 +20,17 @@ from fastvideo.utils import PRECISION_TO_TYPE
 class ZImageInputValidationStage(InputValidationStage):
     """Validate the image geometry and reproduce the official device RNG."""
 
-    def _generate_seeds(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> None:
-        del fastvideo_args
+    def _generate_seeds(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> None:
+        del resolved_config
         assert batch.seed is not None
         batch.seeds = [batch.seed]
         device = get_local_torch_device()
         batch.generator = torch.Generator(device=device).manual_seed(batch.seed)
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         if batch.do_classifier_free_guidance and batch.negative_prompt is None and not batch.negative_prompt_embeds:
             batch.negative_prompt = ""
-        batch = super().forward(batch, fastvideo_args)
+        batch = super().forward(batch, resolved_config)
         if batch.num_frames != 1:
             raise ValueError(f"Z-Image is text-to-image and requires num_frames=1, got {batch.num_frames}")
         if batch.height is None or batch.width is None:
@@ -61,8 +61,8 @@ class ZImageConditioningStage(PipelineStage):
         return [item for item in items for _ in range(count)]
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        del fastvideo_args
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+        del resolved_config
         if len(batch.prompt_embeds) != 1:
             raise ValueError(f"Z-Image expects one text encoder, got {len(batch.prompt_embeds)}")
 
@@ -107,7 +107,7 @@ class ZImageLatentPreparationStage(PipelineStage):
         return torch.randn(shape, generator=generators, device=device, dtype=torch.float32)
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         if batch.height is None or batch.width is None:
             raise ValueError("Z-Image requires height and width before latent preparation")
 
@@ -116,7 +116,7 @@ class ZImageLatentPreparationStage(PipelineStage):
             raise ValueError("Z-Image conditioning must run before latent preparation")
 
         channels = int(getattr(self.transformer, "in_channels", 16))
-        spatial_ratio = int(fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio)
+        spatial_ratio = int(resolved_config.pipeline_config.vae_config.arch_config.spatial_compression_ratio)
         shape = (
             len(prompt_embeds),
             channels,
@@ -157,15 +157,15 @@ class ZImageTimestepPreparationStage(PipelineStage):
         slope = (max_shift - base_shift) / (max_seq_len - base_seq_len)
         return image_seq_len * slope + base_shift - slope * base_seq_len
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         if batch.latents is None:
             raise ValueError("Z-Image latents must be prepared before timesteps")
         if batch.timesteps is not None and batch.sigmas is not None:
             raise ValueError("Only one of timesteps or sigmas may be supplied")
 
         scheduler = self.scheduler
-        sigma_min = float(fastvideo_args.pipeline_config.scheduler_sigma_min)
-        use_reference_timesteps = bool(fastvideo_args.pipeline_config.scheduler_use_reference_discrete_timesteps)
+        sigma_min = float(resolved_config.pipeline_config.scheduler_sigma_min)
+        use_reference_timesteps = bool(resolved_config.pipeline_config.scheduler_use_reference_discrete_timesteps)
         scheduler.sigma_min = sigma_min
         scheduler.register_to_config(
             sigma_min=sigma_min,
@@ -208,7 +208,7 @@ class ZImageDenoisingStage(PipelineStage):
         self.scheduler = scheduler
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         if batch.latents is None or batch.timesteps is None:
             raise ValueError("Z-Image denoising requires latents and timesteps")
 
@@ -219,7 +219,7 @@ class ZImageDenoisingStage(PipelineStage):
             raise ValueError("Z-Image denoising requires prompt embeddings")
 
         device = get_local_torch_device()
-        target_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
+        target_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
         batch_size = latents.shape[0]
 
         for index, timestep_value in enumerate(batch.timesteps):
@@ -305,10 +305,10 @@ class ZImageDecodingStage(PipelineStage):
         self.vae = vae
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         if batch.latents is None:
             raise ValueError("Z-Image decoding requires latents")
-        if fastvideo_args.output_type == "latent":
+        if resolved_config.output_type == "latent":
             # FastVideo standardizes image and video latents as [B,C,T,H,W].
             # Tongyi's image-only API returns the equivalent tensor with T squeezed.
             batch.output = batch.latents
@@ -332,6 +332,6 @@ class ZImageDecodingStage(PipelineStage):
         decoded = (decoded / 2 + 0.5).clamp(0, 1)
         batch.output = decoded.unsqueeze(2).float()
 
-        if fastvideo_args.vae_cpu_offload:
+        if resolved_config.vae_cpu_offload:
             self.vae.to("cpu")
         return batch

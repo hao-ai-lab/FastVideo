@@ -84,7 +84,7 @@ class ComposedPipelineBase(ABC):
     _required_config_modules: list[str] = []
     _extra_config_module_map: dict[str, str] = {}
     training_args: TrainingArgs | None = None
-    fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | TrainingArgs | None = None
+    resolved_config: ResolvedGeneratorConfig | FastVideoArgs | TrainingArgs | None = None
     modules: dict[str, Any] = {}
     # do not need to include moe related transformers
     trainable_transformer_names: list[str] = ["transformer"]
@@ -132,14 +132,14 @@ class ComposedPipelineBase(ABC):
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
-                 fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | TrainingArgs,
+                 resolved_config: ResolvedGeneratorConfig | FastVideoArgs | TrainingArgs,
                  required_config_modules: list[str] | None = None,
                  loaded_modules: dict[str, torch.nn.Module] | None = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
         """
-        self.fastvideo_args = fastvideo_args
+        self.resolved_config = resolved_config
 
         self.model_path: str = model_path
         self._stages: list[PipelineStage] = []
@@ -152,20 +152,20 @@ class ComposedPipelineBase(ABC):
         if self._required_config_modules is None:
             raise NotImplementedError("Subclass must set _required_config_modules")
 
-        maybe_init_distributed_environment_and_model_parallel(fastvideo_args.tp_size, fastvideo_args.sp_size)
+        maybe_init_distributed_environment_and_model_parallel(resolved_config.tp_size, resolved_config.sp_size)
 
         # VideoGenerator applies this in each Worker before building the
         # pipeline. Keep direct from_pretrained/build_pipeline callers aligned,
         # but only after distributed setup has selected this process's device.
         # On a config that the worker already decided, the policy changes nothing.
-        if fastvideo_args.inference_mode:
+        if resolved_config.inference_mode:
             local_device = get_local_torch_device()
             device_id = local_device.index if local_device.index is not None else 0
-            if isinstance(fastvideo_args, ResolvedGeneratorConfig):
-                fastvideo_args = finalize_device_offload_policy(fastvideo_args, device_id)
-                self.fastvideo_args = fastvideo_args
+            if isinstance(resolved_config, ResolvedGeneratorConfig):
+                resolved_config = finalize_device_offload_policy(resolved_config, device_id)
+                self.resolved_config = resolved_config
             else:
-                fastvideo_args.finalize_device_offload_policy(device_id)
+                resolved_config.finalize_device_offload_policy(device_id)
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
@@ -177,11 +177,11 @@ class ComposedPipelineBase(ABC):
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
         with self.profiler_controller.region("profiler_region_model_loading"):
-            self.modules = self.load_modules(fastvideo_args, loaded_modules)
+            self.modules = self.load_modules(resolved_config, loaded_modules)
 
     def set_trainable(self) -> None:
         # Only train DiT
-        if getattr(self.fastvideo_args, "training_mode", False):
+        if getattr(self.resolved_config, "training_mode", False):
             for name, module in self.trainable_transformer_modules.items():
                 logger.info("Setting %s to requires_grad=True", name)
                 if not isinstance(module, torch.nn.Module):
@@ -282,23 +282,23 @@ class ComposedPipelineBase(ABC):
         also called once those modules appear. Lazy proxies register a
         materialize transform and can be configured at ``post_init``.
         """
-        if self.fastvideo_args is None:
+        if self.resolved_config is None:
             return
         compile_requested = any((
-            self.fastvideo_args.enable_torch_compile,
-            self.fastvideo_args.enable_torch_compile_text_encoder,
-            self.fastvideo_args.enable_torch_compile_vae,
-            self.fastvideo_args.enable_torch_compile_audio_vae,
+            self.resolved_config.enable_torch_compile,
+            self.resolved_config.enable_torch_compile_text_encoder,
+            self.resolved_config.enable_torch_compile_vae,
+            self.resolved_config.enable_torch_compile_audio_vae,
         ))
-        if self.fastvideo_args.training_mode and compile_requested:
+        if self.resolved_config.training_mode and compile_requested:
             logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
-        if self.fastvideo_args.training_mode:
+        if self.resolved_config.training_mode:
             return
 
-        compile_transformer = self.fastvideo_args.enable_torch_compile
-        compile_text_encoder = self.fastvideo_args.enable_torch_compile_text_encoder
-        compile_vae = self.fastvideo_args.enable_torch_compile_vae
-        compile_audio_vae = self.fastvideo_args.enable_torch_compile_audio_vae
+        compile_transformer = self.resolved_config.enable_torch_compile
+        compile_text_encoder = self.resolved_config.enable_torch_compile_text_encoder
+        compile_vae = self.resolved_config.enable_torch_compile_vae
+        compile_audio_vae = self.resolved_config.enable_torch_compile_audio_vae
         if not (compile_transformer or compile_text_encoder or compile_vae or compile_audio_vae):
             return
 
@@ -314,13 +314,13 @@ class ComposedPipelineBase(ABC):
         except Exception:  # pragma: no cover - FSDP not always available
             fsdp_module_cls = None
 
-        global_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs or {})
-        dit_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_dit or global_compile_kwargs)
-        text_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_text_encoder or global_compile_kwargs)
-        vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_vae or global_compile_kwargs)
-        audio_vae_compile_kwargs = (self.fastvideo_args.torch_compile_kwargs_audio_vae or global_compile_kwargs)
+        global_compile_kwargs = (self.resolved_config.torch_compile_kwargs or {})
+        dit_compile_kwargs = (self.resolved_config.torch_compile_kwargs_dit or global_compile_kwargs)
+        text_compile_kwargs = (self.resolved_config.torch_compile_kwargs_text_encoder or global_compile_kwargs)
+        vae_compile_kwargs = (self.resolved_config.torch_compile_kwargs_vae or global_compile_kwargs)
+        audio_vae_compile_kwargs = (self.resolved_config.torch_compile_kwargs_audio_vae or global_compile_kwargs)
 
-        if compile_transformer and self.fastvideo_args.inference_torch_compile:
+        if compile_transformer and self.resolved_config.inference_torch_compile:
             logger.info("inference_torch_compile already compiled the DiT regions in the "
                         "loader; skipping the pipeline-level DiT compile")
             compile_transformer = False
@@ -365,19 +365,19 @@ class ComposedPipelineBase(ABC):
                 logger.info("Torch Compile enabled for audio VAE")
 
     def post_init(self) -> None:
-        assert self.fastvideo_args is not None, "fastvideo_args must be set"
+        assert self.resolved_config is not None, "fastvideo_args must be set"
         if self.post_init_called:
             return
         self.post_init_called = True
-        if self.fastvideo_args.training_mode:
-            assert isinstance(self.fastvideo_args, TrainingArgs)
-            self.training_args = self.fastvideo_args
+        if self.resolved_config.training_mode:
+            assert isinstance(self.resolved_config, TrainingArgs)
+            self.training_args = self.resolved_config
             assert self.training_args is not None
             self.initialize_training_pipeline(self.training_args)
             if self.training_args.log_validation:
                 self.initialize_validation_pipeline(self.training_args)
 
-        self.initialize_pipeline(self.fastvideo_args)
+        self.initialize_pipeline(self.resolved_config)
         self._apply_inference_compile()
 
         trace_target = self.modules.get("transformer")
@@ -391,11 +391,11 @@ class ComposedPipelineBase(ABC):
             trace_target = None
         self._trace_mgr = attach_activation_trace(trace_target)
 
-        if not self.fastvideo_args.training_mode:
+        if not self.resolved_config.training_mode:
             logger.info("Creating pipeline stages...")
-            self.create_pipeline_stages(self.fastvideo_args)
+            self.create_pipeline_stages(self.resolved_config)
 
-            if self._lazy_module_load_enabled(self.fastvideo_args) and self._lazy_module_names:
+            if self._lazy_module_load_enabled(self.resolved_config) and self._lazy_module_names:
                 self._install_lazy_release_hooks()
 
             # Warmup NCCL communicators for sequence parallelism to avoid
@@ -427,26 +427,26 @@ class ComposedPipelineBase(ABC):
         if args is None or args.inference_mode:
 
             kwargs['model_path'] = model_path
-            fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
+            resolved_config = FastVideoArgs.from_kwargs(**kwargs)
         else:
             assert args is not None, "args must be provided for training mode"
-            fastvideo_args = TrainingArgs.from_cli_args(args)
+            resolved_config = TrainingArgs.from_cli_args(args)
             # TODO(will): fix this so that its not so ugly
-            fastvideo_args.model_path = model_path
+            resolved_config.model_path = model_path
             for key, value in kwargs.items():
-                setattr(fastvideo_args, key, value)
+                setattr(resolved_config, key, value)
 
-            fastvideo_args.dit_cpu_offload = False
+            resolved_config.dit_cpu_offload = False
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
-            assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
+            assert resolved_config.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
 
-        logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
+        logger.info("fastvideo_args in from_pretrained: %s", resolved_config)
 
         pipe = cls(model_path,
-                   fastvideo_args,
+                   resolved_config,
                    required_config_modules=required_config_modules,
                    loaded_modules=loaded_modules)
         pipe.post_init()
@@ -467,7 +467,7 @@ class ComposedPipelineBase(ABC):
             self._install_lazy_release_hooks()
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
-        revision = getattr(self.fastvideo_args, "revision", None)
+        revision = getattr(self.resolved_config, "revision", None)
         model_path = maybe_download_model(
             self.model_path,
             revision=revision,
@@ -508,7 +508,7 @@ class ComposedPipelineBase(ABC):
         return self._stages
 
     @abstractmethod
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """
         Create the inference pipeline stages.
         """
@@ -520,14 +520,14 @@ class ComposedPipelineBase(ABC):
         """
         raise NotImplementedError
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         """
         Initialize the pipeline.
         """
         return
 
     def load_modules(self,
-                     fastvideo_args: FastVideoArgs,
+                     resolved_config: FastVideoArgs,
                      loaded_modules: dict[str, torch.nn.Module] | None = None) -> dict[str, Any]:
         """
         Load the modules from the config.
@@ -547,7 +547,7 @@ class ComposedPipelineBase(ABC):
             logger.info("MoE pipeline detected. Adding transformer_2 to self.required_config_modules...")
             self.required_config_modules.append("transformer_2")
             logger.info("MoE pipeline detected. Setting boundary ratio to %s", model_index["boundary_ratio"])
-            fastvideo_args.pipeline_config.dit_config.boundary_ratio = model_index["boundary_ratio"]
+            resolved_config.pipeline_config.dit_config.boundary_ratio = model_index["boundary_ratio"]
 
         model_index.pop("boundary_ratio", None)
         # used by Wan2.2 ti2v
@@ -622,10 +622,10 @@ class ComposedPipelineBase(ABC):
                     module_name=load_module_name,
                     component_model_path=component_model_path,
                     transformers_or_diffusers=transformers_or_diffusers,
-                    fastvideo_args=fastvideo_args,
+                    resolved_config=resolved_config,
                 )
 
-            if self._lazy_module_load_enabled(fastvideo_args) and module_name in self._lazy_module_names:
+            if self._lazy_module_load_enabled(resolved_config) and module_name in self._lazy_module_names:
                 module = LazyModule(module_name, load_component)
                 logger.info("Deferred module %s from %s", module_name, component_model_path)
             else:
@@ -646,11 +646,11 @@ class ComposedPipelineBase(ABC):
         return modules
 
     @staticmethod
-    def _lazy_module_load_enabled(fastvideo_args: FastVideoArgs) -> bool:
+    def _lazy_module_load_enabled(resolved_config: FastVideoArgs) -> bool:
         """Deferred loading is inference only; training needs every component."""
-        if not fastvideo_args.lazy_module_load:
+        if not resolved_config.lazy_module_load:
             return False
-        if fastvideo_args.training_mode:
+        if resolved_config.training_mode:
             logger.warning("lazy_module_load is not supported in training mode; loading all modules eagerly")
             return False
         return True
@@ -743,24 +743,24 @@ class ComposedPipelineBase(ABC):
             self._install_lazy_release_hooks()
 
     def _post_init_before_forward(
-            self, fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> ResolvedGeneratorConfig | FastVideoArgs:
+            self, resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> ResolvedGeneratorConfig | FastVideoArgs:
         """Run ``post_init`` before the first forward, and return the config that the stages read.
 
         ``post_init`` can rebind ``self.fastvideo_args`` to an override of it, such as a schedule from the
         checkpoint. A caller that passed the pipeline's own config then runs with the rebound one.
         """
         if self.post_init_called:
-            return fastvideo_args
-        passed_own_config = fastvideo_args is self.fastvideo_args
+            return resolved_config
+        passed_own_config = resolved_config is self.resolved_config
         self.post_init()
-        return self.fastvideo_args if passed_own_config else fastvideo_args
+        return self.resolved_config if passed_own_config else resolved_config
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
     ) -> ForwardBatch:
         """
         Generate a video or image using the pipeline.
@@ -771,14 +771,14 @@ class ComposedPipelineBase(ABC):
         Returns:
             ForwardBatch: The batch with the generated video or image.
         """
-        fastvideo_args = self._post_init_before_forward(fastvideo_args)
+        resolved_config = self._post_init_before_forward(resolved_config)
 
         # Execute each stage
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())
         # logger.info("Batch: %s", batch)
         try:
             for stage in self.stages:
-                batch = stage(batch, fastvideo_args)
+                batch = stage(batch, resolved_config)
         except BaseException:
             # A stage's own hook frees only what that stage was the last user
             # of. When the run aborts earlier, everything already materialized

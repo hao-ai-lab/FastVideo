@@ -29,8 +29,8 @@ class _RecoveringWorker:
     def __init__(self):
         self.calls = 0
 
-    def execute_forward(self, forward_batch, fastvideo_args):
-        del forward_batch, fastvideo_args
+    def execute_forward(self, forward_batch, resolved_config):
+        del forward_batch, resolved_config
         self.calls += 1
         if self.calls == 1:
             raise ValueError("bad request")
@@ -45,7 +45,7 @@ def test_worker_rpc_error_does_not_exit_busy_loop(monkeypatch) -> None:
         "method": "execute_forward",
         "kwargs": {
             "forward_batch": SimpleNamespace(),
-            "fastvideo_args": SimpleNamespace(),
+            "resolved_config": SimpleNamespace(),
         },
     }
     pipe = _ScriptedPipe([request, request, {"method": "shutdown"}])

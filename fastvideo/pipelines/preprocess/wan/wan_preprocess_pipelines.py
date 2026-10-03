@@ -8,12 +8,12 @@ from fastvideo.pipelines.stages.image_encoding import ImageVAEEncodingStage
 class PreprocessPipelineI2V(ComposedPipelineBase):
     _required_config_modules = ["image_encoder", "image_processor", "text_encoder", "tokenizer", "vae"]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
-        assert fastvideo_args.preprocess_config is not None
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+        assert resolved_config.preprocess_config is not None
         self.add_stage(stage_name="text_transform_stage",
                        stage=TextTransformStage(
-                           cfg_uncondition_drop_rate=fastvideo_args.preprocess_config.training_cfg_rate,
-                           seed=fastvideo_args.preprocess_config.seed,
+                           cfg_uncondition_drop_rate=resolved_config.preprocess_config.training_cfg_rate,
+                           seed=resolved_config.preprocess_config.seed,
                        ))
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
@@ -22,11 +22,11 @@ class PreprocessPipelineI2V(ComposedPipelineBase):
                        ))
         self.add_stage(stage_name="video_transform_stage",
                        stage=VideoTransformStage(
-                           train_fps=fastvideo_args.preprocess_config.train_fps,
-                           num_frames=fastvideo_args.preprocess_config.num_frames,
-                           max_height=fastvideo_args.preprocess_config.max_height,
-                           max_width=fastvideo_args.preprocess_config.max_width,
-                           do_temporal_sample=fastvideo_args.preprocess_config.do_temporal_sample,
+                           train_fps=resolved_config.preprocess_config.train_fps,
+                           num_frames=resolved_config.preprocess_config.num_frames,
+                           max_height=resolved_config.preprocess_config.max_height,
+                           max_width=resolved_config.preprocess_config.max_width,
+                           do_temporal_sample=resolved_config.preprocess_config.do_temporal_sample,
                        ))
         if (self.get_module("image_encoder") is not None and self.get_module("image_processor") is not None):
             self.add_stage(stage_name="image_encoding_stage",
@@ -41,12 +41,12 @@ class PreprocessPipelineI2V(ComposedPipelineBase):
 class PreprocessPipelineT2V(ComposedPipelineBase):
     _required_config_modules = ["text_encoder", "tokenizer", "vae"]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
-        assert fastvideo_args.preprocess_config is not None
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+        assert resolved_config.preprocess_config is not None
         self.add_stage(stage_name="text_transform_stage",
                        stage=TextTransformStage(
-                           cfg_uncondition_drop_rate=fastvideo_args.preprocess_config.training_cfg_rate,
-                           seed=fastvideo_args.preprocess_config.seed,
+                           cfg_uncondition_drop_rate=resolved_config.preprocess_config.training_cfg_rate,
+                           seed=resolved_config.preprocess_config.seed,
                        ))
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
@@ -55,11 +55,11 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
                        ))
         self.add_stage(stage_name="video_transform_stage",
                        stage=VideoTransformStage(
-                           train_fps=fastvideo_args.preprocess_config.train_fps,
-                           num_frames=fastvideo_args.preprocess_config.num_frames,
-                           max_height=fastvideo_args.preprocess_config.max_height,
-                           max_width=fastvideo_args.preprocess_config.max_width,
-                           do_temporal_sample=fastvideo_args.preprocess_config.do_temporal_sample,
+                           train_fps=resolved_config.preprocess_config.train_fps,
+                           num_frames=resolved_config.preprocess_config.num_frames,
+                           max_height=resolved_config.preprocess_config.max_height,
+                           max_width=resolved_config.preprocess_config.max_width,
+                           do_temporal_sample=resolved_config.preprocess_config.do_temporal_sample,
                        ))
         self.add_stage(stage_name="video_encoding_stage", stage=EncodingStage(vae=self.get_module("vae"), ))
 

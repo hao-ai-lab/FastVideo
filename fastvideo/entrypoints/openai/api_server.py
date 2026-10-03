@@ -56,7 +56,7 @@ def _validate_default_request_against_preset(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Load model on startup, clean up on shutdown"""
-    args: ResolvedGeneratorConfig = app.state.fastvideo_args
+    args: ResolvedGeneratorConfig = app.state.resolved_config
     output_dir: str = app.state.output_dir
     served_model_name: str | None = app.state.served_model_name
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(
-    fastvideo_args: ResolvedGeneratorConfig,
+    resolved_config: ResolvedGeneratorConfig,
     output_dir: str = DEFAULT_OUTPUT_DIR,
     default_request: GenerationRequest | None = None,
     served_model_name: str | None = None,
@@ -105,7 +105,7 @@ def create_app(
         version="0.1.0",
         lifespan=lifespan,
     )
-    app.state.fastvideo_args = fastvideo_args
+    app.state.resolved_config = resolved_config
     app.state.output_dir = output_dir
     app.state.default_request = default_request
     app.state.served_model_name = served_model_name
@@ -175,7 +175,7 @@ def create_app(
 
 
 def run_server(
-    fastvideo_args: ResolvedGeneratorConfig,
+    resolved_config: ResolvedGeneratorConfig,
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     output_dir: str = DEFAULT_OUTPUT_DIR,
@@ -185,17 +185,17 @@ def run_server(
     """Create the app and run it with uvicorn"""
     os.environ.setdefault("FASTVIDEO_STAGE_LOGGING", "1")
     if default_request is not None:
-        _validate_default_request_against_preset(default_request, fastvideo_args.model_path)
+        _validate_default_request_against_preset(default_request, resolved_config.model_path)
 
     app = create_app(
-        fastvideo_args,
+        resolved_config,
         output_dir=output_dir,
         default_request=default_request,
         served_model_name=served_model_name,
     )
 
     logger.info("Starting FastVideo server on %s:%d", host, port)
-    logger.info("Model: %s", fastvideo_args.model_path)
+    logger.info("Model: %s", resolved_config.model_path)
 
     uvicorn.run(
         app,

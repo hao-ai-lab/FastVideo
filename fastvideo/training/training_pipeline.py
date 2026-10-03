@@ -70,20 +70,20 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def __init__(self,
                  model_path: str,
-                 fastvideo_args: TrainingArgs,
+                 resolved_config: TrainingArgs,
                  required_config_modules: list[str] | None = None,
                  loaded_modules: dict[str, torch.nn.Module] | None = None) -> None:
-        fastvideo_args.inference_mode = False
-        self.lora_training = fastvideo_args.lora_training
-        if self.lora_training and fastvideo_args.lora_rank is None:
+        resolved_config.inference_mode = False
+        self.lora_training = resolved_config.lora_training
+        if self.lora_training and resolved_config.lora_rank is None:
             raise ValueError("lora rank must be set when using lora training")
 
-        set_random_seed(fastvideo_args.seed)  # for lora param init
-        super().__init__(model_path, fastvideo_args, required_config_modules, loaded_modules)  # type: ignore
+        set_random_seed(resolved_config.seed)  # for lora param init
+        super().__init__(model_path, resolved_config, required_config_modules, loaded_modules)  # type: ignore
         self.tracker = DummyTracker()
         self.validation_ref_videos_logged = False
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         raise RuntimeError("create_pipeline_stages should not be called for training pipeline")
 
     def set_schemas(self) -> None:

@@ -372,13 +372,13 @@ def _run_fastvideo_flux2_pipeline(
     try:
         executor_world_size = getattr(generator.executor, "world_size", None)
         print("[FLUX2 PIPELINE] fastvideo parallel config "
-              f"num_gpus={generator.fastvideo_args.num_gpus} "
-              f"tp_size={generator.fastvideo_args.tp_size} "
-              f"sp_size={generator.fastvideo_args.sp_size} "
+              f"num_gpus={generator.resolved_config.num_gpus} "
+              f"tp_size={generator.resolved_config.tp_size} "
+              f"sp_size={generator.resolved_config.sp_size} "
               f"executor_world_size={executor_world_size}")
-        assert generator.fastvideo_args.num_gpus == num_gpus
-        assert generator.fastvideo_args.tp_size == tp_size
-        assert generator.fastvideo_args.sp_size == sp_size
+        assert generator.resolved_config.num_gpus == num_gpus
+        assert generator.resolved_config.tp_size == tp_size
+        assert generator.resolved_config.sp_size == sp_size
         if executor_world_size is not None:
             assert executor_world_size == num_gpus
 

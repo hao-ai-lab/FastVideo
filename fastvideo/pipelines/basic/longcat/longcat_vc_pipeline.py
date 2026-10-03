@@ -45,9 +45,9 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         """Initialize LongCat-specific components."""
-        pipeline_config = fastvideo_args.pipeline_config
+        pipeline_config = resolved_config.pipeline_config
         transformer = self.get_module("transformer", None)
         if transformer is None:
             return
@@ -90,7 +90,7 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
             if hasattr(transformer, 'disable_bsa'):
                 transformer.disable_bsa()
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
         """Set up VC-specific pipeline stages."""
 
         # 1. Input validation
@@ -141,7 +141,7 @@ class LongCatVCLatentPreparationStage(LongCatI2VLatentPreparationStage):
     instead of image_latent (single frame).
     """
 
-    def forward(self, batch, fastvideo_args):
+    def forward(self, batch, resolved_config):
         """Prepare latents with VC conditioning."""
 
         # Check if we have video_latent (from VC encoding stage)
@@ -151,7 +151,7 @@ class LongCatVCLatentPreparationStage(LongCatI2VLatentPreparationStage):
             batch.image_latent = video_latent
 
         # Call parent class forward
-        return super().forward(batch, fastvideo_args)
+        return super().forward(batch, resolved_config)
 
 
 EntryClass = LongCatVideoContinuationPipeline

@@ -136,14 +136,14 @@ def _load_fastvideo_production_vae(monkeypatch: pytest.MonkeyPatch):
         vae_config=AutoencoderKLVAEConfig(),
         vae_precision="fp32",
     )
-    fastvideo_args = SimpleNamespace(
+    resolved_config = SimpleNamespace(
         model_paths={},
         pipeline_config=pipeline_config,
         vae_cpu_offload=False,
     )
-    vae = VAELoader().load(str(ZIMAGE_VAE_DIR), fastvideo_args)
+    vae = VAELoader().load(str(ZIMAGE_VAE_DIR), resolved_config)
     assert isinstance(vae, FastVideoAutoencoderKL)
-    assert fastvideo_args.model_paths["vae"] == str(ZIMAGE_VAE_DIR)
+    assert resolved_config.model_paths["vae"] == str(ZIMAGE_VAE_DIR)
     return vae
 
 

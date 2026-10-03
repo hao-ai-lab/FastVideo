@@ -49,7 +49,7 @@ class LongCatDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Run LongCat denoising loop with optimized CFG.
@@ -61,14 +61,14 @@ class LongCatDenoisingStage(DenoisingStage):
         Returns:
             The batch with denoised latents.
         """
-        if not fastvideo_args.model_loaded["transformer"]:
+        if not resolved_config.model_loaded["transformer"]:
             from fastvideo.models.loader.component_loader import TransformerLoader
             loader = TransformerLoader()
-            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
             pipeline = self.pipeline() if self.pipeline else None
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            fastvideo_args.model_loaded["transformer"] = True
+            resolved_config.model_loaded["transformer"] = True
 
         # Inference dtype. We hardcode bf16 (matching the WanDenoisingStage
         # pattern) rather than reading transformer.parameters().dtype: when
@@ -78,7 +78,7 @@ class LongCatDenoisingStage(DenoisingStage):
         # forward fails with "Input type (float) and bias type
         # (c10::BFloat16) should be the same".
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         # Extract batch parameters
         latents = batch.latents

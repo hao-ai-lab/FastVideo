@@ -30,11 +30,11 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
         """Initialize LongCat-specific components."""
 
         # Enable BSA (Block Sparse Attention) if configured
-        pipeline_config = fastvideo_args.pipeline_config
+        pipeline_config = resolved_config.pipeline_config
         transformer = self.get_module("transformer", None)
         if transformer is None:
             raise RuntimeError("Transformer module not found during initializing LongCat pipeline.")
@@ -83,7 +83,7 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
             if hasattr(transformer, 'disable_bsa'):
                 transformer.disable_bsa()
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

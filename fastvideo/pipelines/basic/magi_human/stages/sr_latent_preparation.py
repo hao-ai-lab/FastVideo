@@ -119,14 +119,14 @@ class MagiHumanSRLatentPreparationStage(PipelineStage):
         self.sigmas = ZeroSNRDDPMDiscretization()(1000, do_append_zero=False, flip=True)
         self.video_processor = VideoProcessor(vae_scale_factor=vae_scale_factor)
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         device = batch.latents.device
         _, _, latent_t, _, _ = batch.latents.shape
         _, vh, vw = self.vae_stride

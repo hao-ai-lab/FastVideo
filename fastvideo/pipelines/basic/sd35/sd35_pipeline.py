@@ -34,8 +34,8 @@ class SD35Pipeline(ComposedPipelineBase):
         "tokenizer_3",
     ]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
-        te_cfgs = list(fastvideo_args.pipeline_config.text_encoder_configs)
+    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
+        te_cfgs = list(resolved_config.pipeline_config.text_encoder_configs)
         if len(te_cfgs) >= 2:
             for i in (0, 1):
                 te_cfgs[i].tokenizer_kwargs.setdefault("padding", "max_length")
@@ -49,7 +49,7 @@ class SD35Pipeline(ComposedPipelineBase):
             te_cfgs[2].tokenizer_kwargs.setdefault("truncation", True)
             te_cfgs[2].tokenizer_kwargs.setdefault("return_tensors", "pt")
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(

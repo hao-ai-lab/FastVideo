@@ -35,19 +35,19 @@ class LongCatI2VDenoisingStage(LongCatDenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """Run denoising loop with I2V conditioning."""
 
         # Load transformer if needed
-        if not fastvideo_args.model_loaded["transformer"]:
+        if not resolved_config.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
-            fastvideo_args.model_loaded["transformer"] = True
+            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
+            resolved_config.model_loaded["transformer"] = True
 
         # Setup
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         latents = batch.latents
         timesteps = batch.timesteps

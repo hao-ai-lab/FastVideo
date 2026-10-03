@@ -25,9 +25,9 @@ def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
 
 class Worker:
 
-    def __init__(self, fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs, local_rank: int, rank: int,
+    def __init__(self, resolved_config: ResolvedGeneratorConfig | FastVideoArgs, local_rank: int, rank: int,
                  distributed_init_method: str):
-        self.fastvideo_args = fastvideo_args
+        self.resolved_config = resolved_config
         self.local_rank = local_rank
         self.rank = rank
         self.distributed_init_method = distributed_init_method
@@ -64,7 +64,7 @@ class Worker:
         # inherited or missing value here would bind every Ray actor to cuda:0.
         envs.set_external("LOCAL_RANK", str(self.local_rank))
         envs.set_external("RANK", str(self.rank))
-        envs.set_external("WORLD_SIZE", str(self.fastvideo_args.num_gpus))
+        envs.set_external("WORLD_SIZE", str(self.resolved_config.num_gpus))
 
         # Platform-agnostic device initialization
         self.device = get_local_torch_device()
@@ -86,23 +86,24 @@ class Worker:
         # its own device. The worker keeps the config that the policy returns,
         # and every loader and pipeline stage below consumes it.
         device_id = self.device.index if self.device.index is not None else 0
-        if isinstance(self.fastvideo_args, ResolvedGeneratorConfig):
-            self.fastvideo_args = finalize_device_offload_policy(self.fastvideo_args, device_id)
+        if isinstance(self.resolved_config, ResolvedGeneratorConfig):
+            self.resolved_config = finalize_device_offload_policy(self.resolved_config, device_id)
         else:
-            self.fastvideo_args.finalize_device_offload_policy(device_id)
+            self.resolved_config.finalize_device_offload_policy(device_id)
 
         # Initialize the distributed environment.
-        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
+        maybe_init_distributed_environment_and_model_parallel(self.resolved_config.tp_size,
+                                                              self.resolved_config.sp_size,
                                                               self.distributed_init_method)
 
-        self.pipeline = build_pipeline(self.fastvideo_args)
+        self.pipeline = build_pipeline(self.resolved_config)
 
     def execute_forward(self, forward_batch: ForwardBatch,
-                        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
+                        resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
         # The pipeline's config carries the overrides that the pipeline made from its checkpoint.
-        output_batch = self.pipeline.forward(forward_batch, self.pipeline.fastvideo_args)
+        output_batch = self.pipeline.forward(forward_batch, self.pipeline.resolved_config)
         needs_output = forward_batch.return_frames or (forward_batch.save_video
-                                                       and fastvideo_args.output_type != "latent"
+                                                       and resolved_config.output_type != "latent"
                                                        and not output_batch.extra.get("audio_only"))
         if output_batch.output is not None and not needs_output:
             # Drop the decoded tensor before multiprocessing or Ray transports
@@ -142,8 +143,8 @@ class Worker:
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
-        self.pipeline.streaming_reset(forward_batch, self.pipeline.fastvideo_args)
+                                resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
+        self.pipeline.streaming_reset(forward_batch, self.pipeline.resolved_config)
         return {"status": "reset_complete"}
 
     def execute_streaming_step(self, keyboard_action: torch.Tensor, mouse_action: torch.Tensor) -> ForwardBatch:

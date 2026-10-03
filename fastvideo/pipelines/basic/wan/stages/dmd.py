@@ -29,7 +29,7 @@ class DmdDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Run the denoising loop.
@@ -45,7 +45,7 @@ class DmdDenoisingStage(DenoisingStage):
         # TODO(will): make the precision configurable for inference
         # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
@@ -85,7 +85,7 @@ class DmdDenoisingStage(DenoisingStage):
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
-        timesteps = torch.tensor(fastvideo_args.pipeline_config.dmd_denoising_steps,
+        timesteps = torch.tensor(resolved_config.pipeline_config.dmd_denoising_steps,
                                  dtype=torch.long,
                                  device=get_local_torch_device())
 
@@ -106,7 +106,7 @@ class DmdDenoisingStage(DenoisingStage):
 
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])
-                embedded_cfg_scale = embedded_cfg_scale_for_batch(batch, fastvideo_args)
+                embedded_cfg_scale = embedded_cfg_scale_for_batch(batch, resolved_config)
                 guidance_expand = (torch.tensor(
                     [embedded_cfg_scale] * latent_model_input.shape[0],
                     dtype=torch.float32,
@@ -124,9 +124,9 @@ class DmdDenoisingStage(DenoisingStage):
                             attn_metadata = self.attn_metadata_builder.build(  # type: ignore
                                 current_timestep=i,  # type: ignore
                                 raw_latent_shape=batch.raw_latent_shape[2:5],  # type: ignore
-                                patch_size=fastvideo_args.pipeline_config.  # type: ignore
+                                patch_size=resolved_config.pipeline_config.  # type: ignore
                                 dit_config.patch_size,  # type: ignore
-                                VSA_sparsity=fastvideo_args.VSA_sparsity,  # type: ignore
+                                VSA_sparsity=resolved_config.VSA_sparsity,  # type: ignore
                                 device=get_local_torch_device(),  # type: ignore
                             )  # type: ignore
                             assert attn_metadata is not None, "attn_metadata cannot be None"

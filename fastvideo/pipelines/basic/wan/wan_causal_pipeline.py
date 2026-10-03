@@ -38,13 +38,13 @@ class WanCausalPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def initialize_pipeline(
         self,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ):
-        self.modules["scheduler"] = (FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift, ))
+        self.modules["scheduler"] = (FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift, ))
 
     def create_pipeline_stages(
         self,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> None:
         self.add_stage(
             stage_name="input_validation_stage",

@@ -35,14 +35,14 @@ class StableAudioLatentPreparationStage(PipelineStage):
         self.sample_rate = sample_rate
         self.audio_channels = audio_channels
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         ext = batch.extra or {}
         device = ext["cross_attn_cond"].device
         latent_sample_size = self.sample_size // self._hop_length()

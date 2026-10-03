@@ -62,7 +62,7 @@ def get_default_request() -> GenerationRequest | None:
 def set_state(
     generator: ServingGenerator,
     serving_engine: OpenAIServingEngine,
-    fastvideo_args: ResolvedGeneratorConfig,
+    resolved_config: ResolvedGeneratorConfig,
     output_dir: str,
     default_request: GenerationRequest | None = None,
     served_model_name: str | None = None,
@@ -71,7 +71,7 @@ def set_state(
     global _generator, _serving_engine, _fastvideo_args, _output_dir, _served_model_name, _default_request
     _generator = generator
     _serving_engine = serving_engine
-    _fastvideo_args = fastvideo_args
+    _fastvideo_args = resolved_config
     _output_dir = output_dir
     _served_model_name = served_model_name
     _default_request = default_request

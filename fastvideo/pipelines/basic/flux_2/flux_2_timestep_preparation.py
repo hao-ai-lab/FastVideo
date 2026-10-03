@@ -36,7 +36,7 @@ class Flux2TimestepPreparationStage(TimestepPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         scheduler = self.scheduler
         device = get_local_torch_device()
@@ -63,7 +63,7 @@ class Flux2TimestepPreparationStage(TimestepPreparationStage):
             else:
                 h = (batch.height if isinstance(batch.height, int) else (batch.height[0] if batch.height else None))
                 w = (batch.width if isinstance(batch.width, int) else (batch.width[0] if batch.width else None))
-                vae_config = getattr(fastvideo_args.pipeline_config, "vae_config", None)
+                vae_config = getattr(resolved_config.pipeline_config, "vae_config", None)
                 if vae_config is not None:
                     arch = getattr(vae_config, "arch_config", None)
                     scale = (getattr(arch, "spatial_compression_ratio", 8) if arch else 8)

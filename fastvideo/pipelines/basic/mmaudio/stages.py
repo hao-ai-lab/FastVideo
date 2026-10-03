@@ -128,13 +128,13 @@ def mmaudio_sequence_lengths(duration_s: float, pc) -> tuple[int, int, int]:
 class MMAudioInputValidationStage(PipelineStage):
     """Validate audio-generation inputs without invoking video pipeline logic."""
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         if batch.num_inference_steps <= 0:
             raise ValueError("MMAudio num_inference_steps must be positive.")
         if batch.num_videos_per_prompt != 1:
@@ -146,10 +146,10 @@ class MMAudioInputValidationStage(PipelineStage):
 
         direct_video = (batch.extra.get("mmaudio_clip_frames") is not None
                         and batch.extra.get("mmaudio_sync_frames") is not None)
-        if (fastvideo_args.workload_type is WorkloadType.V2A and batch.video_path is None and not direct_video):
+        if (resolved_config.workload_type is WorkloadType.V2A and batch.video_path is None and not direct_video):
             raise ValueError("MMAudio V2A requires `video_path` or preprocessed MMAudio frame tensors.")
 
-        pc = fastvideo_args.pipeline_config
+        pc = resolved_config.pipeline_config
         duration_s = batch.audio_end_in_s
         duration_s = pc.duration_s if duration_s is None else float(duration_s)
         start_s = 0.0 if batch.audio_start_in_s is None else float(batch.audio_start_in_s)
@@ -177,15 +177,15 @@ class MMAudioVideoConditioningStage(PipelineStage):
         self.sync_encoder = sync_encoder
         self.transformer = transformer
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        pc = fastvideo_args.pipeline_config
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+        pc = resolved_config.pipeline_config
         duration_s = float(batch.extra["mmaudio_duration_s"])
         clip_frames = batch.extra.get("mmaudio_clip_frames")
         sync_frames = batch.extra.get("mmaudio_sync_frames")
@@ -255,14 +255,14 @@ class MMAudioVideoConditioningStage(PipelineStage):
                 encoded = self.image_encoder(clip_video[start:start + chunk_size]).last_hidden_state
                 clip_outputs.append(encoded)
         clip_features = torch.cat(clip_outputs, dim=0).unsqueeze(0)
-        if fastvideo_args.image_encoder_cpu_offload:
+        if resolved_config.image_encoder_cpu_offload:
             self.image_encoder = self.image_encoder.to("cpu")
 
         self.sync_encoder = self.sync_encoder.to(device)
         sync_video = sync_frames.to(device=device, dtype=model_dtype, non_blocking=True).unsqueeze(0)
         with set_forward_context(current_timestep=0, attn_metadata=None):
             sync_features = self.sync_encoder(sync_video).last_hidden_state
-        if fastvideo_args.image_encoder_cpu_offload:
+        if resolved_config.image_encoder_cpu_offload:
             self.sync_encoder = self.sync_encoder.to("cpu")
 
         if sync_features.shape[1] != sync_length:
@@ -281,14 +281,14 @@ class MMAudioTextConditioningStage(PipelineStage):
         self.tokenizer = tokenizer
         self.transformer = transformer
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         device = get_local_torch_device()
         model_dtype = next(self.transformer.parameters()).dtype
         self.text_encoder = self.text_encoder.to(device)
@@ -315,7 +315,7 @@ class MMAudioTextConditioningStage(PipelineStage):
             text_features = self.transformer.get_empty_string_sequence(1)
         negative_text_features = encode(batch.negative_prompt)
 
-        if fastvideo_args.text_encoder_cpu_offload:
+        if resolved_config.text_encoder_cpu_offload:
             self.text_encoder = self.text_encoder.to("cpu")
 
         conditions = self.transformer.preprocess_conditions(
@@ -339,14 +339,14 @@ class MMAudioLatentPreparationStage(PipelineStage):
         super().__init__()
         self.transformer = transformer
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         if batch.latents is not None:
             return batch
         device = get_local_torch_device()
@@ -370,14 +370,14 @@ class MMAudioDenoisingStage(PipelineStage):
         self.transformer = transformer
         self.scheduler = scheduler
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         assert batch.latents is not None
         # Official MMAudio builds ``torch.linspace`` on CPU. A CPU scalar in
         # the bf16 CUDA update follows scalar-promotion rules, whereas moving
@@ -416,16 +416,16 @@ class MMAudioDecodingStage(PipelineStage):
         self.audio_vae = audio_vae
         self.vocoder = vocoder
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         assert batch.latents is not None
-        if fastvideo_args.output_type == "latent":
+        if resolved_config.output_type == "latent":
             batch.output = batch.latents.detach().cpu()
             return batch
 
@@ -436,7 +436,7 @@ class MMAudioDecodingStage(PipelineStage):
         mel = self.audio_vae.decode(batch.latents.transpose(1, 2).to(decoder_dtype))
         audio = self.vocoder(mel.to(next(self.vocoder.parameters()).dtype))
 
-        pc = fastvideo_args.pipeline_config
+        pc = resolved_config.pipeline_config
         expected_samples = batch.extra["mmaudio_sequence_lengths"][0]
         expected_samples *= pc.spectrogram_frame_rate * pc.latent_downsample_rate
         if audio.shape[-1] != expected_samples:

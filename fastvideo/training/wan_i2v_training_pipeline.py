@@ -30,8 +30,8 @@ class WanI2VTrainingPipeline(TrainingPipeline):
     """
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=fastvideo_args.pipeline_config.flow_shift)
+    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         """

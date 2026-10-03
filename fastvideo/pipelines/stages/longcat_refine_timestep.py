@@ -33,7 +33,7 @@ class LongCatRefineTimestepStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Prepare refinement-specific timesteps.

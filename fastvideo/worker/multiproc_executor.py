@@ -83,7 +83,7 @@ class StreamingTask:
     mouse_action: torch.Tensor | None = None
     # For RESET tasks:
     batch: ForwardBatch | None = None
-    fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | None = None
+    resolved_config: ResolvedGeneratorConfig | FastVideoArgs | None = None
 
 
 @dataclass
@@ -97,13 +97,13 @@ class StreamingResult:
 class MultiprocExecutor(Executor):
 
     def _init_executor(self) -> None:
-        self.world_size = self.fastvideo_args.num_gpus
+        self.world_size = self.resolved_config.num_gpus
         self.shutting_down = False
 
         set_multiproc_executor_envs()
 
         # Check if master_port is provided in fastvideo_args
-        master_port = get_open_port(self.fastvideo_args.master_port)
+        master_port = get_open_port(self.resolved_config.master_port)
         distributed_init_method = get_distributed_init_method(get_loopback_ip(), master_port)
         logger.info("Use master port: %s", master_port)
 
@@ -119,7 +119,7 @@ class MultiprocExecutor(Executor):
             for rank in range(self.world_size):
                 unready_workers.append(
                     WorkerMultiprocProc.make_worker_process(
-                        fastvideo_args=self.fastvideo_args,
+                        resolved_config=self.resolved_config,
                         local_rank=rank,
                         rank=rank,
                         distributed_init_method=distributed_init_method,
@@ -143,11 +143,11 @@ class MultiprocExecutor(Executor):
         atexit.register(self.shutdown)
 
     def execute_forward(self, forward_batch: ForwardBatch,
-                        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
+                        resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> ForwardBatch:
         responses = self.collective_rpc("execute_forward",
                                         kwargs={
                                             "forward_batch": forward_batch,
-                                            "fastvideo_args": fastvideo_args
+                                            "resolved_config": resolved_config
                                         })
         output = responses[0]["output_batch"]
 
@@ -167,11 +167,11 @@ class MultiprocExecutor(Executor):
         return result_batch
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
+                                resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> dict[str, Any]:
         responses = self.collective_rpc("execute_streaming_reset",
                                         kwargs={
                                             "forward_batch": forward_batch,
-                                            "fastvideo_args": fastvideo_args,
+                                            "resolved_config": resolved_config,
                                         })
         return responses[0]
 
@@ -214,7 +214,7 @@ class MultiprocExecutor(Executor):
         self._streaming_output_queue = None
 
     def submit_reset(self, forward_batch: ForwardBatch,
-                     fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs) -> None:
+                     resolved_config: ResolvedGeneratorConfig | FastVideoArgs) -> None:
         if not self._streaming_enabled:
             self.enable_streaming()
 
@@ -222,7 +222,7 @@ class MultiprocExecutor(Executor):
             StreamingTask(
                 task_type=StreamingTaskType.RESET,
                 batch=forward_batch,
-                fastvideo_args=fastvideo_args,
+                resolved_config=resolved_config,
             ))
 
     def submit_step(self, keyboard_action: torch.Tensor | None, mouse_action: torch.Tensor | None) -> None:
@@ -477,7 +477,7 @@ class WorkerMultiprocProc:
 
     def __init__(
         self,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
         local_rank: int,
         rank: int,
         distributed_init_method: str,
@@ -492,11 +492,11 @@ class WorkerMultiprocProc:
         self.streaming_input_queue = streaming_input_queue
         self.streaming_output_queue = streaming_output_queue
         self._initial_log_handler = _initial_log_handler
-        wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args, rpc_rank=rank)
+        wrapper = WorkerWrapperBase(resolved_config=resolved_config, rpc_rank=rank)
 
-        all_kwargs: list[dict] = [{} for _ in range(fastvideo_args.num_gpus)]
+        all_kwargs: list[dict] = [{} for _ in range(resolved_config.num_gpus)]
         all_kwargs[rank] = {
-            "fastvideo_args": fastvideo_args,
+            "resolved_config": resolved_config,
             "local_rank": local_rank,
             "rank": rank,
             "distributed_init_method": distributed_init_method,
@@ -512,7 +512,7 @@ class WorkerMultiprocProc:
 
     @staticmethod
     def make_worker_process(
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
         local_rank: int,
         rank: int,
         distributed_init_method: str,
@@ -525,7 +525,7 @@ class WorkerMultiprocProc:
         reader, writer = context.Pipe(duplex=False)
 
         process_kwargs = {
-            "fastvideo_args": fastvideo_args,
+            "resolved_config": resolved_config,
             "local_rank": local_rank,
             "rank": rank,
             "distributed_init_method": distributed_init_method,
@@ -744,8 +744,8 @@ class WorkerMultiprocProc:
                         continue
                     if method == 'execute_forward':
                         forward_batch = kwargs['forward_batch']
-                        fastvideo_args = kwargs['fastvideo_args']
-                        output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
+                        resolved_config = kwargs['resolved_config']
+                        output_batch = self.worker.execute_forward(forward_batch, resolved_config)
                         logging_info = None
                         if envs.FASTVIDEO_STAGE_LOGGING.get():
                             logging_info = output_batch.logging_info
@@ -802,7 +802,7 @@ class WorkerMultiprocProc:
                     break
                 elif task.task_type == StreamingTaskType.RESET:
                     try:
-                        self.worker.execute_streaming_reset(task.batch, task.fastvideo_args)
+                        self.worker.execute_streaming_reset(task.batch, task.resolved_config)
                         self.streaming_output_queue.put(StreamingResult(task_type=StreamingTaskType.RESET))
                     except Exception as e:
                         logger.error("Worker %d reset error: %s", self.rank, e)

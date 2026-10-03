@@ -39,7 +39,7 @@ class LatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Prepare initial latent variables for the diffusion process.
@@ -53,7 +53,7 @@ class LatentPreparationStage(PipelineStage):
         """
 
         latent_num_frames = (batch.num_frames -
-                             1) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
+                             1) // resolved_config.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
         # Determine batch size; fall back to action/image inputs when no text encoder is present
         if not batch.prompt_embeds:
             if batch.keyboard_cond is not None:
@@ -107,8 +107,8 @@ class LatentPreparationStage(PipelineStage):
                 batch_size,
                 num_frames,
                 self.transformer.num_channels_latents,
-                height // fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio,
-                width // fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio,
+                height // resolved_config.pipeline_config.vae_config.arch_config.spatial_compression_ratio,
+                width // resolved_config.pipeline_config.vae_config.arch_config.spatial_compression_ratio,
             )
             bcthw_shape = tuple(shape[i] for i in [0, 2, 1, 3, 4])
         else:
@@ -116,8 +116,8 @@ class LatentPreparationStage(PipelineStage):
                 batch_size,
                 self.transformer.num_channels_latents,
                 num_frames,
-                height // fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio,
-                width // fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio,
+                height // resolved_config.pipeline_config.vae_config.arch_config.spatial_compression_ratio,
+                width // resolved_config.pipeline_config.vae_config.arch_config.spatial_compression_ratio,
             )
             bcthw_shape = shape
 
@@ -151,7 +151,7 @@ class LatentPreparationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify latent preparation stage inputs."""
         result = VerificationResult()
         result.add_check(
@@ -167,7 +167,7 @@ class LatentPreparationStage(PipelineStage):
         result.add_check("latents", batch.latents, V.none_or_tensor)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify latent preparation stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
@@ -192,7 +192,7 @@ class CosmosLatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         # Determine batch size
         if isinstance(batch.prompt, list):
@@ -378,7 +378,7 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -565,7 +565,7 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         batch.padding_mask = padding_mask
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify Cosmos latent preparation stage inputs."""
         result = VerificationResult()
         result.add_check("prompt_or_embeds", None,
@@ -579,7 +579,7 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         result.add_check("latents", batch.latents, V.none_or_tensor)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         """Verify latent preparation stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
@@ -598,7 +598,7 @@ class Cosmos25T2WLatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -651,11 +651,11 @@ class Cosmos25T2WLatentPreparationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
-        return Cosmos25LatentPreparationStage.verify_input(self, batch, fastvideo_args)  # type: ignore[misc]
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+        return Cosmos25LatentPreparationStage.verify_input(self, batch, resolved_config)  # type: ignore[misc]
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
-        return Cosmos25LatentPreparationStage.verify_output(self, batch, fastvideo_args)  # type: ignore[misc]
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+        return Cosmos25LatentPreparationStage.verify_output(self, batch, resolved_config)  # type: ignore[misc]
 
 
 class Cosmos25V2WLatentPreparationStage(Cosmos25LatentPreparationStage):
@@ -686,18 +686,18 @@ class Cosmos25AutoLatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         if self._has_conditioning_input(batch):
-            return self._v2w.forward(batch, fastvideo_args)
-        return self._t2w.forward(batch, fastvideo_args)
+            return self._v2w.forward(batch, resolved_config)
+        return self._t2w.forward(batch, resolved_config)
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         if self._has_conditioning_input(batch):
-            return self._v2w.verify_input(batch, fastvideo_args)
-        return self._t2w.verify_input(batch, fastvideo_args)
+            return self._v2w.verify_input(batch, resolved_config)
+        return self._t2w.verify_input(batch, resolved_config)
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         if self._has_conditioning_input(batch):
-            return self._v2w.verify_output(batch, fastvideo_args)
-        return self._t2w.verify_output(batch, fastvideo_args)
+            return self._v2w.verify_output(batch, resolved_config)
+        return self._t2w.verify_output(batch, resolved_config)

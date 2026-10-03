@@ -45,7 +45,7 @@ class BlockProcessingContext:
     block_sizes: list[int]
     noise_pool: list[torch.Tensor] | None
 
-    fastvideo_args: FastVideoArgs
+    resolved_config: FastVideoArgs
     target_dtype: torch.dtype
     autocast_enabled: bool
     boundary_timestep: float | None
@@ -104,23 +104,23 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        resolved_config: FastVideoArgs,
     ) -> ForwardBatch:
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
         patch_size = self.transformer.patch_size
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
-        timesteps = torch.tensor(fastvideo_args.pipeline_config.dmd_denoising_steps, dtype=torch.long).cpu()
-        if fastvideo_args.pipeline_config.warp_denoising_step:
+        timesteps = torch.tensor(resolved_config.pipeline_config.dmd_denoising_steps, dtype=torch.long).cpu()
+        if resolved_config.pipeline_config.warp_denoising_step:
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
         timesteps = timesteps.to(get_local_torch_device())
 
-        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config, 'boundary_ratio', None)
+        boundary_ratio = getattr(resolved_config.pipeline_config.dit_config, 'boundary_ratio', None)
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
             high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
@@ -188,17 +188,17 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             timesteps=timesteps,
             block_sizes=block_sizes,
             noise_pool=None,
-            fastvideo_args=fastvideo_args,
+            resolved_config=resolved_config,
             target_dtype=target_dtype,
             autocast_enabled=autocast_enabled,
             boundary_timestep=boundary_timestep,
             high_noise_timesteps=high_noise_timesteps,
-            context_noise=getattr(fastvideo_args.pipeline_config, "context_noise", 0),
+            context_noise=getattr(resolved_config.pipeline_config, "context_noise", 0),
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
         )
 
-        context_noise = getattr(fastvideo_args.pipeline_config, "context_noise", 0)
+        context_noise = getattr(resolved_config.pipeline_config, "context_noise", 0)
 
         with self.progress_bar(total=len(block_sizes) * len(timesteps)) as progress_bar:
             for block_idx, current_num_frames in enumerate(block_sizes):
@@ -386,8 +386,8 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                     attn_metadata = self.attn_metadata_builder.build(
                         current_timestep=i,
                         raw_latent_shape=(current_num_frames, h, w),
-                        patch_size=ctx.fastvideo_args.pipeline_config.dit_config.patch_size,
-                        VSA_sparsity=ctx.fastvideo_args.VSA_sparsity,
+                        patch_size=ctx.resolved_config.pipeline_config.dit_config.patch_size,
+                        VSA_sparsity=ctx.resolved_config.VSA_sparsity,
                         device=get_local_torch_device(),
                     )
                     assert attn_metadata is not None, "attn_metadata cannot be None"
@@ -541,22 +541,22 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                 **context_model_kwargs,
             )
 
-    def streaming_reset(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def streaming_reset(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
 
         latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
         patch_size = self.transformer.patch_size
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
-        timesteps = torch.tensor(fastvideo_args.pipeline_config.dmd_denoising_steps, dtype=torch.long).cpu()
-        if fastvideo_args.pipeline_config.warp_denoising_step:
+        timesteps = torch.tensor(resolved_config.pipeline_config.dmd_denoising_steps, dtype=torch.long).cpu()
+        if resolved_config.pipeline_config.warp_denoising_step:
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
         timesteps = timesteps.to(get_local_torch_device())
 
-        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config, 'boundary_ratio', None)
+        boundary_ratio = getattr(resolved_config.pipeline_config.dit_config, 'boundary_ratio', None)
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
             high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
@@ -632,12 +632,12 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
             timesteps=timesteps,
             block_sizes=block_sizes,
             noise_pool=noise_pool,
-            fastvideo_args=fastvideo_args,
+            resolved_config=resolved_config,
             target_dtype=target_dtype,
             autocast_enabled=autocast_enabled,
             boundary_timestep=boundary_timestep,
             high_noise_timesteps=high_noise_timesteps,
-            context_noise=getattr(fastvideo_args.pipeline_config, "context_noise", 0),
+            context_noise=getattr(resolved_config.pipeline_config, "context_noise", 0),
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
         )
@@ -724,7 +724,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         self._streaming_initialized = False
         self._streaming_ctx = None
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)

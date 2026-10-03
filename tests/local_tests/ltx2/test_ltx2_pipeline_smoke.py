@@ -46,7 +46,7 @@ def _truncate_debug_logs() -> None:
 
 def _run_audio_decode_smoke(
     diffusers_path: str,
-    fastvideo_args,
+    resolved_config,
     device: torch.device,
     num_frames: int,
     fps: float,
@@ -62,13 +62,13 @@ def _run_audio_decode_smoke(
         module_name="audio_decoder",
         component_model_path=audio_decoder_path,
         transformers_or_diffusers="diffusers",
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
     )
     vocoder = PipelineComponentLoader.load_module(
         module_name="vocoder",
         component_model_path=vocoder_path,
         transformers_or_diffusers="diffusers",
-        fastvideo_args=fastvideo_args,
+        resolved_config=resolved_config,
     )
 
     duration = float(num_frames) / float(fps)
@@ -193,7 +193,7 @@ def test_ltx2_pipeline_smoke():
         generator.shutdown()
         _run_audio_decode_smoke(
             diffusers_path=diffusers_path,
-            fastvideo_args=generator.fastvideo_args,
+            resolved_config=generator.resolved_config,
             device=device,
             num_frames=num_frames,
             fps=fps,

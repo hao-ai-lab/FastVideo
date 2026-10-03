@@ -39,7 +39,7 @@ class Flux2Pipeline(LoRAPipeline, ComposedPipelineBase):
         "scheduler",
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(

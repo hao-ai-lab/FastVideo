@@ -21,7 +21,7 @@ class WorkerWrapperBase:
 
     def __init__(
         self,
-        fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig | FastVideoArgs,
         rpc_rank: int = 0,
     ) -> None:
         """
@@ -36,7 +36,7 @@ class WorkerWrapperBase:
         """
         self.rpc_rank = rpc_rank
         self.worker: Worker | None = None
-        self.fastvideo_args: ResolvedGeneratorConfig | FastVideoArgs | None = None
+        self.resolved_config: ResolvedGeneratorConfig | FastVideoArgs | None = None
         # do not store this `fastvideo_args`, `init_worker` will set the final
         # one.
 
@@ -64,8 +64,8 @@ class WorkerWrapperBase:
         Arguments are passed to the worker class constructor.
         """
         kwargs = all_kwargs[self.rpc_rank]
-        self.fastvideo_args = kwargs.get("fastvideo_args")
-        assert self.fastvideo_args is not None, ("fastvideo_args is required to initialize the worker")
+        self.resolved_config = kwargs.get("resolved_config")
+        assert self.resolved_config is not None, ("fastvideo_args is required to initialize the worker")
 
         self.worker = Worker(**kwargs)
         assert self.worker is not None

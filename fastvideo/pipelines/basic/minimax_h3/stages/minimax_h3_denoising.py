@@ -26,14 +26,14 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import get_compute_dtype
 
 
-def _h3_vsa_metadata_builder(transformer: Any, fastvideo_args: FastVideoArgs) -> Any:
+def _h3_vsa_metadata_builder(transformer: Any, resolved_config: FastVideoArgs) -> Any:
     """Builder instance when the transformer resolved to VSA-H3, else None.
 
     Resolves through the same selector record the attention layers used
     (``component_attention_backend``) instead of introspecting module
     internals, mirroring the generic DenoisingStage.
     """
-    dit_config = fastvideo_args.pipeline_config.dit_config
+    dit_config = resolved_config.pipeline_config.dit_config
     backend = get_attn_backend(
         head_size=dit_config.attention_head_dim,
         dtype=get_compute_dtype(),
@@ -86,7 +86,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # clean time (1 - sigma); passing integer rungs to step() is wrong.
             scheduler.set_timesteps(sigmas=sigmas, device=device)
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("layout", batch.extra.get(MINIMAX_H3_LAYOUT_KEY), V.not_none)
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_dims(3))
@@ -95,7 +95,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, V.with_dims(2))
         result.add_check("audio_latents", batch.audio_latents, V.with_dims(2))
@@ -104,7 +104,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         return result
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         """Denoise the packed H3 video and audio streams over one shared schedule."""
         layout = batch.extra.get(MINIMAX_H3_LAYOUT_KEY)
         if not isinstance(layout, MiniMaxH3PackedLayout):
@@ -112,11 +112,11 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         if not batch.prompt_embeds or batch.latents is None or batch.audio_latents is None:
             raise ValueError("MiniMax-H3 conditioning and packed latents must precede denoising.")
 
-        full_cpu_offload = (fastvideo_args.dit_cpu_offload and not fastvideo_args.dit_layerwise_offload
-                            and not fastvideo_args.use_fsdp_inference)
+        full_cpu_offload = (resolved_config.dit_cpu_offload and not resolved_config.dit_layerwise_offload
+                            and not resolved_config.use_fsdp_inference)
         device = get_local_torch_device()
 
-        dmd_steps = fastvideo_args.pipeline_config.dmd_denoising_steps
+        dmd_steps = resolved_config.pipeline_config.dmd_denoising_steps
         if dmd_steps is None:
             self.scheduler.set_timesteps(batch.num_inference_steps, device=device)
             self.audio_scheduler.set_timesteps(batch.num_inference_steps, device=device)
@@ -150,9 +150,9 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         text_indices = layout.text_indices.to(device)
         prompt_embeds = batch.prompt_embeds[0].to(device)
 
-        vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, fastvideo_args)
+        vsa_metadata_builder = _h3_vsa_metadata_builder(self.transformer, resolved_config)
         if vsa_metadata_builder is not None:
-            vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
+            vsa_patch_size = resolved_config.pipeline_config.dit_config.patch_size
             vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
             # Per-request knobs (sweeps flip these between generate calls
             # without respawning workers); mode None defers to the env default.
@@ -165,7 +165,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             # Run-level tile geometry (256 default, 64 = native Triton path),
             # plumbed like the run-level sparsity; the builder validates the
             # value against VSA_H3_TILE_SHAPES.
-            vsa_tile_size = int(fastvideo_args.VSA_tile_size)
+            vsa_tile_size = int(resolved_config.VSA_tile_size)
 
         try:
             if full_cpu_offload:
@@ -238,7 +238,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     batch.step_index = index
                     batch.timestep = video_timestep
         finally:
-            if bool(getattr(fastvideo_args, "dit_layerwise_offload", False)):
+            if bool(getattr(resolved_config, "dit_layerwise_offload", False)):
                 manager = getattr(self.transformer, "_layerwise_offload_manager", None)
                 if manager is not None and getattr(manager, "enabled", False):
                     manager.release_all()

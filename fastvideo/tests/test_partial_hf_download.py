@@ -100,7 +100,7 @@ def test_build_pipeline_forwards_real_minimax_patterns(
     monkeypatch.setattr(
         pipeline_cls,
         "__init__",
-        lambda self, model_path, fastvideo_args: captured.update(pipeline_model_path=model_path),
+        lambda self, model_path, resolved_config: captured.update(pipeline_model_path=model_path),
     )
 
     def fake_download(model_path, **kwargs):
@@ -175,7 +175,7 @@ def test_direct_pipeline_load_forwards_partial_patterns(tmp_path: Path, monkeypa
     monkeypatch.setattr("fastvideo.pipelines.composed_pipeline_base.maybe_download_model", fake_download)
     pipeline = object.__new__(MiniMaxH3Ref2VAModularPipeline)
     pipeline.model_path = "MiniMaxAI/MiniMax-H3"
-    pipeline.fastvideo_args = SimpleNamespace(revision="test-revision")
+    pipeline.resolved_config = SimpleNamespace(revision="test-revision")
 
     pipeline._load_config(pipeline.model_path)
 

@@ -100,16 +100,16 @@ class MagiHumanDenoisingStage(PipelineStage):
         self.video_guidance_high_t_threshold = video_guidance_high_t_threshold
         self.video_guidance_low_t_value = video_guidance_low_t_value
 
-    def verify_input(self, batch, fastvideo_args):
+    def verify_input(self, batch, resolved_config):
         return VerificationResult()
 
-    def verify_output(self, batch, fastvideo_args):
+    def verify_output(self, batch, resolved_config):
         return VerificationResult()
 
     @torch.inference_mode()
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
         device = batch.latents.device
-        shift = fastvideo_args.pipeline_config.flow_shift
+        shift = resolved_config.pipeline_config.flow_shift
         # Video and audio use independent FlowUniPC state (upstream
         # inference/pipeline/video_generate.py:404-407 instantiates two
         # separate schedulers). Sharing one scheduler causes the
@@ -150,7 +150,7 @@ class MagiHumanDenoisingStage(PipelineStage):
 
         audio_feat_len = int(audio_latent.shape[1])
 
-        disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
+        disable_tqdm = not getattr(resolved_config, "log_level_progress", True)
         for idx, t in enumerate(tqdm(timesteps, disable=disable_tqdm)):
             video_latent = _overwrite_first_frame(video_latent, image_latent)
             # Precompute packed video+audio tokens after any TI2V first-frame
