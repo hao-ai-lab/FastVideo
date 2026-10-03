@@ -176,7 +176,7 @@ gen = VideoGenerator.from_pretrained(
     num_gpus=1,
     use_fsdp_inference=False,  # FSDP is incompatible with FP4 pointer path
 )
-gen.generate_video(prompt="A raccoon in sunflowers", save_video=True)
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
 ```
 
 #### Known Limitations
@@ -206,14 +206,20 @@ os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
 
 from fastvideo import VideoGenerator
 from fastvideo.layers.quantization import get_quantization_config
-gen = VideoGenerator.from_pretrained(
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    num_gpus=1,
-    # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
-    # instance — the bare string is not resolved on the from_pretrained path.
-    transformer_quant=get_quantization_config("nvfp4_qat")(),
-    use_fsdp_inference=False,     # FSDP shards invalidate the FP4 tensor pointers
-)
+gen = VideoGenerator.from_config({
+    "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "engine": {
+        "num_gpus": 1,
+        "use_fsdp_inference": False,     # FSDP shards invalidate the FP4 tensor pointers
+    },
+    "pipeline": {
+        "experimental": {
+            # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
+            # instance — the bare string is not resolved under pipeline.experimental.
+            "transformer_quant": get_quantization_config("nvfp4_qat")(),
+        },
+    },
+})
 gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
 ```
 
@@ -305,12 +311,16 @@ automatically.
 from fastvideo import VideoGenerator
 from fastvideo.layers.quantization import get_quantization_config
 
-gen = VideoGenerator.from_pretrained(
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    # Pass an instance — the bare string is not resolved on the from_pretrained path.
-    transformer_quant=get_quantization_config("FP8")(),          # per-tensor (default)
-    # transformer_quant=get_quantization_config("FP8")(granularity="channel"),  # slower, higher accuracy
-)
+gen = VideoGenerator.from_config({
+    "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "pipeline": {
+        "experimental": {
+            # Pass an instance — the bare string is not resolved under pipeline.experimental.
+            "transformer_quant": get_quantization_config("FP8")(),          # per-tensor (default)
+            # "transformer_quant": get_quantization_config("FP8")(granularity="channel"),  # slower, higher accuracy
+        },
+    },
+})
 gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
 ```
 
@@ -376,10 +386,10 @@ device is unsupported. Legacy VSA, MiniMax-H3 tile-256 VSA, and the explicit
 eager with one warning instead of failing mid-denoise.
 
 ```python
-generator = VideoGenerator.from_pretrained(
-    "MiniMaxAI/MiniMax-H3",
-    inference_torch_compile=True,  # or FASTVIDEO_INFERENCE_TORCH_COMPILE=1
-)
+generator = VideoGenerator.from_config({
+    "model_path": "MiniMaxAI/MiniMax-H3",
+    "engine": {"compile": {"regional": True}},  # or FASTVIDEO_INFERENCE_TORCH_COMPILE=1
+})
 ```
 
 In a YAML config, set `generator.engine.compile.regional: true`.
@@ -501,10 +511,10 @@ for backend in ["TORCH_SDPA", "FLASH_ATTN", "SAGE_ATTN"]:
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = backend
     generator = VideoGenerator.from_pretrained("your-model-id")
     start_time = time.perf_counter()
-    generator.generate_video(
-        prompt="Your prompt",
-        seed=1024,
-    )
+    generator.generate({
+        "prompt": "Your prompt",
+        "sampling": {"seed": 1024},
+    })
     elapsed = time.perf_counter() - start_time
     print(f"{backend}: {elapsed:.2f}s")
 ```

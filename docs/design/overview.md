@@ -28,19 +28,15 @@ Minimal usage (from `examples/inference/basic/basic.py`):
 
 ```python
 from fastvideo import VideoGenerator
-from fastvideo.api.sampling_param import SamplingParam
 
 model_id = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # or official_weights/<model_name>/
 generator = VideoGenerator.from_pretrained(model_id, num_gpus=1)
 
-sampling = SamplingParam.from_pretrained(model_id)
-sampling.num_frames = 45
-video = generator.generate_video(
-    "A vibrant city street at sunset.",
-    sampling_param=sampling,
-    output_path="video_samples",
-    save_video=True,
-)
+video = generator.generate({
+    "prompt": "A vibrant city street at sunset.",
+    "sampling": {"num_frames": 45},
+    "output": {"output_path": "video_samples", "save_video": True},
+})
 ```
 
 ## Configuration system

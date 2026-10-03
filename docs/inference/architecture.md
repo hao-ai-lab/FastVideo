@@ -372,10 +372,10 @@ generator = VideoGenerator.from_pretrained(
     model_path="Wan-AI/Wan2.1-T2V-14B-Diffusers",
     num_gpus=1, tp_size=1, sp_size=1,
 )
-result = generator.generate_video(
-    prompt="A cat dancing",
-    height=720, width=1280, num_frames=81,
-)
+result = generator.generate({
+    "prompt": "A cat dancing",
+    "sampling": {"height": 720, "width": 1280, "num_frames": 81},
+})
 ```
 
 **CLI** (`fastvideo/entrypoints/cli/`):
@@ -421,7 +421,7 @@ User: VideoGenerator.from_pretrained(model_path, **kwargs)
       ├─ torch.compile (if enabled)
       └─ warmup_sequence_parallel_communication()
 
-User: generator.generate_video(prompt, ...)
+User: generator.generate(request)
   │
   ├─ ForwardBatch constructed from SamplingParam + user args
   └─ pipeline.forward(batch, fastvideo_args)

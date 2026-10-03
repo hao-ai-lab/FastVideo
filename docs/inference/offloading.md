@@ -215,7 +215,7 @@ generator = VideoGenerator.from_pretrained(
 )
 
 prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers."
-video = generator.generate_video(prompt, output_path="output/", save_video=True)
+video = generator.generate({"prompt": prompt, "output": {"output_path": "output/", "save_video": True}})
 ```
 
 ### Multi-GPU with FSDP
@@ -238,5 +238,5 @@ generator = VideoGenerator.from_pretrained(
 )
 
 prompt = "A majestic lion strides across the golden savanna."
-video = generator.generate_video(prompt, output_path="output/", save_video=True)
+video = generator.generate({"prompt": prompt, "output": {"output_path": "output/", "save_video": True}})
 ```

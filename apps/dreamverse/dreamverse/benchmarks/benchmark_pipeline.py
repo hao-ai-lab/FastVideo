@@ -52,7 +52,8 @@ import torch  # noqa: E402
 
 from fastvideo import VideoGenerator  # noqa: E402
 from fastvideo.api import (  # noqa: E402
-    ComponentConfig, CompileConfig, EngineConfig, GeneratorConfig, OffloadConfig, PipelineSelection, QuantizationConfig,
+    ComponentConfig, CompileConfig, EngineConfig, GenerationResult, GeneratorConfig, OffloadConfig, PipelineSelection,
+    QuantizationConfig,
 )
 
 DEFAULT_PROMPT = ("A cinematic drone shot over coastal cliffs at sunrise, golden "
@@ -128,9 +129,9 @@ def _build_generator_config(model_path: str, enable_compile: bool, num_gpus: int
     )
 
 
-def _extract_stage_times(result: dict) -> OrderedDict[str, float]:
+def _extract_stage_times(result: GenerationResult) -> OrderedDict[str, float]:
     out: OrderedDict[str, float] = OrderedDict()
-    info = result.get("logging_info") if isinstance(result, dict) else None
+    info = result.logging_info if isinstance(result, GenerationResult) else None
     if info is None:
         return out
     stages = getattr(info, "stages", None)
@@ -162,19 +163,25 @@ def _do_one_run(generator: VideoGenerator, prompt: str, *, height: int, width: i
     _reset_peak_gpu()
     t0 = time.perf_counter()
     try:
-        result = generator.generate_video(
-            prompt=prompt,
-            negative_prompt="",
-            save_video=False,
-            height=height,
-            width=width,
-            num_frames=num_frames,
-            fps=24,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=1.0,
-            seed=seed,
-            ltx2_image_crf=0.0,
-        )
+        result = generator.generate({
+            "prompt": prompt,
+            "negative_prompt": "",
+            "sampling": {
+                "height": height,
+                "width": width,
+                "num_frames": num_frames,
+                "fps": 24,
+                "num_inference_steps": num_inference_steps,
+                "guidance_scale": 1.0,
+                "seed": seed,
+            },
+            "output": {
+                "save_video": False
+            },
+            "extensions": {
+                "ltx2_image_crf": 0.0
+            },
+        })
         if torch.cuda.is_available():
             torch.cuda.synchronize()
     except Exception as exc:

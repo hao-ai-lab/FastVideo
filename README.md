@@ -142,11 +142,13 @@ def main():
     prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest."
 
     # Generate the video
-    video = generator.generate_video(
-        prompt,
-        output_path="my_videos/",  # Controls where videos are saved
-        save_video=True
-    )
+    video = generator.generate({
+        "prompt": prompt,
+        "output": {
+            "output_path": "my_videos/",  # Controls where videos are saved
+            "save_video": True,
+        },
+    })
 
 if __name__ == '__main__':
     main()

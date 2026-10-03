@@ -37,7 +37,7 @@ You can customize generation behavior using `PipelineConfig` and
 `SamplingParam`:
 
 ```python
-from fastvideo import VideoGenerator, SamplingParam, PipelineConfig
+from fastvideo import VideoGenerator, PipelineConfig
 
 def main():
     model_name = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
@@ -45,43 +45,40 @@ def main():
     config.vae_precision = "fp16"
 
     # Create the generator
-    generator = VideoGenerator.from_pretrained(
-        model_name,
-        num_gpus=1,
-        dit_layerwise_offload=True,  # FastVideoArgs option
-        pipeline_config=config
-    )
-
-    # Create and customize sampling parameters
-    sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    
-    # How many frames to generate
-    sampling_param.num_frames = 45
-    
-    # Video resolution (width, height)
-    sampling_param.width = 1024
-    sampling_param.height = 576
-    
-    # How many steps we denoise the video (higher = better quality, slower generation)
-    sampling_param.num_inference_steps = 30
-    
-    # How strongly the video conforms to the prompt (higher = more faithful to prompt)
-    sampling_param.guidance_scale = 7.5
-    
-    # Random seed for reproducibility
-    sampling_param.seed = 42  # Optional, leave unset for random results
+    generator = VideoGenerator.from_config({
+        "model_path": model_name,
+        "engine": {
+            "num_gpus": 1,
+            "offload": {"dit_layerwise": True},  # FastVideoArgs option
+        },
+        "pipeline": {"experimental": {"pipeline_config": config}},
+    })
 
     # Generate video with custom parameters
     prompt = "A beautiful sunset over a calm ocean, with gentle waves."
-    video = generator.generate_video(
-        prompt, 
-        sampling_param=sampling_param, 
-        output_path="my_videos/",  # Controls where videos are saved
-        save_video=True
-    )
+    video = generator.generate({
+        "prompt": prompt,
+        "sampling": {
+            # How many frames to generate
+            "num_frames": 45,
+            # Video resolution (width, height)
+            "width": 1024,
+            "height": 576,
+            # How many steps we denoise the video (higher = better quality, slower generation)
+            "num_inference_steps": 30,
+            # How strongly the video conforms to the prompt (higher = more faithful to prompt)
+            "guidance_scale": 7.5,
+            # Random seed for reproducibility
+            "seed": 42,  # Optional, leave unset for random results
+        },
+        "output": {
+            "output_path": "my_videos/",  # Controls where videos are saved
+            "save_video": True,
+        },
+    })
 
-    # If return_frames=True, frames are available in video["frames"]
-    print(f"Generated {len(video['frames'])} frames")
+    # If return_frames=True, frames are available in video.frames
+    print(f"Generated {len(video.frames)} frames")
 
 if __name__ == '__main__':
     main()

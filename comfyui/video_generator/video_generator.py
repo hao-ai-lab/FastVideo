@@ -15,6 +15,9 @@ from fastvideo import VideoGenerator as FastVideoGenerator
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
+# InferenceArgs keys that are SamplingConfig fields of a GenerationRequest.
+_SAMPLING_INFERENCE_ARGS = ("height", "width", "num_frames", "num_inference_steps", "guidance_scale", "seed", "fps")
+
 
 # Custom exception for interruption
 class GenerationInterruptedException(Exception):
@@ -154,7 +157,17 @@ class VideoGenerator:
         """Thread function to run the generation"""
         try:
             if self.generator is not None:
-                self.generator.generate_video(prompt=prompt, output_path=output_path, **inference_args)
+                # Place each InferenceArgs value in the GenerationRequest section that owns it.
+                request: dict[str, Any] = {"prompt": prompt, "output": {"output_path": output_path}}
+                for key, value in inference_args.items():
+                    if key == "image_path":
+                        section = "inputs"
+                    elif key in _SAMPLING_INFERENCE_ARGS:
+                        section = "sampling"
+                    else:
+                        section = "extensions"
+                    request.setdefault(section, {})[key] = value
+                self.generator.generate(request)
                 self._generation_result = os.path.join(output_path, f"{prompt[:100]}.mp4")
             else:
                 raise RuntimeError("Generator is not initialized")
@@ -253,9 +266,24 @@ class VideoGenerator:
         if self.generator is None:
             print('generation_args', generation_args)
             print('pipeline_config', pipeline_config)
-            self.generator = FastVideoGenerator.from_pretrained(model_path=model_path,
-                                                                **generation_args,
-                                                                pipeline_config=pipeline_config)
+            # Place each generation argument at its GeneratorConfig engine path.
+            engine_config: dict[str, Any] = {}
+            if "num_gpus" in generation_args:
+                engine_config["num_gpus"] = generation_args["num_gpus"]
+            for parallelism_key in ("tp_size", "sp_size"):
+                if parallelism_key in generation_args:
+                    engine_config.setdefault("parallelism", {})[parallelism_key] = generation_args[parallelism_key]
+            if "dit_cpu_offload" in generation_args:
+                engine_config["offload"] = {"dit": generation_args["dit_cpu_offload"]}
+            self.generator = FastVideoGenerator.from_config({
+                "model_path": model_path,
+                "engine": engine_config,
+                "pipeline": {
+                    "experimental": {
+                        "pipeline_config": pipeline_config
+                    }
+                },
+            })
 
         print('inference_args', inference_args)
 

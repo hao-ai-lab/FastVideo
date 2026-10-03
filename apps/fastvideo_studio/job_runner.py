@@ -862,23 +862,40 @@ class JobRunner:
             sp_size,
         )
 
-        gen = VideoGenerator.from_pretrained(
-            model_id,
-            workload_type=workload_type,
-            num_gpus=num_gpus,
-            dit_layerwise_offload=dit_layerwise_offload,
-            **({
-                "override_pipeline_cls_name": override_pipeline_cls_name
-            } if override_pipeline_cls_name else {}),
-            dit_cpu_offload=dit_cpu_offload,
-            text_encoder_cpu_offload=text_encoder_cpu_offload,
-            vae_cpu_offload=vae_cpu_offload,
-            image_encoder_cpu_offload=image_encoder_cpu_offload,
-            use_fsdp_inference=use_fsdp_inference,
-            enable_torch_compile=enable_torch_compile,
-            VSA_sparsity=vsa_sparsity,
-            tp_size=tp_size,
-            sp_size=sp_size,
+        gen = VideoGenerator.from_config(
+            {
+                "model_path": model_id,
+                "engine": {
+                    "num_gpus": num_gpus,
+                    "parallelism": {
+                        "tp_size": tp_size,
+                        "sp_size": sp_size,
+                    },
+                    "offload": {
+                        "dit": dit_cpu_offload,
+                        "dit_layerwise": dit_layerwise_offload,
+                        "text_encoder": text_encoder_cpu_offload,
+                        "image_encoder": image_encoder_cpu_offload,
+                        "vae": vae_cpu_offload,
+                    },
+                    "compile": {
+                        "enabled": enable_torch_compile
+                    },
+                    "attention": {
+                        "vsa_sparsity": vsa_sparsity
+                    },
+                    "use_fsdp_inference": use_fsdp_inference,
+                },
+                "pipeline": {
+                    "workload_type":
+                    workload_type,
+                    **({
+                        "components": {
+                            "override_pipeline_cls_name": override_pipeline_cls_name
+                        }
+                    } if override_pipeline_cls_name else {}),
+                },
+            },
             log_queue=log_queue,
         )
 
@@ -1103,30 +1120,33 @@ class JobRunner:
             # Without a name FastVideo derives the filename from the prompt.
             safe_name = re.sub(r'[\\/:*?"<>|]+', "", job.name).strip().strip(".")
             output_target = (os.path.join(job_output_dir, f"{safe_name[:80]}.mp4") if safe_name else job_output_dir)
-            gen_kwargs: dict[str, Any] = {
+            request: dict[str, Any] = {
                 "prompt": job.prompt,
-                "output_path": output_target,
-                "save_video": True,
-                "num_inference_steps": job.num_inference_steps,
-                "num_frames": job.num_frames,
-                "height": job.height,
-                "width": job.width,
-                "guidance_scale": job.guidance_scale,
-                "guidance_rescale": job.guidance_rescale,
-                "fps": job.fps,
-                "seed": job.seed,
                 "negative_prompt": job.negative_prompt or "",
-                "log_queue": log_queue,
+                "sampling": {
+                    "num_inference_steps": job.num_inference_steps,
+                    "num_frames": job.num_frames,
+                    "height": job.height,
+                    "width": job.width,
+                    "guidance_scale": job.guidance_scale,
+                    "guidance_rescale": job.guidance_rescale,
+                    "fps": job.fps,
+                    "seed": job.seed,
+                },
+                "output": {
+                    "output_path": output_target,
+                    "save_video": True,
+                },
             }
             if job.image_path:
-                gen_kwargs["image_path"] = job.image_path
+                request.setdefault("inputs", {})["image_path"] = job.image_path
             if job.references:
-                gen_kwargs["references"] = _build_h3_references(job.references)
+                request.setdefault("inputs", {})["references"] = _build_h3_references(job.references)
             if job.last_image_path:
                 # _prepare_fl2va requires a PIL image, not a path.
                 from PIL import Image as _PILImage
-                gen_kwargs["last_image"] = _PILImage.open(job.last_image_path)
-            generator.generate_video(**gen_kwargs)
+                request.setdefault("inputs", {})["last_image"] = _PILImage.open(job.last_image_path)
+            generator.generate(request, log_queue=log_queue)
 
             buf.phase = "saving"
             logger.info("Generation completed, searching for output file...")

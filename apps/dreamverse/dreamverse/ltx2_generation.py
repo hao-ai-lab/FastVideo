@@ -14,6 +14,7 @@ import gc
 import os
 import re
 import time
+from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
@@ -33,6 +34,9 @@ from dreamverse.config import (
     _resolve_lora_spec,
 )
 from dreamverse.generation_contracts import StepResult
+
+if TYPE_CHECKING:
+    from fastvideo.api import GenerationResult
 
 # Multi-frame decoded continuation defaults from
 # examples/inference/basic/basic_ltx2_distilled_video_continuation.py.
@@ -95,8 +99,8 @@ class ContinuationState:
         self.video_images = None
         self.audio_latents = None
 
-    def apply_video(self, request_kwargs: dict, segment_idx: int) -> None:
-        """Seed next-segment kwargs with the cached tail frames."""
+    def apply_video(self, request: dict, segment_idx: int) -> None:
+        """Seed the next-segment request with the cached tail frames."""
         if segment_idx <= 1 or not self.video_images:
             return
         from PIL import Image
@@ -110,21 +114,21 @@ class ContinuationState:
                 arr = np.clip(arr, 0, 255).astype(np.uint8)
                 noisy.append(Image.fromarray(arr))
             cond_images = noisy
-        request_kwargs["ltx2_video_conditions"] = [(
+        request["extensions"]["ltx2_video_conditions"] = [(
             cond_images,
             LTX2_VIDEO_CONDITIONING_FRAME_IDX,
             LTX2_VIDEO_CONDITIONING_STRENGTH,
         )]
-        request_kwargs["ltx2_images"] = None
-        request_kwargs["image_path"] = None
+        request["extensions"]["ltx2_images"] = None
+        request["inputs"]["image_path"] = None
 
     def apply_audio(
         self,
-        request_kwargs: dict,
+        request: dict,
         segment_idx: int,
         audio_lps: float,
     ) -> None:
-        """Seed next-segment kwargs with clean audio latents + denoise mask.
+        """Seed the next-segment request with clean audio latents + denoise mask.
 
         When audio conditioning is longer than video, extend audio
         generation and shift video RoPE forward so the audio prefix
@@ -141,9 +145,9 @@ class ContinuationState:
         audio_extra = max(0, AUDIO_CONDITIONING_NUM_FRAMES - LTX2_VIDEO_CONDITIONING_NUM_FRAMES)
         if audio_extra > 0:
             audio_num_frames = NUM_FRAMES + audio_extra
-            request_kwargs["audio_num_frames"] = (audio_num_frames)
+            request["extensions"]["audio_num_frames"] = (audio_num_frames)
             prefix_sec = float(audio_extra) / 24.0
-            request_kwargs["video_position_offset_sec"] = prefix_sec
+            request["extensions"]["video_position_offset_sec"] = prefix_sec
 
         new_duration = float(NUM_FRAMES + audio_extra) / 24.0
         total_T = max(
@@ -161,8 +165,8 @@ class ContinuationState:
         mask = torch.ones((B, 1, total_T, 1), dtype=torch.float32)
         mask[:, :, :audio_cond_T, :] = (1.0 - AUDIO_CONDITIONING_STRENGTH)
 
-        request_kwargs["ltx2_audio_clean_latent"] = clean
-        request_kwargs["ltx2_audio_denoise_mask"] = mask
+        request["extensions"]["ltx2_audio_clean_latent"] = clean
+        request["extensions"]["ltx2_audio_denoise_mask"] = mask
 
     def save_video(self, frames: list) -> None:
         """Snapshot trailing N frames as PIL images for next-segment conditioning."""
@@ -460,51 +464,59 @@ class LTX2GenerationBackend:
 
         prompt = self._inject_style_trigger(prompt)
 
-        request_kwargs = dict(
-            prompt=prompt,
-            negative_prompt="",
-            save_video=False,
-            height=FRAME_HEIGHT,
-            width=FRAME_WIDTH,
-            num_frames=NUM_FRAMES,
-            fps=24,
-            num_inference_steps=NUM_INFERENCE_STEPS,
-            guidance_scale=1.0,
-            seed=10,
-            ltx2_image_crf=0.0,
-            image_path=image_path if segment_idx == 1 else None,
-            return_continuation_state=False,
-        )
+        request = {
+            "prompt": prompt,
+            "negative_prompt": "",
+            "inputs": {
+                "image_path": image_path if segment_idx == 1 else None
+            },
+            "sampling": {
+                "height": FRAME_HEIGHT,
+                "width": FRAME_WIDTH,
+                "num_frames": NUM_FRAMES,
+                "fps": 24,
+                "num_inference_steps": NUM_INFERENCE_STEPS,
+                "guidance_scale": 1.0,
+                "seed": 10,
+            },
+            "output": {
+                "save_video": False
+            },
+            "extensions": {
+                "ltx2_image_crf": 0.0,
+                "return_continuation_state": False,
+            },
+        }
 
         if reset_conditioning:
             self.continuation.clear()
 
         audio_lps = (DEFAULT_LTX2_AUDIO_SAMPLE_RATE / DEFAULT_LTX2_AUDIO_HOP_LENGTH / DEFAULT_LTX2_AUDIO_DOWNSAMPLE)
 
-        # Phase 1: seed kwargs with prior-segment conditioning.
-        self.continuation.apply_video(request_kwargs, segment_idx)
-        self.continuation.apply_audio(request_kwargs, segment_idx, audio_lps)
+        # Phase 1: seed the request with prior-segment conditioning.
+        self.continuation.apply_video(request, segment_idx)
+        self.continuation.apply_audio(request, segment_idx, audio_lps)
 
         # Phase 2: generate.
         t0 = time.perf_counter()
-        result = self.generator.generate_video(**request_kwargs)
+        result = self.generator.generate(request)
         torch.cuda.synchronize()
         timings["generation_ms"] = (time.perf_counter() - t0) * 1000
 
-        if not isinstance(result, dict):
-            raise RuntimeError("Expected dictionary output from generate_video.")
-        frames = result.get("frames")
+        if isinstance(result, list):
+            raise RuntimeError("Expected a single GenerationResult from generate.")
+        frames = result.frames
         if not isinstance(frames, list) or len(frames) == 0:
             raise RuntimeError("Generation did not return frames.")
-        audio = result.get("audio")
-        audio_sample_rate = result.get("audio_sample_rate")
+        audio = result.audio
+        audio_sample_rate = result.audio_sample_rate
         if audio is not None and audio_sample_rate is None:
             # LTX2 audio decoding stage uses 24kHz output by default.
             audio_sample_rate = 24000
             print(f"[GPU {self.gpu_id}] audio_sample_rate missing from result; "
                   f"defaulting to {audio_sample_rate}Hz")
 
-        timings["generation_time_ms"] = result.get("generation_time", 0.0) * 1000
+        timings["generation_time_ms"] = (result.generation_time or 0.0) * 1000
 
         # Phase 3: snapshot continuation state for the next segment.
         t_save_start = time.perf_counter()
@@ -542,7 +554,7 @@ class LTX2GenerationBackend:
         self,
         audio: object,
         audio_sample_rate: int | None,
-        result: dict,
+        result: "GenerationResult",
         segment_idx: int,
     ) -> torch.Tensor | None:
         """Pick which tensor to cache for next-segment audio conditioning."""
@@ -557,7 +569,7 @@ class LTX2GenerationBackend:
                       f"for segment {segment_idx + 1}")
                 return re_encoded
             return None
-        audio_latents = result.get("ltx2_audio_latents")
+        audio_latents = result.extra.get("ltx2_audio_latents")
         if audio_latents is not None:
             print(f"[GPU {self.gpu_id}] Cached audio latents "
                   f"shape={tuple(audio_latents.shape)} "
