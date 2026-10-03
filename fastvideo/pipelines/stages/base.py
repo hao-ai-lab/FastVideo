@@ -191,8 +191,10 @@ class PipelineStage(ABC):
                 if torch.cuda.is_available():
                     gib = 1024**3
                     logger.info("[%s] Memory peak_allocated=%.2f GiB reserved=%.2f GiB resident_after=%.2f GiB",
-                                stage_name, torch.cuda.max_memory_allocated() / gib,
-                                torch.cuda.memory_reserved() / gib, torch.cuda.memory_allocated() / gib)
+                                stage_name,
+                                torch.cuda.max_memory_allocated() / gib,
+                                torch.cuda.memory_reserved() / gib,
+                                torch.cuda.memory_allocated() / gib)
                     torch.cuda.reset_peak_memory_stats()
                 batch.logging_info.add_stage_execution_time(stage_key, execution_time)
                 batch.logging_info.add_stage_metric(stage_key, "stage_class", stage_class_name)
