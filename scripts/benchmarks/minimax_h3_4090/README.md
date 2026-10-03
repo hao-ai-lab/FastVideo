@@ -260,16 +260,13 @@ values with FP8 while retaining the other tensors projects about 25.3 GiB
 before activations (the FP8 block-scale overhead is small). This is a storage
 estimate, not a measured FP8 encoder. First try fused NVFP4
 dequantization and avoid per-linear GPU scalar synchronization; then compare
-a native sm89 FP8 encoder at equal prompts. Conditioning is only about
-11.2 s of the current 111.3 s clip, so encoder work alone cannot dominate the
-end-to-end gain.
+a native sm89 FP8 encoder at equal prompts. The later streamed/fused conditioning stage is about 0.55 s, so a new
+encoder export must be measured against that implementation.
 
-Remaining speed experiments: INT8-QK/BF16-PV same-seed clips; VAE compilation
-and tile-batch tuning; more resident blocks after streaming the encoder;
-fused FP8 GEMM epilogues and norm/activation quantization. The 16 GiB cap
-still needs encoder streaming and a completed memory-capped run. The cached
-recipe's 42 GiB anonymous host peak does not establish a 32 GB system-RAM
-minimum.
+Remaining speed experiments include VAE compilation and tile-batch tuning,
+INT8 decoder epilogue fusion, direct strided fine-attention reads, and fused
+norm/activation quantization. See the completed smaller-VRAM results below.
+The cached recipe's host peak does not establish a 32 GB system-RAM minimum.
 
 
 ## Streamed encoder and smaller VRAM caps
@@ -328,3 +325,89 @@ The 8 GiB cap at `fcdba37fc` completed its warmup but OOMed on the timed
 harbor prompt in fine attention. Do not report it as supported. A 34-resident
 experiment completed denoising but OOMed during VAE INT8 epilogue allocation.
 Both failures motivate subsequent memory work rather than speed claims.
+
+
+## Consumer kernel memory work on the release core
+
+The consumer branch is rebased onto release core `a97d23f09` (fork PR #45).
+Historical measured commits remain reachable through tag
+`h3-consumer-fp8-measured-20261003`; rebase changes their branch commit IDs.
+
+`7a0d7d33b` lets the INT8-QK/BF16-PV fine kernel read BSHD-backed views
+without retaining three full BF16 layout copies. Q/K quantization writes
+contiguous INT8 arrays and the output stays BHSD; the K-mean reduction keeps
+the reference's contiguous reduction order. Four CUDA tests require exact
+output equality for partial tiles, empty selections, multiple batches and
+partner padding, together with a lower peak allocation.
+
+`3c0668f6c` adds the opt-in eager
+`FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT=1`. One Triton pass applies the INT32
+GEMM's row scale, output-channel scale and optional bias, then casts the
+result. FP32 operations retain separate rounding steps (FP fusion disabled).
+Strict tests cover zero rows, small input batches, FP32/FP16/BF16, bias,
+large INT32 accumulators and tiny scales. Compiled and grad paths retain
+the reference implementation. Combine it with shared QKV and transpose
+views using `FASTVIDEO_H3_VAE_INT8_SHARED_QKV=1` and
+`FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW=1`.
+
+After the core rebase, 120 focused tests passed (one unrelated GPU cudagraph
+check excluded) and pre-commit passed. `87b22a5d8` adapts capture and tests
+to packed-segment metadata while retaining the core's calibrated NVFP4
+activation-scale guard. `fb92af176` adds optional NVML total-device-memory
+samples every 100 ms, alongside host samples. Summaries distinguish sampled
+total GPU usage from PyTorch's allocated peak. Allocator caps omit driver
+and external CUDA memory, so the 8 GiB total-budget experiment uses a
+7.25 GiB allocator cap and must also satisfy the observed NVML budget.
+These are 4090 simulations; real lower-VRAM and 30-series performance still
+needs those devices.
+
+
+## Warmed release-core clip results
+
+At `fb92af176`, after one warmup and two timed requests:
+
+| Clip | Median e2e | Timed requests | Conditioning | Denoise | Video decode | Peak allocated | Sampled total GPU | Peak host anon |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 832×480, 124 frames / 5.167 s | **41.75 s** | 42.16 / 41.33 s | 0.55 s | 32.69 s | 6.63 s | 22.01 GiB | 23.983 GiB | 24.78 GiB |
+| 832×480, 243 frames / 10.125 s | **79.67 s** | 79.64 / 79.70 s | 0.55 s | 63.51 s | 13.23 s | 20.29 GiB | 23.985 GiB | 27.02 GiB |
+
+Warmups took 84.40 / 125.16 s. These wall times include audio, frame export
+and MP4 saving, and exclude initial generator construction. The 5 s recipe
+keeps 34 DiT blocks resident; the 10 s recipe keeps 30. Both use the same
+checkpoint revision and eight DMD forwards as the earlier rows. No profiling,
+QKV capture, alternate decoder or sparsity increase is enabled.
+
+```bash
+source /workspace/env.sh
+source /workspace/venv/bin/activate
+cd /workspace
+export PYTHONPATH="/workspace/fastvideo-core:${PYTHONPATH:-}"
+export FASTVIDEO_SOURCE_COMMIT=fb92af176
+export FASTVIDEO_H3_PARK_MODULES=vae,audio_vae
+export FASTVIDEO_H3_ENCODER_LAYERWISE=1 FASTVIDEO_H3_ENCODER_FUSED_DEQUANT=1
+export FASTVIDEO_H3_VSA_TILE_FIRST=1 FASTVIDEO_H3_VSA_SM89_KERNEL=int8
+export FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=34 FASTVIDEO_H3_FFN_CHUNK_TOKENS=16384
+export FASTVIDEO_H3_VAE_TILE_BATCH=28
+export FASTVIDEO_H3_VAE_INT8_SHARED_QKV=1 FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW=1
+export FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT=1 MAX_JOBS=4
+unset FASTVIDEO_CUDA_MEMORY_CAP_GIB
+python -P /workspace/fastvideo-core/scripts/benchmarks/minimax_h3_4090/bench_pod.py \
+  sm89-int8-fast2-480p-5s /workspace/vol/pruned_fp8_300 fp8 \
+  --offload-buffers --no-vae-compile --height 480 --width 832 --frames 124 --timed 2
+```
+
+For 10 s, set resident blocks to 30, name to `sm89-int8-fast2-480p-10s`,
+and frames to 243. Both decoded video and PCM audio hash-identically to the
+previous INT8 candidate for ceramics and harbor at 10 s. This validates these
+memory/decode changes on those prompts, while the INT8 attention candidate
+still differs from the original BF16 attention clips and needs full quality
+review. The sampled 5 s contact sheet is coherent. Raw clips, hashes and
+results live in `output/fasth3-4090-20261003/` beside the worktree.
+
+The earlier unprofiled 1344×768, 243-frame run at `fcdba37fc` completed at
+279.94 s median (289.06 / 270.82 s, 306.80 s warmup), with 12 resident blocks
+and shared VAE QKV/transpose views, before direct-layout attention and fused
+VAE epilogues. Its stage medians were 0.55 s conditioning, 227.21 s denoise,
+44.82 s video decode and 0.48 s audio. Peak allocation was 21.19 GiB and host
+anonymous memory 39.81 GiB. The updated 768p and 8 GiB total-budget runs are
+in progress; they must complete before claiming their speed or support.
