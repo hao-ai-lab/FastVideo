@@ -105,6 +105,7 @@ class Int8ConvRotLinear(nn.Module):
         self.convrot = convrot
         self.group_size = group_size
         self._transpose_view = os.environ.get("FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW", "0") == "1"
+        self._fused_dequant = os.environ.get("FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT", "0") == "1"
         self.register_buffer("weight", torch.empty(out_features, in_features, dtype=torch.int8))
         self.register_buffer("weight_scale", torch.empty(out_features, 1, dtype=torch.float32))
         if bias:
@@ -145,6 +146,10 @@ class Int8ConvRotLinear(nn.Module):
         if not self._transpose_view:
             weight = weight.contiguous()
         acc = torch._int_mm(x_q, weight)[:rows]
+        if self._fused_dequant and not torch.is_grad_enabled() and not torch.compiler.is_compiling():
+            from fastvideo.models.vaes.minimax_h3_int8_kernels import fused_int8_dequant_bias
+            return fused_int8_dequant_bias(acc, x_scale[:rows], self.weight_scale, self.bias, dtype).view(
+                *original_shape[:-1], self.out_features)
         out = self._dequant_int8_gemm(acc, x_scale[:rows], self.weight_scale)
         if self.bias is not None:
             out = out + self.bias.float()
