@@ -88,7 +88,8 @@ WAN_MODEL_DEFINITION_GROUPS = (
             pipeline_config="FastWan2_1_T2V_480P_Config",
             preset="fast_wan_t2v_480p",
             sampling="dmd",
-            hf_model_paths=("FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers"),
+            hf_model_paths=("FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers",
+                            "FastVideo/FastMetal-1.3B-QAD", "FastVideo/FastMetal-14B-QAD"),
             workload_types=("t2v", ),
             match_any=("wandmdpipeline", ),
         ),
@@ -108,6 +109,13 @@ WAN_MODEL_DEFINITION_GROUPS = (
             hf_model_paths=("FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
                             "FastVideo/FastWan2.2-TI2V-5B-Diffusers"),
             workload_types=("t2v", "i2v"),
+        ),
+        WanModelDefinition(
+            pipeline_config="FastWan2_2_TI2V_5B_Config",
+            preset="fast_wan_2_2_ti2v_5b",
+            sampling="dmd",
+            hf_model_paths=("FastVideo/FastMetal-5B-QAD", ),
+            workload_types=("t2v", ),
         ),
         WanModelDefinition(
             pipeline_config="LucyEditDevConfig",
