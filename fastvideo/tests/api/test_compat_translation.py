@@ -5,9 +5,11 @@ PR 6.
 """
 from __future__ import annotations
 
+import pytest
+
 from fastvideo.api.compat import (
+    from_pretrained_kwargs_to_config,
     generator_config_to_fastvideo_args,
-    legacy_from_pretrained_to_config,
     request_to_sampling_param,
 )
 from fastvideo.api.parser import parse_config
@@ -15,19 +17,24 @@ from fastvideo.api.schema import CompileConfig, GenerationRequest, GeneratorConf
 from fastvideo.api.sampling_param import SamplingParam
 
 
-class TestLegacyTorchCompileKwargsTranslation:
-    """Legacy ``torch_compile_kwargs={...}`` gets split across the four
-    first-class :class:`CompileConfig` fields and anything unknown falls
-    into ``extras``."""
+class TestFromPretrainedKwargsTranslation:
+    """The ``from_pretrained`` keyword ``torch_compile_kwargs={...}`` gets
+    split across the four first-class :class:`CompileConfig` fields and
+    anything unknown falls into ``extras``. Keywords outside the
+    ``from_pretrained`` set are rejected with their typed path."""
 
     def test_empty_kwargs_produces_empty_extras(self) -> None:
-        config = legacy_from_pretrained_to_config(
+        config = from_pretrained_kwargs_to_config(
             "/models/ltx2",
             {"torch_compile_kwargs": {}},
         )
         compile_config = config.engine.compile
         assert compile_config.extras == {}
         assert compile_config.backend is None
+
+    def test_other_keyword_names_its_typed_path(self) -> None:
+        with pytest.raises(TypeError, match="ltx2_vae_tiling -> pipeline.vae_tiling"):
+            from_pretrained_kwargs_to_config("/models/ltx2", {"ltx2_vae_tiling": True})
 
 
 class TestCompileConfigRoundTrip:
@@ -78,21 +85,9 @@ class TestCompileConfigRoundTrip:
         assert args.kwargs["torch_compile_kwargs"] == {}
 
 
-class TestLegacyLtx2VaeTilingTranslation:
-    """``ltx2_vae_tiling`` flat kwarg promotes to
-    ``generator.pipeline.vae_tiling``; reverse direction emits the
-    legacy name back to FastVideoArgs."""
-
-    def test_true_round_trips(self) -> None:
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2",
-            {"ltx2_vae_tiling": True},
-        )
-        assert config.pipeline.vae_tiling is True
-
-    def test_unset_stays_none(self) -> None:
-        config = legacy_from_pretrained_to_config("/models/ltx2", {})
-        assert config.pipeline.vae_tiling is None
+class TestLtx2VaeTilingFlattening:
+    """``generator.pipeline.vae_tiling`` reaches FastVideoArgs as the flat
+    keyword ``ltx2_vae_tiling``."""
 
     def test_reverse_emits_legacy_name(self, monkeypatch) -> None:
         _stub_fastvideo_args_from_kwargs(monkeypatch)
@@ -114,30 +109,11 @@ class TestLegacyLtx2VaeTilingTranslation:
         assert "ltx2_vae_tiling" not in args.kwargs
 
 
-class TestLegacyTextEncoderCompileTranslation:
-    """``enable_torch_compile_text_encoder`` flat kwarg promotes to
-    ``generator.engine.compile.text_encoder_enabled``; reverse direction
-    emits the legacy name back onto the FastVideoArgs kwargs dict so
+class TestTextEncoderCompileFlattening:
+    """``generator.engine.compile.text_encoder_enabled`` reaches the
+    FastVideoArgs kwargs dict as ``enable_torch_compile_text_encoder`` so
     realtime-runtime consumers can read it before FastVideoArgs filters
     unknown fields."""
-
-    def test_forward_routes_to_compile_text_encoder_enabled(self) -> None:
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2",
-            {"enable_torch_compile_text_encoder": True},
-        )
-        assert config.engine.compile.text_encoder_enabled is True
-
-    def test_false_round_trips(self) -> None:
-        config = legacy_from_pretrained_to_config(
-            "/models/ltx2",
-            {"enable_torch_compile_text_encoder": False},
-        )
-        assert config.engine.compile.text_encoder_enabled is False
-
-    def test_unset_stays_none(self) -> None:
-        config = legacy_from_pretrained_to_config("/models/ltx2", {})
-        assert config.engine.compile.text_encoder_enabled is None
 
     def test_reverse_emits_legacy_name(self, monkeypatch) -> None:
         _stub_fastvideo_args_from_kwargs(monkeypatch)

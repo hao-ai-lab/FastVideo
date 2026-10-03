@@ -30,8 +30,8 @@ import fastvideo.envs as envs
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     expand_request_prompt_batch,
+    from_pretrained_kwargs_to_config,
     generator_config_to_fastvideo_args,
-    legacy_from_pretrained_to_config,
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
@@ -70,33 +70,6 @@ logger = init_logger(__name__)
 _FFMPEG_ENCODER_OPTION_CACHE: dict[tuple[str, str, str], bool] = {}
 
 _BATCH_EXTRA_PASSTHROUGH_KEYS = tuple(REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS)
-
-_FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
-    "num_gpus",
-    "revision",
-    "trust_remote_code",
-    "distributed_executor_backend",
-    "tp_size",
-    "sp_size",
-    "hsdp_replicate_dim",
-    "hsdp_shard_dim",
-    "dist_timeout",
-    "use_fsdp_inference",
-    "disable_autocast",
-    "enable_stage_verification",
-    "dit_cpu_offload",
-    "dit_layerwise_offload",
-    "text_encoder_cpu_offload",
-    "image_encoder_cpu_offload",
-    "vae_cpu_offload",
-    "pin_cpu_memory",
-    "enable_torch_compile",
-    "torch_compile_kwargs",
-    "lora_path",
-    "lora_strength",
-    "output_type",
-    "nvfp4_fa4",
-})
 
 
 def _infer_latent_batch_size(batch: ForwardBatch) -> int:
@@ -185,20 +158,16 @@ class VideoGenerator:
     ) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
-        
+
         Args:
             model_path: Path or identifier for the pretrained model
-            pipeline_config: Pipeline config to use for inference
-            **kwargs: Additional arguments to customize model loading, set any FastVideoArgs or PipelineConfig attributes here.
-                
+            **kwargs: The common engine and offload keywords in
+                ``fastvideo.api.compat.FROM_PRETRAINED_KWARGS``, such as
+                ``num_gpus`` and ``dit_cpu_offload``. Pass any other setting
+                through ``VideoGenerator.from_config(...)``.
+
         Returns:
             The created video generator
-
-        Priority level: Default pipeline config < User's pipeline config < User's kwargs
-
-        Stable convenience kwargs remain supported here for common engine and
-        offload settings. Advanced model- or pipeline-specific options should
-        move to VideoGenerator.from_config(...).
         """
         log_queue = kwargs.pop("log_queue", None)
         if kwargs.pop("nvfp4_fa4", False):
@@ -223,17 +192,8 @@ class VideoGenerator:
         if model_path is None:
             raise TypeError("model_path or config is required")
 
-        legacy_only_kwargs = sorted(set(kwargs) - _FROM_PRETRAINED_CONVENIENCE_KWARGS)
-        if legacy_only_kwargs:
-            warnings.warn(
-                "VideoGenerator.from_pretrained(...) received legacy-only kwargs "
-                f"({', '.join(legacy_only_kwargs)}); prefer VideoGenerator.from_config(...) "
-                "for advanced configuration.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         return cls.from_config(
-            legacy_from_pretrained_to_config(model_path, kwargs),
+            from_pretrained_kwargs_to_config(model_path, kwargs),
             log_queue=log_queue,
         )
 

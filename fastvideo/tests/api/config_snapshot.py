@@ -8,7 +8,9 @@ and a ``SamplingParam`` where the case has a request) through one of the public 
 - ``yaml``: every repository config file with a ``generator`` section, through ``load_generator_config_from_file``,
   ``resolve_inference_config``, and ``generator_config_to_fastvideo_args``, with the resolution decisions; its ``request`` or ``default_request`` through the ``fastvideo generate`` and
   ``fastvideo serve`` loaders and ``request_to_sampling_param``.
-- ``kwargs``: ``VideoGenerator.from_pretrained`` keywords, through ``legacy_from_pretrained_to_config`` and the same
+- ``kwargs``: ``VideoGenerator.from_pretrained`` keywords, through ``from_pretrained_kwargs_to_config`` and the same
+  resolution.
+- ``config``: typed ``GeneratorConfig`` mappings, as ``VideoGenerator.from_config`` receives them, through the same
   resolution.
 - ``cli``: argparse flags, through ``FastVideoArgs.add_cli_args`` and ``FastVideoArgs.from_cli_args``.
 - ``environment``: environment variables that ``FastVideoArgs.__post_init__`` folds into fields.
@@ -263,9 +265,19 @@ def _yaml_request(path: Path) -> Any:
 def _kwargs_case(model_path: str, kwargs: dict[str, Any]) -> Callable[[], dict[str, Any]]:
 
     def build() -> dict[str, Any]:
-        from fastvideo.api.compat import legacy_from_pretrained_to_config
+        from fastvideo.api.compat import from_pretrained_kwargs_to_config
 
-        return snapshot_resolved_fastvideo_args(legacy_from_pretrained_to_config(model_path, kwargs))
+        return snapshot_resolved_fastvideo_args(from_pretrained_kwargs_to_config(model_path, kwargs))
+
+    return build
+
+
+def _config_case(raw: dict[str, Any]) -> Callable[[], dict[str, Any]]:
+
+    def build() -> dict[str, Any]:
+        from fastvideo.api.compat import normalize_generator_config
+
+        return snapshot_resolved_fastvideo_args(normalize_generator_config(raw))
 
     return build
 
@@ -332,26 +344,13 @@ def collect_cases() -> list[SnapshotCase]:
         SnapshotCase("yaml",
                      path.relative_to(REPO_ROOT).as_posix(), _yaml_case(path)) for path in _repository_config_files()
     ]
-    # One case per kind of branch in legacy_from_pretrained_to_config: flat names of typed fields, keys left in
-    # pipeline.experimental, compile sub-keys, LTX-2 refine keys, and a pipeline config JSON path.
-    pipeline_json = str(REPO_ROOT / "fastvideo/configs/fasthunyuan_t2v.json")
+    # One case per kind of branch in from_pretrained_kwargs_to_config: flat names of typed fields and compile sub-keys.
     kwargs_cases = {
         "typed_offload_and_parallelism": (WAN_T2V, {
             "num_gpus": 2,
             "sp_size": 2,
             "dit_cpu_offload": False,
             "vae_cpu_offload": False,
-        }),
-        "attention_precision_and_flow_shift": (WAN_T2V, {
-            "attention_backend": "TORCH_SDPA",
-            "flow_shift": 5.0,
-            "VSA_sparsity": 0.5,
-            "dit_precision": "fp32",
-        }),
-        "keys_without_typed_fields": (WAN_T2V, {
-            "master_port": 29600,
-            "refine_enabled": True,
-            "boundary_ratio": 0.5,
         }),
         "torch_compile_kwargs_typed_and_extra": (WAN_T2V, {
             "enable_torch_compile": True,
@@ -364,32 +363,95 @@ def collect_cases() -> list[SnapshotCase]:
                 },
             },
         }),
-        "ltx2_refine_lora_path": (LTX2, {
-            "ltx2_refine_lora_path": "/checkpoints/refine_lora.safetensors"
-        }),
-        "ltx2_refine_lora_disabled": (LTX2, {
-            "ltx2_refine_lora_path": ""
-        }),
-        "pipeline_config_json_path": ("FastVideo/FastHunyuan-diffusers", {
-            "pipeline_config": pipeline_json
-        }),
         "disable_autocast": (WAN_T2V, {
             "disable_autocast": True
-        }),
-        "boundary_ratio": (WAN22_T2V, {
-            "boundary_ratio": 0.8
-        }),
-        "vae_tiling_typed": (LTX2, {
-            "ltx2_vae_tiling": False
-        }),
-        "ltx2_vae_tile_sizes": (LTX2, {
-            "ltx2_vae_spatial_tile_size_in_pixels": 512,
-            "ltx2_vae_temporal_tile_size_in_frames": 64,
         }),
     }
     cases += [
         SnapshotCase("kwargs", name, _kwargs_case(model, kwargs)) for name, (model, kwargs) in kwargs_cases.items()
     ]
+    # Typed configs for the settings that only from_config accepts: typed fields, keys left in
+    # pipeline.experimental, LTX-2 refine and VAE tile fields, and a pipeline config JSON path.
+    pipeline_json = str(REPO_ROOT / "fastvideo/configs/fasthunyuan_t2v.json")
+    config_cases = {
+        "attention_precision_and_flow_shift": {
+            "model_path": WAN_T2V,
+            "engine": {
+                "attention": {
+                    "backend": "TORCH_SDPA",
+                    "vsa_sparsity": 0.5
+                },
+                "precision": {
+                    "dit": "fp32"
+                }
+            },
+            "pipeline": {
+                "flow_shift": 5.0
+            },
+        },
+        "keys_without_typed_fields": {
+            "model_path": WAN_T2V,
+            "pipeline": {
+                "experimental": {
+                    "master_port": 29600,
+                    "refine_enabled": True,
+                    "boundary_ratio": 0.5
+                }
+            },
+        },
+        "ltx2_refine_lora_path": {
+            "model_path": LTX2,
+            "pipeline": {
+                "ltx2": {
+                    "refine": {
+                        "lora_path": "/checkpoints/refine_lora.safetensors"
+                    }
+                }
+            },
+        },
+        "ltx2_refine_lora_disabled": {
+            "model_path": LTX2,
+            "pipeline": {
+                "ltx2": {
+                    "refine": {
+                        "lora_path": ""
+                    }
+                }
+            },
+        },
+        "pipeline_config_json_path": {
+            "model_path": "FastVideo/FastHunyuan-diffusers",
+            "pipeline": {
+                "components": {
+                    "pipeline_config_path": pipeline_json
+                }
+            },
+        },
+        "boundary_ratio": {
+            "model_path": WAN22_T2V,
+            "pipeline": {
+                "experimental": {
+                    "boundary_ratio": 0.8
+                }
+            },
+        },
+        "vae_tiling_typed": {
+            "model_path": LTX2,
+            "pipeline": {
+                "vae_tiling": False
+            },
+        },
+        "ltx2_vae_tile_sizes": {
+            "model_path": LTX2,
+            "pipeline": {
+                "ltx2": {
+                    "vae_spatial_tile_size_in_pixels": 512,
+                    "vae_temporal_tile_size_in_frames": 64
+                }
+            },
+        },
+    }
+    cases += [SnapshotCase("config", name, _config_case(raw)) for name, raw in config_cases.items()]
     # argparse defaults differ from the dataclass defaults, so model_path_only is the CLI baseline.
     cli_cases = {
         "model_path_only": ["--model-path", WAN_T2V],

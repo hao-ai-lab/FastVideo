@@ -30,28 +30,26 @@ bring-up: [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pai
 
 ## Customizing Generation
 
-- `PipelineConfig`: Initialization time parameters
-- `SamplingParam`: Generation time parameters
-
-You can customize generation behavior using `PipelineConfig` and
-`SamplingParam`:
+`VideoGenerator.from_pretrained` accepts only common engine and offload
+keywords, such as `num_gpus` and `dit_cpu_offload`. The full list is
+`fastvideo.api.compat.FROM_PRETRAINED_KWARGS`. Pass every other startup
+setting to `VideoGenerator.from_config` at its config path, and pass
+generation settings to `VideoGenerator.generate` as a request:
 
 ```python
-from fastvideo import VideoGenerator, PipelineConfig
+from fastvideo import VideoGenerator
 
 def main():
     model_name = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-    config = PipelineConfig.from_pretrained(model_name)
-    config.vae_precision = "fp16"
 
     # Create the generator
     generator = VideoGenerator.from_config({
         "model_path": model_name,
         "engine": {
             "num_gpus": 1,
-            "offload": {"dit_layerwise": True},  # FastVideoArgs option
+            "offload": {"dit_layerwise": True},
+            "precision": {"vae": "fp16"},
         },
-        "pipeline": {"experimental": {"pipeline_config": config}},
     })
 
     # Generate video with custom parameters

@@ -5,7 +5,7 @@ from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Any, get_args, get_origin, get_type_hints
+from typing import Any, get_args, get_type_hints
 
 from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.api.overrides import apply_overrides, normalize_overrides
@@ -42,6 +42,34 @@ REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS = (
     "vsa_dense_first_n_steps",
     "vsa_dense_layers",
 )
+# The VideoGenerator.from_pretrained keywords besides model_path, config, and log_queue. Every other setting goes
+# through VideoGenerator.from_config at its typed path.
+FROM_PRETRAINED_KWARGS = frozenset({
+    "num_gpus",
+    "revision",
+    "trust_remote_code",
+    "distributed_executor_backend",
+    "tp_size",
+    "sp_size",
+    "hsdp_replicate_dim",
+    "hsdp_shard_dim",
+    "dist_timeout",
+    "use_fsdp_inference",
+    "disable_autocast",
+    "enable_stage_verification",
+    "dit_cpu_offload",
+    "dit_layerwise_offload",
+    "text_encoder_cpu_offload",
+    "image_encoder_cpu_offload",
+    "vae_cpu_offload",
+    "pin_cpu_memory",
+    "enable_torch_compile",
+    "torch_compile_kwargs",
+    "lora_path",
+    "lora_strength",
+    "output_type",
+    "nvfp4_fa4",
+})
 # torch.compile kwargs that map to first-class CompileConfig fields.
 _COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
 # LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
@@ -75,18 +103,23 @@ def load_generator_config_from_file(
     return parse_config(GeneratorConfig, raw)
 
 
-def legacy_from_pretrained_to_config(
+def from_pretrained_kwargs_to_config(
     model_path: str,
     kwargs: Mapping[str, Any],
 ) -> GeneratorConfig:
     """Build a ``GeneratorConfig`` from ``VideoGenerator.from_pretrained`` keyword arguments.
 
-    A keyword that a schema field declares as its flat name sets that field. The keywords in the branches below
-    need a conversion instead, and any other keyword is kept in ``pipeline.experimental``.
+    A keyword that a schema field declares as its flat name sets that field. ``torch_compile_kwargs`` is split across
+    ``engine.compile``, and the keywords without a typed field are kept in ``pipeline.experimental``. A keyword outside
+    ``FROM_PRETRAINED_KWARGS`` raises ``TypeError`` that names the typed path to use with ``from_config``.
     """
-    raw: dict[str, Any] = {"model_path": model_path}
-    experimental: dict[str, Any] = {}
+    unsupported = sorted(set(kwargs) - FROM_PRETRAINED_KWARGS)
+    if unsupported:
+        paths = ", ".join(f"{key} -> {_typed_path_of_keyword(key, kwargs[key])}" for key in unsupported)
+        raise TypeError("VideoGenerator.from_pretrained(...) does not accept these keywords; pass them to "
+                        f"VideoGenerator.from_config(...) at these config paths: {paths}")
 
+    raw: dict[str, Any] = {"model_path": model_path}
     for key, value in kwargs.items():
         if key == "torch_compile_kwargs":
             remaining: dict[str, Any] = (dict(deepcopy(value)) if isinstance(value, Mapping) else {})
@@ -95,27 +128,23 @@ def legacy_from_pretrained_to_config(
                     _set_dotted_path(raw, ["engine", "compile", first_class], remaining.pop(first_class))
             if remaining:
                 _set_dotted_path(raw, ["engine", "compile", "extras"], remaining)
-        elif key == "pipeline_config" and not isinstance(value, str):
-            experimental[key] = deepcopy(value)
-        elif key.startswith(tuple(_COMPONENT_OVERRIDE_PREFIXES)):
-            component, field_name = key.split(".", 1)
-            _set_dotted_path(raw, ["pipeline", _COMPONENT_OVERRIDE_PREFIXES[component + "."], field_name], value)
-        elif key in _LTX2_REFINE_PRESET_KEYWORDS:
-            _set_dotted_path(raw, ["pipeline", "preset_overrides", "refine", key[len("ltx2_refine_"):]], value)
-        elif key in _EMPTY_MEANS_UNSET_KEYWORDS:
-            # An empty string means "no file"; keep typed None.
-            _set_dotted_path(raw, _EMPTY_MEANS_UNSET_KEYWORDS[key].split("."), value or None)
         elif key in _FLAT_NAME_FIELDS:
-            dotted_path, annotation = _FLAT_NAME_FIELDS[key]
-            if get_origin(annotation) is dict:
-                value = dict(deepcopy(value)) if isinstance(value, Mapping) else {}
-            _set_dotted_path(raw, dotted_path.split("."), value)
+            _set_dotted_path(raw, _FLAT_NAME_FIELDS[key][0].split("."), value)
         else:
-            experimental[key] = deepcopy(value)
-
-    if experimental:
-        _set_dotted_path(raw, ["pipeline", "experimental"], experimental)
+            _set_dotted_path(raw, ["pipeline", "experimental", key], deepcopy(value))
     return parse_config(GeneratorConfig, raw)
+
+
+def _typed_path_of_keyword(key: str, value: Any) -> str:
+    """The ``GeneratorConfig`` path that holds the setting of a flat ``FastVideoArgs`` keyword."""
+    if key in _FLAT_NAME_FIELDS and not (key == "pipeline_config" and not isinstance(value, str)):
+        return _FLAT_NAME_FIELDS[key][0]
+    if key in _LTX2_REFINE_PRESET_KEYWORDS:
+        return f"pipeline.preset_overrides.refine.{key[len('ltx2_refine_'):]}"
+    for prefix, section in _COMPONENT_OVERRIDE_PREFIXES.items():
+        if key.startswith(prefix):
+            return f"pipeline.{section}.{key[len(prefix):]}"
+    return f"pipeline.experimental.{key}"
 
 
 def generator_config_to_fastvideo_args(
@@ -282,11 +311,7 @@ _COMPONENT_OVERRIDE_PREFIXES = {
     "dit_config.": "dit",
     "vae_config.": "vae",
 }
-# from_pretrained keywords whose empty-string value means "unset", and the field each one sets.
-_EMPTY_MEANS_UNSET_KEYWORDS = {
-    "ltx2_refine_upsampler_path": "pipeline.components.upsampler_weights",
-}
-# from_pretrained keywords that set pipeline.preset_overrides.refine.<key without the ltx2_refine_ prefix>.
+# Flat keywords whose setting is pipeline.preset_overrides.refine.<key without the ltx2_refine_ prefix>.
 _LTX2_REFINE_PRESET_KEYWORDS = frozenset({
     "ltx2_refine_enabled",
     "ltx2_refine_add_noise",
@@ -506,11 +531,12 @@ def _validate_batched_input_length(
 
 
 __all__ = [
+    "FROM_PRETRAINED_KWARGS",
     "REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS",
     "explicit_request_raw",
     "explicit_request_updates",
+    "from_pretrained_kwargs_to_config",
     "generator_config_to_fastvideo_args",
-    "legacy_from_pretrained_to_config",
     "load_generator_config_from_file",
     "normalize_generation_request",
     "normalize_generator_config",

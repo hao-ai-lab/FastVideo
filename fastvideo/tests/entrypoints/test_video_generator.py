@@ -671,22 +671,18 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
     assert generator.config.engine.num_gpus == 4
 
 
-def test_from_pretrained_legacy_only_kwargs_warn(monkeypatch):
+def test_from_pretrained_rejects_other_kwargs_with_their_config_path(monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
     _patch_fastvideo_args_from_kwargs(monkeypatch)
 
-    with pytest.warns(DeprecationWarning, match="legacy-only kwargs"):
-        generator = VideoGenerator.from_pretrained(
+    with pytest.raises(TypeError, match="workload_type -> pipeline.workload_type"):
+        VideoGenerator.from_pretrained(
             "test-model",
             num_gpus=4,
             workload_type="t2v",
         )
 
-    assert captured["fastvideo_args"].model_path == "test-model"
-    assert captured["fastvideo_args"].num_gpus == 4
-    assert captured["fastvideo_args"].workload_type.value == "t2v"
-    assert generator.config is not None
-    assert generator.config.pipeline.workload_type == "t2v"
+    assert "fastvideo_args" not in captured
 
 
 def test_generate_uses_typed_request_path(monkeypatch):
