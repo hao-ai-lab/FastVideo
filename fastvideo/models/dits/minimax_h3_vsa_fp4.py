@@ -123,15 +123,17 @@ def _layout_for(meta: MiniMaxH3VSAMetadata, rotary_emb: tuple[torch.Tensor, torc
 
 
 def _shared_input_projections(linears: tuple[Any, ...], x: torch.Tensor) -> list[torch.Tensor]:
-    """Run projections of one input, quantizing it once when all are NVFP4.
+    """Run projections of one input, quantizing it once when all are NVFP4 with the unit activation scale.
 
-    NVFP4 activations use a unit global scale for every layer, so one
-    quantized copy is exactly what each layer would have produced.
+    Only then is one quantized copy exactly what each layer would have produced; layers with a calibrated
+    or dynamic activation scale quantize their own input.
     """
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
 
     methods = [linear.quant_method for linear in linears]
-    if not all(type(m) is NVFP4QuantizeMethod and m.wants_prequantized_input() for m in methods):
+    if not all(
+            type(m) is NVFP4QuantizeMethod and m.wants_prequantized_input() and m.uses_unit_activation_scale(linear)
+            for m, linear in zip(methods, linears, strict=True)):
         return [linear(x)[0] for linear in linears]
     pre = methods[0].quantize_input(x)
     return [m.apply(linear, x, linear.bias, pre_quantized=pre) for m, linear in zip(methods, linears, strict=True)]
@@ -168,7 +170,8 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
         k_pooled = _pool_tiles(key[:, :logical], vbs, layout.tile)
         scores = torch.matmul(q_pooled, k_pooled.transpose(-2, -1)) / (dim**0.5)
         sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
-        mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt)
+        mask = _build_block_mask(scores, meta.num_prefix_tiles, sparsity, meta.exempt, meta.video_tile_spans,
+                                 meta.span_sparsities)
         q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
     with STAGES.span("fp4_attention"):
         out = api.sageattn_blackwell_sparse_bshd(query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad)
@@ -334,7 +337,8 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
         scores = torch.matmul(_pool_tiles(q_t[:, :logical], vbs, layout.tile),
                               _pool_tiles(k_t[:, :logical], vbs, layout.tile).transpose(-2, -1)) / (dim**0.5)
         sparsity = 0.0 if attn._layer_idx in meta.dense_layers else meta.VSA_sparsity
-        mask = _build_block_mask(scores, meta.num_prefix_tiles, meta.num_video_tiles, sparsity, meta.exempt)
+        mask = _build_block_mask(scores, meta.num_prefix_tiles, sparsity, meta.exempt, meta.video_tile_spans,
+                                 meta.span_sparsities)
         q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
     with STAGES.span("fp4_attention"):
         out_bhsd = api.sageattn_blackwell_sparse_bshd(q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad)
