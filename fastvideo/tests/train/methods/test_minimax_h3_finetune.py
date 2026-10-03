@@ -247,8 +247,7 @@ def test_h3_experiment_config_uses_modular_validation_callback() -> None:
     assert validation["num_videos_per_prompt"] == 1
     assert validation["use_validation_media_conditioning"] is False
     assert validation["offload_training_state"] is True
-    assert validation["text_encoder_cpu_offload"] is True
-    assert validation["vae_cpu_offload"] is True
+    assert validation["engine"]["offload"] == {"text_encoder": True, "vae": True}
     assert tracker["trackers"] == ["wandb"]
     assert tracker["project_name"] == "fastvideo_minimax_h3"
 

@@ -90,7 +90,7 @@ conversion and uses it directly.)
 
 `--role student` exports the trained transformer weights (the only role
 that matters here: student/teacher/critic in stage 2 all load from the same
-checkpoint, and `_loading_teacher_critic_model` handles the full-precision
+checkpoint, and `loading_teacher_critic_model` handles the full-precision
 masking for teacher/critic at load time, not at export time). `--verify`
 strictly reloads the exported transformer immediately, so a key-mapping bug
 fails here instead of deep inside the stage-2 launch.
@@ -98,7 +98,7 @@ fails here instead of deep inside the stage-2 launch.
 Only the student is quantized (Attn-QAT); the teacher and critic stay full
 precision / dense attention. This is enforced in the loader
 (`fastvideo/models/loader/component_loader.py`, via the
-`_loading_teacher_critic_model` flag), which masks `quant_config` and clears
+`loading_teacher_critic_model` flag), which masks `quant_config` and clears
 `FASTVIDEO_ATTENTION_BACKEND` for teacher/critic -- the same global env var
 reaches only the student, with no per-model flags or Kandinsky5-specific
 handling. Validation runs the distilled student through
@@ -136,26 +136,31 @@ still says the base T2V pipeline and the registry
 (`fastvideo/registry.py`) has no way to auto-detect that a given directory
 is actually a DMD (four-step re-noise sampler) export -- it will resolve to
 `Kandinsky5T2VPipeline` and run the full-length sampler on DMD-distilled
-weights. Pass `override_pipeline_cls_name` and a `Kandinsky5DMDConfig`
-explicitly to select the right pipeline/sampler and get
-`dmd_denoising_steps` set (`Kandinsky5T2VConfig`'s default of `None` makes
+weights. Set `pipeline.components.override_pipeline_cls_name` and pass a
+`Kandinsky5DMDConfig` as `pipeline.experimental.pipeline_config` to select
+the right pipeline/sampler and get `pipeline.dmd_denoising_steps` set
+(`Kandinsky5T2VConfig`'s default of `None` makes
 `Kandinsky5DmdDenoisingStage` raise immediately):
 
 ```python
 from fastvideo import VideoGenerator
 from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5DMDConfig
-from fastvideo.layers.quantization import get_quantization_config
 
-gen = VideoGenerator.from_pretrained(
-    "path/to/kandinsky5_dmd_checkpoint", num_gpus=1,
-    override_pipeline_cls_name="Kandinsky5DMDPipeline",
-    pipeline_config=Kandinsky5DMDConfig(),
-    transformer_quant=get_quantization_config("nvfp4_qat")(),
-    use_fsdp_inference=False,
-)
+gen = VideoGenerator.from_config({
+    "model_path": "path/to/kandinsky5_dmd_checkpoint",
+    "engine": {
+        "num_gpus": 1,
+        "use_fsdp_inference": False,
+        "quantization": {"transformer_quant": "nvfp4_qat"},
+    },
+    "pipeline": {
+        "components": {"override_pipeline_cls_name": "Kandinsky5DMDPipeline"},
+        "experimental": {"pipeline_config": Kandinsky5DMDConfig()},
+    },
+})
 # Kandinsky5DmdDenoisingStage ignores request.sampling.num_inference_steps
 # and guidance_scale -- it's a fixed 4-step, no-CFG sampler driven entirely
-# by pipeline_config.dmd_denoising_steps (set above). Adjust
+# by pipeline.dmd_denoising_steps, which Kandinsky5DMDConfig sets. Adjust
 # Kandinsky5DMDConfig(dmd_denoising_steps=[...]) instead if the checkpoint
 # was distilled/validated with a different schedule than the default
 # [1000, 750, 500, 250].
@@ -176,8 +181,9 @@ to a supported dense backend while the FP4 linear layers still run.
   and that gradients flow through a forward+backward pass.
 - `fastvideo/tests/api/test_kandinsky5_dmd_pipeline_resolution.py` --
   confirms an unmodified export resolves to `Kandinsky5T2VPipeline` (the bug)
-  and that `override_pipeline_cls_name="Kandinsky5DMDPipeline"` fixes it (the
-  documented workaround above), plus `Kandinsky5DMDConfig`'s
+  and that `pipeline.components.override_pipeline_cls_name:
+  Kandinsky5DMDPipeline` fixes it (the documented workaround above), plus
+  `Kandinsky5DMDConfig`'s
   `dmd_denoising_steps` default.
 - `fastvideo/tests/nightly/test_e2e_kandinsky5_dmd_t2v_overfit.py` -- a few
   steps of both training stages on a single synthetic sample, exercising the

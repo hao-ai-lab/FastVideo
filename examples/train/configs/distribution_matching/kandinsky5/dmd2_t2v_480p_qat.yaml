@@ -11,7 +11,7 @@
 #
 # - Teacher: frozen, full-precision Kandinsky5 (loaded from the stage-1 QAT
 #   checkpoint's base weights, or the original pretrained checkpoint --
-#   the _loading_teacher_critic_model gate in component_loader.py masks
+#   the loading_teacher_critic_model gate in component_loader.py masks
 #   quant_config and FASTVIDEO_ATTENTION_BACKEND for teacher/critic
 #   regardless, so they always run full precision / dense attention).
 # - Student: trainable, initialized from the stage-1 QAT finetune checkpoint.

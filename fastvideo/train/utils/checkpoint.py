@@ -189,7 +189,7 @@ class CheckpointConfig:
 class CheckpointManager:
     """Role-based checkpoint manager for training runtime.
 
-    - Checkpoint policy lives in YAML (via TrainingArgs fields).
+    - Checkpoint policy lives in YAML (the ``training.checkpoint`` section).
     - Resume path is typically provided via CLI (``--resume-from-checkpoint``).
     """
 

@@ -8,12 +8,22 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
+from fastvideo.api.inference_resolution import (
+    generator_resolution_steps,
+    resolve_config,
+    resolve_inference_config,
+)
+from fastvideo.api.resolution import ResolutionStep, ResolvedGeneratorConfig
+from fastvideo.api.schema import ExecutionMode, GeneratorConfig
+from fastvideo.api.training_schema import (
+    resolve_training_offload_conflicts,
+    validate_training_parallel_sizes,
+)
 from fastvideo.attention.selector import (
     _component_attention_backend_scope,
     coerce_attn_backend,
 )
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.fastvideo_args import ExecutionMode, TrainingArgs
 from fastvideo.models.loader.component_loader import (
     PipelineComponentLoader, )
 from fastvideo.utils import (
@@ -27,55 +37,137 @@ if TYPE_CHECKING:
         TrainingConfig, )
 
 # ------------------------------------------------------------------
-# TrainingArgs builders (only place that creates FastVideoArgs)
+# Resolved configs (the only place that builds them from a TrainingConfig)
 # ------------------------------------------------------------------
 
 
-def _make_training_args(
+def _generator_config_mapping(
     tc: TrainingConfig,
     *,
     model_path: str,
-) -> TrainingArgs:
-    """Build a TrainingArgs for PipelineComponentLoader."""
-    pipeline_config = tc.pipeline_config or PipelineConfig()
-    # Propagate dit_precision from TrainingConfig to PipelineConfig
-    # so that TransformerLoader.load() picks up the correct
-    # default_dtype (e.g. fp32 master weights for training).
-    if tc.dit_precision and tc.dit_precision != pipeline_config.dit_precision:
-        pipeline_config.dit_precision = tc.dit_precision
-    return TrainingArgs(
-        model_path=model_path,
-        mode=ExecutionMode.DISTILLATION,
-        inference_mode=False,
-        pipeline_config=pipeline_config,
-        num_gpus=tc.distributed.num_gpus,
-        tp_size=tc.distributed.tp_size,
-        sp_size=tc.distributed.sp_size,
-        hsdp_replicate_dim=tc.distributed.hsdp_replicate_dim,
-        hsdp_shard_dim=tc.distributed.hsdp_shard_dim,
-        pin_cpu_memory=tc.distributed.pin_cpu_memory,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-        image_encoder_cpu_offload=False,
-        use_fsdp_inference=False,
-        enable_torch_compile=False,
+    mode: ExecutionMode,
+    pipeline_config: PipelineConfig,
+) -> dict[str, Any]:
+    """``GeneratorConfig`` mapping with the training parallel layout and every offload and compile switch off.
+
+    ``pipeline_config`` is the model definition that resolution copies and
+    materializes. ``tc.dit_precision`` sets the DiT precision, so
+    ``TransformerLoader`` builds the master weights in it (fp32 for training).
+    """
+    return {
+        "model_path": model_path,
+        "mode": mode,
+        "engine": {
+            "num_gpus": tc.distributed.num_gpus,
+            "parallelism": {
+                "tp_size": tc.distributed.tp_size,
+                "sp_size": tc.distributed.sp_size,
+                "hsdp_replicate_dim": tc.distributed.hsdp_replicate_dim,
+                "hsdp_shard_dim": tc.distributed.hsdp_shard_dim,
+            },
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "text_encoder": False,
+                "image_encoder": False,
+                "vae": False,
+                "pin_cpu_memory": tc.distributed.pin_cpu_memory,
+            },
+            "use_fsdp_inference": False,
+            "compile": {
+                "enabled": False
+            },
+            "precision": {
+                "dit": tc.dit_precision
+            },
+        },
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": pipeline_config
+            }
+        },
+    }
+
+
+def _training_resolution_steps(config: GeneratorConfig, defaults: Any) -> tuple[ResolutionStep, ...]:
+    """Generator resolution steps plus the training offload-conflict and parallel-size checks."""
+    return generator_resolution_steps(
+        config,
+        defaults,
+        before_placeholders=(resolve_training_offload_conflicts, validate_training_parallel_sizes),
     )
 
 
-def make_inference_args(
+def _build_training_resolved_config(
     tc: TrainingConfig,
     *,
     model_path: str,
-) -> TrainingArgs:
-    """Build a TrainingArgs for inference (validation / pipelines)."""
-    args = _make_training_args(tc, model_path=model_path)
-    args.inference_mode = True
-    args.mode = ExecutionMode.INFERENCE
-    args.dit_cpu_offload = True
-    args.VSA_sparsity = tc.vsa_sparsity
-    return args
+    override_transformer_cls_name: str | None = None,
+    transformer_weights: str | None = None,
+) -> ResolvedGeneratorConfig:
+    """Build the distillation-mode resolved config that ``PipelineComponentLoader`` reads.
+
+    ``override_transformer_cls_name`` and ``transformer_weights`` set
+    ``pipeline.components.override_transformer_cls_name`` and
+    ``pipeline.components.transformer_weights`` when they are given.
+    """
+    raw = _generator_config_mapping(
+        tc,
+        model_path=model_path,
+        mode=ExecutionMode.DISTILLATION,
+        pipeline_config=tc.pipeline_config if tc.pipeline_config is not None else PipelineConfig(),
+    )
+    components: dict[str, str] = {}
+    if override_transformer_cls_name is not None:
+        components["override_transformer_cls_name"] = str(override_transformer_cls_name)
+    if transformer_weights:
+        components["transformer_weights"] = str(transformer_weights)
+    if components:
+        raw["pipeline"]["components"] = components
+    return resolve_config(raw, GeneratorConfig, _training_resolution_steps)
+
+
+def build_inference_resolved_config(
+    tc: TrainingConfig,
+    *,
+    model_path: str,
+    pipeline_config: PipelineConfig | None = None,
+) -> ResolvedGeneratorConfig:
+    """Build the inference-mode resolved config for validation forwards and standalone encoder loads.
+
+    It has the training parallel layout, the DiT offloaded to the CPU, every
+    other offload off, and ``tc.vsa_sparsity`` as the VSA sparsity.
+    ``pipeline_config`` replaces ``tc.pipeline_config`` as the model
+    definition.
+    """
+    if pipeline_config is None:
+        pipeline_config = tc.pipeline_config if tc.pipeline_config is not None else PipelineConfig()
+    raw = _generator_config_mapping(
+        tc,
+        model_path=model_path,
+        mode=ExecutionMode.INFERENCE,
+        pipeline_config=pipeline_config,
+    )
+    raw["engine"]["offload"]["dit"] = True
+    raw["engine"]["attention"] = {"vsa_sparsity": tc.vsa_sparsity}
+    return resolve_inference_config(raw)
+
+
+def keep_checkpoint_component_config(
+    tc: TrainingConfig,
+    resolved_config: ResolvedGeneratorConfig,
+    component_config_name: str,
+) -> None:
+    """Point ``tc.pipeline_config.<component_config_name>`` at the component config that a loader filled.
+
+    A resolved config holds a copy of ``tc.pipeline_config``, and the VAE and
+    encoder loaders fill that copy's arch configs from the checkpoint's
+    ``config.json``. Training code reads component shapes, such as the VAE
+    latent channels and compression ratios, from ``tc.pipeline_config``.
+    """
+    if tc.pipeline_config is not None:
+        setattr(tc.pipeline_config, component_config_name,
+                getattr(resolved_config.pipeline_config, component_config_name))
 
 
 # ------------------------------------------------------------------
@@ -95,15 +187,20 @@ def load_module_from_path(
 ) -> torch.nn.Module:
     """Load one pipeline component with its role-scoped attention policy.
 
-    Accepts a ``TrainingConfig`` and internally builds the
-    ``TrainingArgs`` needed by ``PipelineComponentLoader``.
+    Accepts a ``TrainingConfig`` and internally builds the distillation-mode
+    resolved config that ``PipelineComponentLoader`` reads.
 
     Diffusers component entries retain provider and architecture as their
     first two fields and can append modular loading metadata. Attention layers
     bind their backend during construction, so the requested backend remains
     scoped to this load call.
     """
-    resolved_config: Any = _make_training_args(training_config, model_path=model_path)
+    resolved_config = _build_training_resolved_config(
+        training_config,
+        model_path=model_path,
+        override_transformer_cls_name=override_transformer_cls_name,
+        transformer_weights=transformer_override_safetensor,
+    )
 
     local_model_path = maybe_download_model(model_path)
     config = verify_model_config_and_directory(local_model_path)
@@ -122,14 +219,6 @@ def load_module_from_path(
     transformers_or_diffusers, _architecture = module_info[:2]
     component_path = os.path.join(local_model_path, module_type)
 
-    # fastvideo_args is freshly built above and never escapes this function,
-    # so overrides are plain assignments — nothing to save or restore.
-    if override_transformer_cls_name is not None:
-        resolved_config.override_transformer_cls_name = str(override_transformer_cls_name)
-
-    if transformer_override_safetensor:
-        resolved_config.init_weights_from_safetensors = str(transformer_override_safetensor)
-
     if attention_backend is not None and module_type != "transformer":
         raise ValueError("attention_backend can only be set when loading "
                          f"a transformer, got module_type={module_type!r}")
@@ -140,8 +229,6 @@ def load_module_from_path(
     attention_context = (nullcontext() if resolved_attention_backend is None else _component_attention_backend_scope(
         resolved_attention_backend, component=module_type))
 
-    if disable_custom_init_weights:
-        resolved_config._loading_teacher_critic_model = True
     # Attention implementations are bound while transformer layers are
     # constructed. Scope the override to this one role so student,
     # teacher, and critic can use independent backends in one process.
@@ -151,7 +238,10 @@ def load_module_from_path(
             component_model_path=component_path,
             transformers_or_diffusers=(transformers_or_diffusers),
             resolved_config=resolved_config,
+            loading_teacher_critic_model=disable_custom_init_weights,
         )
+    if module_type == "vae":
+        keep_checkpoint_component_config(training_config, resolved_config, "vae_config")
 
     if not isinstance(module, torch.nn.Module):
         raise TypeError(f"Loaded {module_type!r} is not a "

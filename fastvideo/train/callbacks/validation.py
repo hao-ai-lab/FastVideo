@@ -13,6 +13,7 @@ import gc
 import json
 import os
 import time
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
@@ -23,7 +24,11 @@ import torchvision
 from einops import rearrange
 from torch.utils.data import DataLoader
 
+from fastvideo.api.inference_resolution import resolve_inference_config
+from fastvideo.api.overrides import apply_overrides
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.dataset.validation_dataset import (
     ValidationDataset, )
 from fastvideo.distributed import (
@@ -35,7 +40,7 @@ from fastvideo.pipelines import ForwardBatch
 from fastvideo.train.callbacks.callback import Callback
 from fastvideo.train.utils.instantiate import resolve_target
 from fastvideo.train.utils.moduleloader import (
-    make_inference_args, )
+    build_inference_resolved_config, )
 from fastvideo.train.utils.validation_media import write_validation_mp4
 from fastvideo.training.trackers import DummyTracker
 from fastvideo.utils import pixels_to_uint8, shallow_asdict
@@ -117,6 +122,18 @@ SYNTHETIC_OPTICAL_FLOW_LOG_KEYS = (
 )
 
 
+def _dotted_leaves(mapping: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Return ``{dotted.path: value}`` for every value of a nested mapping that is not a non-empty mapping."""
+    leaves: dict[str, Any] = {}
+    for key, value in mapping.items():
+        path = f"{prefix}{key}"
+        if isinstance(value, Mapping) and value:
+            leaves.update(_dotted_leaves(value, f"{path}."))
+        else:
+            leaves[path] = value
+    return leaves
+
+
 class ValidationCallback(Callback):
     """Generic validation callback driven entirely by YAML
     config.
@@ -145,13 +162,15 @@ class ValidationCallback(Callback):
         offload_training_state: bool = False,
         unload_pipeline_after_validation: bool = False,
         attn_qat_infer: bool = False,
-        **pipeline_kwargs: Any,
+        **generator_overrides: Any,
     ) -> None:
         """Configure validation cadence, generation parameters, and pipeline loading.
 
         ``run_at_start`` controls the pre-training baseline event.
         ``use_validation_media_conditioning`` lets text-to-video recipes use
-        captions from a dataset that also contains source-media paths.
+        captions from a dataset that also contains source-media paths. The
+        remaining keys are nested ``GeneratorConfig`` fields, such as
+        ``engine.offload.vae``, that override the validation pipeline's config.
         """
         self.pipeline_target = str(pipeline_target)
         self.dataset_file = str(dataset_file)
@@ -169,12 +188,12 @@ class ValidationCallback(Callback):
         self.overlay_actions = self._coerce_bool(overlay_actions)
         # Validation-only action amplification for world model; training keeps raw action values.
         self.keyboard_value_scale = float(keyboard_value_scale)
-        metrics_config = pipeline_kwargs.pop("metrics", None)
+        metrics_config = generator_overrides.pop("metrics", None)
         self.metrics_config = self._parse_metrics_config(metrics_config)
         self.offload_training_state = self._coerce_bool(offload_training_state)
         self.unload_pipeline_after_validation = self._coerce_bool(unload_pipeline_after_validation)
         self.attn_qat_infer = self._coerce_bool(attn_qat_infer)
-        self.pipeline_kwargs = dict(pipeline_kwargs)
+        self.generator_overrides = dict(generator_overrides)
 
         # Set after on_train_start.
         self._pipeline: Any | None = None
@@ -1191,12 +1210,26 @@ class ValidationCallback(Callback):
         model_path = getattr(pipeline_config, "_fastvideo_train_model_path", None)
         return str(model_path or tc.model_path)
 
-    def _validation_pipeline_config(self, transformer: torch.nn.Module) -> Any:
+    def _validation_pipeline_config(
+        self,
+        transformer: torch.nn.Module,
+        loaded_config: Any,
+    ) -> Any:
+        """Copy the training pipeline config for the validation forwards.
+
+        The copy takes the runtime attention window of ``transformer`` and the
+        encoder widths of ``loaded_config``, the validation pipeline's loaded
+        model definition.
+        """
         tc = self.training_config
-        pipeline_config = deepcopy(tc.pipeline_config)
+        pipeline_config = (deepcopy(tc.pipeline_config) if tc.pipeline_config is not None else PipelineConfig())
         self._sync_runtime_dit_arch_config(
             pipeline_config,
             transformer,
+        )
+        self._keep_loaded_encoder_widths(
+            pipeline_config,
+            loaded_config,
         )
         return pipeline_config
 
@@ -1207,12 +1240,11 @@ class ValidationCallback(Callback):
     ) -> None:
         """Carry the loader-populated encoder widths onto ``validation_config``.
 
-        Validation reaches the stages through two pipeline configs that never
-        pass through ``ModelConfig.update_model_arch``: the deep copy
-        ``_validation_pipeline_config`` makes of the training-side config, and
-        ``tc.pipeline_config`` itself, which ``make_inference_args`` hands to
-        ``pipeline.forward`` by reference. Both still hold the encoder dataclass
-        defaults for whatever the checkpoint would have supplied.
+        Validation reaches the stages through a pipeline config that never
+        passes through ``ModelConfig.update_model_arch``: the deep copy
+        ``_validation_pipeline_config`` makes of the training-side config. It
+        still holds the encoder dataclass defaults for whatever the checkpoint
+        would have supplied.
 
         Stages read ``hidden_size`` only when they have to synthesise an
         embedding instead of measuring one: HunyuanVideo 1.5 sizes its
@@ -1284,13 +1316,7 @@ class ValidationCallback(Callback):
         if (self._pipeline is not None and self._pipeline_key == key):
             return self._pipeline
 
-        tc = self.training_config
         PipelineCls = resolve_target(self.pipeline_target)
-        flow_shift = getattr(
-            tc.pipeline_config,
-            "flow_shift",
-            None,
-        )
 
         loaded_modules: dict[str, Any] = {"transformer": transformer}
         # Distillation methods build the flow-match scheduler their few-step DMD
@@ -1299,44 +1325,83 @@ class ValidationCallback(Callback):
         if method_scheduler is not None:
             loaded_modules["scheduler"] = method_scheduler
 
-        kwargs: dict[str, Any] = {
-            "inference_mode": True,
-            "loaded_modules": loaded_modules,
-            "tp_size": tc.distributed.tp_size,
-            "sp_size": tc.distributed.sp_size,
-            "num_gpus": tc.distributed.num_gpus,
-            "pin_cpu_memory": (tc.distributed.pin_cpu_memory),
-            "dit_cpu_offload": False,
-            "dit_layerwise_offload": False,
-        }
-        if flow_shift is not None:
-            kwargs["flow_shift"] = float(flow_shift)
-        kwargs.update(self.pipeline_kwargs)
-
         # The pipeline class comes from a YAML target, so static analysis cannot
         # infer the dynamically resolved ``from_pretrained`` class method.
         self._pipeline = PipelineCls.from_pretrained(  # type: ignore[attr-defined]
             self._pipeline_model_path(),
-            **kwargs,
+            resolved_config=resolve_inference_config(self._pipeline_generator_config()),
+            loaded_modules=loaded_modules,
         )
-        if tc.pipeline_config is not None:
-            loaded_config = self._pipeline.resolved_config.pipeline_config
-            validation_config = self._validation_pipeline_config(transformer)
-            self._keep_loaded_encoder_widths(
-                validation_config,
-                loaded_config,
-            )
-            self._pipeline.resolved_config.pipeline_config = validation_config
-            arch_config = self._pipeline.resolved_config.pipeline_config.dit_config.arch_config
-            logger.info(
-                "Validation pipeline runtime config: local_attn_size=%s sink_size=%s boundary_ratio=%s",
-                getattr(arch_config, "local_attn_size", None),
-                getattr(arch_config, "sink_size", None),
-                getattr(self._pipeline.resolved_config.pipeline_config.dit_config, "boundary_ratio", None),
-            )
 
         self._pipeline_key = key
         return self._pipeline
+
+    def _pipeline_generator_config(self) -> dict[str, Any]:
+        """Build the ``GeneratorConfig`` mapping of the validation pipeline.
+
+        It has the training parallel layout, keeps the DiT on the device, takes
+        ``flow_shift`` from the training pipeline config, and applies
+        ``generator_overrides`` last.
+        """
+        tc = self.training_config
+        raw: dict[str, Any] = {
+            "model_path": self._pipeline_model_path(),
+            "engine": {
+                "num_gpus": tc.distributed.num_gpus,
+                "parallelism": {
+                    "tp_size": tc.distributed.tp_size,
+                    "sp_size": tc.distributed.sp_size,
+                },
+                "offload": {
+                    "dit": False,
+                    "dit_layerwise": False,
+                    "pin_cpu_memory": tc.distributed.pin_cpu_memory,
+                },
+            },
+        }
+        flow_shift = getattr(
+            tc.pipeline_config,
+            "flow_shift",
+            None,
+        )
+        if flow_shift is not None:
+            raw["pipeline"] = {"flow_shift": float(flow_shift)}
+        return apply_overrides(raw, _dotted_leaves(self.generator_overrides))
+
+    def _validation_forward_config(
+        self,
+        pipeline: Any,
+        transformer: torch.nn.Module,
+    ) -> ResolvedGeneratorConfig:
+        """Build the resolved inference config that the validation forwards pass to the pipeline stages.
+
+        Its model definition is ``_validation_pipeline_config``. When that
+        definition has no DMD denoising steps, ``sampling_timesteps`` become
+        ``pipeline.dmd_denoising_steps``, which the causal and DMD denoising
+        stages read.
+        """
+        tc = self.training_config
+        forward_config = build_inference_resolved_config(
+            tc,
+            model_path=tc.model_path,
+            pipeline_config=self._validation_pipeline_config(
+                transformer,
+                pipeline.resolved_config.pipeline_config,
+            ),
+        )
+        if (self.sampling_timesteps is not None and forward_config.pipeline.dmd_denoising_steps is None):
+            forward_config = forward_config.with_override(
+                "validation_callback:sampling_timesteps",
+                {"pipeline.dmd_denoising_steps": [int(s) for s in self.sampling_timesteps]},
+            )
+        dit_config = forward_config.pipeline_config.dit_config
+        logger.info(
+            "Validation forward config: local_attn_size=%s sink_size=%s boundary_ratio=%s",
+            getattr(dit_config.arch_config, "local_attn_size", None),
+            getattr(dit_config.arch_config, "sink_size", None),
+            getattr(dit_config, "boundary_ratio", None),
+        )
+        return forward_config
 
     # ----------------------------------------------------------
     # Batch preparation
@@ -1393,11 +1458,6 @@ class ValidationCallback(Callback):
             dtype=torch.long,
         ) if self.sampling_timesteps is not None else None)
 
-        inference_args = make_inference_args(
-            tc,
-            model_path=tc.model_path,
-        )
-
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             generator=self.validation_random_generator,
@@ -1415,7 +1475,6 @@ class ValidationCallback(Callback):
         # mask instead of the current one, mismatching prompt_embeds.
         batch.prompt_attention_mask = []
         batch.negative_attention_mask = []
-        batch._inference_args = inference_args  # type: ignore[attr-defined]
 
         # Conditionally set I2V fields.
         if ("image" in validation_batch and validation_batch["image"] is not None):
@@ -1479,7 +1538,6 @@ class ValidationCallback(Callback):
         ranks in a group execute each forward pass; the group leader retains
         decoded media.
         """
-        tc = self.training_config
         pipeline = self._get_pipeline(transformer=transformer, )
         sampling_param = self._get_sampling_param()
 
@@ -1490,23 +1548,7 @@ class ValidationCallback(Callback):
             num_workers=0,
         )
 
-        inference_args = make_inference_args(
-            tc,
-            model_path=tc.model_path,
-        )
-        self._sync_runtime_dit_arch_config(
-            inference_args.pipeline_config,
-            transformer,
-        )
-        self._keep_loaded_encoder_widths(
-            inference_args.pipeline_config,
-            pipeline.resolved_config.pipeline_config,
-        )
-
-        # Propagate sampling_timesteps to pipeline_config so
-        # causal/DMD denoising stages can read them.
-        if (self.sampling_timesteps is not None and inference_args.pipeline_config.dmd_denoising_steps is None):
-            inference_args.pipeline_config.dmd_denoising_steps = ([int(s) for s in self.sampling_timesteps])
+        forward_config = self._validation_forward_config(pipeline, transformer)
 
         videos: list[list[np.ndarray]] = []
         audio_waveforms: list[torch.Tensor | np.ndarray | None] = []
@@ -1532,7 +1574,7 @@ class ValidationCallback(Callback):
             with torch.no_grad():
                 output_batch = pipeline.forward(
                     batch,
-                    inference_args,
+                    forward_config,
                 )
 
             samples = output_batch.output.cpu()

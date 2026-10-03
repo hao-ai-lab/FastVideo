@@ -56,8 +56,9 @@ from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
+    build_inference_resolved_config,
+    keep_checkpoint_component_config,
     load_module_from_path,
-    make_inference_args,
 )
 
 if TYPE_CHECKING:
@@ -444,8 +445,8 @@ class Kandinsky5Model(ModelBase):
         pipeline_config = tc.pipeline_config
         assert pipeline_config is not None
         model_path = maybe_download_model(tc.model_path)
-        inference_args = make_inference_args(tc, model_path=model_path)
-        inference_args.text_encoder_cpu_offload = False
+        # The inference config keeps the text encoders on the device.
+        inference_config = build_inference_resolved_config(tc, model_path=model_path)
 
         sampling_param = SamplingParam.from_pretrained(tc.model_path)
         negative_prompt = sampling_param.negative_prompt
@@ -457,7 +458,7 @@ class Kandinsky5Model(ModelBase):
         # --- Qwen / Reason1 ---
         qwen_enc = loader.load(
             os.path.join(model_path, "text_encoder"),
-            inference_args,
+            inference_config,
         ).to(device).eval()
         qwen_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer"))
         qwen_tok_kwargs = dict(qwen_cfg.tokenizer_kwargs)
@@ -477,8 +478,9 @@ class Kandinsky5Model(ModelBase):
         # --- CLIP ---
         clip_enc = loader.load(
             os.path.join(model_path, "text_encoder_2"),
-            inference_args,
+            inference_config,
         ).to(device).eval()
+        keep_checkpoint_component_config(tc, inference_config, "text_encoder_configs")
         clip_tok = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
         clip_tok_kwargs = dict(clip_cfg.tokenizer_kwargs)
         clip_text = preprocess_text(negative_prompt)

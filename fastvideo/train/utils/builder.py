@@ -23,7 +23,7 @@ def build_from_config(cfg: RunConfig, ) -> tuple[TrainingConfig, TrainingMethod,
     1. Instantiate each model in ``cfg.models`` via ``_target_``.
     2. Resolve the method class from ``cfg.method["_target_"]``
        and construct it with ``(cfg=cfg, role_models=...)``.
-    3. Return ``(training_args, method, dataloader, start_step)``.
+    3. Return ``(training_config, method, dataloader, start_step)``.
     """
     from fastvideo.train.models.base import ModelBase
 

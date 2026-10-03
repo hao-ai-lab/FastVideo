@@ -21,6 +21,7 @@ import pytest
 import torch
 
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.train.callbacks.callback import CallbackDict
 from fastvideo.train.callbacks.ema import EMACallback
 from fastvideo.train.callbacks.validation import (
@@ -31,6 +32,7 @@ from fastvideo.train.callbacks.validation import (
     _ValidationMetricStats,
     _ValidationStepResult,
 )
+from fastvideo.train.utils.training_config import DistributedConfig, TrainingConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -138,17 +140,17 @@ class TestConstructor:
         with pytest.raises(ValueError, match="num_videos_per_prompt must be positive"):
             _make_callback(num_videos_per_prompt=0)
 
-    def test_pipeline_kwargs_collected(self) -> None:
+    def test_generator_overrides_collected(self) -> None:
         cb = ValidationCallback(
             pipeline_target=_PIPE_TARGET,
             dataset_file="x.json",
-            extra_arg=123,
-            another="value",
+            engine={"offload": {"vae": True}},
+            pipeline={"flow_shift": 5.0},
         )
-        # Unknown kwargs are stashed for the pipeline factory.
-        assert cb.pipeline_kwargs == {
-            "extra_arg": 123,
-            "another": "value",
+        # Unknown keys are stashed as GeneratorConfig fields of the validation pipeline.
+        assert cb.generator_overrides == {
+            "engine": {"offload": {"vae": True}},
+            "pipeline": {"flow_shift": 5.0},
         }
 
     def test_metrics_true_uses_default_vbench_subset(self) -> None:
@@ -159,7 +161,7 @@ class TestConstructor:
         )
         assert cb.metrics_config.enabled is True
         assert cb.metrics_config.names == DEFAULT_VALIDATION_VBENCH_METRICS
-        assert "metrics" not in cb.pipeline_kwargs
+        assert "metrics" not in cb.generator_overrides
 
     def test_metrics_mapping_is_coerced(self) -> None:
         cb = ValidationCallback(
@@ -263,10 +265,7 @@ class TestOnValidationBegin:
 class TestH3ValidationContract:
     """Verify synchronized MiniMax H3 validation through Weights & Biases logging."""
 
-    def test_prepare_validation_batch_forwards_video_count(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def test_prepare_validation_batch_forwards_video_count(self) -> None:
         """Verify that each ForwardBatch receives the configured output count."""
         cb = _make_callback(num_videos_per_prompt=3)
         cb.training_config = SimpleNamespace(
@@ -280,11 +279,6 @@ class TestH3ValidationContract:
             model_path="unused",
             vsa_sparsity=0.0,
         )
-        monkeypatch.setattr(
-            "fastvideo.train.callbacks.validation.make_inference_args",
-            lambda *args, **kwargs: SimpleNamespace(),
-        )
-
         batch = cb._prepare_validation_batch(
             SamplingParam(),
             {"prompt": "Generate synchronized media."},
@@ -295,7 +289,6 @@ class TestH3ValidationContract:
 
     def test_prepare_validation_batch_ignores_media_for_text_only_generation(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         tmp_path,
     ) -> None:
         """Verify text-to-video-with-audio uses captions without source media."""
@@ -313,11 +306,6 @@ class TestH3ValidationContract:
             model_path="unused",
             vsa_sparsity=0.0,
         )
-        monkeypatch.setattr(
-            "fastvideo.train.callbacks.validation.make_inference_args",
-            lambda *args, **kwargs: SimpleNamespace(),
-        )
-
         batch = cb._prepare_validation_batch(
             SamplingParam(),
             {
@@ -341,7 +329,7 @@ class TestH3ValidationContract:
 
             resolved_config = SimpleNamespace(pipeline_config=SimpleNamespace())
 
-            def forward(self, batch, inference_args):
+            def forward(self, batch, resolved_config):
                 """Produce media whose values identify the source prompt."""
                 prompt_index = int(batch.prompt.rsplit("-", 1)[1])
                 return SimpleNamespace(
@@ -363,13 +351,7 @@ class TestH3ValidationContract:
             "fastvideo.train.callbacks.validation.ValidationDataset",
             lambda filename: validation_records,
         )
-        monkeypatch.setattr(
-            "fastvideo.train.callbacks.validation.make_inference_args",
-            lambda *args, **kwargs: SimpleNamespace(
-                pipeline_config=SimpleNamespace(dmd_denoising_steps=None),
-                dit_cpu_offload=True,
-            ),
-        )
+        monkeypatch.setattr(cb, "_validation_forward_config", lambda pipeline, transformer: SimpleNamespace())
         monkeypatch.setattr(cb, "_get_pipeline", lambda *, transformer: pipeline)
         monkeypatch.setattr(cb, "_get_sampling_param", SamplingParam)
         monkeypatch.setattr(
@@ -401,7 +383,7 @@ class TestH3ValidationContract:
 
             resolved_config = SimpleNamespace(pipeline_config=SimpleNamespace())
 
-            def forward(self, batch, inference_args):
+            def forward(self, batch, resolved_config):
                 return SimpleNamespace(output=output, extra={})
 
         cb = _make_callback()
@@ -415,13 +397,7 @@ class TestH3ValidationContract:
             "fastvideo.train.callbacks.validation.ValidationDataset",
             lambda filename: [{"caption": "prompt-0"}],
         )
-        monkeypatch.setattr(
-            "fastvideo.train.callbacks.validation.make_inference_args",
-            lambda *args, **kwargs: SimpleNamespace(
-                pipeline_config=SimpleNamespace(dmd_denoising_steps=None),
-                dit_cpu_offload=True,
-            ),
-        )
+        monkeypatch.setattr(cb, "_validation_forward_config", lambda pipeline, transformer: SimpleNamespace())
         monkeypatch.setattr(cb, "_get_pipeline", lambda *, transformer: pipeline)
         monkeypatch.setattr(cb, "_get_sampling_param", SamplingParam)
         monkeypatch.setattr(
@@ -1059,8 +1035,8 @@ class TestKeepLoadedEncoderWidths:
         assert validation.text_encoder_configs[0].arch_config.text_len == 1000
 
     def test_keeps_config_objects_unshared(self) -> None:
-        # The second call site writes into ``tc.pipeline_config`` itself, so
-        # the merge must not alias the loaded encoder objects into it.
+        # The validation copy becomes the model definition of the forward
+        # config, so the merge must not alias the loaded encoder objects into it.
         validation = SimpleNamespace(text_encoder_configs=(self._encoder(512), ))
         original = validation.text_encoder_configs
         loaded = SimpleNamespace(text_encoder_configs=(self._encoder(1472), ))
@@ -1110,3 +1086,77 @@ class TestKeepLoadedEncoderWidths:
     ) -> None:
         # Pipelines without text encoders must not raise here.
         ValidationCallback._keep_loaded_encoder_widths(validation, loaded)
+
+
+class TestValidationResolvedConfigs:
+    """The validation pipeline and its forwards run on resolved inference configs built from the training config."""
+
+    # A registered model path, so resolution finds its PipelineConfig class without a download.
+    _MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+
+    def _training_config(self) -> TrainingConfig:
+        return TrainingConfig(
+            distributed=DistributedConfig(num_gpus=2, sp_size=2, hsdp_shard_dim=2),
+            pipeline_config=PipelineConfig.from_kwargs({
+                "model_path": self._MODEL_PATH,
+                "flow_shift": 3.0
+            }),
+            model_path=self._MODEL_PATH,
+            vsa_sparsity=0.5,
+        )
+
+    def test_pipeline_is_built_from_resolved_inference_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify the parallel layout, DiT placement, flow shift, and YAML overrides of the validation pipeline."""
+        captured: dict = {}
+
+        class FakePipeline:
+
+            @classmethod
+            def from_pretrained(cls, model_path, *, resolved_config, loaded_modules):
+                captured.update(model_path=model_path, resolved_config=resolved_config, loaded_modules=loaded_modules)
+                return cls()
+
+        monkeypatch.setattr("fastvideo.train.callbacks.validation.resolve_target", lambda target: FakePipeline)
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            engine={"offload": {
+                "vae": True
+            }},
+        )
+        cb.training_config = self._training_config()
+        cb.method = SimpleNamespace()
+        transformer = torch.nn.Identity()
+
+        pipeline = cb._get_pipeline(transformer=transformer)
+
+        resolved_config = captured["resolved_config"]
+        assert isinstance(pipeline, FakePipeline)
+        assert captured["model_path"] == self._MODEL_PATH
+        assert captured["loaded_modules"] == {"transformer": transformer}
+        assert resolved_config.inference_mode
+        assert resolved_config.engine.num_gpus == 2
+        assert resolved_config.engine.parallelism.sp_size == 2
+        assert resolved_config.engine.offload.dit is False
+        assert resolved_config.engine.offload.dit_layerwise is False
+        assert resolved_config.engine.offload.vae is True
+        assert resolved_config.pipeline.flow_shift == 3.0
+
+    def test_forward_config_uses_validation_copy_and_sampling_timesteps(self) -> None:
+        """Verify the forward config's model definition and DMD steps leave the training pipeline config unchanged."""
+        cb = _make_callback(sampling_timesteps=[1000, 757, 522])
+        training_config = self._training_config()
+        cb.training_config = training_config
+        loaded_config = PipelineConfig.from_kwargs({"model_path": self._MODEL_PATH})
+        loaded_config.text_encoder_configs[0].arch_config.hidden_size = 1234
+        pipeline = SimpleNamespace(resolved_config=SimpleNamespace(pipeline_config=loaded_config))
+
+        forward_config = cb._validation_forward_config(pipeline, torch.nn.Identity())
+
+        assert forward_config.inference_mode
+        assert forward_config.engine.offload.dit is True
+        assert forward_config.engine.attention.vsa_sparsity == 0.5
+        assert forward_config.pipeline.dmd_denoising_steps == (1000, 757, 522)
+        assert forward_config.pipeline_config.text_encoder_configs[0].arch_config.hidden_size == 1234
+        assert training_config.pipeline_config.dmd_denoising_steps is None
+        assert training_config.pipeline_config.text_encoder_configs[0].arch_config.hidden_size != 1234

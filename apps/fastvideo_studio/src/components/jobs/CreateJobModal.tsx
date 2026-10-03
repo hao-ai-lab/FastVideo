@@ -131,8 +131,9 @@ export default function CreateJobModal({
   const editingJobId = editingJob?.id ?? null;
   const editingJobModelId = editingJob?.model_id ?? null;
 
-  // Layerwise offload and FSDP compete for the DiT weights and FastVideoArgs
-  // silently picks a winner (fastvideo_args.py:859); resolve it visibly here.
+  // Layerwise offload and FSDP compete for the DiT weights and the device offload
+  // policy (resolve_device_offload_conflicts in fastvideo/api/device_policy.py)
+  // silently picks a winner; resolve it visibly here.
   // dit_cpu_offload is deliberately not interlocked -- it is a modifier, not a
   // competing strategy.
   const handleDitLayerwiseOffloadChange = React.useCallback((next: boolean) => {

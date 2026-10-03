@@ -80,7 +80,9 @@ callbacks:
     num_videos_per_prompt: 1
     use_validation_media_conditioning: false
     offload_training_state: true
-    text_encoder_cpu_offload: true
-    vae_cpu_offload: true
+    engine:
+      offload:
+        text_encoder: true
+        vae: true
 
 pipeline: {}

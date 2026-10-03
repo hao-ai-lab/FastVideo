@@ -19,7 +19,7 @@
 # The export is passed to all three models.*.init_from overrides: student,
 # teacher, and critic all load the same weights. Teacher/critic are
 # automatically masked back to dense attention and full-precision weights
-# by the _loading_teacher_critic_model gate in
+# by the loading_teacher_critic_model gate in
 # fastvideo/models/loader/component_loader.py (family-agnostic, no
 # Kandinsky5-specific handling needed) -- NOT by pointing them at a
 # different export.

@@ -19,7 +19,10 @@ from transformers import AutoTokenizer
 
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.loader.component_loader import TextEncoderLoader
-from fastvideo.train.utils.moduleloader import make_inference_args
+from fastvideo.train.utils.moduleloader import (
+    build_inference_resolved_config,
+    keep_checkpoint_component_config,
+)
 from fastvideo.utils import maybe_download_model
 
 if TYPE_CHECKING:
@@ -65,16 +68,16 @@ def encode_negative_prompt(
     tokenizer_subdir = f"tokenizer{suffix}"
 
     model_path = maybe_download_model(tc.model_path)
-    inference_args = make_inference_args(tc, model_path=model_path)
-    # Keep the encoder on-device; CPU offload would init an FSDP device
-    # mesh and reintroduce the collective at load time.
-    inference_args.text_encoder_cpu_offload = False
+    # The inference config keeps the encoder on-device; CPU offload would init
+    # an FSDP device mesh and reintroduce the collective at load time.
+    inference_config = build_inference_resolved_config(tc, model_path=model_path)
 
     loader = TextEncoderLoader()
     text_encoder = loader.load(
         os.path.join(model_path, encoder_subdir),
-        inference_args,
+        inference_config,
     ).to(device).eval()
+    keep_checkpoint_component_config(tc, inference_config, "text_encoder_configs")
     tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, tokenizer_subdir))
 
     tok_kwargs = dict(encoder_config.tokenizer_kwargs)

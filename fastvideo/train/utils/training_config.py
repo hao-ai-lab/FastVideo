@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Typed training config — replaces TrainingArgs."""
+"""Typed training config of the modular trainer."""
 
 from __future__ import annotations
 
