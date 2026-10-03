@@ -79,7 +79,17 @@ class _ShardIndex:
         self._header_cache: dict[str, tuple[dict, int]] = {}
         if index_path.exists():
             weight_map = json.loads(index_path.read_text())["weight_map"]
-            self.key_to_shard = {k: str(component_dir / s) for k, s in weight_map.items()}
+
+            def needed(key: str) -> bool:
+                if key == "model.language_model.embed_tokens.weight":
+                    return True
+                prefix = "model.language_model.layers."
+                if not key.startswith(prefix):
+                    return False
+                layer = key[len(prefix):].split(".", 1)[0]
+                return layer.isdigit() and int(layer) < TEXT_ENCODER_LAYER
+
+            self.key_to_shard = {k: str(component_dir / s) for k, s in weight_map.items() if needed(k)}
         else:
             single = component_dir / "model.safetensors"
             if not single.exists():
@@ -294,8 +304,8 @@ class StreamedMiniMaxH3TextConditioner:
         del rows
         gc.collect()
 
-        if cfg.num_layers <= TEXT_ENCODER_LAYER:
-            raise ValueError(f"Conditioner needs > {TEXT_ENCODER_LAYER} layers, has {cfg.num_layers}.")
+        if cfg.num_layers < TEXT_ENCODER_LAYER:
+            raise ValueError(f"Conditioner needs at least {TEXT_ENCODER_LAYER} layers, has {cfg.num_layers}.")
         for layer in range(TEXT_ENCODER_LAYER):
             hidden = self._decoder_layer(layer, hidden, cos, sin)
             # Per-layer sync: without this the whole 50-layer graph accumulates
