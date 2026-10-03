@@ -10,7 +10,7 @@ import pathlib
 import torch
 import triton
 
-from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_int8_fp8_attention
+from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
 from fastvideo_kernel.block_sparse_attn import block_sparse_attn
 
 
@@ -26,26 +26,27 @@ def main():
             q, k, v, mask, vbs = (state[key] for key in ("q", "k", "v", "mask", "vbs"))
             def baseline():
                 return block_sparse_attn(q, k, v, mask, vbs)[0]
-            def candidate():
-                return sparse_int8_fp8_attention(q, k, v, mask, vbs)
             expected = baseline()
-            output = candidate()
-            valid_rows = state["untile"]
-            ref = expected.index_select(2, valid_rows).float()
-            actual = output.index_select(2, valid_rows).float()
-            delta = actual - ref
-            reference_ms = triton.testing.do_bench(baseline)
-            candidate_ms = triton.testing.do_bench(candidate)
-            record = {"capture": capture.name, "shape": list(q.shape),
-                      "mask_density": float(mask.float().mean()),
-                      "finite": bool(torch.isfinite(actual).all()),
-                      "relative_l2": float(delta.norm() / ref.norm()),
-                      "max_abs": float(delta.abs().max()),
-                      "cosine": float(torch.nn.functional.cosine_similarity(actual.flatten(), ref.flatten(), dim=0)),
-                      "bf16_ms": reference_ms, "int8_fp8_ms": candidate_ms,
-                      "speedup": reference_ms / candidate_ms}
-            print(json.dumps(record), flush=True)
-            records.append(record)
+            for int8_qk, fp8_pv in ((True, True), (True, False), (False, True), (False, False)):
+                def candidate():
+                    return sparse_sm89_attention(q, k, v, mask, vbs, int8_qk=int8_qk, fp8_pv=fp8_pv)
+                output = candidate()
+                valid_rows = state["untile"]
+                ref = expected.index_select(2, valid_rows).float()
+                actual = output.index_select(2, valid_rows).float()
+                delta = actual - ref
+                reference_ms = triton.testing.do_bench(baseline)
+                candidate_ms = triton.testing.do_bench(candidate)
+                record = {"capture": capture.name, "shape": list(q.shape), "int8_qk": int8_qk, "fp8_pv": fp8_pv,
+                          "mask_density": float(mask.float().mean()),
+                          "finite": bool(torch.isfinite(actual).all()),
+                          "relative_l2": float(delta.norm() / ref.norm()),
+                          "max_abs": float(delta.abs().max()),
+                          "cosine": float(torch.nn.functional.cosine_similarity(actual.flatten(), ref.flatten(), dim=0)),
+                          "bf16_ms": reference_ms, "int8_fp8_ms": candidate_ms,
+                          "speedup": reference_ms / candidate_ms}
+                print(json.dumps(record), flush=True)
+                records.append(record)
     if not records:
         raise RuntimeError("No real Q/K/V captures found")
     args.output.write_text(json.dumps({"gpu": torch.cuda.get_device_name(), "torch": torch.__version__,
