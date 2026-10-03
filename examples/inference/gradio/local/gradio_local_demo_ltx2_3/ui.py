@@ -69,29 +69,31 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             output_path = str(OUTPUT_DIR / video_filename)
             params.output_path = output_path
             start_time = time.perf_counter()
-            result = generator.generate_video(prompt=prompt,
-                                              output_path=output_path,
-                                              fps=DEFAULT_FPS,
-                                              seed=int(params.seed),
-                                              save_video=True,
-                                              return_frames=False,
-                                              guidance_scale=float(params.guidance_scale),
-                                              height=int(params.height),
-                                              width=int(params.width),
-                                              num_frames=int(params.num_frames),
-                                              num_inference_steps=DEFAULT_NUM_INFERENCE_STEPS,
-                                              negative_prompt=params.negative_prompt,
-                                              image_path=params.image_path,
-                                              ltx2_image_crf=0.0)
+            result = generator.generate({
+                "prompt": prompt,
+                "negative_prompt": params.negative_prompt,
+                "inputs": {"image_path": params.image_path},
+                "sampling": {
+                    "fps": DEFAULT_FPS,
+                    "seed": int(params.seed),
+                    "guidance_scale": float(params.guidance_scale),
+                    "height": int(params.height),
+                    "width": int(params.width),
+                    "num_frames": int(params.num_frames),
+                    "num_inference_steps": DEFAULT_NUM_INFERENCE_STEPS,
+                },
+                "output": {"output_path": output_path, "save_video": True, "return_frames": False},
+                "extensions": {"ltx2_image_crf": 0.0},
+            })
             wall_time = time.perf_counter() - start_time
-            generation_time = (result.get("generation_time") if isinstance(result, dict) else None)
-            e2e_latency = (result.get("e2e_latency") if isinstance(result, dict) else None)
+            generation_time = result.generation_time
+            e2e_latency = result.extra.get("e2e_latency")
             if generation_time is None:
                 generation_time = wall_time
             if e2e_latency is None:
                 e2e_latency = wall_time
-            resolved_output_path = (result.get("output_path", output_path) if isinstance(result, dict) else output_path)
-            logging_info = result.get("logging_info", None) if isinstance(result, dict) else None
+            resolved_output_path = result.extra.get("output_path", output_path)
+            logging_info = result.logging_info
             if logging_info:
                 stage_names = logging_info.get_execution_order()
                 stage_execution_times = [

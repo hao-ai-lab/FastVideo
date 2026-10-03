@@ -19,24 +19,22 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    generator = VideoGenerator.from_pretrained(
-        os.environ.get(
+    generator = VideoGenerator.from_config({
+        "model_path": os.environ.get(
             "MMAUDIO_MODEL_PATH",
             "converted_weights/mmaudio/large_44k_v2",
         ),
-        workload_type="v2a",
-        num_gpus=1,
-    )
-    result = generator.generate_video(
-        prompt=args.prompt,
-        negative_prompt=args.negative_prompt,
-        video_path=args.video_path,
-        audio_end_in_s=args.duration_seconds,
-        output_path=args.output_path,
-        save_video=True,
-        return_frames=False,
-    )
-    print(result["video_path"])
+        "engine": {"num_gpus": 1},
+        "pipeline": {"workload_type": "v2a"},
+    })
+    result = generator.generate({
+        "prompt": args.prompt,
+        "negative_prompt": args.negative_prompt,
+        "inputs": {"video_path": args.video_path},
+        "output": {"output_path": args.output_path, "save_video": True, "return_frames": False},
+        "extensions": {"audio_end_in_s": args.duration_seconds},
+    })
+    print(result.video_path)
     generator.shutdown()
 
 

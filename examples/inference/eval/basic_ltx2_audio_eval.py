@@ -43,14 +43,18 @@ def main() -> None:
     )
 
     output_path = "outputs_video/ltx2_audio_eval/output.mp4"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        num_frames=121,
-        height=1088,
-        width=1920,
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "sampling": {
+            "num_frames": 121,
+            "height": 1088,
+            "width": 1920,
+        },
+        "output": {
+            "output_path": output_path,
+            "save_video": True,
+        },
+    })
     generator.shutdown()
     torch.cuda.empty_cache()
 

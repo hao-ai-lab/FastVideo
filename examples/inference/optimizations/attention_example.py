@@ -22,11 +22,12 @@ def main():
 
     gen_start_time = time.perf_counter()
 
-    gen.generate_video(
-        prompt=
+    gen.generate({
+        "prompt":
         "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting.",
-        seed=1024,
-        output_path="example_outputs/")
+        "sampling": {"seed": 1024},
+        "output": {"output_path": "example_outputs/"},
+    })
 
     generation_time = time.perf_counter() - gen_start_time
     print(f"Video generation time: {generation_time:.2f} seconds")

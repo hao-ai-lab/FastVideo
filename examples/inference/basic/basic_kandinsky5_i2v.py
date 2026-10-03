@@ -20,15 +20,12 @@ def main():
     )
 
     prompt = ("A woman stands up and walks away")
-    _ = generator.generate_video(
-        prompt,
-        image_path=IMAGE_PATH,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        height=1024,
-        width=1024,
-        num_frames=121,
-    )
+    _ = generator.generate({
+        "prompt": prompt,
+        "inputs": {"image_path": IMAGE_PATH},
+        "sampling": {"height": 1024, "width": 1024, "num_frames": 121},
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
 
 if __name__ == "__main__":

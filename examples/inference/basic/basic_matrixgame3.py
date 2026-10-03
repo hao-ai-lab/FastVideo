@@ -17,18 +17,19 @@ def main():
         pin_cpu_memory=True,
     )
 
-    generator.generate_video(
-        prompt=PROMPT,
-        image_path=IMAGE_URL,
-        height=720,
-        width=1280,
-        num_frames=57,
-        num_inference_steps=3,
-        guidance_scale=1.0,
-        seed=42,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "inputs": {"image_path": IMAGE_URL},
+        "sampling": {
+            "height": 720,
+            "width": 1280,
+            "num_frames": 57,
+            "num_inference_steps": 3,
+            "guidance_scale": 1.0,
+            "seed": 42,
+        },
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
 
 if __name__ == "__main__":

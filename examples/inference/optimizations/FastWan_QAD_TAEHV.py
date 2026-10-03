@@ -141,35 +141,44 @@ def build_generator(args: argparse.Namespace) -> VideoGenerator:
 
     compile_enabled = not args.no_compile
 
-    extra_kwargs = {}
+    components = {}
+    experimental = {"pipeline_config": pipeline_config}
     if args.distilled_model:
         weights_path = resolve_distilled_weights(args.distilled_model)
         print(f"Using distilled weights: {args.distilled_model} -> {weights_path}")
-        extra_kwargs["init_weights_from_safetensors"] = weights_path
+        components["transformer_weights"] = weights_path
 
     if args.taehv:
         # Skip the in-pipeline VAE decode entirely: the pipeline returns raw
         # latents, the Wan VAE is offloaded to CPU (and not compiled) since we
         # decode with TAEHV in this script instead.
-        extra_kwargs["output_type"] = "latent"
+        experimental["output_type"] = "latent"
 
-    generator = VideoGenerator.from_pretrained(
-        model_id,
-        pipeline_config=pipeline_config,
-        num_gpus=args.num_gpus,
-        # Keep everything resident on the GPU -- no offloading, except the
-        # unused Wan VAE when TAEHV handles decoding.
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=args.taehv,
-        text_encoder_cpu_offload=False,
-        pin_cpu_memory=False,
-        enable_torch_compile=compile_enabled,
-        enable_torch_compile_text_encoder=compile_enabled,
-        enable_torch_compile_vae=compile_enabled and not args.taehv,
-        **extra_kwargs,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": model_id,
+        "engine": {
+            "num_gpus": args.num_gpus,
+            # Keep everything resident on the GPU -- no offloading, except the
+            # unused Wan VAE when TAEHV handles decoding.
+            "use_fsdp_inference": False,
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "vae": args.taehv,
+                "text_encoder": False,
+                "pin_cpu_memory": False,
+            },
+            "compile": {
+                "enabled": compile_enabled,
+                "text_encoder_enabled": compile_enabled,
+                "vae_enabled": compile_enabled and not args.taehv,
+            },
+        },
+        "pipeline": {
+            "components": components,
+            "experimental": experimental,
+        },
+    })
     return generator
 
 

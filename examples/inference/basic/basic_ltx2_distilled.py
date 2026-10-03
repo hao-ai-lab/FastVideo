@@ -23,11 +23,10 @@ def main() -> None:
     )
 
     output_path = "outputs_video/ltx2_basic/output_ltx2_distilled_t2v.mp4"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "output": {"output_path": output_path, "save_video": True},
+    })
     generator.shutdown()
 
 

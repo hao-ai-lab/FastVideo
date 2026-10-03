@@ -134,12 +134,20 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             output_dir = "outputs/"
             os.makedirs(output_dir, exist_ok=True)
             start_time = time.time()
-            result = generator.generate_video(prompt=prompt,
-                                              sampling_param=params,
-                                              save_video=True,
-                                              return_frames=False)
+            result = generator.generate({
+                "prompt": prompt,
+                "negative_prompt": params.negative_prompt,
+                "sampling": {
+                    "seed": params.seed,
+                    "guidance_scale": params.guidance_scale,
+                    "num_frames": params.num_frames,
+                    "height": params.height,
+                    "width": params.width,
+                },
+                "output": {"save_video": True, "return_frames": False},
+            })
             inference_time = time.time() - start_time
-            logging_info = result.get("logging_info", None)
+            logging_info = result.logging_info
             if logging_info:
                 stage_names = logging_info.get_execution_order()
                 stage_execution_times = [

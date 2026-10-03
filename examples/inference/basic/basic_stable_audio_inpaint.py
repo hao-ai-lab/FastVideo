@@ -67,15 +67,19 @@ def main() -> None:
         "FastVideo/stable-audio-open-1.0-Diffusers",
         num_gpus=1,
     )
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path="outputs_audio/stable_audio_inpaint/output_inpaint.wav",
-        save_video=True,
-        audio_end_in_s=TOTAL_SECONDS,
-        inpaint_audio=REFERENCE_AUDIO_PATH,
-        # Tuple form: keep first KEEP_SECONDS, regenerate the rest.
-        inpaint_mask=(KEEP_SECONDS, TOTAL_SECONDS),
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "output": {
+            "output_path": "outputs_audio/stable_audio_inpaint/output_inpaint.wav",
+            "save_video": True,
+        },
+        "extensions": {
+            "audio_end_in_s": TOTAL_SECONDS,
+            "inpaint_audio": REFERENCE_AUDIO_PATH,
+            # Tuple form: keep first KEEP_SECONDS, regenerate the rest.
+            "inpaint_mask": (KEEP_SECONDS, TOTAL_SECONDS),
+        },
+    })
     generator.shutdown()
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 import torch._inductor.config
 from fastvideo import VideoGenerator
+from fastvideo.api import GenerationResult
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
 from fastvideo.utils import maybe_download_model
@@ -41,11 +42,11 @@ def load_validation_entries(path: Path) -> list[dict]:
 
 
 def print_stage_breakdown(
-    result: dict,
+    result: GenerationResult,
     run_idx: int,
     num_runs: int,
 ) -> float | None:
-    logging_info = result.get("logging_info")
+    logging_info = result.logging_info
     if logging_info is None:
         print(f"[{run_idx}/{num_runs}] Stage breakdown unavailable: no logging_info")
         return None
@@ -65,8 +66,8 @@ def print_stage_breakdown(
     return total
 
 
-def extract_sr_forward_latency(result: dict, ) -> tuple[float | None, list[tuple[str, float]], list[str]]:
-    logging_info = result.get("logging_info")
+def extract_sr_forward_latency(result: GenerationResult, ) -> tuple[float | None, list[tuple[str, float]], list[str]]:
+    logging_info = result.logging_info
     if logging_info is None:
         return None, [], []
 
@@ -96,11 +97,11 @@ def extract_sr_forward_latency(result: dict, ) -> tuple[float | None, list[tuple
 
 
 def collect_stage_times(
-    result: dict,
+    result: GenerationResult,
     stage_times: dict[str, list[float]],
     stage_order: OrderedDict[str, None],
 ) -> None:
-    logging_info = result.get("logging_info")
+    logging_info = result.logging_info
     if logging_info is None:
         return
     stages = getattr(logging_info, "stages", None)
@@ -206,27 +207,41 @@ def main() -> None:
         "dynamic": False,
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_root,
-        num_gpus=1,
-        ltx2_refine_enabled=True,
-        ltx2_refine_upsampler_path=str(refine_upsampler_path),
-        refine_lora_path="",  # keep refine LoRA disabled in this repo's typed adapter
-        ltx2_refine_lora_path="",  # keep refine LoRA disabled for distilled model
-        ltx2_refine_num_inference_steps=2,
-        ltx2_refine_guidance_scale=1.0,
-        ltx2_refine_add_noise=True,
-        pipeline_config=pipeline_config,
-        enable_torch_compile=True,
-        enable_torch_compile_text_encoder=True,
-        enable_torch_compile_vae=True,
-        torch_compile_kwargs=torch_compile_kwargs,
-        torch_compile_kwargs_vae=torch_compile_kwargs,
-        dit_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-        vae_cpu_offload=False,
-        ltx2_vae_tiling=False,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": model_root,
+        "engine": {
+            "num_gpus": 1,
+            "compile": {
+                "enabled": True,
+                "text_encoder_enabled": True,
+                "vae_enabled": True,
+                **torch_compile_kwargs,
+                "vae_kwargs": torch_compile_kwargs,
+            },
+            "offload": {
+                "dit": False,
+                "text_encoder": False,
+                "vae": False,
+            },
+        },
+        "pipeline": {
+            "preset_overrides": {
+                "refine": {
+                    "enabled": True,
+                    "num_inference_steps": 2,
+                    "guidance_scale": 1.0,
+                    "add_noise": True,
+                },
+            },
+            "components": {"upsampler_weights": str(refine_upsampler_path)},
+            "ltx2": {"refine": {"lora_path": ""}},  # keep refine LoRA disabled for distilled model
+            "experimental": {
+                "refine_lora_path": "",  # keep refine LoRA disabled in this repo's typed adapter
+                "pipeline_config": pipeline_config,
+            },
+            "vae_tiling": False,
+        },
+    })
 
     run_times: list[float] = []
     e2e_times: list[float] = []
@@ -247,25 +262,26 @@ def main() -> None:
                 torch.cuda.synchronize()
 
             start = time.perf_counter()
-            result = generator.generate_video(
-                prompt=prompt,
-                output_path=str(output_path),
-                fps=24,
-                seed=10,
-                save_video=True,
-                guidance_scale=1.0,
-                height=benchmark_entry.get("height", 1088),
-                width=benchmark_entry.get("width", 1920),
-                num_frames=121,
-                num_inference_steps=5,
-                # image_path="examples/inference/basic/prompt1.png",
-                # ltx2_image_crf=0.0
-            )
+            result = generator.generate({
+                "prompt": prompt,
+                "sampling": {
+                    "fps": 24,
+                    "seed": 10,
+                    "guidance_scale": 1.0,
+                    "height": benchmark_entry.get("height", 1088),
+                    "width": benchmark_entry.get("width", 1920),
+                    "num_frames": 121,
+                    "num_inference_steps": 5,
+                },
+                "output": {"output_path": str(output_path), "save_video": True},
+                # "inputs": {"image_path": "examples/inference/basic/prompt1.png"},
+                # "extensions": {"ltx2_image_crf": 0.0},
+            })
             if os.environ.get("FASTVIDEO_STAGE_LOGGING") == "0":
                 torch.cuda.synchronize()
 
-            elapsed = result.get("generation_time") if isinstance(result, dict) else None
-            e2e_elapsed = result.get("e2e_latency") if isinstance(result, dict) else None
+            elapsed = result.generation_time if isinstance(result, GenerationResult) else None
+            e2e_elapsed = result.extra.get("e2e_latency") if isinstance(result, GenerationResult) else None
             if elapsed is None:
                 elapsed = time.perf_counter() - start
             if e2e_elapsed is None:
@@ -276,7 +292,7 @@ def main() -> None:
             print(f"[{i + 1}/{num_runs}] Generation time: {elapsed:.2f}s")
             print(f"[{i + 1}/{num_runs}] End-to-end latency: {e2e_elapsed:.2f}s")
 
-            if isinstance(result, dict):
+            if isinstance(result, GenerationResult):
                 stage_sum = print_stage_breakdown(result, i + 1, num_runs)
                 if stage_sum is not None:
                     non_stage_overhead = e2e_elapsed - stage_sum

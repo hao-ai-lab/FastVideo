@@ -20,18 +20,19 @@ def main():
               "foam nose; soft window light from left, eye-level medium shot.")
     video_path = "https://d2drjpuinn46lb.cloudfront.net/painter_original_edit.mp4"
 
-    generator.generate_video(
-        prompt,
-        negative_prompt="",
-        video_path=video_path,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        height=480,
-        width=832,
-        num_frames=81,
-        fps=24,
-        guidance_scale=5.0,
-    )
+    generator.generate({
+        "prompt": prompt,
+        "negative_prompt": "",
+        "inputs": {"video_path": video_path},
+        "sampling": {
+            "height": 480,
+            "width": 832,
+            "num_frames": 81,
+            "fps": 24,
+            "guidance_scale": 5.0,
+        },
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
 
 if __name__ == "__main__":

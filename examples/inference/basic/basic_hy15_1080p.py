@@ -27,7 +27,11 @@ def main():
               "wide with interest. The playful yet serene atmosphere is complemented by soft "
               "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
 
-    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, negative_prompt="")
+    video = generator.generate({
+        "prompt": prompt,
+        "negative_prompt": "",
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
     prompt2 = ("A majestic lion strides across the golden savanna, its powerful frame "
                "glistening under the warm afternoon sun. The tall grass ripples gently in "
@@ -35,7 +39,11 @@ def main():
                "embodying the raw energy of the wild. Low angle, steady tracking shot, "
                "cinematic.")
 
-    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, negative_prompt="")
+    video2 = generator.generate({
+        "prompt": prompt2,
+        "negative_prompt": "",
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
 
 if __name__ == "__main__":

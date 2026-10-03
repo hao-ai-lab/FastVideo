@@ -21,24 +21,22 @@ def main():
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
               "wide with interest. The playful yet serene atmosphere is complemented by soft "
               "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
-    _ = generator.generate_video(prompt,
-                                 output_path=OUTPUT_PATH,
-                                 save_video=True,
-                                 height=512,
-                                 width=768,
-                                 num_frames=121)
+    _ = generator.generate({
+        "prompt": prompt,
+        "sampling": {"height": 512, "width": 768, "num_frames": 121},
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
     prompt2 = ("A majestic lion strides across the golden savanna, its powerful frame "
                "glistening under the warm afternoon sun. The tall grass ripples gently in "
                "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
                "embodying the raw energy of the wild. Low angle, steady tracking shot, "
                "cinematic.")
-    _ = generator.generate_video(prompt2,
-                                 output_path=OUTPUT_PATH,
-                                 save_video=True,
-                                 height=512,
-                                 width=768,
-                                 num_frames=121)
+    _ = generator.generate({
+        "prompt": prompt2,
+        "sampling": {"height": 512, "width": 768, "num_frames": 121},
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
 
 if __name__ == "__main__":

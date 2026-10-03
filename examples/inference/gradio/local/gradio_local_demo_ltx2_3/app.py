@@ -48,29 +48,47 @@ def main():
         refine_upsampler_path = resolve_refine_upsampler_path(resolved_model_path)
         print(f"Using refine upsampler: {refine_upsampler_path}")
 
-        generators[model_path] = VideoGenerator.from_pretrained(
-            str(resolved_model_path),
-            num_gpus=1,
-            ltx2_refine_enabled=True,
-            ltx2_refine_upsampler_path=str(refine_upsampler_path),
-            ltx2_refine_lora_path="",  # disable refine LoRA for distilled model
-            ltx2_refine_num_inference_steps=2,
-            ltx2_refine_guidance_scale=1.0,
-            ltx2_refine_add_noise=True,
-            pipeline_config=pipeline_config,
-            enable_torch_compile=True,
-            enable_torch_compile_text_encoder=True,
-            torch_compile_kwargs={
-                "backend": "inductor",
-                "fullgraph": True,
-                "mode": "max-autotune-no-cudagraphs",
-                "dynamic": False,
+        generators[model_path] = VideoGenerator.from_config({
+            "model_path": str(resolved_model_path),
+            "engine": {
+                "num_gpus": 1,
+                "compile": {
+                    "enabled": True,
+                    "text_encoder_enabled": True,
+                    "backend": "inductor",
+                    "fullgraph": True,
+                    "mode": "max-autotune-no-cudagraphs",
+                    "dynamic": False,
+                },
+                "offload": {
+                    "dit": False,
+                    "vae": False,
+                    "text_encoder": False,
+                },
             },
-            dit_cpu_offload=False,
-            vae_cpu_offload=False,
-            text_encoder_cpu_offload=False,
-            ltx2_vae_tiling=False,
-        )
+            "pipeline": {
+                "components": {
+                    "upsampler_weights": str(refine_upsampler_path),
+                },
+                "ltx2": {
+                    "refine": {
+                        "lora_path": "",  # disable refine LoRA for distilled model
+                    },
+                },
+                "preset_overrides": {
+                    "refine": {
+                        "enabled": True,
+                        "num_inference_steps": 2,
+                        "guidance_scale": 1.0,
+                        "add_noise": True,
+                    },
+                },
+                "vae_tiling": False,
+                "experimental": {
+                    "pipeline_config": pipeline_config,
+                },
+            },
+        })
         default_params[model_path] = apply_ltx2_defaults(SamplingParam.from_pretrained(str(resolved_model_path)))
     demo = create_gradio_interface(default_params, generators)
     print(f"Starting Gradio frontend at http://{args.host}:{args.port}")

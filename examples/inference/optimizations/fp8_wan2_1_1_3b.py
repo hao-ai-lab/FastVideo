@@ -81,22 +81,32 @@ def main():
     taehv_model = load_taehv(args.taehv_checkpoint) if use_taehv else None
 
     # transformer_quant needs a QuantizationConfig *instance* — the bare string
-    # is not resolved on the from_pretrained kwarg path.
+    # is not resolved on the pipeline.experimental path.
     extra = {} if args.bf16 else {"transformer_quant": get_quantization_config("FP8")(granularity=args.granularity)}
-    generator = VideoGenerator.from_pretrained(
-        args.model,
-        num_gpus=args.num_gpus,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=use_taehv,
-        text_encoder_cpu_offload=False,
-        pin_cpu_memory=False,
-        enable_torch_compile=not args.no_compile,
-        enable_torch_compile_vae=not args.no_compile and not use_taehv,
-        output_type="latent" if use_taehv else "pil",
-        **extra,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": args.model,
+        "engine": {
+            "num_gpus": args.num_gpus,
+            "use_fsdp_inference": False,
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "vae": use_taehv,
+                "text_encoder": False,
+                "pin_cpu_memory": False,
+            },
+            "compile": {
+                "enabled": not args.no_compile,
+                "vae_enabled": not args.no_compile and not use_taehv,
+            },
+        },
+        "pipeline": {
+            "experimental": {
+                "output_type": "latent" if use_taehv else "pil",
+                **extra,
+            },
+        },
+    })
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
               "wide with interest. The playful yet serene atmosphere is complemented by soft "

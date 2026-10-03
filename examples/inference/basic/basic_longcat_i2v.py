@@ -48,33 +48,38 @@ def basic_generation():
     print("LongCat I2V: Basic Generation (50 steps, 480p)")
     print("=" * 60)
 
-    generator = VideoGenerator.from_pretrained(
-        "FastVideo/LongCat-Video-I2V-Diffusers",
-        num_gpus=1,
-        use_fsdp_inference=False,  # set to True if GPU is out of memory
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        enable_bsa=False,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": "FastVideo/LongCat-Video-I2V-Diffusers",
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": False,  # set to True if GPU is out of memory
+            "offload": {
+                "dit": False,
+                "vae": True,
+                "text_encoder": True,
+                "pin_cpu_memory": False,
+            },
+        },
+        "pipeline": {"longcat": {"enable_bsa": False}},
+    })
 
     output_path = "outputs_video/longcat_i2v_basic"
 
-    generator.generate_video(
-        prompt=PROMPT,
-        negative_prompt=NEGATIVE_PROMPT,
-        image_path=IMAGE_PATH,
-        output_path=output_path,
-        save_video=True,
-        height=480,
-        width=480,  # Square
-        num_frames=93,
-        num_inference_steps=50,
-        fps=15,
-        guidance_scale=4.0,
-        seed=SEED,
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "negative_prompt": NEGATIVE_PROMPT,
+        "inputs": {"image_path": IMAGE_PATH},
+        "sampling": {
+            "height": 480,
+            "width": 480,  # Square
+            "num_frames": 93,
+            "num_inference_steps": 50,
+            "fps": 15,
+            "guidance_scale": 4.0,
+            "seed": SEED,
+        },
+        "output": {"output_path": output_path, "save_video": True},
+    })
 
     print(f"\nBasic generation complete! Video saved to: {output_path}")
     generator.shutdown()
@@ -95,35 +100,44 @@ def distill_refine_generation():
     print("\n[Stage 1] Distilled generation (16 steps, 480p)")
     print("-" * 40)
 
-    generator = VideoGenerator.from_pretrained(
-        "FastVideo/LongCat-Video-I2V-Diffusers",
-        num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        enable_bsa=False,
-        lora_path="FastVideo/LongCat-Video-T2V-Distilled-LoRA",
-        lora_nickname="distilled",
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": "FastVideo/LongCat-Video-I2V-Diffusers",
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": False,
+                "vae": True,
+                "text_encoder": True,
+                "pin_cpu_memory": False,
+            },
+        },
+        "pipeline": {
+            "longcat": {"enable_bsa": False},
+            "components": {
+                "lora_path": "FastVideo/LongCat-Video-T2V-Distilled-LoRA",
+                "lora_nickname": "distilled",
+            },
+        },
+    })
 
     distill_output_path = "outputs_video/longcat_i2v_distill"
 
-    generator.generate_video(
-        prompt=PROMPT,
-        negative_prompt=NEGATIVE_PROMPT,
-        image_path=IMAGE_PATH,
-        output_path=distill_output_path,
-        save_video=True,
-        height=480,
-        width=480,  # Square
-        num_frames=93,
-        num_inference_steps=16,
-        fps=15,
-        guidance_scale=1.0,
-        seed=SEED,
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "negative_prompt": NEGATIVE_PROMPT,
+        "inputs": {"image_path": IMAGE_PATH},
+        "sampling": {
+            "height": 480,
+            "width": 480,  # Square
+            "num_frames": 93,
+            "num_inference_steps": 16,
+            "fps": 15,
+            "guidance_scale": 1.0,
+            "seed": SEED,
+        },
+        "output": {"output_path": distill_output_path, "save_video": True},
+    })
 
     print(f"Distilled generation complete! Video saved to: {distill_output_path}")
     generator.shutdown()
@@ -144,40 +158,53 @@ def distill_refine_generation():
     # Note: Refinement uses the T2V model (not I2V) since it's upscaling the generated video
     # For BSA [4, 4, 8]: latent must be divisible by 8
     # 768x768: latent 48x48, 48%8=0 ✓
-    refine_generator = VideoGenerator.from_pretrained(
-        "FastVideo/LongCat-Video-T2V-Diffusers",
-        num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        enable_bsa=True,
-        bsa_sparsity=0.875,
-        bsa_chunk_q=[4, 4, 4],
-        bsa_chunk_k=[4, 4, 4],
-        lora_path="FastVideo/LongCat-Video-T2V-Refinement-LoRA",
-        lora_nickname="refinement",
-    )
+    refine_generator = VideoGenerator.from_config({
+        "model_path": "FastVideo/LongCat-Video-T2V-Diffusers",
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": True,
+                "vae": True,
+                "text_encoder": True,
+                "pin_cpu_memory": False,
+            },
+        },
+        "pipeline": {
+            "longcat": {
+                "enable_bsa": True,
+                "bsa_sparsity": 0.875,
+                "bsa_chunk_q": [4, 4, 4],
+                "bsa_chunk_k": [4, 4, 4],
+            },
+            "components": {
+                "lora_path": "FastVideo/LongCat-Video-T2V-Refinement-LoRA",
+                "lora_nickname": "refinement",
+            },
+        },
+    })
 
     refine_output_path = "outputs_video/longcat_i2v_refine_720p"
 
-    refine_generator.generate_video(
-        prompt=PROMPT,
-        negative_prompt=NEGATIVE_PROMPT,
-        output_path=refine_output_path,
-        save_video=True,
-        refine_from=distill_video_path,
-        t_thresh=0.5,
-        spatial_refine_only=False,
-        num_cond_frames=0,
-        height=720,
-        width=720,
-        num_inference_steps=50,
-        fps=30,
-        guidance_scale=1.0,
-        seed=SEED,
-    )
+    refine_generator.generate({
+        "prompt": PROMPT,
+        "negative_prompt": NEGATIVE_PROMPT,
+        "inputs": {"refine_from": distill_video_path},
+        "sampling": {
+            "height": 720,
+            "width": 720,
+            "num_inference_steps": 50,
+            "fps": 30,
+            "guidance_scale": 1.0,
+            "seed": SEED,
+        },
+        "output": {"output_path": refine_output_path, "save_video": True},
+        "extensions": {
+            "t_thresh": 0.5,
+            "spatial_refine_only": False,
+            "num_cond_frames": 0,
+        },
+    })
 
     print(f"Refinement complete! Video saved to: {refine_output_path}")
     refine_generator.shutdown()

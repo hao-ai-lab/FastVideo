@@ -183,7 +183,7 @@ def main():
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
              "wide with interest. The playful yet serene atmosphere is complemented by soft "
              "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
-    video = generator.generate_video(prompt)
+    video = generator.generate({"prompt": prompt})
 
 if __name__ == "__main__":
     main()

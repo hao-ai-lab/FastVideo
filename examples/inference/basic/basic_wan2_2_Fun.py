@@ -32,13 +32,19 @@ def main():
     image_path = "https://pai-aigc-photog.oss-cn-hangzhou.aliyuncs.com/wan_fun/asset_Wan2_2/v1.0/8.png"
     control_video_path = "https://pai-aigc-photog.oss-cn-hangzhou.aliyuncs.com/wan_fun/asset_Wan2_2/v1.0/pose.mp4"
 
-    video = generator.generate_video(prompt,
-                                     negative_prompt=negative_prompt,
-                                     image_path=image_path,
-                                     video_path=control_video_path,
-                                     output_path=OUTPUT_PATH,
-                                     output_video_name=OUTPUT_NAME,
-                                     save_video=True)
+    video = generator.generate({
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "inputs": {
+            "image_path": image_path,
+            "video_path": control_video_path,
+        },
+        "output": {
+            "output_path": OUTPUT_PATH,
+            "output_video_name": OUTPUT_NAME,
+            "save_video": True,
+        },
+    })
 
 
 if __name__ == "__main__":

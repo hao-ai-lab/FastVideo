@@ -38,14 +38,18 @@ def main() -> None:
         num_gpus=1,
     )
     output_path = "outputs_audio/stable_audio_small/output_stable_audio_small.wav"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        # Small variant trains on a ~11.9s window — keep `audio_end_in_s`
-        # at or below that.
-        audio_end_in_s=6.0,
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "output": {
+            "output_path": output_path,
+            "save_video": True,
+        },
+        "extensions": {
+            # Small variant trains on a ~11.9s window — keep `audio_end_in_s`
+            # at or below that.
+            "audio_end_in_s": 6.0,
+        },
+    })
     generator.shutdown()
 
 

@@ -65,19 +65,22 @@ def main():
     actions = create_action_presets(num_frames, keyboard_dim=config["keyboard_dim"])
     grid_sizes = torch.tensor([150, 44, 80])
 
-    generator.generate_video(
-        prompt="",
-        image_path=config["image_url"],
-        mouse_cond=actions["mouse"].unsqueeze(0),
-        keyboard_cond=actions["keyboard"].unsqueeze(0),
-        grid_sizes=grid_sizes,
-        num_frames=num_frames,
-        height=352,
-        width=640,
-        num_inference_steps=50,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-    )
+    generator.generate({
+        "prompt": "",
+        "inputs": {
+            "image_path": config["image_url"],
+            "mouse_cond": actions["mouse"].unsqueeze(0),
+            "keyboard_cond": actions["keyboard"].unsqueeze(0),
+            "grid_sizes": grid_sizes,
+        },
+        "sampling": {
+            "num_frames": num_frames,
+            "height": 352,
+            "width": 640,
+            "num_inference_steps": 50,
+        },
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
 
 if __name__ == "__main__":

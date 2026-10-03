@@ -61,15 +61,19 @@ def main() -> None:
         num_gpus=1,
     )
     output_path = "outputs_audio/stable_audio_basic/output_stable_audio.wav"
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=output_path,
-        save_video=True,
-        # 6-second clip; the model max is ~47.5s.
-        audio_end_in_s=6.0,
+    generator.generate({
+        "prompt": PROMPT,
+        "output": {
+            "output_path": output_path,
+            "save_video": True,
+        },
+        "extensions": {
+            # 6-second clip; the model max is ~47.5s.
+            "audio_end_in_s": 6.0,
+        },
         # The registered preset gives 100 steps + CFG=7.0 by default;
         # override num_inference_steps / guidance_scale here for QA.
-    )
+    })
     generator.shutdown()
 
 

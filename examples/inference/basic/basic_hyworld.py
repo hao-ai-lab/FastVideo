@@ -47,19 +47,22 @@ def main():
     # Generate video
     # The pose string is automatically converted to camera matrices by the pipeline
     print("\nGenerating video...")
-    generator.generate_video(
-        prompt=args.prompt,
-        image_path=args.image,
-        pose=args.pose,  # Camera trajectory control
-        output_path=args.output_path,
-        save_video=True,
-        negative_prompt="",
-        num_frames=args.num_frames,
-        fps=24,
-        height=HEIGHT,
-        width=WIDTH,
-        seed=args.seed,
-    )
+    generator.generate({
+        "prompt": args.prompt,
+        "negative_prompt": "",
+        "inputs": {
+            "image_path": args.image,
+            "pose": args.pose,  # Camera trajectory control
+        },
+        "sampling": {
+            "num_frames": args.num_frames,
+            "fps": 24,
+            "height": HEIGHT,
+            "width": WIDTH,
+            "seed": args.seed,
+        },
+        "output": {"output_path": args.output_path, "save_video": True},
+    })
 
     print(f"\nVideo saved to: {args.output_path}")
 

@@ -62,14 +62,18 @@ def main() -> None:
         "FastVideo/stable-audio-open-1.0-Diffusers",
         num_gpus=1,
     )
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path="outputs_audio/stable_audio_a2a/output_a2a.wav",
-        save_video=True,
-        audio_end_in_s=6.0,
-        init_audio=INIT_AUDIO_PATH,
-        init_audio_strength=INIT_AUDIO_STRENGTH,
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "output": {
+            "output_path": "outputs_audio/stable_audio_a2a/output_a2a.wav",
+            "save_video": True,
+        },
+        "extensions": {
+            "audio_end_in_s": 6.0,
+            "init_audio": INIT_AUDIO_PATH,
+            "init_audio_strength": INIT_AUDIO_STRENGTH,
+        },
+    })
     generator.shutdown()
 
 

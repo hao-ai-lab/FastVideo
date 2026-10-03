@@ -68,23 +68,26 @@ def main():
         pin_cpu_memory=True,
     )
 
-    video = generator.generate_video(
-        args.prompt,
-        negative_prompt=args.negative_prompt,
-        image_path=args.image_path,
-        trajectory_type=args.trajectory,
-        movement_distance=args.movement_distance,
-        camera_rotation=args.camera_rotation,
-        height=args.height,
-        width=args.width,
-        num_frames=args.num_frames,
-        num_inference_steps=args.num_inference_steps,
-        guidance_scale=args.guidance_scale,
-        fps=24,
-        seed=args.seed,
-        output_path=args.output_path,
-        save_video=True,
-    )
+    video = generator.generate({
+        "prompt": args.prompt,
+        "negative_prompt": args.negative_prompt,
+        "inputs": {"image_path": args.image_path},
+        "sampling": {
+            "height": args.height,
+            "width": args.width,
+            "num_frames": args.num_frames,
+            "num_inference_steps": args.num_inference_steps,
+            "guidance_scale": args.guidance_scale,
+            "fps": 24,
+            "seed": args.seed,
+        },
+        "output": {"output_path": args.output_path, "save_video": True},
+        "extensions": {
+            "trajectory_type": args.trajectory,
+            "movement_distance": args.movement_distance,
+            "camera_rotation": args.camera_rotation,
+        },
+    })
 
     generator.shutdown()
 

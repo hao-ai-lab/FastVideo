@@ -35,16 +35,12 @@ def main():
         spatial_scale=8,
     )
 
-    generator.generate_video(
-        prompt,
-        image_path=image_path,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        num_frames=num_frames,
-        height=480,
-        width=832,
-        c2ws_plucker_emb=c2ws_plucker_emb,
-    )
+    generator.generate({
+        "prompt": prompt,
+        "inputs": {"image_path": image_path, "c2ws_plucker_emb": c2ws_plucker_emb},
+        "sampling": {"num_frames": num_frames, "height": 480, "width": 832},
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
 
 if __name__ == "__main__":

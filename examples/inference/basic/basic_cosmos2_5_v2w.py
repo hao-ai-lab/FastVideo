@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo import VideoGenerator
-from fastvideo.api.sampling_param import SamplingParam
 
 
 def main():
@@ -16,8 +15,6 @@ def main():
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
     )
-
-    sampling_param = SamplingParam.from_pretrained(model_path)
 
     # video2world example from official repo
     video_path = "assets/videos/robot_pouring.mp4"
@@ -36,14 +33,12 @@ def main():
         "The final frame captures the robotic arm with the pitcher finishing the pour, with the glass now filled to a higher level, while the pitcher is slightly tilted but still held securely by the gripper."
     )
 
-    generator.generate_video(
-        prompt,
-        sampling_param=sampling_param,
-        video_path=str(video_path),
-        num_cond_frames=1,
-        output_path="outputs_video/cosmos2_5_v2w.mp4",
-        save_video=True,
-    )
+    generator.generate({
+        "prompt": prompt,
+        "inputs": {"video_path": str(video_path)},
+        "output": {"output_path": "outputs_video/cosmos2_5_v2w.mp4", "save_video": True},
+        "extensions": {"num_cond_frames": 1},
+    })
 
     generator.shutdown()
 

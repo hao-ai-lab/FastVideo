@@ -57,14 +57,18 @@ def _generate_videos(rows: list[dict], videos_dir: Path, model: str, num_gpus: i
     gen = VideoGenerator.from_pretrained(model, num_gpus=num_gpus)
     try:
         for row, out_path in todo:
-            gen.generate_video(
-                prompt=row["prompt"],
-                output_path=str(out_path),
-                save_video=True,
-                num_frames=num_frames,
-                height=height,
-                width=width,
-            )
+            gen.generate({
+                "prompt": row["prompt"],
+                "sampling": {
+                    "num_frames": num_frames,
+                    "height": height,
+                    "width": width,
+                },
+                "output": {
+                    "output_path": str(out_path),
+                    "save_video": True,
+                },
+            })
     finally:
         gen.shutdown()
 

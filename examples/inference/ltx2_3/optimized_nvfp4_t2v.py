@@ -95,60 +95,70 @@ def main() -> None:
         "dynamic": False,
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_root,
-        num_gpus=1,
-        pipeline_config=pipeline_config,
-        # Compile the DiT, text encoder, and VAE — all three stages benefit,
-        # and the VAE's codec submodules compile cleanly under fullgraph.
-        enable_torch_compile=True,
-        enable_torch_compile_text_encoder=True,
-        enable_torch_compile_vae=True,
-        torch_compile_kwargs=torch_compile_kwargs,
-        torch_compile_kwargs_vae=torch_compile_kwargs,
-        # Keep everything resident — no CPU offload for serving-style runs.
-        dit_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-        vae_cpu_offload=False,
-        ltx2_vae_tiling=False,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": model_root,
+        "engine": {
+            "num_gpus": 1,
+            # Compile the DiT, text encoder, and VAE — all three stages benefit,
+            # and the VAE's codec submodules compile cleanly under fullgraph.
+            "compile": {
+                "enabled": True,
+                "text_encoder_enabled": True,
+                "vae_enabled": True,
+                **torch_compile_kwargs,
+                "vae_kwargs": torch_compile_kwargs,
+            },
+            # Keep everything resident — no CPU offload for serving-style runs.
+            "offload": {
+                "dit": False,
+                "text_encoder": False,
+                "vae": False,
+            },
+        },
+        "pipeline": {
+            "vae_tiling": False,
+            "experimental": {"pipeline_config": pipeline_config},
+        },
+    })
 
-    common_kwargs = dict(
-        prompt=PROMPT,
-        negative_prompt="",  # distilled is CFG-free; no negative needed
-        guidance_scale=1.0,  # CFG=1 for distilled
-        height=1280,
-        width=832,  # portrait runway aspect
-        num_frames=121,
-        fps=24,  # ~5s clip
-        # Single-stage 8-step distilled sampling — the validated preset for
-        # this checkpoint (no two-stage refine; the NVFP4 deploy contract
-        # runs the distilled single-stage recipe).
-        num_inference_steps=8,
-        save_video=True,
-    )
+    common_request = {
+        "prompt": PROMPT,
+        "negative_prompt": "",  # distilled is CFG-free; no negative needed
+        "sampling": {
+            "guidance_scale": 1.0,  # CFG=1 for distilled
+            "height": 1280,
+            "width": 832,  # portrait runway aspect
+            "num_frames": 121,
+            "fps": 24,  # ~5s clip
+            # Single-stage 8-step distilled sampling — the validated preset for
+            # this checkpoint (no two-stage refine; the NVFP4 deploy contract
+            # runs the distilled single-stage recipe).
+            "num_inference_steps": 8,
+        },
+        "output": {"save_video": True},
+    }
 
     try:
         # Warmup: pays cold compile + first-shape guard work, untimed.
         print("\n[warmup] compiling + generating…")
-        generator.generate_video(
-            output_path=str(OUTPUT_DIR / "_warmup.mp4"),
-            seed=7,
-            **common_kwargs,
-        )
+        generator.generate({
+            **common_request,
+            "sampling": {**common_request["sampling"], "seed": 7},
+            "output": {**common_request["output"], "output_path": str(OUTPUT_DIR / "_warmup.mp4")},
+        })
         (OUTPUT_DIR / "_warmup.mp4").unlink(missing_ok=True)
 
         # Measured run.
         out_path = OUTPUT_DIR / "output_ltx2_3_nvfp4_t2v.mp4"
         print(f"\n[measured] generating: {out_path}")
         t0 = time.perf_counter()
-        result = generator.generate_video(
-            output_path=str(out_path),
-            seed=2002,
-            **common_kwargs,
-        )
+        result = generator.generate({
+            **common_request,
+            "sampling": {**common_request["sampling"], "seed": 2002},
+            "output": {**common_request["output"], "output_path": str(out_path)},
+        })
         wall = time.perf_counter() - t0
-        e2e = (result.get("e2e_latency") if isinstance(result, dict) else None) or wall
+        e2e = result.extra.get("e2e_latency") or wall
         print(f"[measured] e2e={e2e:.2f}s wall={wall:.2f}s")
     finally:
         generator.shutdown()

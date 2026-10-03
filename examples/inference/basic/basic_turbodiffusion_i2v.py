@@ -25,13 +25,19 @@ def main() -> None:
     # Use an example image path
     image_path = "https://huggingface.co/datasets/YiYiXu/testing-images/resolve/main/wan_i2v_input.JPG"
 
-    video = generator.generate_video(
-        prompt,
-        image_path=image_path,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        seed=42,
-    )
+    video = generator.generate({
+        "prompt": prompt,
+        "inputs": {
+            "image_path": image_path,
+        },
+        "sampling": {
+            "seed": 42,
+        },
+        "output": {
+            "output_path": OUTPUT_PATH,
+            "save_video": True,
+        },
+    })
 
 
 if __name__ == "__main__":

@@ -100,14 +100,18 @@ def generate(args: argparse.Namespace) -> Path:
     generator = VideoGenerator.from_pretrained(args.model, num_gpus=args.num_gpus)
     try:
         print(f"[gen] generating to {out}...")
-        generator.generate_video(
-            prompt=args.prompt,
-            output_path=str(out),
-            save_video=True,
-            num_frames=args.num_frames,
-            height=args.height,
-            width=args.width,
-        )
+        generator.generate({
+            "prompt": args.prompt,
+            "sampling": {
+                "num_frames": args.num_frames,
+                "height": args.height,
+                "width": args.width,
+            },
+            "output": {
+                "output_path": str(out),
+                "save_video": True,
+            },
+        })
     finally:
         generator.shutdown()
     return out

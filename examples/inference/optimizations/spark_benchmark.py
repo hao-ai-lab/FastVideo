@@ -51,7 +51,6 @@ def _p(msg: str) -> None:
 def bench_generation(args) -> None:
     """Part A: median few-step generation time on a distilled model."""
     from fastvideo import VideoGenerator
-    from fastvideo.api.sampling_param import SamplingParam
 
     # VSA auto-routes to the Triton kernel on sm_121; do NOT force TORCH_SDPA on a
     # VSA checkpoint (the SDPA path builds a model without the gate weights the
@@ -60,26 +59,23 @@ def bench_generation(args) -> None:
 
     _p(f"loading {args.model} ...")
     load_t0 = time.perf_counter()
-    generator = VideoGenerator.from_pretrained(
-        args.model,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        # Leave offload at these defaults: "CPU" offload is the same unified RAM
-        # on the GB10, so the win is tiling + sane resolution, not offloading.
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        VSA_sparsity=0.8,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": args.model,
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": False,
+            # Leave offload at these defaults: "CPU" offload is the same unified RAM
+            # on the GB10, so the win is tiling + sane resolution, not offloading.
+            "offload": {
+                "text_encoder": True,
+                "pin_cpu_memory": True,
+                "dit": False,
+                "vae": False,
+            },
+            "attention": {"vsa_sparsity": 0.8},
+        },
+    })
     _p(f"model loaded in {time.perf_counter() - load_t0:.1f}s")
-
-    sampling_param = SamplingParam.from_pretrained(args.model)
-    sampling_param.num_frames = args.frames
-    sampling_param.height = args.height
-    sampling_param.width = args.width
-    sampling_param.num_inference_steps = args.steps
-    sampling_param.seed = args.seed
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, "
               "its eyes wide with interest. Soft natural light, warm cheerful tones, "
@@ -88,17 +84,25 @@ def bench_generation(args) -> None:
     def _gen():
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        video = generator.generate_video(prompt, output_path=args.out, save_video=True, sampling_param=sampling_param)
+        video = generator.generate({
+            "prompt": prompt,
+            "sampling": {
+                "num_frames": args.frames,
+                "height": args.height,
+                "width": args.width,
+                "num_inference_steps": args.steps,
+                "seed": args.seed,
+            },
+            "output": {"output_path": args.out, "save_video": True},
+        })
         torch.cuda.synchronize()
-        # generate_video returns a plain dict (legacy result), not an object —
-        # attribute access would silently fall back to wall time / None.
-        dt = video.get("generation_time") if isinstance(video, dict) else None
+        dt = video.generation_time
         if dt is None:
             dt = time.perf_counter() - t0
         # Peak memory is measured *inside the worker process* that runs the
         # pipeline and surfaced on the result; reading torch's allocator in this
         # (main) process would report ~0 because the allocations aren't here.
-        peak = video.get("peak_memory_mb") if isinstance(video, dict) else None
+        peak = video.peak_memory_mb
         return dt, peak
 
     for _ in range(args.warmup):

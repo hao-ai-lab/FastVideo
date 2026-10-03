@@ -83,24 +83,23 @@ def main() -> None:
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    init_kwargs = {
-        "num_gpus": args.num_gpus,
-        "workload_type": "t2i",
-        "sp_size": 1,
-        "tp_size": 1,
-        "dit_cpu_offload": False,
-        "dit_layerwise_offload": False,
-        "text_encoder_cpu_offload": False,
-        "vae_cpu_offload": False,
-        "image_encoder_cpu_offload": False,
-        "pin_cpu_memory": False,
-        "use_fsdp_inference": False,
-    }
-
-    generator = VideoGenerator.from_pretrained(
-        model_path=args.model_path,
-        **init_kwargs,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": args.model_path,
+        "engine": {
+            "num_gpus": args.num_gpus,
+            "parallelism": {"sp_size": 1, "tp_size": 1},
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "text_encoder": False,
+                "vae": False,
+                "image_encoder": False,
+                "pin_cpu_memory": False,
+            },
+            "use_fsdp_inference": False,
+        },
+        "pipeline": {"workload_type": "t2i"},
+    })
     try:
         for i, prompt in enumerate(prompts):
             seed = args.seed + i
@@ -109,21 +108,23 @@ def main() -> None:
             output_path = os.path.join(args.out_dir, f"{filename_base}.png")
             print(f"[flux] prompt_idx={i} seed={seed} output_path={output_path}")
 
-            generation_kwargs = {
-                "output_path": output_path,
-                "height": args.height,
-                "width": args.width,
-                "num_frames": 1,
-                "fps": 1,
-                "num_inference_steps": args.steps,
-                "guidance_scale": args.guidance,
-                "use_embedded_guidance": True,
-                "true_cfg_scale": 1.0,
-                "seed": seed,
-                "save_video": True,
+            request = {
+                "prompt": prompt,
+                "sampling": {
+                    "height": args.height,
+                    "width": args.width,
+                    "num_frames": 1,
+                    "fps": 1,
+                    "num_inference_steps": args.steps,
+                    "guidance_scale": args.guidance,
+                    "use_embedded_guidance": True,
+                    "true_cfg_scale": 1.0,
+                    "seed": seed,
+                },
+                "output": {"output_path": output_path, "save_video": True},
             }
 
-            generator.generate_video(prompt, **generation_kwargs)
+            generator.generate(request)
 
         print(f"[flux] done. outputs written to: {args.out_dir}")
     finally:

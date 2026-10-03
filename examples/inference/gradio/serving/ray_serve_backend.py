@@ -136,10 +136,10 @@ def setup_model_environment(model_path: str) -> None:
 
 
 def process_generation_result(result: Any) -> tuple[List[np.ndarray], float, List[str], List[float]]:
-    frames = result if isinstance(result, list) else result.get("frames", [])
-    generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
+    frames = result if isinstance(result, list) else result.frames
+    generation_time = result.generation_time
 
-    logging_info = result.get("logging_info", None)
+    logging_info = result.logging_info
     if logging_info:
         stage_names = logging_info.get_execution_order()
         stage_execution_times = [
@@ -188,18 +188,28 @@ class BaseModelDeployment:
         from fastvideo.api.sampling_param import SamplingParam
 
         print(f"Initializing model: {self.model_path}")
-        self.generator = VideoGenerator.from_pretrained(
-            model_path=self.model_path,
-            num_gpus=1,
-            use_fsdp_inference=True,
-            text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
-            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125],  # TODO: hardocde for I2V
-            dit_precision="fp32",  # TODO: hardocde for I2V
-            dit_cpu_offload=config["dit_cpu_offload"],
-            vae_cpu_offload=config["vae_cpu_offload"],
-            VSA_sparsity=config["VSA_sparsity"],
-            enable_stage_verification=False,
-        )
+        self.generator = VideoGenerator.from_config({
+            "model_path": self.model_path,
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": True,
+                "offload": {
+                    "text_encoder": config["text_encoder_cpu_offload"],
+                    "dit": config["dit_cpu_offload"],
+                    "vae": config["vae_cpu_offload"],
+                },
+                "precision": {
+                    "dit": "fp32",  # TODO: hardocde for I2V
+                },
+                "attention": {
+                    "vsa_sparsity": config["VSA_sparsity"],
+                },
+                "enable_stage_verification": False,
+            },
+            "pipeline": {
+                "dmd_denoising_steps": [1000, 850, 700, 550, 350, 275, 200, 125],  # TODO: hardocde for I2V
+            },
+        })
         self.default_params = SamplingParam.from_pretrained(self.model_path)
         self.default_params.seed = 1000
         self.default_params.num_frames = 73
@@ -224,13 +234,19 @@ class BaseModelDeployment:
                 )
 
         inference_start_time = time.time()
-        result = self.generator.generate_video(
-            prompt=video_request.prompt,
-            sampling_param=params,
-            image_path=image_path,
-            save_video=False,
-            return_frames=True,
-        )
+        result = self.generator.generate({
+            "prompt": video_request.prompt,
+            "negative_prompt": params.negative_prompt,
+            "inputs": {"image_path": image_path},
+            "sampling": {
+                "seed": params.seed,
+                "guidance_scale": params.guidance_scale,
+                "num_frames": params.num_frames,
+                "height": params.height,
+                "width": params.width,
+            },
+            "output": {"save_video": False, "return_frames": True},
+        })
         inference_time = time.time() - inference_start_time
 
         frames, generation_time, stage_names, stage_execution_times = process_generation_result(result)

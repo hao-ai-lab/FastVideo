@@ -53,18 +53,22 @@ def main():
     print(f"Mode: {mode.upper()}")
 
     # transformer_quant needs a QuantizationConfig *instance* — the bare string
-    # is not resolved on the from_pretrained kwarg path.
+    # is not resolved on the pipeline.experimental path.
     extra = {} if args.bf16 else {"transformer_quant": get_quantization_config(args.quant_method)()}
-    generator = VideoGenerator.from_pretrained(
-        args.model,
-        num_gpus=args.num_gpus,
-        use_fsdp_inference=args.bf16,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        enable_torch_compile=args.compile,
-        **extra,
-    )
+    generator = VideoGenerator.from_config({
+        "model_path": args.model,
+        "engine": {
+            "num_gpus": args.num_gpus,
+            "use_fsdp_inference": args.bf16,
+            "offload": {
+                "dit": False,
+                "vae": True,
+                "text_encoder": True,
+            },
+            "compile": {"enabled": args.compile},
+        },
+        "pipeline": {"experimental": extra},
+    })
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
               "wide with interest. The playful yet serene atmosphere is complemented by soft "

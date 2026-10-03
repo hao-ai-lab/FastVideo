@@ -95,23 +95,24 @@ def main():
     prompt = DEFAULT_I2V_PROMPT if is_i2v else DEFAULT_PROMPTS["temple"]
     print(f"Mode: {'I2V' if is_i2v else 'T2V'}, prompt: {prompt[:60]}...")
 
-    gen_kw = dict(
-        prompt=prompt,
-        negative_prompt="",
-        camera_states=camera_states,
-        height=height,
-        width=width,
-        num_frames=num_frames,
-        num_inference_steps=50,
-        guidance_scale=6.0,
-        seed=42,
-        fps=24,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-    )
+    request = {
+        "prompt": prompt,
+        "negative_prompt": "",
+        "sampling": {
+            "height": height,
+            "width": width,
+            "num_frames": num_frames,
+            "num_inference_steps": 50,
+            "guidance_scale": 6.0,
+            "seed": 42,
+            "fps": 24,
+        },
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+        "extensions": {"camera_states": camera_states},
+    }
     if is_i2v:
-        gen_kw["image_path"] = image_path
-    generator.generate_video(**gen_kw)
+        request["inputs"] = {"image_path": image_path}
+    generator.generate(request)
 
 
 if __name__ == "__main__":

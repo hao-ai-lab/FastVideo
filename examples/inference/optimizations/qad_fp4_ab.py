@@ -101,27 +101,33 @@ def build_generator(fp4_linear: bool):
         from fastvideo.layers.quantization.nvfp4_qat_config import NVFP4QATConfig
         pipeline_config.dit_config.quant_config = NVFP4QATConfig()
 
-    extra_kwargs = {}
+    components = {}
     distilled = resolve_distilled_weights(_env("QAD_DISTILLED", DEFAULT_DISTILLED))
     if distilled:
         print(f"[qad] distilled weights: {distilled}")
-        extra_kwargs["init_weights_from_safetensors"] = distilled
+        components["transformer_weights"] = distilled
 
     # Keep everything resident (the 1.3B QAD model + FP4 fits the GB10's unified
     # memory); real Wan VAE decode for a faithful quality read (no TAEHV).
-    return VideoGenerator.from_pretrained(
-        model_id,
-        pipeline_config=pipeline_config,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
-        pin_cpu_memory=False,
-        enable_torch_compile=False,  # eager: isolate the FP4 effect, no compile noise
-        **extra_kwargs,
-    )
+    return VideoGenerator.from_config({
+        "model_path": model_id,
+        "engine": {
+            "num_gpus": 1,
+            "use_fsdp_inference": False,
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "vae": False,
+                "text_encoder": False,
+                "pin_cpu_memory": False,
+            },
+            "compile": {"enabled": False},  # eager: isolate the FP4 effect, no compile noise
+        },
+        "pipeline": {
+            "components": components,
+            "experimental": {"pipeline_config": pipeline_config},
+        },
+    })
 
 
 def main() -> None:

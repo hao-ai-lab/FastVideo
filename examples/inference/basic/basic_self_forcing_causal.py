@@ -1,6 +1,6 @@
 import os
 import time
-from fastvideo import VideoGenerator, SamplingParam
+from fastvideo import VideoGenerator
 
 OUTPUT_PATH = "video_samples_causal"
 
@@ -20,12 +20,13 @@ def main():
         dit_cpu_offload=False,
     )
 
-    sampling_param = SamplingParam.from_pretrained(model_name)
-
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
               "wide with interest. The playful yet serene atmosphere is complemented by soft "
               "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
-    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
+    video = generator.generate({
+        "prompt": prompt,
+        "output": {"output_path": OUTPUT_PATH, "save_video": True},
+    })
 
 
 if __name__ == "__main__":

@@ -57,15 +57,19 @@ def generate_one_ltx2_video() -> str:
         "Davids048/LTX2-Base-Diffusers",
         num_gpus=1,
     )
-    generator.generate_video(
-        prompt=PROMPT,
-        output_path=OUTPUT_PATH,
-        save_video=True,
-        num_frames=121,  # ~5s @ 24 fps — long enough for audio.desync (Synchformer ≥14 segments)
-        height=480,
-        width=832,
-        fps=24,
-    )
+    generator.generate({
+        "prompt": PROMPT,
+        "sampling": {
+            "num_frames": 121,  # ~5s @ 24 fps — long enough for audio.desync (Synchformer ≥14 segments)
+            "height": 480,
+            "width": 832,
+            "fps": 24,
+        },
+        "output": {
+            "output_path": OUTPUT_PATH,
+            "save_video": True,
+        },
+    })
     generator.shutdown()
     torch.cuda.empty_cache()
     return OUTPUT_PATH

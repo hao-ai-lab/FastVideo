@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo import VideoGenerator
-from fastvideo.api.sampling_param import SamplingParam
 
 
 def main():
@@ -17,8 +16,6 @@ def main():
         pin_cpu_memory=True,
     )
 
-    sampling_param = SamplingParam.from_pretrained(model_path)
-
     # image2world example from official repo
     image_path = "assets/images/bus_terminal.jpg"
 
@@ -32,14 +29,12 @@ def main():
         "It then comes to a smooth stop, resuming its position in line. "
         "Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene.")
 
-    generator.generate_video(
-        prompt,
-        sampling_param=sampling_param,
-        image_path=str(image_path),
-        num_cond_frames=1,
-        output_path="outputs_video/cosmos2_5_i2w.mp4",
-        save_video=True,
-    )
+    generator.generate({
+        "prompt": prompt,
+        "inputs": {"image_path": str(image_path)},
+        "output": {"output_path": "outputs_video/cosmos2_5_i2w.mp4", "save_video": True},
+        "extensions": {"num_cond_frames": 1},
+    })
 
     generator.shutdown()
 
