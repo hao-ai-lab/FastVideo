@@ -1390,6 +1390,8 @@ def mlx_h3_dit_from_diffusers_safetensors(
     for shard in _safetensors_shards(transformer_path):
         shard_arrays = mx.load(str(shard))
         for key, source in shard_arrays.items():
+            if key.endswith(".weight_scale"):
+                continue  # paired with its FP8 weight
             if _is_ignored_dense_key(key, include_vsa=include_vsa):
                 continue
             if temb is not None and (key.startswith("time_embedder.") or key == "adaln_basis.weight"):
@@ -1404,7 +1406,17 @@ def mlx_h3_dit_from_diffusers_safetensors(
             factorized_adaln = config.get("adaln_rank") is not None and (".adaln_proj." in key or key.startswith(
                 ("norm_out.linear.", "adaln_basis.")))
             target_dtype = mx.float32 if keep_fp32 else (mx.float16 if factorized_adaln else cast_dtype)
-            array = _load_array(source, target_dtype)
+            if source.dtype == mx.uint8 and key.endswith(".weight"):
+                scale_key = key + "_scale"
+                if scale_key not in shard_arrays:
+                    raise KeyError(f"FP8 weight {key} needs {scale_key} in the same safetensors shard")
+                scale = shard_arrays[scale_key].astype(mx.float32)
+                if scale.size != source.shape[0]:
+                    raise ValueError(f"FP8 scale for {key} has {scale.size} entries, expected {source.shape[0]}")
+                array = (mx.from_fp8(source, dtype=mx.float16) * scale.reshape(-1, 1)).astype(target_dtype)
+                mx.eval(array)
+            else:
+                array = _load_array(source, target_dtype)
             if temb is not None and ".adaln_proj.linear." in key:
                 _, index_str, sub = key.split(".", 2)
                 index = int(index_str)

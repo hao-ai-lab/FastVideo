@@ -18,6 +18,11 @@ Add ``--include-vsa`` to keep them, quantize them with the selected affine
 INT8/INT6/INT4 grid, and record ``vsa.capable`` in the manifest. Write VSA
 checkpoints to a new directory — do not overwrite an existing dense export.
 
+An FP8 transformer with per-channel ``weight_scale`` can also be a source.
+The loader dequantizes each FP8 matrix before applying the requested MLX
+quantization. This saves download bytes but quantizes twice; compare its clips
+with the BF16-sourced export before using it for release.
+
     python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \\
         --model-root ~/models/FastH3-Preview-v0.2/transformer \\
         --out ~/models/FastH3-MLX-vsa \\
