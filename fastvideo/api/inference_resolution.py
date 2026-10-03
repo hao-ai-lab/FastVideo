@@ -31,7 +31,8 @@ from typing import Any, get_args
 
 import fastvideo.envs as envs
 from fastvideo.api.parser import parse_config
-from fastvideo.api.resolution import ResolutionStep, ResolutionView, ResolvedGeneratorConfig, resolve_generator_config
+from fastvideo.api.resolution import (ResolutionStep, ResolutionView, ResolvedGeneratorConfig, resolve_generator_config,
+                                      thaw)
 from fastvideo.api.schema import ExecutionMode, GeneratorConfig, WorkloadType
 from fastvideo.logger import init_logger
 
@@ -303,6 +304,21 @@ def warn_deprecated_environment_variables(view: ResolutionView) -> dict[str, Any
     return {}
 
 
+def torch_compile_kwargs(resolved_config: ResolvedGeneratorConfig) -> dict[str, Any]:
+    """The keyword arguments for ``torch.compile`` that ``engine.compile`` describes.
+
+    ``backend``, ``fullgraph``, ``mode``, and ``dynamic`` are included when they are set; ``extras`` is merged on top.
+    """
+    compile_config = resolved_config.engine.compile
+    kwargs: dict[str, Any] = {}
+    for key in ("backend", "fullgraph", "mode", "dynamic"):
+        value = getattr(compile_config, key)
+        if value is not None:
+            kwargs[key] = value
+    kwargs.update(thaw(compile_config.extras))
+    return kwargs
+
+
 # Values that runtime code uses for typed fields that no earlier step decided. ``pipeline.ltx2.refine.*`` and
 # ``engine.offload.lazy_module_load`` are not listed: ``None`` there means "decide later" (the LTX-2 checkpoint defaults
 # and the device policy).
@@ -508,6 +524,7 @@ def _non_default_fields(value: Any, default: Any) -> dict[str, Any]:
 
 
 __all__ = [
+    "torch_compile_kwargs",
     "ENVIRONMENT_STEPS",
     "FLAT_INPUT_STEPS",
     "VALIDATION_STEPS",

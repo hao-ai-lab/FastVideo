@@ -139,6 +139,17 @@ def _freeze(value: Any) -> Any:
     return deepcopy(value)
 
 
+def thaw(value: Any) -> Any:
+    """Mutable copy of a value read from a resolved config: mapping proxies become dicts, tuples become lists."""
+    if isinstance(value, Mapping):
+        return {key: thaw(child) for key, child in value.items()}
+    if isinstance(value, tuple):
+        return [thaw(child) for child in value]
+    if isinstance(value, frozenset):
+        return {thaw(child) for child in value}
+    return deepcopy(value)
+
+
 def _split(path: str) -> list[str] | None:
     """Dotted path parts, or ``None`` when ``path`` is not a non-empty dotted string."""
     if not isinstance(path, str) or not path or any(not part for part in path.split(".")):
@@ -564,4 +575,5 @@ __all__ = [
     "ResolvedRequest",
     "resolve_generation_request",
     "resolve_generator_config",
+    "thaw",
 ]
