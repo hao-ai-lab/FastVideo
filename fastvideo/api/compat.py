@@ -398,6 +398,17 @@ def request_to_batch_extra(request: GenerationRequest) -> dict[str, Any]:
     }
 
 
+def explicit_request_raw(request: GenerationRequest) -> dict[str, Any]:
+    """The fields that the caller or operator wrote in ``request``, as a nested raw request mapping.
+
+    Like :func:`explicit_request_updates`, it uses the paths tracked during parsing, but it keeps the sections
+    (``sampling``, ``stage_overrides``, and so on) instead of flattening them.
+    """
+    assert hasattr(request, EXPLICIT_PATHS_ATTR), ("GenerationRequest reached explicit_request_raw without tracking; "
+                                                   "route it through normalize_generation_request or parse_config")
+    return _build_sparse_raw_from_paths(request, get_explicit_paths(request))
+
+
 def explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
     """Project a ``GenerationRequest`` down to *explicitly set* fields only.
 
@@ -572,6 +583,7 @@ def _validate_batched_input_length(
 
 __all__ = [
     "REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS",
+    "explicit_request_raw",
     "explicit_request_updates",
     "generator_config_to_fastvideo_args",
     "legacy_from_pretrained_to_config",

@@ -10,8 +10,8 @@ from typing import Any
 
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
-    explicit_request_updates,
-    legacy_generate_call_to_request,
+    explicit_request_raw,
+    normalize_generation_request,
     request_to_sampling_param,
 )
 from fastvideo.api.schema import GenerationRequest
@@ -29,6 +29,36 @@ from fastvideo.registry import get_preset_selection
 
 class RequestAdaptationError(ValueError):
     """The transport request cannot be represented by the loaded pipeline."""
+
+
+# Field that build_generation_request collects from the OpenAI request -> its GenerationRequest path. Any other
+# collected field is a model-specific value, which the pipeline reads from request.extensions.
+_REQUEST_PATHS = {
+    "negative_prompt": "negative_prompt",
+    "enable_teacache": "runtime.enable_teacache",
+    **{
+        name: f"sampling.{name}"
+        for name in ("width", "height", "fps", "num_frames", "seed", "num_inference_steps", "guidance_scale", "guidance_scale_2", "true_cfg_scale", "max_sequence_length", "boundary_ratio", "num_videos_per_prompt")
+    },
+    **{
+        name: f"inputs.{name}"
+        for name in ("image_path", "last_image", "video_path", "references")
+    },
+    **{
+        name: f"output.{name}"
+        for name in ("output_path", "save_video", "return_frames")
+    },
+}
+# Sections of the serve config's default_request that apply to each request.
+_DEFAULT_REQUEST_KEYS = ("negative_prompt", "inputs", "sampling", "runtime", "output", "stage_overrides", "extensions")
+
+
+def _set_request_path(raw: dict[str, Any], path: str, value: Any) -> None:
+    """Set one dotted path in a nested raw request mapping, creating the sections it goes through."""
+    *sections, name = path.split(".")
+    for section in sections:
+        raw = raw.setdefault(section, {})
+    raw[name] = value
 
 
 def _as_list(value: Any | list[Any] | None) -> list[Any]:
@@ -288,9 +318,14 @@ def build_generation_request(
 ) -> GenerationRequest:
     """Build one tracked FastVideo request using explicit-field precedence."""
     validate_model_and_lora(request, args, served_model_name)
-    kwargs: dict[str, Any] = {}
+    # The operator's default_request fields, with their sections; the request body's fields override them.
+    raw: dict[str, Any] = {}
     if default_request is not None:
-        kwargs.update(explicit_request_updates(default_request))
+        raw = {
+            key: value
+            for key, value in explicit_request_raw(default_request).items() if key in _DEFAULT_REQUEST_KEYS
+        }
+    kwargs: dict[str, Any] = {}
 
     body_set = request.model_fields_set
     nested_set = request.video_params.model_fields_set if request.video_params is not None else set()
@@ -314,7 +349,9 @@ def build_generation_request(
         fps = request.fps if "fps" in body_set else request.video_params.fps
         if fps is not None:
             kwargs["fps"] = fps
-    kwargs.setdefault("fps", 24)
+    if "fps" not in kwargs and "fps" not in raw.get("sampling", {}):
+        kwargs["fps"] = 24
+    effective_fps = kwargs.get("fps", raw.get("sampling", {}).get("fps"))
 
     frames_explicit = ("num_frames" in body_set
                        and request.num_frames is not None) or ("video_params" in body_set and "num_frames" in nested_set
@@ -324,7 +361,7 @@ def build_generation_request(
         if num_frames is not None:
             kwargs["num_frames"] = num_frames
     elif "seconds" in body_set and request.seconds is not None:
-        kwargs["num_frames"] = int(request.seconds) * int(kwargs["fps"])
+        kwargs["num_frames"] = int(request.seconds) * int(effective_fps)
 
     direct_fields = (
         "seed",
@@ -376,8 +413,19 @@ def build_generation_request(
             raise RequestAdaptationError("Unsupported extra_params fields: " + ", ".join(unknown_extra_params))
         kwargs.update(request.extra_params)
 
-    width = kwargs.get("width")
-    height = kwargs.get("height")
+    for name, value in kwargs.items():
+        _set_request_path(raw, _REQUEST_PATHS.get(name, f"extensions.{name}"), value)
+    # request_to_sampling_param applies stage overrides to the sampling fields of the same name, so a field the
+    # request body sets must not stay in the operator's default stage overrides: the body value wins.
+    for stage_name, overrides in list(raw.get("stage_overrides", {}).items()):
+        kept = {key: value for key, value in overrides.items() if key not in kwargs}
+        if kept:
+            raw["stage_overrides"][stage_name] = kept
+        else:
+            del raw["stage_overrides"][stage_name]
+    sampling = raw.setdefault("sampling", {})
+    width = sampling.get("width")
+    height = sampling.get("height")
     if width is not None and (not isinstance(width, int) or width <= 0):
         raise RequestAdaptationError(f"width must be a positive integer, got {width!r}")
     if height is not None and (not isinstance(height, int) or height <= 0):
@@ -391,8 +439,8 @@ def build_generation_request(
         from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_input_preparation import (
             resolve_target_num_frames, )
 
-        if kwargs["fps"] != 24:
-            raise RequestAdaptationError(f"MiniMax-H3 requires fps=24, got {kwargs['fps']}.")
+        if sampling["fps"] != 24:
+            raise RequestAdaptationError(f"MiniMax-H3 requires fps=24, got {sampling['fps']}.")
         if width is None or height is None:
             raise RequestAdaptationError("MiniMax-H3 requires both width and height.")
         if width % MINIMAX_H3_CANVAS_MULTIPLE or height % MINIMAX_H3_CANVAS_MULTIPLE:
@@ -402,23 +450,23 @@ def build_generation_request(
             raise RequestAdaptationError(
                 f"MiniMax-H3 canvas exceeds the {MINIMAX_H3_MAX_PIXELS}-pixel limit: {width}x{height}.")
         try:
-            requested_num_frames = kwargs.get("num_frames")
+            requested_num_frames = sampling.get("num_frames")
             aligned_num_frames = resolve_target_num_frames(requested_num_frames)
         except (TypeError, ValueError) as error:
             raise RequestAdaptationError(str(error)) from error
         if frames_explicit and aligned_num_frames != requested_num_frames:
             raise RequestAdaptationError("MiniMax-H3 num_frames must be on the causal-VAE grid (17 * n + 5); "
                                          f"got {requested_num_frames}, next valid value is {aligned_num_frames}.")
-        kwargs["num_frames"] = aligned_num_frames
+        sampling["num_frames"] = aligned_num_frames
 
     output_path = os.path.join(os.path.abspath(output_dir), "videos", f"{request_id}.mp4")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    kwargs.update({
+    raw.setdefault("output", {}).update({
         "output_path": output_path,
         "save_video": True,
         "return_frames": False,
     })
-    generation_request = legacy_generate_call_to_request(request.prompt, None, legacy_kwargs=kwargs)
+    generation_request = normalize_generation_request({"prompt": request.prompt, **raw})
     try:
         # Resolve once at admission time so unsupported model-specific fields
         # are a deterministic 400, rather than an asynchronous failed job.
