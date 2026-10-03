@@ -279,9 +279,13 @@ the closest legal count above five seconds at 24 fps. For the secondary
 `handoff_spark_mac/benchmark_prompts.json` from the local release handoff.
 The benchmark script runs one warmup and at least two timed generations for
 each prompt in one process. It saves the MP4s and prints the wall time, stage
-times, peak memory, and median. Use the same environment variables as above:
+times, peak memory, and median. Set the Spark environment before running it:
 
 ```bash
+export FASTVIDEO_MINIMAX_H3_FUSIONS=all
+export FASTVIDEO_NVFP4_MM_BACKEND=cutlass FASTVIDEO_H3_VAE_TILE_BATCH=1
+export FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0
+export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1
 nice -n 19 python examples/inference/basic/benchmark_fasth3_spark_nvfp4.py \
   --config examples/inference/basic/basic_fasth3_spark_v2_nvfp4.yaml \
   --prompts /path/to/fasth3-local-release/handoff_spark_mac/benchmark_prompts.json \
