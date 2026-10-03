@@ -29,6 +29,8 @@ def main():
     ap.add_argument("--timed", type=int, default=2)
     ap.add_argument("--sparsity", type=float, default=None, help="default: the checkpoint contract's vsa_sparsity")
     a = ap.parse_args()
+    if a.timed < 1:
+        ap.error("--timed must be at least 1")
 
     contract = json.load(open(os.path.join(a.model_dir, "fastvideo_inference.json")))
     steps = contract["dmd_denoising_steps"]
@@ -67,30 +69,32 @@ def main():
     results = {"run_name": a.run_name, "model_dir": a.model_dir, "num_gpus": a.num_gpus,
                "nvfp4_profile": a.nvfp4_profile, "load_s": round(time.perf_counter() - t0, 1), "env": env,
                "settings": {}}
-    for name in a.settings.split(","):
-        width, height, frames = SETTINGS[name]
-        runs = []
-        plan = [(PROMPT_IDS[0], True)] + [(pid, False) for _ in range(a.timed) for pid in PROMPT_IDS]
-        for i, (pid, warmup) in enumerate(plan):
-            path = os.path.join(out_dir, f"{name}_{pid}_{'warmup' if warmup else i}.mp4")
-            t = time.perf_counter()
-            generator.generate_video(prompt=texts[pid], height=height, width=width, num_frames=frames, fps=24,
-                                     guidance_scale=1.0, num_inference_steps=len(steps) + 1, seed=1234,
-                                     output_path=path, save_video=True)
-            wall = round(time.perf_counter() - t, 2)
-            runs.append({"prompt": pid, "warmup": warmup, "e2e_s": wall, "path": path})
-            print("RUN", name, pid, "warmup" if warmup else "timed", wall, flush=True)
-            if run is not None and not warmup:
-                import wandb
-                run.log({f"{name}/e2e_s": wall, f"{name}/{pid}": wandb.Video(path, fps=24, format="mp4")})
-        timed = [r["e2e_s"] for r in runs if not r["warmup"]]
-        results["settings"][name] = {"width": width, "height": height, "frames": frames,
-                                     "e2e_median_s": statistics.median(timed), "e2e_min_s": min(timed), "runs": runs}
-        print("SETTING", name, json.dumps(results["settings"][name]), flush=True)
-        if run is not None:
-            run.summary[f"{name}_e2e_median_s"] = statistics.median(timed)
-        json.dump(results, open(os.path.join(out_dir, "results.json"), "w"), indent=1)
-    generator.shutdown()
+    try:
+        for name in a.settings.split(","):
+            width, height, frames = SETTINGS[name]
+            runs = []
+            plan = [(PROMPT_IDS[0], True)] + [(pid, False) for _ in range(a.timed) for pid in PROMPT_IDS]
+            for i, (pid, warmup) in enumerate(plan):
+                path = os.path.join(out_dir, f"{name}_{pid}_{'warmup' if warmup else i}.mp4")
+                t = time.perf_counter()
+                generator.generate_video(prompt=texts[pid], height=height, width=width, num_frames=frames, fps=24,
+                                         guidance_scale=1.0, num_inference_steps=len(steps) + 1, seed=1234,
+                                         output_path=path, save_video=True)
+                wall = round(time.perf_counter() - t, 2)
+                runs.append({"prompt": pid, "warmup": warmup, "e2e_s": wall, "path": path})
+                print("RUN", name, pid, "warmup" if warmup else "timed", wall, flush=True)
+                if run is not None and not warmup:
+                    import wandb
+                    run.log({f"{name}/e2e_s": wall, f"{name}/{pid}": wandb.Video(path, fps=24, format="mp4")})
+            timed = [r["e2e_s"] for r in runs if not r["warmup"]]
+            results["settings"][name] = {"width": width, "height": height, "frames": frames,
+                                         "e2e_median_s": statistics.median(timed), "e2e_min_s": min(timed), "runs": runs}
+            print("SETTING", name, json.dumps(results["settings"][name]), flush=True)
+            if run is not None:
+                run.summary[f"{name}_e2e_median_s"] = statistics.median(timed)
+            json.dump(results, open(os.path.join(out_dir, "results.json"), "w"), indent=1)
+    finally:
+        generator.shutdown()
     if run is not None:
         run.summary["load_s"] = results["load_s"]
         run.finish()

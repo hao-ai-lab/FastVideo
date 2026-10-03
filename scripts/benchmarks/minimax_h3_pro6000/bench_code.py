@@ -106,7 +106,7 @@ def run(shapes):
             qp = _pool_tiles(qt, vbs, 64)
             kp = _pool_tiles(kt, vbs, 64)
             scores = torch.matmul(qp, kp.transpose(-2, -1)) / HD**0.5
-            mask = _build_block_mask(scores, n_prefix, n_video, sparsity, True)
+            mask = _build_block_mask(scores, n_prefix, sparsity, True, ((n_prefix, n_prefix + n_video), ), (sparsity, ))
             out, _ = bsa64(qt.transpose(1, 2).contiguous(), kt.transpose(1, 2).contiguous(),
                            vt.transpose(1, 2).contiguous(), mask, vbs)
             out = out.transpose(1, 2).contiguous()
@@ -257,7 +257,7 @@ def check_tile64():
 
         qt, kt, vt = tile(q), tile(k), tile(v)
         scores = torch.matmul(_pool_tiles(qt.transpose(1, 2), vbs, tt), _pool_tiles(kt.transpose(1, 2), vbs, tt).transpose(-2, -1))
-        mask = _build_block_mask(scores, n_prefix, n_video, 0.8, True)
+        mask = _build_block_mask(scores, n_prefix, 0.8, True, ((n_prefix, n_prefix + n_video), ), (0.8, ))
         q2k_idx, q2k_num, kvv, quad = fa.vsa_tile_mask_to_fp4_blocks(mask, tt, vbs, validate=True)
         Lk = q2k_idx.shape[2] * 128
         pad = lambda x: F.pad(x, (0, 0, 0, Lk - Lpad)).contiguous()
@@ -314,7 +314,7 @@ def density_study(prefix_segments=(256, 810), video_shape=(72, 24, 42)):
     qs, ks, vs = (F.pad(x, (0, 0, 0, 0, 0, rows - Lpad)).contiguous() for x in (qt, kt, vt))
     out = {}
     for sparsity in (0.8, 0.9):
-        mask = _build_block_mask(scores, n_prefix, n_video, sparsity, True)
+        mask = _build_block_mask(scores, n_prefix, sparsity, True, ((n_prefix, n_prefix + n_video), ), (sparsity, ))
         m = F.pad(mask, (0, nt2 - n_tiles, 0, nt2 - n_tiles), value=False)
         B, H = m.shape[:2]
         d = {"tile64x64": m.float().mean().item()}

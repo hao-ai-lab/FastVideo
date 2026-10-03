@@ -123,29 +123,28 @@ def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lor
         convert_model_to_mxfp8,
     )
 
+    # NVFP4 may share a model with FP8 linears (e.g. NVFP4 FFN + FP8 attention); handle that pair before the
+    # per-module walk so the result does not depend on which quantized module comes first.
+    nvfp4_modules = [m for m in model.modules() if isinstance(getattr(m, "quant_method", None), NVFP4QuantizeMethod)]
+    if nvfp4_modules:
+        mixed_fp8 = any(isinstance(getattr(m, "quant_method", None), FP8QuantizeMethod) for m in model.modules())
+        if any(getattr(module, "_nvfp4_weight", None) is not None for module in nvfp4_modules):
+            logger.info("NVFP4 packed export already populated; skipping runtime weight conversion")
+        elif defer_weight_conversion_until_lora_merge:
+            logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
+            return
+        else:
+            logger.info("Converting loaded model weights for NVFP4 linear layers")
+            convert_model_to_nvfp4(model)
+        if mixed_fp8:
+            logger.info("Converting the FP8 linears of a mixed NVFP4/FP8 model")
+            convert_model_to_fp8(model)
+        return
+
     qat_train_attached = 0
     qat_train_skipped = 0
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
-        if isinstance(qm, NVFP4QuantizeMethod):
-            mixed_fp8 = any(isinstance(getattr(m, "quant_method", None), FP8QuantizeMethod) for m in model.modules())
-            if any(
-                    getattr(module, "_nvfp4_weight", None) is not None for module in model.modules()
-                    if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)):
-                logger.info("NVFP4 packed export already populated; skipping runtime weight conversion")
-                if mixed_fp8:
-                    logger.info("Converting the FP8 linears of a mixed NVFP4/FP8 model")
-                    convert_model_to_fp8(model)
-                return
-            if defer_weight_conversion_until_lora_merge:
-                logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
-                return
-            logger.info("Converting loaded model weights for NVFP4 linear layers")
-            convert_model_to_nvfp4(model)
-            if any(isinstance(getattr(m, "quant_method", None), FP8QuantizeMethod) for m in model.modules()):
-                logger.info("Converting the FP8 linears of a mixed NVFP4/FP8 model")
-                convert_model_to_fp8(model)
-            return
         if isinstance(qm, NVFP4QATQuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
             convert_model_to_fp4(model)

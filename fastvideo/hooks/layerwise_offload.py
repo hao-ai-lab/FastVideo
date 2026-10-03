@@ -170,7 +170,12 @@ def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
     # The first N entries skip offloading and stay wherever the model is placed (normally the
     # GPU), so a GPU with spare memory streams only the remainder over PCIe.
     import os
-    resident = int(os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS", "0"))
+    try:
+        resident = max(0, int(os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS", "0")))
+    except ValueError:
+        logger.warning("Ignoring malformed FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=%r",
+                       os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS"))
+        resident = 0
     for name, submodule in model.named_children():
         if isinstance(submodule, nn.ModuleList):
             for idx, module_entry in enumerate(submodule):
@@ -190,6 +195,10 @@ def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
                     hook_mgr.append_forward_hook(hook)
             break
     if len(state_list) == 0:
+        if resident > 0:
+            logger.info("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=%d keeps every block resident; nothing to offload",
+                        resident)
+            return
         raise ValueError("No nn.ModuleList found in the model for layerwise offloading.")
 
     # circular linking of states
