@@ -22,7 +22,18 @@ class HostMemoryPeak:
         self.stop = threading.Event()
         self.peak_bytes = 0
         self.peak_anon_bytes = 0
+        self.peak_gpu_bytes = None
+        self._gpu_used = None
+        self._nvml_shutdown = None
         self.thread = threading.Thread(target=self._sample, daemon=True)
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            self._nvml_shutdown = pynvml.nvmlShutdown
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            self._gpu_used = lambda: pynvml.nvmlDeviceGetMemoryInfo(handle).used
+        except Exception as exc:
+            print(f"GPU memory sampler unavailable: {exc}", flush=True)
 
     def _sample(self):
         while not self.stop.is_set():
@@ -31,6 +42,8 @@ class HostMemoryPeak:
                 self.peak_bytes = max(self.peak_bytes, int((root / "memory.current").read_text()))
                 stats = dict(line.split() for line in (root / "memory.stat").read_text().splitlines())
                 self.peak_anon_bytes = max(self.peak_anon_bytes, int(stats["anon"]))
+                if self._gpu_used is not None:
+                    self.peak_gpu_bytes = max(self.peak_gpu_bytes or 0, self._gpu_used())
             except (OSError, KeyError, ValueError):
                 return
             self.stop.wait(0.1)
@@ -42,6 +55,8 @@ class HostMemoryPeak:
     def __exit__(self, *_args):
         self.stop.set()
         self.thread.join()
+        if self._nvml_shutdown is not None:
+            self._nvml_shutdown()
 
 
 def main():
@@ -147,6 +162,8 @@ def main():
             wall = round(time.perf_counter() - t, 2)
             results["runs"].append({"prompt": pid, "warmup": i < a.warmup, "wall_s": wall,
                                     "clip": request["output"]["output_path"],
+                                    "peak_gpu_used_gib": (round(host_peak.peak_gpu_bytes / 2**30, 3)
+                                                          if host_peak.peak_gpu_bytes is not None else None),
                                     "peak_host_cgroup_gib": round(host_peak.peak_bytes / 2**30, 3),
                                     "peak_host_anon_gib": round(host_peak.peak_anon_bytes / 2**30, 3)})
             timed = [run["wall_s"] for run in results["runs"] if not run["warmup"]]
