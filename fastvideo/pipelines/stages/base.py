@@ -195,6 +195,10 @@ class PipelineStage(ABC):
                                 torch.cuda.max_memory_allocated() / gib,
                                 torch.cuda.memory_reserved() / gib,
                                 torch.cuda.memory_allocated() / gib)
+                    batch.logging_info.add_stage_metric(stage_key, "peak_allocated_mb",
+                                                        torch.cuda.max_memory_allocated() / 1024**2)
+                    batch.logging_info.add_stage_metric(stage_key, "peak_reserved_mb",
+                                                        torch.cuda.max_memory_reserved() / 1024**2)
                     torch.cuda.reset_peak_memory_stats()
                 batch.logging_info.add_stage_execution_time(stage_key, execution_time)
                 batch.logging_info.add_stage_metric(stage_key, "stage_class", stage_class_name)

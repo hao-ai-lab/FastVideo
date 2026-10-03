@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Time the resident FastH3 V2 Spark recipe with the release prompts.
+"""Time a resident FastH3 eight-forward Spark recipe with the release prompts.
 
 One process loads the model, then each prompt gets one excluded warmup and at
 least two timed calls. Every call writes a video. This script does not alter
@@ -22,18 +22,24 @@ from fastvideo.api.schema import RunConfig
 PROMPT_IDS = ("latency-ceramics-005", "latency-harbor-005")
 
 
-def _stage_seconds(result: object) -> dict[str, float]:
+def _stage_metrics(result: object) -> dict[str, dict]:
     logging_info = getattr(result, "logging_info", None)
     stages = getattr(logging_info, "stages", None)
     if isinstance(logging_info, dict):
         stages = logging_info.get("stages", stages)
     if not isinstance(stages, dict):
         return {}
-    return {
-        name: float(metrics["execution_time"])
-        for name, metrics in stages.items()
-        if isinstance(metrics, dict) and metrics.get("execution_time") is not None
-    }
+    return {name: metrics for name, metrics in stages.items() if isinstance(metrics, dict)}
+
+
+def _stage_seconds(metrics: dict[str, dict]) -> dict[str, float]:
+    return {name: float(stage["execution_time"]) for name, stage in metrics.items()
+            if stage.get("execution_time") is not None}
+
+
+def _peak_mb(metrics: dict[str, dict], key: str) -> float | None:
+    values = [float(stage[key]) for stage in metrics.values() if stage.get(key) is not None]
+    return max(values) if values else None
 
 
 def _stage_total(stages: dict[str, float], fragment: str) -> float | None:
@@ -107,7 +113,8 @@ def main() -> None:
                 output = Path(result.video_path) if result.video_path else requested_path
                 if not output.is_file():
                     raise RuntimeError(f"generation returned without an MP4: {output}")
-                stages = _stage_seconds(result)
+                metrics = _stage_metrics(result)
+                stages = _stage_seconds(metrics)
                 row = {
                     "prompt_id": prompt_id,
                     "warmup": warmup,
@@ -117,7 +124,9 @@ def main() -> None:
                     "e2e_seconds": round(wall, 3),
                     "denoise_seconds": _stage_total(stages, "denois"),
                     "decode_seconds": _stage_total(stages, "decod"),
-                    "peak_memory_mb": result.peak_memory_mb,
+                    "peak_memory_mb": _peak_mb(metrics, "peak_allocated_mb"),
+                    "peak_reserved_mb": _peak_mb(metrics, "peak_reserved_mb"),
+                    "result_peak_memory_mb": result.peak_memory_mb,
                     "stages": stages,
                     "mp4": str(output),
                 }
