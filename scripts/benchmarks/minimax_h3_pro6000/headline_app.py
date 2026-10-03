@@ -17,7 +17,7 @@ import modal
 from app import FAST_ENV, _install_kernel, _sh, image, volume
 
 HERE = pathlib.Path(__file__).resolve().parent
-headline_image = (image.add_local_file(HERE / "app.py", "/root/app.py")
+headline_image = (image.add_local_python_source("app")
                   .add_local_file(HERE / "bench_headline.py", "/root/bench_headline.py")
                   .add_local_file(HERE / "headline_prompts.json", "/root/headline_prompts.json"))
 app = modal.App("h3-pro6000-headline", image=headline_image)
