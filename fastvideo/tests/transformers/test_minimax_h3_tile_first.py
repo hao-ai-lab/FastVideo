@@ -48,11 +48,12 @@ def test_shared_fp8_projections_match_independent_quantization(granularity):
             torch.testing.assert_close(output, expected, atol=0, rtol=0)
 
 
+@pytest.mark.parametrize("kernel", ["original", "bf16", "int8"])
 @pytest.mark.parametrize("fp8", [False, True])
 @pytest.mark.parametrize("gate_active", [False, True])
 @pytest.mark.parametrize("fused_rope", [False, True])
 def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distributed_setup,
-                                                          fp8, gate_active, fused_rope):
+                                                          fp8, gate_active, fused_rope, kernel):
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         pytest.skip("BF16 CUDA is required")
     if fp8 and torch.cuda.get_device_capability() < (8, 9):
@@ -66,6 +67,7 @@ def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distribu
     monkeypatch.setenv("FASTVIDEO_VSA_SM100A", "0")
     monkeypatch.setenv("FASTVIDEO_H3_VSA_FP4", "0")
     monkeypatch.setenv("FASTVIDEO_H3_VSA_TILE_FIRST", "0")
+    monkeypatch.setenv("FASTVIDEO_H3_VSA_SM89_KERNEL", "original")
     torch.manual_seed(21)
     attn = MiniMaxH3Attention(256, 2, 128, 1e-5, (AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3,), FP8Config("channel") if fp8 else None,
                              "transformer_blocks.0.attn", fuse_qknorm_rope=fused_rope)
@@ -86,6 +88,7 @@ def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distribu
     with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
         reference = attn(x, rope, length)
         attn._vsa_tile_first = True
+        attn.distributed_attention.attn_impl._sm89_kernel = kernel
         actual = attn(x, rope, length)
     # Row order can choose a different GEMM reduction; neither attention nor
     # the VSA selection/padding semantics are approximated by this route.

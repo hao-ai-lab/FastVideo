@@ -14,7 +14,7 @@ def _cuda_sm89():
 @pytest.mark.parametrize("partial", [False, True])
 def test_sparse_int8_preserves_tile_selection_and_valid_keys(partial):
     _cuda_sm89()
-    from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_int8_fp8_attention
+    from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
 
     torch.manual_seed(42)
     q, k, v = (torch.randn(1, 2, 256, 128, device="cuda", dtype=torch.bfloat16) for _ in range(3))
@@ -30,7 +30,7 @@ def test_sparse_int8_preserves_tile_selection_and_valid_keys(partial):
     with torch.inference_mode():
         expected = torch.nn.functional.scaled_dot_product_attention(q.float(), k.float(), v.float(),
                                                                     attn_mask=dense_mask)
-        output = sparse_int8_fp8_attention(q, k, v, mask, vbs)
+        output = sparse_sm89_attention(q, k, v, mask, vbs)
     assert torch.isfinite(output).all()
     relative_error = (output.float() - expected).norm() / expected.norm()
     assert relative_error < 0.055, float(relative_error)
@@ -39,10 +39,10 @@ def test_sparse_int8_preserves_tile_selection_and_valid_keys(partial):
 
 def test_sparse_int8_handles_empty_selection():
     _cuda_sm89()
-    from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_int8_fp8_attention
+    from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
 
     q = torch.zeros(1, 1, 128, 128, device="cuda", dtype=torch.bfloat16)
     with torch.inference_mode():
-        out = sparse_int8_fp8_attention(q, q, q, torch.zeros(1, 1, 2, 2, device="cuda", dtype=torch.bool),
+        out = sparse_sm89_attention(q, q, q, torch.zeros(1, 1, 2, 2, device="cuda", dtype=torch.bool),
                                         torch.tensor([64, 64], device="cuda", dtype=torch.int32))
     assert torch.count_nonzero(out) == 0
