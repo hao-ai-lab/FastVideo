@@ -233,6 +233,15 @@ visually coherent in the sampled contact sheet but is not identical to the
 original-kernel clip (decoded-video SSIM 0.597653). This is a speed candidate,
 not proof of quality equivalence. The original kernel remains the default.
 
+The same cached/six-resident-block BF16 recipe at `26390848b`, with name
+`sm89-bf16-480p-5s-resident6` and `--frames 124`, measured **65.27 s** median.
+The legal frame count represents 5.167 s at 24 fps. Timed requests were
+65.08/65.46 s after a 110.34 s warmup. Conditioning/denoise/video-decode
+medians were 11.74/34.22/13.44 s. Peak GPU allocation was 21.62 GiB,
+host anon 41.14 GiB and total cgroup 88.45 GiB. These generation wall times
+include decode/export and exclude initial generator construction. No
+profiling or QKV capture was enabled.
+
 At `26390848b`, per-key-tile V scaling reduced experimental INT8-QK/FP8-PV
 real-tensor error to 0.84–1.54%, with 1.77× fine-kernel speedup. Dynamic
 per-query, per-key-block P scaling also preserves contributions that would
@@ -244,7 +253,12 @@ The current text encoder is the trimmed 50-layer Qwen3-VL with serialized
 NVFP4 weights, dequantized to BF16 per linear on sm89. The existing serialized
 blockwise FP8 encoder requires sm100+ and FlashInfer's Blackwell GEMM; it
 cannot run on the 4090 as written. An Ada FP8 implementation would also need
-encoder streaming because its weights are larger. First try fused NVFP4
+encoder streaming because its weights are larger. Reading the current
+checkpoint tensor shapes gives 15.33 GiB total encoder weights, including
+11.35 GiB packed values and 1.42 GiB block scales. Replacing those packed
+values with FP8 while retaining the other tensors projects about 25.3 GiB
+before activations (the FP8 block-scale overhead is small). This is a storage
+estimate, not a measured FP8 encoder. First try fused NVFP4
 dequantization and avoid per-linear GPU scalar synchronization; then compare
 a native sm89 FP8 encoder at equal prompts. Conditioning is only about
 11.2 s of the current 111.3 s clip, so encoder work alone cannot dominate the
