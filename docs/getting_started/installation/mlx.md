@@ -46,6 +46,47 @@ is the higher-quality FastH3.
 Recorded shapes and evidence live in the
 [support matrix](../../inference/support_matrix.md#apple-silicon-native-runtime).
 
+## Pruned eight-forward checkpoint
+
+The pruned FastH3 checkpoint has 42 transformer blocks and rank-16 AdaLN.
+Its `fastvideo_inference.json` fixes eight denoising forwards, video/audio
+shifts of 10/3, and VSA sparsity 0.8. Keep that file beside the transformer
+when converting. The converter reads its schedule to build the AdaLN cache.
+
+```bash
+hf download FastVideo/FastH3-Pruned-8Step-BF16-ckpt300 \
+  --local-dir ./FastH3-Pruned-8Step-BF16-ckpt300 \
+  --exclude 'text_encoder/*'
+
+# The pruned repo's packed NVFP4 encoder is for Blackwell. MLX reads the
+# official BF16 encoder through layer 50. The last three shards are unused.
+hf download MiniMaxAI/MiniMax-H3 \
+  --local-dir ./FastH3-Pruned-8Step-BF16-ckpt300 \
+  --include 'text_encoder/model-0000[1-9]-of-00014.safetensors' \
+  --include 'text_encoder/model-0001[0-1]-of-00014.safetensors' \
+  --include 'text_encoder/model.safetensors.index.json' \
+  --include 'text_encoder/config.json'
+
+python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \
+  --model-root ./FastH3-Pruned-8Step-BF16-ckpt300/transformer \
+  --out ./FastH3-Pruned-MLX-vsa \
+  --formats "int8 int6" --include-vsa
+
+python examples/inference/basic/mlx_fasth3.py \
+  --model-root ./FastH3-Pruned-8Step-BF16-ckpt300 \
+  --mlx-checkpoint ./FastH3-Pruned-MLX-vsa/int8 \
+  --prompt "(S1) A potter asks <d>[English] Is the rim ready?</d>" \
+  --height 480 --width 832 --num-frames 243 --steps 8 \
+  --vsa --vsa-sparsity 0.8 --vsa-tile-size 64 \
+  --output-path ./outputs/fasth3_pruned_int8_480p.mp4
+```
+
+At 24 fps, 124 frames is the legal H3 count for a roughly five-second clip.
+Use `--num-frames 124` and a separate output path for that run. The `--fast`
+and `--fast-spatial` options change the workload and are not part of the
+native-resolution benchmark. A 36 GB Mac may need INT6 and phased loading;
+measure memory before claiming all-resident operation.
+
 ## Hardware
 
 - FastMetal 1.3B and 5B: 16 GB unified memory and up

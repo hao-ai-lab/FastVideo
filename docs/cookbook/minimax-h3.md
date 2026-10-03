@@ -13,6 +13,11 @@ is why V2 is the higher-quality FastH3. The V2 schedule contract is in
 **CompactH3** is the 42-block 20B NVFP4 H3 checkpoint for one Blackwell GPU
 (RTX 5090 or RTX PRO 6000). The FastH3 V1 and V2 recipes are unchanged.
 
+The 42-block pruned checkpoint has an [MLX INT8/INT6 conversion and
+eight-forward T2VA command](../getting_started/installation/mlx.md#pruned-eight-forward-checkpoint).
+It reads `fastvideo_inference.json` for the trained schedule. The command
+uses native 832x480 resolution and all requested frames.
+
 <div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=14">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
