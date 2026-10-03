@@ -142,3 +142,4 @@ fastvideo/tests/ssim/reference_videos/**
 *.nvimlog
 .nvimlog
 .python-version
+scripts/benchmarks/minimax_h3_pro6000/headline_results/

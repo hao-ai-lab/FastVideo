@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import os
 from typing import Any, cast
 
 import torch
@@ -21,7 +22,6 @@ def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
     logger.info("Worker %d CUDA device UUID: GPU-%s", rank, device_uuid, local_main_process_only=False)
 
 
-
 def _log_pipeline_memory(pipeline) -> None:
     """Debug (FASTVIDEO_MEMORY_REPORT=1): bytes held per pipeline component, by device and dtype, plus the
     largest tensors, so the resident footprint can be attributed before choosing offload placements."""
@@ -42,13 +42,17 @@ def _log_pipeline_memory(pipeline) -> None:
             largest.append((nbytes, tname, key))
         largest.sort(reverse=True)
         total = sum(by_kind.values())
-        logger.info("MEMREPORT %s total=%.2f GiB %s", name, total / gib,
-                    {k: round(v / gib, 2) for k, v in sorted(by_kind.items(), key=lambda kv: -kv[1])})
+        logger.info("MEMREPORT %s total=%.2f GiB %s", name, total / gib, {
+            k: round(v / gib, 2)
+            for k, v in sorted(by_kind.items(), key=lambda kv: -kv[1])
+        })
         for nbytes, tname, key in largest[:8]:
             logger.info("MEMREPORT %s   %.3f GiB %s %s", name, nbytes / gib, key, tname)
     if torch.cuda.is_available():
-        logger.info("MEMREPORT cuda allocated=%.2f GiB reserved=%.2f GiB", torch.cuda.memory_allocated() / gib,
+        logger.info("MEMREPORT cuda allocated=%.2f GiB reserved=%.2f GiB",
+                    torch.cuda.memory_allocated() / gib,
                     torch.cuda.memory_reserved() / gib)
+
 
 class Worker:
 

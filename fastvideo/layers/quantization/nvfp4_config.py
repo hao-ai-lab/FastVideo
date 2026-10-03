@@ -418,8 +418,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             keys = [prefix] + ([f"b{match.group(1)}.{match.group(2)}"] if match else [])
             amax = next((table[k] for k in keys if k in table), None)
             if amax is not None:
-                self._static_sf = torch.tensor((448.0 * 6.0) / max(amax, 1e-12), dtype=torch.float32,
-                                               device="cuda")
+                self._static_sf = torch.tensor((448.0 * 6.0) / max(amax, 1e-12), dtype=torch.float32, device="cuda")
         return self._static_sf
 
     def _dynamic_activation_scale(self) -> bool:

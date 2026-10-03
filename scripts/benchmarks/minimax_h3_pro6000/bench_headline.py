@@ -42,6 +42,8 @@ def main():
               "offload": {"dit": False, "dit_layerwise": False, "text_encoder": False, "vae": False,
                           "pin_cpu_memory": False, "lazy_module_load": False},
               "compile": {"enabled": False, "vae_enabled": os.environ.get("HEADLINE_VAE_COMPILE", "1") == "1"}}
+    if os.environ.get("HEADLINE_BACKEND"):
+        engine["execution_backend"] = os.environ["HEADLINE_BACKEND"]  # "ray" for multi-node
     if a.nvfp4_profile != "none":
         engine["quantization"] = {"transformer_quant": "NVFP4", "layer_profile": a.nvfp4_profile}
     config = {"model_path": a.model_dir, "engine": engine,
