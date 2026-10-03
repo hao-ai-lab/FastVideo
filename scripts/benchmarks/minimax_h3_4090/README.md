@@ -358,6 +358,9 @@ samples every 100 ms, alongside host samples. Summaries distinguish sampled
 total GPU usage from PyTorch's allocated peak. Allocator caps omit driver
 and external CUDA memory, so the 8 GiB total-budget experiment uses a
 7.25 GiB allocator cap and must also satisfy the observed NVML budget.
+That trial completed its warmup and first timed request, but sampled total
+GPU usage reached about 8.28 GiB. It therefore does **not** meet a strict
+8 GiB device target. A tighter allocator cap still needs validation.
 These are 4090 simulations; real lower-VRAM and 30-series performance still
 needs those devices.
 
@@ -409,5 +412,11 @@ The earlier unprofiled 1344×768, 243-frame run at `fcdba37fc` completed at
 and shared VAE QKV/transpose views, before direct-layout attention and fused
 VAE epilogues. Its stage medians were 0.55 s conditioning, 227.21 s denoise,
 44.82 s video decode and 0.48 s audio. Peak allocation was 21.19 GiB and host
-anonymous memory 39.81 GiB. The updated 768p and 8 GiB total-budget runs are
-in progress; they must complete before claiming their speed or support.
+anonymous memory 39.81 GiB. The updated 768p run was queued after the
+7.25 GiB allocator-cap trial. SSH became unreachable before the final
+results could be collected; updated 768p speed and strict 8 GiB support
+remain unverified.
+
+Track B is staged in [draft PR #46](https://github.com/aryan5v/FastVideo/pull/46),
+stacked on the shared release core in #45. Historical timing sources are
+preserved by the `h3-consumer-fp8-measured-20261003` tag.
