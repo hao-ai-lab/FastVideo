@@ -37,6 +37,7 @@ loader's strict check before the post-load hook runs; the hook adds only the
 content checks a copied tensor can still fail.
 """
 
+import os
 from typing import Any
 
 import torch
@@ -421,6 +422,7 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
         # validated scalar on the host avoids a CUDA synchronization per linear
         # on the BF16 fallback used by consumer GPUs.
         layer._nvfp4_dequant_global_scale = global_scale
+        layer._nvfp4_fused_dequant = os.environ.get("FASTVIDEO_H3_ENCODER_FUSED_DEQUANT", "0") == "1"
         layer.register_buffer("_nvfp4_alpha", torch.tensor(1.0 / global_scale, dtype=torch.float32, device=device),
                               persistent=False)
         layer.register_buffer("_nvfp4_x_global_scale", torch.ones((), dtype=torch.float32, device=device),
@@ -432,8 +434,11 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
         if not _fp4_gemm_supported(layer.weight_packed.device):
             # Pre-Blackwell GPUs have no FP4 GEMM: expand this layer's weight to bf16 for the one call.
             # The encoder runs once per request, so the transient weight is cheaper than keeping a bf16 copy.
-            weight = dequantize_serialized_nvfp4(layer.weight_packed, layer.weight_scale,
-                                                 layer._nvfp4_dequant_global_scale, x.dtype)
+            dequantize = dequantize_serialized_nvfp4
+            if layer._nvfp4_fused_dequant:
+                from fastvideo.layers.quantization.nvfp4_dequant import dequantize_nvfp4_cuda
+                dequantize = dequantize_nvfp4_cuda
+            weight = dequantize(layer.weight_packed, layer.weight_scale, layer._nvfp4_dequant_global_scale, x.dtype)
             return torch.nn.functional.linear(x, weight, None if bias is None else bias.to(x.dtype))
         original_shape = x.shape
         if x.numel() == 0:
