@@ -6,8 +6,8 @@ from typing import Any
 
 import torch  # type: ignore
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
@@ -45,7 +45,7 @@ class BlockProcessingContext:
     block_sizes: list[int]
     noise_pool: list[torch.Tensor] | None
 
-    resolved_config: FastVideoArgs
+    resolved_config: ResolvedGeneratorConfig
     target_dtype: torch.dtype
     autocast_enabled: bool
     boundary_timestep: float | None
@@ -104,17 +104,17 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
         patch_size = self.transformer.patch_size
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
-        timesteps = torch.tensor(resolved_config.pipeline_config.dmd_denoising_steps, dtype=torch.long).cpu()
+        timesteps = torch.tensor(resolved_config.pipeline.dmd_denoising_steps, dtype=torch.long).cpu()
         if resolved_config.pipeline_config.warp_denoising_step:
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
@@ -387,7 +387,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                         current_timestep=i,
                         raw_latent_shape=(current_num_frames, h, w),
                         patch_size=ctx.resolved_config.pipeline_config.dit_config.patch_size,
-                        VSA_sparsity=ctx.resolved_config.VSA_sparsity,
+                        VSA_sparsity=ctx.resolved_config.engine.attention.vsa_sparsity,
                         device=get_local_torch_device(),
                     )
                     assert attn_metadata is not None, "attn_metadata cannot be None"
@@ -541,16 +541,16 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
                 **context_model_kwargs,
             )
 
-    def streaming_reset(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def streaming_reset(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
         patch_size = self.transformer.patch_size
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
-        timesteps = torch.tensor(resolved_config.pipeline_config.dmd_denoising_steps, dtype=torch.long).cpu()
+        timesteps = torch.tensor(resolved_config.pipeline.dmd_denoising_steps, dtype=torch.long).cpu()
         if resolved_config.pipeline_config.warp_denoising_step:
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
@@ -724,7 +724,7 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         self._streaming_initialized = False
         self._streaming_ctx = None
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)

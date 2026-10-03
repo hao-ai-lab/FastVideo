@@ -8,8 +8,8 @@ HunyuanGameCraft I2V generation. For T2V this stage is a no-op.
 
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -45,7 +45,7 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """Encode reference image for I2V, or skip for T2V."""
 
@@ -104,11 +104,11 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
         # ------------------------------------------------------------------
         self.vae = self.vae.to(device)
 
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if resolved_config.pipeline_config.vae_tiling:
+            if resolved_config.pipeline.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
                 ref_pixel = ref_pixel.to(vae_dtype)
@@ -157,17 +157,17 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
         batch.conditioning_mask = mask.to(device=device)
 
         # Offload
-        if resolved_config.vae_cpu_offload:
+        if resolved_config.engine.offload.vae:
             self.vae.to("cpu")
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         # Stage is a no-op when pil_image is None, so nothing required
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         # gt_latents and conditioning_mask are only set for I2V
         return result

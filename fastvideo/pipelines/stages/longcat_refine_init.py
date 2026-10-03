@@ -17,7 +17,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import load_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -45,14 +45,14 @@ class LongCatRefineInitStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Initialize latents for refinement.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with initialized latents for refinement.
@@ -109,7 +109,8 @@ class LongCatRefineInitStage(PipelineStage):
 
         # Use bucket system to select resolution (exactly like LongCat)
         # Calculate scale_factor_spatial considering SP split
-        sp_size = resolved_config.sp_size if resolved_config.sp_size > 0 else 1
+        sp_size = resolved_config.engine.parallelism.sp_size
+        sp_size = sp_size if sp_size > 0 else 1
         vae_scale_factor_spatial = 8  # VAE spatial downsampling
         patch_size_spatial = 2  # LongCat patch size
         bsa_latent_granularity = 4

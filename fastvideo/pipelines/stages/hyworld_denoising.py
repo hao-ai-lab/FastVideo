@@ -8,8 +8,8 @@ video generation in chunks with camera-aware context frame selection for tempora
 
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
@@ -48,7 +48,7 @@ class HYWorldDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Run the chunk-based denoising loop with context frame selection.
@@ -60,19 +60,19 @@ class HYWorldDenoisingStage(DenoisingStage):
                 - action: torch.Tensor | None - Action conditioning (B, T)
                 - chunk_latent_frames: int - Number of frames per chunk (default: 16 for bidirectional model)
                 These can be passed via batch.extra dict or as direct attributes.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with denoised latents.
         """
 
         pipeline = self.pipeline() if self.pipeline else None
-        if not resolved_config.model_loaded["transformer"]:
+        if not self.component_state.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
+            self.transformer = loader.load(self.component_state.model_paths["transformer"], resolved_config)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            resolved_config.model_loaded["transformer"] = True
+            self.component_state.model_loaded["transformer"] = True
 
         # Extract HYWorld-specific parameters from batch.extra or batch attributes
         viewmats = getattr(batch, "viewmats", None) or batch.extra.get("viewmats", None)
@@ -118,7 +118,7 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         # Setup precision and autocast settings
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
@@ -367,7 +367,7 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify HYWorld denoising stage inputs."""
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
@@ -404,7 +404,7 @@ class HYWorldDenoisingStage(DenoisingStage):
 
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         """Verify HYWorld denoising stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])

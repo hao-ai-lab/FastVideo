@@ -7,8 +7,8 @@ This stage prepares latents with image conditioning for the first frame.
 
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.latent_preparation import LatentPreparationStage
@@ -31,7 +31,7 @@ class LongCatI2VLatentPreparationStage(LatentPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """Prepare latents with I2V conditioning."""
 

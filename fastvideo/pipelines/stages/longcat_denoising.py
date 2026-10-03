@@ -6,7 +6,7 @@ LongCat-specific denoising stage implementing CFG-zero optimized guidance.
 import torch
 from tqdm import tqdm
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -49,26 +49,26 @@ class LongCatDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Run LongCat denoising loop with optimized CFG.
         
         Args:
             batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
             
         Returns:
             The batch with denoised latents.
         """
-        if not resolved_config.model_loaded["transformer"]:
+        if not self.component_state.model_loaded["transformer"]:
             from fastvideo.models.loader.component_loader import TransformerLoader
             loader = TransformerLoader()
-            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
+            self.transformer = loader.load(self.component_state.model_paths["transformer"], resolved_config)
             pipeline = self.pipeline() if self.pipeline else None
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            resolved_config.model_loaded["transformer"] = True
+            self.component_state.model_loaded["transformer"] = True
 
         # Inference dtype. We hardcode bf16 (matching the WanDenoisingStage
         # pattern) rather than reading transformer.parameters().dtype: when
@@ -78,7 +78,7 @@ class LongCatDenoisingStage(DenoisingStage):
         # forward fails with "Input type (float) and bias type
         # (c10::BFloat16) should be the same".
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         # Extract batch parameters
         latents = batch.latents

@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import torch  # type: ignore
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.lingbotworld.cam_utils import compute_relative_poses
@@ -33,7 +33,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
             return 1 + max(0, (batch.num_frames - 57 + 39) // 40)
         return 1
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
@@ -51,14 +51,14 @@ class MatrixGame3DenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         assert batch.latents is not None, "latents must be prepared before MatrixGame3 denoising"
         assert batch.image_latent is not None, "MatrixGame3 requires first-frame VAE latents"
         assert batch.prompt_embeds, "MatrixGame3 requires text embeddings"
 
         target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
         device = batch.latents.device
 
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -135,7 +135,7 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                 self.scheduler.set_timesteps(
                     batch.num_inference_steps,
                     device=device,
-                    shift=resolved_config.pipeline_config.flow_shift,
+                    shift=resolved_config.pipeline.flow_shift,
                 )
             except TypeError:
                 self.scheduler.set_timesteps(batch.num_inference_steps, device=device)

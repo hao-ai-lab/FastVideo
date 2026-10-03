@@ -10,11 +10,11 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from tqdm.auto import tqdm
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.attention import LocalAttention
 from fastvideo.attention.backends.nabla import NablaAttentionMetadataBuilder
 from fastvideo.attention.selector import component_attention_backend
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader, VAELoader
@@ -42,7 +42,7 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
         self.scheduler = scheduler
         self.transformer = transformer
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.height is None or batch.width is None:
             raise ValueError("height and width must be provided for Kandinsky5.")
         height = int(batch.height)
@@ -84,7 +84,7 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
             batch_size = batch.prompt_embeds[0].shape[0]
         batch_size *= batch.num_videos_per_prompt
 
-        dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
+        dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
         device = get_local_torch_device()
         num_latent_frames = (num_frames - 1) // temporal_ratio + 1
         num_channels = getattr(
@@ -140,7 +140,7 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
         )
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("num_frames", batch.num_frames, V.positive_int)
         result.add_check("height", batch.height, V.positive_int)
@@ -148,7 +148,7 @@ class Kandinsky5LatentPreparationStage(PipelineStage):
         result.add_check("latents", batch.latents, V.none_or_tensor)
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         return result
@@ -230,10 +230,10 @@ class Kandinsky5DenoisingStage(PipelineStage):
                     "LocalAttention's missing-forward-context guard silently fell back to SDPA.")
                 return
 
-    def _resolve_target_dtype(self, resolved_config: FastVideoArgs) -> torch.dtype:
+    def _resolve_target_dtype(self, resolved_config: ResolvedGeneratorConfig) -> torch.dtype:
         """Resolve the transformer's actual compute dtype.
 
-        Trust ``pipeline_config.dit_precision`` directly for a normal,
+        Trust ``engine.precision.dit`` directly for a normal,
         non-FSDP load -- ``TransformerLoader.load()`` asserts every
         parameter matches it exactly (``fastvideo/models/loader/
         component_loader.py``), so this holds for standalone T2V/I2V
@@ -246,7 +246,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
         ``cast_forward_inputs=False``) for every FSDP-wrapped load,
         independent of ``dit_precision`` -- this covers both the live
         transformer ``ValidationCallback`` reuses from training (whose
-        ``pipeline_config.dit_precision`` reflects the fp32 master-weight
+        ``engine.precision.dit`` reflects the fp32 master-weight
         load dtype, not the actual bf16 compute dtype) and multi-GPU
         ``use_fsdp_inference=True`` runs.
 
@@ -261,7 +261,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
         autocast keyed off the wrong dtype, hand bf16-computing modules
         fp16 inputs.
         """
-        declared_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
+        declared_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
         try:
             from torch.distributed.fsdp import FSDPModule
         except Exception:  # pragma: no cover - FSDP not always available
@@ -370,20 +370,20 @@ class Kandinsky5DenoisingStage(PipelineStage):
 
         return sparse_params
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.timesteps is None:
             raise ValueError("timesteps must be prepared before Kandinsky5 denoising.")
         if batch.latents is None:
             raise ValueError("latents must be prepared before Kandinsky5 denoising.")
-        if not resolved_config.model_loaded["transformer"]:
+        if not self.component_state.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
-            resolved_config.model_loaded["transformer"] = True
+            self.transformer = loader.load(self.component_state.model_paths["transformer"], resolved_config)
+            self.component_state.model_loaded["transformer"] = True
         self._assert_local_attention_backend_engaged()
 
         device = get_local_torch_device()
         target_dtype = self._resolve_target_dtype(resolved_config)
-        autocast_enabled = target_dtype != torch.float32 and not resolved_config.disable_autocast
+        autocast_enabled = target_dtype != torch.float32 and not resolved_config.engine.disable_autocast
         latents = batch.latents
         num_channels = getattr(
             self.transformer,
@@ -497,7 +497,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
         batch.latents = latents[:, :, :, :, :num_channels]
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.min_list_length(2))
@@ -509,7 +509,7 @@ class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
 
     Reuses the parent's RoPE/scale_factor/sparse-params helpers; only the
     denoising loop differs: a fixed short timestep schedule
-    (``pipeline_config.dmd_denoising_steps``) with a single forward pass per
+    (``pipeline.dmd_denoising_steps``) with a single forward pass per
     step and no classifier-free-guidance branch, matching DMD's distilled
     few-step generator.
 
@@ -536,18 +536,18 @@ class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
         super().__init__(transformer, scheduler)
         self._sample_scheduler = FlowMatchEulerDiscreteScheduler(shift=scheduler.shift)
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.latents is None:
             raise ValueError("latents must be prepared before Kandinsky5 DMD denoising.")
-        if not resolved_config.model_loaded["transformer"]:
+        if not self.component_state.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
-            resolved_config.model_loaded["transformer"] = True
+            self.transformer = loader.load(self.component_state.model_paths["transformer"], resolved_config)
+            self.component_state.model_loaded["transformer"] = True
         self._assert_local_attention_backend_engaged()
 
         device = get_local_torch_device()
         target_dtype = self._resolve_target_dtype(resolved_config)
-        autocast_enabled = target_dtype != torch.float32 and not resolved_config.disable_autocast
+        autocast_enabled = target_dtype != torch.float32 and not resolved_config.engine.disable_autocast
         latents = batch.latents
         num_channels = getattr(
             self.transformer,
@@ -574,10 +574,10 @@ class Kandinsky5DmdDenoisingStage(Kandinsky5DenoisingStage):
         scale_factor = self._scale_factor(height, width)
         sparse_params = self.get_sparse_params(latents, device)
 
-        dmd_steps = resolved_config.pipeline_config.dmd_denoising_steps
+        dmd_steps = resolved_config.pipeline.dmd_denoising_steps
         if not dmd_steps:
             raise ValueError("Kandinsky5 DMD denoising requires "
-                             "pipeline_config.dmd_denoising_steps to be set.")
+                             "pipeline.dmd_denoising_steps to be set.")
         timesteps = torch.tensor(dmd_steps, dtype=torch.long, device=device)
 
         # I2V keeps the first (conditioning) frame fixed during denoising.
@@ -659,7 +659,7 @@ class Kandinsky5DecodingStage(DecodingStage):
     def __init__(self, vae: ParallelTiledVAE, pipeline=None) -> None:
         super().__init__(vae=vae, pipeline=pipeline)
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.latents is None:
             raise ValueError("latents must be available before Kandinsky5 decoding.")
         # Kandinsky5 latents are channels-last [B, T, H, W, C]; the base stage
@@ -699,23 +699,23 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         return image
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.pil_image is None:
             raise ValueError("Kandinsky5 I2V requires an input image.")
 
-        if not resolved_config.model_loaded["vae"]:
+        if not self.component_state.model_loaded["vae"]:
             vae = getattr(self, "vae", None)
             if vae is None:
                 loader = VAELoader()
-                vae = loader.load(resolved_config.model_paths["vae"], resolved_config)
+                vae = loader.load(self.component_state.model_paths["vae"], resolved_config)
                 self.vae = vae
-            resolved_config.model_loaded["vae"] = True
+            self.component_state.model_loaded["vae"] = True
 
         device = get_local_torch_device()
         vae = self.vae.to(device)
         self.vae = vae
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        vae_autocast_enabled = vae_dtype != torch.float32 and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        vae_autocast_enabled = vae_dtype != torch.float32 and not resolved_config.engine.disable_autocast
 
         # [B, C, H, W] -> [B, C, 1, H, W]
         image = self._preprocess(batch.pil_image, int(batch.height), int(batch.width))
@@ -761,11 +761,11 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
             latents[:, 0:1, :, :, 2 * num_channels:] = 1.0
         batch.latents = latents
 
-        if resolved_config.vae_cpu_offload:
+        if resolved_config.engine.offload.vae:
             vae.to("cpu")
         return batch
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("pil_image", batch.pil_image, V.not_none)
         result.add_check("height", batch.height, V.positive_int)
@@ -774,7 +774,7 @@ class Kandinsky5ImageEncodingStage(EncodingStage):
         result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         return result
 
-    def verify_output(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("image_latent", batch.image_latent, [V.is_tensor, V.with_dims(5)])
         return result
@@ -796,7 +796,7 @@ class Kandinsky5NormalizationStage(PipelineStage):
         normalized = (source - source_mean) / source_std
         return normalized * ref_std + ref_mean
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         latents = batch.latents
         n = self.COND_FRAMES
         if latents is None or latents.shape[1] <= n:

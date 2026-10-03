@@ -8,8 +8,8 @@ from typing import Any
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -67,7 +67,7 @@ class FluxInputValidationStage(InputValidationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         if (batch.height is not None and batch.width is not None and (batch.height % 16 != 0 or batch.width % 16 != 0)):
             raise ValueError("FLUX expects height and width divisible by 16 "
@@ -79,13 +79,13 @@ class FluxConditioningStage(PipelineStage):
     """Build CLIP pooled + T5 sequence + ``text_ids`` (and optional negative for true CFG)."""
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if len(batch.prompt_embeds) < 2:
             raise ValueError("FluxConditioningStage expects 2 prompt_embeds (CLIP pooled, T5 sequence), "
                              f"got {len(batch.prompt_embeds)}")
 
         device = get_local_torch_device()
-        target_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
+        target_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
 
         pooled = batch.prompt_embeds[0].to(device=device, dtype=target_dtype)
         enc = batch.prompt_embeds[1].to(device=device, dtype=target_dtype)
@@ -122,7 +122,7 @@ class FluxTimestepPreparationStage(TimestepPreparationStage):
         b = base_shift - m * base_seq_len
         return float(image_seq_len) * m + b
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         sig = inspect.signature(self.scheduler.set_timesteps)
         if "mu" not in sig.parameters:
             logger.warning(
@@ -179,7 +179,7 @@ class FluxLatentPreparationStage(PipelineStage):
         self.scheduler = scheduler
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.height is None or batch.width is None:
             raise ValueError("height/width required for FluxLatentPreparationStage")
 
@@ -207,7 +207,7 @@ class FluxLatentPreparationStage(PipelineStage):
         h_lat = batch.height // spatial_ratio
         w_lat = batch.width // spatial_ratio
 
-        dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
+        dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
         device = get_local_torch_device()
 
         shape = (batch_size, num_channels_latents, h_lat, w_lat)
@@ -255,7 +255,7 @@ class FluxDenoisingStage(PipelineStage):
         return kwargs
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.timesteps is None:
             raise ValueError("timesteps must be set before FluxDenoisingStage")
         if batch.latents is None:
@@ -280,8 +280,8 @@ class FluxDenoisingStage(PipelineStage):
         guidance_embeds = bool(getattr(tr_arch, "guidance_embeds", False))
 
         device = get_local_torch_device()
-        target_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        target_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         bs = packed.shape[0]
         if guidance_embeds:
@@ -383,7 +383,7 @@ class FluxDecodingStage(PipelineStage):
         return latents
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         packed = batch.latents
         if packed is None:
             raise ValueError("latents must be set before FluxDecodingStage")
@@ -405,8 +405,8 @@ class FluxDecodingStage(PipelineStage):
         vae_device = next(self.vae.parameters()).device
         latents_4d = latents_4d.to(device=vae_device)
 
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
         use_cuda_autocast = autocast_enabled and vae_device.type == "cuda"
 
         with torch.autocast(

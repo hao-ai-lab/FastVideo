@@ -9,8 +9,8 @@ LongCat-specific normalization for I2V conditioning.
 import PIL
 import torch
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import (normalize, numpy_to_pt, pil_to_numpy, resize)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -38,7 +38,7 @@ class LongCatImageVAEEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """Encode image to latent for I2V conditioning."""
 
@@ -78,11 +78,11 @@ class LongCatImageVAEEncodingStage(PipelineStage):
         self.vae = self.vae.to(get_local_torch_device())
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if resolved_config.pipeline_config.vae_tiling:
+            if resolved_config.pipeline.vae_tiling:
                 self.vae.enable_tiling()
 
             if not vae_autocast_enabled:
@@ -110,7 +110,7 @@ class LongCatImageVAEEncodingStage(PipelineStage):
         logger.info("I2V: Encoded image to latent shape %s, num_cond_latents=%s", latent.shape, batch.num_cond_latents)
 
         # Offload VAE if needed
-        if resolved_config.vae_cpu_offload:
+        if resolved_config.engine.offload.vae:
             self.vae.to("cpu")
 
         return batch

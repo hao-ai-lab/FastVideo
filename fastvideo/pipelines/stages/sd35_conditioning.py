@@ -9,8 +9,8 @@ import torch
 import torch.nn.functional as F
 from diffusers.utils.torch_utils import randn_tensor
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -24,7 +24,7 @@ class SD35LatentPreparationStage(PipelineStage):
         self.scheduler = scheduler
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.height is None or batch.width is None:
             raise ValueError("height/width must be set for SD35LatentPreparationStage")
 
@@ -39,7 +39,7 @@ class SD35LatentPreparationStage(PipelineStage):
 
         batch_size *= batch.num_videos_per_prompt
 
-        dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
+        dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
         device = get_local_torch_device()
 
         if isinstance(batch.generator, list) and len(batch.generator) != batch_size:
@@ -121,14 +121,14 @@ class SD35ConditioningStage(PipelineStage):
         return pooled.to(dtype=dtype)
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if len(batch.prompt_embeds) < 3:
             raise ValueError(
                 f"SD35ConditioningStage expects 3 prompt_embeds entries (2x CLIP + 1x T5), got {len(batch.prompt_embeds)}"
             )
 
         device = get_local_torch_device()
-        target_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
+        target_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
 
         clip_1 = batch.prompt_embeds[0].to(device=device, dtype=target_dtype)
         clip_2 = batch.prompt_embeds[1].to(device=device, dtype=target_dtype)
@@ -217,7 +217,7 @@ class SD35DenoisingStage(PipelineStage):
         return extra_kwargs
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.timesteps is None:
             raise ValueError("timesteps must be set before SD35DenoisingStage")
         if batch.latents is None:
@@ -233,8 +233,8 @@ class SD35DenoisingStage(PipelineStage):
         latents = batch.latents
         guidance_scale = float(batch.guidance_scale)
 
-        target_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        target_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         extra_step_kwargs = self._prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -307,7 +307,7 @@ class SD35DecodingStage(PipelineStage):
         return latents
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.latents is None:
             raise ValueError("latents must be set before SD35DecodingStage")
 
@@ -315,8 +315,8 @@ class SD35DecodingStage(PipelineStage):
         latents_5d = batch.latents.to(device)
         latents_4d = latents_5d.squeeze(2)
 
-        vae_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
-        autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.vae]
+        autocast_enabled = (vae_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         latents_4d = self._denormalize_latents(latents_4d, self.vae)
 

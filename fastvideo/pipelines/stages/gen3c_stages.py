@@ -9,8 +9,8 @@ from typing import Any
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
@@ -34,7 +34,7 @@ class Gen3CCFGPolicyStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         pipeline_config = resolved_config.pipeline_config
         policy = getattr(pipeline_config, "cfg_behavior", "legacy")
@@ -92,7 +92,7 @@ class Gen3CConditioningStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """Run 3D cache conditioning pipeline."""
         pipeline_config = resolved_config.pipeline_config
@@ -223,7 +223,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """Prepare latents and encode 3D cache buffers."""
         pipeline_config = resolved_config.pipeline_config
@@ -353,7 +353,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             conditioning_latents[:, :, :first_latent.shape[2], :, :] = first_latent
             batch.conditioning_latents = conditioning_latents
 
-            if resolved_config.vae_cpu_offload:
+            if resolved_config.engine.offload.vae:
                 self.vae.to("cpu")
 
             batch.condition_video_input_mask = torch.zeros(
@@ -556,15 +556,15 @@ class Gen3CDenoisingStage(DenoisingStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         pipeline = self.pipeline() if self.pipeline else None
-        if not resolved_config.model_loaded["transformer"]:
+        if not self.component_state.model_loaded["transformer"]:
             loader = TransformerLoader()
-            self.transformer = loader.load(resolved_config.model_paths["transformer"], resolved_config)
+            self.transformer = loader.load(self.component_state.model_paths["transformer"], resolved_config)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
-            resolved_config.model_loaded["transformer"] = True
+            self.component_state.model_loaded["transformer"] = True
 
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -579,7 +579,7 @@ class Gen3CDenoisingStage(DenoisingStage):
         else:
             transformer_dtype = next(self.transformer.parameters()).dtype
         target_dtype = transformer_dtype
-        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32) and not resolved_config.engine.disable_autocast
 
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
