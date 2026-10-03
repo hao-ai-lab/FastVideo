@@ -1212,12 +1212,15 @@ class TransformerLoader(ComponentLoader):
                     model = model.to(get_local_torch_device())
         # FASTVIDEO_H3_SPLICE_TRANSFORMER=<transformer dir>: a second checkpoint of the same architecture
         # runs denoising steps FASTVIDEO_H3_SPLICE_FROM_STEP (default 4) onward.
-        splice_path = os.environ.pop("FASTVIDEO_H3_SPLICE_TRANSFORMER", None)
-        if splice_path and hasattr(model, "attach_step_splice"):
+        # Only the primary ``transformer`` component splices; the spliced load itself never does.
+        splice_path = os.environ.get("FASTVIDEO_H3_SPLICE_TRANSFORMER")
+        if (splice_path and not getattr(self, "_loading_splice", False) and hasattr(model, "attach_step_splice")
+                and os.path.basename(os.path.normpath(model_path)) == "transformer"):
+            self._loading_splice = True
             try:
                 late = self.load(splice_path, fastvideo_args)
             finally:
-                os.environ["FASTVIDEO_H3_SPLICE_TRANSFORMER"] = splice_path
+                self._loading_splice = False
             from_step = int(os.environ.get("FASTVIDEO_H3_SPLICE_FROM_STEP", "4"))
             model.attach_step_splice(late, from_step)
             logger.info("Step splice: steps >= %d run the transformer from %s", from_step, splice_path)

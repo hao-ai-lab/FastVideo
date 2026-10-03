@@ -424,13 +424,13 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
 
     @staticmethod
     def _apply_finalized(layer: torch.nn.Module, x: torch.Tensor, bias: torch.Tensor | None) -> torch.Tensor:
+        x = _coerce_fp4_input_dtype(x)
         if not _fp4_gemm_supported(layer.weight_packed.device):
             # Pre-Blackwell GPUs have no FP4 GEMM: expand this layer's weight to bf16 for the one call.
             # The encoder runs once per request, so the transient weight is cheaper than keeping a bf16 copy.
             weight = dequantize_serialized_nvfp4(layer.weight_packed, layer.weight_scale,
                                                  float(layer.weight_global_scale.item()), x.dtype)
             return torch.nn.functional.linear(x, weight, None if bias is None else bias.to(x.dtype))
-        x = _coerce_fp4_input_dtype(x)
         original_shape = x.shape
         if x.numel() == 0:
             # An empty prompt has nothing to quantize; the FP4 kernels are not defined for zero rows.

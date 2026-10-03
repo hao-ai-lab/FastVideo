@@ -27,7 +27,7 @@ def rowwise_scaled_mm_is_slow() -> bool:
 
 @triton.jit
 def _quantize_rowwise_kernel(x_ptr, q_ptr, s_ptr, K, stride_x, stride_q, BLOCK_K: tl.constexpr):
-    row = tl.program_id(0)
+    row = tl.program_id(0).to(tl.int64)
     x_row = x_ptr + row * stride_x
     amax = tl.zeros((BLOCK_K, ), dtype=tl.float32)
     for k in range(0, K, BLOCK_K):
@@ -56,9 +56,10 @@ def quantize_rowwise_fp8(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor
 
 @triton.jit
 def _scale_rows_cols_kernel(o_ptr, sx_ptr, sw_ptr, M, N, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
-    rows = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    rows = tl.program_id(0).to(tl.int64) * BLOCK_M + tl.arange(0, BLOCK_M)
     cols = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
     mask = (rows[:, None] < M) & (cols[None, :] < N)
+    # int64 offsets: a 78k-token fc_in output has 2.2e9 elements, past int32.
     ptrs = o_ptr + rows[:, None] * N + cols[None, :]
     v = tl.load(ptrs, mask=mask, other=0.0).to(tl.float32)
     sx = tl.load(sx_ptr + rows, mask=rows < M, other=0.0)
