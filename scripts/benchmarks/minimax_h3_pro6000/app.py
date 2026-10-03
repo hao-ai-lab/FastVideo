@@ -555,10 +555,10 @@ def headline_fetch(repo: str) -> str:
     return _sh(f"du -sh {local}/*")
 
 
-def _headline(repo: str, gpus: int, profile: str, extra_env: dict | None) -> dict:
+def _headline(repo: str, gpus: int, profile: str, extra_env: dict | None, tag: str = "") -> dict:
     _install_kernel()
     model = f"/vol/models/{repo.split('/')[-1]}"
-    run_name = f"pro6000x{gpus}-{repo.split('/')[-1]}"
+    run_name = f"pro6000x{gpus}-{repo.split('/')[-1]}{tag}"
     env = {**os.environ, **FAST_ENV, **(extra_env or {}), "HEADLINE_OUT": "/vol/outputs/headline",
            "HEADLINE_DEVICE": f"{gpus}x RTX PRO 6000", "PYTHONPATH": "/src/fastvideo"}
     proc = subprocess.run(["python", "/root/bench_headline.py", run_name, model, str(gpus), profile,
@@ -578,26 +578,27 @@ def _headline(repo: str, gpus: int, profile: str, extra_env: dict | None) -> dic
 
 
 @app.function(image=headline_image, gpu="RTX-PRO-6000", memory=131072, cpu=8, timeout=2 * 3600, volumes={"/vol": volume})
-def headline1(repo: str, profile: str, extra_env: dict | None = None) -> dict:
-    return _headline(repo, 1, profile, extra_env)
+def headline1(repo: str, profile: str, extra_env: dict | None = None, tag: str = "") -> dict:
+    return _headline(repo, 1, profile, extra_env, tag)
 
 
 @app.function(image=headline_image, gpu="RTX-PRO-6000:4", memory=196608, cpu=16, timeout=2 * 3600, volumes={"/vol": volume})
-def headline4(repo: str, profile: str, extra_env: dict | None = None) -> dict:
-    return _headline(repo, 4, profile, extra_env)
+def headline4(repo: str, profile: str, extra_env: dict | None = None, tag: str = "") -> dict:
+    return _headline(repo, 4, profile, extra_env, tag)
 
 
 @app.function(image=headline_image, gpu="RTX-PRO-6000:8", memory=262144, cpu=32, timeout=2 * 3600, volumes={"/vol": volume})
-def headline8(repo: str, profile: str, extra_env: dict | None = None) -> dict:
-    return _headline(repo, 8, profile, extra_env)
+def headline8(repo: str, profile: str, extra_env: dict | None = None, tag: str = "") -> dict:
+    return _headline(repo, 8, profile, extra_env, tag)
 
 
 @app.local_entrypoint()
-def headline(repo: str, profile: str = "h3_dit_ffn", gpus: str = "1,4,8", skip_fetch: bool = False):
+def headline(repo: str, profile: str = "h3_dit_ffn", gpus: str = "1,4,8", skip_fetch: bool = False,
+             extra_env: str = "{}", tag: str = ""):
     if not skip_fetch:
         print(headline_fetch.remote(repo))
     fns = {"1": headline1, "4": headline4, "8": headline8}
-    calls = [fns[g].spawn(repo, profile) for g in gpus.split(",")]
+    calls = [fns[g].spawn(repo, profile, json.loads(extra_env), tag) for g in gpus.split(",")]
     out = HERE / "headline_results"
     out.mkdir(exist_ok=True)
     for call in calls:
