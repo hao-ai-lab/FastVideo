@@ -48,10 +48,12 @@ def main():
         engine["execution_backend"] = os.environ["HEADLINE_BACKEND"]  # "ray" for multi-node
     if a.nvfp4_profile != "none":
         engine["quantization"] = {"transformer_quant": "NVFP4", "layer_profile": a.nvfp4_profile}
-    config = {"model_path": a.model_dir, "engine": engine,
-              "pipeline": {"experimental": {"attention_backend": "VIDEO_SPARSE_ATTN_H3", "VSA_sparsity": sparsity,
-                                            "VSA_tile_size": 64, "h3_sequential_load": False,
-                                            "inference_torch_compile": False}}}
+    experimental = {"attention_backend": "VIDEO_SPARSE_ATTN_H3", "VSA_sparsity": sparsity, "VSA_tile_size": 64,
+                    "h3_sequential_load": False, "inference_torch_compile": False}
+    if os.environ.get("HEADLINE_VAE_PARALLEL") == "1" and a.num_gpus > 1:
+        # Decode VAE tiles on every GPU instead of rank 0 only.
+        experimental.update(vae_parallel_decode=True, vae_parallel_decode_strategy="gather")
+    config = {"model_path": a.model_dir, "engine": engine, "pipeline": {"experimental": experimental}}
     env = {k: v for k, v in os.environ.items() if k.startswith(("FASTVIDEO_", "PYTORCH_CUDA"))}
     run = None
     if os.environ.get("WANDB_PROJECT"):
