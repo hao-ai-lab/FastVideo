@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 import contextlib
+import os
 import re
 from collections.abc import Callable, Generator
 from itertools import chain
