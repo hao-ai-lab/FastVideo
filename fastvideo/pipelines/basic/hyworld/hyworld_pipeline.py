@@ -7,7 +7,7 @@ using the modular pipeline architecture with HYWorld-specific denoising stage
 for chunk-based video generation with context frame selection.
 """
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, HYWorldDenoisingStage, InputValidationStage,
@@ -35,7 +35,7 @@ class HYWorldPipeline(ComposedPipelineBase):
         "image_encoder", "feature_extractor"
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up pipeline stages with HYWorld-specific denoising stage."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

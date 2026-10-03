@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Matrix-Game I2V pipeline implementation."""
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
@@ -18,10 +18,10 @@ logger = init_logger(__name__)
 class MatrixGame2I2VPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "image_encoder", "image_processor"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline_config.flow_shift)
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(shift=resolved_config.pipeline.flow_shift)
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         if (self.get_module("text_encoder", None) is not None and self.get_module("tokenizer", None) is not None):

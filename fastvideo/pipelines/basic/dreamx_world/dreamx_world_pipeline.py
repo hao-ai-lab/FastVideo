@@ -4,7 +4,7 @@
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.pipelines.basic.wan.stages.conditioning import WanFirstFrameEncodingStage
 from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
@@ -29,10 +29,10 @@ class DreamXWorldPipeline(LoRAPipeline, ComposedPipelineBase):
     pipeline_config_cls = DreamXWorld5BCamPipelineConfig
     sampling_params_cls = SamplingParam
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=resolved_config.pipeline_config.flow_shift)
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=resolved_config.pipeline.flow_shift)
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(

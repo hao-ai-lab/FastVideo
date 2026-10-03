@@ -11,7 +11,7 @@ Supports:
 - KV cache for conditioning frames
 """
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig, thaw
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (
@@ -45,20 +45,21 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Initialize LongCat-specific components."""
         pipeline_config = resolved_config.pipeline_config
+        bsa_options = resolved_config.pipeline.longcat
         transformer = self.get_module("transformer", None)
         if transformer is None:
             return
 
         # Enable BSA if configured (for VC, BSA may not be needed)
-        if getattr(pipeline_config, 'enable_bsa', False):
+        if bsa_options.enable_bsa:
             bsa_params_cfg = getattr(pipeline_config, 'bsa_params', None) or {}
-            sparsity = getattr(pipeline_config, 'bsa_sparsity', None)
-            cdf_threshold = getattr(pipeline_config, 'bsa_cdf_threshold', None)
-            chunk_q = getattr(pipeline_config, 'bsa_chunk_q', None)
-            chunk_k = getattr(pipeline_config, 'bsa_chunk_k', None)
+            sparsity = bsa_options.bsa_sparsity
+            cdf_threshold = bsa_options.bsa_cdf_threshold
+            chunk_q = thaw(bsa_options.bsa_chunk_q)
+            chunk_k = thaw(bsa_options.bsa_chunk_k)
 
             effective_bsa_params = dict(bsa_params_cfg) if isinstance(bsa_params_cfg, dict) else {}
             if sparsity is not None:
@@ -90,7 +91,7 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
             if hasattr(transformer, 'disable_bsa'):
                 transformer.disable_bsa()
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up VC-specific pipeline stages."""
 
         # 1. Input validation

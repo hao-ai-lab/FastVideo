@@ -6,7 +6,7 @@ This module implements the LongCat video diffusion pipeline using FastVideo's
 modular pipeline architecture.
 """
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig, thaw
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (
@@ -30,25 +30,26 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Initialize LongCat-specific components."""
 
         # Enable BSA (Block Sparse Attention) if configured
         pipeline_config = resolved_config.pipeline_config
+        bsa_options = resolved_config.pipeline.longcat
         transformer = self.get_module("transformer", None)
         if transformer is None:
             raise RuntimeError("Transformer module not found during initializing LongCat pipeline.")
         # If user toggles BSA via CLI/config
-        if pipeline_config.enable_bsa:
+        if bsa_options.enable_bsa:
             # Build effective BSA params:
             # 1) from explicit CLI overrides if provided
             # 2) else from pipeline_config.bsa_params
             # 3) else fall back to reasonable defaults
             bsa_params_cfg = pipeline_config.bsa_params
-            sparsity = pipeline_config.bsa_sparsity
-            cdf_threshold = pipeline_config.bsa_cdf_threshold
-            chunk_q = pipeline_config.bsa_chunk_q
-            chunk_k = pipeline_config.bsa_chunk_k
+            sparsity = bsa_options.bsa_sparsity
+            cdf_threshold = bsa_options.bsa_cdf_threshold
+            chunk_q = thaw(bsa_options.bsa_chunk_q)
+            chunk_k = thaw(bsa_options.bsa_chunk_k)
 
             effective_bsa_params = dict(bsa_params_cfg) if isinstance(bsa_params_cfg, dict) else {}
             if sparsity is not None:
@@ -83,7 +84,7 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
             if hasattr(transformer, 'disable_bsa'):
                 transformer.disable_bsa()
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Cosmos 2.5 pipeline entry (staged pipeline)."""
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (ConditioningStage, Cosmos25AutoDenoisingStage,
@@ -16,7 +16,7 @@ class Cosmos2_5Pipeline(ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler", "safety_checker"]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         logger.info("Creating Cosmos 2.5 pipeline stages...")
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

@@ -6,7 +6,7 @@ This module contains an implementation of the Cosmos video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -21,9 +21,9 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler", "safety_checker"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         scheduler = FlowMatchEulerDiscreteScheduler(
-            shift=resolved_config.pipeline_config.flow_shift,
+            shift=resolved_config.pipeline.flow_shift,
             use_karras_sigmas=True,
         )
         scheduler.config.sigma_max = 80.0
@@ -35,7 +35,7 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
         scheduler.sigma_data = 1.0
         self.modules["scheduler"] = scheduler
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())

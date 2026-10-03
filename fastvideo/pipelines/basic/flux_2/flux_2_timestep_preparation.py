@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.timestep_preparation import TimestepPreparationStage
 
@@ -36,7 +36,7 @@ class Flux2TimestepPreparationStage(TimestepPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         scheduler = self.scheduler
         device = get_local_torch_device()

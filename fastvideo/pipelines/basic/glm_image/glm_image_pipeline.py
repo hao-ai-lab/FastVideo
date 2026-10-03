@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
@@ -30,10 +30,10 @@ class GlmImagePipeline(LoRAPipeline, ComposedPipelineBase):
 
     _optional_config_modules: list[str] = []
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig) -> None:
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(shift=1.0)
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         self.add_stage(
             stage_name="input_validation_stage",
             stage=InputValidationStage(),

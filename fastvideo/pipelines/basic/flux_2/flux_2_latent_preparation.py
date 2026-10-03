@@ -10,7 +10,7 @@ spatial for VAE decode. This stage prepares (B, 128, T, H//2, W//2).
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.latent_preparation import LatentPreparationStage
 
@@ -28,7 +28,7 @@ class Flux2LatentPreparationStage(LatentPreparationStage):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """Prepare latents with Flux2 packed half-spatial shape."""
         from fastvideo.distributed import get_local_torch_device

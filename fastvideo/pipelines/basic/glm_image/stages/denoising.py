@@ -6,7 +6,7 @@ import torch
 
 from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -17,7 +17,7 @@ from fastvideo.platforms import AttentionBackendEnum
 
 class GlmImageDenoisingStage(DenoisingStage):
 
-    def verify_input(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> VerificationResult:
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
         latents = getattr(batch, "latent", getattr(batch, "latents", None))
@@ -26,7 +26,7 @@ class GlmImageDenoisingStage(DenoisingStage):
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
         return result
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         device = get_local_torch_device()
         dtype = torch.bfloat16
         guidance_scale = batch.guidance_scale

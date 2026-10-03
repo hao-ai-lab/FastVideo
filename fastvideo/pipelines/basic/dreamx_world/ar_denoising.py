@@ -8,7 +8,7 @@ from typing import Any
 import torch
 from tqdm.auto import tqdm
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.basic.dreamx_world.stages import DREAMX_Y_CAMERA_KEY
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -25,18 +25,18 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
         self.num_frame_per_block = int(getattr(self.transformer, "num_frame_per_block", 3))
         self.local_attn_size = int(getattr(self.transformer, "local_attn_size", 12))
 
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         assert batch.latents is not None, "latents must be prepared before DreamX AR denoising"
         assert batch.prompt_embeds, "prompt embeds must be prepared before DreamX AR denoising"
         latents = batch.latents
         device = latents.device
         target_dtype = torch.bfloat16
-        autocast_enabled = device.type == "cuda" and not resolved_config.disable_autocast
+        autocast_enabled = device.type == "cuda" and not resolved_config.engine.disable_autocast
 
         frame_seq_length = (latents.shape[-2] // self.transformer.patch_size[1]) * (latents.shape[-1] //
                                                                                     self.transformer.patch_size[2])
         timesteps = torch.tensor(
-            tuple(getattr(resolved_config.pipeline_config, "dmd_denoising_steps", (1000, 750, 500, 250))),
+            tuple(resolved_config.pipeline.dmd_denoising_steps),
             dtype=torch.long,
         ).cpu()
         if getattr(resolved_config.pipeline_config, "warp_denoising_step", True):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
@@ -34,7 +34,7 @@ class SD35Pipeline(ComposedPipelineBase):
         "tokenizer_3",
     ]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig) -> None:
         te_cfgs = list(resolved_config.pipeline_config.text_encoder_configs)
         if len(te_cfgs) >= 2:
             for i in (0, 1):
@@ -49,7 +49,7 @@ class SD35Pipeline(ComposedPipelineBase):
             te_cfgs[2].tokenizer_kwargs.setdefault("truncation", True)
             te_cfgs[2].tokenizer_kwargs.setdefault("return_tensors", "pt")
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(

@@ -7,7 +7,7 @@ using the modular pipeline architecture.
 """
 import torch
 import time
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -28,7 +28,7 @@ class HunyuanVideo152SRPipeline(ComposedPipelineBase):
         "transformer_3", "scheduler", "upsampler", "upsampler_2"
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
@@ -81,14 +81,14 @@ class HunyuanVideo152SRPipeline(ComposedPipelineBase):
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         """
         Generate a video or image using the pipeline.
         
         Args:
             batch: The batch to generate from.
-            fastvideo_args: The inference arguments.
+            resolved_config: The resolved runtime config.
         Returns:
             ForwardBatch: The batch with the generated video or image.
         """

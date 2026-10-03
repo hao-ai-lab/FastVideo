@@ -7,7 +7,7 @@ This module contains an implementation of the Flux2 image diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.basic.flux_2.flux_2_latent_preparation import (
@@ -39,7 +39,7 @@ class Flux2Pipeline(LoRAPipeline, ComposedPipelineBase):
         "scheduler",
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(

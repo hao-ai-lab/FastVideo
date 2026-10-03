@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastvideo.configs.pipelines.zimage import ZImagePipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 
@@ -29,7 +29,7 @@ class ZImagePipeline(ComposedPipelineBase):
         "vae",
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         scheduler = self.get_module("scheduler")
         transformer = self.get_module("transformer")
 

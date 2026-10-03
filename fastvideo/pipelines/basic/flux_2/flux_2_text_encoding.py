@@ -7,7 +7,7 @@ from typing import Any
 import torch
 
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, embedded_cfg_scale_for_batch
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
@@ -50,14 +50,14 @@ def _prepare_flux2_text_ids(prompt_embeds: torch.Tensor) -> torch.Tensor:
 class Flux2TextEncodingStage(TextEncodingStage):
     """Text encoding for Flux2 full and Klein variants."""
 
-    def _uses_embedded_guidance(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> bool:
+    def _uses_embedded_guidance(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> bool:
         return embedded_cfg_scale_for_batch(batch, resolved_config) is not None
 
     @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
         if self._uses_embedded_guidance(batch, resolved_config):
             batch.do_classifier_free_guidance = False
@@ -87,7 +87,7 @@ class Flux2TextEncodingStage(TextEncodingStage):
     def encode_flux2_full_text(
         self,
         text: str | list[str],
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         max_length: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         tokenizer = self.tokenizers[0]

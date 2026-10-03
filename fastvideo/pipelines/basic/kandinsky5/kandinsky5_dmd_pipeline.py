@@ -10,7 +10,7 @@ validation callback.
 
 from __future__ import annotations
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.kandinsky5 import (
@@ -35,7 +35,7 @@ class Kandinsky5DMDPipeline(ComposedPipelineBase):
         "vae",
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         self.add_stage(

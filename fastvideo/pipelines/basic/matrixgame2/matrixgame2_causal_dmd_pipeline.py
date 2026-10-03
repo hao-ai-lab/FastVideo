@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Matrix-Game causal DMD pipeline implementation."""
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 import torch
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch, LoRAPipeline
@@ -17,7 +17,7 @@ logger = init_logger(__name__)
 class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = ["vae", "transformer", "scheduler", "image_encoder", "image_processor"]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
 
         if (self.get_module("text_encoder", None) is not None and self.get_module("tokenizer", None) is not None):
@@ -56,7 +56,7 @@ class MatrixGame2CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         logger.info("MatrixGame2CausalDMDPipeline initialized with action support")
 
     @torch.no_grad()
-    def streaming_reset(self, batch: ForwardBatch, resolved_config: FastVideoArgs):
+    def streaming_reset(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig):
         if not self.post_init_called:
             self.post_init()
 

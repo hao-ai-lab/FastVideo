@@ -3,7 +3,7 @@
 
 from typing import Any
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.basic.lingbot_video.stages import (
     LingBotVideoDenoisingStage,
@@ -27,27 +27,29 @@ class LingBotVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def load_modules(
         self,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
         loaded_modules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Load the optional refiner DiT and the VAE encoder only when declared."""
         model_index = self._load_config(self.model_path)
         required = list(type(self)._required_config_modules)
-        load_refiner = "transformer_2" in model_index and getattr(resolved_config, "refine_enabled", None) is not False
+        # The shared stage-2 refine switch: ``pipeline.preset_overrides.refine.enabled`` and the ``refine_enabled``
+        # key resolve into ``pipeline.ltx2.refine.enabled``; ``None`` loads the refiner when the checkpoint has one.
+        load_refiner = "transformer_2" in model_index and resolved_config.pipeline.ltx2.refine.enabled is not False
         if load_refiner:
             required.append("transformer_2")
             resolved_config.pipeline_config.vae_config.load_encoder = True
         self._required_config_modules = required
         return super().load_modules(resolved_config, loaded_modules)
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs) -> None:
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Apply the released runtime flow shift to the loaded scheduler."""
-        shift = resolved_config.pipeline_config.flow_shift
+        shift = resolved_config.pipeline.flow_shift
         if shift is None:
             raise ValueError("LingBot-Video requires a flow shift")
         self.get_module("scheduler").set_shift(float(shift))
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Create base generation and the optional decoded-video refiner stages."""
         refiner = self.get_module("transformer_2")
         self.add_stage(

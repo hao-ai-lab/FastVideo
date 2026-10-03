@@ -4,7 +4,7 @@ from __future__ import annotations
 import torch
 
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.image_processor import ImageProcessor
 from fastvideo.models.dits.glm_image import GlmImageKVCache
@@ -23,7 +23,7 @@ class GlmImageConditionEncodingStage(PipelineStage):
         self.image_processor = ImageProcessor(vae_scale_factor=_CONDITION_MULTIPLE_OF)
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, resolved_config: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         if batch.pil_image is None:
             return batch
 

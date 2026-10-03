@@ -6,7 +6,7 @@ This module implements the HunyuanGameCraft pipeline for camera/action-condition
 video generation with the modular pipeline architecture.
 """
 
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (
@@ -43,7 +43,7 @@ class HunyuanGameCraftPipeline(ComposedPipelineBase):
         "scheduler",
     ]
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(

@@ -8,8 +8,10 @@ from types import SimpleNamespace
 import torch
 
 import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
-from fastvideo.fastvideo_args import UNIFIED_MEMORY_OFFLOAD_FLAGS, FastVideoArgs
+from fastvideo.api.device_policy import UNIFIED_MEMORY_OFFLOAD_PATHS
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.tests.api.config_snapshot import isolated_environment
 
 
 class _Profiler:
@@ -24,8 +26,8 @@ class _Pipeline(ComposedPipelineBase):
 
     def load_modules(self, resolved_config, loaded_modules=None):
         del loaded_modules
-        policy_state = {flag: getattr(resolved_config, flag) for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS}
-        policy_state["use_fsdp_inference"] = resolved_config.use_fsdp_inference
+        policy_state = {path: resolved_config.provenance(path).value for path in UNIFIED_MEMORY_OFFLOAD_PATHS.values()}
+        policy_state["engine.use_fsdp_inference"] = resolved_config.engine.use_fsdp_inference
         self.events.append(("load_modules", policy_state))
         return {}
 
@@ -36,7 +38,13 @@ class _Pipeline(ComposedPipelineBase):
 def test_direct_pipeline_applies_policy_after_device_initialization(monkeypatch) -> None:
     events = []
     monkeypatch.setattr(_Pipeline, "events", events)
-    args = FastVideoArgs(model_path="unused", use_fsdp_inference=True)
+    with isolated_environment():
+        resolved_config = resolve_inference_config({
+            "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            "engine": {
+                "use_fsdp_inference": True
+            },
+        })
 
     def classify_device(device_id):
         events.append(("offload_policy", device_id))
@@ -54,7 +62,7 @@ def test_direct_pipeline_applies_policy_after_device_initialization(monkeypatch)
     monkeypatch.setattr("fastvideo.platforms.current_platform.get_device_name", lambda device_id: "NVIDIA GB10")
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
 
-    pipeline = _Pipeline("unused", args, required_config_modules=[])
+    pipeline = _Pipeline("unused", resolved_config, required_config_modules=[])
 
     assert pipeline.modules == {}
     assert events == [
@@ -63,8 +71,8 @@ def test_direct_pipeline_applies_policy_after_device_initialization(monkeypatch)
         (
             "load_modules",
             {
-                **{flag: False for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS},
-                "use_fsdp_inference": True,
+                **{path: False for path in UNIFIED_MEMORY_OFFLOAD_PATHS.values()},
+                "engine.use_fsdp_inference": True,
             },
         ),
     ]

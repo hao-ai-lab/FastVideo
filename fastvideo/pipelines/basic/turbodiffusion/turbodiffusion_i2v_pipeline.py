@@ -13,7 +13,7 @@ Key differences from T2V:
 """
 
 from fastvideo.pipelines.basic.wan.stages.denoising import WanDenoisingStage
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_rcm import RCMScheduler
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
@@ -33,12 +33,12 @@ class TurboDiffusionI2VPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "transformer_2", "scheduler"]
 
-    def initialize_pipeline(self, resolved_config: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         # Use RCM scheduler with higher sigma_max for I2V
         logger.info("Initializing RCM scheduler for TurboDiffusion I2V (sigma_max=200)")
         self.modules["scheduler"] = RCMScheduler(sigma_max=200.0)
 
-    def create_pipeline_stages(self, resolved_config: FastVideoArgs) -> None:
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
