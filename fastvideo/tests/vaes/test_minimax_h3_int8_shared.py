@@ -32,6 +32,7 @@ def test_shared_int8_and_transpose_views_are_exact(rows, dtype, convrot, monkeyp
         assert quant.call_count == 1
         for layer in layers:
             layer._transpose_view = True
+            layer._fused_dequant = True
         views = shared_int8_projections(layers, x)
     for ref, actual, view in zip(expected, shared, views, strict=True):
         assert torch.isfinite(ref).all()
@@ -69,5 +70,24 @@ def test_vae_attention_shares_quantized_projections_exactly(distributed_setup, m
         attention._share_int8_qkv = True
         for layer in (attention.to_q, attention.to_k, attention.to_v):
             layer._transpose_view = True
+            layer._fused_dequant = True
         actual = attention(x)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for fused INT8 epilogue")
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("has_bias", [False, True])
+def test_fused_int8_epilogue_large_accumulators_and_small_scales(dtype, has_bias):
+    from fastvideo.models.vaes.minimax_h3_int8_kernels import fused_int8_dequant_bias
+
+    torch.manual_seed(19)
+    acc = torch.randint(-400_000_000, 400_000_000, (129, 264), device="cuda", dtype=torch.int32)
+    x_scale = torch.logspace(-30, -3, 129, device="cuda").view(-1, 1)
+    w_scale = torch.logspace(-6, -2, 264, device="cuda").view(-1, 1)
+    bias = torch.randn(264, device="cuda") if has_bias else None
+    expected = acc.float() * x_scale.float() * w_scale.t().float()
+    if bias is not None:
+        expected = expected + bias.float()
+    actual = fused_int8_dequant_bias(acc, x_scale, w_scale, bias, dtype)
+    torch.testing.assert_close(actual, expected.to(dtype), rtol=0, atol=0)
