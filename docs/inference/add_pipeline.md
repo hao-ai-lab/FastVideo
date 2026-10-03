@@ -210,7 +210,7 @@ from fastvideo.pipelines.stages import (
     InputValidationStage, CLIPTextEncodingStage, TimestepPreparationStage,
     LatentPreparationStage, DenoisingStage, DecodingStage
 )
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 import torch
 
@@ -226,11 +226,11 @@ class MyCustomPipeline(ComposedPipelineBase):
     def required_config_modules(self) -> List[str]:
         return self._required_config_modules
         
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Initialize pipeline-specific components."""
         pass
         
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(
             stage_name="input_validation_stage",
@@ -294,7 +294,7 @@ class MyCustomStage(PipelineStage):
         self.custom_module = custom_module
         self.other_param = other_param
         
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         # Access input data
         input_data = batch.some_attribute
         

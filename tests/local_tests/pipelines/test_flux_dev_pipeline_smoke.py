@@ -36,26 +36,33 @@ def test_flux_dev_pipeline_short_run_finite_output(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
-    from fastvideo.configs.pipelines.flux import FluxPipelineConfig
+    from fastvideo.api.inference_resolution import resolve_inference_config
     from fastvideo.distributed import (
         cleanup_dist_env_and_memory,
         maybe_init_distributed_environment_and_model_parallel,
     )
-    from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
     from fastvideo.pipelines.basic.flux.flux_pipeline import FluxPipeline
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
     torch.manual_seed(0)
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     try:
-        args = FastVideoArgs(
-            model_path=_FLUX_DEV_ROOT,
-            pipeline_config=FluxPipelineConfig(),
-            workload_type=WorkloadType.T2I,
-            hsdp_shard_dim=1,
-            pin_cpu_memory=False,
-            distributed_executor_backend="mp",
-        )
+        # The registry resolves the local FLUX.1-dev root to FluxPipelineConfig.
+        args = resolve_inference_config({
+            "model_path": _FLUX_DEV_ROOT,
+            "engine": {
+                "execution_backend": "mp",
+                "parallelism": {
+                    "hsdp_shard_dim": 1
+                },
+                "offload": {
+                    "pin_cpu_memory": False
+                },
+            },
+            "pipeline": {
+                "workload_type": "t2i"
+            },
+        })
         pipeline = FluxPipeline(_FLUX_DEV_ROOT, args)
 
         batch = ForwardBatch(

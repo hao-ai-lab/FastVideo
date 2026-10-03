@@ -196,15 +196,15 @@ def _run_production_cases(
 
 
 def _production_loader_args() -> SimpleNamespace:
+    """A resolved-config fake with the typed paths that ``TextEncoderLoader.load`` reads."""
     return SimpleNamespace(
-        pipeline_config=SimpleNamespace(
-            text_encoder_configs=(MiniMaxH3Qwen3VLConfig(), ),
-            text_encoder_precisions=("bf16", ),
+        pipeline_config=SimpleNamespace(text_encoder_configs=(MiniMaxH3Qwen3VLConfig(), )),
+        engine=SimpleNamespace(
+            precision=SimpleNamespace(text_encoders=("bf16", )),
+            offload=SimpleNamespace(text_encoder=False, pin_cpu_memory=False),
+            quantization=None,
         ),
-        text_encoder_cpu_offload=False,
-        override_text_encoder_quant=None,
-        override_text_encoder_safetensors=None,
-        pin_cpu_memory=False,
+        pipeline=SimpleNamespace(components=SimpleNamespace(text_encoder_weights=None)),
     )
 
 

@@ -133,12 +133,13 @@ def _load_qwen3_config() -> Qwen3TextConfig:
 
 
 def _loader_args(cpu_offload: bool) -> SimpleNamespace:
+    """A resolved-config fake with the typed paths that ``TextEncoderLoader.load_model`` reads."""
     return SimpleNamespace(
-        text_encoder_cpu_offload=cpu_offload,
-        override_text_encoder_quant=None,
-        override_text_encoder_safetensors=None,
-        pin_cpu_memory=False,
-        disable_offload_on_unified_memory=lambda device_id, offload_flag=None: False,
+        engine=SimpleNamespace(
+            offload=SimpleNamespace(text_encoder=cpu_offload, pin_cpu_memory=False),
+            quantization=None,
+        ),
+        pipeline=SimpleNamespace(components=SimpleNamespace(text_encoder_weights=None)),
     )
 
 
@@ -314,6 +315,7 @@ def test_qwen3_production_loader_avoids_device_context_and_honors_placement(
         SimpleNamespace(
             is_mps=lambda: False,
             verify_model_arch=lambda _arch: None,
+            has_unified_memory=lambda _device_id: False,
         ),
     )
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)

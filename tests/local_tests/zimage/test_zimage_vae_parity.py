@@ -132,18 +132,15 @@ def _load_fastvideo_production_vae(monkeypatch: pytest.MonkeyPatch):
         "fastvideo.models.loader.component_loader.get_local_torch_device",
         lambda: torch.device("cpu"),
     )
-    pipeline_config = SimpleNamespace(
-        vae_config=AutoencoderKLVAEConfig(),
-        vae_precision="fp32",
-    )
     resolved_config = SimpleNamespace(
-        model_paths={},
-        pipeline_config=pipeline_config,
-        vae_cpu_offload=False,
+        pipeline_config=SimpleNamespace(vae_config=AutoencoderKLVAEConfig()),
+        engine=SimpleNamespace(
+            offload=SimpleNamespace(vae=False),
+            precision=SimpleNamespace(vae="fp32"),
+        ),
     )
     vae = VAELoader().load(str(ZIMAGE_VAE_DIR), resolved_config)
     assert isinstance(vae, FastVideoAutoencoderKL)
-    assert resolved_config.model_paths["vae"] == str(ZIMAGE_VAE_DIR)
     return vae
 
 

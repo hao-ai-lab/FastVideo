@@ -18,9 +18,9 @@ ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
 if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
     sys.path.insert(0, str(ltx_core_path))
 
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.dits import LTX2VideoConfig
 from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.dits.ltx2 import Modality as FastVideoModality
 from fastvideo.models.loader.component_loader import TransformerLoader
@@ -109,16 +109,24 @@ def test_ltx2_transformer_audio_parity():
     precision = torch.bfloat16
     precision_str = "bf16"
 
-    args = FastVideoArgs(
-        model_path=str(fastvideo_path),
-        dit_cpu_offload=True,
-        use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(dit_config=config, dit_precision=precision_str),
-    )
-    args.device = device
+    # The model definition is a PipelineConfig around the dit_config read from the official metadata.
+    resolved_config = resolve_inference_config({
+        "model_path": "FastVideo/LTX2-Diffusers",
+        "engine": {
+            "offload": {
+                "dit": True
+            },
+            "use_fsdp_inference": False,
+        },
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(dit_config=config, dit_precision=precision_str)
+            }
+        },
+    })
 
     loader = TransformerLoader()
-    fastvideo_model = loader.load(str(fastvideo_path), args).to(device=device, dtype=precision)
+    fastvideo_model = loader.load(str(fastvideo_path), resolved_config).to(device=device, dtype=precision)
 
     # Use SingleGPUModelBuilder to load the reference model (same as test_ltx2.py)
     reference_builder = SingleGPUModelBuilder(

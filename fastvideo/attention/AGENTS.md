@@ -35,8 +35,9 @@ attention/
 ## Where the Decision Is Made
 
 **Resolved once, at load time, and carried on the component.** The environment
-variable is folded into `FastVideoArgs.attention_backend` in `__post_init__`
-(the parse-once adapter); `PipelineComponentLoader.load_module` applies that
+variable fills `engine.attention.backend` while it is unset, in the config
+resolution step `fill_attention_backend_from_env`
+(`fastvideo/api/inference_resolution.py`); `PipelineComponentLoader.load_module` applies that
 request per component; each loader records what its component resolved onto
 that component's own config as `ModelConfig._resolved_attention_backend`. After
 load, the decision is readable from the component itself:

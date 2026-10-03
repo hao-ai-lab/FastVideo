@@ -13,7 +13,6 @@ FORBIDDEN_PREFIXES = (
     "fastvideo.models",
     "fastvideo.layers",
     "fastvideo.worker",
-    "fastvideo.fastvideo_args",
 )
 ALLOWED_INTERNAL_IMPORTS = {
     (

@@ -103,6 +103,10 @@ PipelineConfig                    (fastvideo/configs/pipelines/base.py)
 - Precision settings: `dit_precision`, `vae_precision`,
   `text_encoder_precisions`.
 
+These generation and precision attributes hold the model defaults. Resolution
+copies them into the typed fields of the resolved config (`pipeline.flow_shift`,
+`engine.precision.dit`, ...), and runtime code reads the typed fields.
+
 Model-specific subclasses override defaults. For example,
 `WanT2V480PConfig` sets `flow_shift=3.0` and uses `WanVideoConfig` as
 its DiT config.
@@ -128,7 +132,7 @@ Concrete hierarchy: `DiTConfig` → `DiTArchConfig`, `VAEConfig` →
 - `PipelineConfig.from_pretrained(model_path)` — resolves config class
   via `get_pipeline_config_cls_from_name()`, instantiates with defaults.
 - `PipelineConfig.from_kwargs(kwargs)` — resolves class, optionally loads
-  JSON via `load_from_json()`, then applies CLI overrides via
+  JSON via `load_from_json()`, then applies keyword overrides via
   `update_config_from_dict()`.
 - `dump_to_json()` / `load_from_json()` — JSON persistence. Callable
   fields and `arch_config` are excluded from dumps.
@@ -147,7 +151,7 @@ sp = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
 ### ComponentLoader (`fastvideo/models/loader/component_loader.py`)
 
-Abstract base with a `load(model_path, fastvideo_args)` method.
+Abstract base with a `load(model_path, resolved_config)` method.
 `ComponentLoader.for_module_type(module_type, library)` is a factory
 that dispatches to specialized loaders via a `module_loaders` dict:
 
@@ -167,7 +171,7 @@ that dispatches to specialized loaders via a `module_loaders` dict:
 `TransformerLoader` reads `config.json` from the component directory,
 resolves the class via `ModelRegistry.resolve_model_cls()`, instantiates
 the model, and loads safetensors weights. CPU offload and layerwise
-offload are applied based on `FastVideoArgs`.
+offload are applied based on `resolved_config.engine.offload`.
 
 Unknown module types fall back to `GenericComponentLoader`.
 
@@ -205,14 +209,14 @@ loading by calling `ComponentLoader.for_module_type()` then `.load()`.
 
 Abstract base class using the Template Method pattern:
 
-- `__call__(batch, fastvideo_args)` — orchestrates verification, timing,
+- `__call__(batch, resolved_config)` — orchestrates verification, timing,
   and error handling. Not overridden by subclasses.
-- `forward(batch, fastvideo_args) -> ForwardBatch` — abstract, contains
+- `forward(batch, resolved_config) -> ForwardBatch` — abstract, contains
   the stage logic.
 - `verify_input()` / `verify_output()` — optional hooks returning
   `VerificationResult`. Default: no checks.
 
-When `fastvideo_args.enable_stage_verification` is `True`, `__call__`
+When `resolved_config.engine.enable_stage_verification` is `True`, `__call__`
 runs input verification before `forward()` and output verification after.
 When `envs.FASTVIDEO_STAGE_LOGGING` is set, execution time is measured
 with `torch.cuda.synchronize()` and logged.
@@ -295,7 +299,7 @@ provides detailed error messages. Failed verification raises
 
 Abstract base for all inference pipelines. Lifecycle:
 
-1. **`__init__(model_path, fastvideo_args)`** — initializes distributed
+1. **`__init__(model_path, resolved_config)`** — initializes distributed
    environment via `maybe_init_distributed_environment_and_model_parallel
    (tp_size, sp_size)`, then calls `load_modules()` to populate
    `self.modules`.
@@ -303,7 +307,7 @@ Abstract base for all inference pipelines. Lifecycle:
    setup), `create_pipeline_stages()` (abstract — subclasses wire stages),
    optionally applies `torch.compile` to transformers, and calls
    `warmup_sequence_parallel_communication()`.
-3. **`forward(batch, fastvideo_args)`** — iterates `self.stages` calling
+3. **`forward(batch, resolved_config)`** — iterates `self.stages` calling
    each stage in order. Decorated with `@torch.no_grad()`.
 
 Key class attributes:
@@ -316,8 +320,9 @@ Key methods:
 - `add_stage(name, stage)` — appends to `_stages` list and
   `_stage_name_mapping` dict, also sets attribute on `self`.
 - `get_module(name, default)` — retrieves a loaded module.
-- `from_pretrained(model_path, **kwargs)` — class method constructing
-  `FastVideoArgs` and calling `cls(...)` then `post_init()`.
+- `from_pretrained(model_path, *, resolved_config)` — class method that
+  builds the pipeline from a resolved config (from
+  `resolve_inference_config({...})`) by calling `cls(...)` then `post_init()`.
 
 ### LoRAPipeline (`fastvideo/pipelines/lora_pipeline.py`)
 
@@ -352,12 +357,12 @@ Key APIs: `get_tp_rank()`, `get_tp_world_size()`, `get_sp_rank()`,
 `warmup_sequence_parallel_communication()` pre-warms NCCL communicators
 to avoid slow first forward passes.
 
-Usage: `torchrun --nproc-per-node=N -m fastvideo.entrypoints.cli.main
-generate --model-path ... --tp-size N --sp-size M`.
+Usage: `fastvideo generate --config run.yaml
+--generator.engine.parallelism.tp_size N --generator.engine.parallelism.sp_size M`.
 
 ### torch.compile Integration
 
-When `fastvideo_args.enable_torch_compile` is `True`,
+When `resolved_config.engine.compile.enabled` is `True`,
 `_maybe_compile_pipeline_module()` checks for a `_compile_conditions`
 attribute on the module. If present, only matching submodules are
 compiled. Otherwise, the entire module is compiled. FSDP-wrapped
@@ -381,35 +386,41 @@ result = generator.generate({
 **CLI** (`fastvideo/entrypoints/cli/`):
 
 ```bash
+# run.yaml holds `generator: {model_path: Wan-AI/Wan2.1-T2V-14B-Diffusers}`.
 fastvideo generate \
-    --model-path "Wan-AI/Wan2.1-T2V-14B-Diffusers" \
-    --prompt "A cat dancing" \
-    --num-gpus 1
+    --config run.yaml \
+    --request.prompt "A cat dancing" \
+    --generator.engine.num_gpus 1
 ```
 
-**FastVideoArgs** (`fastvideo/fastvideo_args.py`): Central args dataclass.
-Key fields: `model_path`, `mode` (`ExecutionMode`), `workload_type`
-(`WorkloadType`), `pipeline_config` (`PipelineConfig`), `num_gpus`,
-`tp_size`, `sp_size`, `lora_path`, `dit_cpu_offload`,
-`dit_layerwise_offload`, `enable_torch_compile`,
-`enable_stage_verification`.
+**ResolvedGeneratorConfig** (`fastvideo/api/resolution.py`): The frozen
+runtime config that the executor, workers, pipelines, stages, and loaders
+read. Key paths: `model_path`, `mode` (`ExecutionMode`),
+`pipeline.workload_type` (`WorkloadType`), `engine.num_gpus`,
+`engine.parallelism.tp_size`, `engine.parallelism.sp_size`,
+`pipeline.components.lora_path`, `engine.offload.dit`,
+`engine.offload.dit_layerwise`, `engine.compile.enabled`,
+`engine.enable_stage_verification`, and `pipeline_config` (the frozen
+`PipelineConfig`).
 
-Constructed via `FastVideoArgs.from_kwargs(**kwargs)` which resolves the
-`PipelineConfig` from the registry, applies JSON config if provided, and
-merges CLI overrides.
+Built by `resolve_inference_config(config)`
+(`fastvideo/api/inference_resolution.py`), which runs the named resolution
+steps (environment variables, model defaults, derived values, validation) in
+order, records each decision, and then builds the `PipelineConfig` from the
+registry, applies a JSON config if provided, and freezes it.
 
 ## End-to-End Inference Flow
 
 ```
 User: VideoGenerator.from_pretrained(model_path, **kwargs)
   │
-  ├─ FastVideoArgs.from_kwargs() → PipelineConfig resolved via registry
+  ├─ resolve_inference_config() → PipelineConfig resolved via registry
   ├─ get_model_info() → ModelInfo(pipeline_cls, sampling_param_cls, ...)
   │   ├─ model_index.json read → _class_name extracted
   │   ├─ pipeline_registry resolves pipeline_cls from _class_name
   │   └─ config_registry resolves config classes from model_path
   │
-  ├─ pipeline_cls.__init__(model_path, fastvideo_args)
+  ├─ pipeline_cls.__init__(model_path, resolved_config)
   │   ├─ maybe_init_distributed(tp_size, sp_size)
   │   └─ load_modules() → reads model_index.json, loads each component
   │       ├─ ComponentLoader.for_module_type() → specialized loader
@@ -424,7 +435,7 @@ User: VideoGenerator.from_pretrained(model_path, **kwargs)
 User: generator.generate(request)
   │
   ├─ ForwardBatch constructed from SamplingParam + user args
-  └─ pipeline.forward(batch, fastvideo_args)
+  └─ pipeline.forward(batch, resolved_config)
       ├─ InputValidationStage → validates dims
       ├─ TextEncodingStage → prompt → embeddings
       ├─ ConditioningStage → prepares conditioning

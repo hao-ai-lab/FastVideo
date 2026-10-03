@@ -46,7 +46,7 @@ def test_lingbot_video_moe_refiner_pipeline_smoke(tmp_path: Path) -> None:
                 "pin_cpu_memory": False,
             },
         },
-        "pipeline": {"experimental": {"refine_enabled": True}},
+        "pipeline": {"preset_overrides": {"refine": {"enabled": True}}},
     })
     try:
         result = generator.generate({

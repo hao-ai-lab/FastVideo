@@ -35,9 +35,7 @@ def test_kandinsky5_lite_transformer_parity():
     # Delay FastVideo imports until after CUDA/path checks so environments
     # without CUDA/kernel support skip cleanly during collection/runtime.
     try:
-        from fastvideo.configs.models.dits import Kandinsky5VideoConfig
-        from fastvideo.configs.pipelines import PipelineConfig
-        from fastvideo.fastvideo_args import FastVideoArgs
+        from fastvideo.api.inference_resolution import resolve_inference_config
         from fastvideo.models.loader.component_loader import TransformerLoader
     except Exception as exc:
         pytest.skip(f"FastVideo imports unavailable for parity run: {exc}")
@@ -50,19 +48,22 @@ def test_kandinsky5_lite_transformer_parity():
     reference_model = DiffusersKandinsky5.from_pretrained(transformer_path).to(device=device, dtype=precision)
     reference_model.eval()
 
-    config = Kandinsky5VideoConfig()
-    args = FastVideoArgs(
-        model_path=str(transformer_path),
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(
-            dit_config=config,
-            dit_precision=precision_str,
-        ),
-    )
-    args.device = device
-    fastvideo_model = TransformerLoader().load(str(transformer_path), args).to(device=device, dtype=precision)
+    # The registry model id selects the Kandinsky 5 pipeline config, whose dit_config is Kandinsky5VideoConfig.
+    resolved_config = resolve_inference_config({
+        "model_path": "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
+        "engine": {
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False
+            },
+            "use_fsdp_inference": False,
+            "precision": {
+                "dit": precision_str
+            },
+        },
+    })
+    fastvideo_model = TransformerLoader().load(str(transformer_path),
+                                               resolved_config).to(device=device, dtype=precision)
     fastvideo_model.eval()
 
     in_visual_dim = reference_model.config.in_visual_dim

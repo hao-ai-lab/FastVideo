@@ -70,11 +70,16 @@ class _RecordingVAE(torch.nn.Module):
 
 
 def _stage_args(*, output_type: str = "pil") -> SimpleNamespace:
+    """A resolved-config fake with the typed paths that the Z-Image stages read."""
+    pipeline_config = ZImagePipelineConfig()
     return SimpleNamespace(
-        pipeline_config=ZImagePipelineConfig(),
-        output_type=output_type,
-        vae_cpu_offload=False,
-        disable_autocast=False,
+        pipeline_config=pipeline_config,
+        pipeline=SimpleNamespace(output_type=output_type),
+        engine=SimpleNamespace(
+            offload=SimpleNamespace(vae=False),
+            precision=SimpleNamespace(dit=pipeline_config.dit_precision),
+            disable_autocast=False,
+        ),
     )
 
 

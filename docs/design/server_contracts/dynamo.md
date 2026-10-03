@@ -309,8 +309,10 @@ re-chase FastVideo drift:
 2. `ContinuationState.payload` is JSON-serializable or references
    opaque blob ids. Dynamo can round-trip it through RPC without
    special-casing torch tensors.
-3. `VideoGenerator.from_pretrained` accepts a typed `GeneratorConfig`;
-   legacy flat kwargs are compatibility-only and deprecate in PR 13.
+3. `VideoGenerator.from_pretrained` accepts a typed `GeneratorConfig`.
+   Its only flat keywords are the convenience keywords in
+   `fastvideo.api.compat.FROM_PRETRAINED_KWARGS`; any other flat keyword
+   raises `TypeError` that names the typed config path to use instead.
 4. `generate_async` (PR 7.10+) emits events in order
    `Progress* → Partial* → Final`; the final event always has exactly
    one occurrence per request.
@@ -328,7 +330,6 @@ at FastVideo's CI — before the Dynamo-side integration even knows.
 * Anything under `fastvideo.pipelines.*` directly (pipelines are
   internal; presets identify them by name on
   `PipelineSelection.preset`).
-* `fastvideo.fastvideo_args.FastVideoArgs` (legacy compat type).
 * `fastvideo.api.compat.*` private helpers
   (`_validate_continuation_state` etc.) — the public boundary is
   `VideoGenerator` + `fastvideo.api`.

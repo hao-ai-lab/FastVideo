@@ -70,8 +70,11 @@ not override checkpoint manifests, user pipeline overrides, or component
 precision settings. HF IDs, local checkpoints, and old config imports retain
 their existing resolution behavior, including first-match detector ordering.
 
-`FastVideoArgs` (in `fastvideo/fastvideo_args.py`) provides runtime settings and
-is passed into pipeline construction and stages.
+`ResolvedGeneratorConfig` (in `fastvideo/api/resolution.py`) provides runtime
+settings and is passed into pipeline construction and stages as `resolved_config`.
+`resolve_inference_config` (in `fastvideo/api/inference_resolution.py`) builds it
+from the typed config in `fastvideo/api/schema.py` and attaches the model's
+frozen `PipelineConfig` as `resolved_config.pipeline_config`.
 
 ## Weights and Diffusers format
 

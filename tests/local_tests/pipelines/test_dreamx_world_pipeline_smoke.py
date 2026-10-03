@@ -34,7 +34,7 @@ def test_dreamx_world_typed_surface_preflight() -> None:
     import fastvideo.registry as registry
     from fastvideo.api.presets import get_preset, get_presets_for_family
     from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BCamPipelineConfig
-    from fastvideo.fastvideo_args import WorkloadType
+    from fastvideo.api.schema import WorkloadType
     from fastvideo.pipelines.basic.dreamx_world.dreamx_world_pipeline import (
         DreamXWorldPipeline,
         EntryClass,
@@ -127,7 +127,7 @@ def test_dreamx_world_pipeline_load_generate_latent_smoke(tmp_path: Path) -> Non
         },
         "pipeline": {
             "components": {"override_pipeline_cls_name": "DreamXWorldPipeline"},
-            "experimental": {"output_type": "latent"},
+            "output_type": "latent",
         },
     })
     try:

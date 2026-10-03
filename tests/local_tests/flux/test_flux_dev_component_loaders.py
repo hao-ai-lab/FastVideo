@@ -69,11 +69,11 @@ def test_flux_dev_model_index_components_load() -> None:
         pytest.skip("official_weights/FLUX.1-dev missing "
                     "(set FLUX_DEV_ROOT or download black-forest-labs/FLUX.1-dev)")
 
+    from fastvideo.api.inference_resolution import resolve_inference_config
     from fastvideo.distributed import (
         cleanup_dist_env_and_memory,
         maybe_init_distributed_environment_and_model_parallel,
     )
-    from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import (
         SchedulerLoader,
         TextEncoderLoader,
@@ -83,12 +83,22 @@ def test_flux_dev_model_index_components_load() -> None:
 
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     try:
-        args = FastVideoArgs(
-            model_path=_FLUX_DEV_ROOT,
-            pipeline_config=_FluxDevLoaderPipelineConfig(),
-            hsdp_shard_dim=1,
-            pin_cpu_memory=False,
-        )
+        args = resolve_inference_config({
+            "model_path": _FLUX_DEV_ROOT,
+            "engine": {
+                "parallelism": {
+                    "hsdp_shard_dim": 1
+                },
+                "offload": {
+                    "pin_cpu_memory": False
+                },
+            },
+            "pipeline": {
+                "experimental": {
+                    "pipeline_config": _FluxDevLoaderPipelineConfig()
+                }
+            },
+        })
 
         tok_clip = TokenizerLoader().load(os.path.join(_FLUX_DEV_ROOT, "tokenizer"), args)
         tok_t5 = TokenizerLoader().load(os.path.join(_FLUX_DEV_ROOT, "tokenizer_2"), args)

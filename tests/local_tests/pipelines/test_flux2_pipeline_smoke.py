@@ -43,7 +43,7 @@ def test_flux2_full_typed_surface_preflight() -> None:
     from fastvideo.api.presets import get_preset, get_presets_for_family
     from fastvideo.configs.models.encoders.mistral3 import Mistral3TextConfig
     from fastvideo.configs.pipelines.flux_2 import Flux2PipelineConfig
-    from fastvideo.fastvideo_args import WorkloadType
+    from fastvideo.api.schema import WorkloadType
     from fastvideo.models.registry import ModelRegistry
     from fastvideo.pipelines.basic.flux_2.flux_2_pipeline import (
         EntryClass,
@@ -154,7 +154,7 @@ def test_flux2_full_text_stage_uses_mistral3_format_and_embedded_guidance() -> N
     stage = Flux2TextEncodingStage(text_encoders=[encoder], tokenizers=[processor])
     cfg = Flux2PipelineConfig()
     cfg.text_encoder_out_layers = (10, 20, 30)
-    args = SimpleNamespace(pipeline_config=cfg)
+    args = SimpleNamespace(pipeline_config=cfg, pipeline=SimpleNamespace(embedded_cfg_scale=cfg.embedded_cfg_scale))
 
     batch = ForwardBatch(
         data_type="image",
@@ -183,7 +183,7 @@ def test_flux2_klein_typed_surface_preflight() -> None:
     import fastvideo.registry as registry
     from fastvideo.api.presets import get_preset, get_presets_for_family
     from fastvideo.configs.pipelines.flux_2 import Flux2KleinPipelineConfig
-    from fastvideo.fastvideo_args import WorkloadType
+    from fastvideo.api.schema import WorkloadType
     from fastvideo.pipelines.basic.flux_2.flux_2_klein_pipeline import (
         EntryClass,
         Flux2KleinPipeline,
@@ -243,7 +243,7 @@ def test_flux2_klein_pipeline_load_generate_smoke() -> None:
         },
         "pipeline": {
             "components": {"override_pipeline_cls_name": "Flux2KleinPipeline"},
-            "experimental": {"output_type": "latent"},
+            "output_type": "latent",
         },
     })
     try:
@@ -294,7 +294,7 @@ def test_flux2_full_pipeline_load_generate_smoke() -> None:
         },
         "pipeline": {
             "components": {"override_pipeline_cls_name": "Flux2Pipeline"},
-            "experimental": {"output_type": "latent"},
+            "output_type": "latent",
         },
     })
     try:

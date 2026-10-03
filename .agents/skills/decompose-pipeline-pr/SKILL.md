@@ -84,7 +84,9 @@ fastvideo/configs/models/dits/__init__.py
 fastvideo/configs/models/encoders/__init__.py
 fastvideo/configs/models/vaes/__init__.py
 fastvideo/envs.py
-fastvideo/fastvideo_args.py
+fastvideo/api/schema.py
+fastvideo/api/resolution.py
+fastvideo/api/inference_resolution.py
 fastvideo/distributed/**
 fastvideo/layers/**
 fastvideo/attention/**

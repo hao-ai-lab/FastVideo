@@ -37,21 +37,24 @@ def test_indexed_image_encoder_uses_matching_config_and_precision(tmp_path) -> N
             dtype="fp16",
             use_text_encoder_override=False,
             cpu_offload=None,
+            offload_flag="text_encoder_cpu_offload",
         ):
-            del model_path, target_device, resolved_config, use_text_encoder_override
+            del model_path, target_device, resolved_config, use_text_encoder_override, offload_flag
             return model_config, dtype, cpu_offload
 
     vision_config = MMAudioDFNCLIPVisionConfig()
     sync_config = MMAudioSynchformerConfig()
     pipeline_config = SimpleNamespace(
         image_encoder_config=vision_config,
-        image_encoder_precision="fp32",
         image_encoder_configs=(vision_config, sync_config),
         image_encoder_precisions=("bf16", "fp16"),
     )
     args = SimpleNamespace(
         pipeline_config=pipeline_config,
-        image_encoder_cpu_offload=True,
+        engine=SimpleNamespace(
+            precision=SimpleNamespace(image_encoder="fp32"),
+            offload=SimpleNamespace(image_encoder=True),
+        ),
     )
 
     selected, precision, cpu_offload = CaptureLoader().load(str(component), args)

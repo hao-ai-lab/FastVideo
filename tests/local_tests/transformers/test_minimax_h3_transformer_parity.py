@@ -14,13 +14,16 @@ import gc
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 import torch
 from torch.testing import assert_close
 
 import fastvideo.envs as envs
+
+if TYPE_CHECKING:
+    from fastvideo.api.resolution import ResolvedGeneratorConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.environ.get("MINIMAX_H3_OFFICIAL_REF_DIR", REPO_ROOT / "DiffusersMiniMaxH3"))
@@ -155,25 +158,24 @@ def _load_official(component_dir: Path, device: torch.device) -> torch.nn.Module
     return model
 
 
-def _production_loader_args() -> SimpleNamespace:
-    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+def _production_loader_args() -> ResolvedGeneratorConfig:
+    from fastvideo.api.inference_resolution import resolve_inference_config
 
-    return SimpleNamespace(
-        pipeline_config=MiniMaxH3PipelineConfig(),
-        model_paths={},
-        override_transformer_cls_name=None,
-        init_weights_from_safetensors=None,
-        hsdp_replicate_dim=1,
-        hsdp_shard_dim=1,
-        dit_cpu_offload=False,
-        pin_cpu_memory=False,
-        use_fsdp_inference=True,
-        training_mode=False,
-        enable_torch_compile=False,
-        torch_compile_kwargs={},
-        inference_mode=True,
-        dit_layerwise_offload=False,
-    )
+    return resolve_inference_config({
+        "model_path": "MiniMaxAI/MiniMax-H3",
+        "engine": {
+            "parallelism": {
+                "hsdp_replicate_dim": 1,
+                "hsdp_shard_dim": 1
+            },
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "pin_cpu_memory": False
+            },
+            "use_fsdp_inference": True,
+        },
+    })
 
 
 def _load_fastvideo(component_dir: Path) -> torch.nn.Module:

@@ -85,10 +85,12 @@ Before running, update in the shell scripts:
 
 ## Troubleshooting
 
-**OOM during training**: Reduce resolution (`--num_height 480 --num_width 832`)
-or disable validation (`remove --log_validation`).
+**OOM during training**: Reduce resolution (`training.data.num_height: 480` and
+`training.data.num_width: 832` in the YAML config that the launcher passes with `--config`)
+or disable validation (`training.validation.enabled: false`).
 
-**OOM during preprocessing**: Use `--preprocess_video_batch_size 1`.
+**OOM during preprocessing**: Set `preprocess.preprocess_video_batch_size: 1` in the
+preprocessing YAML config.
 
 **Validation crashes**: The validation pipeline loads the full model (text encoder +
-VAE + DiT) a second time. Disable with `--log_validation False` for initial runs.
+VAE + DiT) a second time. Disable with `training.validation.enabled: false` for initial runs.

@@ -45,12 +45,12 @@ Configs that do not appear in `registry.py` are unreachable from `VideoGenerator
 
 ## Arch vs Pipeline — Where Does This Field Go?
 
-| Field type | Lives on |
-|-----------|----------|
-| Architecture constants (hidden dim, num heads, layer count) | `configs/models/<role>/<model>.py` |
-| Default sampling params (steps, cfg, shift, fps) | `configs/pipelines/<model>.py` |
-| Runtime overrides (precision, sp_size, tp_size, attention backend) | `configs/pipelines/base.py` defaults + CLI flags via `fastvideo_args.py` |
-| `param_names_mapping` for HF → FastVideo state-dict | Arch config (lives with the model definition) |
+| Field type                                                        | Lives on                                                                                                                                                                                                          |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture constants (hidden dim, num heads, layer count)       | `configs/models/<role>/<model>.py`                                                                                                                                                                                |
+| Default sampling params (steps, cfg, shift, fps)                  | `configs/pipelines/<model>.py`                                                                                                                                                                                    |
+| Runtime settings (precision, sp_size, tp_size, attention backend) | Typed fields in `fastvideo/api/schema.py` (`engine.precision.*`, `engine.parallelism.*`, `engine.attention.backend`), set in YAML or dotted overrides; model precision defaults on `configs/pipelines/<model>.py` |
+| `param_names_mapping` for HF → FastVideo state-dict               | Arch config (lives with the model definition)                                                                                                                                                                     |
 
 If a knob is tunable per inference call → `SamplingParam`, not `PipelineConfig`.
 

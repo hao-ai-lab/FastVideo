@@ -19,46 +19,56 @@ bash examples/training/finetune/wan_t2v_1.3B/crush_smol/preprocess_wan_data_t2v_
 
 ## Preprocessing Pipeline
 
-The new preprocessing pipeline supports multiple dataset formats and video loaders:
+The preprocessing pipeline supports multiple dataset formats and video loaders. It reads a `PreprocessRunConfig`
+YAML file (`fastvideo/api/training_schema.py`): the model and workload type at the top level, and the preprocessing
+settings in the `preprocess` section (the fields of `PreprocessConfig` in `fastvideo/configs/configs.py`):
+
+```yaml
+# preprocess_t2v.yaml
+model_path: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+pipeline:
+  workload_type: t2v
+preprocess:
+  video_loader_type: torchvision
+  dataset_type: merged
+  preprocess_video_batch_size: 2
+  dataloader_num_workers: 0
+  max_height: 480
+  max_width: 832
+  num_frames: 77
+  train_fps: 16
+  samples_per_file: 8
+  flush_frequency: 8
+  video_length_tolerance_range: 5
+```
+
+Pass the file with `--config`. Each dotted override after it sets one field, for example the values that come from
+shell variables:
 
 ```bash
 GPU_NUM=2
-MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATASET_PATH="data/crush-smol/"
 OUTPUT_DIR="data/crush-smol_processed_t2v/"
 
 torchrun --nproc_per_node=$GPU_NUM \
     -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
-    --model_path $MODEL_PATH \
-    --mode preprocess \
-    --workload_type t2v \
-    --preprocess.video_loader_type torchvision \
-    --preprocess.dataset_type merged \
-    --preprocess.dataset_path $DATASET_PATH \
-    --preprocess.dataset_output_dir $OUTPUT_DIR \
-    --preprocess.preprocess_video_batch_size 2 \
-    --preprocess.dataloader_num_workers 0 \
-    --preprocess.max_height 480 \
-    --preprocess.max_width 832 \
-    --preprocess.num_frames 77 \
-    --preprocess.train_fps 16 \
-    --preprocess.samples_per_file 8 \
-    --preprocess.flush_frequency 8 \
-    --preprocess.video_length_tolerance_range 5
+    --config preprocess_t2v.yaml \
+    --preprocess.dataset_path "$DATASET_PATH" \
+    --preprocess.dataset_output_dir "$OUTPUT_DIR"
 ```
 
 ### Key Parameters
 
-| Parameter | Description |
-|-----------|-------------|
-| `--workload_type` | Task type: `t2v` (text-to-video) or `i2v` (image-to-video) |
-| `--preprocess.dataset_type` | Input format: `hf` (HuggingFace) or `merged` (local folder) |
-| `--preprocess.dataset_path` | Path to dataset (HF repo ID or local folder) |
-| `--preprocess.dataset_output_dir` | Output directory for Parquet files |
-| `--preprocess.video_loader_type` | Video decoder: `torchcodec` or `torchvision` |
-| `--preprocess.max_height` / `max_width` | Target resolution for videos |
-| `--preprocess.num_frames` | Number of frames to extract per video |
-| `--preprocess.train_fps` | Target FPS for frame extraction |
+| Parameter                             | Description                                                 |
+| ------------------------------------- | ----------------------------------------------------------- |
+| `pipeline.workload_type`              | Task type: `t2v` (text-to-video) or `i2v` (image-to-video)  |
+| `preprocess.dataset_type`             | Input format: `hf` (HuggingFace) or `merged` (local folder) |
+| `preprocess.dataset_path`             | Path to dataset (HF repo ID or local folder)                |
+| `preprocess.dataset_output_dir`       | Output directory for Parquet files                          |
+| `preprocess.video_loader_type`        | Video decoder: `torchcodec` or `torchvision`                |
+| `preprocess.max_height` / `max_width` | Target resolution for videos                                |
+| `preprocess.num_frames`               | Number of frames to extract per video                       |
+| `preprocess.train_fps`                | Target FPS for frame extraction                             |
 
 ## Dataset Formats
 

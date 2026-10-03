@@ -110,7 +110,7 @@ the official posterior element by element.
 
 ## Video VAE memory benchmark
 
-The benchmark uses one warmup and three measured runs with `vae_cpu_offload=True`. It reports absolute and
+The benchmark uses one warmup and three measured runs with `engine.offload.vae=True`. It reports absolute and
 stage-incremental allocated/reserved CUDA peaks for every rank. For SP runs, the reported aggregate is explicitly the
 sum of rank-local maxima, not a simultaneous node peak.
 

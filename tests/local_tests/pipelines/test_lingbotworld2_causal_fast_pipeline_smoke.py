@@ -19,7 +19,7 @@ def test_lingbotworld2_checkpoint_selects_expected_pipeline_and_defaults() -> No
     import fastvideo.registry as registry
     from fastvideo.api.presets import get_preset, get_presets_for_family
     from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
-    from fastvideo.fastvideo_args import WorkloadType
+    from fastvideo.api.schema import WorkloadType
     from fastvideo.pipelines.basic.lingbotworld2.causal_fast_pipeline import (
         EntryClass,
         LingBotWorld2CausalFastPipeline,
@@ -90,7 +90,7 @@ def test_lingbotworld2_14b_generates_finite_latents_on_8_gpus() -> None:
         },
         "pipeline": {
             "components": {"override_pipeline_cls_name": "LingBotWorld2CausalFastPipeline"},
-            "experimental": {"output_type": "latent"},
+            "output_type": "latent",
         },
     })
     try:

@@ -64,8 +64,8 @@ generator:
     # internal: pipeline_config.dit_config.quant_config = FP4Config()
     # set in gpu_pool.py:280 (via the legacy in-place mutation). The
     # public typed surface resolves "NVFP4" to NVFP4Config() and pins
-    # it on dit_config in FastVideoArgs.__post_init__. Comment this
-    # block out on hosts without flashinfer / NVFP4 hardware.
+    # it on dit_config when resolution materializes the PipelineConfig.
+    # Comment this block out on hosts without flashinfer / NVFP4 hardware.
     quantization:
       transformer_quant: NVFP4
 

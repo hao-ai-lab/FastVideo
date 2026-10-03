@@ -19,7 +19,7 @@ def test_lingbot_video_pipeline_registry_and_preset(tmp_path: Path) -> None:
     """Verify exact class resolution, required modules, config, and official defaults."""
     from fastvideo.api.presets import get_preset
     from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
-    from fastvideo.fastvideo_args import WorkloadType
+    from fastvideo.api.schema import WorkloadType
     from fastvideo.pipelines.basic.lingbot_video.lingbot_video_pipeline import (
         EntryClass,
         LingBotVideoPipeline,

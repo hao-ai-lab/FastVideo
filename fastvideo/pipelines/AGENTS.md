@@ -36,11 +36,13 @@ pipelines/
 
 ## Stage Authoring Rules
 
-- Subclass `PipelineStage` from `stages/base.py`. Implement `forward(batch, args) -> ForwardBatch`.
+- Subclass `PipelineStage` from `stages/base.py`. Implement `forward(batch, resolved_config) -> ForwardBatch`.
 - Implement `verify_input` / `verify_output` — both return `VerificationResult`. Failures raise `StageVerificationError`.
 - Mutate `ForwardBatch` only by reassigning fields you declared in `pipeline_batch_info.py`. New keys → add to the dataclass first.
-- Stages must be **deterministic given the same `ForwardBatch + FastVideoArgs`**. Side effects (logging, profiling) only.
-- Read all knobs from the passed-in `FastVideoArgs` / `PipelineConfig`. Never `os.getenv` directly.
+- Stages must be **deterministic given the same `ForwardBatch` + resolved config**. Side effects (logging, profiling)
+  only.
+- Read all knobs from the passed-in `resolved_config`: typed paths (`engine.*`, `pipeline.*`) and model definition data
+  on `resolved_config.pipeline_config`. Never `os.getenv` directly.
 
 ## Per-Model Pipeline Pattern (`basic/<model>/`)
 

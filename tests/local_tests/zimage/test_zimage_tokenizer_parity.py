@@ -42,8 +42,11 @@ class _DummyPipelineConfig:
 
 
 @dataclass
-class _DummyFastVideoArgs:
+class _DummyResolvedConfig:
+    """The resolved-config paths that ``TokenizerLoader`` reads."""
+
     pipeline_config: _DummyPipelineConfig = field(default_factory=_DummyPipelineConfig)
+    trust_remote_code: bool = False
 
 
 def _load_reference_tokenizer():
@@ -56,7 +59,7 @@ def _load_fastvideo_tokenizer():
     if not ZIMAGE_TOKENIZER_DIR.exists():
         pytest.skip(f"Z-Image tokenizer dir not found: {ZIMAGE_TOKENIZER_DIR}")
     loader = TokenizerLoader()
-    return loader.load(str(ZIMAGE_TOKENIZER_DIR), _DummyFastVideoArgs())
+    return loader.load(str(ZIMAGE_TOKENIZER_DIR), _DummyResolvedConfig())
 
 
 def test_zimage_tokenizer_loader_and_tokenization_parity():

@@ -47,7 +47,7 @@ def _run_worker_forward_batch(worker_wrapper: Any, request_kwargs: dict[str, Any
         **shallow_asdict(sampling_param),
         eta=0.0,
         n_tokens=n_tokens,
-        VSA_sparsity=resolved_config.VSA_sparsity,
+        VSA_sparsity=resolved_config.engine.attention.vsa_sparsity,
     )
     output_batch = worker_wrapper.worker.pipeline.forward(batch, resolved_config)
     assert output_batch.output is not None
@@ -90,7 +90,7 @@ def test_dreamx_world_one_step_pipeline_latent_matches_manual_pass() -> None:
         },
         "pipeline": {
             "components": {"override_pipeline_cls_name": "DreamXWorldPipeline"},
-            "experimental": {"output_type": "latent"},
+            "output_type": "latent",
         },
     })
     try:

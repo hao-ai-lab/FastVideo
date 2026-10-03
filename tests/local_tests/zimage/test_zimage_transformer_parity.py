@@ -267,21 +267,26 @@ def _load_real_config() -> dict:
 
 
 def _run_fastvideo_production(inputs: tuple, dtype: torch.dtype) -> list[torch.Tensor]:
-    from fastvideo.configs.pipelines.base import PipelineConfig
-    from fastvideo.fastvideo_args import FastVideoArgs
+    from fastvideo.api.inference_resolution import resolve_inference_config
     from fastvideo.models.loader.component_loader import TransformerLoader
 
     precision = "bf16" if dtype == torch.bfloat16 else "fp16"
-    args = FastVideoArgs(
-        model_path=str(TRANSFORMER_DIR),
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(dit_config=ZImageDiTConfig(), dit_precision=precision),
-    )
-    model = TransformerLoader().load(str(TRANSFORMER_DIR), args).eval()
+    # The registry model id selects ZImagePipelineConfig, whose dit_config is ZImageDiTConfig.
+    resolved_config = resolve_inference_config({
+        "model_path": "Tongyi-MAI/Z-Image-Turbo",
+        "engine": {
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False
+            },
+            "use_fsdp_inference": False,
+            "precision": {
+                "dit": precision
+            },
+        },
+    })
+    model = TransformerLoader().load(str(TRANSFORMER_DIR), resolved_config).eval()
     assert isinstance(model, ZImageTransformer2DModel)
-    assert args.model_paths["transformer"] == str(TRANSFORMER_DIR)
     assert next(model.parameters()).device.type == "cuda"
     with torch.inference_mode(), torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH):
         outputs = model(

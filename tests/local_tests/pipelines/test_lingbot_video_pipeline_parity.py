@@ -178,7 +178,7 @@ def _run_fastvideo(
                 "pin_cpu_memory": False,
             },
         },
-        "pipeline": {"experimental": {"output_type": PARITY_OUTPUT_TYPE, "refine_enabled": False}},
+        "pipeline": {"output_type": PARITY_OUTPUT_TYPE, "preset_overrides": {"refine": {"enabled": False}}},
     })
     try:
         worker_backends = generator.executor.collective_rpc(_configure_worker_backends)

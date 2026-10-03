@@ -8,9 +8,9 @@ import torch
 from safetensors.torch import load_file
 from torch.testing import assert_close
 
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.encoders import LTX2GemmaConfig
 from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 
@@ -90,15 +90,20 @@ def test_ltx2_gemma_text_encoder_parity():
     input_ids = torch.tensor([[t[0] for t in token_pairs]], device=device, dtype=torch.long)
     attention_mask = torch.tensor([[t[1] for t in token_pairs]], device=device, dtype=torch.long)
 
-    args = FastVideoArgs(
-        model_path=text_encoder_path,
-        pipeline_config=PipelineConfig(
-            text_encoder_configs=(LTX2GemmaConfig(), ),
-            text_encoder_precisions=("bf16", ),
-        ),
-    )
+    resolved_config = resolve_inference_config({
+        "model_path": "FastVideo/LTX2-Diffusers",
+        "pipeline": {
+            "experimental": {
+                "pipeline_config":
+                PipelineConfig(
+                    text_encoder_configs=(LTX2GemmaConfig(), ),
+                    text_encoder_precisions=("bf16", ),
+                )
+            }
+        },
+    })
     loader = TextEncoderLoader()
-    fastvideo_model = loader.load(text_encoder_path, args).to(device)
+    fastvideo_model = loader.load(text_encoder_path, resolved_config).to(device)
     fastvideo_model.eval()
 
     with torch.no_grad():

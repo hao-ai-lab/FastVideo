@@ -20,8 +20,8 @@ BIGVGAN_DIR = REPO_ROOT / "official_weights/mmaudio/bigvgan_v2_44khz_128band_512
 
 
 def test_mmaudio_pipeline_config_registry_and_preset() -> None:
+    from fastvideo.api.schema import WorkloadType
     from fastvideo.configs.pipelines.mmaudio import MMAudioV2AConfig
-    from fastvideo.fastvideo_args import WorkloadType
     from fastvideo.registry import get_model_info, get_preset_selection
 
     assert WorkloadType.from_string("v2a") is WorkloadType.V2A
@@ -61,8 +61,7 @@ def test_mmaudio_bf16_euler_stage_matches_official() -> None:
 
     from mmaudio.model.flow_matching import FlowMatching
 
-    from fastvideo.configs.pipelines.mmaudio import MMAudioV2AConfig
-    from fastvideo.fastvideo_args import FastVideoArgs
+    from fastvideo.api.inference_resolution import resolve_inference_config
     from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
         FlowMatchEulerDiscreteScheduler,
     )
@@ -100,7 +99,7 @@ def test_mmaudio_bf16_euler_stage_matches_official() -> None:
     batch.extra["mmaudio_empty_conditions"] = object()
     actual = MMAudioDenoisingStage(ToyTransformer(), scheduler)(
         batch,
-        FastVideoArgs(model_path="test", pipeline_config=MMAudioV2AConfig()),
+        resolve_inference_config({"model_path": "FastVideo/MMAudio-large-44k-v2-Diffusers"}),
     ).latents
     torch.testing.assert_close(actual, expected, atol=0, rtol=0)
 
@@ -192,27 +191,34 @@ def test_mmaudio_real_v2a_pipeline_waveform_parity(monkeypatch: pytest.MonkeyPat
     gc.collect()
     torch.cuda.empty_cache()
 
-    from fastvideo.configs.pipelines.mmaudio import MMAudioV2AConfig
+    from fastvideo.api.inference_resolution import resolve_inference_config
     from fastvideo.distributed import cleanup_dist_env_and_memory
-    from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
     from fastvideo.pipelines.basic.mmaudio import MMAudioPipeline
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-    args = FastVideoArgs(
-        model_path=str(CONVERTED_MODEL),
-        workload_type=WorkloadType.V2A,
-        pipeline_config=MMAudioV2AConfig(),
-        tp_size=1,
-        sp_size=1,
-        hsdp_shard_dim=1,
-        num_gpus=1,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        text_encoder_cpu_offload=False,
-        image_encoder_cpu_offload=False,
-        vae_cpu_offload=False,
-        pin_cpu_memory=False,
-    )
+    # The registry resolves the converted checkpoint to MMAudioV2AConfig.
+    args = resolve_inference_config({
+        "model_path": str(CONVERTED_MODEL),
+        "engine": {
+            "num_gpus": 1,
+            "parallelism": {
+                "tp_size": 1,
+                "sp_size": 1,
+                "hsdp_shard_dim": 1
+            },
+            "offload": {
+                "dit": False,
+                "dit_layerwise": False,
+                "text_encoder": False,
+                "image_encoder": False,
+                "vae": False,
+                "pin_cpu_memory": False,
+            },
+        },
+        "pipeline": {
+            "workload_type": "v2a"
+        },
+    })
     try:
         pipeline = MMAudioPipeline(str(CONVERTED_MODEL), args)
         pipeline.post_init()

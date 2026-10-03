@@ -41,11 +41,12 @@ Everything the demo needs ships in the upstream `fastvideo` package:
 - **`fastvideo.layers.quantization.nvfp4_config.NVFP4Config`** — the demo sets
   `pipeline_config.dit_config.quant_config = NVFP4Config()` in `app.py` (same
   pattern as `examples/inference/basic/basic_ltx2_distilled_fast_profile.py`).
-- **LTX-2.3 refine kwargs on `VideoGenerator`** — `ltx2_refine_enabled`,
-  `ltx2_refine_upsampler_path`, `ltx2_refine_lora_path`,
-  `ltx2_refine_num_inference_steps`, `ltx2_refine_guidance_scale`,
-  `ltx2_refine_add_noise`, and `ltx2_vae_tiling` are wired in
-  `fastvideo/fastvideo_args.py`, backed by
+- **LTX-2.3 refine settings in the typed config** — `app.py` passes
+  `pipeline.components.upsampler_weights`, `pipeline.ltx2.refine.lora_path`,
+  `pipeline.preset_overrides.refine` (`enabled`, `num_inference_steps`,
+  `guidance_scale`, `add_noise`), and `pipeline.vae_tiling` to
+  `VideoGenerator.from_config`. The typed fields are defined in
+  `fastvideo/api/schema.py` (`LTX2RefineOptions`), backed by
   `fastvideo/pipelines/basic/ltx2/stages/ltx2_refine.py`.
 - **`SamplingParam`** — imported from the public `fastvideo` package root
   (`fastvideo.api.sampling_param` under the hood).

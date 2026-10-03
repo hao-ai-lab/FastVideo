@@ -45,7 +45,7 @@ def test_lingbot_video_moe_base_pipeline_smoke(tmp_path: Path) -> None:
                 "pin_cpu_memory": False,
             },
         },
-        "pipeline": {"experimental": {"refine_enabled": False, "output_type": "latent"}},
+        "pipeline": {"output_type": "latent", "preset_overrides": {"refine": {"enabled": False}}},
     })
     try:
         result = generator.generate({

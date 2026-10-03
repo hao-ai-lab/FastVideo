@@ -4,48 +4,58 @@ This guide covers finetuning video diffusion models with FastVideo, including fu
 
 ## Training Arguments
 
-FastVideo training scripts use several argument groups:
+Each training launcher passes a `TrainingRunConfig` YAML file to its entry point with `--config` (the schema is in
+`fastvideo/api/training_schema.py`). A dotted override after `--config` sets one field, for example
+`--training.optimizer.learning_rate 1e-5` or `--engine.num_gpus "$NUM_GPUS"`:
+
+```bash
+torchrun --nnodes 1 --nproc_per_node 4 \
+    fastvideo/training/wan_training_pipeline.py \
+    --config finetune_t2v.yaml \
+    --engine.num_gpus 4
+```
+
+The settings are grouped as follows:
 
 ### Training Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--max_train_steps` | Total training steps |
-| `--train_batch_size` | Batch size per GPU |
-| `--gradient_accumulation_steps` | Steps to accumulate before optimizer update |
-| `--num_latent_t` | Temporal latent dimension (reduce to save memory) |
-| `--num_height` / `--num_width` | Video resolution |
-| `--num_frames` | Number of frames per video |
-| `--output_dir` | Directory for checkpoints |
+| Config path                                            | Description                                       |
+| ------------------------------------------------------ | ------------------------------------------------- |
+| `training.loop.max_train_steps`                        | Total training steps                              |
+| `training.data.train_batch_size`                       | Batch size per GPU                                |
+| `training.loop.gradient_accumulation_steps`            | Steps to accumulate before optimizer update       |
+| `training.data.num_latent_t`                           | Temporal latent dimension (reduce to save memory) |
+| `training.data.num_height` / `training.data.num_width` | Video resolution                                  |
+| `training.data.num_frames`                             | Number of frames per video                        |
+| `training.checkpoint.output_dir`                       | Directory for checkpoints                         |
 
 ### Parallelism Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--num_gpus` | Total number of GPUs |
-| `--sp_size` | Sequence parallel size (increase to reduce memory per GPU) |
-| `--tp_size` | Tensor parallel size |
-| `--hsdp_replicate_dim` | HSDP replication dimension |
-| `--hsdp_shard_dim` | HSDP sharding dimension |
+| Config path                             | Description                                                |
+| --------------------------------------- | ---------------------------------------------------------- |
+| `engine.num_gpus`                       | Total number of GPUs                                       |
+| `engine.parallelism.sp_size`            | Sequence parallel size (increase to reduce memory per GPU) |
+| `engine.parallelism.tp_size`            | Tensor parallel size                                       |
+| `engine.parallelism.hsdp_replicate_dim` | HSDP replication dimension                                 |
+| `engine.parallelism.hsdp_shard_dim`     | HSDP sharding dimension                                    |
 
 ### Optimizer Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--learning_rate` | Base learning rate |
-| `--mixed_precision` | Precision mode (`bf16` recommended) |
-| `--weight_decay` | Weight decay for regularization |
-| `--max_grad_norm` | Gradient clipping threshold |
+| Config path                        | Description                     |
+| ---------------------------------- | ------------------------------- |
+| `training.optimizer.learning_rate` | Base learning rate              |
+| `training.optimizer.weight_decay`  | Weight decay for regularization |
+| `training.optimizer.max_grad_norm` | Gradient clipping threshold     |
 
 ### Validation Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--log_validation` | Enable validation logging |
-| `--validation_dataset_file` | JSON file with validation prompts |
-| `--validation_steps` | Run validation every N steps |
-| `--validation_sampling_steps` | Inference steps for validation |
-| `--validation_guidance_scale` | CFG scale for validation |
+| Config path                          | Description                                                 |
+| ------------------------------------ | ----------------------------------------------------------- |
+| `training.validation.enabled`        | Enable validation logging                                   |
+| `training.validation.dataset_file`   | JSON file with validation prompts                           |
+| `training.validation.every_steps`    | Run validation every N steps                                |
+| `training.validation.sampling_steps` | Inference steps for validation (a list, for example `[50]`) |
+| `training.validation.guidance_scale` | CFG scale for validation                                    |
 
 ## Full Finetuning
 
@@ -59,8 +69,8 @@ bash examples/training/finetune/wan_t2v_1.3B/crush_smol/finetune_t2v.sh
 **Typical settings:**
 
 - Learning rate: `1e-5` to `5e-5`
-- Gradient checkpointing: `--enable_gradient_checkpointing_type "full"`
-- Memory scaling: Increase `--sp_size` or reduce `--num_latent_t` to fit in memory
+- Gradient checkpointing: `training.model.enable_gradient_checkpointing_type: full`
+- Memory scaling: Increase `engine.parallelism.sp_size` or reduce `training.data.num_latent_t` to fit in memory
 
 ## Attention Quantization-Aware Training
 
@@ -80,10 +90,10 @@ LoRA (Low-Rank Adaptation) trains lightweight adapters while keeping the base mo
 
 ### LoRA-Specific Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--lora_training True` | Enable LoRA mode |
-| `--lora_rank` | Rank of LoRA adapters (16, 32, 64, 128) |
+| Config path                   | Description                             |
+| ----------------------------- | --------------------------------------- |
+| `training.lora.enabled: true` | Enable LoRA mode                        |
+| `training.lora.rank`          | Rank of LoRA adapters (16, 32, 64, 128) |
 
 ### Learning Rate for LoRA
 
@@ -103,7 +113,7 @@ bash examples/training/finetune/wan_t2v_1.3B/crush_smol/finetune_t2v_lora.sh
 
 Key differences from full finetune:
 
-- Add `--lora_training True --lora_rank 32`
+- Set `training.lora.enabled: true` and `training.lora.rank: 32`
 - Use higher learning rate (10–20× full finetune)
 - Can run on fewer GPUs (even single GPU)
 - Outputs adapter weights instead of full model
@@ -186,4 +196,5 @@ Each example includes:
 - `preprocess_*.sh` — run preprocessing
 - `finetune_*.sh` — full finetune launcher
 - `finetune_*_lora.sh` — LoRA finetune launcher
+- a YAML file next to each launcher — the `TrainingRunConfig` that the launcher passes with `--config`
 - `validation.json` — validation prompts

@@ -8,8 +8,9 @@ import numpy as np
 import pytest
 import torch
 
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.api.presets import get_preset
-from fastvideo.fastvideo_args import WorkloadType
+from fastvideo.api.schema import WorkloadType
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.pipeline_registry import PipelineType, import_pipeline_classes
@@ -118,7 +119,7 @@ def test_dreamx_world_default_preset_is_registered(dreamx_model_manifests):
 def test_dreamx_world_pipeline_initializes_official_flow_scheduler():
     pipeline = DreamXWorldPipeline.__new__(DreamXWorldPipeline)
     pipeline.modules = {}
-    resolved_config = SimpleNamespace(pipeline_config=DreamXWorld5BCamPipelineConfig())
+    resolved_config = resolve_inference_config({"model_path": "FastVideo/DreamX-World-5B-Cam-Diffusers"})
 
     pipeline.initialize_pipeline(resolved_config)
 

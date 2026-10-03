@@ -31,6 +31,7 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from extract_lora import load_transformer_state_dict_from_model, get_pipeline_class_for_model
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.training.training_utils import custom_to_hf_state_dict
 from fastvideo.models.loader.utils import get_param_names_mapping, hf_to_custom_state_dict
 
@@ -116,15 +117,19 @@ def get_reverse_param_mapping(base_model_path: str):
     LOG.info("Loading base model for parameter mapping")
 
     pipeline_cls = get_pipeline_class_for_model(base_model_path)
-    pipeline = pipeline_cls.from_pretrained(
-        base_model_path,
-        num_gpus=1,
-        inference_mode=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
-    )
+    resolved_config = resolve_inference_config({
+        "model_path": base_model_path,
+        "engine": {
+            "num_gpus": 1,
+            "offload": {
+                "dit": True,
+                "vae": True,
+                "text_encoder": True,
+                "pin_cpu_memory": True,
+            },
+        },
+    })
+    pipeline = pipeline_cls.from_pretrained(base_model_path, resolved_config=resolved_config)
 
     transformer = None
     if hasattr(pipeline, "transformer"):

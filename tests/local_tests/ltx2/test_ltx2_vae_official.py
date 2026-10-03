@@ -12,9 +12,9 @@ ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
 if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
     sys.path.insert(0, str(ltx_core_path))
 
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.vaes import LTX2VAEConfig
 from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.loader.component_loader import VAELoader
 
 
@@ -49,17 +49,25 @@ def test_ltx2_vae_parity_official():
     precision = torch.bfloat16
     precision_str = "bf16"
 
-    args = FastVideoArgs(
-        model_path=str(fastvideo_path),
-        vae_cpu_offload=False,
-        pipeline_config=PipelineConfig(
-            vae_config=LTX2VAEConfig(),
-            vae_precision=precision_str,
-        ),
-    )
+    resolved_config = resolve_inference_config({
+        "model_path": "FastVideo/LTX2-Diffusers",
+        "engine": {
+            "offload": {
+                "vae": False
+            }
+        },
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(
+                    vae_config=LTX2VAEConfig(),
+                    vae_precision=precision_str,
+                )
+            }
+        },
+    })
 
     loader = VAELoader()
-    fastvideo_vae = loader.load(str(fastvideo_path), args).to(device=device, dtype=precision)
+    fastvideo_vae = loader.load(str(fastvideo_path), resolved_config).to(device=device, dtype=precision)
 
     encoder_builder = SingleGPUModelBuilder(
         model_class_configurator=VideoEncoderConfigurator,

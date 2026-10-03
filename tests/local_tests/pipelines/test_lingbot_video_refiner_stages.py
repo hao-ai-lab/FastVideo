@@ -103,8 +103,8 @@ def test_lingbot_video_refiner_preparation_resizes_encodes_and_noises(monkeypatc
     args = cast(
         Any,
         SimpleNamespace(
-            pipeline_config=SimpleNamespace(flow_shift=3.0),
-            vae_cpu_offload=True,
+            pipeline=SimpleNamespace(flow_shift=3.0),
+            engine=SimpleNamespace(offload=SimpleNamespace(vae=True)),
         ),
     )
     result = stage.forward(batch, args)
@@ -205,9 +205,7 @@ def test_lingbot_video_sequential_cfg_prepares_negative_once(monkeypatch: pytest
 
 def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(monkeypatch: pytest.MonkeyPatch, ) -> None:
     """Honor typed refiner opt-out while loading the optional second transformer."""
-    from fastvideo import fastvideo_args as fva
-    from fastvideo.api.compat import generator_config_to_fastvideo_args
-    from fastvideo.api.schema import GeneratorConfig
+    from fastvideo.api.inference_resolution import resolve_inference_config
     from fastvideo.pipelines import ComposedPipelineBase
     from fastvideo.pipelines.basic.lingbot_video.lingbot_video_pipeline import LingBotVideoPipeline
 
@@ -224,7 +222,13 @@ def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(monkeypatch: pytes
     pipe.model_path = "/model"
     monkeypatch.setattr(pipe, "_load_config", lambda _path: {"transformer_2": ["diffusers", "model"]})
     vae_config = SimpleNamespace(load_encoder=False)
-    args = cast(Any, SimpleNamespace(pipeline_config=SimpleNamespace(vae_config=vae_config)))
+    args = cast(
+        Any,
+        SimpleNamespace(
+            pipeline=SimpleNamespace(ltx2=SimpleNamespace(refine=SimpleNamespace(enabled=None))),
+            pipeline_config=SimpleNamespace(vae_config=vae_config),
+        ),
+    )
     modules = pipe.load_modules(args)
 
     assert "transformer_2" in captured["required"]
@@ -234,13 +238,17 @@ def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(monkeypatch: pytes
     base_pipe = object.__new__(LingBotVideoPipeline)
     base_pipe.model_path = "/model"
     monkeypatch.setattr(base_pipe, "_load_config", lambda _path: {"transformer_2": ["diffusers", "model"]})
-    base_vae_config = SimpleNamespace(load_encoder=False)
-    monkeypatch.setattr(fva.FastVideoArgs, "from_kwargs", lambda **kwargs: SimpleNamespace(**kwargs))
-    config = GeneratorConfig(model_path="/model")
-    config.pipeline.preset_overrides = {"refine": {"enabled": False}}
-    base_args = generator_config_to_fastvideo_args(config)
-    base_args.pipeline_config = SimpleNamespace(vae_config=base_vae_config)
+    base_args = resolve_inference_config({
+        "model_path": "FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers",
+        "pipeline": {
+            "preset_overrides": {
+                "refine": {
+                    "enabled": False
+                }
+            }
+        },
+    })
     base_modules = base_pipe.load_modules(base_args)
-    assert base_args.refine_enabled is False
+    assert base_args.pipeline.ltx2.refine.enabled is False
     assert "transformer_2" not in base_modules
-    assert base_vae_config.load_encoder is False
+    assert base_args.pipeline_config.vae_config.load_encoder is False

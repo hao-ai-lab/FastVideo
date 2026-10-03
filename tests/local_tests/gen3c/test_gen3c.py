@@ -24,9 +24,8 @@ gen3c_path = repo_root / "GEN3C"
 if gen3c_path.exists() and str(gen3c_path) not in sys.path:
     sys.path.insert(0, str(gen3c_path))
 
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.dits.gen3c import Gen3CVideoConfig, Gen3CArchConfig
-from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.dits.gen3c import Gen3CTransformer3DModel
 
@@ -275,6 +274,25 @@ def test_gen3c_patch_embed_channels():
     print(f"[GEN3C TEST] Patch embed input channels: {actual_channels}")
 
 
+def _gen3c_loader_config(dit_precision: str):
+    """The resolved config that ``TransformerLoader`` loads the converted GEN3C transformer with.
+
+    The registry model id selects the GEN3C pipeline config, whose ``dit_config`` is ``Gen3CVideoConfig``.
+    """
+    return resolve_inference_config({
+        "model_path": "FastVideo/GEN3C-Cosmos-7B-Diffusers",
+        "engine": {
+            "offload": {
+                "dit": True
+            },
+            "use_fsdp_inference": False,
+            "precision": {
+                "dit": dit_precision
+            },
+        },
+    })
+
+
 @pytest.mark.skipif(not os.getenv("GEN3C_FASTVIDEO_PATH"),
                     reason="GEN3C_FASTVIDEO_PATH not set - skip weight loading test")
 def test_gen3c_weight_loading():
@@ -288,18 +306,10 @@ def test_gen3c_weight_loading():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
-    config = Gen3CVideoConfig()
-    args = FastVideoArgs(
-        model_path=str(fastvideo_path),
-        dit_cpu_offload=True,
-        use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(dit_config=config,
-                                       dit_precision="bf16" if torch.cuda.is_available() else "fp32"),
-    )
-    args.device = device
+    resolved_config = _gen3c_loader_config("bf16" if torch.cuda.is_available() else "fp32")
 
     loader = TransformerLoader()
-    model = loader.load(str(fastvideo_path), args).to(device=device, dtype=dtype)
+    model = loader.load(str(fastvideo_path), resolved_config).to(device=device, dtype=dtype)
 
     print(f"[GEN3C TEST] Model loaded successfully from {fastvideo_path}")
 
@@ -333,17 +343,10 @@ def test_gen3c_transformer_parity():
     dtype = torch.bfloat16
 
     # Load FastVideo model
-    config = Gen3CVideoConfig()
-    args = FastVideoArgs(
-        model_path=str(fastvideo_path),
-        dit_cpu_offload=True,
-        use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(dit_config=config, dit_precision="bf16"),
-    )
-    args.device = device
+    resolved_config = _gen3c_loader_config("bf16")
 
     loader = TransformerLoader()
-    fastvideo_model = loader.load(str(fastvideo_path), args).to(device=device, dtype=dtype)
+    fastvideo_model = loader.load(str(fastvideo_path), resolved_config).to(device=device, dtype=dtype)
     fastvideo_model.eval()
 
     # Load official GEN3C model

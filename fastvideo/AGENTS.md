@@ -18,7 +18,7 @@ CLI entry: `fastvideo` script → `entrypoints/cli/main.py` (subcommands: `gener
 
 ```
 fastvideo/
-├── api/             # Schema + presets for the OpenAI-compatible serving layer
+├── api/             # Typed config schema, config resolution, presets, request API
 ├── attention/       # Backends + selector (FlashAttn / SageAttn / SDPA / VSA / VMoBA / SLA)
 ├── benchmarks/      # Benchmark suites (MLX FastWan, MetalFX RIFE)
 ├── configs/         # Per-model arch configs + per-pipeline configs (registry-driven)
@@ -43,7 +43,6 @@ fastvideo/
 ├── workflow/        # Preprocessing workflow base class
 ├── registry.py      # Pipeline-config + model-class lookup (canonical)
 ├── envs.py          # Env-var declarations
-├── fastvideo_args.py# Runtime arg dataclass passed through pipelines
 ├── forward_context.py  # Forward-time context (timestep, attention metadata)
 ├── image_processor.py  # Image preprocessing for conditioning
 ├── logger.py        # init_logger / logging setup
@@ -54,22 +53,24 @@ fastvideo/
 
 ## Where to Look
 
-| Task | Location |
-|------|----------|
-| Add a new pipeline class | `pipelines/basic/<model>/` + `configs/pipelines/<model>.py` + register in `registry.py` |
-| Add a new model component | `models/<role>/<model>.py` + `configs/models/<role>/<model>.py` |
-| Edit Wan's dense transformer or arch config | `models/wan/transformer.py` + `models/wan/config.py`; old paths are compatibility shims |
-| Edit Wan's VAE or its config | `models/wan/vae.py` + `models/wan/vae_config.py`; old paths are compatibility shims |
-| Edit a Wan variant or pipeline defaults | `models/wan/definition.py` + `models/wan/pipeline_config.py`; sampling presets remain pipeline-local |
-| Wire an existing model into a new pipeline | `pipelines/basic/<model>/presets.py` + reuse stages from `pipelines/stages/` |
-| Add a converter | `scripts/checkpoint_conversion/<model>_to_*.py` (separate dir, separate AGENTS.md) |
-| Add an attention backend | `attention/backends/<name>.py` + register in selector |
-| Add a runtime CLI flag | `fastvideo_args.py` (avoid `argparse` ad-hoc inside stages) |
+| Task                                        | Location                                                                                                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new pipeline class                    | `pipelines/basic/<model>/` + `configs/pipelines/<model>.py` + register in `registry.py`                                                                  |
+| Add a new model component                   | `models/<role>/<model>.py` + `configs/models/<role>/<model>.py`                                                                                          |
+| Edit Wan's dense transformer or arch config | `models/wan/transformer.py` + `models/wan/config.py`; old paths are compatibility shims                                                                  |
+| Edit Wan's VAE or its config                | `models/wan/vae.py` + `models/wan/vae_config.py`; old paths are compatibility shims                                                                      |
+| Edit a Wan variant or pipeline defaults     | `models/wan/definition.py` + `models/wan/pipeline_config.py`; sampling presets remain pipeline-local                                                     |
+| Wire an existing model into a new pipeline  | `pipelines/basic/<model>/presets.py` + reuse stages from `pipelines/stages/`                                                                             |
+| Add a converter                             | `scripts/checkpoint_conversion/<model>_to_*.py` (separate dir, separate AGENTS.md)                                                                       |
+| Add an attention backend                    | `attention/backends/<name>.py` + register in selector                                                                                                    |
+| Add a runtime setting                       | A typed field in `api/schema.py`, set in YAML or a dotted override; runtime code reads it from `resolved_config` (avoid `argparse` ad-hoc inside stages) |
 
 ## Conventions Specific Here
 
 - `PipelineStage` subclasses (`pipelines/stages/`) own one verb each (encode, schedule, denoise, decode). Compose, don't fork.
-- Every pipeline reads from a `PipelineConfig` subclass and a `SamplingParam`. Never read raw env vars inside a stage — go through `fastvideo.envs`.
+- Every pipeline reads from the resolved config (`ResolvedGeneratorConfig`, whose `pipeline_config` is the model's
+  `PipelineConfig` subclass) and a `SamplingParam`. Never read raw env vars inside a stage — go through
+  `fastvideo.envs`.
 - Logger setup: `from fastvideo.logger import init_logger; logger = init_logger(__name__)`. Do not call `logging.getLogger` directly.
 - Imports between `train/` and `training/` are **forbidden** — they are independent stacks.
 

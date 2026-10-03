@@ -137,8 +137,8 @@ result.resolved_request.provenance("sampling.num_frames")
 # PathProvenance(..., value=81, source='fill_sampling_defaults[preset wan_t2v_1_3b]', explicit=False)
 ```
 
-`resolved_config.provenance_table()` lists every path. After startup, the configuration that `FastVideoArgs`
-carries is read-only.
+`resolved_config.provenance_table()` lists every path. After startup, `resolved_config` is read-only; a later
+change is a recorded override (`resolved_config.with_override(source, values)`) that returns a new object.
 
 ## Performance Optimization
 

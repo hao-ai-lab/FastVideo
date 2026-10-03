@@ -40,7 +40,7 @@ def _write_modular_checkpoint(model_dir: Path) -> None:
 
 def test_minimax_h3_registry_resolves_both_public_pipelines(tmp_path: Path) -> None:
     from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
-    from fastvideo.fastvideo_args import WorkloadType
+    from fastvideo.api.schema import WorkloadType
     from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import (
         MiniMaxH3ModularPipeline,
         MiniMaxH3Ref2VAModularPipeline,

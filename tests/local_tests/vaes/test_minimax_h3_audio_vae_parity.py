@@ -8,7 +8,6 @@ import gc
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -90,14 +89,18 @@ def _load_official(component_dir: Path, device: torch.device) -> torch.nn.Module
 
 
 def _load_fastvideo(component_dir: Path) -> torch.nn.Module:
-    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.api.inference_resolution import resolve_inference_config
     from fastvideo.models.loader.component_loader import AudioDecoderLoader
 
-    args = SimpleNamespace(
-        pipeline_config=MiniMaxH3PipelineConfig(),
-        vae_cpu_offload=False,
-    )
-    model = AudioDecoderLoader().load(str(component_dir), args)
+    resolved_config = resolve_inference_config({
+        "model_path": "MiniMaxAI/MiniMax-H3",
+        "engine": {
+            "offload": {
+                "vae": False
+            }
+        },
+    })
+    model = AudioDecoderLoader().load(str(component_dir), resolved_config)
     assert all(parameter.dtype == torch.float32 for parameter in model.parameters())
     return model
 

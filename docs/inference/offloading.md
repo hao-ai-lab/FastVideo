@@ -4,15 +4,17 @@ This page describes how to use offloading techniques for inference to reduce GPU
 
 ## Default Behavior
 
-```python
-dit_cpu_offload: bool = True
-use_fsdp_inference: bool = False
-dit_layerwise_offload: bool = True
-text_encoder_cpu_offload: bool = True
-image_encoder_cpu_offload: bool = True
-vae_cpu_offload: bool = True
-pin_cpu_memory: bool = True
-lazy_module_load: bool | None = None
+```yaml
+engine:
+  use_fsdp_inference: false
+  offload:
+    dit: true               # dit_cpu_offload
+    dit_layerwise: true     # dit_layerwise_offload
+    text_encoder: true      # text_encoder_cpu_offload
+    image_encoder: true     # image_encoder_cpu_offload
+    vae: true               # vae_cpu_offload
+    pin_cpu_memory: true
+    lazy_module_load: null  # auto
 ```
 
 On unified-memory accelerators such as NVIDIA GB10 and Apple silicon, FastVideo
@@ -35,8 +37,8 @@ channels, DiT patch size) so those stages do not materialize weights just to
 read two integers. The MLX FastH3 runtime always uses this phase order. When
 host offload is off, DiT safetensors are read onto the accelerator instead of
 CPU-then-copy. Both flags default to auto (`None`) and turn on for
-unified-memory devices such as GB10; lazy then disables sequential. Pass
-`--no-lazy-module-load` to keep every component resident (sequential may still
+unified-memory devices such as GB10; lazy then disables sequential. Set
+`engine.offload.lazy_module_load: false` to keep every component resident (sequential may still
 auto-arm). Two-node Spark
 jobs still need this split: sequence parallel replicates the DiT on each GB10
 (~66 GiB of weights plus activations). See
@@ -45,7 +47,10 @@ jobs still need this split: sequence parallel replicates the DiT on each GB10
 ## Behavior Explanation
 
 !!! note
-    For CLI usage, replace underscores (`_`) with hyphens (`-`).
+    `VideoGenerator.from_pretrained` accepts the option names below as keywords, except `lazy_module_load` and
+    `h3_sequential_load`. In a YAML config or a dotted override, each option is a typed field:
+    `engine.use_fsdp_inference`, `engine.offload.<field>` as listed in the defaults above, and
+    `pipeline.minimax_h3.sequential_load` for `h3_sequential_load`.
 
 ### `use_fsdp_inference`
 
@@ -104,8 +109,8 @@ because the encoder has been released.
 Leave the default on Spark / DGX Spark when `lazy_module_load` is off. When
 both would arm (the GB10 auto case), lazy owns deferral and sequential stands
 down so VAE `torch.compile` can attach to the lazy proxy. Force
-`--h3-sequential-load` only when you need the split on a discrete GPU without
-lazy load. Use `--no-h3-sequential-load` when you need more than one prompt per
+`pipeline.minimax_h3.sequential_load: true` only when you need the split on a discrete GPU without
+lazy load. Set `pipeline.minimax_h3.sequential_load: false` when you need more than one prompt per
 worker and have enough memory to keep the encoder.
 
 ### `text_encoder_cpu_offload`
@@ -160,7 +165,7 @@ options above cannot help with because they act after loading. It is
 particularly relevant on unified-memory devices, where host and device draw on
 the same pool and moving weights to the host frees nothing. FastVideo
 auto-enables it there (`lazy_module_load=None`). Leave it off when the model
-already fits, or pass `--no-lazy-module-load` to keep components resident for
+already fits, or set `engine.offload.lazy_module_load: false` to keep components resident for
 later `generate()` calls.
 
 This option applies to inference only. Training keeps every component resident

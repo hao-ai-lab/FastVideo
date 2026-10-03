@@ -94,11 +94,18 @@ def _build_operation(args, vae, device):
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
     patch_size = MiniMaxH3Config().arch_config.patch_size
+    # The resolved-config paths that the H3 latent preparation and video decoding stages read.
     runtime_args = SimpleNamespace(
-        output_type="pil",
-        pin_cpu_memory=False,
-        vae_cpu_offload=True,
-        vae_parallel_encode=False,
+        pipeline=SimpleNamespace(
+            output_type="pil",
+            minimax_h3=SimpleNamespace(
+                vae_parallel_encode=False,
+                vae_parallel_decode=False,
+                vae_parallel_decode_strategy=None,
+                video_decode_backend="h3-vae",
+            ),
+        ),
+        engine=SimpleNamespace(offload=SimpleNamespace(vae=True, pin_cpu_memory=False)),
         pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=patch_size)),
     )
 
@@ -241,10 +248,13 @@ def main() -> None:
         if not path.is_file():
             raise FileNotFoundError(path)
 
+    pipeline_config = MiniMaxH3PipelineConfig()
     loader_args = SimpleNamespace(
-        pipeline_config=MiniMaxH3PipelineConfig(),
-        model_paths={},
-        vae_cpu_offload=True,
+        pipeline_config=pipeline_config,
+        engine=SimpleNamespace(
+            offload=SimpleNamespace(vae=True),
+            precision=SimpleNamespace(vae=pipeline_config.vae_precision),
+        ),
     )
     vae = VAELoader().load(str(component_dir), loader_args)
     parameter_bytes = sum(parameter.numel() * parameter.element_size() for parameter in vae.parameters())

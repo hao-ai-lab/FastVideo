@@ -62,10 +62,12 @@ nothing to set. If you run a model that still defaults to an fp32 decode, set th
 decode-only override yourself:
 
 ```python
-from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo import VideoGenerator
 
-pipeline_config = PipelineConfig.from_pretrained(model_id)
-pipeline_config.vae_decode_precision = "bf16"   # decode-only; leaves encode precision alone
+generator = VideoGenerator.from_config({
+    "model_path": model_id,
+    "engine": {"precision": {"vae_decode": "bf16"}},  # decode-only; leaves encode precision alone
+})
 ```
 
 Decode is output-only, so lowering its precision is safe. (Encode seeds the

@@ -19,7 +19,7 @@ into `data/HD-Mixkit-Finetune-Wan/`:
 
 ```
 data/HD-Mixkit-Finetune-Wan/
-├── combined_parquet_dataset/      # training shards  -> point --data_path here
+├── combined_parquet_dataset/      # training shards  -> point training.data.data_path here
 │   └── worker_0/data_chunk_*.parquet
 └── validation_parquet_dataset/    # validation shards
     └── worker_0/data_chunk_0.parquet
@@ -79,9 +79,9 @@ For the website-visible modular SFT-to-DMD2 workflow, see the
 Distill the QAT-finetuned generator down to **3 sampling steps**. Only the
 generator is quantized (Attn-QAT); the teacher (`real_score`) and critic
 (`fake_score`) stay full precision. This is enforced in the loader
-(`component_loader.py`, via the `_loading_teacher_critic_model` flag), so the
-same global `ATTN_QAT_TRAIN` env reaches **only** the generator, with no
-per-model flags.
+(`component_loader.py`, via the `loading_teacher_critic_model` argument of
+`PipelineComponentLoader.load_module`), so the same global `ATTN_QAT_TRAIN` env
+reaches **only** the generator, with no per-model flags.
 
 ```bash
 # generator init = the stage-1 finetune checkpoint
@@ -102,13 +102,16 @@ is LTX2-specific and will not quantize Wan):
 
 ```python
 from fastvideo import VideoGenerator
-from fastvideo.layers.quantization import get_quantization_config
 
-gen = VideoGenerator.from_pretrained(
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", num_gpus=1,
-    transformer_quant=get_quantization_config("nvfp4_qat")(),  # a config instance, not the string
-    use_fsdp_inference=False,
-)
+gen = VideoGenerator.from_config({
+    "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "engine": {
+        "num_gpus": 1,
+        "use_fsdp_inference": False,
+        # The registry name; resolution builds the config instance and pins it on the DiT config.
+        "quantization": {"transformer_quant": "nvfp4_qat"},
+    },
+})
 gen.generate(request={"prompt": "...", "output": {"save_video": True}})
 ```
 

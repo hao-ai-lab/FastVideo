@@ -59,12 +59,13 @@ def _load_official(device: torch.device, checkpoint: Path) -> Qwen3VLForConditio
 
 def _load_native(device: torch.device, checkpoint: Path) -> LingBotVideoQwen3VLTextModel:
     """Load converted fused tensors through FastVideo's production text loader."""
+    # The resolved-config paths that TextEncoderLoader.load_model reads.
     args = SimpleNamespace(
-        text_encoder_cpu_offload=True,
-        override_text_encoder_quant=None,
-        override_text_encoder_safetensors=None,
-        pin_cpu_memory=False,
-        disable_offload_on_unified_memory=lambda device_id, offload_flag=None: False,
+        engine=SimpleNamespace(
+            offload=SimpleNamespace(text_encoder=True, pin_cpu_memory=False),
+            quantization=None,
+        ),
+        pipeline=SimpleNamespace(components=SimpleNamespace(text_encoder_weights=None)),
     )
     model = TextEncoderLoader().load_model(
         str(checkpoint / "text_encoder"),

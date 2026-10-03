@@ -99,7 +99,7 @@ def get_pipeline_class_for_model(model_path: str):
     """Return appropriate FastVideo Pipeline class for the model."""
     from fastvideo.utils import maybe_download_model_index  # local import
     from fastvideo.pipelines.pipeline_registry import get_pipeline_registry, PipelineType
-    from fastvideo.fastvideo_args import WorkloadType
+    from fastvideo.api.schema import WorkloadType
 
     config = maybe_download_model_index(model_path)
     pipeline_name = config.get("_class_name")
@@ -120,16 +120,22 @@ def load_transformer_state_dict_from_model(
     pin_cpu_memory: bool = True,
 ) -> Dict[str, torch.Tensor]:
     """Load pipeline and extract transformer.state_dict as CPU tensors."""
+    from fastvideo.api.inference_resolution import resolve_inference_config
+
     pipeline_cls = get_pipeline_class_for_model(model_path)
-    pipeline = pipeline_cls.from_pretrained(
-        model_path,
-        num_gpus=num_gpus,
-        inference_mode=True,
-        dit_cpu_offload=dit_cpu_offload,
-        vae_cpu_offload=vae_cpu_offload,
-        text_encoder_cpu_offload=text_encoder_cpu_offload,
-        pin_cpu_memory=pin_cpu_memory,
-    )
+    resolved_config = resolve_inference_config({
+        "model_path": model_path,
+        "engine": {
+            "num_gpus": num_gpus,
+            "offload": {
+                "dit": dit_cpu_offload,
+                "vae": vae_cpu_offload,
+                "text_encoder": text_encoder_cpu_offload,
+                "pin_cpu_memory": pin_cpu_memory,
+            },
+        },
+    })
+    pipeline = pipeline_cls.from_pretrained(model_path, resolved_config=resolved_config)
 
     # Try to locate transformer in several typical attributes
     transformer = getattr(pipeline, "transformer", None)

@@ -16,14 +16,14 @@ MODEL_DIR_ENV = envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.get() if envs.FASTVIDEO_TES
 
 def test_zimage_typed_surface_preflight() -> None:
     from fastvideo.api import GeneratorConfig, PipelineSelection
-    from fastvideo.api.compat import generator_config_to_fastvideo_args
+    from fastvideo.api.inference_resolution import resolve_inference_config
     import fastvideo.registry as registry
     from fastvideo.api.presets import get_preset, get_presets_for_family
     from fastvideo.configs.models.dits.zimage import ZImageDiTConfig
     from fastvideo.configs.models.encoders.qwen3 import Qwen3TextConfig
     from fastvideo.configs.models.vaes.autoencoder_kl import AutoencoderKLVAEConfig
     from fastvideo.configs.pipelines.zimage import ZImagePipelineConfig
-    from fastvideo.fastvideo_args import WorkloadType
+    from fastvideo.api.schema import WorkloadType
     from fastvideo.pipelines.basic.zimage.zimage_pipeline import EntryClass, ZImagePipeline
 
     assert ZImagePipeline.__name__ == "ZImagePipeline"
@@ -73,13 +73,13 @@ def test_zimage_typed_surface_preflight() -> None:
     assert config.scheduler_sigma_min == 0.0
     assert config.scheduler_use_reference_discrete_timesteps is True
 
-    args = generator_config_to_fastvideo_args(
+    resolved_config = resolve_inference_config(
         GeneratorConfig(
             model_path="Tongyi-MAI/Z-Image-Turbo",
             pipeline=PipelineSelection(workload_type="t2i"),
         ))
-    assert isinstance(args.pipeline_config, ZImagePipelineConfig)
-    assert args.workload_type is WorkloadType.T2I
+    assert isinstance(resolved_config.pipeline_config, ZImagePipelineConfig)
+    assert resolved_config.pipeline.workload_type is WorkloadType.T2I
 
 
 def test_model_download_honors_pinned_revision(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -366,19 +366,19 @@ def _run_fastvideo_flux2_pipeline(
         },
         "pipeline": {
             "components": {"override_pipeline_cls_name": "Flux2KleinPipeline"},
-            "experimental": {"output_type": "latent"},
+            "output_type": "latent",
         },
     })
     try:
         executor_world_size = getattr(generator.executor, "world_size", None)
         print("[FLUX2 PIPELINE] fastvideo parallel config "
-              f"num_gpus={generator.resolved_config.num_gpus} "
-              f"tp_size={generator.resolved_config.tp_size} "
-              f"sp_size={generator.resolved_config.sp_size} "
+              f"num_gpus={generator.resolved_config.engine.num_gpus} "
+              f"tp_size={generator.resolved_config.engine.parallelism.tp_size} "
+              f"sp_size={generator.resolved_config.engine.parallelism.sp_size} "
               f"executor_world_size={executor_world_size}")
-        assert generator.resolved_config.num_gpus == num_gpus
-        assert generator.resolved_config.tp_size == tp_size
-        assert generator.resolved_config.sp_size == sp_size
+        assert generator.resolved_config.engine.num_gpus == num_gpus
+        assert generator.resolved_config.engine.parallelism.tp_size == tp_size
+        assert generator.resolved_config.engine.parallelism.sp_size == sp_size
         if executor_world_size is not None:
             assert executor_world_size == num_gpus
 
@@ -515,7 +515,7 @@ def _run_fastvideo_flux2_full_pipeline(
         },
         "pipeline": {
             "components": {"override_pipeline_cls_name": "Flux2Pipeline"},
-            "experimental": {"output_type": "latent"},
+            "output_type": "latent",
         },
     })
     try:
@@ -772,9 +772,11 @@ def test_flux2_full_pipeline_setup_matches_diffusers() -> None:
         max_sequence_length=FULL_MAX_SEQUENCE_LENGTH,
         seed=SEED,
     )
+    text_stage_config = SimpleNamespace(pipeline_config=cfg,
+                                        pipeline=SimpleNamespace(embedded_cfg_scale=cfg.embedded_cfg_scale))
     fv_text_batch = text_stage.forward(
         fv_text_batch,
-        cast(Any, SimpleNamespace(pipeline_config=cfg)),
+        cast(Any, text_stage_config),
     )
     fv_prompt_embeds = fv_text_batch.prompt_embeds[0]
     fv_text_ids = fv_text_batch.extra["flux2_txt_ids"]

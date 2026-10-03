@@ -18,11 +18,8 @@ from omegaconf import OmegaConf
 from torch.testing import assert_close
 from transformers import AutoTokenizer
 
-from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.configs.pipelines.dreamx_world import (
-    DreamXWorld5BCamPipelineConfig,
-    make_dreamx_world_5b_cam_text_encoder_config,
-)
+from fastvideo.api.inference_resolution import resolve_inference_config
+from fastvideo.configs.pipelines.dreamx_world import make_dreamx_world_5b_cam_text_encoder_config
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -109,15 +106,17 @@ def _load_fastvideo_text_encoder(device, dtype, monkeypatch):
     if not text_encoder_path.exists():
         pytest.skip(f"Wan2.2 Diffusers text encoder missing: {text_encoder_path}")
     _patch_single_process_text_parallel(monkeypatch)
-    pipeline_config = DreamXWorld5BCamPipelineConfig()
-    pipeline_config.text_encoder_configs[0]._fsdp_shard_conditions = []
-    args = FastVideoArgs(
-        model_path=str(text_encoder_path),
-        pipeline_config=pipeline_config,
-        text_encoder_cpu_offload=(device.type == "cpu"),
-    )
-    args.model_paths = {}
-    return TextEncoderLoader().load(str(text_encoder_path), args).to(device=device, dtype=dtype).eval()
+    # The registry model id selects DreamXWorld5BCamPipelineConfig.
+    resolved_config = resolve_inference_config({
+        "model_path": "FastVideo/DreamX-World-5B-Cam-Diffusers",
+        "engine": {
+            "offload": {
+                "text_encoder": device.type == "cpu"
+            }
+        },
+    })
+    resolved_config.pipeline_config.text_encoder_configs[0]._fsdp_shard_conditions = []
+    return TextEncoderLoader().load(str(text_encoder_path), resolved_config).to(device=device, dtype=dtype).eval()
 
 
 def test_dreamx_world_text_encoder_config_matches_umt5_xxl_shape():

@@ -37,8 +37,11 @@ training/
 - Pipelines are torch-distributed-launched directly (no shared trainer). Each
   pipeline calls `dist.init_process_group` lifecycle through
   `fastvideo.distributed`.
-- Configs are flat argparse flags wired in `fastvideo_args.py` and per-pipeline
-  argparse groups. No YAML.
+- Each entry point takes `--config <yaml>` (a `TrainingRunConfig` from
+  `fastvideo/api/training_schema.py`) plus dotted overrides such as
+  `--training.optimizer.learning_rate 1e-5`, loaded by `load_resolved_run_config`.
+  Pipelines read training settings from
+  `self.resolved_config.training.<section>.<field>`.
 
 ## Wan I2V Conditioning
 
@@ -46,7 +49,7 @@ The I2V conditioning tensor is `[mask(temporal_compression_ratio channels),
 image_latents(16)]` concatenated with the 16-channel noise on the channel dim.
 The mask is one on the first latent frame across all temporal-compression
 channels and zero elsewhere. Read `temporal_compression_ratio` from
-`training_args.pipeline_config.vae_config.arch_config` (inference:
+`resolved_config.pipeline_config.vae_config.arch_config` (inference:
 `self.vae.temporal_compression_ratio`); never hardcode 4. The construction is
 duplicated in `wan_i2v_training_pipeline.py`, `wan_i2v_distillation_pipeline.py`,
 `matrixgame2_self_forcing_distillation_pipeline.py`, and

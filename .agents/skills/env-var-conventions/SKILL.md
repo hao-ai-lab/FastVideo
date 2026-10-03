@@ -20,7 +20,8 @@ on a summary here.
 - Read `docs/contributing/env_vars.md` in full.
 - Decide whether the setting belongs in an environment variable or an argument
   (rule 5 in the policy doc). Settings that users change per deployment are
-  arguments; add them through `fastvideo/fastvideo_args.py` instead.
+  arguments; add them as typed config fields in `fastvideo/api/schema.py`
+  instead.
 
 ## Inputs
 
