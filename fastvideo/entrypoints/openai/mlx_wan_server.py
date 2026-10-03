@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Serve native FastMetal (Wan2.1) MLX through the shared video-job API and playground."""
+"""Serve native FastMetal Wan2.1 and Wan2.2 MLX through the shared video-job API."""
 
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 import platform
@@ -14,21 +13,15 @@ from types import SimpleNamespace
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-import uvicorn
 import yaml
 
 from fastvideo.api.compat import explicit_request_updates, normalize_generation_request
 from fastvideo.api.schema import GenerationRequest
 from fastvideo.entrypoints.openai.api_server import create_app
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
-
-# The DMD-distilled step ladder the validated recipes use (fixed count, same
-# reason H3 MLX serving pins num_inference_steps to its own ladder size).
-_DMD_STEP_COUNT = 3
-
-# Wan's VAE compresses this many input frames into one latent frame, so a legal
-# frame count is 1 modulo the stride; plan_refine_resolutions enforces it.
-_VAE_TEMPORAL_COMPRESSION = 4
+from fastvideo.entrypoints.openai.mlx_common import MLXServerConfig, MLXWorkerGenerator, run_mlx_server
+from fastvideo.entrypoints.openai.request_adapter import resolve_video_sampling_fields
+from fastvideo.mlx_runtime.wan_helpers import WAN_DMD_STEPS, WAN_TEMPORAL_COMPRESSION, plan_wan_generation
 
 # The adapter's own fps fallback, used when a caller validates a request outside
 # a configured server (create_mlx_wan_app binds the served fps instead).
@@ -50,18 +43,11 @@ class MLXWanGeneratorConfig(BaseModel):
     model_path: Literal["FastVideo/FastMetal-1.3B-QAD", "FastVideo/FastMetal-14B-QAD", "FastVideo/FastMetal-5B-QAD"]
     model_root: str
     mlx_checkpoint: str
+    prompt_cache_dir: str | None = "outputs/wan_prompt_cache"
 
 
-class MLXWanServerConfig(BaseModel):
-    """Host/port/output shape for an MLX serve YAML's ``server:`` block.
-
-    Generic across MLX-served models -- if a second MLX server config needs
-    the same shape, promote this (and its H3 counterpart) to one shared
-    module instead of a third copy.
-    """
-    model_config = ConfigDict(extra="forbid")
-    host: str = "127.0.0.1"
-    port: int = Field(default=8000, ge=1, le=65535)
+class MLXWanServerConfig(MLXServerConfig):
+    """Wan output location and model alias."""
     output_dir: str = "outputs/mlx_wan"
     served_model_name: str = Field(default="fastwan", min_length=1)
 
@@ -77,42 +63,19 @@ class MLXWanServeConfig(BaseModel):
 
 def _aligned_num_frames(num_frames: int) -> int:
     """Round up to the next frame count Wan accepts (1 modulo the VAE temporal stride)."""
-    remainder = (num_frames - 1) % _VAE_TEMPORAL_COMPRESSION
+    remainder = (num_frames - 1) % WAN_TEMPORAL_COMPRESSION
     if remainder == 0:
         return num_frames
-    return num_frames + (_VAE_TEMPORAL_COMPRESSION - remainder)
+    return num_frames + (WAN_TEMPORAL_COMPRESSION - remainder)
 
 
-def _align_seconds_to_frame_grid(request: VideoGenerationRequest, *, default_fps: int) -> None:
-    """Resolve an explicit ``seconds`` into a Wan-legal ``num_frames`` before admission.
-
-    ``build_generation_request`` turns ``seconds`` into ``seconds * fps``, which lands on
-    0 modulo the VAE temporal stride at every fps, while ``plan_refine_resolutions``
-    requires 1. Left alone the job is admitted and only fails inside generation, so
-    resolve it synchronously here; the adapter prefers an explicit ``num_frames`` over
-    ``seconds``, and assigning one records it in ``model_fields_set``.
-
-    Mirrors the adapter's explicit-field precedence, including the nested
-    ``video_params`` spelling, so a request using either form is aligned.
-    """
-    body_set = request.model_fields_set
-    nested_set = request.video_params.model_fields_set if request.video_params is not None else set()
-    if "seconds" not in body_set or request.seconds is None:
-        return
-    frames_explicit = ("num_frames" in body_set
-                       and request.num_frames is not None) or ("video_params" in body_set and "num_frames" in nested_set
-                                                               and request.video_params.num_frames is not None)
-    if frames_explicit:
-        return
-    fps = default_fps
-    if "fps" in body_set and request.fps is not None:
-        fps = request.fps
-    elif "video_params" in body_set and "fps" in nested_set and request.video_params.fps is not None:
-        fps = request.video_params.fps
-    request.num_frames = _aligned_num_frames(int(request.seconds) * int(fps))
-
-
-def validate_wan_video_request(request: VideoGenerationRequest, *, default_fps: int = _FALLBACK_FPS) -> None:
+def validate_wan_video_request(
+    request: VideoGenerationRequest,
+    *,
+    default_fps: int = _FALLBACK_FPS,
+    default_request: GenerationRequest | None = None,
+    model_path: str = "FastVideo/FastMetal-1.3B-QAD",
+) -> None:
     """Reject unsupported inputs before fetching media or creating a job.
 
     Also normalizes the two request shapes the shared adapter would otherwise
@@ -144,24 +107,32 @@ def validate_wan_video_request(request: VideoGenerationRequest, *, default_fps: 
         request.model_fields_set.discard("task")
     if request.guidance_scale not in (None, 1.0):
         raise ValueError("FastMetal MLX is DMD-distilled and requires guidance_scale=1.")
-    if request.num_inference_steps not in (None, _DMD_STEP_COUNT):
-        raise ValueError(f"Wan MLX serving uses a fixed {_DMD_STEP_COUNT}-step DMD ladder; "
-                         f"num_inference_steps must be {_DMD_STEP_COUNT}.")
+    if request.num_inference_steps not in (None, len(WAN_DMD_STEPS)):
+        raise ValueError(f"Wan MLX serving uses a fixed {len(WAN_DMD_STEPS)}-step DMD ladder; "
+                         f"num_inference_steps must be {len(WAN_DMD_STEPS)}.")
     if request.seed is not None and not 0 <= request.seed <= 2**32 - 1:
         raise ValueError("Wan MLX seed must be between 0 and 4294967295.")
-    _align_seconds_to_frame_grid(request, default_fps=default_fps)
+    resolved = resolve_video_sampling_fields(request, default_request=default_request, default_fps=default_fps)
+    body_set = request.model_fields_set
+    nested_set = request.video_params.model_fields_set if request.video_params is not None else set()
+    frames_explicit = ("num_frames" in body_set
+                       and request.num_frames is not None) or ("video_params" in body_set and "num_frames" in nested_set
+                                                               and request.video_params.num_frames is not None)
+    if "seconds" in body_set and request.seconds is not None and not frames_explicit:
+        request.num_frames = _aligned_num_frames(resolved["num_frames"])
+        resolved["num_frames"] = request.num_frames
+    wan22 = model_path == "FastVideo/FastMetal-5B-QAD"
+    plan_wan_generation(
+        height=resolved.get("height", 704 if wan22 else 480),
+        width=resolved.get("width", 1280 if wan22 else 832),
+        num_frames=resolved.get("num_frames", 81),
+        wan22=wan22,
+    )
 
 
-class MLXWanGenerator:
+class MLXWanGenerator(MLXWorkerGenerator):
     """Keep one FastMetal pipeline on one MLX thread across requests."""
-
-    def __init__(self, config: MLXWanGeneratorConfig) -> None:
-        self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="wan-mlx")
-        try:
-            self._pipeline = self._worker.submit(self._load, config).result()
-        except BaseException:
-            self._worker.shutdown(wait=True)
-            raise
+    thread_name = "wan-mlx"
 
     @staticmethod
     def _load(config: MLXWanGeneratorConfig):
@@ -176,11 +147,8 @@ class MLXWanGenerator:
         return pipeline_cls(
             model_root=Path(config.model_root).expanduser(),
             mlx_checkpoint=Path(config.mlx_checkpoint).expanduser(),
+            prompt_cache_dir=getattr(config, "prompt_cache_dir", "outputs/wan_prompt_cache"),
         )
-
-    def generate(self, request: GenerationRequest) -> dict[str, Any]:
-        """Run one generation on the MLX worker thread; block until it finishes."""
-        return self._worker.submit(self._generate, request).result()
 
     def _generate(self, request: GenerationRequest) -> dict[str, Any]:
         """The actual pipeline call; must run on the MLX worker thread."""
@@ -195,20 +163,6 @@ class MLXWanGenerator:
             fps=request.sampling.fps,
         )
         return {"video_path": str(result.video_path), "generation_time": time.perf_counter() - started}
-
-    def shutdown(self) -> None:
-        """Release the pipeline and stop the MLX worker thread."""
-
-        def release():
-            self._pipeline = None
-            from fastvideo.mlx_runtime.memory import cleanup_mlx
-
-            cleanup_mlx()
-
-        try:
-            self._worker.submit(release).result()
-        finally:
-            self._worker.shutdown(wait=True)
 
 
 def load_config(path: str) -> MLXWanServeConfig:
@@ -228,7 +182,8 @@ def create_mlx_wan_app(config: MLXWanServeConfig):
     required = {"width", "height", "num_frames", "fps"}
     if required - set(explicit):
         raise ValueError("Wan MLX default_request must set: " + ", ".join(sorted(required - set(explicit))))
-    validate_wan_video_request(VideoGenerationRequest(prompt="validate config", **explicit))
+    validate_wan_video_request(VideoGenerationRequest(prompt="validate config", **explicit),
+                               model_path=config.generator.model_path)
     # Transport admission uses the registered Wan family, not CUDA engine options.
     args = SimpleNamespace(model_path=config.generator.model_path,
                            lora_path=None,
@@ -249,7 +204,9 @@ def create_mlx_wan_app(config: MLXWanServeConfig):
         request,
         config.server.served_model_name,
         generator_factory=lambda: MLXWanGenerator(config.generator),
-        video_request_validator=partial(validate_wan_video_request, default_fps=request.sampling.fps),
+        video_request_validator=partial(validate_wan_video_request,
+                                        default_request=request,
+                                        model_path=config.generator.model_path),
         runtime="mlx",
     )
 
@@ -262,7 +219,7 @@ def main() -> None:
                         help="Wan MLX serving YAML; paths are relative to the working directory")
     args = parser.parse_args()
     config = load_config(args.config)
-    uvicorn.run(create_mlx_wan_app(config), host=config.server.host, port=config.server.port)
+    run_mlx_server(config)
 
 
 if __name__ == "__main__":

@@ -355,3 +355,147 @@ def test_generator_shuts_down_its_worker_thread_when_load_fails() -> None:
     # The worker thread pool must not outlive the failed __init__ call.
     threads_after = {thread.name for thread in threading.enumerate()}
     assert not any("wan-mlx" in name for name in threads_after - threads_before)
+
+
+@pytest.mark.parametrize("config_path,bad_fields", [
+    (CONFIG_PATH, {"num_frames": 80}),
+    (CONFIG_PATH, {"size": "833x481"}),
+    (CONFIG_PATH, {"width": 840}),
+    (CONFIG_PATH, {"video_params": {"width": 840}}),
+    (CONFIG_PATH, {"num_frames": None, "video_params": {"num_frames": 80}}),
+    (CONFIG_PATH_5B, {"width": 1296}),
+    (CONFIG_PATH_5B, {"height": 720}),
+])
+def test_invalid_merged_geometry_is_rejected_at_admission(config_path, bad_fields, tmp_path):
+    config = load_config(str(config_path))
+    config.server.output_dir = str(tmp_path)
+    app = create_mlx_wan_app(config)
+    with pytest.raises(ValueError):
+        app.state.video_request_validator(VideoGenerationRequest(prompt="a fox", **bad_fields))
+
+
+@pytest.mark.parametrize("fields,expected_frames,expected_fps", [
+    ({"seconds": 1, "fps": None, "video_params": {"fps": 24}}, 25, 24),
+    ({"seconds": 1, "fps": 16, "video_params": {"fps": 24}}, 17, 16),
+    ({"seconds": 1, "fps": None}, 17, 16),
+    ({"seconds": 3, "num_frames": None, "video_params": {"num_frames": 33}}, 33, 16),
+])
+def test_admission_and_adapter_resolve_null_and_nested_fields_identically(
+    fields, expected_frames, expected_fps, tmp_path,
+):
+    from fastvideo.entrypoints.openai.request_adapter import build_generation_request
+
+    config = load_config(str(CONFIG_PATH))
+    config.server.output_dir = str(tmp_path)
+    app = create_mlx_wan_app(config)
+    request = VideoGenerationRequest(prompt="a fox", **fields)
+    app.state.video_request_validator(request)
+    adapted = build_generation_request(
+        "fps-check", request, app.state.fastvideo_args,
+        served_model_name=config.server.served_model_name,
+        output_dir=str(tmp_path), default_request=app.state.default_request,
+    )
+    assert adapted.sampling.num_frames == expected_frames
+    assert adapted.sampling.fps == expected_fps
+
+
+@pytest.mark.parametrize("config_path", [CONFIG_PATH, CONFIG_PATH_14B, CONFIG_PATH_5B])
+def test_local_wan_startup_and_requests_do_not_fetch_hub_metadata(config_path, monkeypatch, tmp_path):
+    from fastvideo.entrypoints.openai.request_adapter import build_generation_request
+    from fastvideo.registry import get_preset_selection
+
+    def reject_network(*args, **kwargs):
+        raise AssertionError("Local FastMetal serving must not fetch Hub metadata")
+
+    monkeypatch.setattr("fastvideo.registry.maybe_download_model_index", reject_network)
+    config = load_config(str(config_path))
+    config.server.output_dir = str(tmp_path)
+    app = create_mlx_wan_app(config)
+    preset, family = get_preset_selection(config.generator.model_path)
+    assert family == "wan"
+    assert preset == ("fast_wan_2_2_ti2v_5b" if config_path == CONFIG_PATH_5B else "fast_wan_t2v_480p")
+    request = VideoGenerationRequest(prompt="a fox", seconds=1)
+    app.state.video_request_validator(request)
+    adapted = build_generation_request(
+        "offline-check", request, app.state.fastvideo_args,
+        served_model_name=config.server.served_model_name,
+        output_dir=str(tmp_path), default_request=app.state.default_request,
+    )
+    assert adapted.sampling.num_frames == (25 if config_path == CONFIG_PATH_5B else 17)
+
+
+def test_config_rejects_invalid_default_geometry(tmp_path):
+    config = load_config(str(CONFIG_PATH_5B))
+    config.server.output_dir = str(tmp_path)
+    config.default_request["sampling"]["width"] = 1296
+    with pytest.raises(ValueError, match="patch"):
+        create_mlx_wan_app(config)
+
+
+def test_size_takes_precedence_over_invalid_width_fields(tmp_path):
+    config = load_config(str(CONFIG_PATH))
+    config.server.output_dir = str(tmp_path)
+    app = create_mlx_wan_app(config)
+    app.state.video_request_validator(VideoGenerationRequest(
+        prompt="a fox", size="256x256", width=833, video_params={"height": 481},
+    ))
+
+
+@pytest.mark.parametrize("config_path", [CONFIG_PATH, CONFIG_PATH_14B, CONFIG_PATH_5B])
+def test_fastvideo_serve_dispatches_mlx_configs_with_dotted_overrides(config_path, monkeypatch, tmp_path):
+    import argparse
+
+    from fastvideo.entrypoints.cli.inference_config import build_serve_config
+    from fastvideo.entrypoints.cli.serve import ServeSubcommand
+
+    captured = []
+    monkeypatch.setattr("fastvideo.entrypoints.openai.mlx_common.run_mlx_server", captured.append)
+    args = argparse.Namespace(config=str(config_path), _unknown=["--server.port", "9001"])
+    config = build_serve_config(args, args._unknown)
+    assert config.runtime == "mlx"
+    assert config.server.port == 9001
+    command = ServeSubcommand()
+    command.validate(args)
+    command.cmd(args)
+    assert captured[0].generator.model_path == load_config(str(config_path)).generator.model_path
+    assert captured[0].server.port == 9001
+
+
+def test_fastvideo_serve_dispatches_existing_h3_mlx_config(monkeypatch):
+    import argparse
+    from fastvideo.entrypoints.cli.serve import ServeSubcommand
+
+    captured = []
+    monkeypatch.setattr("fastvideo.entrypoints.openai.mlx_common.run_mlx_server", captured.append)
+    args = argparse.Namespace(config=str(ROOT / "examples/serving/mlx_fasth3.yaml"), _unknown=[])
+    command = ServeSubcommand()
+    command.validate(args)
+    command.cmd(args)
+    assert captured[0].generator.model_path == "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"
+
+
+def test_fastmetal_registry_advertises_only_text_to_video():
+    from fastvideo.registry import get_registered_models_with_workloads
+
+    fastmetal = [model for model in get_registered_models_with_workloads() if "FastMetal-" in model["id"]]
+    assert len(fastmetal) == 3
+    assert all(model["workload_types"] == ["t2v"] for model in fastmetal)
+
+
+@pytest.mark.parametrize("endpoint", ["/v1/videos", "/v1/videos/sync"])
+def test_invalid_http_requests_are_400_and_do_not_create_jobs(endpoint, monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    def must_not_generate(*args, **kwargs):
+        raise AssertionError("Rejected input reached generation")
+
+    monkeypatch.setattr(MLXWanGenerator, "_load", staticmethod(lambda config: SimpleNamespace(generate=must_not_generate)))
+    monkeypatch.setattr(MLXWanGenerator, "_cleanup", staticmethod(lambda: None))
+    config = load_config(str(CONFIG_PATH_5B))
+    config.server.output_dir = str(tmp_path)
+    with TestClient(create_mlx_wan_app(config)) as client:
+        for fields in ({"num_frames": 80}, {"size": "833x481"}, {"width": 1296}):
+            response = client.post(endpoint, json={"prompt": "a fox", **fields})
+            assert response.status_code == 400
+            assert client.get("/v1/videos").json()["data"] == []
+        assert client.get("/playground/").status_code == 404

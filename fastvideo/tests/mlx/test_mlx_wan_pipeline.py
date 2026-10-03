@@ -1,24 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
-"""MLXWanPipeline.__init__ validation.
+"""Wan constructor guards and real generate() control flow with lightweight components.
 
-The constructor only does filesystem/path checks (no real weights loaded, no
-mlx.core import) -- these run for real here, no stubbing, since nothing in
-__init__ needs Apple Silicon. Generation itself (.generate()) does need
-Metal and is out of scope for this file; see mlx_wan_server tests for the
-serving-layer coverage that stubs it out.
+The orchestration tests use NumPy arrays in place of Metal arrays and keep the
+native schedulers and samplers. Real-weight video checks live in the opt-in
+Apple Silicon smoke test.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+import sys
+
+import numpy as np
 
 import pytest
 
 from fastvideo.mlx_runtime.wan_pipeline import (
     MLXWan22Pipeline,
     MLXWanPipeline,
-    _resolve_wan_torch_dtype,
 )
+from fastvideo.mlx_runtime.wan_helpers import resolve_wan_torch_dtype as _resolve_wan_torch_dtype
 
 
 def _make_model_root(tmp_path: Path) -> Path:
@@ -187,3 +189,130 @@ class TestMLXWan22Pipeline:
         empty_checkpoint = tmp_path / "not_a_real_checkpoint"
         empty_checkpoint.mkdir()
         MLXWan22Pipeline(model_root=model_root, mlx_checkpoint=empty_checkpoint)
+
+
+@pytest.mark.parametrize("pipeline_cls,channels,spatial,encoder_dtype,shift", [
+    (MLXWanPipeline, 16, 8, "bf16", 8.0),
+    (MLXWan22Pipeline, 48, 16, "fp16", 5.0),
+])
+def test_generate_runs_the_family_recipe_and_releases_dit_before_decode(
+    tmp_path, monkeypatch, pipeline_cls, channels, spatial, encoder_dtype, shift,
+):
+    import torch
+    from fastvideo.mlx_runtime import wan_pipeline, wan22_sample
+    from fastvideo.models.schedulers import scheduling_flow_match_euler_discrete as scheduler_module
+
+    events = []
+    forwards = []
+    captured = {}
+    mx = ModuleType("mlx.core")
+    mx.array, mx.float16, mx.float32 = np.array, np.float16, np.float32
+    mx.full = np.full
+    mx.eval = lambda *args: None
+    mx.clear_cache = lambda: None
+    mx.reset_peak_memory = lambda: None
+    mx.get_peak_memory = lambda: 2**30
+    rng = np.random.RandomState()
+    mx.random = SimpleNamespace(seed=rng.seed, normal=lambda shape: rng.normal(size=shape))
+    mlx = ModuleType("mlx")
+    mlx.core = mx
+    monkeypatch.setitem(sys.modules, "mlx", mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", mx)
+
+    class TinyDiT:
+        config = {"in_channels": channels, "num_attention_heads": 1,
+                  "attention_head_dim": 12, "patch_size": [1, 2, 2]}
+        patch_size = (1, 2, 2)
+
+        def __call__(self, latents, embeddings, timestep, rope):
+            forwards.append((latents.copy(), timestep.copy()))
+            assert embeddings.dtype == np.float16
+            return np.zeros_like(latents)
+
+    def load(checkpoint, *, compile):
+        assert compile is True
+        captured["checkpoint"] = checkpoint
+        return TinyDiT()
+
+    def encode(**kwargs):
+        captured["encode"] = kwargs
+        events.append("encode")
+        return torch.ones((1, 4, 12), dtype=torch.float16 if encoder_dtype == "fp16" else torch.float32)
+
+    original_scheduler = scheduler_module.FlowMatchEulerDiscreteScheduler
+
+    def make_scheduler(**kwargs):
+        captured["shift"] = kwargs["shift"]
+        return original_scheduler(**kwargs)
+
+    original_sample = wan22_sample.sample_wan22_dmd
+
+    def sample(*args, **kwargs):
+        captured["sample"] = kwargs
+        return original_sample(*args, **kwargs)
+
+    def decode(latents, output_path, **kwargs):
+        events.append("decode")
+        assert events[-2] == "release_dit"
+        captured["decoded"] = latents.copy()
+        captured["decode"] = kwargs
+        output_path.write_bytes(b"test video")
+
+    monkeypatch.setattr("fastvideo.mlx_runtime.checkpoint.load_mlx_dit_checkpoint", load)
+    monkeypatch.setattr("fastvideo.mlx_runtime.wan22.mlx_wan22_dit_from_mlx_checkpoint", load)
+    monkeypatch.setattr(wan_pipeline, "_encode_wan_prompt", encode)
+    monkeypatch.setattr(wan_pipeline, "_make_wan_rotary_embeddings", lambda *args, **kwargs: (None, None))
+    monkeypatch.setattr(wan_pipeline, "cleanup_mlx", lambda: events.append("release_dit"))
+    monkeypatch.setattr(wan_pipeline, "cleanup_torch_mps", lambda: None)
+    monkeypatch.setattr(scheduler_module, "FlowMatchEulerDiscreteScheduler", make_scheduler)
+    monkeypatch.setattr(wan22_sample, "sample_wan22_dmd", sample)
+    monkeypatch.setattr("fastvideo.mlx_runtime.wan_vae.decode_latents_to_video", decode)
+
+    root = _make_model_root(tmp_path)
+    checkpoint = _make_packed_checkpoint(tmp_path, in_channels=channels)
+    pipeline = pipeline_cls(model_root=root, mlx_checkpoint=checkpoint, prompt_cache_dir=tmp_path / "cache")
+    result = pipeline.generate("a fox", output_path=tmp_path / "out.mp4", width=64, height=32,
+                               num_frames=5, seed=1234, fps=27, max_sequence_length=4)
+    assert captured["encode"].get("dtype_arg", "bf16") == encoder_dtype
+    assert captured["encode"].get("device_arg", "auto") == ("cpu" if channels == 48 else "auto")
+    assert captured["encode"]["cache_dir"] == tmp_path / "cache"
+    assert captured["checkpoint"] == checkpoint
+    assert captured["shift"] == shift
+    shape = (1, channels, 2, 32 // spatial, 64 // spatial)
+    expected_noise = torch.randn(shape, generator=torch.Generator().manual_seed(1234),
+                                dtype=torch.float32).numpy().astype(np.float16)
+    np.testing.assert_array_equal(forwards[0][0], expected_noise)
+    assert len(forwards) == 3
+    if channels == 48:
+        assert captured["sample"] == {"dmd_denoising_steps": [1000, 757, 522], "flow_shift": 5.0,
+                                      "warp_denoising_step": True, "seed": 0}
+        _, expected_steps = wan22_sample.build_wan22_dmd_schedule()
+    else:
+        expected_steps = [1000, 757, 522]
+    assert [float(np.asarray(t).flat[0]) for _, t in forwards] == expected_steps
+    assert captured["decoded"].shape == shape
+    assert captured["decoded"].dtype == np.float32
+    assert captured["decode"] == {"fps": 27, "backend": "taehv", "z_dim": channels,
+                                  "taehv_checkpoint": None, "torch_device": "auto"}
+    assert result.video_path == str(tmp_path / "out.mp4")
+    assert result.video_decode_backend == "taehv"
+    assert result.peak_memory_gib["load_peak_gib"] == 1.0
+
+
+@pytest.mark.parametrize("pipeline_cls,channels,bad_fields", [
+    (MLXWanPipeline, 16, {"num_frames": 80}),
+    (MLXWanPipeline, 16, {"width": 840}),
+    (MLXWan22Pipeline, 48, {"num_frames": 80}),
+    (MLXWan22Pipeline, 48, {"width": 1296}),
+])
+def test_generate_rejects_invalid_shapes_before_prompt_encoding(tmp_path, monkeypatch, pipeline_cls, channels, bad_fields):
+    from fastvideo.mlx_runtime import wan_pipeline
+
+    def must_not_encode(**kwargs):
+        raise AssertionError("Invalid geometry reached the encoder")
+
+    monkeypatch.setattr(wan_pipeline, "_encode_wan_prompt", must_not_encode)
+    pipeline = pipeline_cls(model_root=_make_model_root(tmp_path),
+                            mlx_checkpoint=_make_packed_checkpoint(tmp_path, in_channels=channels))
+    with pytest.raises(ValueError):
+        pipeline.generate("a fox", output_path=tmp_path / "out.mp4", **bad_fields)

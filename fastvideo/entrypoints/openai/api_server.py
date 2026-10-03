@@ -166,7 +166,7 @@ def create_app(
 
     app.include_router(common_router)
     app.include_router(video_router)
-    # The MLX runtime only wires video-with-audio generation (see
+    # Native MLX servers provide video generation through their own pipelines (see
     # fastvideo/mlx_runtime/); image generation has no MLX backend yet.
     if runtime != "mlx":
         app.include_router(image_router)

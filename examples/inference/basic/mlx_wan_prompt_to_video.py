@@ -64,6 +64,12 @@ from fastvideo.mlx_runtime.memory import (
     cleanup_mlx,
     cleanup_torch_mps,
 )
+from fastvideo.mlx_runtime.wan_helpers import (
+    encode_wan_prompt as encode_prompt,
+    make_wan_rotary_embeddings as make_rotary_embeddings,
+    resolve_wan_torch_device as _torch_device,
+    resolve_wan_torch_dtype as _torch_dtype,
+)
 from fastvideo.mlx_runtime.prompt_cache import (
     fingerprint_digest,
     load_prompt_cache,
@@ -128,76 +134,6 @@ def resolve_model_root(
         model_id,
         allow_patterns=allow_patterns,
     ))
-
-
-def _torch_device(device_arg: str):
-    import torch
-
-    if device_arg == "auto":
-        return torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    return torch.device(device_arg)
-
-
-def _torch_dtype(dtype_arg: str):
-    import torch
-
-    return {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype_arg]
-
-
-def encode_prompt(
-    *,
-    model_root: Path,
-    prompt: str,
-    max_sequence_length: int,
-    device_arg: str,
-    dtype_arg: str,
-):
-    import torch
-    from transformers import AutoTokenizer, UMT5EncoderModel
-
-    device = _torch_device(device_arg)
-    dtype = _torch_dtype(dtype_arg)
-    tokenizer = AutoTokenizer.from_pretrained(model_root / "tokenizer", local_files_only=True)
-    text_encoder = UMT5EncoderModel.from_pretrained(
-        model_root / "text_encoder",
-        torch_dtype=dtype,
-        low_cpu_mem_usage=True,
-        local_files_only=True,
-    ).to(device)
-    text_encoder.eval()
-
-    text_inputs = tokenizer(
-        [prompt],
-        padding="max_length",
-        max_length=max_sequence_length,
-        truncation=True,
-        add_special_tokens=True,
-        return_attention_mask=True,
-        return_tensors="pt",
-    )
-    text_input_ids = text_inputs.input_ids.to(device)
-    mask = text_inputs.attention_mask.to(device)
-    seq_lens = mask.gt(0).sum(dim=1).long()
-
-    with torch.no_grad():
-        prompt_embeds = text_encoder(text_input_ids, mask).last_hidden_state
-    prompt_embeds = prompt_embeds.to(dtype=dtype)
-    prompt_embeds = [u[:v] for u, v in zip(prompt_embeds, seq_lens, strict=False)]
-    prompt_embeds = torch.stack(
-        [
-            torch.cat([u, u.new_zeros(max_sequence_length - u.size(0), u.size(1))])
-            for u in prompt_embeds
-        ],
-        dim=0,
-    )
-    if prompt_embeds.dtype == torch.bfloat16:
-        # NumPy (and the .npy cache/subprocess transport) has no bfloat16;
-        # fp32 is exact for every bf16 value.
-        prompt_embeds = prompt_embeds.float()
-    prompt_embeds = prompt_embeds.cpu().contiguous()
-    del text_encoder, tokenizer, text_inputs, text_input_ids, mask, seq_lens
-    cleanup_torch_mps()
-    return prompt_embeds
 
 
 def encode_prompt_subprocess(
@@ -313,36 +249,6 @@ def get_prompt_embeds(
     if cache_path is not None and fingerprint is not None:
         save_prompt_cache(cache_path, prompt_embeds.cpu().numpy(), fingerprint)
     return prompt_embeds
-
-
-def make_rotary_embeddings(config: dict, *, latent_frames: int, latent_height: int, latent_width: int):
-    import mlx.core as mx
-    import torch
-
-    from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
-
-    num_heads = int(config["num_attention_heads"])
-    head_dim = int(config["attention_head_dim"])
-    hidden_size = num_heads * head_dim
-    patch_size = tuple(config["patch_size"])
-    post_patch = (
-        latent_frames // patch_size[0],
-        latent_height // patch_size[1],
-        latent_width // patch_size[2],
-    )
-    rope_dim_list = [head_dim - 4 * (head_dim // 6), 2 * (head_dim // 6), 2 * (head_dim // 6)]
-    freqs_cos, freqs_sin = get_rotary_pos_embed(
-        post_patch,
-        hidden_size,
-        num_heads,
-        rope_dim_list,
-        dtype=torch.float32,
-        rope_theta=10000,
-    )
-    return (
-        mx.array(freqs_cos.numpy()).astype(mx.float32),
-        mx.array(freqs_sin.numpy()).astype(mx.float32),
-    )
 
 
 def decode_latents_to_video(
