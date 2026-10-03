@@ -270,3 +270,61 @@ fused FP8 GEMM epilogues and norm/activation quantization. The 16 GiB cap
 still needs encoder streaming and a completed memory-capped run. The cached
 recipe's 42 GiB anonymous host peak does not establish a 32 GB system-RAM
 minimum.
+
+
+## Streamed encoder and smaller VRAM caps
+
+At `753e560f6`, `FASTVIDEO_H3_ENCODER_LAYERWISE=1` streams the language
+layers separately from DiT residency, retaining token embeddings and unused
+vision modules on the CPU. This route currently supports text-only T2VA;
+visual references fail explicitly. The pipeline preserves the streamed
+placement. Twenty-eight offload/encoder/stage tests passed, including exact
+repeated BF16 and NVFP4 parity.
+
+At `78540b635`, `FASTVIDEO_H3_ENCODER_FUSED_DEQUANT=1` expands packed NVFP4
+weights with one Triton pass. Fifteen strict tests passed across FP32, FP16,
+BF16, swizzled scales and repeated encoder forwards. On three large stress
+matrices the expansion was 25.3–25.9× faster and used 8× less temporary GPU
+memory than Torch expansion. This is a dequantization microbenchmark; the
+whole conditioning stage measured 0.55–0.62 seconds in the clip runs below.
+The current encoder remains NVFP4 storage with BF16 GEMMs on Ada.
+
+All rows use 832×480, 243 frames, eight DMD forwards, sparsity 0.8, tile 64,
+cached components, INT8 QK/BF16 PV and the eager light H3 VAE. Each median
+has one warmup and two timed requests. Source is `78540b635` except the
+16 GiB row (`753e560f6`, before fused dequantization).
+
+| 4090 configuration | Median e2e | Timed requests | Denoise | Video decode | Peak GPU allocated | Peak host anon |
+| --- | --- | --- | --- | --- | --- | --- |
+| 16 GiB cap, 6 resident | 104.03 s | 100.10 / 107.96 s | 72.42 s | 25.54 s | 11.28 GiB | 39.86 GiB |
+| 12 GiB cap, 0 resident | 107.27 s | 111.02 / 103.52 s | 77.38 s | 25.48 s | 8.68 GiB | 42.35 GiB |
+| Uncapped, 30 resident | 98.97 s | 98.88 / 99.05 s | 69.12 s | 25.47 s | 21.69 GiB | 29.44 GiB |
+
+Set `FASTVIDEO_CUDA_MEMORY_CAP_GIB=12` for the 12 GiB recipe; unset it for
+the full card. Set resident blocks to the table value. Both fused rows use:
+
+```bash
+FASTVIDEO_SOURCE_COMMIT=78540b635 \
+FASTVIDEO_H3_PARK_MODULES=vae,audio_vae \
+FASTVIDEO_H3_ENCODER_LAYERWISE=1 FASTVIDEO_H3_ENCODER_FUSED_DEQUANT=1 \
+FASTVIDEO_H3_VSA_TILE_FIRST=1 FASTVIDEO_H3_VSA_SM89_KERNEL=int8 \
+FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=30 FASTVIDEO_H3_FFN_CHUNK_TOKENS=16384 \
+FASTVIDEO_H3_VAE_TILE_BATCH=28 MAX_JOBS=4 \
+python -P /workspace/fastvideo/scripts/benchmarks/minimax_h3_4090/bench_pod.py \
+  sm89-int8-480p-resident30-fused /workspace/vol/pruned_fp8_300 fp8 \
+  --offload-buffers --no-vae-compile --height 480 --width 832 --frames 243 --timed 2
+```
+
+The 12 GiB and 30-resident ceramics clips have identical decoded-video and
+PCM audio hashes to the six-resident INT8 clip. These placement and dequant
+changes preserve the candidate's output; quality equivalence of INT8
+attention to the original BF16 checkpoint still requires motion/speech review.
+Allocator caps emulate available VRAM on a 4090, not another card's speed.
+Host peaks include all pod processes; actual 32 GB host-limit support has
+not been established. The 30-resident warmup reached 30.26 GiB anonymous
+memory and the timed runs reached 77.50 GiB total cgroup usage including cache.
+
+The 8 GiB cap at `fcdba37fc` completed its warmup but OOMed on the timed
+harbor prompt in fine attention. Do not report it as supported. A 34-resident
+experiment completed denoising but OOMed during VAE INT8 epilogue allocation.
+Both failures motivate subsequent memory work rather than speed claims.
