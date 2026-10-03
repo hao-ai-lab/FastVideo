@@ -1343,7 +1343,12 @@ def _attn_bwd_dv_forward_weights(Q, K, DO, DV, MAXIMA, DENOMINATOR, sm_scale,
         # STE, so these weights multiply dO directly.
         correction = tl.math.exp2(local_max - final_max) / denominator
         weights = quantized.to(tl.float32) * correction[:, None]
-        dv += tl.dot(tl.trans(weights), do.to(tl.float32), input_precision="tf32x3")
+        # quantized carries at most 6 significant bits, so a bf16 hi/lo split of the fp32
+        # weights keeps ~16 bits against the bf16 dO tile with two bf16 dots instead of tf32x3.
+        hi = weights.to(tl.bfloat16)
+        lo = (weights - hi.to(tl.float32)).to(tl.bfloat16)
+        dv = tl.dot(tl.trans(hi), do, dv)
+        dv = tl.dot(tl.trans(lo), do, dv)
     tl.store(DV + k_base + offs_n[:, None] * HEAD_DIM + offs_k[None, :], dv, mask=kv_valid[:, None])
 
 
