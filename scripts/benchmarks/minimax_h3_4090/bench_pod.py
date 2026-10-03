@@ -9,6 +9,7 @@ import os
 import pathlib
 import shlex
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -112,12 +113,20 @@ def main():
     config = {"model_path": a.model, "engine": engine, "pipeline": {"experimental": experimental}}
     out_dir = a.output_root / a.name
     out_dir.mkdir(parents=True, exist_ok=True)
+    model_root = pathlib.Path(a.model)
+    revision_file = model_root / ".cache/huggingface/download/fastvideo_inference.json.metadata"
+    model_revision = revision_file.read_text().splitlines()[0] if revision_file.is_file() else None
+    hardware = subprocess.check_output(
+        ["nvidia-smi", "--query-gpu=name,memory.total,driver_version,pci.bus_id", "--format=csv,noheader"], text=True
+    ).strip()
     sampling = {"seed": 20260929, "height": a.height, "width": a.width, "num_frames": a.frames, "fps": 24,
                 "num_inference_steps": 9, "guidance_scale": 1.0, "batch_cfg": False}
     results = {"name": a.name, "quant": a.quant, "command": shlex.join([sys.executable, "-P", *sys.argv]),
                "env": {k: v for k, v in os.environ.items() if k.startswith(("FASTVIDEO_", "PYTORCH_"))
                        or k in ("CUDA_VISIBLE_DEVICES", "MAX_JOBS")},
                "torch": torch.__version__, "cuda": torch.version.cuda,
+               "hardware": hardware, "model_revision": model_revision,
+               "model_contract": json.loads((model_root / "fastvideo_inference.json").read_text()),
                "source_commit": os.environ.get("FASTVIDEO_SOURCE_COMMIT"),
                "gpu": torch.cuda.get_device_name(0), "config": config, "sampling": sampling, "runs": []}
     (out_dir / "results.json").write_text(json.dumps(results, indent=2))
