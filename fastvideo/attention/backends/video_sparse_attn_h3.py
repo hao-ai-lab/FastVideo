@@ -906,6 +906,9 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             if has_sm100a_pair and use_sm100a:
                 out_bhsd = out_bhsd[:, :, :logical_seq_len]
             out = out_bhsd.transpose(1, 2).contiguous()
+            # Fine attention is complete. Release its layout copies before the
+            # gated compression merge creates full-sequence temporaries.
+            del q_bhsd, k_bhsd, v_bhsd, out_bhsd
         else:
             out, _ = block_sparse_attn_256_bshd(
                 logical_query,
