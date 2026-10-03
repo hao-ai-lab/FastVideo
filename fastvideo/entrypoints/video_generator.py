@@ -32,7 +32,6 @@ from fastvideo.api.compat import (
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
-    legacy_generate_call_to_request,
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
@@ -401,80 +400,6 @@ class VideoGenerator:
             output=OutputConfig(save_video=False, return_frames=False),
         )
 
-    def generate_video(
-        self,
-        prompt: str | None = None,
-        sampling_param: SamplingParam | None = None,
-        # Action control inputs (Matrix-Game)
-        mouse_cond: torch.Tensor | None = None,
-        keyboard_cond: torch.Tensor | None = None,
-        grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
-        | None = None,
-        **kwargs,
-    ) -> dict[str, Any] | list[dict[str, Any]]:
-        """
-        Generate a video based on the given prompt.
-        
-        Args:
-            prompt: The prompt to use for generation (optional if prompt_txt is provided)
-            negative_prompt: The negative prompt to use (overrides the one in fastvideo_args)
-            output_path: Path to save the video (overrides the one in fastvideo_args)
-            prompt_path: Path to prompt file
-            save_video: Whether to save the video to disk
-            return_frames: Whether to include raw frames in the result dict
-            num_inference_steps: Number of denoising steps (overrides fastvideo_args)
-            guidance_scale: Classifier-free guidance scale (overrides fastvideo_args)
-            num_frames: Number of frames to generate (overrides fastvideo_args)
-            height: Height of generated video (overrides fastvideo_args)
-            width: Width of generated video (overrides fastvideo_args)
-            fps: Frames per second for saved video (overrides fastvideo_args)
-            seed: Random seed for generation (overrides fastvideo_args)
-            callback: Callback function called after each step
-            callback_steps: Number of steps between each callback
-            
-        Returns:
-            A metadata dictionary for single-prompt generation, or a list of
-            metadata dictionaries for prompt-file batch generation.
-        """
-        log_queue = kwargs.pop("log_queue", None)
-        warnings.warn(
-            "VideoGenerator.generate_video(...) is deprecated; use "
-            "VideoGenerator.generate(request=...) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if log_queue:
-            self.executor.set_log_queue(log_queue)
-
-        try:
-            extra_overrides: dict[str, Any] = {}
-            for _ek in _BATCH_EXTRA_PASSTHROUGH_KEYS:
-                if _ek in kwargs:
-                    extra_overrides[_ek] = kwargs.pop(_ek)
-
-            request = legacy_generate_call_to_request(
-                prompt,
-                sampling_param,
-                mouse_cond=mouse_cond,
-                keyboard_cond=keyboard_cond,
-                grid_sizes=grid_sizes,
-                legacy_kwargs=kwargs,
-            )
-
-            resolved_sampling_param = request_to_sampling_param(
-                request,
-                model_path=self.fastvideo_args.model_path,
-            )
-            return self._generate_video_impl(
-                prompt=request.prompt,
-                sampling_param=resolved_sampling_param,
-                fastvideo_args=self.fastvideo_args,
-                **extra_overrides,
-            )
-        finally:
-            if log_queue:
-                self.executor.clear_log_queue()
-
     def _generate_request_impl(
         self,
         request: GenerationRequest,
@@ -530,7 +455,7 @@ class VideoGenerator:
         fastvideo_args: FastVideoArgs | None = None,
         **kwargs,
     ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
-        """Internal implementation of generate_video."""
+        """Run one prompt, or each prompt of a prompt file, through the pipeline with ``sampling_param``."""
         if fastvideo_args is None:
             fastvideo_args = self.fastvideo_args
 

@@ -192,9 +192,7 @@ def main() -> None:
         last = _generate()
         torch.cuda.synchronize()
         wall = time.perf_counter() - t0
-        # generate_video returns a plain dict; attribute access would always
-        # fall back to wall time.
-        gen_t = last.get("generation_time") if isinstance(last, dict) else None
+        gen_t = last.generation_time
         denoise_times.append(gen_t if gen_t is not None else wall)
         print(f"[qad] {tag} run {i + 1}/{runs}: {wall:.2f}s wall "
               f"(gen {denoise_times[-1]:.2f}s)")

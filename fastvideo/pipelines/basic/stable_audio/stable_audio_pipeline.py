@@ -62,7 +62,7 @@ def _disable_tf32_for_stable_audio() -> None:
 class StableAudioPipeline(ComposedPipelineBase):
     """Stable Audio Open 1.0 pipeline.
 
-    Mode is kwargs-driven on `generate_video()`:
+    Mode is driven by the request `extensions` passed to `generate()`:
 
       * Text-to-audio (default) -- `prompt=...`, `audio_end_in_s=...`
       * Audio-to-audio variation -- add `init_audio=ref` (and optionally

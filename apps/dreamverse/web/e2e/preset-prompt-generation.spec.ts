@@ -67,7 +67,7 @@ test.describe('preset prompt generation', () => {
     // on a B200 plus encode/transfer time. The "Continuation flipped
     // to Generating + Leave button rendered" pair above is the proof
     // the integration works: FE → /readyz → /curated-presets → WS
-    // /ws → BE → GPU pool → VideoGenerator.generate_video, all green.
+    // /ws → BE → GPU pool → VideoGenerator.generate, all green.
     const video = page.locator('video').first();
     await expect(video).toHaveCount(1);
   });

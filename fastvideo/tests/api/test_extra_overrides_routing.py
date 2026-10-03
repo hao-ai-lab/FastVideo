@@ -13,8 +13,8 @@ invocation closed stdin before the writer thread had pushed every
 frame, surfacing as ``BrokenPipeError`` in the streaming server.
 
 These tests pin two contracts:
-  1. ``_BATCH_EXTRA_PASSTHROUGH_KEYS`` lists the exact set of kwargs
-     pulled out of ``generate_video(**kwargs)`` for ``batch.extra``.
+  1. ``_BATCH_EXTRA_PASSTHROUGH_KEYS`` lists the exact set of request
+     extensions that go to ``batch.extra``.
   2. ``SamplingParam.update()`` raises ``ValueError`` on unknown keys.
 """
 from __future__ import annotations

@@ -112,7 +112,7 @@ per-metric policy with direction, percent threshold, absolute threshold, and a
 
 `test_inference_performance.py` temporarily sets `FASTVIDEO_STAGE_LOGGING=1`
 while it runs so pipeline stage execution times are available in
-`generate_video(...).logging_info`. Stage logs use pipeline-unique keys such as
+`generate(...).logging_info`. Stage logs use pipeline-unique keys such as
 `prompt_encoding_stage` so duplicate stage classes do not collide. For
 `PipelineStage` entries, shared component stage bases emit a stable
 `component_metric`: text encoding stages map to `text_encoder_time_s`,

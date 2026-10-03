@@ -23,10 +23,6 @@ from fastvideo.api.schema import (
     ContinuationState,
     GenerationRequest,
     GeneratorConfig,
-    InputConfig,
-    OutputConfig,
-    RequestRuntimeConfig,
-    SamplingConfig,
 )
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -34,16 +30,8 @@ from fastvideo.pipelines.basic.ltx2.stage_overrides import (
     refine_preset_override_fields,
     refine_stage_override_fields,
 )
-from fastvideo.utils import shallow_asdict
 
-_INPUT_FIELD_NAMES = {field.name for field in fields(InputConfig)}
-_SAMPLING_FIELD_NAMES = {field.name for field in fields(SamplingConfig)}
-_RUNTIME_FIELD_NAMES = {field.name for field in fields(RequestRuntimeConfig)}
-_OUTPUT_FIELD_NAMES = {field.name for field in fields(OutputConfig)}
 _MISSING = object()
-_LEGACY_REQUEST_ALIASES = {
-    "neg_prompt": "negative_prompt",
-}
 REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS = (
     "ltx2_audio_latents",
     "ltx2_audio_clean_latent",
@@ -198,34 +186,6 @@ def normalize_generation_request(request: GenerationRequest | Mapping[str, Any],
     return normalized
 
 
-def legacy_generate_call_to_request(
-    prompt: str | None,
-    sampling_param: SamplingParam | None,
-    *,
-    mouse_cond: Any | None = None,
-    keyboard_cond: Any | None = None,
-    grid_sizes: Any | None = None,
-    legacy_kwargs: Mapping[str, Any] | None = None,
-) -> GenerationRequest:
-    raw = _sampling_param_to_request_raw(sampling_param)
-    if prompt is not None:
-        raw["prompt"] = prompt
-
-    for key, value in (legacy_kwargs or {}).items():
-        _apply_request_field(raw, key, value)
-
-    if mouse_cond is not None:
-        raw.setdefault("inputs", {})["mouse_cond"] = mouse_cond
-    if keyboard_cond is not None:
-        raw.setdefault("inputs", {})["keyboard_cond"] = keyboard_cond
-    if grid_sizes is not None:
-        raw.setdefault("inputs", {})["grid_sizes"] = grid_sizes
-
-    normalized = parse_config(GenerationRequest, raw)
-    bind_generation_request_raw(normalized, raw)
-    return normalized
-
-
 def request_to_sampling_param(
     request: GenerationRequest,
     *,
@@ -352,42 +312,6 @@ def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str
     if compile_config.extras:
         out.update(deepcopy(compile_config.extras))
     return out
-
-
-def _sampling_param_to_request_raw(sampling_param: SamplingParam | None, ) -> dict[str, Any]:
-    if sampling_param is None:
-        return {}
-
-    raw: dict[str, Any] = {}
-    for key, value in shallow_asdict(sampling_param).items():
-        if key == "prompt":
-            continue
-        _apply_request_field(raw, key, deepcopy(value))
-    return raw
-
-
-def _apply_request_field(
-    raw: dict[str, Any],
-    key: str,
-    value: Any,
-) -> None:
-    key = _LEGACY_REQUEST_ALIASES.get(key, key)
-    if key == "negative_prompt":
-        raw["negative_prompt"] = value
-        return
-    if key in _INPUT_FIELD_NAMES:
-        raw.setdefault("inputs", {})[key] = value
-        return
-    if key in _SAMPLING_FIELD_NAMES:
-        raw.setdefault("sampling", {})[key] = value
-        return
-    if key in _RUNTIME_FIELD_NAMES:
-        raw.setdefault("runtime", {})[key] = value
-        return
-    if key in _OUTPUT_FIELD_NAMES:
-        raw.setdefault("output", {})[key] = value
-        return
-    raw.setdefault("extensions", {})[key] = value
 
 
 def request_to_batch_extra(request: GenerationRequest) -> dict[str, Any]:
@@ -587,7 +511,6 @@ __all__ = [
     "explicit_request_updates",
     "generator_config_to_fastvideo_args",
     "legacy_from_pretrained_to_config",
-    "legacy_generate_call_to_request",
     "load_generator_config_from_file",
     "normalize_generation_request",
     "normalize_generator_config",

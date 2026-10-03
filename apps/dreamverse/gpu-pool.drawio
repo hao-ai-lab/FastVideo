@@ -207,7 +207,7 @@
                         </Array>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="e_dsg" value="generator.generate_video()" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9673a6;endArrow=classic;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="do_step" target="generator" edge="1">
+                <mxCell id="e_dsg" value="generator.generate()" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9673a6;endArrow=classic;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="do_step" target="generator" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="e_dscache" value="read / write" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d6b656;endArrow=classic;startArrow=classic;fontSize=10;exitX=0;exitY=0.8;exitDx=0;exitDy=0;entryX=1;entryY=0.2;entryDx=0;entryDy=0;" parent="1" source="do_step" target="caches" edge="1">
@@ -534,7 +534,7 @@
                         <mxPoint x="1040" y="1610" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="dm11a" value="10a. worker runs:&#xa;VideoGenerationWorker.generate_step()&#xa;    (ltx2_generation.py:380)&#xa;  → generator.generate_video()&#xa;  → updates ContinuationState&#xa;then stream_fmp4() (av_streaming.py:121)&#xa;  → ffmpeg (rawvideo+wav → fmp4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
+                <mxCell id="dm11a" value="10a. worker runs:&#xa;VideoGenerationWorker.generate_step()&#xa;    (ltx2_generation.py:380)&#xa;  → generator.generate()&#xa;  → updates ContinuationState&#xa;then stream_fmp4() (av_streaming.py:121)&#xa;  → ffmpeg (rawvideo+wav → fmp4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe0b2;strokeColor=#d79b00;fontSize=10;align=left;spacingLeft=8;fontFamily=monospace;" parent="1" vertex="1">
                     <mxGeometry x="955" y="1640" width="180" height="70" as="geometry"/>
                 </mxCell>
                 <mxCell id="dm11" value="10b. resp_q.put(MediaInit / MediaChunk / MediaComplete / StepComplete)" style="endArrow=classic;html=1;strokeColor=#b85450;fontSize=10;labelBackgroundColor=#ffffff;" parent="1" edge="1">

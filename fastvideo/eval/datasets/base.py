@@ -3,7 +3,7 @@
 A :class:`PromptDataset` is an iterable of *sample dicts* describing the
 prompts and conditions for a benchmark. Each sample is a plain dict —
 no dataclass, no schema enforcement — that flows directly into both
-generation (``VideoGenerator.generate_video(**sample)``) and scoring
+generation (a ``VideoGenerator.generate`` request) and scoring
 (``Evaluator.evaluate(**eval_kwargs)``). The runner picks well-known
 keys (``prompt``, ``n_samples``, ``dimensions``, ``auxiliary_info``,
 ...) and passes the rest through.
@@ -11,7 +11,6 @@ keys (``prompt``, ``n_samples``, ``dimensions``, ``auxiliary_info``,
 This matches the surrounding FastVideo style:
 
 * :class:`fastvideo.dataset.validation_dataset.ValidationDataset` yields dicts.
-* :meth:`fastvideo.VideoGenerator.generate_video` consumes ``**kwargs``.
 * :meth:`fastvideo.eval.Evaluator.evaluate` consumes ``**kwargs``.
 
 To add a new benchmark:

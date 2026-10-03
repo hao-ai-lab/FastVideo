@@ -47,8 +47,8 @@ def main() -> None:
 
     def _run(tag: str) -> float:
         save = tag == "measured"
-        # Modern typed-request API (generate_video is deprecated). Same
-        # prompt/seed/shapes both runs so the compiled graph is reused.
+        # Typed request API. Same prompt/seed/shapes both runs so the
+        # compiled graph is reused.
         request: dict = {
             "prompt": PROMPT,
             "sampling": {

@@ -63,7 +63,7 @@ class StableAudioDecodingStage(PipelineStage):
         # Raw tensor for parity tests.
         batch.extra["decoded_audio"] = decoded.detach().cpu()
 
-        # `VideoGenerator.generate_video` is video-shaped (asserts
+        # `VideoGenerator.generate` is video-shaped (asserts
         # `output_batch.output is not None`); fill with a placeholder of
         # the expected `[B, 3, num_frames, H, W]` shape — the real audio
         # is on `batch.extra` above. Keep this compatibility shim until

@@ -19,7 +19,7 @@ backend differs from the Wan-tuned ``video_sparse_attn``:
 - Non-video *queries* are always dense. Non-video *keys* are either
   always-selected for every query ("exempt", default) or compete in
   top-k under a FLOP-matched budget ("compete") — the ablation axis,
-  switched per request via ``generate_video(..., vsa_mode=...)``
+  switched per request via the request extension ``vsa_mode``
   (default: exempt). Per-request scheduling knobs
   (``vsa_dense_first_n_steps``, ``vsa_dense_layers``) let mixed schedules
   run the diffuse steps/layers dense while pushing the rest harder.

@@ -13,10 +13,7 @@ This test makes sure:
 
 1. The public typed API can represent everything Dreamverse currently
    passes at init time (``legacy_from_pretrained_to_config``).
-2. The request-path Dreamverse uses (``generator.generate_video(**kwargs)``
-   with per-segment flags) round-trips through the typed ``GenerationRequest``
-   without reintroducing private-only fields at the public boundary.
-3. Private-only Dreamverse fields that don't belong on the public
+2. Private-only Dreamverse fields that don't belong on the public
    surface either go to ``pipeline.experimental`` / ``request.extensions``
    (the documented escape hatch) or raise explicitly, rather than
    silently becoming part of the public compatibility promise.
@@ -36,7 +33,6 @@ from fastvideo.api import (
 )
 from fastvideo.api.compat import (
     legacy_from_pretrained_to_config,
-    legacy_generate_call_to_request,
     normalize_generation_request,
 )
 
@@ -150,35 +146,6 @@ class TestDreamversePrivateOnlyFields:
 class TestDreamverseRequestShape:
     """The per-segment Dreamverse request path mirrors OpenAI's shape
     plus a few LTX-2 knobs. All of them must have a typed home."""
-
-    def test_basic_request_fields_round_trip(self):
-        # The request path calls legacy_generate_call_to_request with a
-        # prompt + legacy kwargs; verify the typed shape carries them.
-        legacy_kwargs = {
-            "num_frames": 121,
-            "height": 1024,
-            "width": 1536,
-            "num_inference_steps": 8,
-            "guidance_scale": 1.0,
-            "seed": 42,
-            "fps": 24,
-            "negative_prompt": "blurry",
-        }
-        request = legacy_generate_call_to_request(
-            prompt="a fox running",
-            sampling_param=None,
-            legacy_kwargs=legacy_kwargs,
-        )
-        request = normalize_generation_request(request)
-        assert request.prompt == "a fox running"
-        assert request.negative_prompt == "blurry"
-        assert request.sampling.num_frames == 121
-        assert request.sampling.height == 1024
-        assert request.sampling.width == 1536
-        assert request.sampling.num_inference_steps == 8
-        assert request.sampling.guidance_scale == 1.0
-        assert request.sampling.seed == 42
-        assert request.sampling.fps == 24
 
     def test_return_state_reaches_output_config(self):
         """PR 7 added ``output.return_state`` — must survive the legacy

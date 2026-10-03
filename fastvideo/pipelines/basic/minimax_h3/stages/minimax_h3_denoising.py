@@ -154,7 +154,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
         if vsa_metadata_builder is not None:
             vsa_patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
             vsa_prefix_segments = _h3_vsa_prefix_segments(layout, vsa_patch_size)
-            # Per-request knobs (sweeps flip these between generate_video calls
+            # Per-request knobs (sweeps flip these between generate calls
             # without respawning workers); mode None defers to the env default.
             vsa_mode = batch.extra.get("vsa_mode", "exempt")
             if vsa_mode not in ("exempt", "compete"):

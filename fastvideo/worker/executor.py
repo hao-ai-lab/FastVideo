@@ -110,12 +110,12 @@ class Executor(ABC):
 
     @abstractmethod
     def set_log_queue(self, log_queue: Queue | None) -> None:
-        """Forward worker logs to the given queue. Call before generate_video."""
+        """Forward worker logs to the given queue. Call before generate."""
         self.collective_rpc("set_log_queue", kwargs={"log_queue": log_queue})
 
     @abstractmethod
     def clear_log_queue(self) -> None:
-        """Stop forwarding worker logs to the queue. Call after generate_video."""
+        """Stop forwarding worker logs to the queue. Call after generate."""
         self.collective_rpc("clear_log_queue")
 
     @abstractmethod

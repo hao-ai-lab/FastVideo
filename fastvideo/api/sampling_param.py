@@ -140,7 +140,7 @@ class SamplingParam:
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
 
     # LTX-2 image / video / continuation conditioning. These flow from
-    # generate_video(...) kwargs through ``sampling_param.update(kwargs)``
+    # request ``extensions`` through ``sampling_param.update(...)``
     # onto the ForwardBatch fields of the same name. ``ltx2_image_crf``
     # gates the conditioning-image H.264 re-encode; the streaming
     # session controller passes ``ltx2_image_crf=0.0`` because it

@@ -42,7 +42,7 @@ Near-term OSS note:
 - `apps/dreamverse/dreamverse/main.py`: websocket endpoint, request handling,
   session state machine, rewrite orchestration, REST routes, and stream relay
 - `apps/dreamverse/dreamverse/gpu_pool.py`: GPU worker processes, warmup, model
-  loading, and `generate_video()` calls through FastVideo
+  loading, and `generate()` calls through FastVideo
 - `apps/dreamverse/dreamverse/prompt_enhancer.py`: prompt enhancement, rollout
   rewrite execution, provider selection, and timeout/fallback behavior
 - `apps/dreamverse/dreamverse/rewrite_prompt_payload.py`: canonical rewrite request payload
