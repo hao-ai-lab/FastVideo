@@ -37,7 +37,7 @@ from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.minimax_h3_vsa_fp4 import (STAGES, vsa_fp4_attention, vsa_fp4_attention_sp,
-                                                       vsa_fp4_requested)
+                                                       vsa_fp4_requested, vsa_tile_first_attention)
 from fastvideo.models.dits.minimax_h3_fusions import (
     HAVE_TRITON,
     fused_qknorm_rope,
@@ -242,6 +242,7 @@ class MiniMaxH3Attention(nn.Module):
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
         self._layer_idx = layer_idx_from_prefix(prefix, default=-1)
         self._vsa_fp4 = use_vsa and vsa_fp4_requested()
+        self._vsa_tile_first = use_vsa and os.environ.get("FASTVIDEO_H3_VSA_TILE_FIRST", "0") == "1"
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
         # skips the gate branch entirely while it is structurally zero.
@@ -336,9 +337,26 @@ class MiniMaxH3Attention(nn.Module):
                 with STAGES.span("out_proj"):
                     hidden_states, _ = self.to_out(hidden_states)
                 return hidden_states
-        query, _ = self.to_q(hidden_states)
-        key, _ = self.to_k(hidden_states)
-        value, _ = self.to_v(hidden_states)
+        if (self._vsa_tile_first and hidden_states.is_cuda and rotary_emb is not None
+                and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
+                and (not model_parallel_is_initialized() or get_sp_world_size() == 1)):
+            meta = get_forward_context().attn_metadata
+            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.tile_elems == 64:
+                use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
+                hidden_states = vsa_tile_first_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
+                with STAGES.span("out_proj"):
+                    hidden_states, _ = self.to_out(hidden_states)
+                return hidden_states
+        with STAGES.span("qkv_proj"):
+            # All three projections see the same activations. Reuse their FP8
+            # quantization when the loaded methods have identical granularity.
+            from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
+            if not torch.is_grad_enabled() and not torch.compiler.is_compiling():
+                query, key, value = _shared_input_projections((self.to_q, self.to_k, self.to_v), hidden_states)
+            else:
+                query, _ = self.to_q(hidden_states)
+                key, _ = self.to_k(hidden_states)
+                value, _ = self.to_v(hidden_states)
         query = query.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         key = key.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         value = value.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
@@ -362,16 +380,18 @@ class MiniMaxH3Attention(nn.Module):
             gate_compress, _ = self.to_gate_compress(hidden_states)
             extra_attention_kwargs["gate_compress"] = gate_compress.unflatten(
                 -1, (self.num_attention_heads, self.attention_head_dim))
-        hidden_states, _ = self.distributed_attention(
-            query,
-            key,
-            value,
-            original_seq_len=original_seq_len,
-            freqs_cis=None,
-            **extra_attention_kwargs,
-        )
+        with STAGES.span("attention"):
+            hidden_states, _ = self.distributed_attention(
+                query,
+                key,
+                value,
+                original_seq_len=original_seq_len,
+                freqs_cis=None,
+                **extra_attention_kwargs,
+            )
         hidden_states = hidden_states.flatten(2, 3).type_as(query)
-        hidden_states, _ = self.to_out(hidden_states)
+        with STAGES.span("out_proj"):
+            hidden_states, _ = self.to_out(hidden_states)
         return hidden_states
 
 
@@ -644,6 +664,9 @@ class MiniMaxH3TransformerBlock(nn.Module):
                     1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
         with nvtx_range("minimax_h3.transformer_block.self_attention"):
             attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
+        # The attention input is dead now. Keeping it until assignment below
+        # overlaps three full-width activations during the residual fusion.
+        del norm_hidden_states
         if use_modulate_fusion:
             with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
                 hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(
@@ -662,6 +685,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
                 norm_hidden_states = self.norm2(hidden_states)
                 norm_hidden_states = norm_hidden_states * (
                     1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
+        del attention_output
         with nvtx_range("minimax_h3.transformer_block.feed_forward"), STAGES.span("feed_forward"):
             feed_forward_output = self.ff(norm_hidden_states)
         if use_modulate_fusion and not torch.compiler.is_compiling():
@@ -1135,6 +1159,9 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         # The eager driver owns profiling markers while each block's compiled
         # forward owns the graph that the marker surrounds.
         for block_index, block in enumerate(self.transformer_blocks):
+            if STAGES.enabled:
+                logger.info("H3_MEMORY_BLOCK %d allocated=%.3f GiB reserved=%.3f GiB", block_index,
+                            torch.cuda.memory_allocated() / 2**30, torch.cuda.memory_reserved() / 2**30)
             with nvtx_range(f"minimax_h3.transformer_block.{block_index}"), STAGES.span("block_total"):
                 packed_hidden_states = block(
                     packed_hidden_states,
