@@ -15,7 +15,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
 from fastvideo.utils import maybe_download_model, PRECISION_TO_TYPE
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.encoders import T5Config, T5LargeConfig
 
 logger = init_logger(__name__)
@@ -23,10 +23,13 @@ logger = init_logger(__name__)
 envs.setdefault_external("MASTER_ADDR", "localhost")
 envs.setdefault_external("MASTER_PORT", "29503")
 
+WAN_BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+COSMOS_BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
+
 
 @pytest.fixture
 def t5_model_paths_and_config():
-    base_model_path = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+    base_model_path = WAN_BASE_MODEL_PATH
     model_path = maybe_download_model(base_model_path, local_dir=os.path.join('data', base_model_path))
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
@@ -35,7 +38,7 @@ def t5_model_paths_and_config():
 
 @pytest.fixture
 def t5_large_model_paths_and_config():
-    base_model_path = "nvidia/Cosmos-Predict2-2B-Video2World"
+    base_model_path = COSMOS_BASE_MODEL_PATH
     local_dir = os.path.join('data', base_model_path)
     skip_if_gated_repo_inaccessible(base_model_path, local_path=local_dir, test_name="Cosmos T5-large encoder test")
     model_path = maybe_download_model(base_model_path, local_dir=local_dir)
@@ -57,7 +60,11 @@ def test_t5_encoder(t5_model_paths_and_config):
     model1 = UMT5EncoderModel.from_pretrained(text_encoder_path).to(precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-    args = FastVideoArgs(model_path=text_encoder_path, pipeline_config=pipeline_config, pin_cpu_memory=False)
+    args = resolve_inference_config({
+        "model_path": WAN_BASE_MODEL_PATH,
+        "engine": {"offload": {"pin_cpu_memory": False}},
+        "pipeline": {"experimental": {"pipeline_config": pipeline_config}},
+    })
     loader = TextEncoderLoader()
     model2 = loader.load(text_encoder_path, args)
     model2 = model2.to(precision)
@@ -137,7 +144,11 @@ def test_t5_large_encoder(t5_large_model_paths_and_config):
     model1 = T5EncoderModel.from_pretrained(text_encoder_path).to(precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-    args = FastVideoArgs(model_path=text_encoder_path, pipeline_config=pipeline_config, pin_cpu_memory=False)
+    args = resolve_inference_config({
+        "model_path": COSMOS_BASE_MODEL_PATH,
+        "engine": {"offload": {"pin_cpu_memory": False}},
+        "pipeline": {"experimental": {"pipeline_config": pipeline_config}},
+    })
     loader = TextEncoderLoader()
     model2 = loader.load(text_encoder_path, args)
     model2 = model2.to(precision)

@@ -12,7 +12,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.utils import maybe_download_model, PRECISION_TO_TYPE
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.encoders import Qwen2_5_VLConfig
 
 logger = init_logger(__name__)
@@ -20,11 +20,12 @@ logger = init_logger(__name__)
 envs.setdefault_external("MASTER_ADDR", "localhost")
 envs.setdefault_external("MASTER_PORT", "29505")
 
+BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+
 
 @pytest.fixture
 def qwen_model_path_and_config():
-    base_model_path = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
-    model_path = maybe_download_model(base_model_path)
+    model_path = maybe_download_model(BASE_MODEL_PATH)
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
     return text_encoder_path, tokenizer_path, Hunyuan15T2V480PConfig()
@@ -48,7 +49,11 @@ def test_qwen2_5_encoder(qwen_model_path_and_config):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
     # Load FastVideo model
-    args = FastVideoArgs(model_path=text_encoder_path, pipeline_config=pipeline_config, pin_cpu_memory=False)
+    args = resolve_inference_config({
+        "model_path": BASE_MODEL_PATH,
+        "engine": {"offload": {"pin_cpu_memory": False}},
+        "pipeline": {"experimental": {"pipeline_config": pipeline_config}},
+    })
 
     loader = TextEncoderLoader()
     model2 = loader.load(text_encoder_path, args)

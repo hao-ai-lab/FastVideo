@@ -666,8 +666,8 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder[torch.Tensor]):
                              f"tokens={int(mask.sum())}, features={features.shape[0]}")
         return mask
 
-    # no_grad, NOT inference_mode: with text_encoder_cpu_offload=True (the
-    # FastVideoArgs default) the loader FSDP2-shards this conditioner, and
+    # no_grad, NOT inference_mode: with engine.offload.text_encoder=True (the
+    # default) the loader FSDP2-shards this conditioner, and
     # FSDP2's wait_for_unshard reads tensor._version via
     # _unsafe_preserve_version_counter - inference tensors do not track
     # version counters, so inference_mode crashes the first encode. no_grad

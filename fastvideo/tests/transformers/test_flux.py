@@ -11,9 +11,9 @@ from diffusers import FluxTransformer2DModel as HFFluxTransformer2DModel
 from torch.testing import assert_close
 
 import fastvideo.envs as envs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.dits.flux import FluxDiTConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -21,6 +21,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 envs.setdefault_external("MASTER_ADDR", "localhost")
 envs.setdefault_external("MASTER_PORT", "29517")
 
+# Registered model id that selects the FLUX.1-dev pipeline config during resolution.
+BASE_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _DEFAULT_FLUX_TRANSFORMER = os.path.join(
     _REPO_ROOT,
@@ -71,13 +73,17 @@ def test_flux_transformer_parity_vs_diffusers() -> None:
     device = torch.device("cuda:0")
     precision = torch.bfloat16
 
-    args = FastVideoArgs(
-        model_path=transformer_path,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        pipeline_config=PipelineConfig(dit_config=FluxDiTConfig(), dit_precision="bf16"),
-    )
-    args.device = device
+    args = resolve_inference_config({
+        "model_path": BASE_MODEL_PATH,
+        "engine": {
+            "offload": {"dit": False, "dit_layerwise": False},
+        },
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(dit_config=FluxDiTConfig(), dit_precision="bf16")
+            }
+        },
+    })
 
     generator = torch.Generator(device=device).manual_seed(0)
     torch.manual_seed(0)

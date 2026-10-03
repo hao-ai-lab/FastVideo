@@ -5,13 +5,13 @@ import pytest
 import torch
 
 import fastvideo.envs as envs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.dits import HYWorldConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed.parallel_state import (
     get_sp_parallel_rank,
     get_sp_world_size,
 )
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
@@ -24,7 +24,8 @@ logger = init_logger(__name__)
 envs.setdefault_external("MASTER_ADDR", "localhost")
 envs.setdefault_external("MASTER_PORT", "29503")
 
-MODEL_PATH = maybe_download_model("FastVideo/HY-WorldPlay-Bidirectional-Diffusers")
+BASE_MODEL_PATH = "FastVideo/HY-WorldPlay-Bidirectional-Diffusers"
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH)
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 REFERENCE_LATENTS = {
     AttentionBackendEnum.FLASH_ATTN: -197132.85557549074,
@@ -57,13 +58,18 @@ def test_hyworld_transformer():
     precision = torch.bfloat16
     precision_str = "bf16"
 
-    args = FastVideoArgs(
-        model_path=transformer_path,
-        dit_cpu_offload=False,
-        use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(dit_config=HYWorldConfig(), dit_precision=precision_str),
-    )
-    args.device = device
+    args = resolve_inference_config({
+        "model_path": BASE_MODEL_PATH,
+        "engine": {
+            "offload": {"dit": False},
+            "use_fsdp_inference": False,
+        },
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(dit_config=HYWorldConfig(), dit_precision=precision_str)
+            }
+        },
+    })
 
     loader = TransformerLoader()
     model = loader.load(transformer_path, args).to(device, dtype=precision)

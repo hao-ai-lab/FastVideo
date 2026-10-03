@@ -14,7 +14,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.utils import maybe_download_model, PRECISION_TO_TYPE
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.encoders import T5Config
 
 logger = init_logger(__name__)
@@ -22,11 +22,12 @@ logger = init_logger(__name__)
 envs.setdefault_external("MASTER_ADDR", "localhost")
 envs.setdefault_external("MASTER_PORT", "29503")
 
+BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+
 
 @pytest.fixture
 def t5_model_paths_and_config():
-    base_model_path = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
-    model_path = maybe_download_model(base_model_path)
+    model_path = maybe_download_model(BASE_MODEL_PATH)
     text_encoder_path = os.path.join(model_path, "text_encoder_2")
     tokenizer_path = os.path.join(model_path, "tokenizer_2")
     return text_encoder_path, tokenizer_path, Hunyuan15T2V480PConfig()
@@ -45,7 +46,11 @@ def test_t5_encoder(t5_model_paths_and_config):
     model1 = T5EncoderModel.from_pretrained(text_encoder_path).to(precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-    args = FastVideoArgs(model_path=text_encoder_path, pipeline_config=pipeline_config, pin_cpu_memory=False)
+    args = resolve_inference_config({
+        "model_path": BASE_MODEL_PATH,
+        "engine": {"offload": {"pin_cpu_memory": False}},
+        "pipeline": {"experimental": {"pipeline_config": pipeline_config}},
+    })
     loader = TextEncoderLoader()
     model2 = loader.load(text_encoder_path, args)
     model2 = model2.to(precision)

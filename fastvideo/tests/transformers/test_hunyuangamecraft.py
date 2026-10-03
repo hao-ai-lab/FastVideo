@@ -10,13 +10,13 @@ import pytest
 import torch
 
 import fastvideo.envs as envs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed.parallel_state import (
     get_sp_parallel_rank,
     get_sp_world_size,
 )
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
@@ -29,6 +29,8 @@ envs.setdefault_external("MASTER_PORT", "29507")
 
 # Path to converted weights (local path, not HuggingFace)
 TRANSFORMER_PATH = "official_weights/hunyuan-gamecraft/transformer"
+# Registered model id that selects the HunyuanGameCraft pipeline config during resolution.
+BASE_MODEL_PATH = "FastVideo/HunyuanGameCraft-Diffusers"
 
 # Reference latent computed from FastVideo HunyuanGameCraft model with:
 # - seed=42, batch=1, frames=9, H=44, W=80, text_seq=32
@@ -57,13 +59,18 @@ def test_hunyuangamecraft_transformer(env_overrides):
     precision = torch.bfloat16
     precision_str = "bf16"
 
-    args = FastVideoArgs(
-        model_path=TRANSFORMER_PATH,
-        dit_cpu_offload=False,
-        use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(dit_config=HunyuanGameCraftConfig(), dit_precision=precision_str),
-    )
-    args.device = device
+    args = resolve_inference_config({
+        "model_path": BASE_MODEL_PATH,
+        "engine": {
+            "offload": {"dit": False},
+            "use_fsdp_inference": False,
+        },
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(dit_config=HunyuanGameCraftConfig(), dit_precision=precision_str)
+            }
+        },
+    })
 
     loader = TransformerLoader()
     model = loader.load(TRANSFORMER_PATH, args).to(device, dtype=precision)

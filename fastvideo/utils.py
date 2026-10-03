@@ -46,7 +46,7 @@ logger = init_logger(__name__)
 
 T = TypeVar("T")
 
-# TODO(will): used to convert fastvideo_args.precision to torch.dtype. Find a
+# TODO(will): used to convert a precision name (engine.precision.*) to torch.dtype. Find a
 # cleaner way to do this.
 PRECISION_TO_TYPE = {
     "fp32": torch.float32,

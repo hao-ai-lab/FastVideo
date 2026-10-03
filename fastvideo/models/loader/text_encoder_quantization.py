@@ -10,8 +10,8 @@ import torch
 import torch.nn as nn
 from safetensors.torch import safe_open
 
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.configs.models import EncoderConfig
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.linear import LinearBase, UnquantizedLinearMethod
 from fastvideo.layers.quantization.base_config import QuantizationConfig
 from fastvideo.models.encoders.base import TextEncoder
@@ -19,10 +19,10 @@ from fastvideo.models.encoders.base import TextEncoder
 
 def _resolve_text_encoder_checkpoint_path(
     model_path: str,
-    resolved_config: FastVideoArgs,
+    resolved_config: ResolvedGeneratorConfig,
     use_text_encoder_override: bool,
 ) -> str:
-    override = resolved_config.override_text_encoder_safetensors if use_text_encoder_override else None
+    override = resolved_config.pipeline.components.text_encoder_weights if use_text_encoder_override else None
     checkpoint_path = override or model_path
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Text-encoder checkpoint does not exist: {checkpoint_path}")

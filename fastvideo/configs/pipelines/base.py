@@ -91,8 +91,8 @@ class PipelineConfig:
     def __setattr__(self, name: str, value: Any) -> None:
         if self.__dict__.get("_frozen") and name in self.__dataclass_fields__:
             raise AttributeError(f"{type(self).__name__}.{name} was decided by config resolution and is read-only; "
-                                 f"use fastvideo_args.override(source, {{'pipeline_config.{name}': value}}) to "
-                                 "change it")
+                                 f"to change pipeline_config.{name}, override its typed path with "
+                                 "resolved_config.with_override(source, {path: value}) and use the returned config")
         super().__setattr__(name, value)
 
     def freeze(self) -> None:

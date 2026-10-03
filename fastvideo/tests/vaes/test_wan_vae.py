@@ -8,10 +8,10 @@ from torch.testing import assert_close
 
 import fastvideo.envs as envs
 from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.models.wan.vae_config import WanVAEConfig
-from fastvideo.tests.golden_gate._wan_checkpoint import component_path
+from fastvideo.tests.golden_gate._wan_checkpoint import WAN_REPO, component_path
 
 envs.setdefault_external("MASTER_ADDR", "localhost")
 envs.setdefault_external("MASTER_PORT", "29503")
@@ -23,10 +23,15 @@ def test_wan_vae():
     vae_path = str(component_path("vae"))
     device = torch.device("cuda:0")
     precision = torch.float32
-    args = FastVideoArgs(model_path=vae_path,
-                         pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision="fp32"))
-    args.device = device
-    args.vae_cpu_offload = False
+    args = resolve_inference_config({
+        "model_path": WAN_REPO,
+        "engine": {"offload": {"vae": False}},
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(vae_config=WanVAEConfig(), vae_precision="fp32")
+            }
+        },
+    })
 
     candidate = VAELoader().load(vae_path, args)
     assert candidate.use_feature_cache  # Preserve the original Wan VAE algorithm.

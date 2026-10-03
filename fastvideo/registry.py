@@ -59,7 +59,7 @@ from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
 from fastvideo.api.flux import FluxSamplingParam
 
-from fastvideo.fastvideo_args import WorkloadType
+from fastvideo.api.schema import WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index, verify_model_config_and_directory)
 

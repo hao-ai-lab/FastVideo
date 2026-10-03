@@ -12,7 +12,7 @@ from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.logger import init_logger
 # from fastvideo.models.vaes.hunyuanvae import (
 #     AutoencoderKLHunyuanVideo as MyHunyuanVAE)
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
 from fastvideo.utils import maybe_download_model
@@ -33,10 +33,15 @@ def test_hunyuan_vae():
     device = torch.device("cuda:0")
     precision = torch.float32
     precision_str = "fp32"
-    args = FastVideoArgs(model_path=VAE_PATH,
-                         pipeline_config=PipelineConfig(vae_config=Hunyuan15VAEConfig(), vae_precision=precision_str))
-    args.device = device
-    args.vae_cpu_offload = False
+    args = resolve_inference_config({
+        "model_path": BASE_MODEL_PATH,
+        "engine": {"offload": {"vae": False}},
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(vae_config=Hunyuan15VAEConfig(), vae_precision=precision_str)
+            }
+        },
+    })
 
     model1 = AutoencoderKLHunyuanVideo15.from_pretrained(VAE_PATH, torch_dtype=precision).to(device).eval()
     model1.enable_tiling()

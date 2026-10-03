@@ -9,7 +9,7 @@ from diffusers.models.transformers.transformer_cosmos import CosmosTransformer3D
 import fastvideo.envs as envs
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
@@ -43,10 +43,18 @@ def test_cosmos2_transformer():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16
     precision_str = "bf16"
-    args = FastVideoArgs(model_path=TRANSFORMER_PATH,
-                         dit_cpu_offload=False,
-                         use_fsdp_inference=False,
-                         pipeline_config=PipelineConfig(dit_config=CosmosVideoConfig(), dit_precision=precision_str))
+    args = resolve_inference_config({
+        "model_path": BASE_MODEL_PATH,
+        "engine": {
+            "offload": {"dit": False},
+            "use_fsdp_inference": False,
+        },
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(dit_config=CosmosVideoConfig(), dit_precision=precision_str)
+            }
+        },
+    })
 
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, args).to(device, dtype=precision)

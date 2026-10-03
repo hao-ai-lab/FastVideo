@@ -9,9 +9,9 @@ from torch.testing import assert_close
 import fastvideo.envs as envs
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.models.loader.component_loader import TransformerLoader
-from fastvideo.tests.golden_gate._wan_checkpoint import component_path
+from fastvideo.tests.golden_gate._wan_checkpoint import WAN_REPO, component_path
 from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
@@ -25,12 +25,17 @@ def test_wan_transformer():
     transformer_path = str(component_path("transformer"))
     device = torch.device("cuda:0")
     precision = torch.bfloat16
-    args = FastVideoArgs(
-        model_path=transformer_path,
-        dit_cpu_offload=True,
-        pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision="bf16"),
-    )
-    args.device = device
+    args = resolve_inference_config({
+        "model_path": WAN_REPO,
+        "engine": {
+            "offload": {"dit": True},
+        },
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": PipelineConfig(dit_config=WanVideoConfig(), dit_precision="bf16")
+            }
+        },
+    })
 
     loader = TransformerLoader()
     candidate = loader.load(transformer_path, args).to(dtype=precision).eval()

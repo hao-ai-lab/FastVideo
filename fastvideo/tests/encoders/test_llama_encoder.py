@@ -9,7 +9,7 @@ import gc
 import fastvideo.envs as envs
 from fastvideo.configs.pipelines import HunyuanConfig
 from fastvideo.forward_context import set_forward_context
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.utils import maybe_download_model
@@ -39,7 +39,10 @@ def test_llama_encoder():
     - Load models with the same weights and parameters
     - Produce nearly identical outputs for the same input prompts
     """
-    args = FastVideoArgs(model_path="meta-llama/Llama-2-7b-hf", pipeline_config=HunyuanConfig())
+    args = resolve_inference_config({
+        "model_path": BASE_MODEL_PATH,
+        "pipeline": {"experimental": {"pipeline_config": HunyuanConfig()}},
+    })
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 

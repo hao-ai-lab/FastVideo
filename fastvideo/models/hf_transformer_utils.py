@@ -80,7 +80,6 @@ def get_diffusers_config(model: str, ) -> dict[str, Any]:
     
     Args:
         model: The model name or path.
-        fastvideo_args: Optional inference arguments to override in the config.
         
     Returns:
         The loaded configuration.

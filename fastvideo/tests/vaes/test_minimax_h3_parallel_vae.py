@@ -296,19 +296,27 @@ def test_parallel_encode_validates_input() -> None:
         encode_pixels_parallel(vae, torch.zeros(1, 4, 4, 16, 16), group)
 
 
-def test_fastvideo_args_strategy_literals_match_module() -> None:
-    """fastvideo_args mirrors the strategy literals to avoid importing model
-    modules at args construction; keep the two in sync."""
-    from fastvideo.fastvideo_args import FastVideoArgs
+def test_resolved_strategy_literals_match_module() -> None:
+    """Config resolution mirrors the strategy literals to avoid importing model
+    modules; its default and accepted values match this module."""
+    from fastvideo.api.errors import ConfigValidationError
+    from fastvideo.api.inference_resolution import resolve_inference_config
+    from fastvideo.tests.api.config_snapshot import isolated_environment
 
-    args = FastVideoArgs(model_path="test/parallel-vae")
-    assert args.vae_parallel_decode is False
-    assert args.vae_parallel_encode is False
-    assert args.vae_parallel_decode_strategy == DEFAULT_DECODE_GATHER_STRATEGY
-    assert args.vae_parallel_decode_strategy in DECODE_GATHER_STRATEGIES
+    model_path = "FastVideo/FastVideo-FastH3-8-Step-V2"
+
+    def resolve(minimax_h3):
+        with isolated_environment():
+            return resolve_inference_config({"model_path": model_path, "pipeline": {"minimax_h3": minimax_h3}})
+
+    options = resolve({}).pipeline.minimax_h3
+    assert options.vae_parallel_decode is False
+    assert options.vae_parallel_encode is False
+    assert options.vae_parallel_decode_strategy == DEFAULT_DECODE_GATHER_STRATEGY
+    assert options.vae_parallel_decode_strategy in DECODE_GATHER_STRATEGIES
 
     for strategy in DECODE_GATHER_STRATEGIES:
-        assert FastVideoArgs(model_path="test/parallel-vae",
-                             vae_parallel_decode_strategy=strategy).vae_parallel_decode_strategy == strategy
-    with pytest.raises(ValueError, match="vae_parallel_decode_strategy"):
-        FastVideoArgs(model_path="test/parallel-vae", vae_parallel_decode_strategy="scatter")
+        resolved = resolve({"vae_parallel_decode_strategy": strategy})
+        assert resolved.pipeline.minimax_h3.vae_parallel_decode_strategy == strategy
+    with pytest.raises(ConfigValidationError, match="vae_parallel_decode_strategy"):
+        resolve({"vae_parallel_decode_strategy": "scatter"})

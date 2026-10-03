@@ -19,7 +19,9 @@ from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
-from fastvideo.api.device_policy import offload_disabled_on_unified_memory
+from fastvideo.api.device_policy import UNIFIED_MEMORY_OFFLOAD_PATHS, offload_disabled_on_unified_memory
+from fastvideo.api.inference_resolution import torch_compile_kwargs
+from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.attention.selector import (
     _active_component_attention_backend_scope,
     _component_attention_backend_scope,
@@ -28,7 +30,6 @@ from fastvideo.attention.selector import (
 )
 from fastvideo.configs.models import EncoderConfig
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.quantization import get_quantization_config
 from fastvideo.logger import init_logger
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
@@ -52,6 +53,12 @@ from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
 logger = init_logger(__name__)
 
 
+def _text_encoder_quant(resolved_config: ResolvedGeneratorConfig) -> str | None:
+    """The online text-encoder quantization name, or ``None`` when the ``engine.quantization`` section is unset."""
+    quantization = resolved_config.engine.quantization
+    return None if quantization is None else quantization.text_encoder_quant
+
+
 class ComponentLoader(ABC):
     """Base class for loading a specific type of model component."""
 
@@ -59,13 +66,13 @@ class ComponentLoader(ABC):
         self.device = device
 
     @abstractmethod
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """
         Load the component based on the model path, architecture, and inference args.
 
         Args:
             model_path: Path to the component model
-            fastvideo_args: FastVideoArgs
+            resolved_config: The resolved runtime config
 
         Returns:
             The loaded component
@@ -248,12 +255,12 @@ class TextEncoderLoader(ComponentLoader):
         for source in secondary_weights:
             yield from self._get_weights_iterator(source, to_cpu)
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """Load the text encoders based on the model path, and inference args."""
         # model_config: PretrainedConfig = get_hf_config(
         #     model=model_path,
-        #     trust_remote_code=fastvideo_args.trust_remote_code,
-        #     revision=fastvideo_args.revision,
+        #     trust_remote_code=resolved_config.trust_remote_code,
+        #     revision=resolved_config.revision,
         #     model_override_args=None,
         # )
         model_config = get_diffusers_config(model=model_path)
@@ -307,7 +314,7 @@ class TextEncoderLoader(ComponentLoader):
             except Exception:
                 idx = 0
         encoder_configs = resolved_config.pipeline_config.text_encoder_configs
-        encoder_precisions = resolved_config.pipeline_config.text_encoder_precisions
+        encoder_precisions = resolved_config.engine.precision.text_encoders
         if idx < 0 or idx >= len(encoder_configs):
             raise IndexError(
                 f"text encoder index {idx} out of range for text_encoder_configs (len={len(encoder_configs)}), model_path={model_path}"
@@ -344,7 +351,7 @@ class TextEncoderLoader(ComponentLoader):
             model_path: str,
             model_config: EncoderConfig,
             target_device: torch.device,
-            resolved_config: FastVideoArgs,
+            resolved_config: ResolvedGeneratorConfig,
             dtype: str = "fp16",
             use_text_encoder_override: bool = False,  # prevent subclasses from misusing
             cpu_offload: bool | None = None,
@@ -352,14 +359,16 @@ class TextEncoderLoader(ComponentLoader):
     ):
         runtime_device = get_local_torch_device()
         device_id = runtime_device.index if runtime_device.index is not None else 0
-        requested_cpu_offload = getattr(resolved_config, offload_flag) if cpu_offload is None else cpu_offload
-        # A resolved config already carries the worker's offload policy, so only ask whether the policy covers this
-        # component; a FastVideoArgs applies the policy to itself.
-        apply_policy = getattr(resolved_config, "disable_offload_on_unified_memory", None)
-        if apply_policy is not None:
-            disable_cpu_offload = apply_policy(device_id, offload_flag=offload_flag)
+        if cpu_offload is None:
+            # offload_flag names the device-policy switch of this component; its value is the
+            # engine.offload field at the same path (text_encoder_cpu_offload -> engine.offload.text_encoder).
+            offload_field = UNIFIED_MEMORY_OFFLOAD_PATHS[offload_flag].rsplit(".", 1)[1]
+            requested_cpu_offload = getattr(resolved_config.engine.offload, offload_field)
         else:
-            disable_cpu_offload = offload_disabled_on_unified_memory(device_id, offload_flag)
+            requested_cpu_offload = cpu_offload
+        # The resolved config already carries the worker's offload policy, so only ask whether the policy covers
+        # this component.
+        disable_cpu_offload = offload_disabled_on_unified_memory(device_id, offload_flag)
 
         if requested_cpu_offload and disable_cpu_offload:
             # Direct loader callers can choose a CPU target before the worker
@@ -390,10 +399,13 @@ class TextEncoderLoader(ComponentLoader):
                 model_cls,
                 checkpoint_path,
             )
+            text_encoder_quant = _text_encoder_quant(resolved_config)
+            text_encoder_weights = resolved_config.pipeline.components.text_encoder_weights
             if checkpoint_quant_config is not None:
-                if resolved_config.override_text_encoder_quant is not None:
+                if text_encoder_quant is not None:
                     raise ValueError("Serialized checkpoint quantization is selected from checkpoint metadata; "
-                                     "override_text_encoder_quant is an online conversion option and must be unset")
+                                     "engine.quantization.text_encoder_quant is an online conversion option and "
+                                     "must be unset")
                 requested_dtype = PRECISION_TO_TYPE[dtype]
                 if requested_dtype not in checkpoint_quant_config.get_supported_act_dtypes():
                     raise ValueError(f"Serialized {checkpoint_quant_config.get_name()} text encoder does not support "
@@ -404,10 +416,11 @@ class TextEncoderLoader(ComponentLoader):
                     checkpoint_quant_config.get_name(),
                     checkpoint_path,
                 )
-            elif use_text_encoder_override and resolved_config.override_text_encoder_quant is not None:
-                if resolved_config.override_text_encoder_safetensors is None:
-                    raise ValueError("override_text_encoder_quant is set but override_text_encoder_safetensors is None")
-                quant_cls = get_quantization_config(resolved_config.override_text_encoder_quant)
+            elif use_text_encoder_override and text_encoder_quant is not None:
+                if text_encoder_weights is None:
+                    raise ValueError("engine.quantization.text_encoder_quant is set but "
+                                     "pipeline.components.text_encoder_weights is None")
+                quant_cls = get_quantization_config(text_encoder_quant)
                 model_config.quant_config = quant_cls()
 
             if getattr(model_cls, "supports_hf_from_pretrained", False):
@@ -427,7 +440,7 @@ class TextEncoderLoader(ComponentLoader):
                 model = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}
-            if (use_text_encoder_override and resolved_config.override_text_encoder_safetensors is not None):
+            if (use_text_encoder_override and text_encoder_weights is not None):
                 if os.path.isdir(checkpoint_path):
                     override_weights = self._get_all_weights(
                         model,
@@ -476,7 +489,7 @@ class TextEncoderLoader(ComponentLoader):
             from fastvideo.platforms import current_platform
 
             if use_cpu_offload:
-                pin_cpu_memory = resolved_config.pin_cpu_memory and is_pin_memory_available()
+                pin_cpu_memory = resolved_config.engine.offload.pin_cpu_memory and is_pin_memory_available()
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():
                     logger.info("Disabling FSDP sharding for MPS platform as it's not compatible")
@@ -513,12 +526,12 @@ class TextEncoderLoader(ComponentLoader):
 
 class ImageEncoderLoader(TextEncoderLoader):
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """Load the text encoders based on the model path, and inference args."""
         # model_config: PretrainedConfig = get_hf_config(
         #     model=model_path,
-        #     trust_remote_code=fastvideo_args.trust_remote_code,
-        #     revision=fastvideo_args.revision,
+        #     trust_remote_code=resolved_config.trust_remote_code,
+        #     revision=resolved_config.revision,
         #     model_override_args=None,
         # )
         with open(os.path.join(model_path, "config.json")) as f:
@@ -547,7 +560,7 @@ class ImageEncoderLoader(TextEncoderLoader):
                     f"image encoder index {index} requires pipeline_config."
                     "image_encoder_configs")
             encoder_config = resolved_config.pipeline_config.image_encoder_config
-            encoder_precision = resolved_config.pipeline_config.image_encoder_precision
+            encoder_precision = resolved_config.engine.precision.image_encoder
         else:
             if index < 0 or index >= len(encoder_configs):
                 raise IndexError(
@@ -564,7 +577,7 @@ class ImageEncoderLoader(TextEncoderLoader):
 
         from fastvideo.platforms import current_platform
 
-        if resolved_config.image_encoder_cpu_offload:
+        if resolved_config.engine.offload.image_encoder:
             target_device = (torch.device("mps") if current_platform.is_mps() else torch.device("cpu"))
         else:
             target_device = get_local_torch_device()
@@ -575,7 +588,7 @@ class ImageEncoderLoader(TextEncoderLoader):
             target_device,
             resolved_config,
             encoder_precision,
-            cpu_offload=resolved_config.image_encoder_cpu_offload,
+            cpu_offload=resolved_config.engine.offload.image_encoder,
             offload_flag="image_encoder_cpu_offload",
         )
 
@@ -583,7 +596,7 @@ class ImageEncoderLoader(TextEncoderLoader):
 class VisionLanguageEncoderLoader(ComponentLoader):
     """Loader for vision-language autoregressive encoders."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         from fastvideo.distributed.parallel_state import get_local_torch_device
         from fastvideo.models.encoders.glm_image_ar_loader import (GlmImageARLoader)
 
@@ -600,7 +613,7 @@ class VisionLanguageEncoderLoader(ComponentLoader):
 class ProcessorLoader(ComponentLoader):
     """Loader for HF processors that pair with vision-language encoders."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         from transformers import AutoProcessor
 
         logger.info("Loading processor from %s", model_path)
@@ -615,7 +628,7 @@ class ProcessorLoader(ComponentLoader):
 class ImageProcessorLoader(ComponentLoader):
     """Loader for image processor."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """Load the image processor based on the model path, and inference args."""
         logger.info("Loading image processor from %s", model_path)
 
@@ -627,7 +640,7 @@ class ImageProcessorLoader(ComponentLoader):
 class TokenizerLoader(ComponentLoader):
     """Loader for tokenizers."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """Load the tokenizer based on the model path, and inference args."""
         logger.info("Loading tokenizer from %s", model_path)
         resolved_model_path = model_path
@@ -759,24 +772,23 @@ class VAELoader(ComponentLoader):
                 return directory
         return None
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """Load the VAE based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name")
         config.pop("_name_or_path", None)
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported.")
-        resolved_config.model_paths["vae"] = model_path
 
         from fastvideo.platforms import current_platform
 
-        if resolved_config.vae_cpu_offload:
+        if resolved_config.engine.offload.vae:
             target_device = (torch.device("mps") if current_platform.is_mps() else torch.device("cpu"))
         else:
             target_device = get_local_torch_device()
 
-        with set_default_torch_dtype(PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision] if resolved_config.
-                                     pipeline_config.vae_precision else torch.bfloat16):
+        vae_precision = resolved_config.engine.precision.vae
+        with set_default_torch_dtype(PRECISION_TO_TYPE[vae_precision] if vae_precision else torch.bfloat16):
             pipeline_name = resolved_config.pipeline_config.__class__.__name__
             is_gen3c = pipeline_name.startswith("Gen3C")
             is_cosmos25 = pipeline_name == "Cosmos25Config"
@@ -786,7 +798,7 @@ class VAELoader(ComponentLoader):
             if is_gen3c and class_name in ("AutoencoderKLWan", "AutoencoderKLGen3CTokenizer"):
                 from fastvideo.models.vaes.gen3c_tokenizer_vae import (AutoencoderKLGen3CTokenizer)
 
-                dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
+                dtype = PRECISION_TO_TYPE[vae_precision]
                 num_frames = int(getattr(resolved_config.pipeline_config, "num_frames", 121))
                 state_t = int(getattr(resolved_config.pipeline_config, "state_t", 16))
                 if state_t > 1 and num_frames > 1:
@@ -835,7 +847,7 @@ class VAELoader(ComponentLoader):
             if class_name == "AutoencoderKLWan" and is_cosmos25:
                 from fastvideo.models.vaes.cosmos25wanvae import Cosmos25WanVAE
 
-                dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
+                dtype = PRECISION_TO_TYPE[vae_precision]
                 vae = Cosmos25WanVAE(device=target_device, dtype=dtype)
 
                 weight_path = os.path.join(model_path, "tokenizer.safetensors")
@@ -846,7 +858,7 @@ class VAELoader(ComponentLoader):
                 return vae.eval()
 
             if class_name == "LingBotWorld2WanVAE":
-                dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.vae_precision]
+                dtype = PRECISION_TO_TYPE[vae_precision]
                 config.pop("_class_name", None)
                 vae_config = resolved_config.pipeline_config.vae_config
                 vae_config.update_model_arch(config)
@@ -927,7 +939,7 @@ class VAELoader(ComponentLoader):
 class AudioDecoderLoader(ComponentLoader):
     """Loader for full audio VAEs and legacy decode-only audio components."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name", None) or "LTX2AudioDecoder"
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
@@ -942,7 +954,7 @@ class AudioDecoderLoader(ComponentLoader):
             config.pop("_name_or_path", None)
             audio_vae_config = deepcopy(configured_audio_vae)
             audio_vae_config.update_model_arch(config)
-            if getattr(resolved_config, "vae_cpu_offload", False):
+            if resolved_config.engine.offload.vae:
                 target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
             with set_default_torch_dtype(torch.float32):
                 audio_vae = model_cls(audio_vae_config).to(device=target_device, dtype=torch.float32)
@@ -990,7 +1002,7 @@ class AudioDecoderLoader(ComponentLoader):
 class VocoderLoader(ComponentLoader):
     """Loader for native vocoders."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name", None) or "LTX2Vocoder"
 
@@ -1035,8 +1047,15 @@ def _collect_safetensors_keys(safetensors_list: list) -> set:
 class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
-        """Load the transformer based on the model path, and inference args."""
+    def load(self,
+             model_path: str,
+             resolved_config: ResolvedGeneratorConfig,
+             loading_teacher_critic_model: bool = False):
+        """Load the transformer based on the model path, and inference args.
+
+        ``loading_teacher_critic_model`` marks a DMD teacher (real_score) or critic (fake_score) transformer, which
+        loads its checkpoint weights in full precision with dense attention.
+        """
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
@@ -1046,25 +1065,24 @@ class TransformerLoader(ComponentLoader):
                              "Only diffusers format is supported.")
 
         logger.info("transformer cls_name: %s", cls_name)
-        if resolved_config.override_transformer_cls_name is not None:
-            cls_name = resolved_config.override_transformer_cls_name
+        override_transformer_cls_name = resolved_config.pipeline.components.override_transformer_cls_name
+        if override_transformer_cls_name is not None:
+            cls_name = override_transformer_cls_name
             logger.info("Overriding transformer cls_name to %s", cls_name)
-
-        resolved_config.model_paths["transformer"] = model_path
 
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = deepcopy(resolved_config.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
 
         # Generator-only QAT for DMD distillation: the teacher (real_score) and
-        # critic (fake_score) transformers load with this flag set and must stay
+        # critic (fake_score) transformers load with loading_teacher_critic_model and must stay
         # full precision. Drop the nvfp4_qat quant from their copied config, and
         # build their attention under a scope that ignores any process-wide
         # ATTN_QAT_TRAIN request so it falls back to dense. The generator loads
         # without the flag and keeps both. The scope is exception-safe and
         # needs no env mutation or selector cache flush (the request is part
         # of the resolution cache key).
-        _qat_generator_only = hasattr(resolved_config, "_loading_teacher_critic_model")
+        _qat_generator_only = loading_teacher_critic_model
         if _qat_generator_only:
             dit_config.quant_config = None
 
@@ -1082,13 +1100,14 @@ class TransformerLoader(ComponentLoader):
             update_fn(weight_keys)
 
         # Check if we should use custom initialization weights
-        custom_weights_path = getattr(resolved_config, "init_weights_from_safetensors", None)
+        components = resolved_config.pipeline.components
+        custom_weights_path = components.transformer_weights
         use_custom_weights = (custom_weights_path and os.path.exists(custom_weights_path)
-                              and not hasattr(resolved_config, "_loading_teacher_critic_model"))
+                              and not loading_teacher_critic_model)
 
         if use_custom_weights:
             if "transformer_2" in model_path:
-                custom_weights_path = getattr(resolved_config, "init_weights_from_safetensors_2", None)
+                custom_weights_path = components.transformer_2_weights
             assert custom_weights_path is not None, ("Custom initialization weights must be provided")
             if os.path.isdir(custom_weights_path):
                 safetensors_list = glob.glob(os.path.join(str(custom_weights_path), "*.safetensors"))
@@ -1103,11 +1122,12 @@ class TransformerLoader(ComponentLoader):
             safetensors_list,
         )
 
-        default_dtype = PRECISION_TO_TYPE[resolved_config.pipeline_config.dit_precision]
+        default_dtype = PRECISION_TO_TYPE[resolved_config.engine.precision.dit]
 
         # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name, default_dtype)
-        assert resolved_config.hsdp_shard_dim is not None
+        parallelism = resolved_config.engine.parallelism
+        assert parallelism.hsdp_shard_dim is not None
         # Cosmos2.5 checkpoints can include extra entries not present in the
         # instantiated model (e.g. pos_embedder ranges / *_extra_state). Load
         # non-strictly for Cosmos2.5 only; keep upstream strict behavior for others.
@@ -1134,27 +1154,27 @@ class TransformerLoader(ComponentLoader):
                 },
                 weight_dir_list=safetensors_list,
                 device=get_local_torch_device(),
-                hsdp_replicate_dim=resolved_config.hsdp_replicate_dim,
-                hsdp_shard_dim=resolved_config.hsdp_shard_dim,
+                hsdp_replicate_dim=parallelism.hsdp_replicate_dim,
+                hsdp_shard_dim=parallelism.hsdp_shard_dim,
                 strict=strict_load,
-                cpu_offload=resolved_config.dit_cpu_offload,
-                pin_cpu_memory=resolved_config.pin_cpu_memory,
-                fsdp_inference=resolved_config.use_fsdp_inference,
+                cpu_offload=resolved_config.engine.offload.dit,
+                pin_cpu_memory=resolved_config.engine.offload.pin_cpu_memory,
+                fsdp_inference=resolved_config.engine.use_fsdp_inference,
                 # TODO(will): make these configurable
                 default_dtype=default_dtype,
                 param_dtype=torch.bfloat16,
                 reduce_dtype=torch.float32,
                 output_dtype=None,
                 training_mode=resolved_config.training_mode,
-                enable_torch_compile=resolved_config.enable_torch_compile,
-                torch_compile_kwargs=resolved_config.torch_compile_kwargs,
-                inference_regional_compile=resolved_config.inference_torch_compile,
-                inference_vsa_tile_size=resolved_config.VSA_tile_size,
+                enable_torch_compile=resolved_config.engine.compile.enabled,
+                torch_compile_kwargs=torch_compile_kwargs(resolved_config),
+                inference_regional_compile=resolved_config.engine.compile.regional,
+                inference_vsa_tile_size=resolved_config.engine.attention.vsa_tile_size,
                 # Only the whole-parameter half of the adapter is applied here, while
                 # tensors are still unsharded; LoRAPipeline merges the low-rank half
                 # once the module tree exists.
-                lora_path=getattr(resolved_config, "lora_path", None),
-                lora_strength=getattr(resolved_config, "lora_strength", 1.0),
+                lora_path=components.lora_path,
+                lora_strength=components.lora_strength,
             )
 
         total_params = sum(p.numel() for p in model.parameters())
@@ -1167,7 +1187,7 @@ class TransformerLoader(ComponentLoader):
 
         model = model.eval()
 
-        if resolved_config.inference_mode and resolved_config.dit_layerwise_offload:
+        if resolved_config.inference_mode and resolved_config.engine.offload.dit_layerwise:
             # Check if model has nn.ModuleList for layerwise offload compatibility
             has_module_list = any(isinstance(m, nn.ModuleList) for m in model.children())
             if has_module_list:
@@ -1182,7 +1202,7 @@ class TransformerLoader(ComponentLoader):
 class SchedulerLoader(ComponentLoader):
     """Loader for scheduler."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """Load the scheduler based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
 
@@ -1193,8 +1213,9 @@ class SchedulerLoader(ComponentLoader):
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
         scheduler = scheduler_cls(**config)
-        if resolved_config.pipeline_config.flow_shift is not None:
-            scheduler.set_shift(resolved_config.pipeline_config.flow_shift)
+        flow_shift = resolved_config.pipeline.flow_shift
+        if flow_shift is not None:
+            scheduler.set_shift(flow_shift)
         return scheduler
 
 
@@ -1209,7 +1230,7 @@ class ConditionerLoader(ComponentLoader):
     fetched sub-encoders (T5) don't trip the missing-key check.
     """
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name", None)
         config.pop("_name_or_path", None)
@@ -1254,7 +1275,7 @@ class ConditionerLoader(ComponentLoader):
 class UpsamplerLoader(ComponentLoader):
     """Loader for upsamplers (incl. LTX-2 spatial/temporal upsamplers)."""
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """Load the upsampler based on the model path, and inference args."""
         config_dict = get_diffusers_config(model=model_path)
         class_name = config_dict.pop("_class_name", None)
@@ -1326,7 +1347,7 @@ class GenericComponentLoader(ComponentLoader):
         super().__init__()
         self.library = library
 
-    def load(self, model_path: str, resolved_config: FastVideoArgs):
+    def load(self, model_path: str, resolved_config: ResolvedGeneratorConfig):
         """Load a generic component based on the model path, and inference args."""
         logger.warning(
             "Using generic loader for %s with library %s",
@@ -1369,7 +1390,8 @@ class PipelineComponentLoader:
         module_name: str,
         component_model_path: str,
         transformers_or_diffusers: str,
-        resolved_config: FastVideoArgs,
+        resolved_config: ResolvedGeneratorConfig,
+        loading_teacher_critic_model: bool = False,
     ):
         """
         Load a pipeline module.
@@ -1378,7 +1400,9 @@ class PipelineComponentLoader:
             module_name: Name of the module (e.g., "vae", "text_encoder", "transformer", "scheduler")
             component_model_path: Path to the component model
             transformers_or_diffusers: Whether the module is from transformers or diffusers
-            pipeline_args: Inference arguments
+            resolved_config: The resolved runtime config
+            loading_teacher_critic_model: Whether a transformer is a DMD teacher or critic; passed to
+                ``TransformerLoader.load`` and ignored by the other loaders
 
         Returns:
             The loaded module
@@ -1396,7 +1420,7 @@ class PipelineComponentLoader:
         # Resolve this component's attention backend ONCE, here, from the
         # explicit request and the environment. A per-role request already
         # resolved upstream (the train stack's moduleloader) wins; otherwise
-        # fastvideo_args.attention_backend is the process-wide default, applied
+        # engine.attention.backend is the process-wide default, applied
         # per component.
         #
         # The loaders record the decision on their own config rather than this
@@ -1406,9 +1430,13 @@ class PipelineComponentLoader:
         if _active_component_attention_backend_scope() is not None:
             attention_context = nullcontext()
         else:
-            resolved = coerce_attn_backend(getattr(resolved_config, "attention_backend", None))
+            resolved = coerce_attn_backend(resolved_config.engine.attention.backend)
             attention_context = (_component_attention_backend_scope(resolved, component=module_name)
                                  if resolved is not None else nullcontext())
 
         with attention_context:
+            if isinstance(loader, TransformerLoader):
+                return loader.load(component_model_path,
+                                   resolved_config,
+                                   loading_teacher_critic_model=loading_teacher_critic_model)
             return loader.load(component_model_path, resolved_config)

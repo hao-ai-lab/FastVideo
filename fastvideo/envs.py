@@ -314,7 +314,7 @@ FASTVIDEO_ATTENTION_BACKEND = EnvStr(
     None,
     category="attention",
     doc="Attention backend, as an AttentionBackendEnum name such as TORCH_SDPA, FLASH_ATTN, VIDEO_SPARSE_ATTN, "
-    "SAGE_ATTN, or SAGE_ATTN_THREE. FastVideoArgs uses it when FastVideoArgs.attention_backend is unset. An "
+    "SAGE_ATTN, or SAGE_ATTN_THREE. Config resolution uses it when engine.attention.backend is unset. An "
     "unsupported name raises an error.")
 # FA4 is opt-in and never auto-selected just because it is installed. Below
 # sm90, grad-enabled and GQA calls are routed to FA2 (FA4's backward asserts
@@ -358,17 +358,17 @@ FASTVIDEO_INFERENCE_TORCH_COMPILE = EnvBool(
     False,
     category="performance",
     doc="Compile each DiT transformer block with fullgraph torch.compile at inference. Same as "
-    "FastVideoArgs.inference_torch_compile=True.")
+    "engine.compile.regional=True.")
 FASTVIDEO_VAE_PARALLEL_DECODE = EnvBool(
     False,
     category="performance",
     doc="MiniMax-H3 VAE decode splits its temporal chunks across the sequence-parallel ranks instead of running "
-    "serially on the output rank. Same as FastVideoArgs.vae_parallel_decode=True.")
+    "serially on the output rank. Same as pipeline.minimax_h3.vae_parallel_decode=True.")
 FASTVIDEO_VAE_PARALLEL_ENCODE = EnvBool(
     False,
     category="performance",
     doc="MiniMax-H3 reference-video VAE encode splits its temporal chunks across the sequence-parallel ranks. "
-    "Same as FastVideoArgs.vae_parallel_encode=True.")
+    "Same as pipeline.minimax_h3.vae_parallel_encode=True.")
 FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY = EnvStr(
     None,
     category="performance",
@@ -496,7 +496,7 @@ FASTVIDEO_CFG_GATE_STEP = EnvFloat(
 FASTVIDEO_LTX2_USE_DISTILLED_SIGMAS = EnvBool(
     True,
     category="sampling",
-    doc="LTX-2 uses the distilled sigma schedule when FastVideoArgs.ltx2_use_distilled_sigmas is also true.",
+    doc="LTX-2 uses the distilled sigma schedule when pipeline.ltx2.use_distilled_sigmas is also true.",
     deprecated_names=("LTX2_USE_DISTILLED_SIGMAS", ))
 
 # ================== Evaluation ==================
