@@ -128,6 +128,27 @@ components. On a 36 GiB Mac, try INT6 first and measure peak allocation.
 If loading or inference runs out of memory, use phased loading by leaving
 `resident=False`. Changing placement does not change frames or resolution.
 
+### Metal wired memory
+
+MLX's allocation limit and wired-memory limit are separate. H3's optional
+`metal_wired_limit_gib` calls `mx.set_wired_limit` so selected Metal allocations
+stay in physical memory. It does not increase available RAM. Explicit requests
+fail visibly if the installed MLX build cannot apply them.
+
+Inspect the device's recommended working set before choosing a limit:
+
+```python
+import mlx.core as mx
+
+print(mx.device_info())
+```
+
+For the tested 36 GiB M4 Max, phased generation can request
+`metal_wired_limit_gib=27` in `MiniMaxH3MLXPipeline`. Leave room for macOS and
+other applications. All-resident generation also needs room for the encoder,
+DiT, both decoders and peak activations; wiring cannot make an oversized stack
+fit. An omitted wired limit preserves MLX's existing wiring setting.
+
 ## Hardware
 
 - FastMetal 1.3B and 5B: 16 GB unified memory and up
