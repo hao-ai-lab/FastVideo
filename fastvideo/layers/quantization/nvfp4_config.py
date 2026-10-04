@@ -198,7 +198,16 @@ def _register_ops_once() -> None:
             raise RuntimeError("NVFP4 activation quantization on DGX Spark requires a completion fence; "
                                "disable CUDA graph capture.")
         SfLayout, _, nvfp4_quantize = _require_flashinfer()
-        quantized, scales = nvfp4_quantize(x, global_sf, sfLayout=SfLayout(sf_layout), do_shuffle=do_shuffle)
+        if spark:
+            # FlashInfer's PDL kernel reads the global scale before its
+            # dependency wait. Fresh dynamic scales require normal ordering.
+            quantized, scales = nvfp4_quantize(x,
+                                               global_sf,
+                                               sfLayout=SfLayout(sf_layout),
+                                               do_shuffle=do_shuffle,
+                                               enable_pdl=False)
+        else:
+            quantized, scales = nvfp4_quantize(x, global_sf, sfLayout=SfLayout(sf_layout), do_shuffle=do_shuffle)
         if spark:
             # With FlashInfer 0.6.18 on GB10, queued activation quantization
             # plus GEMM can diverge. Completing quantization while its padded
