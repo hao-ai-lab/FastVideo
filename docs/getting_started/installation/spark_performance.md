@@ -314,6 +314,42 @@ sparsity. The V2 converter packs VSA gates, so its `h3_dit_vsa` profile must
 match the recipe. A later pruned NVFP4 transformer uses the separate
 `h3_dit_ffn` profile, with attention and VSA gates left dense.
 
+### Native FastH3 release measurements
+
+Measured on October 4, 2026, with the trained eight-forward ladder, VSA 0.8,
+832x480 native video, the 50-layer NVFP4 encoder and light video/audio VAEs
+resident. Each cell is the median of two timed calls after one warmup, in
+seconds, for `latency-ceramics-005` / `latency-harbor-005`, seed 2026.
+
+| Model | Frames | One Spark | Two Sparks, SP2 |
+|---|---:|---:|---:|
+| Pruned ckpt300, FFN NVFP4 | 124 | 134.361 / 134.675 | **78.245 / 78.272** |
+| Pruned ckpt300, FFN NVFP4 | 243 | 284.188 / 280.593 | **165.987 / 163.001** |
+| Full V2, NVFP4 FFN/attention/gates | 124 | 142.460 / 140.425 | **88.356 / 86.101** |
+| Full V2, NVFP4 FFN/attention/gates | 243 | 308.204 / 306.141 | **179.876 / 180.213** |
+
+The base integrates upstream main `0cc41a22` with experimental NVFP4 support.
+One-Spark tested commits are `6d6b57fe` (pruned 124), `3f24557a` (pruned 243,
+with `CUDA_LAUNCH_BLOCKING=1`), `f5126f78` (V2 124) and `6e9d7a0b` (V2 243).
+The final pair uses `715d4a5f`, with matching actual-worker code fingerprints,
+CUTLASS FP4 GEMMs and Triton VSA. Light-VAE tile batch is 8 on one Spark and 1
+on the pair; pair batch 8 was slower at 124 frames (79.993 / 80.022 s pruned).
+All offload/deferred-loading and compile options are disabled. The pair uses
+QSFP RoCE, SP2/TP1 and parallel VAE gathering. See the pair configs
+`basic_fasth3_spark_pair_pruned_nvfp4.yaml` and
+`basic_fasth3_spark_pair_v2_nvfp4.yaml` beside the benchmark script.
+
+Every final pair warmup and repeat has correct dimensions/frame count, coherent
+sampled frames and identical full decoded-video hashes within its prompt.
+The V2 one-Spark 124-frame harbor warmup differs from the timed clips but remains
+coherent. These checks establish repeat reliability for the tested recipes;
+BF16 reference parity, speech accuracy and lip sync need separate review.
+
+The [older H3 local blog](https://haoailab.com/blogs/fasth3-local/) reports
+243 s on one Spark and 209 s on two Sparks at 124 frames. It uses the four-step
+Preview checkpoint and full VAE, so the old and new values are context, not a
+matched optimization comparison. It has no matching 243-frame baseline.
+
 ## Reproduce these numbers
 
 Two scripts under `examples/inference/optimizations/` reproduce the claims on
