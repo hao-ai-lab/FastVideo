@@ -21,6 +21,7 @@ from fastvideo.mlx_runtime.minimax_h3_pipeline import (  # noqa: E402
     MiniMaxH3MLXPipeline,
     _adaln_schedule_union,
     _center_crop_frames,
+    _configure_metal_memory_limits,
     _default_metal_wired_limit_gib,
     _preflight_media_dependencies,
     _validate_checkpoint_step_ladder,
@@ -143,3 +144,26 @@ def test_mux_cleans_temporary_files_after_ffmpeg_failure(tmp_path, monkeypatch: 
 
     assert not output.with_suffix(".tmp.mp4").exists()
     assert not output.with_suffix(".tmp.wav").exists()
+
+
+def test_explicit_wired_limit_uses_wired_api_separately_from_allocator():
+    calls = []
+    fake = SimpleNamespace(
+        metal=SimpleNamespace(device_info=lambda: {"memory_size": 36 * 2**30}),
+        set_memory_limit=lambda size: calls.append(("allocator", size)),
+        set_wired_limit=lambda size: calls.append(("wired", size)) or 0,
+    )
+    _configure_metal_memory_limits(fake, 27.0)
+    assert calls == [("allocator", 30 * 2**30), ("wired", 27 * 2**30)]
+
+
+def test_explicit_wired_limit_failure_is_not_silently_ignored():
+    def reject(size):
+        raise ValueError("exceeds system wired limit")
+    fake = SimpleNamespace(set_wired_limit=reject)
+    with pytest.raises(ValueError, match="system wired limit"):
+        _configure_metal_memory_limits(fake, 31.0)
+    with pytest.raises(ValueError, match="finite and positive"):
+        _configure_metal_memory_limits(fake, float("nan"))
+    with pytest.raises(RuntimeError, match="cannot set"):
+        _configure_metal_memory_limits(SimpleNamespace(), 27.0)

@@ -232,7 +232,7 @@ def _cleanup_mlx() -> None:
 
 
 def _default_metal_wired_limit_gib(mx) -> float:
-    """Keep the default below both physical memory and the tested 30 GiB cap."""
+    """Legacy helper for allocator capacity, not the wired-residency setting."""
     metal = getattr(mx, "metal", None)
     if metal is None:
         return 30.0
@@ -243,6 +243,30 @@ def _default_metal_wired_limit_gib(mx) -> float:
     if total_bytes <= 0:
         return 30.0
     return min(30.0, 0.84 * total_bytes / 2**30)
+
+
+def _configure_metal_memory_limits(mx, wired_limit_gib: float | None) -> None:
+    """Keep allocator capacity separate from explicitly requested wired residency."""
+    set_memory = getattr(mx, "set_memory_limit", None)
+    if set_memory is None and hasattr(mx, "metal"):
+        set_memory = getattr(mx.metal, "set_memory_limit", None)
+    if set_memory is not None:
+        try:
+            set_memory(int(_default_metal_wired_limit_gib(mx) * 2**30))
+        except Exception as error:  # noqa: BLE001 - older MLX best effort
+            logger.info("Could not set the Metal allocation limit: %s", error)
+    if wired_limit_gib is None:
+        return
+    if not math.isfinite(wired_limit_gib) or wired_limit_gib <= 0:
+        raise ValueError("metal_wired_limit_gib must be finite and positive")
+    set_wired = getattr(mx, "set_wired_limit", None)
+    if set_wired is None and hasattr(mx, "metal"):
+        set_wired = getattr(mx.metal, "set_wired_limit", None)
+    if set_wired is None:
+        raise RuntimeError("This MLX build cannot set the requested wired-memory limit")
+    # Explicit requests must succeed; do not silently benchmark an unwired model.
+    previous = set_wired(int(wired_limit_gib * 2**30))
+    logger.info("MLX wired limit %.2f GiB (previous %.2f GiB)", wired_limit_gib, previous / 2**30)
 
 
 MINIMAX_H3_PROMPT_CACHE_VERSION = "v2-attention-layout"
@@ -334,17 +358,7 @@ class MiniMaxH3MLXPipeline:
     ) -> None:
         import mlx.core as mx
 
-        set_limit = getattr(mx, "set_memory_limit", None)
-        if set_limit is None and hasattr(mx, "metal"):
-            set_limit = getattr(mx.metal, "set_memory_limit", None)
-        if set_limit is not None:
-            # Keep large resident models inside a predictable wired budget.
-            try:
-                if metal_wired_limit_gib is None:
-                    metal_wired_limit_gib = _default_metal_wired_limit_gib(mx)
-                set_limit(int(metal_wired_limit_gib * 2**30))
-            except Exception as error:  # noqa: BLE001 - best effort on older MLX
-                logger.info("Could not raise the Metal wired limit: %s", error)
+        _configure_metal_memory_limits(mx, metal_wired_limit_gib)
         self.model_root = Path(model_root)
         if conditioner_mode not in ("auto", "streamed", "nvfp4"):
             raise ValueError(f"Unknown H3 conditioner mode: {conditioner_mode}")
