@@ -303,6 +303,11 @@ def _nvfp4_quantize(
         x_for_quant = F.pad(x, (0, 0, 0, pad_rows))
 
     quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x_for_quant, global_sf, sf_layout, do_shuffle)
+    if x.is_cuda and torch.cuda.get_device_capability(x.device) == (12, 1):
+        # On GB10 with FlashInfer 0.6.18, identical native H3 requests can
+        # diverge unless quantization completes before its padded input is
+        # released. Fence this boundary rather than every CUDA launch.
+        torch.cuda.current_stream(x.device).synchronize()
     if sf_layout != SfLayout.layout_linear.value:
         quantized = quantized.narrow(0, 0, logical_rows)
     return quantized, scales
