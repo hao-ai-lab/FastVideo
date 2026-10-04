@@ -193,8 +193,18 @@ def _register_ops_once() -> None:
         sf_layout: int,
         do_shuffle: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        spark = torch.cuda.get_device_capability(x.device) == (12, 1)
+        if spark and torch.cuda.is_current_stream_capturing():
+            raise RuntimeError("NVFP4 activation quantization on DGX Spark requires a completion fence; "
+                               "disable CUDA graph capture.")
         SfLayout, _, nvfp4_quantize = _require_flashinfer()
-        return nvfp4_quantize(x, global_sf, sfLayout=SfLayout(sf_layout), do_shuffle=do_shuffle)
+        quantized, scales = nvfp4_quantize(x, global_sf, sfLayout=SfLayout(sf_layout), do_shuffle=do_shuffle)
+        if spark:
+            # With FlashInfer 0.6.18 on GB10, queued activation quantization
+            # plus GEMM can diverge. Completing quantization while its padded
+            # input is alive restores identical native H3 requests.
+            torch.cuda.current_stream(x.device).synchronize()
+        return quantized, scales
 
     @_nvfp4_quantize_op.register_fake
     def _nvfp4_quantize_op_fake(
@@ -303,11 +313,6 @@ def _nvfp4_quantize(
         x_for_quant = F.pad(x, (0, 0, 0, pad_rows))
 
     quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x_for_quant, global_sf, sf_layout, do_shuffle)
-    if x.is_cuda and torch.cuda.get_device_capability(x.device) == (12, 1):
-        # On GB10 with FlashInfer 0.6.18, identical native H3 requests can
-        # diverge unless quantization completes before its padded input is
-        # released. Fence this boundary rather than every CUDA launch.
-        torch.cuda.current_stream(x.device).synchronize()
     if sf_layout != SfLayout.layout_linear.value:
         quantized = quantized.narrow(0, 0, logical_rows)
     return quantized, scales
