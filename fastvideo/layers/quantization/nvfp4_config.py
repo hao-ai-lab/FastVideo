@@ -29,7 +29,6 @@ import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
 import fastvideo.envs as envs
-
 from fastvideo.layers.quantization.base_config import (
     QuantizationConfig,
     QuantizeMethodBase,
@@ -211,7 +210,7 @@ def _register_ops_once() -> None:
         if spark:
             # With FlashInfer 0.6.18 on GB10, queued activation quantization
             # plus GEMM can diverge. Completing quantization while its padded
-            # input is alive restores identical native H3 requests.
+            # input is alive prevents the observed intermittent corruption.
             torch.cuda.current_stream(x.device).synchronize()
         return quantized, scales
 

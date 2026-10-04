@@ -331,6 +331,10 @@ FASTVIDEO_VSA_SM100A = EnvBool(
     category="attention",
     doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a) kernel. "
     "fastvideo-kernel reads the same variable with the same rule.")
+FASTVIDEO_VSA_TRITON = EnvBool(
+    False,
+    category="attention",
+    doc="Force the Triton MiniMax-H3 sparse attention kernel. fastvideo-kernel reads the same variable.")
 FASTVIDEO_NVFP4_FA4 = EnvBool(
     False,
     category="attention",
@@ -378,6 +382,12 @@ FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     category="performance",
     doc="MiniMax-H3 inference-only Triton fusions: all, 1, or a comma-separated subset of "
     "modulate,qknorm_rope,swiglu. Empty, 0, or none keeps the eager implementation.")
+FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(
+    1, category="performance", doc="Spatial tiles per MiniMax-H3 light-VAE decoder call. Values below 1 use one tile.")
+FASTVIDEO_NVFP4_MM_BACKEND = EnvStr(
+    "auto",
+    category="performance",
+    doc="FlashInfer NVFP4 matrix multiplication backend: auto, cutlass, cudnn, trtllm, or b12x.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "
