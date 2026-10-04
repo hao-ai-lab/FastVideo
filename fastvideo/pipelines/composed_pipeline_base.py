@@ -419,10 +419,6 @@ class ComposedPipelineBase(ABC):
         config/pretrained weights.
         """
         if resolved_config.training_mode:
-            # Training keeps the DiT on the device.
-            if resolved_config.engine.offload.dit:
-                resolved_config = resolved_config.with_override("ComposedPipelineBase.from_pretrained:training",
-                                                                {"engine.offload.dit": False})
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the

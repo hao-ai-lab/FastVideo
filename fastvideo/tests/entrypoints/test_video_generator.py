@@ -661,11 +661,11 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
     assert generator.config.engine.num_gpus == 4
 
 
-def test_from_pretrained_rejects_other_kwargs_with_their_config_path(monkeypatch):
+def test_from_pretrained_rejects_other_kwargs_and_points_to_from_config(monkeypatch):
     captured = _patch_from_resolved_config(monkeypatch)
     _skip_model_definition(monkeypatch)
 
-    with pytest.raises(TypeError, match="workload_type -> pipeline.workload_type"):
+    with pytest.raises(TypeError, match=r"does not accept workload_type\.(.|\n)*VideoGenerator\.from_config"):
         VideoGenerator.from_pretrained(
             "test-model",
             num_gpus=4,

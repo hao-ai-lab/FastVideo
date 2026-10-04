@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Any
 
 from fastvideo.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.layers.quantization import QuantizationConfig
@@ -48,24 +47,3 @@ class DiTConfig(ModelConfig):
     # FastVideoDiT-specific parameters
     prefix: str = ""
     quant_config: QuantizationConfig | None = None
-
-    @staticmethod
-    def add_cli_args(parser: Any, prefix: str = "dit-config") -> Any:
-        """Add CLI arguments for DiTConfig fields"""
-        parser.add_argument(
-            f"--{prefix}.prefix",
-            type=str,
-            dest=f"{prefix.replace('-', '_')}.prefix",
-            default=DiTConfig.prefix,
-            help="Prefix for the DiT model",
-        )
-
-        parser.add_argument(
-            f"--{prefix}.quant-config",
-            type=str,
-            dest=f"{prefix.replace('-', '_')}.quant_config",
-            default=None,
-            help="Quantization configuration for the DiT model",
-        )
-
-        return parser

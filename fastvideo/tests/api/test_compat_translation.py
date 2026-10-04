@@ -8,6 +8,8 @@ from __future__ import annotations
 import pytest
 
 from fastvideo.api.compat import (
+    FROM_PRETRAINED_KWARGS,
+    _FROM_PRETRAINED_FIELDS,
     from_pretrained_kwargs_to_config,
     request_to_sampling_param,
 )
@@ -21,7 +23,7 @@ class TestFromPretrainedKwargsTranslation:
     """The ``from_pretrained`` keyword ``torch_compile_kwargs={...}`` gets
     split across the four first-class :class:`CompileConfig` fields and
     anything unknown falls into ``extras``. Keywords outside the
-    ``from_pretrained`` set are rejected with their typed path."""
+    ``from_pretrained`` set are rejected."""
 
     def test_empty_kwargs_produces_empty_extras(self) -> None:
         config = from_pretrained_kwargs_to_config(
@@ -32,9 +34,17 @@ class TestFromPretrainedKwargsTranslation:
         assert compile_config.extras == {}
         assert compile_config.backend is None
 
-    def test_other_keyword_names_its_typed_path(self) -> None:
-        with pytest.raises(TypeError, match="ltx2_vae_tiling -> pipeline.vae_tiling"):
+    def test_other_keyword_points_to_from_config(self) -> None:
+        with pytest.raises(TypeError, match=r"does not accept ltx2_vae_tiling\. It accepts only these keywords: "
+                           r"(.|\n)*VideoGenerator\.from_config"):
             from_pretrained_kwargs_to_config("/models/ltx2", {"ltx2_vae_tiling": True})
+
+    def test_keyword_fields_are_the_from_pretrained_keywords(self) -> None:
+        """Every keyword with a schema field sets one field; ``torch_compile_kwargs`` and ``nvfp4_fa4`` have none."""
+        assert set(_FROM_PRETRAINED_FIELDS) == FROM_PRETRAINED_KWARGS - {"torch_compile_kwargs", "nvfp4_fa4"}
+        assert len(set(_FROM_PRETRAINED_FIELDS.values())) == len(_FROM_PRETRAINED_FIELDS)
+        config = from_pretrained_kwargs_to_config("/models/wan", {"dit_cpu_offload": False, "sp_size": 2})
+        assert config.engine.offload.dit is False and config.engine.parallelism.sp_size == 2
 
 
 class TestCompileConfigRoundTrip:

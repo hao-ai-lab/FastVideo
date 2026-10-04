@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Snapshot cases for the final configuration objects, compared against golden JSON files.
 
-Each case builds the configuration objects that runtime code reads (``FastVideoArgs`` with its ``PipelineConfig``,
-and a ``SamplingParam`` where the case has a request) through one of the public entry paths:
+Each case builds the configuration objects that runtime code reads through one of the public entry paths. A generator
+case records the resolved config (``ResolvedGeneratorConfig.to_dict()``), its ``PipelineConfig`` and class, and the
+resolution decisions; a request case records the ``SamplingParam`` and the request resolution.
 
-- ``registry``: every registered model path, through ``FastVideoArgs.from_kwargs`` and ``SamplingParam.from_pretrained``.
-- ``yaml``: every repository config file with a ``generator`` section, through ``load_generator_config_from_file``,
-  ``resolve_inference_config``, and ``generator_config_to_fastvideo_args``, with the resolution decisions; its ``request`` or ``default_request`` through the ``fastvideo generate`` and
+- ``registry``: every registered model path, through ``resolve_inference_config`` and ``SamplingParam.from_pretrained``.
+- ``yaml``: every repository config file with a ``generator`` section, through ``load_generator_config_from_file`` and
+  ``resolve_inference_config``; its ``request`` or ``default_request`` through the ``fastvideo generate`` and
   ``fastvideo serve`` loaders and ``request_to_sampling_param``.
 - ``kwargs``: ``VideoGenerator.from_pretrained`` keywords, through ``from_pretrained_kwargs_to_config`` and the same
   resolution.
 - ``config``: typed ``GeneratorConfig`` mappings, as ``VideoGenerator.from_config`` receives them, through the same
   resolution.
-- ``cli``: argparse flags, through ``FastVideoArgs.add_cli_args`` and ``FastVideoArgs.from_cli_args``.
-- ``environment``: environment variables that ``FastVideoArgs.__post_init__`` folds into fields.
+- ``environment``: environment variables that resolution folds into typed fields.
 - ``request``: typed ``GenerationRequest`` values, through ``request_to_sampling_param``.
 
 Every case runs with all registered environment variables unset (except the ones an ``env`` case sets) and with model
@@ -134,29 +134,22 @@ def to_jsonable(value: Any) -> Any:
     return _normalize_text(repr(value))
 
 
-def snapshot_fastvideo_args(resolved_config: Any) -> dict[str, Any]:
-    """FastVideoArgs fields, with its PipelineConfig as a separate top-level entry."""
-    fields = {
-        field.name: to_jsonable(getattr(resolved_config, field.name))
-        for field in dataclasses.fields(resolved_config) if field.name != "pipeline_config"
-    }
+def snapshot_resolved_config(resolved_config: Any) -> dict[str, Any]:
+    """The resolved values, the ``PipelineConfig`` and its class, and the resolution decisions of a resolved config."""
     pipeline_config = resolved_config.pipeline_config
     return {
-        "fastvideo_args": fields,
+        "resolved_config": to_jsonable(resolved_config.to_dict()),
         "pipeline_config_class": f"{type(pipeline_config).__module__}.{type(pipeline_config).__qualname__}",
         "pipeline_config": to_jsonable(pipeline_config),
+        "resolution_decisions": to_jsonable(resolved_config.decisions),
     }
 
 
-def snapshot_resolved_fastvideo_args(generator_config: Any) -> dict[str, Any]:
-    """Resolve a GeneratorConfig the way VideoGenerator.from_config does, and record the resolution decisions."""
-    from fastvideo.api.compat import generator_config_to_fastvideo_args
+def snapshot_resolved_generator_config(generator_config: Any) -> dict[str, Any]:
+    """Resolve a GeneratorConfig or raw mapping the way VideoGenerator.from_config does, and snapshot the result."""
     from fastvideo.api.inference_resolution import resolve_inference_config
 
-    resolved = resolve_inference_config(generator_config)
-    snapshot = snapshot_fastvideo_args(generator_config_to_fastvideo_args(resolved))
-    snapshot["resolution_decisions"] = to_jsonable(resolved.decisions)
-    return snapshot
+    return snapshot_resolved_config(resolve_inference_config(generator_config))
 
 
 def snapshot_sampling_param(sampling_param: Any) -> dict[str, Any]:
@@ -220,18 +213,12 @@ def isolated_environment(env_values: dict[str, Any] | None = None) -> Iterator[N
 # ---------------------------------------------------------------------------
 
 
-def _from_kwargs(**kwargs: Any) -> dict[str, Any]:
-    from fastvideo.fastvideo_args import FastVideoArgs
-
-    return snapshot_fastvideo_args(FastVideoArgs.from_kwargs(**kwargs))
-
-
 def _registry_case(model_path: str) -> Callable[[], dict[str, Any]]:
 
     def build() -> dict[str, Any]:
         from fastvideo.api.sampling_param import SamplingParam
 
-        snapshot = _from_kwargs(model_path=model_path)
+        snapshot = snapshot_resolved_generator_config({"model_path": model_path})
         snapshot.update(snapshot_sampling_param(SamplingParam.from_pretrained(model_path)))
         return snapshot
 
@@ -245,7 +232,7 @@ def _yaml_case(path: Path) -> Callable[[], dict[str, Any]]:
         from fastvideo.api.compat import load_generator_config_from_file
 
         generator_config = load_generator_config_from_file(path)
-        snapshot = snapshot_resolved_fastvideo_args(generator_config)
+        snapshot = snapshot_resolved_generator_config(generator_config)
         snapshot.update(snapshot_request(_yaml_request(path), generator_config.model_path))
         return snapshot
 
@@ -267,7 +254,7 @@ def _kwargs_case(model_path: str, kwargs: dict[str, Any]) -> Callable[[], dict[s
     def build() -> dict[str, Any]:
         from fastvideo.api.compat import from_pretrained_kwargs_to_config
 
-        return snapshot_resolved_fastvideo_args(from_pretrained_kwargs_to_config(model_path, kwargs))
+        return snapshot_resolved_generator_config(from_pretrained_kwargs_to_config(model_path, kwargs))
 
     return build
 
@@ -277,29 +264,16 @@ def _config_case(raw: dict[str, Any]) -> Callable[[], dict[str, Any]]:
     def build() -> dict[str, Any]:
         from fastvideo.api.compat import normalize_generator_config
 
-        return snapshot_resolved_fastvideo_args(normalize_generator_config(raw))
+        return snapshot_resolved_generator_config(normalize_generator_config(raw))
 
     return build
 
 
-def _cli_case(argv: list[str]) -> Callable[[], dict[str, Any]]:
+def _env_case(env_values: dict[str, Any], raw: dict[str, Any]) -> Callable[[], dict[str, Any]]:
+    """A resolution of the raw generator mapping ``raw`` run with ``env_values`` set (applied by ``run_case``)."""
 
     def build() -> dict[str, Any]:
-        from fastvideo.fastvideo_args import FastVideoArgs
-        from fastvideo.utils import FlexibleArgumentParser
-
-        parser = FlexibleArgumentParser()
-        FastVideoArgs.add_cli_args(parser)
-        return snapshot_fastvideo_args(FastVideoArgs.from_cli_args(parser.parse_args(argv)))
-
-    return build
-
-
-def _env_case(env_values: dict[str, Any], **kwargs: Any) -> Callable[[], dict[str, Any]]:
-    """A FastVideoArgs.from_kwargs case run with ``env_values`` set (applied by ``run_case``)."""
-
-    def build() -> dict[str, Any]:
-        return _from_kwargs(**kwargs)
+        return snapshot_resolved_generator_config(raw)
 
     build.env_values = env_values  # type: ignore[attr-defined]
     return build
@@ -319,7 +293,7 @@ def _repository_config_files() -> list[Path]:
     """Every YAML file outside the tests that has a ``generator`` mapping at the top level.
 
     Files with ``runtime: mlx`` are skipped: ``fastvideo/entrypoints/openai/mlx_server.py`` reads them with its own
-    schema, and they never reach ``FastVideoArgs``.
+    schema, and they never reach ``resolve_inference_config``.
     """
     files = []
     for path in sorted(REPO_ROOT.rglob("*.y*ml")):
@@ -344,7 +318,7 @@ def collect_cases() -> list[SnapshotCase]:
         SnapshotCase("yaml",
                      path.relative_to(REPO_ROOT).as_posix(), _yaml_case(path)) for path in _repository_config_files()
     ]
-    # One case per kind of branch in from_pretrained_kwargs_to_config: flat names of typed fields and compile sub-keys.
+    # One case per kind of branch in from_pretrained_kwargs_to_config: keywords of typed fields and compile sub-keys.
     kwargs_cases = {
         "typed_offload_and_parallelism": (WAN_T2V, {
             "num_gpus": 2,
@@ -370,8 +344,9 @@ def collect_cases() -> list[SnapshotCase]:
     cases += [
         SnapshotCase("kwargs", name, _kwargs_case(model, kwargs)) for name, (model, kwargs) in kwargs_cases.items()
     ]
-    # Typed configs for the settings that only from_config accepts: typed fields, keys left in
-    # pipeline.experimental, LTX-2 refine and VAE tile fields, and a pipeline config JSON path.
+    # Typed configs for the settings that only from_config accepts: typed fields, a model-only PipelineConfig
+    # attribute and a key that code reads by name in pipeline.experimental, LTX-2 refine and VAE tile fields, and a
+    # pipeline config JSON path.
     pipeline_json = str(REPO_ROOT / "fastvideo/configs/fasthunyuan_t2v.json")
     config_cases = {
         "attention_precision_and_flow_shift": {
@@ -389,13 +364,30 @@ def collect_cases() -> list[SnapshotCase]:
                 "flow_shift": 5.0
             },
         },
-        "keys_without_typed_fields": {
+        "master_port_refine_enabled_boundary_ratio": {
+            "model_path": WAN_T2V,
+            "engine": {
+                "parallelism": {
+                    "master_port": 29600
+                }
+            },
+            "pipeline": {
+                "ltx2": {
+                    "refine": {
+                        "enabled": True
+                    }
+                },
+                "boundary_ratio": 0.5
+            },
+        },
+        "experimental_keys": {
             "model_path": WAN_T2V,
             "pipeline": {
                 "experimental": {
-                    "master_port": 29600,
-                    "refine_enabled": True,
-                    "boundary_ratio": 0.5
+                    "flow_shift_sr": 2.0,
+                    "ray_runtime_env": {
+                        "pip": ["probe"]
+                    }
                 }
             },
         },
@@ -430,9 +422,7 @@ def collect_cases() -> list[SnapshotCase]:
         "boundary_ratio": {
             "model_path": WAN22_T2V,
             "pipeline": {
-                "experimental": {
-                    "boundary_ratio": 0.8
-                }
+                "boundary_ratio": 0.8
             },
         },
         "vae_tiling_typed": {
@@ -452,27 +442,7 @@ def collect_cases() -> list[SnapshotCase]:
         },
     }
     cases += [SnapshotCase("config", name, _config_case(raw)) for name, raw in config_cases.items()]
-    # argparse defaults differ from the dataclass defaults, so model_path_only is the CLI baseline.
-    cli_cases = {
-        "model_path_only": ["--model-path", WAN_T2V],
-        "offload_and_parallelism": [
-            "--model-path", WAN_T2V, "--num-gpus", "2", "--sp-size", "2", "--dit-cpu-offload", "true",
-            "--vae-cpu-offload", "false"
-        ],
-        "attention_backend_and_disable_autocast":
-        ["--model-path", WAN_T2V, "--attention-backend", "TORCH_SDPA", "--disable-autocast"],
-        "pipeline_config_flags": [
-            "--model-path", WAN_T2V, "--flow-shift", "5.0", "--dit-precision", "fp32", "--embedded-cfg-scale", "4.5",
-            "--vae-tiling", "false", "--vae-sp", "false"
-        ],
-        "vae_config_flags": [
-            "--model-path", WAN_T2V, "--vae-config.load-encoder", "false", "--vae-config.use-tiling", "true",
-            "--vae-config.tile-sample-min-height", "128"
-        ],
-        "dit_config_flags": ["--model-path", WAN_T2V, "--dit-config.prefix", "Probe"],
-    }
-    cases += [SnapshotCase("cli", name, _cli_case(argv)) for name, argv in cli_cases.items()]
-    # Environment variables that FastVideoArgs.__post_init__ folds into fields.
+    # Environment variables that resolution folds into typed fields.
     env_cases = {
         "attention_backend": {
             "FASTVIDEO_ATTENTION_BACKEND": "TORCH_SDPA"
@@ -490,14 +460,20 @@ def collect_cases() -> list[SnapshotCase]:
         },
     }
     cases += [
-        SnapshotCase("environment", name, _env_case(env_values, model_path=WAN_T2V))
+        SnapshotCase("environment", name, _env_case(env_values, {"model_path": WAN_T2V}))
         for name, env_values in env_cases.items()
     ]
     cases.append(
-        SnapshotCase("environment", "explicit_argument_wins_over_attention_backend",
-                     _env_case({"FASTVIDEO_ATTENTION_BACKEND": "TORCH_SDPA"},
-                               model_path=WAN_T2V,
-                               attention_backend="FLASH_ATTN")))
+        SnapshotCase(
+            "environment", "explicit_argument_wins_over_attention_backend",
+            _env_case({"FASTVIDEO_ATTENTION_BACKEND": "TORCH_SDPA"}, {
+                "model_path": WAN_T2V,
+                "engine": {
+                    "attention": {
+                        "backend": "FLASH_ATTN"
+                    }
+                }
+            })))
     # Requests cover sampling fields, LTX-2 stage overrides, extensions, and output flags.
     request_cases = {
         "sampling_values": (WAN_T2V, {

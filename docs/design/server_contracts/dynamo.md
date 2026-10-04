@@ -311,8 +311,9 @@ re-chase FastVideo drift:
    special-casing torch tensors.
 3. `VideoGenerator.from_pretrained` accepts a typed `GeneratorConfig`.
    Its only flat keywords are the convenience keywords in
-   `fastvideo.api.compat.FROM_PRETRAINED_KWARGS`; any other flat keyword
-   raises `TypeError` that names the typed config path to use instead.
+   `fastvideo.api.compat.FROM_PRETRAINED_KWARGS`; any other keyword
+   raises `TypeError` that points to `VideoGenerator.from_config(...)`,
+   which takes every setting at its typed config path.
 4. `generate_async` (PR 7.10+) emits events in order
    `Progress* → Partial* → Final`; the final event always has exactly
    one occurrence per request.

@@ -5,14 +5,14 @@ from dataclasses import MISSING, dataclass, field
 from enum import Enum
 from typing import Any, Literal
 
-# Field metadata key that holds a field's name in the flat keyword API: the keyword arguments of
-# ``VideoGenerator.from_pretrained`` and the fields of ``FastVideoArgs``. ``fastvideo.api.compat`` converts between
-# the nested config and the flat keywords through this name, so a field that declares it needs no other mapping.
+# Field metadata key that holds the ``VideoGenerator.from_pretrained`` keyword that sets a field.
+# ``fastvideo.api.compat.from_pretrained_kwargs_to_config`` maps each keyword of ``FROM_PRETRAINED_KWARGS`` to the
+# field that declares it.
 FLAT_NAME = "flat_name"
 
 
 def flat_field(flat_name: str, default: Any = MISSING, *, default_factory: Any = MISSING) -> Any:
-    """Declare a dataclass field whose name in the flat keyword API is ``flat_name``."""
+    """Declare a dataclass field that the ``VideoGenerator.from_pretrained`` keyword ``flat_name`` sets."""
     return field(default=default, default_factory=default_factory, metadata={FLAT_NAME: flat_name})
 
 
@@ -34,11 +34,6 @@ class ExecutionMode(str, Enum):
             return cls(value.lower())
         except ValueError:
             raise ValueError(f"Invalid mode: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
-
-    @classmethod
-    def choices(cls) -> list[str]:
-        """Get all available choices as strings for argparse."""
-        return [mode.value for mode in cls]
 
 
 class WorkloadType(str, Enum):
@@ -63,11 +58,6 @@ class WorkloadType(str, Enum):
             raise ValueError(
                 f"Invalid workload type: {value}. Must be one of: {', '.join([m.value for m in cls])}") from None
 
-    @classmethod
-    def choices(cls) -> list[str]:
-        """Get all available choices as strings for argparse."""
-        return [workload.value for workload in cls]
-
 
 @dataclass
 class ServerConfig:
@@ -84,7 +74,7 @@ class ParallelismConfig:
     hsdp_replicate_dim: int = flat_field("hsdp_replicate_dim", 1)
     hsdp_shard_dim: int = flat_field("hsdp_shard_dim", -1)
     dist_timeout: int | None = flat_field("dist_timeout", None)
-    master_port: int | None = flat_field("master_port", None)
+    master_port: int | None = None
     """Port of the rendezvous that the executor opens for its workers. ``None`` picks an open port."""
 
 
@@ -101,7 +91,7 @@ class OffloadConfig:
     # overlapping set rather than the sum. Grouped here because it is the same
     # decision the offload knobs answer, which is how much of the model has to
     # be resident at once. ``None`` auto-enables on unified-memory devices.
-    lazy_module_load: bool | None = flat_field("lazy_module_load", None)
+    lazy_module_load: bool | None = None
 
 
 @dataclass
@@ -128,31 +118,31 @@ class CompileConfig:
     dynamic: bool | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
-    text_encoder_enabled: bool | None = flat_field("enable_torch_compile_text_encoder", None)
-    vae_enabled: bool | None = flat_field("enable_torch_compile_vae", None)
-    audio_vae_enabled: bool | None = flat_field("enable_torch_compile_audio_vae", None)
-    regional: bool | None = flat_field("inference_torch_compile", None)
+    text_encoder_enabled: bool | None = None
+    vae_enabled: bool | None = None
+    audio_vae_enabled: bool | None = None
+    regional: bool | None = None
     """Regional fullgraph compile of each DiT transformer block, independent of ``enabled``. The loader applies it
     with fixed options and ignores the kwargs below. ``None`` falls back to ``FASTVIDEO_INFERENCE_TORCH_COMPILE``."""
 
-    dit_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_dit", default_factory=dict)
-    text_encoder_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_text_encoder", default_factory=dict)
-    vae_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_vae", default_factory=dict)
-    audio_vae_kwargs: dict[str, Any] = flat_field("torch_compile_kwargs_audio_vae", default_factory=dict)
+    dit_kwargs: dict[str, Any] = field(default_factory=dict)
+    text_encoder_kwargs: dict[str, Any] = field(default_factory=dict)
+    vae_kwargs: dict[str, Any] = field(default_factory=dict)
+    audio_vae_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class AttentionConfig:
-    backend: str | None = flat_field("attention_backend", None)
+    backend: str | None = None
     """Default attention backend request, such as ``FLASH_ATTN`` or ``TORCH_SDPA``, applied per component at load
     time. ``None`` falls back to ``FASTVIDEO_ATTENTION_BACKEND``, then per-layer defaults, then automatic selection."""
-    vsa_sparsity: float | None = flat_field("VSA_sparsity", None)
+    vsa_sparsity: float | None = None
     """Video sparse attention (VSA) sparsity at inference. ``None`` keeps the default of 0.0."""
-    vsa_tile_size: int | None = flat_field("VSA_tile_size", None)
+    vsa_tile_size: int | None = None
     """VSA tile size in tokens, 256 or 64; 64 runs the native Triton block-sparse path. ``None`` keeps 256."""
-    moba_config_path: str | None = flat_field("moba_config_path", None)
+    moba_config_path: str | None = None
     """Path to a JSON config for V-MoBA attention."""
-    moba_config: dict[str, Any] | None = flat_field("moba_config", None)
+    moba_config: dict[str, Any] | None = None
     """V-MoBA attention settings. Resolution loads them from ``moba_config_path`` when that path is set."""
 
 
@@ -163,17 +153,17 @@ Precision = Literal["fp32", "fp16", "bf16"]
 class PrecisionConfig:
     """Numeric precision of each model component. ``None`` keeps the model's default."""
 
-    dit: Precision | None = flat_field("dit_precision", None)
-    vae: Precision | None = flat_field("vae_precision", None)
-    vae_decode: Precision | None = flat_field("vae_decode_precision", None)
-    image_encoder: Precision | None = flat_field("image_encoder_precision", None)
-    text_encoders: list[Precision] | None = flat_field("text_encoder_precisions", None)
+    dit: Precision | None = None
+    vae: Precision | None = None
+    vae_decode: Precision | None = None
+    image_encoder: Precision | None = None
+    text_encoders: list[Precision] | None = None
     """One precision per text encoder, in the model's text encoder order."""
 
 
 @dataclass
 class QuantizationConfig:
-    text_encoder_quant: str | None = flat_field("override_text_encoder_quant", None)
+    text_encoder_quant: str | None = None
     transformer_quant: str | None = None
 
 
@@ -194,21 +184,21 @@ class EngineConfig:
 
 @dataclass
 class ComponentConfig:
-    config_root: str | None = flat_field("config_model_path", None)
-    pipeline_config_path: str | None = flat_field("pipeline_config", None)
-    text_encoder_weights: str | None = flat_field("override_text_encoder_safetensors", None)
-    transformer_weights: str | None = flat_field("init_weights_from_safetensors", None)
-    transformer_2_weights: str | None = flat_field("init_weights_from_safetensors_2", None)
+    config_root: str | None = None
+    pipeline_config_path: str | None = None
+    text_encoder_weights: str | None = None
+    transformer_weights: str | None = None
+    transformer_2_weights: str | None = None
     vae_weights: str | None = None
-    upsampler_weights: str | None = flat_field("ltx2_refine_upsampler_path", None)
+    upsampler_weights: str | None = None
     lora_path: str | None = flat_field("lora_path", None)
-    lora_nickname: str = flat_field("lora_nickname", "default")
+    lora_nickname: str = "default"
     lora_strength: float = flat_field("lora_strength", 1.0)
-    lora_target_modules: list[str] | None = flat_field("lora_target_modules", None)
+    lora_target_modules: list[str] | None = None
     """Module name substrings that restrict LoRA injection, such as ``["q_proj", "v_proj"]``. ``None`` adapts the
     default modules."""
-    override_pipeline_cls_name: str | None = flat_field("override_pipeline_cls_name", None)
-    override_transformer_cls_name: str | None = flat_field("override_transformer_cls_name", None)
+    override_pipeline_cls_name: str | None = None
+    override_transformer_cls_name: str | None = None
 
 
 @dataclass
@@ -221,41 +211,41 @@ class LTX2RefineOptions:
     ``num_inference_steps`` that are still ``None`` then become ``False``, ``True``, 1.0, and 3.
     """
 
-    enabled: bool | None = flat_field("ltx2_refine_enabled", None)
+    enabled: bool | None = None
     """Run the stage-2 spatial refine. ``None`` is ``False``."""
-    num_inference_steps: int | None = flat_field("ltx2_refine_num_inference_steps", None)
+    num_inference_steps: int | None = None
     """Stage-2 denoising steps, 2 or 3. ``None`` is 3."""
-    guidance_scale: float | None = flat_field("ltx2_refine_guidance_scale", None)
+    guidance_scale: float | None = None
     """Stage-2 guidance scale. ``None`` is 1.0."""
-    add_noise: bool | None = flat_field("ltx2_refine_add_noise", None)
+    add_noise: bool | None = None
     """Add noise to the upsampled latents before stage 2. ``None`` is ``True``."""
     image_crf: int | None = None
     """Stage-2 image conditioning CRF from ``preset_overrides.refine``. Requests set it per call."""
     video_position_offset_sec: float | None = None
     """Stage-2 video position offset from ``preset_overrides.refine``. Requests set it per call."""
-    transformer_path: str | None = flat_field("ltx2_refine_transformer_path", None)
-    lora_path: str | None = flat_field("ltx2_refine_lora_path", None)
+    transformer_path: str | None = None
+    lora_path: str | None = None
     """LoRA applied to the refine transformer only. ``None`` uses the checkpoint's default
     (``fastvideo_refine_lora_path`` in ``model_index.json``); an empty string disables the refine LoRA."""
-    noise_path: str | None = flat_field("ltx2_refine_noise_path", None)
-    audio_noise_path: str | None = flat_field("ltx2_refine_audio_noise_path", None)
+    noise_path: str | None = None
+    audio_noise_path: str | None = None
 
 
 @dataclass
 class LTX2Options:
     """LTX-2 settings. ``None`` keeps the model's default."""
 
-    vae_spatial_tile_size_in_pixels: int | None = flat_field("ltx2_vae_spatial_tile_size_in_pixels", None)
-    vae_spatial_tile_overlap_in_pixels: int | None = flat_field("ltx2_vae_spatial_tile_overlap_in_pixels", None)
-    vae_temporal_tile_size_in_frames: int | None = flat_field("ltx2_vae_temporal_tile_size_in_frames", None)
-    vae_temporal_tile_overlap_in_frames: int | None = flat_field("ltx2_vae_temporal_tile_overlap_in_frames", None)
-    initial_latent_path: str | None = flat_field("ltx2_initial_latent_path", None)
+    vae_spatial_tile_size_in_pixels: int | None = None
+    vae_spatial_tile_overlap_in_pixels: int | None = None
+    vae_temporal_tile_size_in_frames: int | None = None
+    vae_temporal_tile_overlap_in_frames: int | None = None
+    initial_latent_path: str | None = None
     """Path to load or save a precomputed initial video latent."""
-    audio_latent_path: str | None = flat_field("ltx2_audio_latent_path", None)
+    audio_latent_path: str | None = None
     """Path to load or save a precomputed initial audio latent."""
-    legacy_native_noise_order: bool | None = flat_field("ltx2_legacy_native_noise_order", None)
+    legacy_native_noise_order: bool | None = None
     """Draw latent noise in the legacy native order, which earlier SSIM references use."""
-    use_distilled_sigmas: bool | None = flat_field("ltx2_use_distilled_sigmas", None)
+    use_distilled_sigmas: bool | None = None
     """Use the distilled sigma schedule when the checkpoint provides one."""
     refine: LTX2RefineOptions = field(default_factory=LTX2RefineOptions)
 
@@ -264,23 +254,22 @@ class LTX2Options:
 class MiniMaxH3Options:
     """MiniMax-H3 settings. ``None`` keeps the model's default."""
 
-    sequential_load: bool | None = flat_field("h3_sequential_load", None)
+    sequential_load: bool | None = None
     """Encode with Qwen3-VL, release that encoder, then load the DiT and VAEs. ``None`` enables it on
     unified-memory devices only."""
-    video_decode_backend: Literal["h3-vae", "taeh3"] | None = flat_field("video_decode_backend", None)
+    video_decode_backend: Literal["h3-vae", "taeh3"] | None = None
     """``h3-vae`` is the full VAE; ``taeh3`` is a fast approximate preview decoder."""
-    taeh3_checkpoint: str | None = flat_field("taeh3_checkpoint", None)
+    taeh3_checkpoint: str | None = None
     """Local ``taeh3.safetensors`` path. ``None`` downloads the pinned upstream weights."""
-    taeh3_chunk_size: int | None = flat_field("taeh3_chunk_size", None)
+    taeh3_chunk_size: int | None = None
     """TAEH3 latent frames per execution chunk."""
-    vae_parallel_decode: bool | None = flat_field("vae_parallel_decode", None)
+    vae_parallel_decode: bool | None = None
     """Spread VAE decode chunks across the sequence-parallel ranks. ``None`` falls back to
     ``FASTVIDEO_VAE_PARALLEL_DECODE``."""
-    vae_parallel_encode: bool | None = flat_field("vae_parallel_encode", None)
+    vae_parallel_encode: bool | None = None
     """Spread reference-video VAE encode clips across the sequence-parallel ranks. ``None`` falls back to
     ``FASTVIDEO_VAE_PARALLEL_ENCODE``."""
-    vae_parallel_decode_strategy: Literal["gather", "all_gather"] | None = flat_field(
-        "vae_parallel_decode_strategy", None)
+    vae_parallel_decode_strategy: Literal["gather", "all_gather"] | None = None
     """Collective that moves decoded chunks. ``None`` falls back to ``FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY``,
     then ``gather``."""
 
@@ -289,32 +278,32 @@ class MiniMaxH3Options:
 class LongCatOptions:
     """LongCat block sparse attention (BSA) settings. ``None`` keeps the model's default."""
 
-    enable_bsa: bool | None = flat_field("enable_bsa", None)
-    bsa_sparsity: float | None = flat_field("bsa_sparsity", None)
-    bsa_cdf_threshold: float | None = flat_field("bsa_cdf_threshold", None)
-    bsa_chunk_q: list[int] | None = flat_field("bsa_chunk_q", None)
+    enable_bsa: bool | None = None
+    bsa_sparsity: float | None = None
+    bsa_cdf_threshold: float | None = None
+    bsa_chunk_q: list[int] | None = None
     """Query chunk shape as ``[T, H, W]``."""
-    bsa_chunk_k: list[int] | None = flat_field("bsa_chunk_k", None)
+    bsa_chunk_k: list[int] | None = None
     """Key chunk shape as ``[T, H, W]``."""
 
 
 @dataclass
 class PipelineSelection:
-    workload_type: WorkloadType | None = flat_field("workload_type", None)
+    workload_type: WorkloadType | None = None
     preset: str | None = None
     preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
-    vae_tiling: bool | None = flat_field("ltx2_vae_tiling", None)
+    vae_tiling: bool | None = None
     """Tile-based VAE decode. ``None`` keeps the model's default."""
-    vae_sp: bool | None = flat_field("vae_sp", None)
+    vae_sp: bool | None = None
     """VAE spatial parallelism across ranks; requires ``vae_tiling``. ``None`` keeps the model's default."""
-    flow_shift: float | None = flat_field("flow_shift", None)
+    flow_shift: float | None = None
     """Flow-matching scheduler shift. ``None`` keeps the model's default."""
-    embedded_cfg_scale: float | None = flat_field("embedded_cfg_scale", None)
+    embedded_cfg_scale: float | None = None
     """Guidance scale that guidance-distilled models take as a DiT input. ``None`` keeps the model's default."""
-    dmd_denoising_steps: list[int] | None = flat_field("dmd_denoising_steps", None)
+    dmd_denoising_steps: list[int] | None = None
     """Timesteps of a few-step distilled (DMD) sampler. ``None`` keeps the model's default."""
-    boundary_ratio: float | None = flat_field("boundary_ratio", None)
+    boundary_ratio: float | None = None
     """Mixture-of-experts switch point of a two-transformer model. ``None`` keeps the model's default."""
     output_type: str = flat_field("output_type", "pil")
     """Output of the decoding stage: ``pil`` for decoded frames, ``latent`` to skip the VAE decode."""
@@ -331,8 +320,8 @@ class PipelineSelection:
 
 @dataclass
 class GeneratorConfig:
-    model_path: str = flat_field("model_path")
-    mode: ExecutionMode = flat_field("mode", ExecutionMode.INFERENCE)
+    model_path: str
+    mode: ExecutionMode = ExecutionMode.INFERENCE
     """What the run does: inference, preprocessing, finetuning, or distillation."""
     revision: str | None = flat_field("revision", None)
     trust_remote_code: bool = flat_field("trust_remote_code", False)

@@ -80,9 +80,9 @@ def main():
 
     taehv_model = load_taehv(args.taehv_checkpoint) if use_taehv else None
 
-    # transformer_quant needs a QuantizationConfig *instance* — the bare string
-    # is not resolved on the pipeline.experimental path.
-    extra = {} if args.bf16 else {"transformer_quant": get_quantization_config("FP8")(granularity=args.granularity)}
+    # A registry name cannot carry the FP8 granularity, so the FP8Config
+    # instance goes to the DiT config's quant_config through pipeline.dit.
+    dit_overrides = {} if args.bf16 else {"quant_config": get_quantization_config("FP8")(granularity=args.granularity)}
     generator = VideoGenerator.from_config({
         "model_path": args.model,
         "engine": {
@@ -101,10 +101,8 @@ def main():
             },
         },
         "pipeline": {
-            "experimental": {
-                "output_type": "latent" if use_taehv else "pil",
-                **extra,
-            },
+            "output_type": "latent" if use_taehv else "pil",
+            "dit": dit_overrides,
         },
     })
 

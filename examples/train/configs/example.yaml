@@ -6,7 +6,7 @@
 #                defaults. Unknown keys are silently ignored.
 #   [FREE]     — free-form dict passed as-is to the target class / method.
 #                Keys depend on the _target_ class constructor / method_config.
-#   [RESOLVED] — parsed by PipelineConfig.from_kwargs(); auto-populated from
+#   [RESOLVED] — parsed by PipelineConfig.from_source(); auto-populated from
 #                the model's config files. Only scalar overrides are useful.
 # ==============================================================================
 
@@ -189,7 +189,7 @@ callbacks:
 # ------------------------------------------------------------------------------
 # pipeline: [RESOLVED] -> PipelineConfig
 #
-# Parsed by PipelineConfig.from_kwargs(). Most fields are auto-populated from
+# Parsed by PipelineConfig.from_source(). Most fields are auto-populated from
 # the model's config files (vae_config, dit_config, text_encoder_configs, etc.).
 # Only scalar overrides are typically needed here.
 # ------------------------------------------------------------------------------

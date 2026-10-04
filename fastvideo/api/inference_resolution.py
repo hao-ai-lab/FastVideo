@@ -9,15 +9,13 @@ The steps run in this order. A fill step sets a field only while it is ``None``,
 precedence over a later one: user input, then environment variables, then model defaults.
 
 1. Environment variables fill typed fields.
-2. Model defaults from the model's ``PipelineConfig`` fill the typed fields that are still unset.
-3. The flat keys under ``pipeline.preset_overrides`` and ``pipeline.experimental`` set the typed fields of their
-   names; they win over the typed input, as they do when the ``PipelineConfig`` is built.
+2. Model defaults from the model's ``PipelineConfig`` fill the typed fields of ``PIPELINE_CONFIG_MIRRORS`` that are
+   still unset.
+3. ``pipeline.preset_overrides.refine`` sets the LTX-2 refine fields.
 4. Derived values replace placeholders and load the files that a path names.
 5. Validation steps raise on inconsistent values and decide nothing.
 
 ``fastvideo.api.training_schema`` resolves the training and preprocessing roots with the same steps plus their own.
-``FastVideoArgs.__post_init__`` and ``check_fastvideo_args`` still apply these rules to a ``FastVideoArgs`` that is
-built directly.
 """
 from __future__ import annotations
 
@@ -26,8 +24,7 @@ import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import fields, is_dataclass
-from enum import Enum
-from typing import Any, get_args
+from typing import Any
 
 import fastvideo.envs as envs
 from fastvideo.api.parser import parse_config
@@ -76,52 +73,70 @@ def fill_vae_parallel_from_env(view: ResolutionView) -> dict[str, Any]:
     return values
 
 
-def _pipeline_config_source(config: GeneratorConfig) -> Any:
-    """The ``pipeline_config`` keyword that the flat keywords of ``config`` carry: a JSON path, a dict, or an object.
+# Typed path -> the ``PipelineConfig`` attribute that mirrors it. The model's ``PipelineConfig`` subclasses declare
+# their defaults for these settings as attributes: the defaults step fills an unset typed field from its attribute,
+# and materialization writes the resolved typed value back to the attribute. Runtime code reads the typed path.
+PIPELINE_CONFIG_MIRRORS: dict[str, str] = {
+    "model_path": "model_path",
+    "pipeline.components.pipeline_config_path": "pipeline_config_path",
+    "engine.disable_autocast": "disable_autocast",
+    "engine.precision.dit": "dit_precision",
+    "engine.precision.vae": "vae_precision",
+    "engine.precision.vae_decode": "vae_decode_precision",
+    "engine.precision.image_encoder": "image_encoder_precision",
+    "engine.precision.text_encoders": "text_encoder_precisions",
+    "pipeline.flow_shift": "flow_shift",
+    "pipeline.embedded_cfg_scale": "embedded_cfg_scale",
+    "pipeline.dmd_denoising_steps": "dmd_denoising_steps",
+    "pipeline.boundary_ratio": "boundary_ratio",
+    "pipeline.vae_tiling": "vae_tiling",
+    "pipeline.vae_sp": "vae_sp",
+    "pipeline.longcat.enable_bsa": "enable_bsa",
+    "pipeline.longcat.bsa_sparsity": "bsa_sparsity",
+    "pipeline.longcat.bsa_cdf_threshold": "bsa_cdf_threshold",
+    "pipeline.longcat.bsa_chunk_q": "bsa_chunk_q",
+    "pipeline.longcat.bsa_chunk_k": "bsa_chunk_k",
+}
+# Mirrored paths that the defaults step leaves unset: an LTX-2 tile size can turn ``pipeline.vae_tiling`` on before
+# :func:`vae_tiling_default_step` fills it from the model default.
+_FILLED_AFTER_DERIVATION = frozenset({"pipeline.vae_tiling"})
 
-    ``pipeline.experimental`` wins over ``pipeline.preset_overrides``, which wins over
-    ``pipeline.components.pipeline_config_path``.
+
+def _pipeline_config_source(config: GeneratorConfig) -> Any:
+    """The source that the model's ``PipelineConfig`` is built from: a JSON path, a mapping, or a ``PipelineConfig``.
+
+    ``pipeline.experimental.pipeline_config`` wins over ``pipeline.components.pipeline_config_path``.
     """
-    source = config.pipeline.components.pipeline_config_path
-    for overrides in (config.pipeline.preset_overrides, config.pipeline.experimental):
-        if overrides.get("pipeline_config") is not None:
-            source = overrides["pipeline_config"]
-    return source
+    source = config.pipeline.experimental.get("pipeline_config")
+    return config.pipeline.components.pipeline_config_path if source is None else source
 
 
 def build_model_pipeline_config(config: GeneratorConfig) -> Any:
     """Build the model's ``PipelineConfig`` before any typed value is applied.
 
-    It is the registry class for ``model_path``, updated from the ``pipeline_config`` source of
-    :func:`_pipeline_config_source`. The defaults step reads it, and materialization then applies the resolved values
-    to the same instance.
+    It is the registry class for ``model_path``, updated from the source of :func:`_pipeline_config_source`. The
+    defaults step reads it, and materialization then applies the resolved values to the same instance.
     """
     from fastvideo.configs.pipelines.base import PipelineConfig
 
-    source = _pipeline_config_source(config)
-    kwargs: dict[str, Any] = {"model_path": config.model_path}
-    if source is not None:
-        kwargs["pipeline_config"] = deepcopy(source)
-    return PipelineConfig.from_kwargs(kwargs)
+    return PipelineConfig.from_source(config.model_path, deepcopy(_pipeline_config_source(config)))
 
 
 def pipeline_config_defaults_step(config: GeneratorConfig, defaults: Any = None) -> ResolutionStep:
     """Build the step that fills unset typed fields with the values of the model's ``PipelineConfig``.
 
     ``defaults`` is the instance from :func:`build_model_pipeline_config`; it is built from ``config`` when it is
-    not given. A typed field is filled when its flat name is an attribute of that ``PipelineConfig``, its value is
-    ``None``, and the attribute is not ``None``. The step's source name carries the ``PipelineConfig`` class name.
+    not given. A typed field of ``PIPELINE_CONFIG_MIRRORS`` is filled when its value is ``None`` and its attribute on
+    that ``PipelineConfig`` is not ``None``. The step's source name carries the ``PipelineConfig`` class name.
     """
-    from fastvideo.api.compat import _FLAT_NAME_FIELDS
-
     if defaults is None:
         defaults = build_model_pipeline_config(config)
 
     def fill_pipeline_config_defaults(view: ResolutionView) -> dict[str, Any]:
         values: dict[str, Any] = {}
-        for flat_name, (dotted_path, _) in _FLAT_NAME_FIELDS.items():
-            default = getattr(defaults, flat_name, None)
-            if default is not None and view.get(dotted_path) is None:
+        for dotted_path, attribute in PIPELINE_CONFIG_MIRRORS.items():
+            default = getattr(defaults, attribute, None)
+            if dotted_path not in _FILLED_AFTER_DERIVATION and default is not None and view.get(dotted_path) is None:
                 values[dotted_path] = deepcopy(default)
         return values
 
@@ -177,57 +192,14 @@ def copy_refine_preset_overrides(view: ResolutionView) -> dict[str, Any]:
     The keys are the refine preset and stage override fields (``enabled``, ``add_noise``, ``num_inference_steps``,
     ``guidance_scale``, ``image_crf``, ``video_position_offset_sec``); a ``None`` value leaves its field unchanged.
     """
-    from fastvideo.api.compat import _LTX2_REFINE_FLAT_KEYS
+    from fastvideo.pipelines.basic.ltx2.stage_overrides import (refine_preset_override_fields,
+                                                                refine_stage_override_fields)
 
     refine = view.get_plain("pipeline.preset_overrides").get("refine")
     if not isinstance(refine, Mapping):
         return {}
-    return {
-        f"pipeline.ltx2.refine.{key}": refine[key]
-        for key in sorted(_LTX2_REFINE_FLAT_KEYS) if refine.get(key) is not None
-    }
-
-
-def _flat_value_for_field(annotation: Any, value: Any) -> Any:
-    """A flat keyword value in the type of its typed field: a string becomes the member of an enum field."""
-    enum_types = [arg for arg in (annotation, *get_args(annotation)) if isinstance(arg, type) and issubclass(arg, Enum)]
-    if enum_types and isinstance(value, str) and not isinstance(value, enum_types[0]):
-        return enum_types[0](value)
-    return deepcopy(value)
-
-
-def route_flat_override_keys(view: ResolutionView) -> dict[str, Any]:
-    """The flat keys under ``pipeline.preset_overrides`` and then ``pipeline.experimental`` set their typed fields.
-
-    A key that is the flat name of a typed field sets that field; ``dit_config.<key>`` and ``vae_config.<key>`` set
-    ``pipeline.dit`` and ``pipeline.vae`` entries; a string ``pipeline_config`` sets
-    ``pipeline.components.pipeline_config_path``. A generic ``refine_*`` key then sets its LTX-2 refine field, so it
-    wins over the ``ltx2_refine_*`` key. ``None`` values and keys without a typed field change nothing.
-    """
-    from fastvideo.api.compat import _COMPONENT_OVERRIDE_PREFIXES, _FLAT_NAME_FIELDS
-    from fastvideo.api.flat_name_fallback import GENERIC_REFINE_PATHS, generic_refine_aliases
-
-    preset_overrides = view.get_plain("pipeline.preset_overrides")
-    experimental = view.get_plain("pipeline.experimental")
-    flat_inputs = {key: value for key, value in preset_overrides.items() if key != "refine"}
-    flat_inputs.update(experimental)
-    values: dict[str, Any] = {}
-    for key, value in flat_inputs.items():
-        if value is None:
-            continue
-        prefixes = [prefix for prefix in _COMPONENT_OVERRIDE_PREFIXES if key.startswith(prefix)]
-        if prefixes:
-            values[f"pipeline.{_COMPONENT_OVERRIDE_PREFIXES[prefixes[0]]}.{key[len(prefixes[0]):]}"] = value
-        elif key == "pipeline_config":
-            if isinstance(value, str):
-                values["pipeline.components.pipeline_config_path"] = value
-        elif key in _FLAT_NAME_FIELDS:
-            dotted_path, annotation = _FLAT_NAME_FIELDS[key]
-            values[dotted_path] = _flat_value_for_field(annotation, value)
-    for name, value in generic_refine_aliases(preset_overrides, experimental).items():
-        if value is not None:
-            values[GENERIC_REFINE_PATHS[name]] = value
-    return values
+    keys = refine_preset_override_fields() | refine_stage_override_fields()
+    return {f"pipeline.ltx2.refine.{key}": refine[key] for key in sorted(keys) if refine.get(key) is not None}
 
 
 def load_moba_config(view: ResolutionView) -> dict[str, Any]:
@@ -260,6 +232,32 @@ def validate_lora_strength(view: ResolutionView) -> dict[str, Any]:
     lora_strength = view.get("pipeline.components.lora_strength")
     if not math.isfinite(lora_strength):
         raise ValueError(f"lora_strength must be finite, got {lora_strength}")
+    return {}
+
+
+# Typed fields that no runtime code reads. Resolution rejects a value at one of them, so the setting is not dropped.
+UNSUPPORTED_PATHS = ("pipeline.preset", "pipeline.preset_version", "pipeline.components.vae_weights")
+
+
+def validate_unsupported_fields(view: ResolutionView) -> dict[str, Any]:
+    """The fields of ``UNSUPPORTED_PATHS`` must be unset."""
+    unsupported = [path for path in UNSUPPORTED_PATHS if view.get(path) is not None]
+    if unsupported:
+        raise NotImplementedError(f"resolution does not support {', '.join(unsupported)}; leave these fields unset")
+    return {}
+
+
+def validate_experimental_keys(view: ResolutionView) -> dict[str, Any]:
+    """A ``pipeline.experimental`` key must not name a ``PipelineConfig`` attribute that has a typed path.
+
+    Materialization writes those attributes from their typed paths (``PIPELINE_CONFIG_MIRRORS``), so the key is set at
+    the typed path instead.
+    """
+    typed_paths = {attribute: path for path, attribute in PIPELINE_CONFIG_MIRRORS.items()}
+    misplaced = sorted(set(view.get("pipeline.experimental")) & set(typed_paths))
+    if misplaced:
+        moves = ", ".join(f"pipeline.experimental.{key} -> {typed_paths[key]}" for key in misplaced)
+        raise ValueError(f"these settings have typed config paths; set them there: {moves}")
     return {}
 
 
@@ -350,10 +348,10 @@ ENVIRONMENT_STEPS: tuple[ResolutionStep, ...] = (
     fill_regional_compile_from_env,
     fill_vae_parallel_from_env,
 )
-# Steps between the model defaults and the derived values: inputs written under flat keyword names.
-FLAT_INPUT_STEPS: tuple[ResolutionStep, ...] = (copy_refine_preset_overrides, route_flat_override_keys)
 # Steps that check the values decided so far against each other.
 VALIDATION_STEPS: tuple[ResolutionStep, ...] = (
+    validate_unsupported_fields,
+    validate_experimental_keys,
     validate_lora_strength,
     validate_attention_backend,
     validate_vae_parallel_decode_strategy,
@@ -370,7 +368,7 @@ def generator_resolution_steps(
 ) -> tuple[ResolutionStep, ...]:
     """The resolution steps of any generator root, in the order that they run.
 
-    ``before_placeholders`` runs after the flat inputs and before ``derive_parallel_sizes``, for checks that need the
+    ``before_placeholders`` runs after the refine copy and before ``derive_parallel_sizes``, for checks that need the
     -1 placeholders; ``after`` runs last. ``validate_parallel_sizes`` checks the sizes before
     ``derive_num_gpus_from_parallel_sizes`` raises ``num_gpus``.
     """
@@ -379,7 +377,7 @@ def generator_resolution_steps(
     return (
         *ENVIRONMENT_STEPS,
         pipeline_config_defaults_step(config, defaults),
-        *FLAT_INPUT_STEPS,
+        copy_refine_preset_overrides,
         *before_placeholders,
         derive_parallel_sizes,
         derive_vae_tiling_from_ltx2_tile_sizes,
@@ -398,61 +396,72 @@ def inference_resolution_steps(config: GeneratorConfig, defaults: Any = None) ->
     return generator_resolution_steps(config, defaults)
 
 
-def _apply_ltx2_vae_overrides(pipeline_config: Any, flat: Mapping[str, Any]) -> None:
-    """Apply the LTX-2 VAE tiling keywords to ``pipeline_config``, as ``FastVideoArgs`` did after construction.
-
-    ``ltx2_vae_tiling`` sets ``vae_tiling``; otherwise any tile size turns it on. Each tile size is written onto
-    ``vae_config`` when the VAE config has that attribute.
-    """
-    tile_sizes = {
-        "ltx2_spatial_tile_size_in_pixels": flat.get("ltx2_vae_spatial_tile_size_in_pixels"),
-        "ltx2_spatial_tile_overlap_in_pixels": flat.get("ltx2_vae_spatial_tile_overlap_in_pixels"),
-        "ltx2_temporal_tile_size_in_frames": flat.get("ltx2_vae_temporal_tile_size_in_frames"),
-        "ltx2_temporal_tile_overlap_in_frames": flat.get("ltx2_vae_temporal_tile_overlap_in_frames"),
-    }
-    if flat.get("ltx2_vae_tiling") is not None and hasattr(pipeline_config, "vae_tiling"):
-        pipeline_config.vae_tiling = flat["ltx2_vae_tiling"]
-    elif any(value is not None for value in tile_sizes.values()) and hasattr(pipeline_config, "vae_tiling"):
-        pipeline_config.vae_tiling = True
-    vae_config = pipeline_config.vae_config
-    for attribute, value in tile_sizes.items():
-        if value is not None and hasattr(vae_config, attribute):
-            setattr(vae_config, attribute, value)
+# LTX-2 VAE tile size path -> the ``vae_config`` attribute that the LTX-2 VAE reads.
+_LTX2_VAE_TILE_ATTRIBUTES = {
+    "pipeline.ltx2.vae_spatial_tile_size_in_pixels": "ltx2_spatial_tile_size_in_pixels",
+    "pipeline.ltx2.vae_spatial_tile_overlap_in_pixels": "ltx2_spatial_tile_overlap_in_pixels",
+    "pipeline.ltx2.vae_temporal_tile_size_in_frames": "ltx2_temporal_tile_size_in_frames",
+    "pipeline.ltx2.vae_temporal_tile_overlap_in_frames": "ltx2_temporal_tile_overlap_in_frames",
+}
 
 
-def _apply_transformer_quant(pipeline_config: Any, transformer_quant: Any) -> None:
-    """Pin a transformer quantization config on ``dit_config.quant_config`` unless one is already set there.
+def _config_value(config: GeneratorConfig, path: str) -> Any:
+    """Value at a dotted field path of a typed config; ``None`` through an optional section that is ``None``."""
+    node: Any = config
+    for part in path.split("."):
+        if node is None:
+            return None
+        node = getattr(node, part)
+    return node
 
-    A registry name such as ``nvfp4_qat_train`` becomes its ``QuantizationConfig`` instance first.
+
+def _set_present_attributes(target: Any, values: Mapping[str, Any]) -> None:
+    """Set each value that is not ``None`` on ``target`` when ``target`` has an attribute of that name."""
+    for name, value in values.items():
+        if value is not None and hasattr(target, name):
+            setattr(target, name, value)
+
+
+def _apply_transformer_quant(pipeline_config: Any, transformer_quant: str | None) -> None:
+    """Pin the quantization config that ``transformer_quant`` names on ``dit_config.quant_config`` unless one is set.
+
+    A registry name such as ``nvfp4_qat_train`` becomes its ``QuantizationConfig`` instance.
     """
     dit_config = getattr(pipeline_config, "dit_config", None)
     if transformer_quant is None or dit_config is None:
         return
-    if isinstance(transformer_quant, str):
-        from fastvideo.layers.quantization import get_quantization_config
-        transformer_quant = get_quantization_config(transformer_quant)()
+    from fastvideo.layers.quantization import get_quantization_config
+
     if getattr(dit_config, "quant_config", None) is None:
-        dit_config.quant_config = transformer_quant
+        dit_config.quant_config = get_quantization_config(transformer_quant)()
 
 
 def materialize_pipeline_config(resolved: ResolvedGeneratorConfig, pipeline_config: Any) -> Any:
     """Apply the resolved values to the model's ``PipelineConfig``, validate it, and freeze it.
 
-    ``pipeline_config`` is the instance from :func:`build_model_pipeline_config`. The flat keywords of
-    :func:`fastvideo.api.compat.generator_kwargs` update it with the rules of ``PipelineConfig.update_config_from_dict``
-    (``dit_config.<key>`` and ``vae_config.<key>`` included). The keywords that it leaves are the ones that apply the
-    LTX-2 VAE tiling and the transformer quantization. A preprocessing run loads the VAE encoder.
+    ``pipeline_config`` is the instance from :func:`build_model_pipeline_config`. In order, materialization sets the
+    ``pipeline.experimental`` keys that are ``PipelineConfig`` attributes (model-only fields), the attributes of
+    ``PIPELINE_CONFIG_MIRRORS`` from their typed values, and the ``pipeline.vae`` and ``pipeline.dit`` entries on
+    ``vae_config`` and ``dit_config``; a ``None`` value leaves its attribute unchanged. It then writes the LTX-2 VAE
+    tile sizes onto ``vae_config``, pins the ``engine.quantization.transformer_quant`` config on ``dit_config``, runs
+    ``check_pipeline_config``, and loads the VAE encoder for a preprocessing run.
     """
-    from fastvideo.api.compat import generator_kwargs
-
-    flat = generator_kwargs(resolved)
-    source = flat.get("pipeline_config")
-    if isinstance(source, str):
-        flat["pipeline_config_path"] = source
-    flat["model_path"] = resolved.model_path
-    pipeline_config.update_config_from_dict(flat)
-    _apply_ltx2_vae_overrides(pipeline_config, flat)
-    _apply_transformer_quant(pipeline_config, flat.get("transformer_quant"))
+    config = resolved.to_config()
+    _set_present_attributes(pipeline_config, {
+        key: value
+        for key, value in config.pipeline.experimental.items() if key != "pipeline_config"
+    })
+    mirrored = {attribute: _config_value(config, path) for path, attribute in PIPELINE_CONFIG_MIRRORS.items()}
+    if mirrored["text_encoder_precisions"] is not None:
+        mirrored["text_encoder_precisions"] = tuple(mirrored["text_encoder_precisions"])
+    _set_present_attributes(pipeline_config, mirrored)
+    _set_present_attributes(pipeline_config.vae_config, config.pipeline.vae)
+    _set_present_attributes(pipeline_config.dit_config, config.pipeline.dit)
+    _set_present_attributes(pipeline_config.vae_config, {
+        attribute: _config_value(config, path)
+        for path, attribute in _LTX2_VAE_TILE_ATTRIBUTES.items()
+    })
+    _apply_transformer_quant(pipeline_config, _config_value(config, "engine.quantization.transformer_quant"))
     pipeline_config.check_pipeline_config()
     if resolved.mode == ExecutionMode.PREPROCESS and not pipeline_config.vae_config.load_encoder:
         pipeline_config.vae_config.load_encoder = True
@@ -526,7 +535,7 @@ def _non_default_fields(value: Any, default: Any) -> dict[str, Any]:
 __all__ = [
     "torch_compile_kwargs",
     "ENVIRONMENT_STEPS",
-    "FLAT_INPUT_STEPS",
+    "PIPELINE_CONFIG_MIRRORS",
     "VALIDATION_STEPS",
     "build_model_pipeline_config",
     "copy_refine_preset_overrides",
@@ -543,10 +552,11 @@ __all__ = [
     "pipeline_config_defaults_step",
     "resolve_config",
     "resolve_inference_config",
-    "route_flat_override_keys",
     "validate_attention_backend",
+    "validate_experimental_keys",
     "validate_lora_strength",
     "validate_parallel_sizes",
+    "validate_unsupported_fields",
     "validate_vae_parallel_decode_strategy",
     "warn_deprecated_environment_variables",
     "written_fields",

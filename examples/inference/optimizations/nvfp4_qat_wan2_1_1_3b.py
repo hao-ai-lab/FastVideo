@@ -45,16 +45,12 @@ def main():
 
     # Import after the env var so the platform picks up the selection.
     from fastvideo import VideoGenerator
-    from fastvideo.layers.quantization import get_quantization_config
 
     mode = "bf16" if args.bf16 else args.quant_method
     if args.compile:
         mode += "_compile"
     print(f"Mode: {mode.upper()}")
 
-    # transformer_quant needs a QuantizationConfig *instance* — the bare string
-    # is not resolved on the pipeline.experimental path.
-    extra = {} if args.bf16 else {"transformer_quant": get_quantization_config(args.quant_method)()}
     generator = VideoGenerator.from_config({
         "model_path": args.model,
         "engine": {
@@ -66,8 +62,10 @@ def main():
                 "text_encoder": True,
             },
             "compile": {"enabled": args.compile},
+            # transformer_quant takes a quantization registry name; resolution
+            # pins its config on the DiT config's quant_config.
+            "quantization": {"transformer_quant": None if args.bf16 else args.quant_method},
         },
-        "pipeline": {"experimental": extra},
     })
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

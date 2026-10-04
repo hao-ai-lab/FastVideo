@@ -197,7 +197,7 @@ sm_100a VSA kernel is not on this chip, so denoise is slower than a GB200
 | NCCL hangs or uses Wi-Fi | `source spark_pair_env.sh`. Confirm `NCCL_SOCKET_IFNAME` is the QSFP NIC. |
 | Gloo `connectFullMesh` / `remote=[127.0.0.1]` | Two 1-GPU nodes must not use loopback as the Gloo store. Source `spark_pair_env.sh` so `GLOO_SOCKET_IFNAME` is the QSFP NIC on **each** box. FastVideo no longer copies that NIC name from the driver onto workers. |
 | Second `generate()` crashes `NoneType.parameters` | Sequential load used to drop the text encoder without reloading it. This branch reloads Qwen for later requests so `--warmup --repeats N` works. |
-| OOM / `earlyoom` prefers Python | Lazy module load must stay on (do not pass `--no-lazy-module-load`). Peak GPU during 345-frame denoise is ~90 GiB/node. |
+| OOM / `earlyoom` prefers Python | Lazy module load must stay on (do not pass `--no-lazy-module-load` to `basic_fasth3.py` or set `engine.offload.lazy_module_load: false`). Peak GPU during 345-frame denoise is ~90 GiB/node. |
 | `num_gpus=2` on one Spark | Each Spark has one GPU. Use Ray across two nodes, or `num_gpus=1` on one box. |
 
 ## What we are not claiming

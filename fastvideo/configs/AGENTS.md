@@ -17,7 +17,6 @@ the layout below.
 ```
 configs/
 ├── configs.py                  # Dataset / loader enums (DatasetType, VideoLoaderType)
-├── utils.py                    # update_config_from_args, shallow_asdict helpers
 ├── backend/                    # Attention backend defaults
 ├── models/
 │   ├── base.py                 # ModelConfig ABC
@@ -57,5 +56,6 @@ If a knob is tunable per inference call → `SamplingParam`, not `PipelineConfig
 ## Anti-Patterns
 
 - Hard-coding architecture constants inside model classes — always read from the arch config.
-- Using `argparse` directly here. Configs deserialize from dicts via `update_config_from_args`.
+- Using `argparse` directly here. Configs deserialize from JSON files and dicts via `PipelineConfig.from_source`
+  and `PipelineConfig.update_pipeline_config`.
 - Importing from `fastvideo.pipelines` here. Configs are the lower layer; the dependency is one-way.

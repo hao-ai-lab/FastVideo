@@ -168,8 +168,9 @@ is power-cycled. To avoid it:
   encoder is still resident, the process is a typical `earlyoom` kill (Python is
   preferred). On unified memory, `lazy_module_load` auto-enables and owns that
   split (encoder, then DiT, then VAE; DiT can drop before decode). Sequential
-  load is the H3-only fallback when lazy is off; do not pass
-  `--no-lazy-module-load` here. Geometry scalars come from checkpoint
+  load is the H3-only fallback when lazy is off; do not set
+  `engine.offload.lazy_module_load` to false here (`--no-lazy-module-load` in
+  `basic_fasth3.py` and `basic_minimax_h3_t2v.py`). Geometry scalars come from checkpoint
   `config.json`, not live weights. See [Offloading](../../inference/offloading.md).
 - **FastH3 TAEH3** (`--video-decode-backend taeh3`) is an opt-in preview decoder.
   T2VA never materializes the 9.7 GiB video VAE (DiT still loads after Qwen via
@@ -203,7 +204,7 @@ A few things that surprise people on this box (beyond the memory notes above):
   build recent enough to include its `transformers`-compatibility handling before
   running it.
 - **MiniMax H3 worker init can look healthy and still die on the first generate**
-  if deferred loading is off (`--no-lazy-module-load` and sequential also off)
+  if deferred loading is off (`engine.offload.lazy_module_load: false` and sequential also off)
   and encoder, VAE, and DiT load together. On GB10 the log should show
   `lazy_module_load owns deferral` (or, if lazy is off, sequential
   `Released MiniMax-H3 text encoder after conditioning` before

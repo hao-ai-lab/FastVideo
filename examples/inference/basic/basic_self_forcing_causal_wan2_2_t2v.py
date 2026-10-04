@@ -35,7 +35,6 @@ def main():
                 "transformer_2_weights":
                 "/mnt/sharefs/users/hao.zhang/wei/SFwan2.2_distill_self_forcing_release_cfg2/checkpoint-246_weight_only/generator_2_inference_transformer/",
             },
-            "experimental": {"num_frame_per_block": 7},
         },
     })
 

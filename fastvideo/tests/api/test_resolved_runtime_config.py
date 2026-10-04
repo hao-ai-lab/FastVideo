@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The resolved runtime config: materialization, flat names, runtime state, device policy, overrides, and roots."""
+"""The resolved runtime config: materialization, typed attributes, device policy, overrides, and roots."""
 from __future__ import annotations
 
-import dataclasses
 import json
 import pickle
 from contextlib import nullcontext
@@ -12,15 +11,13 @@ import pytest
 import torch
 
 from fastvideo.api import device_policy
-from fastvideo.api.compat import generator_config_to_fastvideo_args
 from fastvideo.api.errors import ConfigValidationError
 from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import ExecutionMode, GeneratorConfig, WorkloadType
 from fastvideo.api.training_schema import (PreprocessRunConfig, TrainingRunConfig, load_resolved_run_config,
                                            resolve_preprocess_config, resolve_training_config)
-from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.tests.api.config_snapshot import isolated_environment, to_jsonable
+from fastvideo.tests.api.config_snapshot import isolated_environment
 
 WAN_T2V = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 LTX2 = "FastVideo/LTX2-Distilled-Diffusers"
@@ -36,9 +33,9 @@ def test_resolution_builds_and_freezes_the_pipeline_config_once(monkeypatch):
     from fastvideo.configs.pipelines.base import PipelineConfig
 
     builds = []
-    original = PipelineConfig.from_kwargs.__func__
-    monkeypatch.setattr(PipelineConfig, "from_kwargs",
-                        classmethod(lambda cls, kwargs: builds.append(dict(kwargs)) or original(cls, kwargs)))
+    original = PipelineConfig.from_source.__func__
+    monkeypatch.setattr(PipelineConfig, "from_source",
+                        classmethod(lambda cls, *args: builds.append(args) or original(cls, *args)))
     resolved = _resolve({"model_path": WAN_T2V, "pipeline": {"flow_shift": 5.0, "dit": {"prefix": "Probe"}}})
 
     assert len(builds) == 1
@@ -49,60 +46,34 @@ def test_resolution_builds_and_freezes_the_pipeline_config_once(monkeypatch):
         resolved.pipeline_config.flow_shift = 1.0
 
 
-@pytest.mark.parametrize("raw", [
-    {
-        "model_path": WAN_T2V,
-        "engine": {
-            "num_gpus": 2
-        },
-        "pipeline": {
-            "experimental": {
-                "master_port": 29600,
-                "prompt_txt": "prompts.txt",
-                "refine_enabled": True
-            }
-        },
-    },
-    {
-        "model_path": LTX2,
-        "pipeline": {
-            "preset_overrides": {
-                "refine": {
-                    "enabled": True,
-                    "num_inference_steps": 2,
-                    "add_noise": False
-                }
-            },
-            "ltx2": {
-                "vae_spatial_tile_size_in_pixels": 512
-            },
-        },
-    },
-])
-def test_flat_names_return_the_values_that_fastvideo_args_held(raw):
-    resolved = _resolve(raw)
-    with isolated_environment():
-        resolved_config = generator_config_to_fastvideo_args(resolved)
+def test_only_typed_paths_and_reserved_names_are_attributes():
+    resolved = _resolve({"model_path": WAN_T2V, "pipeline": {"workload_type": "t2v"}})
 
-    # disable_autocast and boundary_ratio held their FastVideoArgs defaults; the typed field holds the input.
-    skipped = {"pipeline_config", "disable_autocast", "boundary_ratio"}
-    for config_field in dataclasses.fields(FastVideoArgs):
-        if config_field.name not in skipped:
-            expected = to_jsonable(getattr(resolved_config, config_field.name))
-            assert to_jsonable(getattr(resolved, config_field.name)) == expected, config_field.name
-    assert to_jsonable(resolved.pipeline_config) == to_jsonable(resolved_config.pipeline_config)
-    assert resolved.workload_type is WorkloadType.T2V
+    assert resolved.pipeline.workload_type is WorkloadType.T2V
     assert resolved.mode is ExecutionMode.INFERENCE and resolved.inference_mode and not resolved.training_mode
-
-
-def test_unknown_and_training_only_names_raise_attribute_error():
-    resolved = _resolve({"model_path": WAN_T2V})
-
     assert getattr(resolved, "log_level_progress", "default") == "default"
-    assert not hasattr(resolved, "_loading_teacher_critic_model")
-    with pytest.raises(AttributeError, match="exists on TrainingRunConfig"):
-        resolved.learning_rate
-    assert resolved.preprocess_config is None
+    for name in ("num_gpus", "dit_cpu_offload", "workload_type", "learning_rate", "preprocess_config", "model_paths"):
+        with pytest.raises(AttributeError, match=f"GeneratorConfig has no field '{name}'"):
+            getattr(resolved, name)
+    with pytest.raises(AttributeError, match="read-only"):
+        resolved.model_paths = {}
+
+
+def test_experimental_key_with_a_typed_path_is_rejected():
+    with pytest.raises(ValueError, match=r"pipeline.experimental.flow_shift -> pipeline.flow_shift"):
+        _resolve({"model_path": WAN_T2V, "pipeline": {"experimental": {"flow_shift": 5.0}}})
+
+
+def test_fields_without_a_runtime_reader_are_rejected():
+    with pytest.raises(NotImplementedError, match="pipeline.components.vae_weights"):
+        _resolve({"model_path": WAN_T2V, "pipeline": {"components": {"vae_weights": "/weights/vae.safetensors"}}})
+
+
+def test_experimental_model_only_attribute_reaches_the_pipeline_config():
+    resolved = _resolve({"model_path": WAN_T2V, "pipeline": {"experimental": {"flow_shift_sr": 2.0}}})
+
+    assert resolved.pipeline_config.flow_shift_sr == 2.0
+    assert resolved.pipeline.experimental["flow_shift_sr"] == 2.0
 
 
 def test_overrides_and_pickling_carry_the_frozen_pipeline_config():
@@ -117,14 +88,15 @@ def test_overrides_and_pickling_carry_the_frozen_pipeline_config():
         resolved.engine.num_gpus = 4
 
 
-def test_override_of_a_typed_home_updates_its_pipeline_config_mirror():
+def test_override_of_a_typed_home_leaves_the_pipeline_config_unchanged():
     resolved = _resolve({"model_path": WAN_T2V})
+    materialized_steps = resolved.pipeline_config.dmd_denoising_steps
 
     overridden = resolved.with_override("checkpoint:test", {"pipeline.dmd_denoising_steps": [999, 500]})
 
     assert overridden.pipeline.dmd_denoising_steps == (999, 500)
     assert overridden.pipeline_config is resolved.pipeline_config
-    assert overridden.pipeline_config.dmd_denoising_steps == [999, 500]
+    assert overridden.pipeline_config.dmd_denoising_steps == materialized_steps
     assert overridden.provenance("pipeline.dmd_denoising_steps").source == "checkpoint:test"
 
 
@@ -243,7 +215,7 @@ def test_pipeline_records_component_paths_and_shares_its_component_state(monkeyp
     assert stage.component_state is pipeline.component_state
 
 
-def test_from_pretrained_keeps_the_dit_on_the_device_for_training():
+def test_training_resolution_keeps_the_dit_on_the_device():
     from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 
     built = {}
@@ -278,10 +250,9 @@ def test_from_pretrained_keeps_the_dit_on_the_device_for_training():
 
     _Pipeline.from_pretrained(WAN_T2V, resolved_config=resolved)
 
-    assert resolved.engine.offload.dit is True
-    assert built["resolved_config"].engine.offload.dit is False
-    assert built["resolved_config"].provenance("engine.offload.dit").source == (
-        "ComposedPipelineBase.from_pretrained:training")
+    assert resolved.engine.offload.dit is False
+    assert resolved.provenance("engine.offload.dit").source == "keep_training_dit_on_device"
+    assert built["resolved_config"] is resolved
 
 
 def test_ltx2_checkpoint_refine_defaults_rebind_the_pipeline_config(tmp_path):
@@ -350,7 +321,6 @@ def test_minimax_h3_checkpoint_schedule_rebinds_and_reaches_the_first_forward(tm
 
     assert seen == [pipeline.resolved_config] and pipeline.resolved_config is not resolved
     assert pipeline.resolved_config.pipeline.dmd_denoising_steps == tuple(steps)
-    assert pipeline.resolved_config.pipeline_config.dmd_denoising_steps == steps
     assert pipeline.resolved_config.provenance("pipeline.dmd_denoising_steps").source == (
         "checkpoint:fastvideo_inference.json")
 

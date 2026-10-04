@@ -205,19 +205,13 @@ import os
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "ATTN_QAT_INFER"
 
 from fastvideo import VideoGenerator
-from fastvideo.layers.quantization import get_quantization_config
 gen = VideoGenerator.from_config({
     "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "engine": {
         "num_gpus": 1,
         "use_fsdp_inference": False,     # FSDP shards invalidate the FP4 tensor pointers
-    },
-    "pipeline": {
-        "experimental": {
-            # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific). Pass an
-            # instance — the bare string is not resolved under pipeline.experimental.
-            "transformer_quant": get_quantization_config("nvfp4_qat")(),
-        },
+        # Wan-2.1 uses the nvfp4_qat config (NVFP4 is LTX2-specific).
+        "quantization": {"transformer_quant": "nvfp4_qat"},
     },
 })
 gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
@@ -309,19 +303,28 @@ automatically.
 
 ```python
 from fastvideo import VideoGenerator
+
+gen = VideoGenerator.from_config({
+    "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "engine": {"quantization": {"transformer_quant": "FP8"}},  # per-tensor (default)
+})
+gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
+```
+
+`engine.quantization.transformer_quant` takes a quantization registry name and builds that config with its default
+arguments. To pass constructor arguments, such as per-channel granularity, set the config instance on the DiT config
+through `pipeline.dit` instead:
+
+```python
+from fastvideo import VideoGenerator
 from fastvideo.layers.quantization import get_quantization_config
 
 gen = VideoGenerator.from_config({
     "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "pipeline": {
-        "experimental": {
-            # Pass an instance — the bare string is not resolved under pipeline.experimental.
-            "transformer_quant": get_quantization_config("FP8")(),          # per-tensor (default)
-            # "transformer_quant": get_quantization_config("FP8")(granularity="channel"),  # slower, higher accuracy
-        },
+        "dit": {"quant_config": get_quantization_config("FP8")(granularity="channel")},  # slower, higher accuracy
     },
 })
-gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
 ```
 
 Or run the example script:
@@ -466,8 +469,11 @@ MS-SSIM gate on *your* config, especially when combining
   above unless your exact configuration has its own gate.
 
 Extra `torch.compile` options are passed through `torch_compile_kwargs`
-(a dict), accepted by `VideoGenerator.from_pretrained(...)` and by the
-CLI as a JSON string via `--torch-compile-kwargs`. Example (currently
+(a dict), accepted by `VideoGenerator.from_pretrained(...)`. In a config
+file or a CLI dotted override, set them at `engine.compile.backend`,
+`fullgraph`, `mode`, and `dynamic`, and put any other `torch.compile`
+kwargs in `engine.compile.extras` (for example
+`--generator.engine.compile.mode reduce-overhead`). Example (currently
 **not** recommended — see the CUDA-graphs caveat above):
 
 ```python

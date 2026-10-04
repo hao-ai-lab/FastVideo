@@ -236,7 +236,6 @@ def main() -> None:
             "components": {"upsampler_weights": str(refine_upsampler_path)},
             "ltx2": {"refine": {"lora_path": ""}},  # keep refine LoRA disabled for distilled model
             "experimental": {
-                "refine_lora_path": "",  # keep refine LoRA disabled in this repo's typed adapter
                 "pipeline_config": pipeline_config,
             },
             "vae_tiling": False,

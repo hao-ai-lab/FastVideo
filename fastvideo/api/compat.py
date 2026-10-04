@@ -7,10 +7,8 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, get_args, get_type_hints
 
-from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.api.overrides import apply_overrides, normalize_overrides
 from fastvideo.api.parser import config_to_dict, load_raw_config, parse_config
-from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.api.request_metadata import (
     EXPLICIT_PATHS_ATTR,
     bind_generation_request_raw,
@@ -19,17 +17,11 @@ from fastvideo.api.request_metadata import (
 )
 from fastvideo.api.schema import (
     FLAT_NAME,
-    CompileConfig,
     ContinuationState,
     GenerationRequest,
     GeneratorConfig,
 )
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.pipelines.basic.ltx2.stage_overrides import (
-    refine_preset_override_fields,
-    refine_stage_override_fields,
-)
 
 _MISSING = object()
 REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS = (
@@ -72,8 +64,6 @@ FROM_PRETRAINED_KWARGS = frozenset({
 })
 # torch.compile kwargs that map to first-class CompileConfig fields.
 _COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
-# LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
-_LTX2_REFINE_FLAT_KEYS = (refine_preset_override_fields() | refine_stage_override_fields())
 
 
 def normalize_generator_config(config: GeneratorConfig | Mapping[str, Any], ) -> GeneratorConfig:
@@ -109,15 +99,15 @@ def from_pretrained_kwargs_to_config(
 ) -> GeneratorConfig:
     """Build a ``GeneratorConfig`` from ``VideoGenerator.from_pretrained`` keyword arguments.
 
-    A keyword that a schema field declares as its flat name sets that field. ``torch_compile_kwargs`` is split across
-    ``engine.compile``, and the keywords without a typed field are kept in ``pipeline.experimental``. A keyword outside
-    ``FROM_PRETRAINED_KWARGS`` raises ``TypeError`` that names the typed path to use with ``from_config``.
+    A keyword that a schema field declares as its ``from_pretrained`` keyword sets that field. ``torch_compile_kwargs``
+    is split across ``engine.compile``, and the keywords without a field are kept in ``pipeline.experimental``. A
+    keyword outside ``FROM_PRETRAINED_KWARGS`` raises ``TypeError``.
     """
     unsupported = sorted(set(kwargs) - FROM_PRETRAINED_KWARGS)
     if unsupported:
-        paths = ", ".join(f"{key} -> {_typed_path_of_keyword(key, kwargs[key])}" for key in unsupported)
-        raise TypeError("VideoGenerator.from_pretrained(...) does not accept these keywords; pass them to "
-                        f"VideoGenerator.from_config(...) at these config paths: {paths}")
+        raise TypeError(f"VideoGenerator.from_pretrained(...) does not accept {', '.join(unsupported)}. It accepts "
+                        f"only these keywords: {', '.join(sorted(FROM_PRETRAINED_KWARGS))}. Pass every other setting "
+                        "to VideoGenerator.from_config(...) at its config path.")
 
     raw: dict[str, Any] = {"model_path": model_path}
     for key, value in kwargs.items():
@@ -128,87 +118,11 @@ def from_pretrained_kwargs_to_config(
                     _set_dotted_path(raw, ["engine", "compile", first_class], remaining.pop(first_class))
             if remaining:
                 _set_dotted_path(raw, ["engine", "compile", "extras"], remaining)
-        elif key in _FLAT_NAME_FIELDS:
-            _set_dotted_path(raw, _FLAT_NAME_FIELDS[key][0].split("."), value)
+        elif key in _FROM_PRETRAINED_FIELDS:
+            _set_dotted_path(raw, _FROM_PRETRAINED_FIELDS[key].split("."), value)
         else:
             _set_dotted_path(raw, ["pipeline", "experimental", key], deepcopy(value))
     return parse_config(GeneratorConfig, raw)
-
-
-def _typed_path_of_keyword(key: str, value: Any) -> str:
-    """The ``GeneratorConfig`` path that holds the setting of a flat ``FastVideoArgs`` keyword."""
-    if key in _FLAT_NAME_FIELDS and not (key == "pipeline_config" and not isinstance(value, str)):
-        return _FLAT_NAME_FIELDS[key][0]
-    for prefix, section in _COMPONENT_OVERRIDE_PREFIXES.items():
-        if key.startswith(prefix):
-            return f"pipeline.{section}.{key[len(prefix):]}"
-    return f"pipeline.experimental.{key}"
-
-
-def generator_config_to_fastvideo_args(
-    config: GeneratorConfig | Mapping[str, Any] | ResolvedGeneratorConfig, ) -> FastVideoArgs:
-    """Resolve a ``GeneratorConfig`` and flatten it into a ``FastVideoArgs``.
-
-    A config that is not resolved yet goes through :func:`resolve_inference_config` first. The keywords are the ones
-    that :func:`generator_kwargs` builds.
-    """
-    resolved = config if isinstance(config, ResolvedGeneratorConfig) else resolve_inference_config(config)
-    return FastVideoArgs.from_kwargs(**generator_kwargs(resolved), resolved_config=resolved)
-
-
-def generator_kwargs(resolved: ResolvedGeneratorConfig) -> dict[str, Any]:
-    """Flatten a resolved config into the flat keywords that build its ``PipelineConfig``.
-
-    Every field of the resolved config that declares a flat name and holds a value other than ``None`` becomes the
-    keyword of that name. The paths in ``_SPECIALLY_MAPPED_PATHS`` are converted below; ``pipeline.preset_overrides``
-    and then ``pipeline.experimental`` are applied last, so their keys win over the typed fields.
-    """
-    normalized = resolved.to_config()
-    unsupported = []
-    if normalized.pipeline.preset is not None:
-        unsupported.append("pipeline.preset")
-    if normalized.pipeline.preset_version is not None:
-        unsupported.append("pipeline.preset_version")
-    if normalized.pipeline.components.vae_weights is not None:
-        unsupported.append("pipeline.components.vae_weights")
-    if unsupported:
-        joined = ", ".join(unsupported)
-        raise NotImplementedError(f"VideoGenerator compatibility adapter does not support {joined} yet")
-
-    kwargs: dict[str, Any] = {}
-    for flat_name, (dotted_path, _) in _FLAT_NAME_FIELDS.items():
-        value = _read_dotted_path(normalized, dotted_path.split("."))
-        if value is not _MISSING and value is not None:
-            kwargs[flat_name] = deepcopy(value)
-    kwargs["torch_compile_kwargs"] = _compile_config_to_torch_kwargs(normalized.engine.compile)
-
-    quantization = normalized.engine.quantization
-    if quantization is not None and quantization.transformer_quant is not None:
-        # Resolve the typed quant name to a concrete ``QuantizationConfig``
-        # instance and pin it on ``dit_config.quant_config``. The legacy
-        # path expected callers to do this themselves via
-        # ``pipeline_config.dit_config.quant_config = NVFP4Config()``; the
-        # typed surface accepts a string and does the wiring here so
-        # downstream code can rely on a single source of truth.
-        from fastvideo.layers.quantization import get_quantization_config
-        _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
-        kwargs["transformer_quant"] = _resolved_quant_cls()
-
-    for prefix, section in _COMPONENT_OVERRIDE_PREFIXES.items():
-        for field_name, value in getattr(normalized.pipeline, section).items():
-            kwargs[f"{prefix}{field_name}"] = deepcopy(value)
-
-    preset_overrides = deepcopy(normalized.pipeline.preset_overrides)
-    refine = preset_overrides.pop("refine", None)
-    if isinstance(refine, Mapping):
-        for key in _LTX2_REFINE_FLAT_KEYS:
-            if key in refine:
-                kwargs[f"ltx2_refine_{key}"] = refine[key]
-        if "enabled" in refine:
-            kwargs["refine_enabled"] = refine["enabled"]
-    kwargs.update(preset_overrides)
-    kwargs.update(deepcopy(normalized.pipeline.experimental))
-    return kwargs
 
 
 def normalize_generation_request(request: GenerationRequest | Mapping[str, Any], ) -> GenerationRequest:
@@ -276,8 +190,8 @@ def _looks_like_run_or_serve_config(raw: Mapping[str, Any]) -> bool:
     return isinstance(raw.get("generator"), Mapping)
 
 
-def _schema_fields(config_type: type, prefix: str = "") -> Iterator[tuple[str, Any, Any]]:
-    """Yield ``(dotted path, field, annotation)`` for every field under ``config_type`` that is not a nested config.
+def _schema_fields(config_type: type, prefix: str = "") -> Iterator[tuple[str, Any]]:
+    """Yield ``(dotted path, field)`` for every field under ``config_type`` that is not a nested config.
 
     A field whose type is a dataclass, or an optional dataclass, is a nested config and is walked into.
     """
@@ -289,55 +203,14 @@ def _schema_fields(config_type: type, prefix: str = "") -> Iterator[tuple[str, A
         if nested:
             yield from _schema_fields(nested[0], f"{dotted_path}.")
         else:
-            yield dotted_path, config_field, annotation
+            yield dotted_path, config_field
 
 
-# Flat keyword name -> (dotted path, annotation) for every GeneratorConfig field that declares a flat name.
-_FLAT_NAME_FIELDS: dict[str, tuple[str, Any]] = {
-    config_field.metadata[FLAT_NAME]: (dotted_path, annotation)
-    for dotted_path, config_field, annotation in _schema_fields(GeneratorConfig) if FLAT_NAME in config_field.metadata
+# ``from_pretrained`` keyword -> dotted path of the GeneratorConfig field that declares it.
+_FROM_PRETRAINED_FIELDS: dict[str, str] = {
+    config_field.metadata[FLAT_NAME]: dotted_path
+    for dotted_path, config_field in _schema_fields(GeneratorConfig) if FLAT_NAME in config_field.metadata
 }
-# GeneratorConfig fields without a flat name, and how generator_config_to_fastvideo_args carries each one.
-_SPECIALLY_MAPPED_PATHS: dict[str, str] = {
-    **{
-        f"engine.compile.{key}": "merged into torch_compile_kwargs"
-        for key in (*_COMPILE_TYPED_KEYS, "extras")
-    },
-    "engine.quantization.transformer_quant": "resolved to a QuantizationConfig instance",
-    "pipeline.preset": "not supported",
-    "pipeline.preset_version": "not supported",
-    "pipeline.components.vae_weights": "not supported",
-    "pipeline.ltx2.refine.image_crf": "no flat keyword; copied from pipeline.preset_overrides.refine",
-    "pipeline.ltx2.refine.video_position_offset_sec": "no flat keyword; copied from pipeline.preset_overrides.refine",
-    "pipeline.dit": "keys passed as dit_config.<key>",
-    "pipeline.vae": "keys passed as vae_config.<key>",
-    "pipeline.preset_overrides": "keys passed as flat keywords; refine keys renamed to ltx2_refine_*",
-    "pipeline.experimental": "keys passed as flat keywords",
-}
-# Flat keyword prefix for a component config override -> the PipelineSelection dict that holds the overrides.
-_COMPONENT_OVERRIDE_PREFIXES = {
-    "dit_config.": "dit",
-    "vae_config.": "vae",
-}
-
-
-def _compile_config_to_torch_kwargs(compile_config: CompileConfig, ) -> dict[str, Any]:
-    """Flatten typed ``CompileConfig`` back to a ``torch_compile_kwargs``
-    dict that the legacy ``FastVideoArgs`` path still expects.
-
-    Typed first-class fields (:attr:`backend`, :attr:`fullgraph`,
-    :attr:`mode`, :attr:`dynamic`) are only emitted when the user set
-    them explicitly (non-``None``). ``extras`` is merged on top for any
-    uncommon kwargs.
-    """
-    out: dict[str, Any] = {}
-    for key in _COMPILE_TYPED_KEYS:
-        value = getattr(compile_config, key)
-        if value is not None:
-            out[key] = value
-    if compile_config.extras:
-        out.update(deepcopy(compile_config.extras))
-    return out
 
 
 def request_to_batch_extra(request: GenerationRequest) -> dict[str, Any]:
@@ -537,8 +410,6 @@ __all__ = [
     "explicit_request_raw",
     "explicit_request_updates",
     "from_pretrained_kwargs_to_config",
-    "generator_config_to_fastvideo_args",
-    "generator_kwargs",
     "load_generator_config_from_file",
     "normalize_generation_request",
     "normalize_generator_config",

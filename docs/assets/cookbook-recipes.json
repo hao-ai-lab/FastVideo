@@ -544,7 +544,7 @@
       "limitations": [
         "Install from the DGX Spark guide, not the generic CUDA extra. GB10 has no FA4 / sm_100a VSA kernel; keep FASTVIDEO_FA4=0 and FASTVIDEO_VSA_SM100A=0.",
         "Legal num_frames values are 17n+5, capped at 345 (15 s). Native 16:9 sizes include 832x480 and 1344x768.",
-        "Lazy module load reloads Qwen3-VL and the DiT between phases of each request. Do not pass --no-lazy-module-load on this box.",
+        "Lazy module load reloads Qwen3-VL and the DiT between phases of each request. Do not set engine.offload.lazy_module_load to false on this box.",
         "A 345-frame request on one Spark can OOM. Prefer 124 or 243 frames, TAEH3 decode, or two Sparks over QSFP."
       ]
     },

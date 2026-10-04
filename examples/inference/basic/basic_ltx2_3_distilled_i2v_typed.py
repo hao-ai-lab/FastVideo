@@ -2,11 +2,9 @@
 """LTX-2.3 distilled image-to-video — typed API (``from_config`` / ``generate``).
 
 Identical generation behavior to ``basic_ltx2_3_distilled_i2v.py``, but
-expressed through the newer typed surface (``GeneratorConfig`` /
-``GenerationRequest``) instead of the ``from_pretrained(**legacy_kwargs)``
-bridge. The typed API is now the preferred entry point — the legacy
-example still works but emits a ``DeprecationWarning`` for the LTX-2.3
-specific knobs.
+expressed with the typed dataclasses (``GeneratorConfig`` /
+``GenerationRequest``) instead of nested dicts and a ``PipelineConfig``
+object.
 
 Quick start
 -----------
@@ -42,28 +40,28 @@ Hardware notes
   The ``_inductor.shape_padding = False`` line below also avoids a
   ``pad_mm`` landmine on the same generation of cards.
 
-Typed-API mapping (legacy kwarg ↔ typed field)
-----------------------------------------------
-- ``num_gpus``                      ↔ ``engine.num_gpus``
-- ``enable_torch_compile``          ↔ ``engine.compile.enabled``
-- ``enable_torch_compile_text_encoder`` ↔ ``engine.compile.text_encoder_enabled``
-- ``enable_torch_compile_vae``      ↔ ``engine.compile.vae_enabled``
-- ``torch_compile_kwargs``          ↔ ``engine.compile.backend/fullgraph/mode/dynamic``
-- ``torch_compile_kwargs_vae``      ↔ empty ``compile.vae_kwargs`` (inherits master)
-- ``dit_cpu_offload``               ↔ ``engine.offload.dit``
-- ``text_encoder_cpu_offload``      ↔ ``engine.offload.text_encoder``
-- ``vae_cpu_offload``               ↔ ``engine.offload.vae``
-- ``ltx2_vae_tiling``               ↔ ``pipeline.vae_tiling``
-- ``ltx2_refine_enabled``           ↔ ``pipeline.preset_overrides["refine"]["enabled"]``
-- ``ltx2_refine_upsampler_path``    ↔ ``pipeline.components.upsampler_weights``
-- ``ltx2_refine_lora_path``         ↔ ``pipeline.ltx2.refine.lora_path``
-- ``ltx2_refine_num_inference_steps`` ↔ ``pipeline.preset_overrides["refine"]["num_inference_steps"]``
-- ``ltx2_refine_guidance_scale``    ↔ ``pipeline.preset_overrides["refine"]["guidance_scale"]``
-- ``ltx2_refine_add_noise``         ↔ ``pipeline.preset_overrides["refine"]["add_noise"]``
-- ``pipeline_config=PipelineConfig.from_pretrained(model_root)`` ↔ (no-op — ``PipelineConfig.from_kwargs`` already resolves the model-specific class from ``model_path``)
-- ``pipeline_config.dit_config.quant_config = None`` ↔ leave ``engine.quantization`` unset
-- ``ltx2_images`` / ``ltx2_image_crf`` ↔ ``request.extensions`` (LTX-2 specific, no
-  first-class typed field yet)
+Recipe setting ↔ typed field
+----------------------------
+- GPU count                        ↔ ``engine.num_gpus``
+- DiT compile                      ↔ ``engine.compile.enabled``
+- Text encoder compile             ↔ ``engine.compile.text_encoder_enabled``
+- VAE compile                      ↔ ``engine.compile.vae_enabled``
+- ``torch.compile`` kwargs         ↔ ``engine.compile.backend/fullgraph/mode/dynamic``
+- VAE ``torch.compile`` kwargs     ↔ empty ``engine.compile.vae_kwargs`` (inherits the master kwargs)
+- DiT CPU offload                  ↔ ``engine.offload.dit``
+- Text encoder CPU offload         ↔ ``engine.offload.text_encoder``
+- VAE CPU offload                  ↔ ``engine.offload.vae``
+- VAE tiling                       ↔ ``pipeline.vae_tiling``
+- Refine stage on                  ↔ ``pipeline.preset_overrides["refine"]["enabled"]``
+- Refine upsampler                 ↔ ``pipeline.components.upsampler_weights``
+- Refine LoRA                      ↔ ``pipeline.ltx2.refine.lora_path``
+- Refine denoising steps           ↔ ``pipeline.preset_overrides["refine"]["num_inference_steps"]``
+- Refine guidance scale            ↔ ``pipeline.preset_overrides["refine"]["guidance_scale"]``
+- Refine noise injection           ↔ ``pipeline.preset_overrides["refine"]["add_noise"]``
+- Model-specific ``PipelineConfig`` ↔ nothing to set: ``PipelineConfig.from_source`` builds the
+  registry class of ``model_path``
+- No DiT quantization              ↔ leave ``engine.quantization`` unset
+- Conditioning image and its CRF   ↔ ``request.extensions["ltx2_images"]`` / ``["ltx2_image_crf"]`` (LTX-2 specific)
 """
 from __future__ import annotations
 
@@ -177,7 +175,7 @@ def main() -> None:
             # Keep DiT / text encoder / VAE resident on GPU — no CPU offload
             # for serving-style runs. ``image_encoder`` and
             # ``pin_cpu_memory`` are left at their schema defaults
-            # (matches the legacy example, which only set these three).
+            # (matches ``basic_ltx2_3_distilled_i2v.py``, which sets only these three).
             offload=OffloadConfig(
                 dit=False,
                 text_encoder=False,
@@ -199,12 +197,12 @@ def main() -> None:
             ),
         ),
         pipeline=PipelineSelection(
-            # ``PipelineConfig.from_kwargs`` resolves the model-specific
+            # ``PipelineConfig.from_source`` resolves the model-specific
             # pipeline-config class from ``model_path`` automatically, so we
             # don't need to set ``components.pipeline_config_path`` — the
             # model-specific VAE precision / decoder defaults are picked up
-            # the same way the legacy example's
-            # ``PipelineConfig.from_pretrained(model_root)`` did them.
+            # the same way ``basic_ltx2_3_distilled_i2v.py``'s
+            # ``PipelineConfig.from_pretrained(model_root)`` picks them up.
             components=ComponentConfig(upsampler_weights=str(refine_upsampler_path),
                                        # Distilled has no refine LoRA — omit ``lora_path``.
                                        ),

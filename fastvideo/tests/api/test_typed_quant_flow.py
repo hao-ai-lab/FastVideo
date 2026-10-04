@@ -53,15 +53,14 @@ def test_no_typed_quant_leaves_the_dit_quant_config_unset() -> None:
 
 
 def test_apply_transformer_quant_pins_to_dit_config() -> None:
-    """Materialization must copy the ``transformer_quant`` instance onto
-    ``pipeline_config.dit_config.quant_config`` so the DiT loader sees
+    """Materialization must pin the config that ``transformer_quant`` names
+    on ``pipeline_config.dit_config.quant_config`` so the DiT loader sees
     it during construction.
     """
     pipeline_config = SimpleNamespace(dit_config=SimpleNamespace(quant_config=None))
 
-    nvfp4 = NVFP4Config()
-    _apply_transformer_quant(pipeline_config, nvfp4)
-    assert pipeline_config.dit_config.quant_config is nvfp4
+    _apply_transformer_quant(pipeline_config, "NVFP4")
+    assert isinstance(pipeline_config.dit_config.quant_config, NVFP4Config)
 
 
 def test_apply_transformer_quant_does_not_overwrite_explicit_dit_config() -> None:
@@ -70,5 +69,5 @@ def test_apply_transformer_quant_does_not_overwrite_explicit_dit_config() -> Non
     """
     explicit = NVFP4Config(layer_profile="base")
     pipeline_config = SimpleNamespace(dit_config=SimpleNamespace(quant_config=explicit))
-    _apply_transformer_quant(pipeline_config, NVFP4Config(layer_profile="refine"))
+    _apply_transformer_quant(pipeline_config, "NVFP4")
     assert pipeline_config.dit_config.quant_config is explicit

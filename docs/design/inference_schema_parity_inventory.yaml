@@ -2,133 +2,151 @@ status_definitions:
   kept: "Public field remains on a public adapter surface with the same meaning."
   moved: "Public field remains supported but normalizes into a different nested path."
   preset_owned: "Public field remains supported only through a model/preset-specific surface."
-  compatibility_only: "Legacy public field remains adapter-only during migration and is not part of the canonical typed schema."
+  from_pretrained_keyword: "Typed config field that an argument of VideoGenerator.from_pretrained also sets; the entry value names that argument."
+  compatibility_only: "Public field that an adapter or an open mapping accepts outside the typed fields of the canonical schema."
   private_only: "Field should only be handled by private adapters and is not a public FastVideo compatibility promise."
-  internal_only: "Field is runtime/config plumbing and should not be part of the new public typed inference API."
+  internal_only: "Field is runtime/config plumbing that model code, config resolution, or the runtime fills; it is not a public input."
+  unsupported: "Typed config field that no runtime code reads; resolution rejects a value."
 
 surfaces:
-  fastvideo_args:
+  generator_config:
+    from_pretrained_keyword:
+      model_path: "model_path (positional argument)"
+      revision: revision
+      trust_remote_code: trust_remote_code
+      engine.num_gpus: num_gpus
+      engine.execution_backend: distributed_executor_backend
+      engine.parallelism.tp_size: tp_size
+      engine.parallelism.sp_size: sp_size
+      engine.parallelism.hsdp_replicate_dim: hsdp_replicate_dim
+      engine.parallelism.hsdp_shard_dim: hsdp_shard_dim
+      engine.parallelism.dist_timeout: dist_timeout
+      engine.offload.dit: dit_cpu_offload
+      engine.offload.dit_layerwise: dit_layerwise_offload
+      engine.offload.text_encoder: text_encoder_cpu_offload
+      engine.offload.image_encoder: image_encoder_cpu_offload
+      engine.offload.vae: vae_cpu_offload
+      engine.offload.pin_cpu_memory: pin_cpu_memory
+      engine.compile.enabled: enable_torch_compile
+      engine.compile.backend: "torch_compile_kwargs['backend']"
+      engine.compile.fullgraph: "torch_compile_kwargs['fullgraph']"
+      engine.compile.mode: "torch_compile_kwargs['mode']"
+      engine.compile.dynamic: "torch_compile_kwargs['dynamic']"
+      engine.compile.extras: "torch_compile_kwargs keys other than backend, fullgraph, mode, and dynamic"
+      engine.enable_stage_verification: enable_stage_verification
+      engine.use_fsdp_inference: use_fsdp_inference
+      engine.disable_autocast: disable_autocast
+      pipeline.components.lora_path: lora_path
+      pipeline.components.lora_strength: lora_strength
+      pipeline.output_type: output_type
+    kept:
+      - mode
+      - engine.parallelism.master_port
+      - engine.offload.lazy_module_load
+      - engine.compile.text_encoder_enabled
+      - engine.compile.vae_enabled
+      - engine.compile.audio_vae_enabled
+      - engine.compile.regional
+      - engine.compile.dit_kwargs
+      - engine.compile.text_encoder_kwargs
+      - engine.compile.vae_kwargs
+      - engine.compile.audio_vae_kwargs
+      - engine.attention.backend
+      - engine.attention.vsa_sparsity
+      - engine.attention.vsa_tile_size
+      - engine.attention.moba_config_path
+      - engine.precision.dit
+      - engine.precision.vae
+      - engine.precision.vae_decode
+      - engine.precision.image_encoder
+      - engine.precision.text_encoders
+      - engine.quantization.text_encoder_quant
+      - engine.quantization.transformer_quant
+      - pipeline.workload_type
+      - pipeline.components.config_root
+      - pipeline.components.pipeline_config_path
+      - pipeline.components.text_encoder_weights
+      - pipeline.components.transformer_weights
+      - pipeline.components.transformer_2_weights
+      - pipeline.components.upsampler_weights
+      - pipeline.components.lora_nickname
+      - pipeline.components.lora_target_modules
+      - pipeline.components.override_pipeline_cls_name
+      - pipeline.components.override_transformer_cls_name
+      - pipeline.vae_tiling
+      - pipeline.vae_sp
+      - pipeline.flow_shift
+      - pipeline.embedded_cfg_scale
+      - pipeline.dmd_denoising_steps
+      - pipeline.boundary_ratio
+      - pipeline.dit
+      - pipeline.vae
+    unsupported:
+      - pipeline.preset
+      - pipeline.preset_version
+      - pipeline.components.vae_weights
     moved:
-      model_path: generator.model_path
-      workload_type: generator.pipeline.workload_type
-      distributed_executor_backend: generator.engine.execution_backend
-      trust_remote_code: generator.trust_remote_code
-      revision: generator.revision
-      num_gpus: generator.engine.num_gpus
-      tp_size: generator.engine.parallelism.tp_size
-      sp_size: generator.engine.parallelism.sp_size
-      hsdp_replicate_dim: generator.engine.parallelism.hsdp_replicate_dim
-      hsdp_shard_dim: generator.engine.parallelism.hsdp_shard_dim
-      dist_timeout: generator.engine.parallelism.dist_timeout
-      lora_path: generator.pipeline.components.lora_path
-      lora_nickname: generator.pipeline.components.lora_nickname
-      lora_strength: generator.pipeline.components.lora_strength
-      dit_cpu_offload: generator.engine.offload.dit
-      use_fsdp_inference: generator.engine.use_fsdp_inference
-      dit_layerwise_offload: generator.engine.offload.dit_layerwise
-      text_encoder_cpu_offload: generator.engine.offload.text_encoder
-      image_encoder_cpu_offload: generator.engine.offload.image_encoder
-      vae_cpu_offload: generator.engine.offload.vae
-      pin_cpu_memory: generator.engine.offload.pin_cpu_memory
-      lazy_module_load: generator.engine.offload.lazy_module_load
-      enable_torch_compile: generator.engine.compile.enabled
-      enable_torch_compile_text_encoder: generator.engine.compile.text_encoder_enabled
-      enable_torch_compile_vae: generator.engine.compile.vae_enabled
-      enable_torch_compile_audio_vae: generator.engine.compile.audio_vae_enabled
-      torch_compile_kwargs: generator.engine.compile.backend,fullgraph,mode,dynamic,extras
-      torch_compile_kwargs_dit: generator.engine.compile.dit_kwargs
-      torch_compile_kwargs_text_encoder: generator.engine.compile.text_encoder_kwargs
-      torch_compile_kwargs_vae: generator.engine.compile.vae_kwargs
-      torch_compile_kwargs_audio_vae: generator.engine.compile.audio_vae_kwargs
-      transformer_quant: generator.engine.quantization.transformer_quant
-      disable_autocast: generator.engine.disable_autocast
-      enable_stage_verification: generator.engine.enable_stage_verification
-      prompt_txt: request.inputs.prompt_path
-      override_text_encoder_safetensors: generator.pipeline.components.text_encoder_weights
-      override_text_encoder_quant: generator.engine.quantization.text_encoder_quant
-      transformer_quant: generator.engine.quantization.transformer_quant
-      override_transformer_cls_name: generator.pipeline.components.override_transformer_cls_name
-      init_weights_from_safetensors: generator.pipeline.components.transformer_weights
-      init_weights_from_safetensors_2: generator.pipeline.components.transformer_2_weights
-      override_pipeline_cls_name: generator.pipeline.components.override_pipeline_cls_name
-      boundary_ratio: request.sampling.boundary_ratio
-      ltx2_vae_tiling: generator.pipeline.vae_tiling
-      refine_enabled: generator.pipeline.preset_overrides.refine.enabled
-      refine_upsampler_path: generator.pipeline.components.upsampler_weights
-      refine_lora_path: generator.pipeline.ltx2.refine.lora_path
-      refine_num_inference_steps: request.stage_overrides.refine.num_inference_steps
-      refine_guidance_scale: request.stage_overrides.refine.guidance_scale
-      refine_add_noise: generator.pipeline.preset_overrides.refine.add_noise
-      ltx2_refine_enabled: generator.pipeline.preset_overrides.refine.enabled
-      ltx2_refine_upsampler_path: generator.pipeline.components.upsampler_weights
-      ltx2_refine_lora_path: generator.pipeline.ltx2.refine.lora_path
-      ltx2_refine_num_inference_steps: request.stage_overrides.refine.num_inference_steps
-      ltx2_refine_guidance_scale: request.stage_overrides.refine.guidance_scale
-      ltx2_refine_add_noise: generator.pipeline.preset_overrides.refine.add_noise
-      lora_target_modules: generator.pipeline.components.lora_target_modules
-      attention_backend: generator.engine.attention.backend
-      VSA_sparsity: generator.engine.attention.vsa_sparsity
-      VSA_tile_size: generator.engine.attention.vsa_tile_size
-      moba_config_path: generator.engine.attention.moba_config_path
-      inference_torch_compile: generator.engine.compile.regional
-      vae_parallel_decode: generator.pipeline.minimax_h3.vae_parallel_decode
-      vae_parallel_encode: generator.pipeline.minimax_h3.vae_parallel_encode
-      vae_parallel_decode_strategy: generator.pipeline.minimax_h3.vae_parallel_decode_strategy
-      h3_sequential_load: generator.pipeline.minimax_h3.sequential_load
-      video_decode_backend: generator.pipeline.minimax_h3.video_decode_backend
-      taeh3_checkpoint: generator.pipeline.minimax_h3.taeh3_checkpoint
-      taeh3_chunk_size: generator.pipeline.minimax_h3.taeh3_chunk_size
-      refine_transformer_path: generator.pipeline.ltx2.refine.transformer_path
-      refine_noise_path: generator.pipeline.ltx2.refine.noise_path
-      refine_audio_noise_path: generator.pipeline.ltx2.refine.audio_noise_path
-      ltx2_refine_transformer_path: generator.pipeline.ltx2.refine.transformer_path
-      ltx2_refine_noise_path: generator.pipeline.ltx2.refine.noise_path
-      ltx2_refine_audio_noise_path: generator.pipeline.ltx2.refine.audio_noise_path
-      ltx2_legacy_native_noise_order: generator.pipeline.ltx2.legacy_native_noise_order
-      ltx2_use_distilled_sigmas: generator.pipeline.ltx2.use_distilled_sigmas
-      ltx2_vae_spatial_tile_size_in_pixels: generator.pipeline.ltx2.vae_spatial_tile_size_in_pixels
-      ltx2_vae_spatial_tile_overlap_in_pixels: generator.pipeline.ltx2.vae_spatial_tile_overlap_in_pixels
-      ltx2_vae_temporal_tile_size_in_frames: generator.pipeline.ltx2.vae_temporal_tile_size_in_frames
-      ltx2_vae_temporal_tile_overlap_in_frames: generator.pipeline.ltx2.vae_temporal_tile_overlap_in_frames
-      ltx2_initial_latent_path: generator.pipeline.ltx2.initial_latent_path
-      ltx2_audio_latent_path: generator.pipeline.ltx2.audio_latent_path
+      pipeline.preset_overrides:
+        target: generator.pipeline.ltx2.refine
+        note: "Only the refine mapping applies: resolution copies pipeline.preset_overrides.refine into the pipeline.ltx2.refine fields of the same names. Other keys have no effect."
+    preset_owned:
+      - pipeline.ltx2.vae_spatial_tile_size_in_pixels
+      - pipeline.ltx2.vae_spatial_tile_overlap_in_pixels
+      - pipeline.ltx2.vae_temporal_tile_size_in_frames
+      - pipeline.ltx2.vae_temporal_tile_overlap_in_frames
+      - pipeline.ltx2.initial_latent_path
+      - pipeline.ltx2.audio_latent_path
+      - pipeline.ltx2.legacy_native_noise_order
+      - pipeline.ltx2.use_distilled_sigmas
+      - pipeline.ltx2.refine.enabled
+      - pipeline.ltx2.refine.num_inference_steps
+      - pipeline.ltx2.refine.guidance_scale
+      - pipeline.ltx2.refine.add_noise
+      - pipeline.ltx2.refine.image_crf
+      - pipeline.ltx2.refine.video_position_offset_sec
+      - pipeline.ltx2.refine.transformer_path
+      - pipeline.ltx2.refine.lora_path
+      - pipeline.ltx2.refine.noise_path
+      - pipeline.ltx2.refine.audio_noise_path
+      - pipeline.minimax_h3.sequential_load
+      - pipeline.minimax_h3.video_decode_backend
+      - pipeline.minimax_h3.taeh3_checkpoint
+      - pipeline.minimax_h3.taeh3_chunk_size
+      - pipeline.minimax_h3.vae_parallel_decode
+      - pipeline.minimax_h3.vae_parallel_encode
+      - pipeline.minimax_h3.vae_parallel_decode_strategy
+      - pipeline.longcat.enable_bsa
+      - pipeline.longcat.bsa_sparsity
+      - pipeline.longcat.bsa_cdf_threshold
+      - pipeline.longcat.bsa_chunk_q
+      - pipeline.longcat.bsa_chunk_k
     compatibility_only:
-      mode: "Legacy multi-mode FastVideoArgs switch; typed inference config should not expose execution mode."
-      inference_mode: "Legacy boolean mirror of mode; kept only through adapters while FastVideoArgs remains."
-      output_type: "Legacy output formatting surface pending GenerationResult cleanup."
-      master_port: "Executor/bootstrap compatibility field; not part of the canonical inference schema."
-    private_only:
-      ray_placement_group: "Ray deployment-only field."
-      ray_runtime_env: "Ray deployment-only field."
+      pipeline.experimental: "Open mapping for settings without a typed path: the pipeline_config source (a JSON path, a mapping, or a PipelineConfig), keys that runtime code reads by name (for example ray_runtime_env), and PipelineConfig attribute overrides for model-only fields (for example flow_shift_sr). Resolution rejects a key whose PipelineConfig attribute has a typed path."
     internal_only:
-      pipeline_config: "Legacy internal carrier object."
-      preprocess_config: "Legacy preprocess carrier object."
-      moba_config: "Derived runtime config loaded from moba_config_path."
-      model_paths: "Runtime bookkeeping."
-      model_loaded: "Runtime bookkeeping."
+      engine.attention.moba_config: "V-MoBA attention settings that resolution loads from engine.attention.moba_config_path."
 
   pipeline_config_base:
     moved:
+      model_path: generator.model_path
       pipeline_config_path: generator.pipeline.components.pipeline_config_path
       embedded_cfg_scale: generator.pipeline.embedded_cfg_scale
       flow_shift: generator.pipeline.flow_shift
+      disable_autocast: generator.engine.disable_autocast
+      vae_tiling: generator.pipeline.vae_tiling
       vae_sp: generator.pipeline.vae_sp
       dmd_denoising_steps: generator.pipeline.dmd_denoising_steps
+      boundary_ratio: generator.pipeline.boundary_ratio
       dit_precision: generator.engine.precision.dit
       vae_precision: generator.engine.precision.vae
       vae_decode_precision: generator.engine.precision.vae_decode
       image_encoder_precision: generator.engine.precision.image_encoder
       text_encoder_precisions: generator.engine.precision.text_encoders
     preset_owned:
-      flow_shift_sr: generator.pipeline.preset_overrides.flow_shift_sr
-      is_causal: generator.pipeline.preset_overrides.is_causal
-      vae_tiling: generator.pipeline.preset_overrides.vae_tiling
-      ti2v_task: generator.pipeline.preset_overrides.ti2v_task
-      lucy_edit_task: generator.pipeline.preset_overrides.lucy_edit_task
-      boundary_ratio: generator.pipeline.preset_overrides.boundary_ratio
+      flow_shift_sr: generator.pipeline.experimental.flow_shift_sr
+      is_causal: generator.pipeline.experimental.is_causal
+      ti2v_task: generator.pipeline.experimental.ti2v_task
+      lucy_edit_task: generator.pipeline.experimental.lucy_edit_task
     compatibility_only:
-      model_path: "Redundant with generator.model_path."
-      disable_autocast: "Duplicated by generator.engine.disable_autocast during migration."
       upsampler_precision: "Precision override pending dedicated typed component precision design."
       image_encoder_precisions: "Precision overrides pending dedicated typed component precision design."
     internal_only:
@@ -143,6 +161,22 @@ surfaces:
       scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
 
   pipeline_config_extensions:
+    moved:
+      enable_bsa:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.enable_bsa
+      bsa_sparsity:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.bsa_sparsity
+      bsa_cdf_threshold:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.bsa_cdf_threshold
+      bsa_chunk_q:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.bsa_chunk_q
+      bsa_chunk_k:
+        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
+        target: generator.pipeline.longcat.bsa_chunk_k
     preset_owned:
       flux2_text_encoder_type:
         sources:
@@ -323,23 +357,8 @@ surfaces:
           - fastvideo.configs.pipelines.wan.WanI2V720PConfig
           - fastvideo.configs.pipelines.wan.WanT2V480PConfig
           - fastvideo.configs.pipelines.wan.WanT2V720PConfig
-      bsa_cdf_threshold:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.bsa_cdf_threshold
-      bsa_chunk_k:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.bsa_chunk_k
-      bsa_chunk_q:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.bsa_chunk_q
       bsa_params:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      bsa_sparsity:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.bsa_sparsity
-      enable_bsa:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.enable_bsa
       enable_kv_cache:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
       enhance_hf:

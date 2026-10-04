@@ -10,7 +10,7 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 
 import yaml
 
-from fastvideo.api import RunConfig, ServeConfig
+from fastvideo.api import GeneratorConfig, RunConfig, ServeConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
@@ -21,7 +21,6 @@ from fastvideo.entrypoints.openai.protocol import (
     VideoGenerationsRequest,
 )
 from fastvideo.entrypoints.openai.request_adapter import build_generation_request
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.utils import FlexibleArgumentParser
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -44,6 +43,29 @@ def _flatten_status_section(section: dict, valid_statuses: set[str]) -> set[str]
         else:
             raise TypeError(f"Unsupported inventory entry type for {status!r}: {type(entries)!r}")
     return names
+
+
+def _get_dataclass_leaf_paths(cls: type, prefix: str = "") -> set[str]:
+    """Collect the dotted paths of the leaf fields of a nested config dataclass.
+
+    A field whose annotation is a dataclass, or ``X | None`` of a dataclass,
+    is walked into; every other field, including a dict-valued field, is one
+    leaf.
+    """
+    paths: set[str] = set()
+    hints = get_type_hints(cls)
+    for config_field in dataclasses.fields(cls):
+        annotation = hints[config_field.name]
+        if get_origin(annotation) in {types.UnionType, Union}:
+            non_none_args = [arg for arg in get_args(annotation) if arg is not type(None)]
+            if len(non_none_args) == 1:
+                annotation = non_none_args[0]
+        path = f"{prefix}{config_field.name}"
+        if dataclasses.is_dataclass(annotation):
+            paths.update(_get_dataclass_leaf_paths(annotation, f"{path}."))
+        else:
+            paths.add(path)
+    return paths
 
 
 def _get_extra_dataclass_fields(
@@ -163,11 +185,11 @@ def test_inventory_statuses_are_known() -> None:
         assert not unknown, f"Unknown statuses in surface inventory: {sorted(unknown)}"
 
 
-def test_fastvideo_args_fields_are_classified() -> None:
+def test_generator_config_fields_are_classified() -> None:
     inventory = _load_inventory()
-    expected = {f.name for f in dataclasses.fields(FastVideoArgs)}
+    expected = _get_dataclass_leaf_paths(GeneratorConfig)
     actual = _flatten_status_section(
-        inventory["surfaces"]["fastvideo_args"],
+        inventory["surfaces"]["generator_config"],
         set(inventory["status_definitions"]),
     )
     assert actual == expected

@@ -1097,10 +1097,7 @@ class TestValidationResolvedConfigs:
     def _training_config(self) -> TrainingConfig:
         return TrainingConfig(
             distributed=DistributedConfig(num_gpus=2, sp_size=2, hsdp_shard_dim=2),
-            pipeline_config=PipelineConfig.from_kwargs({
-                "model_path": self._MODEL_PATH,
-                "flow_shift": 3.0
-            }),
+            pipeline_config=PipelineConfig.from_source(self._MODEL_PATH, {"flow_shift": 3.0}),
             model_path=self._MODEL_PATH,
             vsa_sparsity=0.5,
         )
@@ -1147,7 +1144,7 @@ class TestValidationResolvedConfigs:
         cb = _make_callback(sampling_timesteps=[1000, 757, 522])
         training_config = self._training_config()
         cb.training_config = training_config
-        loaded_config = PipelineConfig.from_kwargs({"model_path": self._MODEL_PATH})
+        loaded_config = PipelineConfig.from_source(self._MODEL_PATH)
         loaded_config.text_encoder_configs[0].arch_config.hidden_size = 1234
         pipeline = SimpleNamespace(resolved_config=SimpleNamespace(pipeline_config=loaded_config))
 

@@ -489,7 +489,6 @@ def classify_paths(paths: list[str]) -> MergePlan:
             _select_output_coverage(plan, path)
             continue
         if path in {
-                "fastvideo/fastvideo_args.py",
                 "fastvideo/forward_context.py",
                 "fastvideo/image_processor.py",
                 "fastvideo/registry.py",

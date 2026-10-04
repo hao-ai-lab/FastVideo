@@ -33,8 +33,8 @@ class LingBotVideoPipeline(LoRAPipeline, ComposedPipelineBase):
         """Load the optional refiner DiT and the VAE encoder only when declared."""
         model_index = self._load_config(self.model_path)
         required = list(type(self)._required_config_modules)
-        # The shared stage-2 refine switch: ``pipeline.preset_overrides.refine.enabled`` and the ``refine_enabled``
-        # key resolve into ``pipeline.ltx2.refine.enabled``; ``None`` loads the refiner when the checkpoint has one.
+        # The shared stage-2 refine switch: ``pipeline.preset_overrides.refine.enabled`` resolves into
+        # ``pipeline.ltx2.refine.enabled``; ``None`` loads the refiner when the checkpoint has one.
         load_refiner = "transformer_2" in model_index and resolved_config.pipeline.ltx2.refine.enabled is not False
         if load_refiner:
             required.append("transformer_2")

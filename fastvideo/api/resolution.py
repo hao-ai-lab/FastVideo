@@ -412,12 +412,9 @@ class ResolvedGeneratorConfig(_ResolvedTree):
     same ``pipeline_config``.
 
     ``training_mode`` and ``inference_mode`` are read-only views of the top-level ``mode`` field.
-
-    Code that still reads the flat ``FastVideoArgs`` attribute names reaches the values through
-    :mod:`fastvideo.api.flat_name_fallback`, which also holds the mutable runtime state behind those names.
     """
 
-    __slots__ = ("_pipeline_config", "_runtime_state", "_flat_values")
+    __slots__ = ("_pipeline_config", )
 
     def __init__(
         self,
@@ -427,39 +424,14 @@ class ResolvedGeneratorConfig(_ResolvedTree):
         decisions: Sequence[Decision],
         override_log: Sequence[Decision],
         pipeline_config: Any = None,
-        runtime_state: dict[str, Any] | None = None,
     ):
-        """Hold the resolved tree with its ``pipeline_config`` and runtime state; new state starts at its defaults."""
-        from fastvideo.api import flat_name_fallback
-
         super().__init__(tree, raw_tree, explicit_paths, decisions, override_log)
         object.__setattr__(self, "_pipeline_config", pipeline_config)
-        object.__setattr__(self, "_flat_values", {})
-        if runtime_state is None:
-            runtime_state = flat_name_fallback.initial_runtime_state(self)
-        object.__setattr__(self, "_runtime_state", runtime_state)
 
     def __reduce__(self) -> tuple[Any, ...]:
         state = object.__getattribute__
         return type(self), (state(self, "_struct"), state(self, "_raw_tree"), state(self, "_explicit_paths"),
-                            state(self, "_decisions"), state(self, "_override_log"), state(self, "_pipeline_config"),
-                            state(self, "_runtime_state"))
-
-    def __getattr__(self, name: str) -> Any:
-        struct = object.__getattribute__(self, "_struct")
-        if name in struct.fields:
-            return super().__getattr__(name)
-        from fastvideo.api import flat_name_fallback
-
-        return flat_name_fallback.read_flat_name(self, name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        from fastvideo.api import flat_name_fallback
-
-        if name in flat_name_fallback.RUNTIME_STATE_NAMES:
-            object.__getattribute__(self, "_runtime_state")[name] = value
-            return
-        super().__setattr__(name, value)
+                            state(self, "_decisions"), state(self, "_override_log"), state(self, "_pipeline_config"))
 
     @property
     def pipeline_config(self) -> Any:
@@ -478,16 +450,12 @@ class ResolvedGeneratorConfig(_ResolvedTree):
         return not self.training_mode
 
     def with_override(self, source: str, values: Mapping[str, Any]) -> ResolvedGeneratorConfig:
-        from fastvideo.api import flat_name_fallback
-
-        overridden = super().with_override(source, values)
-        flat_name_fallback.sync_pipeline_config_mirrors(overridden)
-        return overridden
+        return super().with_override(source, values)
 
     def _replace(self, tree: _Struct, override_log: tuple[Decision, ...]) -> ResolvedGeneratorConfig:
         state = object.__getattribute__
         return type(self)(tree, state(self, "_raw_tree"), state(self, "_explicit_paths"), state(self, "_decisions"),
-                          override_log, state(self, "_pipeline_config"), state(self, "_runtime_state"))
+                          override_log, state(self, "_pipeline_config"))
 
     def to_config(self) -> GeneratorConfig:
         """Typed copy of the resolved values as the root config class, for code that consumes the typed config."""
@@ -550,8 +518,7 @@ def resolve_generator_config(
     resolved = ResolvedGeneratorConfig(tree, raw_tree, frozenset(explicit_paths), decisions, ())
     if materialize is None:
         return resolved
-    return ResolvedGeneratorConfig(tree, raw_tree, frozenset(explicit_paths), decisions, (), materialize(resolved),
-                                   object.__getattribute__(resolved, "_runtime_state"))
+    return ResolvedGeneratorConfig(tree, raw_tree, frozenset(explicit_paths), decisions, (), materialize(resolved))
 
 
 def resolve_generation_request(request: GenerationRequest, steps: Sequence[ResolutionStep]) -> ResolvedRequest:

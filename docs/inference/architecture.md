@@ -131,9 +131,11 @@ Concrete hierarchy: `DiTConfig` → `DiTArchConfig`, `VAEConfig` →
 
 - `PipelineConfig.from_pretrained(model_path)` — resolves config class
   via `get_pipeline_config_cls_from_name()`, instantiates with defaults.
-- `PipelineConfig.from_kwargs(kwargs)` — resolves class, optionally loads
-  JSON via `load_from_json()`, then applies keyword overrides via
-  `update_config_from_dict()`.
+- `PipelineConfig.from_source(model_path, source)` — resolves the registry
+  class of `model_path`, then updates it from `source`: a JSON path loaded
+  via `load_from_json()`, a mapping of field values applied via
+  `update_pipeline_config()`, or a `PipelineConfig` that replaces the
+  registry instance.
 - `dump_to_json()` / `load_from_json()` — JSON persistence. Callable
   fields and `arch_config` are excluded from dumps.
 

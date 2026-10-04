@@ -17,8 +17,8 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-# Offload settings that trade device memory for host memory, by flat name. All of them are a loss on a device whose
-# host and device memory are the same physical pool.
+# Offload settings that trade device memory for host memory, by the flag name that loaders and log messages use. All
+# of them are a loss on a device whose host and device memory are the same physical pool.
 UNIFIED_MEMORY_OFFLOAD_PATHS = {
     "dit_layerwise_offload": "engine.offload.dit_layerwise",
     "dit_cpu_offload": "engine.offload.dit",
@@ -125,7 +125,7 @@ def finalize_device_offload_policy(resolved_config: ResolvedGeneratorConfig,
         if lazy_module_load:
             logger.info(
                 "Enabling lazy_module_load: %s has unified memory, so encoder, DiT, and VAEs cannot stay "
-                "resident together. Pass --no-lazy-module-load to keep every component loaded.",
+                "resident together. Set engine.offload.lazy_module_load to false to keep every component loaded.",
                 _device_name(device_id),
             )
     return resolve_device_offload_conflicts(resolved_config)

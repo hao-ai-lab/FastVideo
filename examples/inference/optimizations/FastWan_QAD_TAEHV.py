@@ -142,17 +142,15 @@ def build_generator(args: argparse.Namespace) -> VideoGenerator:
     compile_enabled = not args.no_compile
 
     components = {}
-    experimental = {"pipeline_config": pipeline_config}
     if args.distilled_model:
         weights_path = resolve_distilled_weights(args.distilled_model)
         print(f"Using distilled weights: {args.distilled_model} -> {weights_path}")
         components["transformer_weights"] = weights_path
 
-    if args.taehv:
-        # Skip the in-pipeline VAE decode entirely: the pipeline returns raw
-        # latents, the Wan VAE is offloaded to CPU (and not compiled) since we
-        # decode with TAEHV in this script instead.
-        experimental["output_type"] = "latent"
+    # With TAEHV, skip the in-pipeline VAE decode entirely: the pipeline returns
+    # raw latents, the Wan VAE is offloaded to CPU (and not compiled) since we
+    # decode with TAEHV in this script instead.
+    output_type = "latent" if args.taehv else "pil"
 
     generator = VideoGenerator.from_config({
         "model_path": model_id,
@@ -176,7 +174,8 @@ def build_generator(args: argparse.Namespace) -> VideoGenerator:
         },
         "pipeline": {
             "components": components,
-            "experimental": experimental,
+            "output_type": output_type,
+            "experimental": {"pipeline_config": pipeline_config},
         },
     })
     return generator

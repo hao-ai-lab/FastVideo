@@ -265,22 +265,18 @@ def _parse_pipeline_config(
     pipeline_raw, dit_arch_overrides = _split_training_dit_arch_overrides(pipeline_raw)
 
     # Derive model_path from models.student.init_from —
-    # needed by PipelineConfig.from_kwargs.
+    # PipelineConfig.from_source picks the registry class from it.
     model_path: str | None = None
     student_cfg = models.get("student")
     if student_cfg is not None:
         init_from = student_cfg.get("init_from")
         if init_from is not None:
             model_path = str(init_from)
+    if model_path is None:
+        raise ValueError("models.student.init_from is required to build the pipeline config")
 
-    kwargs: dict[str, Any] = {"pipeline_config": pipeline_raw}
-    if model_path is not None:
-        kwargs["model_path"] = model_path
-
-    if isinstance(pipeline_raw, str):
-        kwargs["pipeline_config"] = _resolve_existing_file(pipeline_raw)
-
-    pipeline_config = PipelineConfig.from_kwargs(kwargs)
+    source = _resolve_existing_file(pipeline_raw) if isinstance(pipeline_raw, str) else pipeline_raw
+    pipeline_config = PipelineConfig.from_source(model_path, source)
     _apply_training_dit_arch_overrides(pipeline_config, dit_arch_overrides)
     _resolve_dit_quant_config(pipeline_config)
     return pipeline_config

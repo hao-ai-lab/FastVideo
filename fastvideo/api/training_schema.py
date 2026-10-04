@@ -5,10 +5,9 @@
 section. Both resolve to a ``ResolvedGeneratorConfig`` through the generator resolution steps plus their own, so the
 pipelines, loaders, and stages read one runtime config type in every mode.
 
-The field defaults are the effective values of the command line that these runs used: the argparse defaults of the
-``TrainingArgs`` and ``FastVideoArgs`` flags, including the engine offload settings, which default to off there
-(``CommandLineEngineConfig``). Comma strings of the command line (``betas``, ``validation_sampling_steps``) are typed
-tuples and lists here.
+The field defaults are the effective values of the training and preprocessing launchers, including the engine
+offload settings, which default to off (``CommandLineEngineConfig``). Sequences such as ``betas`` and
+``validation.sampling_steps`` are typed tuples and lists.
 
 ``load_resolved_run_config`` is the one loader of the entry points: ``--config <yaml>`` plus dotted overrides such as
 ``--training.optimizer.learning_rate 1e-5``.
@@ -191,8 +190,7 @@ class TrainingOptions:
 
 @dataclass
 class CommandLineOffloadConfig(OffloadConfig):
-    """Offload settings with the defaults of the ``FastVideoArgs`` command line: every offload and pinned host memory
-    off."""
+    """Offload settings of the training and preprocessing launchers: every offload and pinned host memory off."""
 
     dit: bool = False
     dit_layerwise: bool = False
@@ -204,7 +202,7 @@ class CommandLineOffloadConfig(OffloadConfig):
 
 @dataclass
 class CommandLineEngineConfig(EngineConfig):
-    """Engine settings with the offload defaults of the ``FastVideoArgs`` command line."""
+    """Engine settings with the offload defaults of the training and preprocessing launchers."""
 
     offload: CommandLineOffloadConfig = field(default_factory=CommandLineOffloadConfig)
 
@@ -247,6 +245,14 @@ def resolve_training_offload_conflicts(view: ResolutionView) -> dict[str, Any]:
             logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
             values["engine.offload.dit"] = False
     return values
+
+
+def keep_training_dit_on_device(view: ResolutionView) -> dict[str, Any]:
+    """A finetuning or distillation run keeps the DiT on the device, so ``engine.offload.dit`` turns off."""
+    training = view.get("mode") in (ExecutionMode.FINETUNING, ExecutionMode.DISTILLATION)
+    if not training or not view.get("engine.offload.dit"):
+        return {}
+    return {"engine.offload.dit": False}
 
 
 def validate_training_parallel_sizes(view: ResolutionView) -> dict[str, Any]:
@@ -298,7 +304,7 @@ def training_resolution_steps(config: GeneratorConfig, defaults: Any = None) -> 
                                       defaults,
                                       before_placeholders=(resolve_training_offload_conflicts,
                                                            validate_training_parallel_sizes),
-                                      after=(derive_lora_alpha_from_rank, ))
+                                      after=(derive_lora_alpha_from_rank, keep_training_dit_on_device))
 
 
 def derive_video_preprocess_vae_precision(view: ResolutionView) -> dict[str, Any]:
@@ -380,6 +386,7 @@ __all__ = [
     "CommandLineOffloadConfig",
     "derive_lora_alpha_from_rank",
     "fill_preprocess_model_path",
+    "keep_training_dit_on_device",
     "load_resolved_run_config",
     "preprocess_resolution_steps",
     "resolve_preprocess_config",

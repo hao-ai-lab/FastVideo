@@ -102,7 +102,7 @@ def _wan_training_config() -> TrainingConfig:
     """Training config with the Wan model definition and a two-GPU sequence-parallel layout."""
     return TrainingConfig(
         distributed=DistributedConfig(num_gpus=2, sp_size=2, hsdp_shard_dim=2),
-        pipeline_config=PipelineConfig.from_kwargs({"model_path": _MODEL_PATH}),
+        pipeline_config=PipelineConfig.from_source(_MODEL_PATH),
         model_path=_MODEL_PATH,
         vsa_sparsity=0.5,
     )
