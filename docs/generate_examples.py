@@ -293,12 +293,16 @@ def cookbook_serving_profile(recipe: dict) -> dict:
     for language, (filename, install) in COOKBOOK_CLIENTS.items():
         path = ROOT_DIR / "examples/serving/clients" / filename
         text = path.read_text(encoding="utf-8")
-        # Keep displayed snippets identical to executable sources for the
-        # checked-in H3 profile, with only endpoint and alias substitutions.
+        # Keep displayed snippets identical to the executable sources, with
+        # only endpoint and alias substitutions.
         text = text.replace("http://127.0.0.1:8000/v1", base_url)
         text = text.replace('"fasth3"', json.dumps(model)).replace("${FASTVIDEO_MODEL:-fasth3}",
                                                                    "${FASTVIDEO_MODEL:-" + model + "}")
         clients[language] = {"source": path.relative_to(ROOT_DIR).as_posix(), "code": text, "install": install}
+    # The playground router only serves H3 servers (see require_h3 in
+    # fastvideo/entrypoints/openai/playground.py), so other families must not link to it.
+    has_playground = recipe["family"] == "minimax_h3"
+    compile_enabled = ((generator.get("engine") or {}).get("compile") or {}).get("enabled")
     return {
         "source": serving["source"],
         "install": serving["install"],
@@ -307,7 +311,10 @@ def cookbook_serving_profile(recipe: dict) -> dict:
         "prepare": serving.get("prepare", ""),
         "model": model,
         "base_url": base_url,
-        "playground_url": f"http://127.0.0.1:{port}/playground/",
+        "playground_url": f"http://127.0.0.1:{port}/playground/" if has_playground else None,
+        "audio": bool(serving.get("audio")),
+        # None when the config leaves compilation at its default.
+        "compile_enabled": compile_enabled,
         "health_command": f"curl --fail-with-body http://127.0.0.1:{port}/health",
         "hardware": hardware,
         "sampling": config["default_request"]["sampling"],

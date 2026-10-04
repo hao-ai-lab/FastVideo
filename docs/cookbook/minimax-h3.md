@@ -11,7 +11,7 @@ a full model, not a demo. **V2** is the eight-step checkpoint. More forwards
 is why V2 is the higher-quality FastH3. The V2 schedule contract is in
 [FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=11">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=12">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -154,7 +154,7 @@ is why V2 is the higher-quality FastH3. The V2 schedule contract is in
             <span>Both can run locally</span>
           </div>
           <div class="cookbook-option-grid cookbook-option-grid--hardware" role="group" aria-label="How to run this recipe">
-            <button type="button" data-cookbook-mode="server" aria-pressed="false"><strong>Run a server</strong><span>Playground, cURL, or an API client</span></button>
+            <button type="button" data-cookbook-mode="server" aria-pressed="false"><strong>Run a server</strong><span data-cookbook-server-hint>Playground, cURL, or an API client</span></button>
             <button type="button" data-cookbook-mode="python" aria-pressed="false"><strong>Use Python directly</strong><span>Call the model in your own process</span></button>
           </div>
         </div>
@@ -201,17 +201,17 @@ is why V2 is the higher-quality FastH3. The V2 schedule contract is in
           </section>
           <section class="cookbook-serving__step" aria-labelledby="serving-start-heading">
             <h4 id="serving-start-heading"><span aria-hidden="true">2</span> Start the server</h4>
-            <p>Keep this terminal running while you use the playground or API clients.</p>
+            <p>Keep this terminal running while you use <span data-cookbook-playground-only>the playground or </span>API clients.</p>
             <div class="cookbook-command"><div class="cookbook-command__bar"><span>GPU machine · Terminal</span></div><pre id="cookbook-server-command"><code class="language-bash" data-cookbook-server-command></code></pre></div>
             <details class="cookbook-serving__check"><summary>Check that the server is ready</summary><p>In another terminal, this returns <code>{"status":"ok"}</code> after startup.</p><div class="cookbook-command"><pre id="cookbook-health-command"><code class="language-bash" data-cookbook-health-command></code></pre></div></details>
           </section>
           <section class="cookbook-serving__step" aria-labelledby="serving-client-heading">
             <h4 id="serving-client-heading"><span aria-hidden="true">3</span> Generate and download a video</h4>
-            <div class="cookbook-serving__playground">
+            <div class="cookbook-serving__playground" data-cookbook-playground-only>
               <div><strong>Try prompts in your browser</strong><p>Edit a prompt, generate, and watch the result. The playground uses the same server as cURL and your app.</p></div>
               <a class="cookbook-serving__launch" data-cookbook-playground href="http://127.0.0.1:8000/playground/" target="_blank" rel="noopener">Open playground <span aria-hidden="true">↗</span></a>
             </div>
-            <p class="cookbook-serving__local-hint">Open after the server is ready. On a remote GPU machine, <a href="../openai-api/#connect-your-app">forward port 8000</a> to your computer first. This opens a local page, not a hosted demo.</p>
+            <p class="cookbook-serving__local-hint"><span data-cookbook-playground-only>Open after the server is ready. </span>On a remote GPU machine, <a href="../openai-api/#connect-your-app">forward port 8000</a> to your computer first.<span data-cookbook-playground-only> This opens a local page, not a hosted demo.</span></p>
             <details class="cookbook-serving__code"><summary>Use cURL or an SDK</summary>
             <p>Each example submits a job, checks its status, and saves the MP4. The Python and JavaScript examples use OpenAI-compatible clients; no OpenAI account is needed.</p>
             <div class="cookbook-serving__clients" role="group" aria-label="API client language">
