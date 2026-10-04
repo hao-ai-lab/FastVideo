@@ -13,10 +13,11 @@ FastVideo's packed NVFP4 DiT export (``nvfp4_weights.safetensors``, read by
 ``load_minimax_h3_nvfp4_dit_export``) stores ``<module>::_nvfp4_weight`` (same
 bytes), ``::_nvfp4_weight_scale`` (the same E4M3 bytes in FlashInfer's 128x4
 swizzled layout), ``::_nvfp4_alpha`` (= ``weight_scale_2``) and
-``::_weight_global_sf`` (= 1 / ``weight_scale_2``). The calibrated weights are
-therefore carried over bit for bit; only the activation scale changes, because
-FastVideo quantizes activations per call with a unit global scale and the
-static ``input_scale`` is dropped.
+``::_weight_global_sf`` (= 1 / ``weight_scale_2``), and
+``::_nvfp4_input_global_sf`` (= 1 / ``input_scale``). The calibrated weight
+bytes and activation scale are preserved. Dropping the activation scale would
+replace its calibrated range with a unit global scale, clipping inputs above
+2688.
 
 ``--quantize-attention`` additionally quantizes the dense BF16 attention
 projections (``attn.to_{q,k,v,out}``) of every main block exactly as
@@ -109,7 +110,8 @@ def probe(buffers: dict[str, torch.Tensor], reference: torch.Tensor, rows: int =
     return ((out.float() - ref).norm() / ref.norm()).item()
 
 
-def convert_modelopt_linear(weight, scale, scale_2, device) -> tuple[dict[str, torch.Tensor], torch.Tensor, float]:
+def convert_modelopt_linear(weight, scale, scale_2, device, input_scale=None
+                            ) -> tuple[dict[str, torch.Tensor], torch.Tensor, float]:
     """Carry the calibrated bytes over; return (buffers, dequantized weight, scale-byte agreement).
 
     The agreement compares the swizzled ModelOpt scales with the scales
@@ -132,6 +134,11 @@ def convert_modelopt_linear(weight, scale, scale_2, device) -> tuple[dict[str, t
         "_nvfp4_alpha": scale_2.clone(),
         "_weight_global_sf": (1.0 / scale_2).to(torch.bfloat16),
     }
+    if input_scale is not None:
+        value = input_scale.to(dtype=torch.float32)
+        if value.numel() != 1 or not bool(torch.isfinite(value).all()) or not bool((value > 0).all()):
+            raise ValueError("ModelOpt input_scale must be a finite positive scalar")
+        buffers["_nvfp4_input_global_sf"] = value.reshape(()).reciprocal().to(device=device)
     return buffers, reference, agreement
 
 
@@ -197,7 +204,9 @@ def main() -> None:
         else:
             buffers, reference, agreement = convert_modelopt_linear(tensor(f"{prefix}.weight"),
                                                                     tensor(f"{prefix}.weight_scale"),
-                                                                    tensor(f"{prefix}.weight_scale_2"), device)
+                                                                    tensor(f"{prefix}.weight_scale_2"), device,
+                                                                    input_scale=tensor(f"{prefix}.input_scale")
+                                                                    if f"{prefix}.input_scale" in weight_map else None)
             agreements.append(agreement)
         error = probe(buffers, reference)
         worst = max(worst, error)
@@ -241,7 +250,7 @@ def main() -> None:
             shutil.copy2(extra, args.dst / extra.name)
     print(json.dumps({"exported_linears": len(modelopt) + len(attention), "modelopt_linears": len(modelopt),
                       "quantized_dense_linears": len(attention), "worst_probe_error": round(worst, 4),
-                      "static_activation_scales": len(attention) + len(modelopt) if amax_table else 0,
+                      "static_activation_scales": sum(k.endswith("::_nvfp4_input_global_sf") for k in export),
                       "gate_linears": sum(1 for p in attention if _BLOCK_GATE.match(p)),
                       "min_scale_byte_agreement": round(min(agreements), 4) if agreements else None,
                       "mean_scale_byte_agreement": round(sum(agreements) / len(agreements), 4) if agreements else None,
