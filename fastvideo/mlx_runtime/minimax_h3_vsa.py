@@ -544,11 +544,11 @@ def _key_valid_mask(block_idx, variable_block_sizes, tile_elems: int):
     return offsets[None, None, None, :] < selected_sizes[:, :, :, None]
 
 
-_REFERENCE_GATHER_TARGET_BYTES = 2 * 1024**3
+_REFERENCE_GATHER_TARGET_BYTES = 256 * 1024**2
 
 
 def _reference_gather_query_chunk(heads: int, dim: int, k_sel: int, tile_elems: int, n_q: int) -> int:
-    """Batch as many query tiles as fit in ~2 GiB of gathered BF16 K/V."""
+    """Bound gathered BF16 K/V to 256 MiB, leaving space for resident weights."""
     bytes_per_query = 4 * heads * max(k_sel, 1) * tile_elems * dim
     chunk = min(n_q, max(1, _REFERENCE_GATHER_TARGET_BYTES // max(bytes_per_query, 1)))
     return int(chunk)
