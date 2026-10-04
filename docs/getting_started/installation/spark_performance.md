@@ -213,9 +213,9 @@ A few things that surprise people on this box (beyond the memory notes above):
 
 This recipe uses the full V2 eight-forward transformer, the 50-layer NVFP4
 Qwen3-VL encoder, and the light H3 video VAE. Its configuration keeps all
-three resident on one GB10. Runtime, memory fit, and quality still need a run
-on that device. The earlier bf16 H3 memory guidance above concerns a larger
-checkpoint.
+three resident on one GB10. This stack fits in the Spark's unified memory;
+benchmark your installed runtime and review the clips before publishing a
+speed claim. The earlier bf16 H3 memory guidance above concerns a larger checkpoint.
 
 Install FastVideo from a checkout that includes the ModelOpt converter and
 FlashInfer FP4 support, following [the Spark install guide](spark.md). Sign in
@@ -255,10 +255,20 @@ copy the resulting `transformer/` directory to the Spark. Do not omit
 recipe's `num_inference_steps: 9` means nine sigma points and eight DiT
 forwards.
 
+The converter preserves ModelOpt's calibrated `input_scale` as the reciprocal
+`_nvfp4_input_global_sf`. Reconvert older exports that discarded this scale:
+unit activation scaling clips inputs above 2688. An explicit `--act-amax`
+table overrides the source calibration.
+
+On GB10 with FlashInfer 0.6.18, FastVideo fences activation quantization before
+releasing its padded input. Without this completion fence, identical H3
+requests produced different DiT latents and occasionally corrupt video.
+The fence applies to `sm_121`; other architectures retain asynchronous execution.
+
 Run `examples/inference/basic/basic_fasth3_spark_v2_nvfp4.yaml` from the
 repository root. It uses 832x480, 243 frames, VSA sparsity 0.8 with
-64-token tiles, and the full H3 VAE. It does not use frame dropping or spatial
-upscaling.
+64-token tiles, and the light H3 VAE through the `h3-vae` decode backend.
+It does not use frame dropping or spatial upscaling.
 
 ```bash
 FASTVIDEO_MINIMAX_H3_FUSIONS=all \
