@@ -8,6 +8,7 @@ from fastvideo.train.methods.distribution_matching.self_forcing import (
     SelfForcingMethod, )
 from fastvideo.train.methods.distribution_matching.streaming_long_tuning import (
     StreamingLongTuningMethod, )
+from fastvideo.train.methods.distribution_matching.tdm import TDMMethod
 
 __all__ = [
     "AnyFlowMethod",
@@ -15,4 +16,5 @@ __all__ = [
     "DMD2Method",
     "SelfForcingMethod",
     "StreamingLongTuningMethod",
+    "TDMMethod",
 ]
