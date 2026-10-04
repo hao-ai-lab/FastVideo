@@ -15,10 +15,7 @@ from fastvideo.api.inference_resolution import (
 )
 from fastvideo.api.resolution import ResolutionStep, ResolvedGeneratorConfig
 from fastvideo.api.schema import ExecutionMode, GeneratorConfig
-from fastvideo.api.training_schema import (
-    resolve_training_offload_conflicts,
-    validate_training_parallel_sizes,
-)
+from fastvideo.api.training_schema import validate_training_parallel_sizes
 from fastvideo.attention.selector import (
     _component_attention_backend_scope,
     coerce_attn_backend,
@@ -90,11 +87,11 @@ def _generator_config_mapping(
 
 
 def _training_resolution_steps(config: GeneratorConfig, defaults: Any) -> tuple[ResolutionStep, ...]:
-    """Generator resolution steps plus the training offload-conflict and parallel-size checks."""
+    """Generator resolution steps plus the training parallel-size check."""
     return generator_resolution_steps(
         config,
         defaults,
-        before_placeholders=(resolve_training_offload_conflicts, validate_training_parallel_sizes),
+        before_placeholders=(validate_training_parallel_sizes, ),
     )
 
 
@@ -132,13 +129,15 @@ def build_inference_resolved_config(
     *,
     model_path: str,
     pipeline_config: PipelineConfig | None = None,
+    dmd_denoising_steps: list[int] | None = None,
 ) -> ResolvedGeneratorConfig:
     """Build the inference-mode resolved config for validation forwards and standalone encoder loads.
 
     It has the training parallel layout, the DiT offloaded to the CPU, every
     other offload off, and ``tc.vsa_sparsity`` as the VSA sparsity.
     ``pipeline_config`` replaces ``tc.pipeline_config`` as the model
-    definition.
+    definition. ``dmd_denoising_steps`` sets ``pipeline.dmd_denoising_steps``,
+    the DMD schedule that the causal and DMD denoising stages read.
     """
     if pipeline_config is None:
         pipeline_config = tc.pipeline_config if tc.pipeline_config is not None else PipelineConfig()
@@ -150,6 +149,8 @@ def build_inference_resolved_config(
     )
     raw["engine"]["offload"]["dit"] = True
     raw["engine"]["attention"] = {"vsa_sparsity": tc.vsa_sparsity}
+    if dmd_denoising_steps is not None:
+        raw["pipeline"]["dmd_denoising_steps"] = list(dmd_denoising_steps)
     return resolve_inference_config(raw)
 
 

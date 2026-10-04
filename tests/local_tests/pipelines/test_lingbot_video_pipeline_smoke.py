@@ -146,15 +146,25 @@ def test_lingbot_video_pipeline_load_generate_smoke(tmp_path: Path) -> None:
     )
     generator = VideoGenerator.from_pretrained(
         str(model_dir),
-        num_gpus=num_gpus,
-        sp_size=sp_size,
-        use_fsdp_inference=use_fsdp_inference,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        output_type="latent",
+        {
+            "engine": {
+                "num_gpus": num_gpus,
+                "parallelism": {
+                    "sp_size": sp_size,
+                },
+                "use_fsdp_inference": use_fsdp_inference,
+                "offload": {
+                    "dit": False,
+                    "dit_layerwise": False,
+                    "vae": True,
+                    "text_encoder": True,
+                    "pin_cpu_memory": False,
+                },
+            },
+            "pipeline": {
+                "output_type": "latent",
+            },
+        },
     )
     try:
         result = generator.generate({

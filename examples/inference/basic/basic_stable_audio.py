@@ -58,7 +58,11 @@ PROMPT = "Lo-fi hip hop instrumental with vinyl crackle and gentle piano."
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
         "FastVideo/stable-audio-open-1.0-Diffusers",
-        num_gpus=1,
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+        },
     )
     output_path = "outputs_audio/stable_audio_basic/output_stable_audio.wav"
     generator.generate({

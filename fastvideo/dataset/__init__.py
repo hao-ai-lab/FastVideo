@@ -9,9 +9,9 @@ from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255, Te
 from fastvideo.dataset.validation_dataset import ValidationDataset
 
 
-def getdataset(preprocess_config) -> VideoCaptionMergedDataset:
+def getdataset(preprocess_config, model_path: str) -> VideoCaptionMergedDataset:
     """Build the video-caption dataset of ``preprocess_config``, the ``preprocess`` section of a resolved
-    ``PreprocessRunConfig``."""
+    ``PreprocessRunConfig``. ``model_path`` is the local checkpoint directory that holds the tokenizer."""
     temporal_sample = (TemporalRandomCrop(preprocess_config.num_frames)
                        if preprocess_config.do_temporal_sample else None)  # 16 x
     norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
@@ -32,15 +32,19 @@ def getdataset(preprocess_config) -> VideoCaptionMergedDataset:
     ])
     return VideoCaptionMergedDataset(data_merge_path=preprocess_config.data_merge_path,
                                      preprocess_config=preprocess_config,
+                                     model_path=model_path,
                                      transform=transform,
                                      temporal_sample=temporal_sample,
                                      transform_topcrop=transform_topcrop,
                                      seed=preprocess_config.seed)
 
 
-def gettextdataset(preprocess_config) -> TextDataset:
+def gettextdataset(preprocess_config, model_path: str) -> TextDataset:
+    """Build the text dataset of ``preprocess_config``; ``model_path`` is the local checkpoint directory that holds
+    the tokenizer."""
     return TextDataset(data_merge_path=preprocess_config.data_merge_path,
                        preprocess_config=preprocess_config,
+                       model_path=model_path,
                        seed=preprocess_config.seed)
 
 

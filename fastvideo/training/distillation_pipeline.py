@@ -97,19 +97,23 @@ class DistillationPipeline(TrainingPipeline):
         distillation = resolved_config.training.distillation
         # The teacher (real score) and the critic (fake score) load as the base Wan transformer, whatever class the
         # student uses.
-        teacher_critic_config = resolved_config.with_override(
-            "DistillationPipeline.load_modules",
-            {"pipeline.components.override_transformer_cls_name": "WanTransformer3DModel"})
+        teacher_critic_cls_name = "WanTransformer3DModel"
 
         if distillation.real_score_model_path:
             logger.info("Loading real score transformer from: %s", distillation.real_score_model_path)
             # TODO(will): can use deepcopy instead if the model is the same
-            self.real_score_transformer = self.load_module_from_path(distillation.real_score_model_path, "transformer",
-                                                                     teacher_critic_config)
+            self.real_score_transformer = self.load_module_from_path(
+                distillation.real_score_model_path,
+                "transformer",
+                resolved_config,
+                override_transformer_cls_name=teacher_critic_cls_name)
             modules["real_score_transformer"] = self.real_score_transformer
             try:
-                self.real_score_transformer_2 = self.load_module_from_path(distillation.real_score_model_path,
-                                                                           "transformer_2", teacher_critic_config)
+                self.real_score_transformer_2 = self.load_module_from_path(
+                    distillation.real_score_model_path,
+                    "transformer_2",
+                    resolved_config,
+                    override_transformer_cls_name=teacher_critic_cls_name)
                 logger.info("Loaded real score transformer_2 for MoE support")
                 modules["real_score_transformer_2"] = self.real_score_transformer_2
             except Exception:
@@ -120,12 +124,18 @@ class DistillationPipeline(TrainingPipeline):
 
         if distillation.fake_score_model_path:
             logger.info("Loading fake score transformer from: %s", distillation.fake_score_model_path)
-            self.fake_score_transformer = self.load_module_from_path(distillation.fake_score_model_path, "transformer",
-                                                                     teacher_critic_config)
+            self.fake_score_transformer = self.load_module_from_path(
+                distillation.fake_score_model_path,
+                "transformer",
+                resolved_config,
+                override_transformer_cls_name=teacher_critic_cls_name)
             modules["fake_score_transformer"] = self.fake_score_transformer
             try:
-                self.fake_score_transformer_2 = self.load_module_from_path(distillation.fake_score_model_path,
-                                                                           "transformer_2", teacher_critic_config)
+                self.fake_score_transformer_2 = self.load_module_from_path(
+                    distillation.fake_score_model_path,
+                    "transformer_2",
+                    resolved_config,
+                    override_transformer_cls_name=teacher_critic_cls_name)
                 logger.info("Loaded fake score transformer_2 for MoE support")
                 modules["fake_score_transformer_2"] = self.fake_score_transformer_2
             except Exception:
@@ -265,7 +275,11 @@ class DistillationPipeline(TrainingPipeline):
         else:
             logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
-    def load_module_from_path(self, model_path: str, module_type: str, resolved_config: ResolvedGeneratorConfig):
+    def load_module_from_path(self,
+                              model_path: str,
+                              module_type: str,
+                              resolved_config: ResolvedGeneratorConfig,
+                              override_transformer_cls_name: str | None = None):
         """
         Load a teacher (real score) or critic (fake score) module from a specific path using the same loading logic as
         the pipeline.
@@ -276,6 +290,8 @@ class DistillationPipeline(TrainingPipeline):
             model_path: Path to the model
             module_type: Type of module to load (e.g., "transformer")
             resolved_config: The config to load the module with
+            override_transformer_cls_name: The transformer class to build, over
+                ``pipeline.components.override_transformer_cls_name``
 
         Returns:
             The loaded module
@@ -311,6 +327,7 @@ class DistillationPipeline(TrainingPipeline):
             transformers_or_diffusers=transformers_or_diffusers,
             resolved_config=resolved_config,
             loading_teacher_critic_model=True,
+            override_transformer_cls_name=override_transformer_cls_name,
         )
 
         logger.info("Successfully loaded %s from %s", module_type, component_path)

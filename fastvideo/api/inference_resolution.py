@@ -11,9 +11,13 @@ precedence over a later one: user input, then environment variables, then model 
 1. Environment variables fill typed fields.
 2. Model defaults from the model's ``PipelineConfig`` fill the typed fields of ``PIPELINE_CONFIG_MIRRORS`` that are
    still unset.
-3. ``pipeline.preset_overrides.refine`` sets the LTX-2 refine fields.
+3. ``pipeline.preset_overrides.refine`` sets the LTX-2 refine fields, and the checkpoint's bundled files fill the
+   LTX-2 refine fields and the MiniMax-H3 DMD schedule that are still unset (``fastvideo.api.checkpoint_defaults``).
 4. Derived values replace placeholders and load the files that a path names.
-5. Validation steps raise on inconsistent values and decide nothing.
+5. The device policy settles the offload settings for the memory class of the local device
+   (``fastvideo.api.device_policy``).
+6. Validation steps raise on inconsistent values and decide nothing.
+7. ``fill_runtime_defaults`` gives every field that is still unset its runtime default.
 
 ``fastvideo.api.training_schema`` resolves the training and preprocessing roots with the same steps plus their own.
 """
@@ -27,6 +31,8 @@ from dataclasses import fields, is_dataclass
 from typing import Any
 
 import fastvideo.envs as envs
+from fastvideo.api.checkpoint_defaults import dmd_schedule_checkpoint_step, ltx2_refine_checkpoint_step
+from fastvideo.api.device_policy import DEVICE_POLICY_STEPS
 from fastvideo.api.parser import parse_config
 from fastvideo.api.resolution import (ResolutionStep, ResolutionView, ResolvedGeneratorConfig, resolve_generator_config,
                                       thaw)
@@ -302,6 +308,18 @@ def warn_deprecated_environment_variables(view: ResolutionView) -> dict[str, Any
     return {}
 
 
+def apply_nvfp4_fa4_env(view: ResolutionView) -> dict[str, Any]:
+    """``engine.attention.nvfp4_fa4`` exports the environment that the NVFP4 FlashAttention-4 path reads.
+
+    Sets ``FASTVIDEO_NVFP4_FA4=1`` and the ``CUTE_DSL_ENABLE_TVM_FFI`` default of the CuTe DSL kernels when the field
+    is true; decides nothing.
+    """
+    if view.get("engine.attention.nvfp4_fa4"):
+        envs.FASTVIDEO_NVFP4_FA4.set(True)
+        envs.setdefault_external("CUTE_DSL_ENABLE_TVM_FFI", "1")
+    return {}
+
+
 def torch_compile_kwargs(resolved_config: ResolvedGeneratorConfig) -> dict[str, Any]:
     """The keyword arguments for ``torch.compile`` that ``engine.compile`` describes.
 
@@ -317,9 +335,8 @@ def torch_compile_kwargs(resolved_config: ResolvedGeneratorConfig) -> dict[str, 
     return kwargs
 
 
-# Values that runtime code uses for typed fields that no earlier step decided. ``pipeline.ltx2.refine.*`` and
-# ``engine.offload.lazy_module_load`` are not listed: ``None`` there means "decide later" (the LTX-2 checkpoint defaults
-# and the device policy).
+# Values that runtime code uses for typed fields that no earlier step decided. The LTX-2 refine switches are the
+# stage-2 defaults of the LTX-2 pipeline; the checkpoint's model_index.json fills them first when it declares them.
 RUNTIME_DEFAULTS: dict[str, Any] = {
     "engine.attention.vsa_sparsity": 0.0,
     "engine.attention.vsa_tile_size": 256,
@@ -335,6 +352,10 @@ RUNTIME_DEFAULTS: dict[str, Any] = {
     "pipeline.minimax_h3.video_decode_backend": "h3-vae",
     "pipeline.ltx2.legacy_native_noise_order": False,
     "pipeline.ltx2.use_distilled_sigmas": True,
+    "pipeline.ltx2.refine.enabled": False,
+    "pipeline.ltx2.refine.add_noise": True,
+    "pipeline.ltx2.refine.guidance_scale": 1.0,
+    "pipeline.ltx2.refine.num_inference_steps": 3,
 }
 
 
@@ -356,6 +377,7 @@ VALIDATION_STEPS: tuple[ResolutionStep, ...] = (
     validate_attention_backend,
     validate_vae_parallel_decode_strategy,
     warn_deprecated_environment_variables,
+    apply_nvfp4_fa4_env,
 )
 
 
@@ -368,9 +390,10 @@ def generator_resolution_steps(
 ) -> tuple[ResolutionStep, ...]:
     """The resolution steps of any generator root, in the order that they run.
 
-    ``before_placeholders`` runs after the refine copy and before ``derive_parallel_sizes``, for checks that need the
-    -1 placeholders; ``after`` runs last. ``validate_parallel_sizes`` checks the sizes before
-    ``derive_num_gpus_from_parallel_sizes`` raises ``num_gpus``.
+    ``before_placeholders`` runs after the checkpoint fills and before ``derive_parallel_sizes``, for checks that need
+    the -1 placeholders; ``after`` runs last. The device-policy steps run after every fill and derivation and before
+    the validations. ``validate_parallel_sizes`` checks the sizes before ``derive_num_gpus_from_parallel_sizes`` raises
+    ``num_gpus``.
     """
     if defaults is None:
         defaults = build_model_pipeline_config(config)
@@ -378,11 +401,14 @@ def generator_resolution_steps(
         *ENVIRONMENT_STEPS,
         pipeline_config_defaults_step(config, defaults),
         copy_refine_preset_overrides,
+        ltx2_refine_checkpoint_step(defaults),
+        dmd_schedule_checkpoint_step(defaults),
         *before_placeholders,
         derive_parallel_sizes,
         derive_vae_tiling_from_ltx2_tile_sizes,
         vae_tiling_default_step(defaults),
         load_moba_config,
+        *DEVICE_POLICY_STEPS,
         *VALIDATION_STEPS,
         validate_parallel_sizes,
         derive_num_gpus_from_parallel_sizes,
@@ -537,6 +563,7 @@ __all__ = [
     "ENVIRONMENT_STEPS",
     "PIPELINE_CONFIG_MIRRORS",
     "VALIDATION_STEPS",
+    "apply_nvfp4_fa4_env",
     "build_model_pipeline_config",
     "copy_refine_preset_overrides",
     "derive_num_gpus_from_parallel_sizes",

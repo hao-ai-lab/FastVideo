@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from fastvideo.api.compat import from_pretrained_kwargs_to_config
+from fastvideo.api.compat import normalize_generator_config
 from fastvideo.api.inference_resolution import resolve_inference_config, torch_compile_kwargs
 from fastvideo.tests.api.config_snapshot import isolated_environment
 
@@ -144,17 +144,21 @@ class TestCompileExtrasPreserved:
     round-trip through ``CompileConfig.extras``."""
 
     def test_extras_preserved(self) -> None:
-        kwargs = {
-            "enable_torch_compile": True,
-            "torch_compile_kwargs": {
-                "backend": "inductor",
-                "options": {
-                    "triton.cudagraphs": False
-                },
-                "disable": False,
+        config = normalize_generator_config({
+            "model_path": "FastVideo/LTX2-Distilled-Diffusers",
+            "engine": {
+                "compile": {
+                    "enabled": True,
+                    "backend": "inductor",
+                    "extras": {
+                        "options": {
+                            "triton.cudagraphs": False
+                        },
+                        "disable": False,
+                    },
+                }
             },
-        }
-        config = from_pretrained_kwargs_to_config("FastVideo/LTX2-Distilled-Diffusers", kwargs)
+        })
         assert config.engine.compile.backend == "inductor"
         assert config.engine.compile.extras == {
             "options": {

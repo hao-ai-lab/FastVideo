@@ -1381,19 +1381,20 @@ class ValidationCallback(Callback):
         stages read.
         """
         tc = self.training_config
+        validation_pipeline_config = self._validation_pipeline_config(
+            transformer,
+            pipeline.resolved_config.pipeline_config,
+        )
+        dmd_denoising_steps = None
+        if (self.sampling_timesteps is not None
+                and getattr(validation_pipeline_config, "dmd_denoising_steps", None) is None):
+            dmd_denoising_steps = [int(s) for s in self.sampling_timesteps]
         forward_config = build_inference_resolved_config(
             tc,
             model_path=tc.model_path,
-            pipeline_config=self._validation_pipeline_config(
-                transformer,
-                pipeline.resolved_config.pipeline_config,
-            ),
+            pipeline_config=validation_pipeline_config,
+            dmd_denoising_steps=dmd_denoising_steps,
         )
-        if (self.sampling_timesteps is not None and forward_config.pipeline.dmd_denoising_steps is None):
-            forward_config = forward_config.with_override(
-                "validation_callback:sampling_timesteps",
-                {"pipeline.dmd_denoising_steps": [int(s) for s in self.sampling_timesteps]},
-            )
         dit_config = forward_config.pipeline_config.dit_config
         logger.info(
             "Validation forward config: local_attn_size=%s sink_size=%s boundary_ratio=%s",

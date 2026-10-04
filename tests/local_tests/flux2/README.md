@@ -83,7 +83,7 @@ pytest tests/local_tests/flux2/test_flux2_component_parity.py::test_flux2_mistra
 | Full pipeline smoke | [`../pipelines/test_flux2_pipeline_smoke.py`](../pipelines/test_flux2_pipeline_smoke.py) | Full Flux2 Mistral3/AutoProcessor wiring; short latent generate | `PASSED on Modal L40S:2` |
 | Pipeline parity | [`../pipelines/test_flux2_pipeline_parity.py`](../pipelines/test_flux2_pipeline_parity.py) | Four-step denoised latent parity vs `diffusers.Flux2KleinPipeline` | `PASSED on Modal L40S` |
 | Full pipeline parity | [`../pipelines/test_flux2_pipeline_parity.py`](../pipelines/test_flux2_pipeline_parity.py) | Short full Flux2 latent parity vs `diffusers.Flux2Pipeline` | `PASSED on Modal L40S:2, L40S:4, and H100:1` |
-| Pipeline TP2 parity | [`../pipelines/test_flux2_pipeline_parity.py`](../pipelines/test_flux2_pipeline_parity.py) | Two-worker tensor-parallel load/generate with `num_gpus=2`, `tp_size=2`, `sp_size=1` | `PASSED on Modal L40S:2` |
+| Pipeline TP2 parity | [`../pipelines/test_flux2_pipeline_parity.py`](../pipelines/test_flux2_pipeline_parity.py) | Two-worker tensor-parallel load/generate with `engine.num_gpus: 2`, `tp_size=2`, `sp_size=1` | `PASSED on Modal L40S:2` |
 | Pixel image comparison | Modal image runner | Same-prompt Diffusers vs FastVideo PNG generation and pixel metrics | `PASSED on Modal L40S` |
 
 ## Latest Remote Evidence
@@ -116,7 +116,7 @@ Flux2 modal L40S:2 statuses: component=0 smoke=0 pipeline=0
 ```
 
 The `L40S:2` run verifies the same parity suite in a two-GPU Modal allocation.
-These tests currently instantiate FastVideo with `num_gpus=1`, so this is not a
+These tests currently instantiate FastVideo with `engine.num_gpus: 1`, so this is not a
 tensor-parallel two-GPU parity test.
 
 Additional Modal `L40S:4` allocation run `ap-tQEUnFr00uOvpMZdOngebQ` applied
@@ -132,7 +132,7 @@ Flux2 modal L40S:4 statuses: component=0 smoke=0 pipeline=0
 
 Modal `L40S:2` tensor-parallel run `ap-szNgcJRiUv11lmmNFvjjPT` applied patch
 `patches/flux2-local-tp2-c850fcad.patch`, confirmed two visible L40S devices,
-and instantiated FastVideo with `num_gpus=2`, `tp_size=2`, `sp_size=1`,
+and instantiated FastVideo with `engine.num_gpus: 2`, `tp_size=2`, `sp_size=1`,
 `executor_world_size=2`.
 
 ```text
@@ -172,7 +172,7 @@ tests/local_tests/pipelines/test_flux2_pipeline_parity.py -v -s: 2 passed
 The pipeline parity file covered both strict single-GPU latent parity and true
 TP2 latent parity. The strict path reported zero max/mean/median diff for all
 four trajectory steps and final latents. The TP2 path instantiated FastVideo
-with `num_gpus=2`, `tp_size=2`, `sp_size=1`, and `executor_world_size=2`.
+with `engine.num_gpus: 2`, `tp_size=2`, `sp_size=1`, and `executor_world_size=2`.
 
 ```text
 TP2 final diff max=2.107544 mean=0.020110 median=0.015625
@@ -231,7 +231,7 @@ Current-session Modal evidence:
   `0.062500`, mean `0.008581`, median `0.007812`; only `9/8192` latent entries
   hit the max bucket.
 - Modal `L40S:4` run `ap-KKOzv9THDmTYt3gevhQkVR` passed full pipeline latent
-  parity with true TP4 (`num_gpus=4`, `tp_size=4`, `sp_size=1`). Final latent
+  parity with true TP4 (`engine.num_gpus: 4`, `tp_size=4`, `sp_size=1`). Final latent
   diff max stayed `0.062500`, mean was `0.007946`, and median was `0.007812`.
 - Modal `L40S:4` diagnostic run `ap-SlhykTTLxzsYxnsCUbCH7S` reproduced the TP4
   result with max `0.062500`, mean `0.007946`, median `0.007812`; only `6/8192`

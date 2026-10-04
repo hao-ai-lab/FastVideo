@@ -1,6 +1,6 @@
 """torch.compile A/B example for FastVideo.
 
-`enable_torch_compile=True` compiles the DiT submodules that declare
+`engine.compile.enabled: true` compiles the DiT submodules that declare
 `_compile_conditions` for a substantial end-to-end speedup (e.g.
 Wan2.1-T2V-1.3B on A100: ~-24% e2e). It is off by default.
 
@@ -35,14 +35,20 @@ def main() -> None:
     args = parser.parse_args()
 
     mode = "COMPILE" if args.compile else "BASELINE"
-    print(f"Mode: {mode}  (enable_torch_compile={args.compile})")
+    print(f"Mode: {mode}  (engine.compile.enabled={args.compile})")
 
     os.makedirs("video_samples", exist_ok=True)
 
     generator = VideoGenerator.from_pretrained(
         args.model,
-        num_gpus=args.num_gpus,
-        enable_torch_compile=args.compile,
+        {
+            "engine": {
+                "num_gpus": args.num_gpus,
+                "compile": {
+                    "enabled": args.compile,
+                },
+            },
+        },
     )
 
     def _run(tag: str) -> float:

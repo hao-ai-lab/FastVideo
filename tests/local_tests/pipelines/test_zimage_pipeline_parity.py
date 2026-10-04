@@ -290,16 +290,26 @@ def test_zimage_pipeline_latents_match_pinned_native_repo(tmp_path: Path) -> Non
 
         generator = VideoGenerator.from_pretrained(
             str(MODEL_DIR),
-            num_gpus=1,
-            tp_size=1,
-            sp_size=1,
-            use_fsdp_inference=False,
-            dit_cpu_offload=False,
-            dit_layerwise_offload=False,
-            text_encoder_cpu_offload=False,
-            vae_cpu_offload=False,
-            pin_cpu_memory=False,
-            output_type="latent",
+            {
+                "engine": {
+                    "num_gpus": 1,
+                    "parallelism": {
+                        "tp_size": 1,
+                        "sp_size": 1,
+                    },
+                    "use_fsdp_inference": False,
+                    "offload": {
+                        "dit": False,
+                        "dit_layerwise": False,
+                        "text_encoder": False,
+                        "vae": False,
+                        "pin_cpu_memory": False,
+                    },
+                },
+                "pipeline": {
+                    "output_type": "latent",
+                },
+            },
         )
         try:
             result = generator.generate({

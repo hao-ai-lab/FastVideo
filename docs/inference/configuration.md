@@ -8,7 +8,7 @@ FastVideo automatically distributes the generation process when multiple GPUs ar
 # Will use 4 GPUs in parallel for faster generation
 generator = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    num_gpus=4,
+    {"engine": {"num_gpus": 4}},
 )
 ```
 
@@ -30,10 +30,10 @@ bring-up: [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pai
 
 ## Customizing Generation
 
-`VideoGenerator.from_pretrained` accepts only common engine and offload
-keywords, such as `num_gpus` and `dit_cpu_offload`. The full list is
-`fastvideo.api.compat.FROM_PRETRAINED_KWARGS`. Pass every other startup
-setting to `VideoGenerator.from_config` at its config path, and pass
+`VideoGenerator.from_pretrained(model_path, config)` takes the startup
+settings as a nested mapping at their typed config paths, such as
+`{"engine": {"num_gpus": 2, "offload": {"dit": False}}}`; it is
+`VideoGenerator.from_config` with `model_path` added to the mapping. Pass
 generation settings to `VideoGenerator.generate` as a request:
 
 ```python
@@ -137,8 +137,8 @@ result.resolved_request.provenance("sampling.num_frames")
 # PathProvenance(..., value=81, source='fill_sampling_defaults[preset wan_t2v_1_3b]', explicit=False)
 ```
 
-`resolved_config.provenance_table()` lists every path. After startup, `resolved_config` is read-only; a later
-change is a recorded override (`resolved_config.with_override(source, values)`) that returns a new object.
+`resolved_config.provenance_table()` lists every path. Every value is decided before resolution ends, including the
+device offload policy and the checkpoint defaults; after that, `resolved_config` is read-only.
 
 ## Performance Optimization
 

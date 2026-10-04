@@ -97,7 +97,14 @@ def generate(args: argparse.Namespace) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"[gen] loading {args.model} ({args.num_gpus} GPU)...")
-    generator = VideoGenerator.from_pretrained(args.model, num_gpus=args.num_gpus)
+    generator = VideoGenerator.from_pretrained(
+        args.model,
+        {
+            "engine": {
+                "num_gpus": args.num_gpus,
+            },
+        },
+    )
     try:
         print(f"[gen] generating to {out}...")
         generator.generate({

@@ -94,7 +94,7 @@ class StableAudioLatentPreparationStage(PipelineStage):
         have to.
         """
         assert self.vae is not None, "VAE required for init_audio / inpaint_audio encoding"
-        # VAE may be CPU-parked under `vae_cpu_offload=True`.
+        # VAE may be CPU-parked under `engine.offload.vae: true`.
         self.vae = self.vae.to(device)
         if isinstance(audio, str | os.PathLike):
             audio = _decode_audio_file(audio, target_sr=self.sample_rate)

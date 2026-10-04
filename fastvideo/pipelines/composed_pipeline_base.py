@@ -13,11 +13,10 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.api.device_policy import finalize_device_offload_policy
 from fastvideo.api.inference_resolution import torch_compile_kwargs
 from fastvideo.api.resolution import ResolvedGeneratorConfig, thaw
 from fastvideo.distributed import (
-    get_local_torch_device,
+    get_local_torch_device,  # noqa: F401  # the MiniMax-H3 pipeline reads the device through this module
     get_world_group,
     maybe_init_distributed_environment_and_model_parallel,
 )
@@ -154,16 +153,6 @@ class ComposedPipelineBase(ABC):
 
         maybe_init_distributed_environment_and_model_parallel(resolved_config.engine.parallelism.tp_size,
                                                               resolved_config.engine.parallelism.sp_size)
-
-        # VideoGenerator applies this in each Worker before building the
-        # pipeline. Keep direct from_pretrained/build_pipeline callers aligned,
-        # but only after distributed setup has selected this process's device.
-        # On a config that the worker already decided, the policy changes nothing.
-        if resolved_config.inference_mode:
-            local_device = get_local_torch_device()
-            device_id = local_device.index if local_device.index is not None else 0
-            resolved_config = finalize_device_offload_policy(resolved_config, device_id)
-            self.resolved_config = resolved_config
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
@@ -727,17 +716,10 @@ class ComposedPipelineBase(ABC):
                          stage_name)
             self._install_lazy_release_hooks()
 
-    def _post_init_before_forward(self, resolved_config: ResolvedGeneratorConfig) -> ResolvedGeneratorConfig:
-        """Run ``post_init`` before the first forward, and return the config that the stages read.
-
-        ``post_init`` can rebind ``self.resolved_config`` to an override of it, such as a schedule from the
-        checkpoint. A caller that passed the pipeline's own config then runs with the rebound one.
-        """
-        if self.post_init_called:
-            return resolved_config
-        passed_own_config = resolved_config is self.resolved_config
-        self.post_init()
-        return self.resolved_config if passed_own_config else resolved_config
+    def _post_init_before_forward(self) -> None:
+        """Run ``post_init`` once, before the first forward."""
+        if not self.post_init_called:
+            self.post_init()
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
@@ -755,7 +737,7 @@ class ComposedPipelineBase(ABC):
         Returns:
             ForwardBatch: The batch with the generated video or image.
         """
-        resolved_config = self._post_init_before_forward(resolved_config)
+        self._post_init_before_forward()
 
         # Execute each stage
         logger.info("Running pipeline stages: %s", self._stage_name_mapping.keys())

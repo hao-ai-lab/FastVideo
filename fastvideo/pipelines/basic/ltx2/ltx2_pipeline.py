@@ -18,88 +18,6 @@ from fastvideo.pipelines.stages import (DecodingStage, InputValidationStage, LTX
 
 logger = init_logger(__name__)
 
-# Values of the stage-2 refine settings that neither the input nor the checkpoint's model_index.json decided.
-_REFINE_DEFAULTS: dict[str, Any] = {
-    "pipeline.ltx2.refine.enabled": False,
-    "pipeline.ltx2.refine.add_noise": True,
-    "pipeline.ltx2.refine.guidance_scale": 1.0,
-    "pipeline.ltx2.refine.num_inference_steps": 3,
-}
-# Refine component paths, by the model_index.json key that supplies the checkpoint's default.
-_REFINE_PATH_KEYS = {
-    "pipeline.ltx2.refine.transformer_path": "fastvideo_refine_transformer_path",
-    "pipeline.ltx2.refine.lora_path": "fastvideo_refine_lora_path",
-    "pipeline.ltx2.refine.noise_path": "fastvideo_refine_noise_path",
-    "pipeline.ltx2.refine.audio_noise_path": "fastvideo_refine_audio_noise_path",
-}
-
-
-def _resolve_refine_path(model_path: str, value: str | None) -> str | None:
-    """Resolve a refine component path, preferring paths inside the local
-    model snapshot when the value is relative."""
-    if value is None:
-        return None
-    if os.path.isabs(value):
-        return value
-    candidate = os.path.join(model_path, value)
-    if os.path.exists(candidate):
-        return candidate
-    return value
-
-
-def _resolve_refine_upsampler_path(model_path: str, model_index: dict[str, Any]) -> str | None:
-    """Resolve the refine upsampler directory for a local model snapshot.
-
-    model_index.json keys ("fastvideo_refine_upsampler_path", then
-    "spatial_upsampler") are the documented override and win when present.
-    Otherwise probe the snapshot root: published LTX-2 distilled checkpoints
-    bundle the upsampler weights on disk (spelled "spatial_upscaler")
-    without declaring them in model_index.json.
-    """
-    path = _resolve_refine_path(model_path, model_index.get("fastvideo_refine_upsampler_path"))
-    if path is None and "spatial_upsampler" in model_index:
-        path = _resolve_refine_path(model_path, "spatial_upsampler")
-    if path is None:
-        for dirname in ("spatial_upscaler", "spatial_upsampler"):
-            candidate = os.path.join(model_path, dirname)
-            if os.path.isdir(candidate):
-                return candidate
-    return path
-
-
-def _checkpoint_refine_values(resolved_config: ResolvedGeneratorConfig, model_path: str,
-                              model_index: dict[str, Any]) -> dict[str, Any]:
-    """The refine settings that the checkpoint's ``model_index.json`` and the refine defaults change.
-
-    Distilled checkpoints bundle ``fastvideo_refine_*`` defaults so the pipeline can configure itself. Each one fills
-    its setting only while the setting is ``None``, so a value from the input always wins; ``fastvideo_refine_enabled``
-    can only turn refine on. The upsampler falls back to a directory in the snapshot. The four switches that are still
-    ``None`` afterwards take ``_REFINE_DEFAULTS``. The result holds only the paths whose value changes.
-    """
-
-    def current(path: str) -> Any:
-        return resolved_config.provenance(path).value
-
-    values: dict[str, Any] = {}
-    if model_index.get("fastvideo_refine_enabled") is True and current("pipeline.ltx2.refine.enabled") is None:
-        values["pipeline.ltx2.refine.enabled"] = True
-    if current("pipeline.components.upsampler_weights") is None:
-        values["pipeline.components.upsampler_weights"] = _resolve_refine_upsampler_path(model_path, model_index)
-    for path, key in _REFINE_PATH_KEYS.items():
-        if current(path) is None:
-            values[path] = _resolve_refine_path(model_path, model_index.get(key))
-    for path, key, convert in (
-        ("pipeline.ltx2.refine.num_inference_steps", "fastvideo_refine_num_inference_steps", int),
-        ("pipeline.ltx2.refine.guidance_scale", "fastvideo_refine_guidance_scale", float),
-        ("pipeline.ltx2.refine.add_noise", "fastvideo_refine_add_noise", bool),
-    ):
-        if current(path) is None and model_index.get(key) is not None:
-            values[path] = convert(model_index[key])
-    for path, default in _REFINE_DEFAULTS.items():
-        if values.get(path, current(path)) is None:
-            values[path] = default
-    return {path: value for path, value in values.items() if value != current(path)}
-
 
 class LTX2Pipeline(LoRAPipeline):
 
@@ -237,13 +155,6 @@ class LTX2Pipeline(LoRAPipeline):
     ) -> dict[str, Any]:
         model_index = self._load_config(self.model_path)
         logger.info("Loading pipeline modules from config: %s", model_index)
-
-        # Apply the refine defaults bundled in model_index.json, then the remaining refine defaults. The pipeline owns
-        # its config; later stages read the rebound one.
-        refine_values = _checkpoint_refine_values(resolved_config, self.model_path, model_index)
-        if refine_values:
-            resolved_config = resolved_config.with_override("checkpoint:model_index.json", refine_values)
-            self.resolved_config = resolved_config
 
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")

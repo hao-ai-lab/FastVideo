@@ -57,10 +57,7 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             loaded_modules,
         )
         # The teacher (real score) and critic (fake score) load as the bidirectional MatrixGame2WanModel class.
-        teacher_config = resolved_config.with_override(
-            "MatrixGame2SelfForcingDistillationPipeline.load_modules",
-            {"pipeline.components.override_transformer_cls_name": "MatrixGame2WanModel"},
-        )
+        teacher_cls_name = "MatrixGame2WanModel"
         if loaded_modules is not None and "real_score_transformer" in loaded_modules:
             self.real_score_transformer = loaded_modules["real_score_transformer"]
         elif resolved_config.training.distillation.real_score_model_path:
@@ -71,7 +68,8 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             self.real_score_transformer = self.load_module_from_path(
                 resolved_config.training.distillation.real_score_model_path,
                 "transformer",
-                teacher_config,
+                resolved_config,
+                override_transformer_cls_name=teacher_cls_name,
             )
         else:
             raise ValueError("real_score_model_path is required for DMD distillation pipeline")
@@ -87,7 +85,8 @@ class MatrixGame2SelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             self.fake_score_transformer = self.load_module_from_path(
                 resolved_config.training.distillation.fake_score_model_path,
                 "transformer",
-                teacher_config,
+                resolved_config,
+                override_transformer_cls_name=teacher_cls_name,
             )
         else:
             raise ValueError("fake_score_model_path is required for DMD distillation pipeline")

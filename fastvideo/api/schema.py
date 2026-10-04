@@ -1,19 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
-from dataclasses import MISSING, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal
-
-# Field metadata key that holds the ``VideoGenerator.from_pretrained`` keyword that sets a field.
-# ``fastvideo.api.compat.from_pretrained_kwargs_to_config`` maps each keyword of ``FROM_PRETRAINED_KWARGS`` to the
-# field that declares it.
-FLAT_NAME = "flat_name"
-
-
-def flat_field(flat_name: str, default: Any = MISSING, *, default_factory: Any = MISSING) -> Any:
-    """Declare a dataclass field that the ``VideoGenerator.from_pretrained`` keyword ``flat_name`` sets."""
-    return field(default=default, default_factory=default_factory, metadata={FLAT_NAME: flat_name})
 
 
 class ExecutionMode(str, Enum):
@@ -69,23 +59,23 @@ class ServerConfig:
 
 @dataclass
 class ParallelismConfig:
-    tp_size: int = flat_field("tp_size", -1)
-    sp_size: int = flat_field("sp_size", -1)
-    hsdp_replicate_dim: int = flat_field("hsdp_replicate_dim", 1)
-    hsdp_shard_dim: int = flat_field("hsdp_shard_dim", -1)
-    dist_timeout: int | None = flat_field("dist_timeout", None)
+    tp_size: int = -1
+    sp_size: int = -1
+    hsdp_replicate_dim: int = 1
+    hsdp_shard_dim: int = -1
+    dist_timeout: int | None = None
     master_port: int | None = None
     """Port of the rendezvous that the executor opens for its workers. ``None`` picks an open port."""
 
 
 @dataclass
 class OffloadConfig:
-    dit: bool = flat_field("dit_cpu_offload", True)
-    dit_layerwise: bool = flat_field("dit_layerwise_offload", True)
-    text_encoder: bool = flat_field("text_encoder_cpu_offload", True)
-    image_encoder: bool = flat_field("image_encoder_cpu_offload", True)
-    vae: bool = flat_field("vae_cpu_offload", True)
-    pin_cpu_memory: bool = flat_field("pin_cpu_memory", True)
+    dit: bool = True
+    dit_layerwise: bool = True
+    text_encoder: bool = True
+    image_encoder: bool = True
+    vae: bool = True
+    pin_cpu_memory: bool = True
     # Not a CPU offload: loads each heavy component on first use and frees it
     # after the last stage that needs it, so peak memory is the largest
     # overlapping set rather than the sum. Grouped here because it is the same
@@ -111,7 +101,7 @@ class CompileConfig:
     leaving it empty inherits the master kwargs.
     """
 
-    enabled: bool = flat_field("enable_torch_compile", False)
+    enabled: bool = False
     backend: str | None = None
     fullgraph: bool | None = None
     mode: str | None = None
@@ -144,6 +134,9 @@ class AttentionConfig:
     """Path to a JSON config for V-MoBA attention."""
     moba_config: dict[str, Any] | None = None
     """V-MoBA attention settings. Resolution loads them from ``moba_config_path`` when that path is set."""
+    nvfp4_fa4: bool = False
+    """FlashAttention-4 with Q and K quantized to NVFP4. Resolution exports ``FASTVIDEO_NVFP4_FA4=1`` and the
+    ``CUTE_DSL_ENABLE_TVM_FFI`` default that the CuTe DSL kernels need when this is true."""
 
 
 Precision = Literal["fp32", "fp16", "bf16"]
@@ -169,16 +162,16 @@ class QuantizationConfig:
 
 @dataclass
 class EngineConfig:
-    num_gpus: int = flat_field("num_gpus", 1)
-    execution_backend: Literal["mp", "ray"] = flat_field("distributed_executor_backend", "mp")
+    num_gpus: int = 1
+    execution_backend: Literal["mp", "ray"] = "mp"
     parallelism: ParallelismConfig = field(default_factory=ParallelismConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     compile: CompileConfig = field(default_factory=CompileConfig)
     attention: AttentionConfig = field(default_factory=AttentionConfig)
     precision: PrecisionConfig = field(default_factory=PrecisionConfig)
-    enable_stage_verification: bool = flat_field("enable_stage_verification", True)
-    use_fsdp_inference: bool = flat_field("use_fsdp_inference", False)
-    disable_autocast: bool = flat_field("disable_autocast", False)
+    enable_stage_verification: bool = True
+    use_fsdp_inference: bool = False
+    disable_autocast: bool = False
     quantization: QuantizationConfig | None = None
 
 
@@ -191,9 +184,9 @@ class ComponentConfig:
     transformer_2_weights: str | None = None
     vae_weights: str | None = None
     upsampler_weights: str | None = None
-    lora_path: str | None = flat_field("lora_path", None)
+    lora_path: str | None = None
     lora_nickname: str = "default"
-    lora_strength: float = flat_field("lora_strength", 1.0)
+    lora_strength: float = 1.0
     lora_target_modules: list[str] | None = None
     """Module name substrings that restrict LoRA injection, such as ``["q_proj", "v_proj"]``. ``None`` adapts the
     default modules."""
@@ -205,10 +198,11 @@ class ComponentConfig:
 class LTX2RefineOptions:
     """Stage-2 refine settings. ``pipeline.components.upsampler_weights`` holds the refine upsampler.
 
-    Resolution copies ``pipeline.preset_overrides.refine`` into the fields of the same name. When the pipeline loads,
-    the ``fastvideo_refine_*`` defaults of the checkpoint's ``model_index.json`` fill each field that is still ``None``
-    (``fastvideo_refine_enabled`` can only turn refine on); ``enabled``, ``add_noise``, ``guidance_scale``, and
-    ``num_inference_steps`` that are still ``None`` then become ``False``, ``True``, 1.0, and 3.
+    Resolution copies ``pipeline.preset_overrides.refine`` into the fields of the same name; then the step
+    ``fill_ltx2_refine_from_checkpoint`` fills each field that is still ``None`` from the ``fastvideo_refine_*``
+    defaults of the checkpoint's ``model_index.json`` (``fastvideo_refine_enabled`` can only turn refine on); and
+    ``fill_runtime_defaults`` gives ``enabled``, ``add_noise``, ``guidance_scale``, and ``num_inference_steps`` that
+    are still ``None`` the values ``False``, ``True``, 1.0, and 3.
     """
 
     enabled: bool | None = None
@@ -305,7 +299,7 @@ class PipelineSelection:
     """Timesteps of a few-step distilled (DMD) sampler. ``None`` keeps the model's default."""
     boundary_ratio: float | None = None
     """Mixture-of-experts switch point of a two-transformer model. ``None`` keeps the model's default."""
-    output_type: str = flat_field("output_type", "pil")
+    output_type: str = "pil"
     """Output of the decoding stage: ``pil`` for decoded frames, ``latent`` to skip the VAE decode."""
     dit: dict[str, Any] = field(default_factory=dict)
     """Overrides for fields of the model's DiT config, such as ``prefix``."""
@@ -323,8 +317,8 @@ class GeneratorConfig:
     model_path: str
     mode: ExecutionMode = ExecutionMode.INFERENCE
     """What the run does: inference, preprocessing, finetuning, or distillation."""
-    revision: str | None = flat_field("revision", None)
-    trust_remote_code: bool = flat_field("trust_remote_code", False)
+    revision: str | None = None
+    trust_remote_code: bool = False
     engine: EngineConfig = field(default_factory=EngineConfig)
     pipeline: PipelineSelection = field(default_factory=PipelineSelection)
 

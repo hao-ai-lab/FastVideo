@@ -6,12 +6,18 @@ OUTPUT_PATH = "video_samples_lucy_edit"
 def main():
     generator = VideoGenerator.from_pretrained(
         "decart-ai/Lucy-Edit-Dev",
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=True,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": True,
+                    "vae": False,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,
+                },
+            },
+        },
     )
 
     prompt = ("Change the apron and blouse to a classic clown costume: satin "

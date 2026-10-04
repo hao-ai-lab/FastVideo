@@ -200,7 +200,15 @@ def _fastvideo_image(device) -> np.ndarray:
         from fastvideo import VideoGenerator
     except ImportError as e:
         pytest.skip(f"FastVideo VideoGenerator unavailable: {e}")
-    gen = VideoGenerator.from_pretrained(str(LOCAL_WEIGHTS_DIR), num_gpus=1, trust_remote_code=True)
+    gen = VideoGenerator.from_pretrained(
+        str(LOCAL_WEIGHTS_DIR),
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+            "trust_remote_code": True,
+        },
+    )
     result = gen.generate({
         "prompt": SAMPLE_PROMPT,
         "sampling": {

@@ -212,11 +212,17 @@ def test_magi_human_pipeline_smoke() -> None:
 
     generator = VideoGenerator.from_pretrained(
         diffusers_path,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": False,
+                    "vae": False,
+                    "text_encoder": False,
+                },
+            },
+        },
     )
     try:
         result = generator.generate({

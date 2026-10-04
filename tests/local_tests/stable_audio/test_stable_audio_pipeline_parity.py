@@ -161,11 +161,17 @@ def test_stable_audio_pipeline_official_parity():
     from fastvideo import VideoGenerator
     generator = VideoGenerator.from_pretrained(
         _FV_REPO_ID,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": False,
+                    "vae": False,
+                    "text_encoder": False,
+                },
+            },
+        },
     )
     try:
         result = generator.generate({

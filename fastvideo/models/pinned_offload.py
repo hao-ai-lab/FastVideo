@@ -63,7 +63,7 @@ def load(module: nn.Module, device: torch.device, pin: bool = True) -> nn.Module
         return module.to(device)
     missing = [(name, t) for name, t in _tensors(module) if t.data.device != device]
     if not missing:
-        # Already resident, which is what ``vae_cpu_offload=False`` leaves. Taking
+        # Already resident, which is what ``engine.offload.vae: false`` leaves. Taking
         # host copies here would pull the whole module back over PCIe once and keep
         # a pinned mirror of it for the life of the process, for a module that never
         # leaves the device.

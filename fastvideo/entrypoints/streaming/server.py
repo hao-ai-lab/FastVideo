@@ -189,7 +189,7 @@ def run_server(serve_config: ServeConfig, *, generator: _GeneratorProto | None =
     if generator is None:
         from fastvideo import VideoGenerator  # lazy to avoid boot cost
 
-        generator = VideoGenerator.from_pretrained(config=serve_config.generator)
+        generator = VideoGenerator.from_config(serve_config.generator)
     app = build_app(serve_config, generator)
     uvicorn.run(
         app,

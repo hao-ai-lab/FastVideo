@@ -199,7 +199,8 @@ def test_lazy_module_load_owns_deferral_when_both_would_arm(monkeypatch) -> None
 
     monkeypatch.setattr(ComposedPipelineBase, "load_modules", fake_load)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
-    MiniMaxH3Pipeline("unused/for-this-test", _h3_config(sequential_load=True))
+    # Resolution turns lazy_module_load on for unified memory; the pipeline reads that decision.
+    MiniMaxH3Pipeline("unused/for-this-test", _h3_config(lazy_module_load=True, sequential_load=True))
 
     assert loads == [list(MiniMaxH3Pipeline._required_config_modules)]
     assert all(name in loads[0] for name in _DENOISE_MODULE_NAMES)

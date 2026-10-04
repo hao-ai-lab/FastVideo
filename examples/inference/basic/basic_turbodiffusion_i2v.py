@@ -14,7 +14,11 @@ def main() -> None:
     # TurboDiffusion I2V: 1-4 step image-to-video generation
     generator = VideoGenerator.from_pretrained(
         MODEL_PATH,
-        num_gpus=2,
+        {
+            "engine": {
+                "num_gpus": 2,
+            },
+        },
     )
 
     # Example prompt and image for I2V

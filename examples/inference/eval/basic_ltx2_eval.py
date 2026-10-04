@@ -58,7 +58,11 @@ def main() -> None:
     # ----- generation (matches examples/inference/basic/basic_ltx2.py) -----
     generator = VideoGenerator.from_pretrained(
         "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+        },
     )
 
     output_path = "outputs_video/ltx2_basic/output_ltx2_base_t2v_1088_1920_1.1.mp4"

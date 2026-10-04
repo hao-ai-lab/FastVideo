@@ -387,6 +387,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
     def __init__(self,
                  data_merge_path: str,
                  preprocess_config,
+                 model_path: str,
                  transform,
                  temporal_sample,
                  transform_topcrop,
@@ -397,8 +398,8 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset, torch.distribu
         self.temporal_sample = temporal_sample
         self.seed = seed
 
-        # Initialize tokenizer
-        tokenizer_path = os.path.join(preprocess_config.model_path, "tokenizer")
+        # Initialize tokenizer from the local checkpoint directory
+        tokenizer_path = os.path.join(model_path, "tokenizer")
         tokenizer = None
         if os.path.exists(tokenizer_path):
             try:
@@ -565,13 +566,13 @@ class TextDataset(torch.utils.data.IterableDataset, torch.distributed.checkpoint
     This dataset processes text data through text encoding stages only.
     """
 
-    def __init__(self, data_merge_path: str, preprocess_config, start_idx: int = 0, seed: int = 42):
+    def __init__(self, data_merge_path: str, preprocess_config, model_path: str, start_idx: int = 0, seed: int = 42):
         self.data_merge_path = data_merge_path
         self.start_idx = start_idx
         self.seed = seed
 
-        # Initialize tokenizer
-        tokenizer_path = os.path.join(preprocess_config.model_path, "tokenizer")
+        # Initialize tokenizer from the local checkpoint directory
+        tokenizer_path = os.path.join(model_path, "tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, cache_dir=preprocess_config.cache_dir)
 
         # Initialize text encoding stage

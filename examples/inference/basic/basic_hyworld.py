@@ -35,13 +35,19 @@ def main():
     print("\nInitializing VideoGenerator for HYWorld...")
     generator = VideoGenerator.from_pretrained(
         "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
-        num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
-        image_encoder_cpu_offload=True,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": True,
+                "offload": {
+                    "dit": True,
+                    "vae": True,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,
+                    "image_encoder": True,
+                },
+            },
+        },
     )
 
     # Generate video

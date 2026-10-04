@@ -60,12 +60,18 @@ def main():
 
     generator = VideoGenerator.from_pretrained(
         args.model_path,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": False,
+                    "vae": True,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,
+                },
+            },
+        },
     )
 
     video = generator.generate({

@@ -364,7 +364,7 @@ class PreprocessPipeline_MatrixGame2_ODE_Trajectory(BasePreprocessPipeline):
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
         # Loading dataset
-        train_dataset = getdataset(preprocess_config)
+        train_dataset = getdataset(preprocess_config, self.model_path)
 
         self.preprocess_dataloader = DataLoader(
             train_dataset,

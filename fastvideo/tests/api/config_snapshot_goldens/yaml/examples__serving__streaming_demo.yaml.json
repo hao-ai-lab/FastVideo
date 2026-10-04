@@ -332,6 +332,7 @@
     "backend": null,
     "moba_config": {},
     "moba_config_path": null,
+    "nvfp4_fa4": false,
     "vsa_sparsity": 0.0,
     "vsa_tile_size": 256
    },

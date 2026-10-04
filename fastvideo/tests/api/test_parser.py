@@ -140,6 +140,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "vsa_tile_size": None,
                     "moba_config_path": None,
                     "moba_config": None,
+                    "nvfp4_fa4": False,
                 },
                 "precision": {
                     "dit": None,

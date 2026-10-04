@@ -248,7 +248,7 @@ class Kandinsky5DenoisingStage(PipelineStage):
         transformer ``ValidationCallback`` reuses from training (whose
         ``engine.precision.dit`` reflects the fp32 master-weight
         load dtype, not the actual bf16 compute dtype) and multi-GPU
-        ``use_fsdp_inference=True`` runs.
+        ``engine.use_fsdp_inference: true`` runs.
 
         For that FSDP case, read the policy itself
         (``set_mixed_precision_policy`` records it right before

@@ -1,21 +1,34 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Offload decisions that depend on the device a worker binds, as overrides of a resolved config.
+"""Offload decisions that depend on the device class of the local process, as resolution steps.
 
-Resolution runs before any device is chosen, so it cannot tell whether host and device memory are one physical pool.
-A worker calls :func:`finalize_device_offload_policy` once after it binds its device and keeps the returned config.
-Each decision is a recorded override (``device_policy:<name>``) on a new config object; the input is unchanged.
+The steps run in the main process during resolution, so every worker starts from a config whose offload settings are
+final. They query the platform for ``LOCAL_DEVICE_ID`` (device 0 of the local process) and assume that every device of
+a node has the same memory class: a node mixes no unified-memory and discrete devices. Importing ``fastvideo``
+initializes the CUDA driver already, so the query adds no new initialization; when the platform cannot answer (for
+example ``torch.cuda`` is unavailable), the steps decide "not unified".
 
-:func:`offload_disabled_on_unified_memory` answers the same question without overriding, for a loader that chooses a
-target device for one component.
+``UNIFIED_MEMORY_OFFLOAD_PATHS`` names the offload settings that the unified-memory policy turns off, by the flag name
+that loaders and log messages use.
+
+``APPLY_DEVICE_POLICY`` is the switch of every step here. The test isolation
+(``fastvideo/tests/api/config_snapshot.py::isolated_environment``) sets it to ``False`` the same way it blocks
+downloads, so the golden snapshots do not depend on the machine that produced them; the steps then decide nothing and
+the offload settings keep their input values.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from fastvideo.api.resolution import ResolvedGeneratorConfig
+from fastvideo.api.resolution import ResolutionStep, ResolutionView
+from fastvideo.api.schema import ExecutionMode
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+# The device whose memory class decides the policy: device 0 of the local process (see the module docstring).
+LOCAL_DEVICE_ID = 0
+# Whether the device-policy steps decide anything; the test isolation turns it off (see the module docstring).
+APPLY_DEVICE_POLICY = True
 
 # Offload settings that trade device memory for host memory, by the flag name that loaders and log messages use. All
 # of them are a loss on a device whose host and device memory are the same physical pool.
@@ -40,107 +53,91 @@ def _device_name(device_id: int) -> str:
         return current_platform.device_name
 
 
-def has_unified_memory(device_id: int) -> bool:
-    """Whether the bound device shares one memory pool with the host.
-
-    CUDA's probe reads runtime device properties and may initialize a CUDA context, so call it only in a process
-    that owns ``device_id``.
-    """
+def has_unified_memory(device_id: int = LOCAL_DEVICE_ID) -> bool:
+    """Whether ``device_id`` shares one memory pool with the host; ``False`` when the platform cannot answer."""
     from fastvideo.platforms import current_platform
 
-    return bool(current_platform.has_unified_memory(device_id))
-
-
-def offload_disabled_on_unified_memory(device_id: int, offload_flag: str | None = None) -> bool:
-    """Whether the unified-memory policy turns off ``offload_flag`` (any offload when ``None``) on ``device_id``."""
-    if not has_unified_memory(device_id):
+    try:
+        return bool(current_platform.has_unified_memory(device_id))
+    except Exception as error:
+        logger.debug("Treating device %d as discrete: the unified-memory query failed (%s)", device_id, error)
         return False
-    return offload_flag is None or offload_flag in UNIFIED_MEMORY_OFFLOAD_PATHS
 
 
-def disable_offload_on_unified_memory(resolved_config: ResolvedGeneratorConfig,
-                                      device_id: int,
-                                      *,
-                                      unified: bool | None = None) -> ResolvedGeneratorConfig:
-    """Turn off every enabled host offload when ``device_id`` has unified memory.
-
-    ``unified`` is the probe result when the caller already has it. The decision is the override
-    ``device_policy:unified_memory``.
-    """
-    if unified is None:
-        unified = has_unified_memory(device_id)
-    if not unified:
-        return resolved_config
-    enabled = [flag for flag, path in UNIFIED_MEMORY_OFFLOAD_PATHS.items() if _typed_value(resolved_config, path)]
+def apply_unified_memory_offload_policy(view: ResolutionView) -> dict[str, Any]:
+    """Every enabled host offload of ``UNIFIED_MEMORY_OFFLOAD_PATHS`` turns off when the local device has unified
+    memory: moving weights to the host duplicates them instead of freeing device memory."""
+    if not APPLY_DEVICE_POLICY or not has_unified_memory(LOCAL_DEVICE_ID):
+        return {}
+    enabled = [flag for flag, path in UNIFIED_MEMORY_OFFLOAD_PATHS.items() if view.get(path)]
     if not enabled:
-        return resolved_config
-    device_name = _device_name(device_id)
+        return {}
+    device_name = _device_name(LOCAL_DEVICE_ID)
     for flag in enabled:
         logger.info(
             "Disabling %s: %s has unified memory, so moving weights to the host duplicates them rather than "
             "freeing device memory.", flag, device_name)
-    return resolved_config.with_override("device_policy:unified_memory",
-                                         {UNIFIED_MEMORY_OFFLOAD_PATHS[flag]: False
-                                          for flag in enabled})
+    return {UNIFIED_MEMORY_OFFLOAD_PATHS[flag]: False for flag in enabled}
 
 
-def resolve_device_offload_conflicts(resolved_config: ResolvedGeneratorConfig) -> ResolvedGeneratorConfig:
-    """Turn off offload modes that cannot run together on this platform.
+def fill_lazy_module_load(view: ResolutionView) -> dict[str, Any]:
+    """An unset ``engine.offload.lazy_module_load`` becomes ``True`` on unified memory for inference and ``False``
+    otherwise."""
+    if not APPLY_DEVICE_POLICY or view.get("engine.offload.lazy_module_load") is not None:
+        return {}
+    training = view.get("mode") in (ExecutionMode.FINETUNING, ExecutionMode.DISTILLATION)
+    lazy_module_load = not training and has_unified_memory(LOCAL_DEVICE_ID)
+    if lazy_module_load:
+        logger.info(
+            "Enabling lazy_module_load: %s has unified memory, so encoder, DiT, and VAEs cannot stay resident "
+            "together. Set engine.offload.lazy_module_load to false to keep every component loaded.",
+            _device_name(LOCAL_DEVICE_ID),
+        )
+    return {"engine.offload.lazy_module_load": lazy_module_load}
 
-    On MPS, FSDP inference and layerwise offload turn off. With layerwise offload on, FSDP inference and DiT CPU
-    offload turn off.
-    """
+
+def apply_mps_offload_policy(view: ResolutionView) -> dict[str, Any]:
+    """On MPS, FSDP inference and layerwise offload turn off."""
+    if not APPLY_DEVICE_POLICY:
+        return {}
     from fastvideo.platforms import current_platform
 
-    if current_platform.is_mps():
-        resolved_config = resolved_config.with_override("device_policy:mps", {
-            "engine.use_fsdp_inference": False,
-            "engine.offload.dit_layerwise": False
-        })
-    if _typed_value(resolved_config, "engine.offload.dit_layerwise"):
-        if _typed_value(resolved_config, "engine.use_fsdp_inference"):
-            logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
-            resolved_config = resolved_config.with_override("device_policy:layerwise_offload",
-                                                            {"engine.use_fsdp_inference": False})
-        if _typed_value(resolved_config, "engine.offload.dit"):
-            logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
-            resolved_config = resolved_config.with_override("device_policy:layerwise_offload",
-                                                            {"engine.offload.dit": False})
-    return resolved_config
+    if not current_platform.is_mps():
+        return {}
+    return {"engine.use_fsdp_inference": False, "engine.offload.dit_layerwise": False}
 
 
-def finalize_device_offload_policy(resolved_config: ResolvedGeneratorConfig,
-                                   device_id: int = 0) -> ResolvedGeneratorConfig:
-    """Apply the device-local memory policy of ``device_id``, then resolve incompatible offload modes.
-
-    On unified memory every host offload turns off. An unset ``engine.offload.lazy_module_load`` becomes ``True`` on
-    unified memory for inference and ``False`` otherwise. Applying the policy to its own result changes nothing.
-    """
-    unified = has_unified_memory(device_id)
-    resolved_config = disable_offload_on_unified_memory(resolved_config, device_id, unified=unified)
-    if _typed_value(resolved_config, "engine.offload.lazy_module_load") is None:
-        lazy_module_load = unified and not resolved_config.training_mode
-        resolved_config = resolved_config.with_override("device_policy:lazy_module_load",
-                                                        {"engine.offload.lazy_module_load": lazy_module_load})
-        if lazy_module_load:
-            logger.info(
-                "Enabling lazy_module_load: %s has unified memory, so encoder, DiT, and VAEs cannot stay "
-                "resident together. Set engine.offload.lazy_module_load to false to keep every component loaded.",
-                _device_name(device_id),
-            )
-    return resolve_device_offload_conflicts(resolved_config)
+def apply_layerwise_offload_conflicts(view: ResolutionView) -> dict[str, Any]:
+    """With layerwise offload on, FSDP inference and DiT CPU offload turn off."""
+    if not APPLY_DEVICE_POLICY or not view.get("engine.offload.dit_layerwise"):
+        return {}
+    values: dict[str, Any] = {}
+    if view.get("engine.use_fsdp_inference"):
+        logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
+        values["engine.use_fsdp_inference"] = False
+    if view.get("engine.offload.dit"):
+        logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
+        values["engine.offload.dit"] = False
+    return values
 
 
-def _typed_value(resolved_config: ResolvedGeneratorConfig, path: str) -> Any:
-    """The resolved value of a dotted path."""
-    return resolved_config.provenance(path).value
-
+# The device-policy steps in the order that they run: the unified-memory policy first, so the conflict steps see the
+# offload settings that survive it.
+DEVICE_POLICY_STEPS: tuple[ResolutionStep, ...] = (
+    apply_unified_memory_offload_policy,
+    fill_lazy_module_load,
+    apply_mps_offload_policy,
+    apply_layerwise_offload_conflicts,
+)
 
 __all__ = [
+    "APPLY_DEVICE_POLICY",
+    "DEVICE_POLICY_STEPS",
+    "LOCAL_DEVICE_ID",
     "UNIFIED_MEMORY_OFFLOAD_PATHS",
-    "disable_offload_on_unified_memory",
-    "finalize_device_offload_policy",
+    "apply_layerwise_offload_conflicts",
+    "apply_mps_offload_policy",
+    "apply_unified_memory_offload_policy",
+    "fill_lazy_module_load",
     "has_unified_memory",
-    "offload_disabled_on_unified_memory",
-    "resolve_device_offload_conflicts",
 ]

@@ -166,22 +166,26 @@ Enable FP4 attention via the `--nvfp4_fa4` flag:
 python examples/inference/optimizations/fp4_attn_wan2_1_1_3b.py --nvfp4_fa4
 ```
 
-Or in Python via the `nvfp4_fa4` kwarg (sets env vars automatically):
+Or in Python via the `engine.attention.nvfp4_fa4` field (resolution sets the env vars):
 
 ```python
 from fastvideo import VideoGenerator
 gen = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    nvfp4_fa4=True,
-    num_gpus=1,
-    use_fsdp_inference=False,  # FSDP is incompatible with FP4 pointer path
+    {
+        "engine": {
+            "attention": {"nvfp4_fa4": True},
+            "num_gpus": 1,
+            "use_fsdp_inference": False,  # FSDP is incompatible with FP4 pointer path
+        },
+    },
 )
 gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_video": True}})
 ```
 
 #### Known Limitations
 
-- `use_fsdp_inference=True` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
+- `engine.use_fsdp_inference: true` is incompatible with the FP4 path (FSDP shards invalidate tensor pointers)
 - Per-call cosine similarity vs BF16: ~0.99 (slight quantization error accumulates over denoising steps)
 - Only supports `headdim >= 128`
 
@@ -354,7 +358,7 @@ end-to-end speedup. It is **off by default** and enabled per-run.
 ```python
 generator = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    enable_torch_compile=True,
+    {"engine": {"compile": {"enabled": True}}},
 )
 ```
 
@@ -405,7 +409,7 @@ compile wins for the DiT.
 ### What to expect from generic compile
 
 The Wan result below measures the existing generic
-`enable_torch_compile=True` path. It is useful evidence that compile can help,
+`engine.compile.enabled: true` path. It is useful evidence that compile can help,
 but it is **not** a benchmark or numerical gate for the stricter regional
 fullgraph path above.
 
@@ -448,12 +452,12 @@ not asserted by any standing SSIM regression here — the SSIM tests in
 run with `enable_torch_compile` disabled. If you depend on compile
 output staying close to eager (or your previous compiled run), run an
 MS-SSIM gate on *your* config, especially when combining
-`enable_torch_compile=True` with other numerics-affecting flags
+`engine.compile.enabled: true` with other numerics-affecting flags
 (quantized attention backends, FP4, layerwise offload edge cases).
 
 ### Known interactions
 
-- **Layerwise CPU offload** (`dit_layerwise_offload=True`, the default):
+- **Layerwise CPU offload** (`engine.offload.dit_layerwise: true`, the default):
   the offload hook previously caused an implicit graph break once per
   transformer layer, fragmenting the compiled region. Addressed in
   hao-ai-lab/FastVideo#1365 — keep that fix to get a clean compiled
@@ -468,19 +472,17 @@ MS-SSIM gate on *your* config, especially when combining
   grad-enabled path remain outside it. Use the default inductor mode shown
   above unless your exact configuration has its own gate.
 
-Extra `torch.compile` options are passed through `torch_compile_kwargs`
-(a dict), accepted by `VideoGenerator.from_pretrained(...)`. In a config
-file or a CLI dotted override, set them at `engine.compile.backend`,
-`fullgraph`, `mode`, and `dynamic`, and put any other `torch.compile`
-kwargs in `engine.compile.extras` (for example
+Extra `torch.compile` options live at `engine.compile.backend`,
+`fullgraph`, `mode`, and `dynamic`; any other `torch.compile` kwargs go in
+`engine.compile.extras`. Set them in the nested config, in a config file,
+or as a CLI dotted override (for example
 `--generator.engine.compile.mode reduce-overhead`). Example (currently
 **not** recommended — see the CUDA-graphs caveat above):
 
 ```python
 VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    enable_torch_compile=True,
-    torch_compile_kwargs={"mode": "reduce-overhead"},  # may error today
+    {"engine": {"compile": {"enabled": True, "mode": "reduce-overhead"}}},  # may error today
 )
 ```
 
@@ -493,7 +495,7 @@ config; **discard the first generation** (graph build):
 import time
 from fastvideo import VideoGenerator
 
-gen = VideoGenerator.from_pretrained("your-model-id", enable_torch_compile=True)
+gen = VideoGenerator.from_pretrained("your-model-id", {"engine": {"compile": {"enabled": True}}})
 req = {"prompt": "Your prompt", "sampling": {"seed": 1024},
        "output": {"save_video": False}}
 gen.generate(req)                                            # warmup: graph build, discard

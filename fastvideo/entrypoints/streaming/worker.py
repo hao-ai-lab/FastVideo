@@ -56,7 +56,7 @@ def worker_main(
     try:
         from fastvideo import VideoGenerator
 
-        generator = VideoGenerator.from_pretrained(config=generator_config)
+        generator = VideoGenerator.from_config(generator_config)
         if warmup_config.enabled:
             _warmup_worker(generator, warmup_config)
         result_queue.put({"kind": "ready", "worker_id": worker_id})

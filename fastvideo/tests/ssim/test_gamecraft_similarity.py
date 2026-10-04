@@ -178,13 +178,17 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overr
         dtype=torch.bfloat16,
     )
 
-    init_kwargs = {
-        "num_gpus": BASE_PARAMS["num_gpus"],
-        "use_fsdp_inference": True,
-        "dit_cpu_offload": True,
-        "vae_cpu_offload": True,
-        "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": True,
+    generator_config = {
+        "engine": {
+            "num_gpus": BASE_PARAMS["num_gpus"],
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": True,
+                "vae": True,
+                "text_encoder": True,
+                "pin_cpu_memory": True,
+            },
+        },
     }
 
     request = {
@@ -210,7 +214,7 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overr
 
     generator: VideoGenerator | None = None
     try:
-        generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
+        generator = VideoGenerator.from_pretrained(BASE_PARAMS["model_path"], generator_config)
         generator.generate(request)
     finally:
         _shutdown_executor(generator)
@@ -308,13 +312,17 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overr
         dtype=torch.bfloat16,
     )
 
-    init_kwargs = {
-        "num_gpus": BASE_PARAMS["num_gpus"],
-        "use_fsdp_inference": True,
-        "dit_cpu_offload": True,
-        "vae_cpu_offload": True,
-        "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": True,
+    generator_config = {
+        "engine": {
+            "num_gpus": BASE_PARAMS["num_gpus"],
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit": True,
+                "vae": True,
+                "text_encoder": True,
+                "pin_cpu_memory": True,
+            },
+        },
     }
 
     request = {
@@ -343,7 +351,7 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overr
 
     generator: VideoGenerator | None = None
     try:
-        generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
+        generator = VideoGenerator.from_pretrained(BASE_PARAMS["model_path"], generator_config)
         generator.generate(request)
     finally:
         _shutdown_executor(generator)

@@ -98,7 +98,15 @@ def _fastvideo_edit_image(device) -> np.ndarray:
     except ImportError as e:
         pytest.skip(f"FastVideo VideoGenerator unavailable: {e}")
     condition = Image.open(CONDITION_IMAGE).convert("RGB")
-    gen = VideoGenerator.from_pretrained(str(LOCAL_WEIGHTS_DIR), num_gpus=1, trust_remote_code=True)
+    gen = VideoGenerator.from_pretrained(
+        str(LOCAL_WEIGHTS_DIR),
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+            "trust_remote_code": True,
+        },
+    )
     result = gen.generate({
         "prompt": EDIT_PROMPT,
         "inputs": {"pil_image": condition},

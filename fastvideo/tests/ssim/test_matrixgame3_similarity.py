@@ -104,14 +104,18 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrid
     BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
-    init_kwargs = {
-        "num_gpus": BASE_PARAMS["num_gpus"],
-        "use_fsdp_inference": True,
-        "dit_layerwise_offload": False,
-        "dit_cpu_offload": False,
-        "vae_cpu_offload": False,
-        "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": True,
+    generator_config = {
+        "engine": {
+            "num_gpus": BASE_PARAMS["num_gpus"],
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit_layerwise": False,
+                "dit": False,
+                "vae": False,
+                "text_encoder": True,
+                "pin_cpu_memory": True,
+            },
+        },
     }
 
     request = {
@@ -133,7 +137,7 @@ def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrid
         },
     }
 
-    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
+    generator = VideoGenerator.from_pretrained(BASE_PARAMS["model_path"], generator_config)
     generator.generate(request)
 
     if isinstance(generator.executor, MultiprocExecutor):

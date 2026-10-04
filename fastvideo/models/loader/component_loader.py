@@ -19,7 +19,7 @@ from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
-from fastvideo.api.device_policy import UNIFIED_MEMORY_OFFLOAD_PATHS, offload_disabled_on_unified_memory
+from fastvideo.api.device_policy import UNIFIED_MEMORY_OFFLOAD_PATHS
 from fastvideo.api.inference_resolution import torch_compile_kwargs
 from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.attention.selector import (
@@ -358,27 +358,12 @@ class TextEncoderLoader(ComponentLoader):
             offload_flag: str = "text_encoder_cpu_offload",
     ):
         runtime_device = get_local_torch_device()
-        device_id = runtime_device.index if runtime_device.index is not None else 0
         if cpu_offload is None:
-            # offload_flag names the device-policy switch of this component; its value is the
-            # engine.offload field at the same path (text_encoder_cpu_offload -> engine.offload.text_encoder).
+            # offload_flag names the device-policy switch of this component; its value is the engine.offload field
+            # at the same path (text_encoder_cpu_offload -> engine.offload.text_encoder), which resolution already
+            # settled for the memory class of this device.
             offload_field = UNIFIED_MEMORY_OFFLOAD_PATHS[offload_flag].rsplit(".", 1)[1]
-            requested_cpu_offload = getattr(resolved_config.engine.offload, offload_field)
-        else:
-            requested_cpu_offload = cpu_offload
-        # The resolved config already carries the worker's offload policy, so only ask whether the policy covers
-        # this component.
-        disable_cpu_offload = offload_disabled_on_unified_memory(device_id, offload_flag)
-
-        if requested_cpu_offload and disable_cpu_offload:
-            # Direct loader callers can choose a CPU target before the worker
-            # applies its device-local policy. Reset both the request and the
-            # target so the model is never constructed on the host first.
-            logger.info("Disabling %s on unified-memory device %d", offload_flag, device_id)
-            cpu_offload = False
-            target_device = runtime_device
-        else:
-            cpu_offload = requested_cpu_offload
+            cpu_offload = getattr(resolved_config.engine.offload, offload_field)
         use_cpu_offload = (cpu_offload and len(getattr(model_config, "_fsdp_shard_conditions", [])) > 0)
 
         from fastvideo.platforms import current_platform
@@ -1050,11 +1035,14 @@ class TransformerLoader(ComponentLoader):
     def load(self,
              model_path: str,
              resolved_config: ResolvedGeneratorConfig,
-             loading_teacher_critic_model: bool = False):
+             loading_teacher_critic_model: bool = False,
+             override_transformer_cls_name: str | None = None):
         """Load the transformer based on the model path, and inference args.
 
         ``loading_teacher_critic_model`` marks a DMD teacher (real_score) or critic (fake_score) transformer, which
-        loads its checkpoint weights in full precision with dense attention.
+        loads its checkpoint weights in full precision with dense attention. ``override_transformer_cls_name`` is the
+        model class to build for this load; it takes precedence over
+        ``pipeline.components.override_transformer_cls_name``.
         """
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
@@ -1065,7 +1053,8 @@ class TransformerLoader(ComponentLoader):
                              "Only diffusers format is supported.")
 
         logger.info("transformer cls_name: %s", cls_name)
-        override_transformer_cls_name = resolved_config.pipeline.components.override_transformer_cls_name
+        if override_transformer_cls_name is None:
+            override_transformer_cls_name = resolved_config.pipeline.components.override_transformer_cls_name
         if override_transformer_cls_name is not None:
             cls_name = override_transformer_cls_name
             logger.info("Overriding transformer cls_name to %s", cls_name)
@@ -1392,6 +1381,7 @@ class PipelineComponentLoader:
         transformers_or_diffusers: str,
         resolved_config: ResolvedGeneratorConfig,
         loading_teacher_critic_model: bool = False,
+        override_transformer_cls_name: str | None = None,
     ):
         """
         Load a pipeline module.
@@ -1403,6 +1393,9 @@ class PipelineComponentLoader:
             resolved_config: The resolved runtime config
             loading_teacher_critic_model: Whether a transformer is a DMD teacher or critic; passed to
                 ``TransformerLoader.load`` and ignored by the other loaders
+            override_transformer_cls_name: The model class to build for a transformer, over
+                ``pipeline.components.override_transformer_cls_name``; passed to ``TransformerLoader.load`` and
+                ignored by the other loaders
 
         Returns:
             The loaded module
@@ -1438,5 +1431,6 @@ class PipelineComponentLoader:
             if isinstance(loader, TransformerLoader):
                 return loader.load(component_model_path,
                                    resolved_config,
-                                   loading_teacher_critic_model=loading_teacher_critic_model)
+                                   loading_teacher_critic_model=loading_teacher_critic_model,
+                                   override_transformer_cls_name=override_transformer_cls_name)
             return loader.load(component_model_path, resolved_config)

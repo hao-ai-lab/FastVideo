@@ -2,7 +2,6 @@ status_definitions:
   kept: "Public field remains on a public adapter surface with the same meaning."
   moved: "Public field remains supported but normalizes into a different nested path."
   preset_owned: "Public field remains supported only through a model/preset-specific surface."
-  from_pretrained_keyword: "Typed config field that an argument of VideoGenerator.from_pretrained also sets; the entry value names that argument."
   compatibility_only: "Public field that an adapter or an open mapping accepts outside the typed fields of the canonical schema."
   private_only: "Field should only be handled by private adapters and is not a public FastVideo compatibility promise."
   internal_only: "Field is runtime/config plumbing that model code, config resolution, or the runtime fills; it is not a public input."
@@ -10,37 +9,37 @@ status_definitions:
 
 surfaces:
   generator_config:
-    from_pretrained_keyword:
-      model_path: "model_path (positional argument)"
-      revision: revision
-      trust_remote_code: trust_remote_code
-      engine.num_gpus: num_gpus
-      engine.execution_backend: distributed_executor_backend
-      engine.parallelism.tp_size: tp_size
-      engine.parallelism.sp_size: sp_size
-      engine.parallelism.hsdp_replicate_dim: hsdp_replicate_dim
-      engine.parallelism.hsdp_shard_dim: hsdp_shard_dim
-      engine.parallelism.dist_timeout: dist_timeout
-      engine.offload.dit: dit_cpu_offload
-      engine.offload.dit_layerwise: dit_layerwise_offload
-      engine.offload.text_encoder: text_encoder_cpu_offload
-      engine.offload.image_encoder: image_encoder_cpu_offload
-      engine.offload.vae: vae_cpu_offload
-      engine.offload.pin_cpu_memory: pin_cpu_memory
-      engine.compile.enabled: enable_torch_compile
-      engine.compile.backend: "torch_compile_kwargs['backend']"
-      engine.compile.fullgraph: "torch_compile_kwargs['fullgraph']"
-      engine.compile.mode: "torch_compile_kwargs['mode']"
-      engine.compile.dynamic: "torch_compile_kwargs['dynamic']"
-      engine.compile.extras: "torch_compile_kwargs keys other than backend, fullgraph, mode, and dynamic"
-      engine.enable_stage_verification: enable_stage_verification
-      engine.use_fsdp_inference: use_fsdp_inference
-      engine.disable_autocast: disable_autocast
-      pipeline.components.lora_path: lora_path
-      pipeline.components.lora_strength: lora_strength
-      pipeline.output_type: output_type
     kept:
+      - model_path
       - mode
+      - revision
+      - trust_remote_code
+      - engine.num_gpus
+      - engine.execution_backend
+      - engine.parallelism.tp_size
+      - engine.parallelism.sp_size
+      - engine.parallelism.hsdp_replicate_dim
+      - engine.parallelism.hsdp_shard_dim
+      - engine.parallelism.dist_timeout
+      - engine.offload.dit
+      - engine.offload.dit_layerwise
+      - engine.offload.text_encoder
+      - engine.offload.image_encoder
+      - engine.offload.vae
+      - engine.offload.pin_cpu_memory
+      - engine.compile.enabled
+      - engine.compile.backend
+      - engine.compile.fullgraph
+      - engine.compile.mode
+      - engine.compile.dynamic
+      - engine.compile.extras
+      - engine.enable_stage_verification
+      - engine.use_fsdp_inference
+      - engine.disable_autocast
+      - engine.attention.nvfp4_fa4
+      - pipeline.components.lora_path
+      - pipeline.components.lora_strength
+      - pipeline.output_type
       - engine.parallelism.master_port
       - engine.offload.lazy_module_load
       - engine.compile.text_encoder_enabled

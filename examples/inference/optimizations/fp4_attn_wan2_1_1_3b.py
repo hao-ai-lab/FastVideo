@@ -38,14 +38,24 @@ def main():
 
     generator = VideoGenerator.from_pretrained(
         args.model,
-        num_gpus=args.num_gpus,
-        nvfp4_fa4=args.nvfp4_fa4,
-        use_fsdp_inference=not args.nvfp4_fa4,
-        dit_cpu_offload=False,
-        dit_layerwise_offload=False,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        enable_torch_compile=args.compile,
+        {
+            "engine": {
+                "num_gpus": args.num_gpus,
+                "attention": {
+                    "nvfp4_fa4": args.nvfp4_fa4,
+                },
+                "use_fsdp_inference": not args.nvfp4_fa4,
+                "offload": {
+                    "dit": False,
+                    "dit_layerwise": False,
+                    "vae": True,
+                    "text_encoder": True,
+                },
+                "compile": {
+                    "enabled": args.compile,
+                },
+            },
+        },
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

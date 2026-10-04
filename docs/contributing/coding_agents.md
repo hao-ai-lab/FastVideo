@@ -59,7 +59,7 @@ Minimal usage example (based on `examples/inference/basic/basic.py`):
 from fastvideo import VideoGenerator
 
 model_id = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # or official_weights/<model_name>/
-generator = VideoGenerator.from_pretrained(model_id, num_gpus=1)
+generator = VideoGenerator.from_pretrained(model_id, {"engine": {"num_gpus": 1}})
 
 video = generator.generate({
     "prompt": "A vibrant city street at sunset.",

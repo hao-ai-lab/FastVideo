@@ -36,7 +36,7 @@ logger.info("Worker %s Using FlashAttention-%s backend",
             local_main_process_only=False)
 
 # FP4 FA4 support: quantize Q/K to NVFP4 E2M1 for block-scaled MMA on Blackwell.
-# Requires: flash-attention-fp4, flashinfer, cutlass-dsl. Enable via nvfp4_fa4=True kwarg.
+# Requires: flash-attention-fp4, flashinfer, cutlass-dsl. Enable via ``engine.attention.nvfp4_fa4``.
 # The FP4 path uses a dedicated custom_op wrapper (flash_attn_fp4_func) so that
 # torch.compile treats the CuTeDSL kernel as an opaque boundary.
 try:

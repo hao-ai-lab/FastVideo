@@ -226,27 +226,6 @@ class PreprocessRunConfig(GeneratorConfig):
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
 
 
-def resolve_training_offload_conflicts(view: ResolutionView) -> dict[str, Any]:
-    """Settle offload modes that cannot run together in training, before any device is bound.
-
-    On MPS, FSDP inference and layerwise offload turn off. With layerwise offload on, FSDP inference and DiT CPU
-    offload turn off.
-    """
-    from fastvideo.platforms import current_platform
-
-    values: dict[str, Any] = {}
-    if current_platform.is_mps():
-        values.update({"engine.use_fsdp_inference": False, "engine.offload.dit_layerwise": False})
-    if values.get("engine.offload.dit_layerwise", view.get("engine.offload.dit_layerwise")):
-        if view.get("engine.use_fsdp_inference"):
-            logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
-            values["engine.use_fsdp_inference"] = False
-        if view.get("engine.offload.dit"):
-            logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
-            values["engine.offload.dit"] = False
-    return values
-
-
 def keep_training_dit_on_device(view: ResolutionView) -> dict[str, Any]:
     """A finetuning or distillation run keeps the DiT on the device, so ``engine.offload.dit`` turns off."""
     training = view.get("mode") in (ExecutionMode.FINETUNING, ExecutionMode.DISTILLATION)
@@ -297,13 +276,12 @@ def validate_preprocess_options(view: ResolutionView) -> dict[str, Any]:
 def training_resolution_steps(config: GeneratorConfig, defaults: Any = None) -> tuple[ResolutionStep, ...]:
     """The resolution steps of a ``TrainingRunConfig``, in the order that they run.
 
-    The offload conflicts and the parallel-size check run on the placeholders, before ``derive_parallel_sizes``
-    replaces them.
+    The parallel-size check runs on the placeholders, before ``derive_parallel_sizes`` replaces them. The offload
+    conflicts are settled by the device-policy steps of the generator list.
     """
     return generator_resolution_steps(config,
                                       defaults,
-                                      before_placeholders=(resolve_training_offload_conflicts,
-                                                           validate_training_parallel_sizes),
+                                      before_placeholders=(validate_training_parallel_sizes, ),
                                       after=(derive_lora_alpha_from_rank, keep_training_dit_on_device))
 
 
@@ -391,7 +369,6 @@ __all__ = [
     "preprocess_resolution_steps",
     "resolve_preprocess_config",
     "resolve_training_config",
-    "resolve_training_offload_conflicts",
     "training_resolution_steps",
     "validate_preprocess_options",
     "validate_training_parallel_sizes",

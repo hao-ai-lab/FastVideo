@@ -19,7 +19,11 @@ os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
         "FastVideo/LTX2-Distilled-Diffusers",
-        num_gpus=4,
+        {
+            "engine": {
+                "num_gpus": 4,
+            },
+        },
     )
 
     output_path = "outputs_video/ltx2_basic/output_ltx2_distilled_t2v.mp4"

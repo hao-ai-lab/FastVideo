@@ -310,7 +310,7 @@ class LTX2GenerationBackend:
             ),
         )
 
-        self.generator = VideoGenerator.from_pretrained(config=generator_config)
+        self.generator = VideoGenerator.from_config(generator_config)
         print(f"[GPU {self.gpu_id}] After model load: {self._gpu_mem()}")
 
         lora_stack = DREAMVERSE_LORA_STACK or ([(DREAMVERSE_LORA_PATH,

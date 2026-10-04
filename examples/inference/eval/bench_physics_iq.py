@@ -54,7 +54,14 @@ def _generate_videos(rows: list[dict], videos_dir: Path, model: str, num_gpus: i
 
     print(f"[gen] {len(todo)}/{len(rows)} scenarios to render with {model} "
           f"({num_frames}x{height}x{width})...")
-    gen = VideoGenerator.from_pretrained(model, num_gpus=num_gpus)
+    gen = VideoGenerator.from_pretrained(
+        model,
+        {
+            "engine": {
+                "num_gpus": num_gpus,
+            },
+        },
+    )
     try:
         for row, out_path in todo:
             gen.generate({

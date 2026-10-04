@@ -251,7 +251,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     start_idx += table.num_rows
 
         # Loading dataset
-        train_dataset = getdataset(preprocess_config)
+        train_dataset = getdataset(preprocess_config, self.model_path)
 
         train_dataloader = DataLoader(
             train_dataset,

@@ -631,7 +631,7 @@ def test_from_file_loads_generator_from_run_config(tmp_path, monkeypatch):
     assert captured["resolved_config"].engine.num_gpus == 3
 
 
-def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
+def test_from_pretrained_nested_config_does_not_warn(monkeypatch):
     captured = _patch_from_resolved_config(monkeypatch)
     _skip_model_definition(monkeypatch)
 
@@ -639,12 +639,18 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
         warnings.simplefilter("always")
         generator = VideoGenerator.from_pretrained(
             "test-model",
-            num_gpus=4,
-            use_fsdp_inference=False,
-            text_encoder_cpu_offload=True,
-            pin_cpu_memory=True,
-            dit_cpu_offload=False,
-            vae_cpu_offload=False,
+            {
+                "engine": {
+                    "num_gpus": 4,
+                    "use_fsdp_inference": False,
+                    "offload": {
+                        "text_encoder": True,
+                        "pin_cpu_memory": True,
+                        "dit": False,
+                        "vae": False,
+                    },
+                },
+            },
         )
 
     assert not caught
@@ -661,16 +667,26 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
     assert generator.config.engine.num_gpus == 4
 
 
-def test_from_pretrained_rejects_other_kwargs_and_points_to_from_config(monkeypatch):
+def test_from_pretrained_rejects_flat_keywords_and_points_to_a_nested_config(monkeypatch):
     captured = _patch_from_resolved_config(monkeypatch)
     _skip_model_definition(monkeypatch)
 
-    with pytest.raises(TypeError, match=r"does not accept workload_type\.(.|\n)*VideoGenerator\.from_config"):
+    with pytest.raises(TypeError, match=r"does not accept num_gpus, workload_type\.(.|\n)*nested config"):
         VideoGenerator.from_pretrained(
             "test-model",
             num_gpus=4,
             workload_type="t2v",
         )
+
+    assert "resolved_config" not in captured
+
+
+def test_from_pretrained_rejects_a_config_with_another_model_path(monkeypatch):
+    captured = _patch_from_resolved_config(monkeypatch)
+    _skip_model_definition(monkeypatch)
+
+    with pytest.raises(ValueError, match="differs from model_path"):
+        VideoGenerator.from_pretrained("test-model", {"model_path": "other-model"})
 
     assert "resolved_config" not in captured
 

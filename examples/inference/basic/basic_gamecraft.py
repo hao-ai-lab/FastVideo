@@ -56,12 +56,18 @@ def main():
     # FastVideo will automatically download weights from HuggingFace
     generator = VideoGenerator.from_pretrained(
         MODEL_PATH,
-        num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": True,
+                "offload": {
+                    "dit": True,
+                    "vae": True,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,
+                },
+            },
+        },
     )
 
     # Video parameters

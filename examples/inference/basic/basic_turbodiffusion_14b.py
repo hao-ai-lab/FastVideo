@@ -14,7 +14,11 @@ def main() -> None:
     generator = VideoGenerator.from_pretrained(
         "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
         # 14B model needs more GPUs
-        num_gpus=2,
+        {
+            "engine": {
+                "num_gpus": 2,
+            },
+        },
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

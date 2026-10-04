@@ -12,22 +12,16 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (PreprocessP
 from fastvideo.pipelines.preprocess.matrixgame2.matrixgame2_preprocess_pipeline import (PreprocessPipeline_MatrixGame2)
 from fastvideo.pipelines.preprocess.matrixgame2.matrixgame2_preprocess_pipeline_ode_trajectory import (
     PreprocessPipeline_MatrixGame2_ODE_Trajectory)
-from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
 
 def main(resolved_config: ResolvedGeneratorConfig) -> None:
-    """Download the model and run the pipeline of ``preprocess.preprocess_task`` on one GPU.
+    """Run the pipeline of ``preprocess.preprocess_task`` on one GPU.
 
-    The local checkpoint directory becomes ``model_path`` and ``preprocess.model_path``, which the pipelines and the
-    dataset tokenizer read.
+    The pipeline downloads the checkpoint of ``model_path`` and keeps the local directory as its ``model_path``, which
+    the dataset tokenizer reads too.
     """
-    model_path = maybe_download_model(resolved_config.model_path)
-    resolved_config = resolved_config.with_override("v1_preprocess.main", {
-        "model_path": model_path,
-        "preprocess.model_path": model_path,
-    })
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     num_gpus = int(os.environ["WORLD_SIZE"])
     assert num_gpus == 1, "Only support 1 GPU"
@@ -61,8 +55,8 @@ def main(resolved_config: ResolvedGeneratorConfig) -> None:
 
     logger.info("Preprocess task: %s using %s", preprocess_task, PreprocessPipeline.__name__)
 
-    pipeline = PreprocessPipeline(model_path, resolved_config)
-    pipeline.forward(batch=None, resolved_config=pipeline.resolved_config)
+    pipeline = PreprocessPipeline(resolved_config.model_path, resolved_config)
+    pipeline.forward(batch=None, resolved_config=resolved_config)
 
 
 if __name__ == "__main__":

@@ -14,10 +14,16 @@ def main():
     generator = VideoGenerator.from_pretrained(
         model_name,
         # FastVideo will automatically handle distributed setup
-        num_gpus=1,
-        use_fsdp_inference=False,  # set to True if GPU is out of memory
-        text_encoder_cpu_offload=False,
-        dit_cpu_offload=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,  # set to True if GPU is out of memory
+                "offload": {
+                    "text_encoder": False,
+                    "dit": False,
+                },
+            },
+        },
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

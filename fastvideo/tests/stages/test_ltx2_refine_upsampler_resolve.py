@@ -4,7 +4,7 @@
 Pure tmp_path tests: no GPU, no model downloads.
 """
 
-from fastvideo.pipelines.basic.ltx2.ltx2_pipeline import _resolve_refine_upsampler_path
+from fastvideo.api.checkpoint_defaults import _resolve_refine_upsampler_path
 
 
 def test_model_index_key_wins_over_directory_probe(tmp_path):

@@ -65,7 +65,11 @@ def main() -> None:
                                 "m4a/flac) before running.")
     generator = VideoGenerator.from_pretrained(
         "FastVideo/stable-audio-open-1.0-Diffusers",
-        num_gpus=1,
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+        },
     )
     generator.generate({
         "prompt": PROMPT,

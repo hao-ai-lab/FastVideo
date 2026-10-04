@@ -153,7 +153,6 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/distributed/device_communicators/cpu_communicator.py: read VLLM_DIST_IDENT': 1,
     'fastvideo/entrypoints/cli/utils.py: whole-environ': 1,
     'fastvideo/entrypoints/openai/api_server.py: write FASTVIDEO_STAGE_LOGGING': 1,
-    'fastvideo/entrypoints/video_generator.py: write FASTVIDEO_NVFP4_FA4': 1,
     'fastvideo/mlx_runtime/memory.py: write <dynamic>': 1,
     'fastvideo/performance/hf_store.py: read HF_REPO_ID': 1,
     'fastvideo/performance/hf_store.py: read PERFORMANCE_TRACKING_SYNC_REUSE_TTL_SECONDS': 1,

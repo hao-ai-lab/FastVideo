@@ -9,13 +9,19 @@ def main():
         # "kandinskylab/Kandinsky-5.0-T2V-Pro-sft-5s-Diffusers"
         # "kandinskylab/Kandinsky-5.0-T2V-Lite-distilled16steps-5s-Diffusers"
         # "kandinskylab/Kandinsky-5.0-T2V-Pro-distilled-5s-Diffusers"
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
-        # image_encoder_cpu_offload=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": False,
+                    "vae": False,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,
+                    # "image_encoder": False,
+                },
+            },
+        },
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

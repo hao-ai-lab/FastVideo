@@ -581,12 +581,18 @@ def main():
     setup_model_environment(model_path)
     generator = StreamingVideoGenerator.from_pretrained(
         model_path,
-        num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": True,
+                "offload": {
+                    "dit": True,
+                    "vae": False,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,
+                },
+            },
+        },
     )
 
     generators = {model_path: generator}

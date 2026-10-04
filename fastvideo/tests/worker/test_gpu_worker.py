@@ -41,9 +41,9 @@ def test_cuda_device_uuid_receipt_identifies_profiled_worker(monkeypatch, env_ov
 
 
 @pytest.mark.parametrize("executor_backend", ["mp", "ray"])
-def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypatch, env_overrides,
-                                                                        executor_backend: str) -> None:
-    """The runtime probe must see this worker's device, never driver device 0, and the worker keeps its result."""
+def test_init_device_binds_the_worker_device_and_keeps_the_resolved_config(monkeypatch, env_overrides,
+                                                                          executor_backend: str) -> None:
+    """The worker binds its own device and builds the pipeline on the config it received, without a device query."""
     events = []
     with isolated_environment():
         args = resolve_inference_config({
@@ -53,13 +53,8 @@ def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypa
                 "execution_backend": executor_backend
             },
         })
-    decided = args.with_override("test:device_policy", {"engine.offload.lazy_module_load": False})
-
-    def fake_policy(resolved_config, device_id):
-        events.append(("policy", device_id))
-        return decided
-
-    monkeypatch.setattr("fastvideo.worker.gpu_worker.finalize_device_offload_policy", fake_policy)
+    probe = Mock(side_effect=AssertionError("device probe ran in the worker"))
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", probe)
     worker = Worker(args, local_rank=3, rank=3, distributed_init_method="env://")
 
     env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
@@ -77,21 +72,32 @@ def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypa
 
     assert events == [
         ("set_device", 3),
-        ("policy", 3),
         ("distributed", None),
         ("pipeline", None),
     ]
     assert os.environ["LOCAL_RANK"] == "3"
     assert worker.device == torch.device("cuda:3")
     assert worker.init_gpu_memory == 123
-    assert worker.resolved_config is decided
+    assert worker.resolved_config is args
+    probe.assert_not_called()
 
 
 def _worker_returning(output_batch: ForwardBatch) -> Worker:
     worker = Worker.__new__(Worker)
     worker.resolved_config = SimpleNamespace()
-    worker.pipeline = SimpleNamespace(resolved_config=SimpleNamespace(), forward=lambda batch, args: output_batch)
+    worker.pipeline = SimpleNamespace(forward=lambda batch, args: output_batch)
     return worker
+
+
+def test_execute_forward_runs_the_pipeline_on_the_worker_config():
+    worker = Worker.__new__(Worker)
+    worker.resolved_config = SimpleNamespace()
+    seen = []
+    worker.pipeline = SimpleNamespace(forward=lambda batch, args: seen.append(args) or batch)
+
+    worker.execute_forward(ForwardBatch(data_type="video", return_frames=True), _request_config())
+
+    assert seen == [worker.resolved_config]
 
 
 def _request_config(output_type: str = "pil") -> SimpleNamespace:

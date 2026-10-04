@@ -17,7 +17,11 @@ def main() -> None:
     # Uses FastVideo default sampling settings for LTX2 base.
     generator = VideoGenerator.from_pretrained(
         "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+        },
     )
 
     output_path = "outputs_video/ltx2_basic/output_ltx2_base_t2v_1088_1920_1.1.mp4"

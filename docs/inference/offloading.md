@@ -208,15 +208,21 @@ from fastvideo import VideoGenerator
 
 generator = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    num_gpus=1,
-    # Recommended for single GPU
-    dit_layerwise_offload=True,
-    # Enable if OOM happens
-    vae_cpu_offload=True,
-    image_encoder_cpu_offload=True,
-    text_encoder_cpu_offload=True,
-    # Speeds up CPU-GPU transfer
-    pin_cpu_memory=True,
+    {
+        "engine": {
+            "num_gpus": 1,
+            "offload": {
+                # Recommended for single GPU
+                "dit_layerwise": True,
+                # Enable if OOM happens
+                "vae": True,
+                "image_encoder": True,
+                "text_encoder": True,
+                # Speeds up CPU-GPU transfer
+                "pin_cpu_memory": True,
+            },
+        },
+    },
 )
 
 prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers."
@@ -230,16 +236,22 @@ from fastvideo import VideoGenerator
 
 generator = VideoGenerator.from_pretrained(
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    num_gpus=2,
-    # Recommended for multi-GPU
-    use_fsdp_inference=True,
-    dit_layerwise_offload=False,
-    dit_cpu_offload=False,
-    # Enable if OOM happens
-    vae_cpu_offload=True,
-    image_encoder_cpu_offload=True,
-    text_encoder_cpu_offload=True,
-    pin_cpu_memory=True,
+    {
+        "engine": {
+            "num_gpus": 2,
+            # Recommended for multi-GPU
+            "use_fsdp_inference": True,
+            "offload": {
+                "dit_layerwise": False,
+                "dit": False,
+                # Enable if OOM happens
+                "vae": True,
+                "image_encoder": True,
+                "text_encoder": True,
+                "pin_cpu_memory": True,
+            },
+        },
+    },
 )
 
 prompt = "A majestic lion strides across the golden savanna."

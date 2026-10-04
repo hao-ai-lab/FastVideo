@@ -29,11 +29,17 @@ def main() -> None:
     args = parse_args()
     generator = VideoGenerator.from_pretrained(
         str(args.model_path),
-        num_gpus=1,
-        use_fsdp_inference=False,
-        text_encoder_cpu_offload=True,
-        vae_cpu_offload=False,
-        pin_cpu_memory=True,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "text_encoder": True,
+                    "vae": False,
+                    "pin_cpu_memory": True,
+                },
+            },
+        },
     )
     try:
         generator.generate({

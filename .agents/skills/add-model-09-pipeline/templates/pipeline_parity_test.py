@@ -80,11 +80,17 @@ def _run_fastvideo_pipeline(model_path: Path, params: dict[str, Any]) -> Any:
 
     generator = VideoGenerator.from_pretrained(
         str(model_path),
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": False,
+                    "vae": False,
+                    "text_encoder": False,
+                },
+            },
+        },
     )
     try:
         return generator.generate({

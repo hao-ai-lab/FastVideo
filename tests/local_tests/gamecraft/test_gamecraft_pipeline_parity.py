@@ -330,12 +330,18 @@ def test_gamecraft_pipeline_latent_parity():
     # Create generator
     generator = VideoGenerator.from_pretrained(
         diffusers_path,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=True,  # Save memory
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": False,
+                    "vae": True,  # Save memory
+                    "text_encoder": True,
+                    "pin_cpu_memory": False,
+                },
+            },
+        },
     )
 
     # Run generation
@@ -481,12 +487,18 @@ def test_gamecraft_pipeline_smoke():
 
     generator = VideoGenerator.from_pretrained(
         diffusers_path,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": True,
+                    "vae": True,
+                    "text_encoder": True,
+                    "pin_cpu_memory": False,
+                },
+            },
+        },
     )
 
     result = generator.generate({

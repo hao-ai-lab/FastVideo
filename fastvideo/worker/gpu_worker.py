@@ -4,7 +4,6 @@ from typing import Any, cast
 import torch
 
 import fastvideo.envs as envs
-from fastvideo.api.device_policy import finalize_device_offload_policy
 from fastvideo.api.resolution import ResolvedGeneratorConfig
 from fastvideo.distributed import (cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.distributed.parallel_state import get_local_torch_device
@@ -80,13 +79,6 @@ class Worker:
             # For MPS, we can't get memory info the same way
             self.init_gpu_memory = 0
 
-        # CUDA's unified-memory classification reads runtime device
-        # properties, so make this decision only after this worker has bound
-        # its own device. The worker keeps the config that the policy returns,
-        # and every loader and pipeline stage below consumes it.
-        device_id = self.device.index if self.device.index is not None else 0
-        self.resolved_config = finalize_device_offload_policy(self.resolved_config, device_id)
-
         # Initialize the distributed environment.
         maybe_init_distributed_environment_and_model_parallel(self.resolved_config.engine.parallelism.tp_size,
                                                               self.resolved_config.engine.parallelism.sp_size,
@@ -95,8 +87,7 @@ class Worker:
         self.pipeline = build_pipeline(self.resolved_config)
 
     def execute_forward(self, forward_batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
-        # The pipeline's config carries the overrides that the pipeline made from its checkpoint.
-        output_batch = self.pipeline.forward(forward_batch, self.pipeline.resolved_config)
+        output_batch = self.pipeline.forward(forward_batch, self.resolved_config)
         needs_output = forward_batch.return_frames or (forward_batch.save_video
                                                        and resolved_config.pipeline.output_type != "latent"
                                                        and not output_batch.extra.get("audio_only"))

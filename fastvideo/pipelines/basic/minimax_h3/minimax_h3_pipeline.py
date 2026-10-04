@@ -160,10 +160,15 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             shift = getattr(self.get_module(module_name), "shift", None)
             if shift is None or not math.isfinite(float(shift)) or float(shift) <= 0:
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose a positive finite shift, got {shift}.")
-        self._load_checkpoint_schedule(resolved_config)
+        self._validate_checkpoint_schedule(resolved_config)
 
-    def _load_checkpoint_schedule(self, resolved_config: ResolvedGeneratorConfig) -> None:
-        """A distilled export's schedule is explicit; never silently use a uniform grid."""
+    def _validate_checkpoint_schedule(self, resolved_config: ResolvedGeneratorConfig) -> None:
+        """Check the checkpoint's ``fastvideo_inference.json`` against the loaded schedulers and the resolved schedule.
+
+        Resolution fills ``pipeline.dmd_denoising_steps`` from that file (``fill_dmd_schedule_from_checkpoint``); a
+        distilled export's schedule is explicit, so a config that disagrees with the file, or that has no schedule
+        although the file declares one, raises rather than silently using a uniform grid.
+        """
         path = Path(self.model_path) / "fastvideo_inference.json"
         if not path.is_file():
             return
@@ -190,10 +195,12 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                     or declared <= 0 or float(self.get_module(name).shift) != float(declared)):
                 raise ValueError(f"FastH3 checkpoint {key}={declared!r} disagrees with {name}/scheduler_config.json.")
         configured_steps = resolved_config.pipeline.dmd_denoising_steps
-        if configured_steps is not None and list(configured_steps) != steps:
+        if configured_steps is None:
+            raise ValueError("The checkpoint's fastvideo_inference.json declares a DMD schedule but "
+                             "pipeline.dmd_denoising_steps is unset; resolve the config with the checkpoint's "
+                             "model_path so that fill_dmd_schedule_from_checkpoint fills it.")
+        if list(configured_steps) != steps:
             raise ValueError("Explicit DMD schedule disagrees with the checkpoint's trained DMD rungs.")
-        self.resolved_config = resolved_config.with_override("checkpoint:fastvideo_inference.json",
-                                                             {"pipeline.dmd_denoising_steps": list(steps)})
         logger.info("FastH3 checkpoint schedule: %d transformer forwards, DMD rungs=%s, video/audio shifts=%s/%s",
                     len(steps), steps,
                     self.get_module("scheduler").shift,
@@ -412,7 +419,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             self._add_denoise_stages(ref2va=ref2va)
 
     def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
-        resolved_config = self._post_init_before_forward(resolved_config)
+        self._post_init_before_forward()
 
         # Sequential encode-then-release is the H3-only fallback. Lazy and the
         # fully-resident discrete-GPU path both keep a complete stage list and

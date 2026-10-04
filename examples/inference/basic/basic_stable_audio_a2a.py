@@ -60,7 +60,11 @@ INIT_AUDIO_STRENGTH = 0.6
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
         "FastVideo/stable-audio-open-1.0-Diffusers",
-        num_gpus=1,
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+        },
     )
     generator.generate({
         "prompt": PROMPT,

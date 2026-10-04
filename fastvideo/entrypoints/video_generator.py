@@ -29,7 +29,6 @@ import fastvideo.envs as envs
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     expand_request_prompt_batch,
-    from_pretrained_kwargs_to_config,
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
@@ -150,49 +149,41 @@ class VideoGenerator:
     @classmethod
     def from_pretrained(
         cls,
-        model_path: str | GeneratorConfig | Mapping[str, Any] | None = None,
-        **kwargs,
+        model_path: str,
+        config: GeneratorConfig | Mapping[str, Any] | None = None,
+        *,
+        log_queue=None,
+        **flat_keywords,
     ) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
 
+        ``from_pretrained(model_path, config)`` is ``from_config({"model_path": model_path, **config})``.
+
         Args:
             model_path: Path or identifier for the pretrained model
-            **kwargs: The common engine and offload keywords in
-                ``fastvideo.api.compat.FROM_PRETRAINED_KWARGS``, such as
-                ``num_gpus`` and ``dit_cpu_offload``. Pass any other setting
-                through ``VideoGenerator.from_config(...)``.
+            config: The settings besides ``model_path``, as a nested mapping such as
+                ``{"engine": {"num_gpus": 2, "offload": {"dit": False}}}`` or a ``GeneratorConfig``. A
+                ``model_path`` inside it must equal ``model_path``.
+            log_queue: Optional multiprocessing.Queue to forward worker logs to
 
         Returns:
             The created video generator
         """
-        log_queue = kwargs.pop("log_queue", None)
-        if kwargs.pop("nvfp4_fa4", False):
-            import os
-            os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
-            envs.setdefault_external("CUTE_DSL_ENABLE_TVM_FFI", "1")
-        typed_config = kwargs.pop("config", None)
-        if typed_config is not None:
-            if model_path is not None:
-                raise TypeError("Pass either model_path or config to from_pretrained, not both")
-            if kwargs:
-                unexpected = ", ".join(sorted(kwargs))
-                raise TypeError(f"Unexpected keyword arguments with config: {unexpected}")
-            return cls.from_config(typed_config, log_queue=log_queue)
-
-        if isinstance(model_path, GeneratorConfig | Mapping):
-            if kwargs:
-                unexpected = ", ".join(sorted(kwargs))
-                raise TypeError(f"Unexpected keyword arguments with typed config: {unexpected}")
-            return cls.from_config(model_path, log_queue=log_queue)
-
-        if model_path is None:
-            raise TypeError("model_path or config is required")
-
-        return cls.from_config(
-            from_pretrained_kwargs_to_config(model_path, kwargs),
-            log_queue=log_queue,
-        )
+        if flat_keywords:
+            unexpected = ", ".join(sorted(flat_keywords))
+            raise TypeError(f"VideoGenerator.from_pretrained(...) does not accept {unexpected}. Pass settings as a "
+                            "nested config at their typed paths, for example "
+                            "from_pretrained(model_path, {'engine': {'num_gpus': 2, 'offload': {'dit': False}}}).")
+        if config is None:
+            return cls.from_config({"model_path": model_path}, log_queue=log_queue)
+        if isinstance(config, GeneratorConfig):
+            if config.model_path != model_path:
+                raise ValueError(f"config.model_path {config.model_path!r} differs from model_path {model_path!r}")
+            return cls.from_config(config, log_queue=log_queue)
+        if config.get("model_path", model_path) != model_path:
+            raise ValueError(f"config['model_path'] {config['model_path']!r} differs from model_path {model_path!r}")
+        return cls.from_config({**config, "model_path": model_path}, log_queue=log_queue)
 
     @classmethod
     def from_config(

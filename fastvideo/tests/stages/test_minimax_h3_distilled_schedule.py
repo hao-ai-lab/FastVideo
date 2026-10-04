@@ -9,6 +9,9 @@ import pytest
 import torch
 from torch.testing import assert_close
 
+from fastvideo.api.checkpoint_defaults import dmd_schedule_checkpoint_step
+from fastvideo.api.inference_resolution import fill_runtime_defaults
+from fastvideo.api.resolution import resolve_generator_config
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3ModularPipeline
@@ -36,6 +39,19 @@ def _pipeline(tmp_path, *, video_shift=10.0):
     pipeline.modules = {"scheduler": MiniMaxH3Scheduler(shift=video_shift),
                         "audio_scheduler": MiniMaxH3Scheduler(shift=3.0)}
     return pipeline
+
+
+def _resolve_checkpoint(tmp_path, raw=None):
+    """Resolve the local checkpoint ``tmp_path`` through the checkpoint schedule step and the runtime defaults."""
+    return resolve_generator_config({"model_path": str(tmp_path), **(raw or {})},
+                                    (dmd_schedule_checkpoint_step(MiniMaxH3PipelineConfig()), fill_runtime_defaults),
+                                    materialize=lambda _: MiniMaxH3PipelineConfig())
+
+
+def _with_steps(steps):
+    """A resolved config whose input sets ``pipeline.dmd_denoising_steps``."""
+    return make_resolved_config(MiniMaxH3PipelineConfig(dmd_denoising_steps=steps),
+                                raw={"pipeline": {"dmd_denoising_steps": steps}})
 
 
 def test_pipeline_preserves_shift10_from_checkpoint(tmp_path):
@@ -85,8 +101,8 @@ def _run_tiny_stage(monkeypatch, steps, grid_points, *, video_shift=10.0, offloa
     resolved_config = make_resolved_config(MiniMaxH3PipelineConfig(),
                                            raw={"engine": {"offload": offload, "use_fsdp_inference": False}})
     if steps is not None:
-        # A schedule decided after resolution, such as the checkpoint's, arrives through with_override, which does
-        # not type-check values, so the stage's own ladder validation is what rejects a malformed one.
+        # The checkpoint step copies the schedule as written and an override skips the parser's type check, so the
+        # stage's own ladder validation is what rejects a malformed one.
         resolved_config = resolved_config.with_override("test:dmd_schedule", {"pipeline.dmd_denoising_steps": steps})
     batch = ForwardBatch(
         data_type="video", prompt_embeds=[torch.zeros(1, 2, 8)], latents=torch.ones(2, 96), audio_latents=torch.ones(4, 32),
@@ -158,17 +174,34 @@ def test_eight_forward_schedule_uses_trained_rungs_for_both_modalities(monkeypat
     assert_close(result.audio_latents, torch.full_like(result.audio_latents, 1.0 - 3.0 * audio_sigmas[0]))
 
 
-def test_pipeline_loads_the_exported_ladder_and_rejects_a_conflicting_one(tmp_path):
+def test_resolution_fills_the_exported_ladder_and_the_pipeline_accepts_it(tmp_path):
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps(CONTRACT))
-    pipeline = _pipeline(tmp_path)
-    pipeline.initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
-    assert list(pipeline.resolved_config.pipeline.dmd_denoising_steps) == DMD_STEPS
+    resolved_config = _resolve_checkpoint(tmp_path)
+    assert list(resolved_config.pipeline.dmd_denoising_steps) == DMD_STEPS
+    provenance = resolved_config.provenance("pipeline.dmd_denoising_steps")
+    assert provenance.source == "fill_dmd_schedule_from_checkpoint"
 
+    pipeline = _pipeline(tmp_path)
+    pipeline.initialize_pipeline(resolved_config)
+
+    # An input schedule wins during resolution; the pipeline then rejects the disagreement with the checkpoint.
+    explicit = _resolve_checkpoint(tmp_path, {"pipeline": {"dmd_denoising_steps": DMD_STEPS}})
+    assert explicit.provenance("pipeline.dmd_denoising_steps").source == "input"
     wrong_steps = [1000, 750, 500, 250]
-    wrong = make_resolved_config(MiniMaxH3PipelineConfig(dmd_denoising_steps=wrong_steps),
-                                 raw={"pipeline": {"dmd_denoising_steps": wrong_steps}})
     with pytest.raises(ValueError, match="checkpoint.*DMD"):
-        pipeline.initialize_pipeline(wrong)
+        pipeline.initialize_pipeline(_with_steps(wrong_steps))
+    with pytest.raises(ValueError, match="dmd_denoising_steps is unset"):
+        pipeline.initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
+
+
+def test_checkpoint_step_skips_other_models_and_checkpoints_without_a_schedule(tmp_path):
+    (tmp_path / "fastvideo_inference.json").write_text(json.dumps(CONTRACT))
+    other_model = resolve_generator_config({"model_path": str(tmp_path)},
+                                           (dmd_schedule_checkpoint_step(object()), fill_runtime_defaults))
+    assert other_model.pipeline.dmd_denoising_steps is None
+
+    (tmp_path / "fastvideo_inference.json").unlink()
+    assert _resolve_checkpoint(tmp_path).pipeline.dmd_denoising_steps is None
 
 
 @pytest.mark.parametrize("grid_points", [5, 50])
@@ -179,8 +212,8 @@ def test_base_and_four_forward_schedules_are_unchanged(monkeypatch, tmp_path, gr
     pipeline.initialize_pipeline(resolved_config)
     assert pipeline.modules["scheduler"].shift == 12.0
     assert pipeline.modules["audio_scheduler"].shift == 3.0
-    # Without a sidecar the pipeline keeps the config it was given; a checkpoint schedule would rebind it.
-    assert (getattr(pipeline, "resolved_config", None) or resolved_config).pipeline.dmd_denoising_steps is None
+    # Without a sidecar, resolution leaves the schedule unset and the pipeline accepts that.
+    assert _resolve_checkpoint(tmp_path).pipeline.dmd_denoising_steps is None
     assert config.text_encoder_precisions == ("bf16",)
     stage, calls, _ = _run_tiny_stage(monkeypatch, None, grid_points, video_shift=12.0)
     assert len(calls) == grid_points - 1
@@ -210,7 +243,7 @@ def test_explicit_eight_forward_ladder_requires_nine_grid_points(monkeypatch, gr
 def test_checkpoint_schedule_metadata_must_be_self_consistent(tmp_path, field, value):
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps({**CONTRACT, field: value}))
     with pytest.raises(ValueError):
-        _pipeline(tmp_path).initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
+        _pipeline(tmp_path).initialize_pipeline(_with_steps(DMD_STEPS))
 
 
 @pytest.mark.parametrize("module_name", ["scheduler", "audio_scheduler"])
@@ -231,12 +264,13 @@ def test_sidecar_without_shift_fields_uses_the_checkpoint_schedulers(tmp_path):
     four_step.pop("video_scheduler_shift")
     four_step.pop("audio_scheduler_shift")
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps(four_step))
+    resolved_config = _resolve_checkpoint(tmp_path)
+    assert list(resolved_config.pipeline.dmd_denoising_steps) == [999, 749, 500, 250]
     pipeline = _pipeline(tmp_path, video_shift=12.0)
-    pipeline.initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
-    assert list(pipeline.resolved_config.pipeline.dmd_denoising_steps) == [999, 749, 500, 250]
+    pipeline.initialize_pipeline(resolved_config)
     assert pipeline.modules["scheduler"].shift == 12.0
     assert pipeline.modules["audio_scheduler"].shift == 3.0
     # Explicit disagreement is still rejected.
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps({**four_step, "video_scheduler_shift": 10.0}))
     with pytest.raises(ValueError, match="disagrees"):
-        _pipeline(tmp_path, video_shift=12.0).initialize_pipeline(make_resolved_config(MiniMaxH3PipelineConfig()))
+        _pipeline(tmp_path, video_shift=12.0).initialize_pipeline(resolved_config)

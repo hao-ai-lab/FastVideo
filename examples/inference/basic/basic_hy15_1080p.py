@@ -14,13 +14,19 @@ def main():
         "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR",  # 480p -> 720p -> 1080p
         # or "weizhou03/HunyuanVideo-1.5-Diffusers-1080p" # 720p -> 1080p
         # FastVideo will automatically handle distributed setup
-        num_gpus=1,
-        use_fsdp_inference=False,  # set to True if GPU is out of memory
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,  # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
-        # image_encoder_cpu_offload=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,  # set to True if GPU is out of memory
+                "offload": {
+                    "dit": True,
+                    "vae": True,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,  # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
+                    # "image_encoder": False,
+                },
+            },
+        },
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

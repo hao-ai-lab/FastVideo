@@ -55,7 +55,11 @@ def generate_one_ltx2_video() -> str:
     # audio track is silence/noise — unusable for audio.* metrics).
     generator = VideoGenerator.from_pretrained(
         "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+        },
     )
     generator.generate({
         "prompt": PROMPT,

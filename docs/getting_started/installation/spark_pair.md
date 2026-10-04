@@ -17,7 +17,7 @@ xDiT vendor. Do not install xDiT for this path.
 
 | Goal | How | Use two Sparks? |
 |---|---|---|
-| Two independent videos at once | One process per box, `num_gpus=1` | Throughput only. Each clip still takes the 1-GPU time for that size. |
+| Two independent videos at once | One process per box, `engine.num_gpus: 1` | Throughput only. Each clip still takes the 1-GPU time for that size. |
 | One clip, faster | Ray + `sp_size=2` + parallel VAE | **Yes.** One 768×1344×124 recipe was 292 s vs 374 s on one GB10. |
 | One clip, longer | Same, more frames | **Yes.** 345 frames (~14.4 s at 24 fps) finished in 587 s at 768×1344. |
 
@@ -35,7 +35,7 @@ over ~21 GB/s RoCE.
   QSFP; do not download 100+ GB twice over Wi-Fi.
 - Ray in the FastVideo venv (`uv pip install ray` if it is not already there).
 
-Each Spark has **one** GPU. `num_gpus=2` therefore means two nodes, which is
+Each Spark has **one** GPU. `engine.num_gpus: 2` therefore means two nodes, which is
 why the executor must be Ray (`mp` only works inside one process tree).
 
 ## 1. Put IPv4 on the QSFP NICs
@@ -198,7 +198,7 @@ sm_100a VSA kernel is not on this chip, so denoise is slower than a GB200
 | Gloo `connectFullMesh` / `remote=[127.0.0.1]` | Two 1-GPU nodes must not use loopback as the Gloo store. Source `spark_pair_env.sh` so `GLOO_SOCKET_IFNAME` is the QSFP NIC on **each** box. FastVideo no longer copies that NIC name from the driver onto workers. |
 | Second `generate()` crashes `NoneType.parameters` | Sequential load used to drop the text encoder without reloading it. This branch reloads Qwen for later requests so `--warmup --repeats N` works. |
 | OOM / `earlyoom` prefers Python | Lazy module load must stay on (do not pass `--no-lazy-module-load` to `basic_fasth3.py` or set `engine.offload.lazy_module_load: false`). Peak GPU during 345-frame denoise is ~90 GiB/node. |
-| `num_gpus=2` on one Spark | Each Spark has one GPU. Use Ray across two nodes, or `num_gpus=1` on one box. |
+| `engine.num_gpus: 2` on one Spark | Each Spark has one GPU. Use Ray across two nodes, or `engine.num_gpus: 1` on one box. |
 
 ## What we are not claiming
 

@@ -9,12 +9,18 @@ OUTPUT_PATH = "video_samples_matrixgame3"
 def main():
     generator = VideoGenerator.from_pretrained(
         MODEL_PATH,
-        num_gpus=1,
-        use_fsdp_inference=False,
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,
+                "offload": {
+                    "dit": False,
+                    "vae": False,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,
+                },
+            },
+        },
     )
 
     generator.generate({

@@ -39,7 +39,11 @@ METRICS = [
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
         "Davids048/LTX2-Base-Diffusers",
-        num_gpus=1,
+        {
+            "engine": {
+                "num_gpus": 1,
+            },
+        },
     )
 
     output_path = "outputs_video/ltx2_audio_eval/output.mp4"

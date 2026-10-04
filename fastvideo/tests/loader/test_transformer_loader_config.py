@@ -57,6 +57,7 @@ def test_transformer_loader_passes_the_typed_engine_settings(transformer_dir, fs
             "use_fsdp_inference": True,
             "offload": {
                 "dit": False,
+                "dit_layerwise": False,
                 "pin_cpu_memory": False
             },
             "compile": {
@@ -120,3 +121,22 @@ def test_teacher_critic_flag_loads_checkpoint_weights_without_quantization(monke
     assert teacher["weight_dir_list"] == [str(transformer_dir / "model.safetensors")]
     assert teacher["init_params"]["config"].quant_config is None
     assert resolved_config.pipeline_config.dit_config.quant_config is quant_config
+
+
+def test_load_argument_overrides_the_transformer_class_name(monkeypatch, transformer_dir, fsdp_calls) -> None:
+    """``override_transformer_cls_name`` of the load call wins over the typed component setting."""
+    resolved_config = _resolve({"pipeline": {"components": {"override_transformer_cls_name": "StudentModel"}}})
+    requested = []
+    monkeypatch.setattr(component_loader.ModelRegistry, "resolve_model_cls",
+                        lambda name: requested.append(name) or (_FakeTransformer, None))
+
+    PipelineComponentLoader.load_module("transformer", str(transformer_dir), "diffusers", resolved_config)
+    PipelineComponentLoader.load_module("transformer",
+                                        str(transformer_dir),
+                                        "diffusers",
+                                        resolved_config,
+                                        loading_teacher_critic_model=True,
+                                        override_transformer_cls_name="TeacherModel")
+
+    assert requested == ["StudentModel", "TeacherModel"]
+    assert resolved_config.pipeline.components.override_transformer_cls_name == "StudentModel"

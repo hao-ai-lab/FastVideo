@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU tests for worker-local offload policy on unified-memory devices."""
+"""CPU tests for the device-policy resolution steps, which settle host offload for the local device's memory class."""
 from __future__ import annotations
 
 import dataclasses
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
-from fastvideo.api.device_policy import (UNIFIED_MEMORY_OFFLOAD_PATHS, disable_offload_on_unified_memory,
-                                         finalize_device_offload_policy)
+from fastvideo.api import device_policy
+from fastvideo.api.device_policy import LOCAL_DEVICE_ID, UNIFIED_MEMORY_OFFLOAD_PATHS
 from fastvideo.api.inference_resolution import resolve_inference_config
 from fastvideo.api.schema import OffloadConfig
 from fastvideo.api.training_schema import resolve_training_config
@@ -23,9 +23,14 @@ def _offload_field(flag: str) -> str:
     return UNIFIED_MEMORY_OFFLOAD_PATHS[flag].rsplit(".", 1)[1]
 
 
+def _device_policy_enabled():
+    """Turn the device-policy steps on inside the test isolation, which turns them off like downloads."""
+    return patch.object(device_policy, "APPLY_DEVICE_POLICY", True)
+
+
 def _resolve(engine: dict | None = None):
     """A resolved inference config for a registered model with the given ``engine`` section."""
-    with isolated_environment():
+    with isolated_environment(), _device_policy_enabled():
         return resolve_inference_config({"model_path": WAN_T2V, "engine": engine or {}})
 
 
@@ -42,6 +47,11 @@ def _enabled_flags(resolved_config) -> list[str]:
     ]
 
 
+def _decisions_of(resolved_config, source: str) -> list[dict]:
+    """The values that the step ``source`` decided, in order."""
+    return [values for decided_by, values in resolved_config.decisions if decided_by == source]
+
+
 @pytest.fixture
 def as_unified_cuda(monkeypatch):
     probe = Mock(return_value=True)
@@ -51,22 +61,23 @@ def as_unified_cuda(monkeypatch):
     return probe
 
 
-def test_resolving_an_inference_config_defers_device_policy(monkeypatch) -> None:
-    probe = Mock(side_effect=AssertionError("device probe ran in the driver"))
+@pytest.fixture
+def as_discrete_cuda(monkeypatch):
+    probe = Mock(return_value=False)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", probe)
-
-    resolved_config = _resolve({"use_fsdp_inference": True})
-
-    assert resolved_config.engine.use_fsdp_inference is True
-    assert resolved_config.engine.offload.dit_layerwise is True
-    assert resolved_config.engine.offload.dit is True
-    probe.assert_not_called()
-
-
-def test_training_resolution_retains_offload_conflict_normalization(monkeypatch) -> None:
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+    return probe
 
-    with isolated_environment():
+
+def test_resolution_queries_the_local_device(as_unified_cuda) -> None:
+    _resolve()
+
+    assert as_unified_cuda.call_args_list
+    assert {call.args for call in as_unified_cuda.call_args_list} == {(LOCAL_DEVICE_ID, )}
+
+
+def test_training_resolution_settles_offload_conflicts(as_discrete_cuda) -> None:
+    with isolated_environment(), _device_policy_enabled():
         resolved_config = resolve_training_config({
             "model_path": WAN_T2V,
             "engine": {
@@ -85,6 +96,8 @@ def test_training_resolution_retains_offload_conflict_normalization(monkeypatch)
     assert resolved_config.engine.offload.dit_layerwise is True
     assert resolved_config.engine.offload.dit is False
     assert resolved_config.engine.use_fsdp_inference is False
+    assert resolved_config.provenance("engine.use_fsdp_inference").source == "apply_layerwise_offload_conflicts"
+    assert resolved_config.engine.offload.lazy_module_load is False
 
 
 def test_policy_list_covers_every_host_offload_field() -> None:
@@ -96,145 +109,139 @@ def test_policy_list_covers_every_host_offload_field() -> None:
 def test_unified_device_disables_every_offload_flag(as_unified_cuda) -> None:
     resolved_config = _resolve()
 
-    decided = finalize_device_offload_policy(resolved_config, device_id=6)
-
-    as_unified_cuda.assert_called_once_with(6)
-    assert not _enabled_flags(decided)
-    assert _enabled_flags(resolved_config) == list(UNIFIED_MEMORY_OFFLOAD_FLAGS)
+    assert not _enabled_flags(resolved_config)
+    assert _decisions_of(resolved_config, "apply_unified_memory_offload_policy") == [{
+        path: False
+        for path in UNIFIED_MEMORY_OFFLOAD_PATHS.values()
+    }]
+    for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS:
+        provenance = resolved_config.provenance(UNIFIED_MEMORY_OFFLOAD_PATHS[flag])
+        assert (provenance.raw_value, provenance.source) == (True, "apply_unified_memory_offload_policy")
 
 
 @pytest.mark.parametrize("flag", UNIFIED_MEMORY_OFFLOAD_FLAGS)
 def test_each_offload_flag_is_independently_disabled(as_unified_cuda, flag: str) -> None:
     resolved_config = _with_offloads(flag)
-    assert _enabled_flags(resolved_config) == [flag]
 
-    decided = disable_offload_on_unified_memory(resolved_config, device_id=2)
+    assert not _enabled_flags(resolved_config)
+    assert _decisions_of(resolved_config, "apply_unified_memory_offload_policy") == [{
+        UNIFIED_MEMORY_OFFLOAD_PATHS[flag]: False
+    }]
 
-    assert not _enabled_flags(decided)
-    assert decided.override_log == (("device_policy:unified_memory", {UNIFIED_MEMORY_OFFLOAD_PATHS[flag]: False}), )
 
-
-def test_discrete_device_classification_preserves_offload_requests(monkeypatch) -> None:
-    probe = Mock(return_value=False)
-    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", probe)
+def test_discrete_device_classification_preserves_offload_requests(as_discrete_cuda) -> None:
     resolved_config = _resolve()
 
-    assert disable_offload_on_unified_memory(resolved_config, device_id=3) is resolved_config
+    assert _enabled_flags(resolved_config) == [
+        flag for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS if flag != "dit_cpu_offload"
+    ]
+    assert _decisions_of(resolved_config, "apply_unified_memory_offload_policy") == []
+    assert resolved_config.provenance("engine.offload.dit").source == "apply_layerwise_offload_conflicts"
 
-    probe.assert_called_once_with(3)
-    assert _enabled_flags(resolved_config) == list(UNIFIED_MEMORY_OFFLOAD_FLAGS)
 
-
-def test_discrete_device_finalization_retains_layerwise_precedence(monkeypatch) -> None:
-    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: False)
-    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+def test_discrete_device_retains_layerwise_precedence(as_discrete_cuda) -> None:
     resolved_config = _resolve({"use_fsdp_inference": True})
 
-    decided = finalize_device_offload_policy(resolved_config, device_id=3)
-
-    offload = decided.engine.offload
+    offload = resolved_config.engine.offload
     assert offload.dit_layerwise is True
     assert offload.dit is False
-    assert decided.engine.use_fsdp_inference is False
+    assert resolved_config.engine.use_fsdp_inference is False
     assert offload.text_encoder is True
     assert offload.image_encoder is True
     assert offload.vae is True
     assert offload.lazy_module_load is False
-
-
-def test_workers_classify_their_own_device(monkeypatch) -> None:
-    seen_device_ids = []
-
-    def has_unified_memory(device_id):
-        seen_device_ids.append(device_id)
-        return device_id == 1
-
-    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", has_unified_memory)
-    monkeypatch.setattr("fastvideo.platforms.current_platform.get_device_name", lambda device_id: "NVIDIA GB10")
-    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
-    resolved_config = _resolve()
-
-    device_zero = finalize_device_offload_policy(resolved_config, device_id=0)
-    device_one = finalize_device_offload_policy(resolved_config, device_id=1)
-
-    assert seen_device_ids == [0, 1]
-    assert device_zero.engine.offload.dit_layerwise is True
-    assert device_zero.engine.offload.text_encoder is True
-    assert not _enabled_flags(device_one)
-
-
-def test_policy_applied_to_its_own_result_changes_nothing(as_unified_cuda) -> None:
-    decided = finalize_device_offload_policy(_resolve(), device_id=1)
-
-    again = finalize_device_offload_policy(decided, device_id=1)
-
-    assert again.override_log == decided.override_log
-    assert again.to_dict() == decided.to_dict()
+    assert _decisions_of(resolved_config, "apply_layerwise_offload_conflicts") == [{
+        "engine.use_fsdp_inference": False,
+        "engine.offload.dit": False,
+    }]
 
 
 def test_mps_clears_offload_and_keeps_its_fsdp_rule(monkeypatch) -> None:
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: True)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
     monkeypatch.setattr("fastvideo.platforms.current_platform.get_device_name", lambda device_id: "mps")
+
     resolved_config = _resolve({"use_fsdp_inference": True})
 
-    decided = finalize_device_offload_policy(resolved_config)
-
-    assert decided.engine.use_fsdp_inference is False
-    assert not _enabled_flags(decided)
+    assert resolved_config.engine.use_fsdp_inference is False
+    assert not _enabled_flags(resolved_config)
+    assert _decisions_of(resolved_config, "apply_mps_offload_policy") == [{
+        "engine.use_fsdp_inference": False,
+        "engine.offload.dit_layerwise": False,
+    }]
 
 
 def test_cuda_unified_memory_preserves_realistic_fsdp_request(as_unified_cuda) -> None:
     resolved_config = _resolve({"use_fsdp_inference": True})
-    assert resolved_config.engine.offload.dit_layerwise is True
+
     assert resolved_config.engine.use_fsdp_inference is True
-
-    decided = finalize_device_offload_policy(resolved_config)
-
-    assert decided.engine.use_fsdp_inference is True
-    assert not _enabled_flags(decided)
+    assert not _enabled_flags(resolved_config)
+    assert _decisions_of(resolved_config, "apply_layerwise_offload_conflicts") == []
 
 
 def test_pin_cpu_memory_is_not_a_host_offload_mode(as_unified_cuda) -> None:
     resolved_config = _resolve({"offload": {"pin_cpu_memory": True}})
 
-    decided = finalize_device_offload_policy(resolved_config)
-
     assert "pin_cpu_memory" not in UNIFIED_MEMORY_OFFLOAD_FLAGS
-    assert decided.engine.offload.pin_cpu_memory is True
+    assert resolved_config.engine.offload.pin_cpu_memory is True
 
 
 def test_already_disabled_flags_stay_disabled(as_unified_cuda) -> None:
-    decided = finalize_device_offload_policy(_with_offloads())
+    resolved_config = _with_offloads()
 
-    assert not _enabled_flags(decided)
+    assert not _enabled_flags(resolved_config)
+    assert _decisions_of(resolved_config, "apply_unified_memory_offload_policy") == []
 
 
 @pytest.mark.parametrize("name_error", [NotImplementedError, ValueError, RuntimeError])
 def test_platform_without_device_name_uses_generic_name(monkeypatch, name_error: type[Exception]) -> None:
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
 
     def unsupported_name(device_id):
         raise name_error("device name unavailable")
 
     monkeypatch.setattr("fastvideo.platforms.current_platform.get_device_name", unsupported_name)
+
     resolved_config = _with_offloads("text_encoder_cpu_offload")
 
-    decided = disable_offload_on_unified_memory(resolved_config, device_id=0)
+    assert resolved_config.engine.offload.text_encoder is False
 
-    assert decided.engine.offload.text_encoder is False
+
+def test_failed_device_query_counts_as_discrete(monkeypatch) -> None:
+
+    def unavailable(device_id):
+        raise RuntimeError("no CUDA driver")
+
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", unavailable)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+
+    resolved_config = _with_offloads("text_encoder_cpu_offload")
+
+    assert resolved_config.engine.offload.text_encoder is True
+    assert resolved_config.engine.offload.lazy_module_load is False
 
 
 def test_unified_device_auto_enables_lazy_module_load(as_unified_cuda) -> None:
     resolved_config = _resolve()
 
-    assert resolved_config.engine.offload.lazy_module_load is None
-    assert finalize_device_offload_policy(resolved_config, device_id=6).engine.offload.lazy_module_load is True
+    provenance = resolved_config.provenance("engine.offload.lazy_module_load")
+    assert (provenance.raw_value, provenance.value, provenance.source) == (None, True, "fill_lazy_module_load")
 
 
 def test_explicit_false_lazy_module_load_stays_off_on_unified(as_unified_cuda) -> None:
     resolved_config = _resolve({"offload": {"lazy_module_load": False}})
 
-    decided = finalize_device_offload_policy(resolved_config, device_id=6)
+    assert resolved_config.engine.offload.lazy_module_load is False
+    assert resolved_config.provenance("engine.offload.lazy_module_load").source == "input"
 
-    assert decided.engine.offload.lazy_module_load is False
+
+def test_disabled_device_policy_decides_nothing(as_unified_cuda) -> None:
+    with isolated_environment(), patch.object(device_policy, "APPLY_DEVICE_POLICY", False):
+        resolved_config = resolve_inference_config({"model_path": WAN_T2V, "engine": {"use_fsdp_inference": True}})
+
+    assert _enabled_flags(resolved_config) == list(UNIFIED_MEMORY_OFFLOAD_FLAGS)
+    assert resolved_config.engine.use_fsdp_inference is True
+    assert resolved_config.engine.offload.lazy_module_load is None
+    assert [source for source, _ in resolved_config.decisions if source.startswith(("apply_", "fill_lazy"))] == []
+    as_unified_cuda.assert_not_called()

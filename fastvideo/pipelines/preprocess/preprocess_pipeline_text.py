@@ -152,7 +152,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
         # Loading text dataset
-        train_dataset = gettextdataset(preprocess_config)
+        train_dataset = gettextdataset(preprocess_config, self.model_path)
 
         self.preprocess_dataloader = DataLoader(
             train_dataset,

@@ -7,12 +7,18 @@ def main():
 
     generator = VideoGenerator.from_pretrained(
         model_path,
-        num_gpus=1,
-        use_fsdp_inference=False,  # set True if GPU is out of memory
-        dit_cpu_offload=False,
-        vae_cpu_offload=False,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,  # set True if GPU is out of memory
+                "offload": {
+                    "dit": False,
+                    "vae": False,
+                    "text_encoder": True,
+                    "pin_cpu_memory": True,
+                },
+            },
+        },
     )
 
     prompt = (

@@ -32,7 +32,7 @@ from fastvideo.api import (
 
 | Surface | Availability | Notes |
 | --- | --- | --- |
-| `VideoGenerator.from_pretrained(model_path, **typed_kwargs)` | Today | `typed_kwargs` is a stable subset from `GeneratorConfig` — no flat legacy LTX-2 kwargs (guaranteed after PR 6) |
+| `VideoGenerator.from_pretrained(model_path, config)` | Today | `config` is a nested `GeneratorConfig` mapping without `model_path`; no flat keywords |
 | `VideoGenerator.generate(request: GenerationRequest) -> GenerationResult` | Today | Aggregated; Dynamo wraps in `asyncio.to_thread` under `asyncio.Lock` |
 | `VideoGenerator.generate_async(request) -> AsyncGenerator[VideoEvent, None]` | **PR 7.10** | Canonical execution substrate; sync wrapper reroutes through this |
 | `VideoGenerator.default_health_check_request() -> GenerationRequest` | **PR 7.10** | 256x256 / 8 frames / 1 step; lets Dynamo build its health payload without knowing any FastVideo internals |
@@ -225,7 +225,7 @@ async def init_video_generation(runtime, config, shutdown_endpoints):
     from fastvideo.api import config_to_dict
 
     server_args, dynamo_args = config.server_args, config.dynamo_args
-    generator = VideoGenerator.from_pretrained(**config.fastvideo_kwargs())
+    generator = VideoGenerator.from_config(build_generator_config(server_args))
 
     dump_config(dynamo_args.dump_config_to, config)
 
@@ -309,11 +309,11 @@ re-chase FastVideo drift:
 2. `ContinuationState.payload` is JSON-serializable or references
    opaque blob ids. Dynamo can round-trip it through RPC without
    special-casing torch tensors.
-3. `VideoGenerator.from_pretrained` accepts a typed `GeneratorConfig`.
-   Its only flat keywords are the convenience keywords in
-   `fastvideo.api.compat.FROM_PRETRAINED_KWARGS`; any other keyword
-   raises `TypeError` that points to `VideoGenerator.from_config(...)`,
-   which takes every setting at its typed config path.
+3. `VideoGenerator.from_pretrained(model_path, config)` takes a typed
+   `GeneratorConfig` or its nested mapping; any flat keyword raises
+   `TypeError` that points to the nested config.
+   `VideoGenerator.from_config(...)` takes the same settings with
+   `model_path` inside.
 4. `generate_async` (PR 7.10+) emits events in order
    `Progress* → Partial* → Final`; the final event always has exactly
    one occurrence per request.

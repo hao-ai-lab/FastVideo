@@ -38,7 +38,7 @@ def main():
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        num_gpus=1,  # Adjust based on your hardware
+        {"engine": {"num_gpus": 1}},  # Adjust based on your hardware
     )
 
     # Define a prompt for your video
@@ -82,7 +82,7 @@ from fastvideo import VideoGenerator
 def main():
     # Create the generator
     model_name = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
-    generator = VideoGenerator.from_pretrained(model_name, num_gpus=1)
+    generator = VideoGenerator.from_pretrained(model_name, {"engine": {"num_gpus": 1}})
 
     # Generate video based on the image
     prompt = "A photograph coming to life with gentle movement"
@@ -109,12 +109,12 @@ Common issues and their solutions:
 If you encounter CUDA out of memory errors:
 
 - Reduce `num_frames` or video resolution
-- Enable FastVideo offloading options such as `dit_layerwise_offload=True`
-  (single GPU) or `use_fsdp_inference=True` (multi-GPU)
+- Enable FastVideo offloading options such as `engine.offload.dit_layerwise: true`
+  (single GPU) or `engine.use_fsdp_inference: true` (multi-GPU)
 - Try a smaller model or use distilled versions
-- Use `num_gpus` > 1 if multiple GPUs are available
-- Try enabling FSDP inference with `use_fsdp_inference=True` (may slow down generation)
-- Try enabling DiT layerwise offload with `dit_layerwise_offload=True` (now only a few models support this, but may introduce less overhead than FSDP)
+- Use `engine.num_gpus` > 1 if multiple GPUs are available
+- Try enabling FSDP inference with `engine.use_fsdp_inference: true` (may slow down generation)
+- Try enabling DiT layerwise offload with `engine.offload.dit_layerwise: true` (now only a few models support this, but may introduce less overhead than FSDP)
 
 ### Slow Generation
 

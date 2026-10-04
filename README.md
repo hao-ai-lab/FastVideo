@@ -135,7 +135,7 @@ def main():
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
         "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-        num_gpus=1,  # Adjust based on your hardware
+        {"engine": {"num_gpus": 1}},  # Adjust based on your hardware
     )
 
     # Define a prompt for your video

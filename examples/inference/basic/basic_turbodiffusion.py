@@ -14,11 +14,16 @@ def main() -> None:
     generator = VideoGenerator.from_pretrained(
         "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
         # FastVideo will automatically handle distributed setup
-        num_gpus=1,
-        use_fsdp_inference=False,  # set to True if GPU is out of memory
-
-        # set to false if using RTX 4090
-        # pin_cpu_memory=False,
+        {
+            "engine": {
+                "num_gpus": 1,
+                "use_fsdp_inference": False,  # set to True if GPU is out of memory
+                "offload": {
+                    # set to false if using RTX 4090
+                    # "pin_cpu_memory": False,
+                },
+            },
+        },
     )
 
     # Generate videos with the same simple API, regardless of GPU count

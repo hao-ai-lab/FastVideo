@@ -177,7 +177,7 @@ from fastvideo import VideoGenerator
 def main():
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        num_gpus=1,
+        {"engine": {"num_gpus": 1}},
     )
 
     prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

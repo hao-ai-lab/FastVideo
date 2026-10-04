@@ -9,10 +9,8 @@ resolution decisions; a request case records the ``SamplingParam`` and the reque
 - ``yaml``: every repository config file with a ``generator`` section, through ``load_generator_config_from_file`` and
   ``resolve_inference_config``; its ``request`` or ``default_request`` through the ``fastvideo generate`` and
   ``fastvideo serve`` loaders and ``request_to_sampling_param``.
-- ``kwargs``: ``VideoGenerator.from_pretrained`` keywords, through ``from_pretrained_kwargs_to_config`` and the same
-  resolution.
-- ``config``: typed ``GeneratorConfig`` mappings, as ``VideoGenerator.from_config`` receives them, through the same
-  resolution.
+- ``config``: typed ``GeneratorConfig`` mappings, as ``VideoGenerator.from_config`` and
+  ``VideoGenerator.from_pretrained`` receive them, through the same resolution.
 - ``environment``: environment variables that resolution folds into typed fields.
 - ``request``: typed ``GenerationRequest`` values, through ``request_to_sampling_param``.
 
@@ -187,13 +185,17 @@ def snapshot_request(request: Any, model_path: str) -> dict[str, Any]:
 
 @contextlib.contextmanager
 def isolated_environment(env_values: dict[str, Any] | None = None) -> Iterator[None]:
-    """Unset every registered FastVideo environment variable, set ``env_values``, and block model-index downloads.
+    """Unset every registered FastVideo environment variable, set ``env_values``, block model-index downloads, and
+    turn the device policy off.
 
     The registry's ``override`` context managers restore the previous values on exit. Downloads are blocked by
-    replacing ``fastvideo.registry.maybe_download_model_index``, the only network call on the configuration path.
+    replacing ``fastvideo.registry.maybe_download_model_index``, the only network call on the configuration path. The
+    device policy steps are turned off (``device_policy.APPLY_DEVICE_POLICY``) so that a snapshot does not depend on
+    the machine that produced it.
     """
     import fastvideo.envs as envs
     import fastvideo.registry as registry
+    from fastvideo.api import device_policy
 
     def refuse_download(model_path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise OfflineResolutionError(f"resolving {model_path!r} needs a model_index.json download")
@@ -205,6 +207,9 @@ def isolated_environment(env_values: dict[str, Any] | None = None) -> Iterator[N
         original = registry.maybe_download_model_index
         registry.maybe_download_model_index = refuse_download
         stack.callback(setattr, registry, "maybe_download_model_index", original)
+        apply_policy = device_policy.APPLY_DEVICE_POLICY
+        device_policy.APPLY_DEVICE_POLICY = False
+        stack.callback(setattr, device_policy, "APPLY_DEVICE_POLICY", apply_policy)
         yield
 
 
@@ -247,16 +252,6 @@ def _yaml_request(path: Path) -> Any:
     if "request" in yaml.safe_load(path.read_text()):
         return build_generate_run_config(namespace).request
     return build_serve_config(namespace).default_request
-
-
-def _kwargs_case(model_path: str, kwargs: dict[str, Any]) -> Callable[[], dict[str, Any]]:
-
-    def build() -> dict[str, Any]:
-        from fastvideo.api.compat import from_pretrained_kwargs_to_config
-
-        return snapshot_resolved_generator_config(from_pretrained_kwargs_to_config(model_path, kwargs))
-
-    return build
 
 
 def _config_case(raw: dict[str, Any]) -> Callable[[], dict[str, Any]]:
@@ -318,37 +313,46 @@ def collect_cases() -> list[SnapshotCase]:
         SnapshotCase("yaml",
                      path.relative_to(REPO_ROOT).as_posix(), _yaml_case(path)) for path in _repository_config_files()
     ]
-    # One case per kind of branch in from_pretrained_kwargs_to_config: keywords of typed fields and compile sub-keys.
-    kwargs_cases = {
-        "typed_offload_and_parallelism": (WAN_T2V, {
-            "num_gpus": 2,
-            "sp_size": 2,
-            "dit_cpu_offload": False,
-            "vae_cpu_offload": False,
-        }),
-        "torch_compile_kwargs_typed_and_extra": (WAN_T2V, {
-            "enable_torch_compile": True,
-            "torch_compile_kwargs": {
-                "backend": "inductor",
-                "mode": "max-autotune",
-                "fullgraph": True,
-                "options": {
-                    "triton.cudagraphs": False
-                },
-            },
-        }),
-        "disable_autocast": (WAN_T2V, {
-            "disable_autocast": True
-        }),
-    }
-    cases += [
-        SnapshotCase("kwargs", name, _kwargs_case(model, kwargs)) for name, (model, kwargs) in kwargs_cases.items()
-    ]
-    # Typed configs for the settings that only from_config accepts: typed fields, a model-only PipelineConfig
-    # attribute and a key that code reads by name in pipeline.experimental, LTX-2 refine and VAE tile fields, and a
-    # pipeline config JSON path.
+    # Typed configs: engine, offload, parallelism, and compile fields, a model-only PipelineConfig attribute and a key
+    # that code reads by name in pipeline.experimental, LTX-2 refine and VAE tile fields, and a pipeline config JSON
+    # path.
     pipeline_json = str(REPO_ROOT / "fastvideo/configs/fasthunyuan_t2v.json")
     config_cases = {
+        "typed_offload_and_parallelism": {
+            "model_path": WAN_T2V,
+            "engine": {
+                "num_gpus": 2,
+                "parallelism": {
+                    "sp_size": 2
+                },
+                "offload": {
+                    "dit": False,
+                    "vae": False
+                },
+            },
+        },
+        "torch_compile_kwargs_typed_and_extra": {
+            "model_path": WAN_T2V,
+            "engine": {
+                "compile": {
+                    "enabled": True,
+                    "backend": "inductor",
+                    "mode": "max-autotune",
+                    "fullgraph": True,
+                    "extras": {
+                        "options": {
+                            "triton.cudagraphs": False
+                        }
+                    },
+                }
+            },
+        },
+        "disable_autocast": {
+            "model_path": WAN_T2V,
+            "engine": {
+                "disable_autocast": True
+            },
+        },
         "attention_precision_and_flow_shift": {
             "model_path": WAN_T2V,
             "engine": {

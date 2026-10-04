@@ -6,6 +6,7 @@ import json
 import pickle
 from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -20,12 +21,16 @@ from fastvideo.api.training_schema import (PreprocessRunConfig, TrainingRunConfi
 from fastvideo.tests.api.config_snapshot import isolated_environment
 
 WAN_T2V = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-LTX2 = "FastVideo/LTX2-Distilled-Diffusers"
-FASTH3 = "FastVideo/FastVideo-FastH3-8-Step-V2"
 
 
 def _resolve(raw, env_values=None):
     with isolated_environment(env_values):
+        return resolve_inference_config(raw)
+
+
+def _resolve_with_device_policy(raw):
+    """Resolve inside the isolation with the device-policy steps on, which the isolation turns off like downloads."""
+    with isolated_environment(), patch.object(device_policy, "APPLY_DEVICE_POLICY", True):
         return resolve_inference_config(raw)
 
 
@@ -100,46 +105,56 @@ def test_override_of_a_typed_home_leaves_the_pipeline_config_unchanged():
     assert overridden.provenance("pipeline.dmd_denoising_steps").source == "checkpoint:test"
 
 
-def test_unified_memory_policy_returns_recorded_overrides_once(monkeypatch):
-    resolved = _resolve({"model_path": WAN_T2V, "engine": {"offload": {"dit_layerwise": False}}})
-    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: device_id == 1)
+def test_unified_memory_policy_is_decided_during_resolution(monkeypatch):
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
     monkeypatch.setattr("fastvideo.platforms.current_platform.get_device_name", lambda device_id: "NVIDIA GB10")
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
 
-    decided = device_policy.finalize_device_offload_policy(resolved, 1)
-    again = device_policy.finalize_device_offload_policy(decided, 1)
+    resolved = _resolve_with_device_policy({"model_path": WAN_T2V, "engine": {"offload": {"dit_layerwise": False}}})
 
-    assert [source for source, _ in decided.override_log] == [
-        "device_policy:unified_memory",
-        "device_policy:lazy_module_load",
+    device_decisions = [(source, values) for source, values in resolved.decisions
+                        if source in ("apply_unified_memory_offload_policy", "fill_lazy_module_load")]
+    assert device_decisions == [
+        ("apply_unified_memory_offload_policy", {
+            "engine.offload.dit": False,
+            "engine.offload.text_encoder": False,
+            "engine.offload.image_encoder": False,
+            "engine.offload.vae": False,
+        }),
+        ("fill_lazy_module_load", {
+            "engine.offload.lazy_module_load": True
+        }),
     ]
-    assert decided.override_log[0][1] == {
+    assert resolved.engine.offload.lazy_module_load is True and resolved.engine.offload.dit is False
+    assert resolved.override_log == ()
+    assert resolved.provenance("engine.offload.dit").raw_value is True
+
+
+def test_discrete_device_leaves_offload_requests_and_turns_lazy_module_load_off(monkeypatch):
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: False)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+
+    resolved = _resolve_with_device_policy({"model_path": WAN_T2V, "engine": {"offload": {"dit_layerwise": False}}})
+
+    assert resolved.engine.offload.dit is True and resolved.engine.offload.text_encoder is True
+    assert resolved.engine.offload.lazy_module_load is False
+    assert resolved.provenance("engine.offload.lazy_module_load").source == "fill_lazy_module_load"
+
+
+def test_layerwise_offload_turns_off_conflicting_modes(monkeypatch):
+    monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: False)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
+
+    resolved = _resolve_with_device_policy({"model_path": WAN_T2V, "engine": {"use_fsdp_inference": True}})
+
+    assert [values for source, values in resolved.decisions if source == "apply_layerwise_offload_conflicts"] == [{
+        "engine.use_fsdp_inference": False,
         "engine.offload.dit": False,
-        "engine.offload.text_encoder": False,
-        "engine.offload.image_encoder": False,
-        "engine.offload.vae": False,
-    }
-    assert decided.engine.offload.lazy_module_load is True and decided.engine.offload.dit is False
-    assert again.override_log == decided.override_log
-    assert resolved.override_log == () and resolved.engine.offload.dit is True
-    assert device_policy.offload_disabled_on_unified_memory(1, "text_encoder_cpu_offload")
-    assert not device_policy.offload_disabled_on_unified_memory(0, "text_encoder_cpu_offload")
-    assert device_policy.finalize_device_offload_policy(resolved, 0).engine.offload.lazy_module_load is False
-
-
-def test_layerwise_offload_turns_off_conflicting_modes():
-    resolved = _resolve({"model_path": WAN_T2V, "engine": {"use_fsdp_inference": True}})
-
-    decided = device_policy.resolve_device_offload_conflicts(resolved)
-
-    assert [values for _, values in decided.override_log] == [{
-        "engine.use_fsdp_inference": False
-    }, {
-        "engine.offload.dit": False
     }]
+    assert resolved.engine.use_fsdp_inference is False and resolved.engine.offload.dit is False
 
 
-def test_direct_pipeline_keeps_the_policy_result_of_a_resolved_config(monkeypatch):
+def test_direct_pipeline_keeps_the_resolved_config(monkeypatch):
     import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
     from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 
@@ -159,14 +174,14 @@ def test_direct_pipeline_keeps_the_policy_result_of_a_resolved_config(monkeypatc
     monkeypatch.setattr(composed_pipeline_base, "get_world_group", lambda: SimpleNamespace(local_rank=2))
     monkeypatch.setattr(composed_pipeline_base, "get_or_create_profiler", lambda trace_dir: profiler)
     monkeypatch.setattr("fastvideo.platforms.current_platform.has_unified_memory", lambda device_id: True)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.get_device_name", lambda device_id: "NVIDIA GB10")
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_mps", lambda: False)
-    resolved = _resolve({"model_path": WAN_T2V})
+    resolved = _resolve_with_device_policy({"model_path": WAN_T2V})
 
     pipeline = _Pipeline("unused", resolved, required_config_modules=[])
 
-    assert pipeline.resolved_config is pipeline.loaded_with
-    assert pipeline.resolved_config.engine.offload.lazy_module_load is True
-    assert resolved.engine.offload.lazy_module_load is None
+    assert pipeline.resolved_config is resolved and pipeline.loaded_with is resolved
+    assert resolved.engine.offload.lazy_module_load is True
 
 
 def test_pipeline_records_component_paths_and_shares_its_component_state(monkeypatch, tmp_path):
@@ -255,40 +270,41 @@ def test_training_resolution_keeps_the_dit_on_the_device():
     assert built["resolved_config"] is resolved
 
 
-def test_ltx2_checkpoint_refine_defaults_rebind_the_pipeline_config(tmp_path):
-    from fastvideo.pipelines.basic.ltx2.ltx2_pipeline import LTX2Pipeline
+def test_ltx2_checkpoint_refine_defaults_are_resolved_from_a_local_checkpoint(tmp_path):
+    (tmp_path / "transformer").mkdir()
+    (tmp_path / "model_index.json").write_text(
+        json.dumps({
+            "_class_name": "LTX2Pipeline",
+            "_diffusers_version": "0",
+            "transformer": ["diffusers", "Model"],
+            "fastvideo_refine_lora_path": "FastVideo/LTX2-Distilled-LoRA",
+            "fastvideo_refine_num_inference_steps": 2,
+        }))
 
-    resolved = _resolve({"model_path": LTX2})
-    pipeline = object.__new__(LTX2Pipeline)
-    pipeline.model_path = str(tmp_path)
-    pipeline.resolved_config = resolved
-    pipeline._required_config_modules = list(LTX2Pipeline._required_config_modules)
-    model_index = {name: ["diffusers", "Model"] for name in pipeline._required_config_modules}
-    pipeline._load_config = lambda model_path: {
-        "_class_name": "LTX2Pipeline",
-        "_diffusers_version": "0",
-        "fastvideo_refine_lora_path": "FastVideo/LTX2-Distilled-LoRA",
-        "fastvideo_refine_num_inference_steps": 2,
-        **model_index,
-    }
+    from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 
-    pipeline.load_modules(resolved, {name: object() for name in model_index})
+    resolved = _resolve({
+        "model_path": str(tmp_path),
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": LTX2T2VConfig()
+            }
+        }
+    })
 
-    rebound = pipeline.resolved_config
-    assert rebound is not resolved
-    assert rebound.override_log == (("checkpoint:model_index.json", {
+    refine_decisions = [values for source, values in resolved.decisions if source == "fill_ltx2_refine_from_checkpoint"]
+    assert refine_decisions == [{
         "pipeline.ltx2.refine.lora_path": "FastVideo/LTX2-Distilled-LoRA",
         "pipeline.ltx2.refine.num_inference_steps": 2,
-        "pipeline.ltx2.refine.enabled": False,
-        "pipeline.ltx2.refine.add_noise": True,
-        "pipeline.ltx2.refine.guidance_scale": 1.0,
-    }), )
-    assert rebound.pipeline.ltx2.refine.lora_path == "FastVideo/LTX2-Distilled-LoRA"
-    assert rebound.pipeline.ltx2.refine.num_inference_steps == 2
-    assert resolved.pipeline.ltx2.refine.num_inference_steps is None
+    }]
+    refine = resolved.pipeline.ltx2.refine
+    assert (refine.lora_path, refine.num_inference_steps) == ("FastVideo/LTX2-Distilled-LoRA", 2)
+    assert (refine.enabled, refine.add_noise, refine.guidance_scale) == (False, True, 1.0)
+    assert resolved.provenance("pipeline.ltx2.refine.enabled").source == "fill_runtime_defaults"
 
 
-def test_minimax_h3_checkpoint_schedule_rebinds_and_reaches_the_first_forward(tmp_path, monkeypatch):
+def test_minimax_h3_checkpoint_schedule_is_resolved_and_reaches_the_first_forward(tmp_path, monkeypatch):
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
     from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
     from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3ModularPipeline
     from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -301,7 +317,24 @@ def test_minimax_h3_checkpoint_schedule_rebinds_and_reaches_the_first_forward(tm
             "num_inference_steps": 9,
             "transformer_forwards": 8,
         }))
-    resolved = _resolve({"model_path": FASTH3})
+    (tmp_path / "transformer").mkdir()
+    (tmp_path / "model_index.json").write_text(
+        json.dumps({
+            "_class_name": "MiniMaxH3ModularPipeline",
+            "_diffusers_version": "0",
+            "transformer": ["diffusers", "Model"],
+        }))
+    resolved = _resolve({
+        "model_path": str(tmp_path),
+        "pipeline": {
+            "experimental": {
+                "pipeline_config": MiniMaxH3PipelineConfig()
+            }
+        }
+    })
+    assert resolved.pipeline.dmd_denoising_steps == tuple(steps)
+    assert resolved.provenance("pipeline.dmd_denoising_steps").source == "fill_dmd_schedule_from_checkpoint"
+
     pipeline = object.__new__(MiniMaxH3ModularPipeline)
     pipeline.model_path = str(tmp_path)
     pipeline.resolved_config = resolved
@@ -309,7 +342,7 @@ def test_minimax_h3_checkpoint_schedule_rebinds_and_reaches_the_first_forward(tm
     pipeline.post_init_called = False
     seen = []
     monkeypatch.setattr(ComposedPipelineBase, "post_init",
-                        lambda self: (setattr(self, "post_init_called", True), self._load_checkpoint_schedule(
+                        lambda self: (setattr(self, "post_init_called", True), self._validate_checkpoint_schedule(
                             self.resolved_config)))
     monkeypatch.setattr(MiniMaxH3ModularPipeline, "_defer_denoise_modules", lambda self, args: False)
     monkeypatch.setattr(ComposedPipelineBase, "_stages", [], raising=False)
@@ -317,12 +350,9 @@ def test_minimax_h3_checkpoint_schedule_rebinds_and_reaches_the_first_forward(tm
     monkeypatch.setattr(ComposedPipelineBase, "stages",
                         property(lambda self: [lambda batch, args: seen.append(args) or batch]))
 
-    pipeline.forward(SimpleNamespace(), pipeline.resolved_config)
+    pipeline.forward(SimpleNamespace(), resolved)
 
-    assert seen == [pipeline.resolved_config] and pipeline.resolved_config is not resolved
-    assert pipeline.resolved_config.pipeline.dmd_denoising_steps == tuple(steps)
-    assert pipeline.resolved_config.provenance("pipeline.dmd_denoising_steps").source == (
-        "checkpoint:fastvideo_inference.json")
+    assert seen == [resolved] and pipeline.resolved_config is resolved
 
 
 def test_training_root_uses_command_line_defaults_and_typed_values(tmp_path):

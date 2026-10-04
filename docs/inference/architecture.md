@@ -376,8 +376,8 @@ modules are skipped.
 
 ```python
 generator = VideoGenerator.from_pretrained(
-    model_path="Wan-AI/Wan2.1-T2V-14B-Diffusers",
-    num_gpus=1, tp_size=1, sp_size=1,
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+    {"engine": {"num_gpus": 1, "parallelism": {"tp_size": 1, "sp_size": 1}}},
 )
 result = generator.generate({
     "prompt": "A cat dancing",
@@ -414,7 +414,7 @@ registry, applies a JSON config if provided, and freezes it.
 ## End-to-End Inference Flow
 
 ```
-User: VideoGenerator.from_pretrained(model_path, **kwargs)
+User: VideoGenerator.from_pretrained(model_path, config)
   │
   ├─ resolve_inference_config() → PipelineConfig resolved via registry
   ├─ get_model_info() → ModelInfo(pipeline_cls, sampling_param_cls, ...)
