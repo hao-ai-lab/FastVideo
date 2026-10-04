@@ -37,16 +37,17 @@ METAL_FUNC void scale_rows_simd8x8(thread simdgroup_float8x8 &mat, const threadg
 """
 
 # One threadgroup = one (head, video query tile). 8 SIMD-groups x 32 = 256
-# threads cover 64 query rows. Q is half smem (16 KiB). K/V stage 8 keys.
+# threads cover 64 query rows. K/V stage 32 keys, with 28.25 KiB total smem.
+# Updating online softmax once per 32 keys reduces accumulator rescaling barriers.
 _SIMD_SOURCE = """
     const int TILE = 64;
     const int D = 128;
     const int SG = 32;
     const int N_SG = 8;
     const int ROWS = 8;
-    const int KCHUNK = 8;
-    threadgroup float kvsmem[8 * 128];
-    threadgroup float score_smem[8 * 64];
+    const int KCHUNK = 32;
+    threadgroup float kvsmem[KCHUNK * D];
+    threadgroup float score_smem[N_SG * ROWS * KCHUNK];
     threadgroup float scale_tmp[8 * 64];
     threadgroup float qtile[8 * 64];
     threadgroup float row_alpha[8 * 8];
@@ -65,7 +66,7 @@ _SIMD_SOURCE = """
     int qt = n_prefix + (int)q_tile;
     int q_valid = active ? vbs[qt] : 0;
     int q_base_tile = (((int)head * S) + qt * TILE) * D;
-    threadgroup float *sg_scores = score_smem + sid * 64;
+    threadgroup float *sg_scores = score_smem + sid * ROWS * KCHUNK;
     threadgroup float *sg_tmp = scale_tmp + sid * 64;
     threadgroup float *sg_qtile = qtile + sid * 64;
     threadgroup float *sg_alpha = row_alpha + sid * 8;
@@ -117,16 +118,18 @@ _SIMD_SOURCE = """
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
 
-            thread simdgroup_float8x8 smat = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
-            for (int kk = 0; kk < 16; kk++) {
-                simdgroup_float8x8 kmat;
-                simdgroup_load(kmat, (const threadgroup float*)(kvsmem + kk * 8), D, ulong2(0, 0), true);
-                simdgroup_multiply_accumulate(smat, qfrag[kk], kmat, smat);
+            for (int kc = 0; kc < KCHUNK; kc += 8) {
+                thread simdgroup_float8x8 smat = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+                for (int kk = 0; kk < 16; kk++) {
+                    simdgroup_float8x8 kmat;
+                    simdgroup_load(kmat, (const threadgroup float*)(kvsmem + kc * D + kk * 8), D, ulong2(0, 0), true);
+                    simdgroup_multiply_accumulate(smat, qfrag[kk], kmat, smat);
+                }
+                simdgroup_store(smat, sg_scores + kc, KCHUNK);
             }
-            simdgroup_store(smat, sg_scores, KCHUNK);
             simdgroup_barrier(mem_flags::mem_threadgroup);
 
-            float scores[8];
+            float scores[KCHUNK];
             float cmax = -3.402823466e+38f;
             if (lane < (uint)ROWS) {
                 int grow = qrow0 + (int)lane;
@@ -178,12 +181,14 @@ _SIMD_SOURCE = """
             }
             simdgroup_barrier(mem_flags::mem_threadgroup);
 
-            thread simdgroup_float8x8 pmat;
-            simdgroup_load(pmat, sg_scores, KCHUNK);
-            for (int kk = 0; kk < 16; kk++) {
-                simdgroup_float8x8 vmat;
-                simdgroup_load(vmat, (const threadgroup float*)(kvsmem + kk * 8), D);
-                simdgroup_multiply_accumulate(acc[kk], pmat, vmat, acc[kk]);
+            for (int kc = 0; kc < KCHUNK; kc += 8) {
+                thread simdgroup_float8x8 pmat;
+                simdgroup_load(pmat, sg_scores + kc, KCHUNK);
+                for (int kk = 0; kk < 16; kk++) {
+                    simdgroup_float8x8 vmat;
+                    simdgroup_load(vmat, (const threadgroup float*)(kvsmem + kc * D + kk * 8), D);
+                    simdgroup_multiply_accumulate(acc[kk], pmat, vmat, acc[kk]);
+                }
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
         }

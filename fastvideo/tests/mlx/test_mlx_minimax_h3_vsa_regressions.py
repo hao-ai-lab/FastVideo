@@ -328,3 +328,23 @@ def test_converter_continues_past_mismatched_existing_format(tmp_path, monkeypat
     converter.main()
     assert saved == ["int6"]
     assert (existing / h3.H3_WEIGHTS_FILENAME).read_bytes() == b"existing"
+
+
+@pytest.mark.parametrize("dtype", [mx.float16, mx.bfloat16])
+@pytest.mark.parametrize("exempt", [False, True])
+def test_simd_partial_key_chunks_match_reference(dtype, exempt):
+    """Nonuniform scores and partial tiles exercise all four 8-key fragments."""
+    _require_metal()
+    geometry = vsa.build_h3_tile_geometry((7, 5), (5, 3, 7), 64)
+    mx.random.seed(3026)
+    q, k, value = [mx.random.normal((geometry.total_seq_length, 2, 128)).astype(dtype)
+                   for _ in range(3)]
+    expected = vsa.h3_vsa_attention(q, k, value, geometry, sparsity=.5, exempt=exempt, impl="reference")
+    stats = vsa.MiniMaxH3VSAStats()
+    actual = vsa.h3_vsa_attention(q, k, value, geometry, sparsity=.5, exempt=exempt, impl="simd", stats=stats)
+    mx.eval(actual, expected)
+    assert stats.impl == "simd" and stats.dense_fallback_reason is None
+    assert mx.all(mx.isfinite(actual)).item()
+    # The Metal kernel uses FP32 accumulation with a different reduction order.
+    np.testing.assert_allclose(np.asarray(actual.astype(mx.float32)),
+                               np.asarray(expected.astype(mx.float32)), atol=.01, rtol=.01)
