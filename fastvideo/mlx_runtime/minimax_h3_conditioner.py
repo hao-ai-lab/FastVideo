@@ -403,6 +403,64 @@ def unswizzle_nvfp4_scales(scale: np.ndarray, rows: int, cols: int) -> np.ndarra
     return np.ascontiguousarray(tiles.transpose(0, 3, 2, 1, 4).reshape(pad_rows, pad_cols)[:rows, :cols])
 
 
+MLX_NVFP4_ENCODER_MANIFEST = "mlx_h3_nvfp4_encoder.json"
+
+
+def _read_nvfp4_encoder_config(component_dir: str | Path) -> dict[str, Any]:
+    raw = json.loads((Path(component_dir) / "config.json").read_text())
+    expected = {
+        "quant_method": "nvfp4",
+        "fmt": "e2m1",
+        "group_size": 16,
+        "scale_fmt": "e4m3",
+        "scale_layout": "128x4",
+        "activation_scheme": "dynamic",
+    }
+    quant = raw.get("quantization_config", {})
+    if any(quant.get(key) != value for key, value in expected.items()):
+        raise ValueError("MLX NVFP4 conditioning requires the FastVideo group-16, 128x4 encoder export.")
+    return raw
+
+
+def export_mlx_h3_nvfp4_encoder(component_dir: str | Path, output_dir: str | Path) -> Path:
+    """Cache the released packed encoder in MLX layout, without requantization.
+
+    Keep original packed nibbles, row-major scale bytes, global scales and
+    embedding/norm values. Later loads skip CPU scale unswizzling and staging.
+    """
+    raw = _read_nvfp4_encoder_config(component_dir)
+    output_dir = Path(output_dir)
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError(f"Encoder cache output must be empty: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    index = _ResidentNVFP4Index(_ShardIndex(Path(component_dir)))
+    try:
+        arrays = {}
+        matrices = {}
+        dense_keys = []
+        for key, value in index.weights.items():
+            if isinstance(value, NVFP4Matrix):
+                arrays[key] = value.weight
+                arrays[key + ".scales"] = value.scales
+                matrices[key] = {"global_scale": value.global_scale}
+            else:
+                arrays[key] = value
+                dense_keys.append(key)
+        mx.save_safetensors(str(output_dir / "model.safetensors"), arrays)
+        (output_dir / "config.json").write_text(json.dumps(raw, indent=2) + "\n")
+        manifest = {
+            "format_version": 1,
+            "language_layers": TEXT_ENCODER_LAYER,
+            "matrices": matrices,
+            "dense_keys": dense_keys,
+            "source_dir": str(Path(component_dir).resolve())
+        }
+        (output_dir / MLX_NVFP4_ENCODER_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
+    finally:
+        index.close()
+    return output_dir
+
+
 class _ResidentNVFP4Index:
     """Load the released 50-layer encoder without expanding packed matrices."""
 
@@ -441,6 +499,30 @@ class _ResidentNVFP4Index:
                 self.weights[key] = value
         source.close()
 
+    @classmethod
+    def from_mlx_checkpoint(cls, component_dir: str | Path):
+        component_dir = Path(component_dir)
+        manifest = json.loads((component_dir / MLX_NVFP4_ENCODER_MANIFEST).read_text())
+        if manifest.get("format_version") != 1 or manifest.get("language_layers") != TEXT_ENCODER_LAYER:
+            raise ValueError("Unsupported native MLX NVFP4 encoder cache")
+        arrays = mx.load(str(component_dir / "model.safetensors"))
+        matrices = manifest["matrices"]
+        expected = set(manifest["dense_keys"]) | set(matrices) | {key + ".scales" for key in matrices}
+        if set(arrays) != expected:
+            raise ValueError("Native MLX encoder arrays do not match the manifest")
+        index = cls.__new__(cls)
+        index.weights = {key: arrays[key] for key in manifest["dense_keys"]}
+        for key, info in matrices.items():
+            weight, scales = arrays[key], arrays[key + ".scales"]
+            factor = float(info["global_scale"])
+            if (weight.ndim != 2 or weight.dtype != mx.uint32 or scales.dtype != mx.uint8
+                    or scales.shape != (weight.shape[0], weight.shape[1] // 2) or weight.shape[1] % 2
+                    or not np.isfinite(factor) or factor <= 0):
+                raise ValueError(f"Invalid native MLX NVFP4 matrix: {key}")
+            index.weights[key] = NVFP4Matrix(weight, scales, factor)
+        mx.eval(list(arrays.values()))
+        return index
+
     def get_mlx(self, key: str):
         return self.weights[key]
 
@@ -458,18 +540,7 @@ class ResidentNVFP4MiniMaxH3TextConditioner(StreamedMiniMaxH3TextConditioner):
     """
 
     def __init__(self, component_dir: str | Path, tokenizer_dir: str | Path | None = None):
-        raw = json.loads((Path(component_dir) / "config.json").read_text())
-        quant = raw.get("quantization_config", {})
-        expected = {
-            "quant_method": "nvfp4",
-            "fmt": "e2m1",
-            "group_size": 16,
-            "scale_fmt": "e4m3",
-            "scale_layout": "128x4",
-            "activation_scheme": "dynamic"
-        }
-        if any(quant.get(key) != value for key, value in expected.items()):
-            raise ValueError("MLX NVFP4 conditioning requires the FastVideo group-16, 128x4 encoder export.")
+        _read_nvfp4_encoder_config(component_dir)
         # Fail on an older MLX before reading the encoder's large shards.
         try:
             packed, scales = mx.quantize(mx.ones((1, 64)), mode="nvfp4")
@@ -477,7 +548,11 @@ class ResidentNVFP4MiniMaxH3TextConditioner(StreamedMiniMaxH3TextConditioner):
         except (ValueError, RuntimeError) as error:
             raise RuntimeError("Native NVFP4 conditioning requires an MLX build with nvfp4 matmul support.") from error
         super().__init__(component_dir, tokenizer_dir)
-        self.index = _ResidentNVFP4Index(self.index)
+        if (Path(component_dir) / MLX_NVFP4_ENCODER_MANIFEST).exists():
+            self.index.close()
+            self.index = _ResidentNVFP4Index.from_mlx_checkpoint(component_dir)
+        else:
+            self.index = _ResidentNVFP4Index(self.index)
 
     def _embed_tokens(self, token_ids: list[int]):
         table = self.index.get_mlx("model.language_model.embed_tokens.weight")

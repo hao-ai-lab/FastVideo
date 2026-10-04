@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Native MLX NVFP4 encoder storage and residency regression checks."""
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -8,7 +9,7 @@ import pytest
 mx = pytest.importorskip("mlx.core")
 from fastvideo.mlx_runtime.minimax_h3_conditioner import (
     NVFP4Matrix, ResidentNVFP4MiniMaxH3TextConditioner, _ResidentNVFP4Index,
-    _ShardIndex, unswizzle_nvfp4_scales,
+    _ShardIndex, export_mlx_h3_nvfp4_encoder, unswizzle_nvfp4_scales,
 )
 from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
 
@@ -44,7 +45,8 @@ def test_padded_scale_layout_round_trip():
 
 
 @pytest.mark.parametrize("global_scale", [0.5, 4.0])
-def test_serialized_encoder_linear_matches_independent_fp4_reference(tmp_path, global_scale):
+@pytest.mark.parametrize("native_cache", [False, True])
+def test_serialized_encoder_linear_matches_independent_fp4_reference(tmp_path, global_scale, native_cache):
     from safetensors.numpy import save_file
 
     rng = np.random.default_rng(3)
@@ -56,6 +58,17 @@ def test_serialized_encoder_linear_matches_independent_fp4_reference(tmp_path, g
                prefix + ".weight_global_scale": np.array([global_scale], np.float32)},
               tmp_path / "model.safetensors")
     index = _ResidentNVFP4Index(_ShardIndex(tmp_path))
+    if native_cache:
+        _write_encoder_config(tmp_path)
+        cache_dir = export_mlx_h3_nvfp4_encoder(tmp_path, tmp_path / "cache")
+        cached = _ResidentNVFP4Index.from_mlx_checkpoint(cache_dir)
+        for key, original in index.weights.items():
+            value = cached.get_mlx(key)
+            np.testing.assert_array_equal(np.array(value.weight), np.array(original.weight))
+            np.testing.assert_array_equal(np.array(value.scales), np.array(original.scales))
+            assert value.global_scale == original.global_scale
+        index.close()
+        index = cached
     weight = index.get_mlx(prefix + ".weight")
     assert isinstance(weight, NVFP4Matrix)
     assert weight.weight.dtype == mx.uint32
@@ -69,14 +82,29 @@ def test_serialized_encoder_linear_matches_independent_fp4_reference(tmp_path, g
     assert not index.weights
 
 
-def test_resident_embedding_keeps_bf16_storage(tmp_path):
+def _write_encoder_config(path):
+    (path / "config.json").write_text(json.dumps({"quantization_config": {
+        "quant_method": "nvfp4", "fmt": "e2m1", "group_size": 16,
+        "scale_fmt": "e4m3", "scale_layout": "128x4", "activation_scheme": "dynamic",
+    }}))
+
+
+@pytest.mark.parametrize("native_cache", [False, True])
+def test_resident_embedding_keeps_bf16_storage(tmp_path, native_cache):
     torch = pytest.importorskip("torch")
     from safetensors.torch import save_file
 
     key = "model.language_model.embed_tokens.weight"
     table = torch.arange(60).reshape(10, 6).to(torch.bfloat16)
     save_file({key: table}, tmp_path / "model.safetensors")
-    index = _ResidentNVFP4Index(_ShardIndex(tmp_path))
+    if native_cache:
+        _write_encoder_config(tmp_path)
+        cache_dir = export_mlx_h3_nvfp4_encoder(tmp_path, tmp_path / "cache")
+        index = _ResidentNVFP4Index.from_mlx_checkpoint(cache_dir)
+        with pytest.raises(FileExistsError, match="empty"):
+            export_mlx_h3_nvfp4_encoder(tmp_path, cache_dir)
+    else:
+        index = _ResidentNVFP4Index(_ShardIndex(tmp_path))
     assert index.get_mlx(key).dtype == mx.bfloat16
     conditioner = ResidentNVFP4MiniMaxH3TextConditioner.__new__(ResidentNVFP4MiniMaxH3TextConditioner)
     conditioner.index = index
