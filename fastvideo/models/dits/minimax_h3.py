@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import math
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -142,7 +141,7 @@ class MiniMaxH3FeedForward(nn.Module):
             self.fc_out.quant_method, MXFP8QuantizeMethod)
         # Inference-only token chunking: the 2 * ffn_dim intermediate is ~5.3x the block input
         # (4.5 GiB at 78k tokens), so chunks bound the activation peak on 24-32 GB GPUs.
-        self.chunk_tokens = int(os.environ.get("FASTVIDEO_H3_FFN_CHUNK_TOKENS", "0"))
+        self.chunk_tokens = envs.FASTVIDEO_H3_FFN_CHUNK_TOKENS.get()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         tokens = hidden_states.shape[-2] if hidden_states.dim() > 1 else 0
@@ -242,7 +241,7 @@ class MiniMaxH3Attention(nn.Module):
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
         self._layer_idx = layer_idx_from_prefix(prefix, default=-1)
         self._vsa_fp4 = use_vsa and vsa_fp4_requested()
-        self._vsa_tile_first = use_vsa and os.environ.get("FASTVIDEO_H3_VSA_TILE_FIRST", "0") == "1"
+        self._vsa_tile_first = use_vsa and envs.FASTVIDEO_H3_VSA_TILE_FIRST.get()
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
         # skips the gate branch entirely while it is structurally zero.
@@ -536,7 +535,7 @@ class MiniMaxH3AdaLayerNormModulation(nn.Module):
                 out = F.linear(x.to(weight.dtype), weight, bias)
                 if self._cache_key is not None:
                     cache[self._cache_key] = out
-                    if os.environ.get("FASTVIDEO_H3_ADALN_DUMP"):
+                    if envs.FASTVIDEO_H3_ADALN_DUMP.get():
                         # Projection inputs, kept only when dumping, for offline low-rank fits.
                         self.__dict__.setdefault("_modulation_inputs", {})[self._cache_key] = x.detach()
             return out.view(-1, 6 * self.hidden_size).chunk(6, dim=-1)
@@ -1049,7 +1048,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                     cache[key] = value.to(device)
 
     def _maybe_dump_adaln_tables(self) -> None:
-        path = os.environ.get("FASTVIDEO_H3_ADALN_DUMP")
+        path = envs.FASTVIDEO_H3_ADALN_DUMP.get()
         if not path:
             return
         entries = sum(len(b.adaln_proj._modulation_cache) for b in self.transformer_blocks)

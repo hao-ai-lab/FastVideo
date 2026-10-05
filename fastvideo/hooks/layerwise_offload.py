@@ -4,6 +4,7 @@ from typing import Any
 import torch
 from torch import nn
 from fastvideo.hooks.hooks import ForwardHook, ModuleHookManager
+import fastvideo.envs as envs
 from fastvideo.hooks.pinned_memory import PinnedTensorArena
 from fastvideo.logger import init_logger
 
@@ -34,7 +35,7 @@ def _offload_tensors(module: nn.Module, names: dict[str, torch.Tensor] | None = 
                 yield name, tensor
         return
     yield from module.named_parameters()
-    if os.environ.get("FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS") == "1":
+    if envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.get():
         for name, buf in module.named_buffers():
             if buf is not None and buf.numel() * buf.element_size() >= _BUFFER_OFFLOAD_MIN_BYTES:
                 yield name, buf
@@ -191,10 +192,9 @@ def enable_layerwise_offload(model: nn.Module,
         resident = max(0, resident_blocks)
     else:
         try:
-            resident = max(0, int(os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS", "0")))
-        except ValueError:
-            logger.warning("Ignoring malformed FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=%r",
-                           os.environ.get("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS"))
+            resident = max(0, envs.FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS.get())
+        except ValueError as error:
+            logger.warning("Ignoring malformed FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS: %s", error)
             resident = 0
     for name, submodule in model.named_children():
         if isinstance(submodule, nn.ModuleList):

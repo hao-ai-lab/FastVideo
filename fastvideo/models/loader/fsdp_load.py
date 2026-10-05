@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 import contextlib
-import os
 import re
 from collections.abc import Callable, Generator
 from itertools import chain
@@ -387,7 +386,7 @@ def maybe_load_fsdp_model(
         skip_param_names |= set(fp8_targets.values())
         fp8_keys = {f"{prefix}.{suffix}" for prefix in fp8_prefixes for suffix in ("weight", "weight_scale")}
         weight_iterator = ((name, tensor) for name, tensor in weight_iterator if name not in fp8_keys)
-    if os.environ.get("FASTVIDEO_H3_ADALN_TABLE"):
+    if envs.FASTVIDEO_H3_ADALN_TABLE.get():
         # Precomputed AdaLN modulation replaces the per-block projections; never read their weights.
         skip_param_names |= {name for name, _ in model.named_parameters()
                              if re.fullmatch(r"transformer_blocks\.\d+\.adaln_proj\.linear\.(weight|bias)", name)}

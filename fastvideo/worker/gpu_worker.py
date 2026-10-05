@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import os
 from typing import Any, cast
 
 import torch
@@ -105,10 +104,10 @@ class Worker:
         if current_platform.is_cuda_alike():
             torch.cuda.set_device(self.device)
             # Debug: FASTVIDEO_CUDA_MEMORY_CAP_GIB emulates a smaller card by capping this process's allocator.
-            cap_gib = os.environ.get("FASTVIDEO_CUDA_MEMORY_CAP_GIB")
-            if cap_gib:
+            cap_gib = envs.FASTVIDEO_CUDA_MEMORY_CAP_GIB.get()
+            if cap_gib > 0:
                 total = torch.cuda.get_device_properties(self.device).total_memory
-                torch.cuda.set_per_process_memory_fraction(min(1.0, float(cap_gib) * 1024**3 / total), self.device)
+                torch.cuda.set_per_process_memory_fraction(min(1.0, cap_gib * 1024**3 / total), self.device)
                 logger.info("Capped CUDA allocator at %s GiB of %.1f GiB", cap_gib, total / 1024**3)
             self.init_gpu_memory = torch.cuda.mem_get_info(self.device)[0]
             if current_platform.is_cuda():
@@ -129,7 +128,7 @@ class Worker:
                                                               self.distributed_init_method)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
-        if os.environ.get("FASTVIDEO_MEMORY_REPORT") == "1" and self.rank == 0:
+        if envs.FASTVIDEO_MEMORY_REPORT.get() and self.rank == 0:
             _log_pipeline_memory(self.pipeline)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:

@@ -7,6 +7,8 @@ from unittest.mock import patch
 import pytest
 import torch
 
+import fastvideo.envs as envs
+
 from fastvideo.layers.quantization.fp8_config import FP8Config, FP8QuantizeMethod
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
@@ -52,7 +54,7 @@ def test_shared_fp8_projections_match_independent_quantization(granularity):
 @pytest.mark.parametrize("fp8", [False, True])
 @pytest.mark.parametrize("gate_active", [False, True])
 @pytest.mark.parametrize("fused_rope", [False, True])
-def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distributed_setup, tmp_path,
+def test_tile_first_matches_generic_vsa_with_partial_tiles(env_overrides, distributed_setup, tmp_path,
                                                           fp8, gate_active, fused_rope, kernel):
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         pytest.skip("BF16 CUDA is required")
@@ -62,15 +64,15 @@ def test_tile_first_matches_generic_vsa_with_partial_tiles(monkeypatch, distribu
     from fastvideo.forward_context import set_forward_context
     from fastvideo.models.dits.minimax_h3 import MiniMaxH3Attention
 
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "VIDEO_SPARSE_ATTN_H3")
-    monkeypatch.setenv("FASTVIDEO_VSA_TRITON", "1")
-    monkeypatch.setenv("FASTVIDEO_VSA_SM100A", "0")
-    monkeypatch.setenv("FASTVIDEO_H3_VSA_FP4", "0")
-    monkeypatch.setenv("FASTVIDEO_H3_VSA_TILE_FIRST", "0")
-    monkeypatch.setenv("FASTVIDEO_H3_VSA_SM89_KERNEL", "original")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("VIDEO_SPARSE_ATTN_H3"))
+    env_overrides.enter_context(envs.override_external("FASTVIDEO_VSA_TRITON", "1"))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(False))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_FP4.override(False))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_TILE_FIRST.override(False))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_SM89_KERNEL.override("original"))
     capture = kernel == "int8" and fp8 and gate_active and fused_rope
     if capture:
-        monkeypatch.setenv("FASTVIDEO_H3_CAPTURE_QKV", str(tmp_path))
+        env_overrides.enter_context(envs.FASTVIDEO_H3_CAPTURE_QKV.override(str(tmp_path)))
     torch.manual_seed(21)
     attn = MiniMaxH3Attention(256, 2, 128, 1e-5, (AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3,), FP8Config("channel") if fp8 else None,
                              "transformer_blocks.0.attn", fuse_qknorm_rope=fused_rope)

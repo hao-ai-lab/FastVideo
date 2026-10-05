@@ -61,7 +61,6 @@ device cannot run it.
 
 import functools
 import math
-import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -548,7 +547,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         self.prefix = prefix
         self.layer_idx = layer_idx_from_prefix(prefix, default=-1)
         self.head_size = head_size
-        self._sm89_kernel = os.environ.get("FASTVIDEO_H3_VSA_SM89_KERNEL", "original")
+        self._sm89_kernel = envs.FASTVIDEO_H3_VSA_SM89_KERNEL.get()
         if self._sm89_kernel not in {"original", "bf16", "int8"}:
             raise ValueError("FASTVIDEO_H3_VSA_SM89_KERNEL must be original, bf16, or int8")
         # Generic torch.compile must not specialize the shared VSA forward on

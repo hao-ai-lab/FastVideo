@@ -28,6 +28,8 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
+import fastvideo.envs as envs
+
 from fastvideo.layers.quantization.base_config import (
     QuantizationConfig,
     QuantizeMethodBase,
@@ -347,7 +349,7 @@ def _mm_fp4_backend() -> str:
     ``cudnn`` once activations reach tens of thousands of rows (measured at
     73k rows on an RTX PRO 6000); short sequences are unaffected.
     """
-    return os.environ.get("FASTVIDEO_NVFP4_MM_BACKEND", "auto")
+    return envs.FASTVIDEO_NVFP4_MM_BACKEND.get()
 
 
 def _coerce_fp4_input_dtype(x: torch.Tensor) -> torch.Tensor:
@@ -414,7 +416,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         if getattr(self, "_static_sf_checked", False):
             return self._static_sf
         self._static_sf_checked, self._static_sf = True, None
-        path = os.environ.get("FASTVIDEO_NVFP4_ACT_AMAX")
+        path = envs.FASTVIDEO_NVFP4_ACT_AMAX.get()
         if path:
             table = _load_amax_table(path)
             prefix = self.layer_prefix or ""
@@ -429,7 +431,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         """FASTVIDEO_NVFP4_DYNAMIC_ACT: "all", or comma-separated layer-name suffixes (e.g. "ff.fc_out")."""
         cached = getattr(self, "_dynamic_act_cached", None)
         if cached is None:
-            selected = os.environ.get("FASTVIDEO_NVFP4_DYNAMIC_ACT", "")
+            selected = envs.FASTVIDEO_NVFP4_DYNAMIC_ACT.get()
             suffixes = [part.strip() for part in selected.split(",") if part.strip()]
             prefix = self.layer_prefix or ""
             cached = "all" in suffixes or any(prefix.endswith(suffix) for suffix in suffixes)
@@ -618,11 +620,11 @@ class NVFP4Config(QuantizationConfig):
             method = NVFP4QuantizeMethod(layer_prefix=prefix)
             method._retain_original_weights = self.retain_original_weights
             return method
-        if (self.layer_profile == "h3_dit_ffn" and os.environ.get("FASTVIDEO_H3_FP8_ATTENTION") == "1"
+        if (self.layer_profile == "h3_dit_ffn" and envs.FASTVIDEO_H3_FP8_ATTENTION.get()
                 and _H3_BLOCK_ATTN_PROJ.search(prefix) is not None):
             # Mixed precision: NVFP4 MLPs, FP8 (per-tensor weight, dynamic per-tensor activation) attention.
             from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
-            return FP8QuantizeMethod(granularity=os.environ.get("FASTVIDEO_H3_FP8_GRANULARITY", "tensor"))
+            return FP8QuantizeMethod(granularity=envs.FASTVIDEO_H3_FP8_GRANULARITY.get())
         return None
 
 
