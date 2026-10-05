@@ -821,7 +821,8 @@ class VideoGenerator:
             samples = torch.empty(0, device='cpu')
         else:
             samples = allocate_cpu_tensor_with_pin_fallback(
-                (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
+                (latent_batch_size, getattr(fastvideo_args.pipeline_config, "output_channels",
+                                            3), sampling_param.num_frames, sampling_param.height, sampling_param.width),
                 pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 

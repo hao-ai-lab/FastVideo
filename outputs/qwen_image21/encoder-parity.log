@@ -1,0 +1,22 @@
+INFO 10-02 01:39:44.929 [__init__.py:47] CUDA is available
+INFO 10-02 01:39:49.016 [parallel_state.py:909] Initializing distributed environment with world_size=1, device=cuda:0
+INFO 10-02 01:39:49.016 [parallel_state.py:737] Using nccl backend for CUDA platform
+INFO 10-02 01:39:52.341 [component_loader.py:448] Loading weights took 1.82 seconds
+QWEN_IMAGE21_ENCODER_PARITY text {"cosine": 0.9999999999999999, "finite": true, "max_abs": 0.0, "mean_abs": 0.0, "mismatched_elements": 0, "reference_rms": 24.580148696899414, "relative_l2": 0.0, "rmse": 0.0, "shape": [15, 4096], "total_elements": 61440}
+QWEN_IMAGE21_ENCODER_PARITY long_text {"cosine": 1.0, "finite": true, "max_abs": 0.0, "mean_abs": 0.0, "mismatched_elements": 0, "reference_rms": 12.555062294006348, "relative_l2": 0.0, "rmse": 0.0, "shape": [1546, 4096], "total_elements": 6332416}
+QWEN_IMAGE21_ENCODER_PARITY images_1 {"cosine": 0.9999999999999999, "finite": true, "max_abs": 0.0, "mean_abs": 0.0, "mismatched_elements": 0, "reference_rms": 18.644174575805664, "relative_l2": 0.0, "rmse": 0.0, "shape": [25, 4096], "total_elements": 102400}
+QWEN_IMAGE21_ENCODER_PARITY images_2 {"cosine": 1.0, "finite": true, "max_abs": 0.0, "mean_abs": 0.0, "mismatched_elements": 0, "reference_rms": 16.940481185913086, "relative_l2": 0.0, "rmse": 0.0, "shape": [37, 4096], "total_elements": 151552}
+QWEN_IMAGE21_ENCODER_PARITY images_10 {"cosine": 0.9999999999999999, "finite": true, "max_abs": 0.0, "mean_abs": 0.0, "mismatched_elements": 0, "reference_rms": 12.446188926696777, "relative_l2": 0.0, "rmse": 0.0, "shape": [134, 4096], "total_elements": 548864}
+QWEN_IMAGE21_ENCODER_PARITY left_padding {"cosine": 1.0, "finite": true, "max_abs": 0.0, "mean_abs": 0.0, "mismatched_elements": 0, "reference_rms": 24.055248260498047, "relative_l2": 0.0, "rmse": 0.0, "shape": [34, 4096], "total_elements": 139264}
+.
+=============================== warnings summary ===============================
+tests/local_tests/encoders/test_qwen_image21_conditioner_parity.py: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+tests/local_tests/encoders/test_qwen_image21_conditioner_parity.py::test_qwen_image21_conditioner_real_weight_parity
+  /opt/venv/lib/python3.12/site-packages/transformers/models/qwen2_vl/image_processing_qwen2_vl.py:129: FutureWarning: Passing `min_pixels` and `max_pixels` to a processor call is deprecated and will be removed in v5.23. Pass in `size={'longest_edge': xxx, 'shortest_edge': xxx} to override the target size.`
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 passed, 15 warnings in 23.59s

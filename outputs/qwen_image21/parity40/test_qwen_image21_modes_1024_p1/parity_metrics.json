@@ -1,0 +1,26 @@
+{
+  "case": "edit",
+  "steps": 40,
+  "cache": true,
+  "seed": 42,
+  "rgb": {
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 0.7352994084358215,
+    "reference_abs_mean": 0.7352994084358215,
+    "fraction_outside_tolerance": 0.0
+  },
+  "all_channels": {
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 0.801398515701294,
+    "reference_abs_mean": 0.801398515701294,
+    "fraction_outside_tolerance": 0.0
+  }
+}

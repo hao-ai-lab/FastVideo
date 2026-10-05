@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /root/FastVideo
+configfile: pyproject.toml
+plugins: anyio-4.15.1, platformdirs-4.12.2
+collecting ... collected 6 items / 4 deselected / 2 selected
+
+tests/local_tests/vaes/test_qwen_image21_vae_parity.py::test_qwen_image21_vae_bf16_reference_layout_parity[64-80-False] INFO 10-02 02:07:36.173 [__init__.py:47] CUDA is available
+PASSED
+tests/local_tests/vaes/test_qwen_image21_vae_parity.py::test_qwen_image21_vae_bf16_reference_layout_parity[288-320-True] PASSED
+
+=============================== warnings summary ===============================
+tests/local_tests/vaes/test_qwen_image21_vae_parity.py: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /root/FastVideo/outputs/qwen_image21/vae-bf16-regression.xml -
+================= 2 passed, 4 deselected, 14 warnings in 7.92s =================

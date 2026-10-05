@@ -1,0 +1,105 @@
+INFO 10-02 00:39:33.387 [__init__.py:47] CUDA is available
+INFO 10-02 00:39:34.191 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 00:39:34.191 [multiproc_executor.py:107] Use master port: 36473
+INFO 10-02 00:39:37.789 [__init__.py:47] CUDA is available
+WARNING 10-02 00:39:38.671 [fastvideo_args.py:1006] dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.
+INFO 10-02 00:39:38.671 [parallel_state.py:909] Initializing distributed environment with world_size=1, device=cuda:0
+INFO 10-02 00:39:38.671 [parallel_state.py:737] Using nccl backend for CUDA platform
+[W1002 00:39:38.668024933 ProcessGroupNCCL.cpp:1001] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+INFO 10-02 00:39:38.704 [__init__.py:39] Building pipeline of type: basic
+INFO 10-02 00:39:38.704 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 00:39:38.704 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 00:39:38.704 [registry.py:1112] Pinning pipeline class name from QwenImage21Pipeline to QwenImage21Pipeline
+INFO 10-02 00:39:38.704 [pipeline_registry.py:134] Loading pipelines for types: ['basic']
+INFO 10-02 00:39:38.753 [pipeline_registry.py:176] Loaded 55 pipeline classes across 1 types
+INFO 10-02 00:39:38.754 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 00:39:38.754 [__init__.py:56] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 00:39:38.754 [profiler.py:198] Torch profiler disabled; returning no-op controller
+INFO 10-02 00:39:38.754 [composed_pipeline_base.py:171] Loading pipeline modules...
+INFO 10-02 00:39:38.754 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 00:39:38.754 [composed_pipeline_base.py:471] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 00:39:38.754 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 00:39:38.754 [composed_pipeline_base.py:532] Loading pipeline modules from config: {'_class_name': 'QwenImage21Pipeline', '_diffusers_version': '0.37.0.dev0', 'processor': ['transformers', 'Qwen3VLProcessor'], 'scheduler': ['diffusers', 'FlowMatchEulerDiscreteScheduler'], 'text_encoder': ['transformers', 'Qwen3VLForConditionalGeneration'], 'transformer': ['diffusers', 'QwenImage21Transformer2DModel'], 'vae': ['diffusers', 'AutoencoderKLQwenImage21']}
+INFO 10-02 00:39:38.754 [composed_pipeline_base.py:571] Loading required modules: ['processor', 'text_encoder', 'transformer', 'vae', 'scheduler']
+INFO 10-02 00:39:38.754 [component_loader.py:1380] Loading processor using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 00:39:38.754 [component_loader.py:600] Loading processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 00:39:39.205 [component_loader.py:605] Loaded processor: Qwen3VLProcessor
+INFO 10-02 00:39:39.205 [composed_pipeline_base.py:626] Loaded module processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 00:39:39.205 [component_loader.py:1380] Loading scheduler using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-02 00:39:39.206 [composed_pipeline_base.py:626] Loaded module scheduler from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-02 00:39:39.206 [composed_pipeline_base.py:623] Deferred module text_encoder from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-02 00:39:39.206 [composed_pipeline_base.py:623] Deferred module transformer from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-02 00:39:39.206 [composed_pipeline_base.py:623] Deferred module vae from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-02 00:39:39.207 [__init__.py:61] Pipelines instantiated
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.207 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 00:39:39.207 [multiproc_executor.py:707] 1 workers ready
+INFO 10-02 00:39:39.207 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 00:39:39.208 [video_generator.py:766] 
+INFO 10-02 00:39:39.208 [video_generator.py:766]                       height: 1024
+INFO 10-02 00:39:39.208 [video_generator.py:766]                        width: 1024
+INFO 10-02 00:39:39.208 [video_generator.py:766]                 video_length: 1
+INFO 10-02 00:39:39.208 [video_generator.py:766]                       prompt: A red ceramic teapot, isolated on a transparent background.
+INFO 10-02 00:39:39.208 [video_generator.py:766]                       image_path: None
+INFO 10-02 00:39:39.208 [video_generator.py:766]                   neg_prompt: None
+INFO 10-02 00:39:39.208 [video_generator.py:766]                         seed: 42
+INFO 10-02 00:39:39.208 [video_generator.py:766]                  infer_steps: 40
+INFO 10-02 00:39:39.208 [video_generator.py:766]        num_videos_per_prompt: 1
+INFO 10-02 00:39:39.208 [video_generator.py:766]               guidance_scale: 1.0
+INFO 10-02 00:39:39.208 [video_generator.py:766]                     n_tokens: 16384
+INFO 10-02 00:39:39.208 [video_generator.py:766]                   flow_shift: None
+INFO 10-02 00:39:39.208 [video_generator.py:766]      embedded_guidance_scale: 6.0
+INFO 10-02 00:39:39.208 [video_generator.py:766]                   save_video: True
+INFO 10-02 00:39:39.208 [video_generator.py:766]                   output_path: outputs/qwen_image21/teapot.png
+INFO 10-02 00:39:39.208 [video_generator.py:766]         
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.209 [composed_pipeline_base.py:388] Creating pipeline stages...
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.209 [composed_pipeline_base.py:702] Deferred modules to free after stage 1 (text_encoding): ['text_encoder']
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.209 [composed_pipeline_base.py:702] Deferred modules to free after stage 4 (denoising): ['transformer']
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.209 [composed_pipeline_base.py:702] Deferred modules to free after stage 5 (decoding): ['vae']
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.209 [composed_pipeline_base.py:758] Running pipeline stages: dict_keys(['input_preparation', 'text_encoding', 'latent_preparation', 'timestep_preparation', 'denoising', 'decoding'])
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.210 [lazy_module.py:71] Loading deferred module text_encoder
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.210 [component_loader.py:1380] Loading text_encoder using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:39.210 [component_loader.py:299] HF Model config: {'architectures': ['Qwen3VLForConditionalGeneration'], 'dtype': 'bfloat16', 'image_token_id': 151655, 'text_config': {'attention_bias': False, 'attention_dropout': 0.0, 'bos_token_id': 151643, 'dtype': 'bfloat16', 'eos_token_id': 151645, 'head_dim': 128, 'hidden_act': 'silu', 'hidden_size': 4096, 'initializer_range': 0.02, 'intermediate_size': 12288, 'max_position_embeddings': 262144, 'model_type': 'qwen3_vl_text', 'num_attention_heads': 32, 'num_hidden_layers': 36, 'num_key_value_heads': 8, 'rms_norm_eps': 1e-06, 'rope_scaling': {'mrope_interleaved': True, 'mrope_section': [24, 20, 20], 'rope_type': 'default'}, 'rope_theta': 5000000, 'use_cache': True, 'vocab_size': 151936}, 'tie_word_embeddings': False, 'video_token_id': 151656, 'vision_config': {'deepstack_visual_indexes': [8, 16, 24], 'depth': 27, 'dtype': 'bfloat16', 'hidden_act': 'gelu_pytorch_tanh', 'hidden_size': 1152, 'in_channels': 3, 'initializer_range': 0.02, 'intermediate_size': 4304, 'model_type': 'qwen3_vl', 'num_heads': 16, 'num_position_embeddings': 2304, 'out_hidden_size': 4096, 'patch_size': 16, 'spatial_merge_size': 2, 'temporal_patch_size': 2}, 'vision_end_token_id': 151653, 'vision_start_token_id': 151652}
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:01,  1.72it/s]
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:02<00:02,  1.45s/it]
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:03<00:01,  1.25s/it]
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:04<00:00,  1.18s/it]
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:04<00:00,  1.18s/it]
+[1;36m(Worker pid=32017)[0;0m 
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:45.746 [component_loader.py:448] Loading weights took 4.77 seconds
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:55.911 [lazy_module.py:85] Loaded deferred module text_encoder, cuda allocated now 0.00 GiB
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.207 [lazy_module.py:141] Released deferred module text_encoder, cuda allocated 0.03 -> 0.03 GiB, freed 0.00 GiB
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.221 [lazy_module.py:71] Loading deferred module transformer
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.221 [component_loader.py:1380] Loading transformer using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.221 [component_loader.py:1042] transformer cls_name: QwenImage21Transformer2DModel
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.221 [component_loader.py:1094] Loading model from 2 safetensors files: ['/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00002-of-00002.safetensors', '/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00001-of-00002.safetensors']
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.221 [component_loader.py:1103] Loading model from QwenImage21Transformer2DModel, default_dtype: torch.bfloat16
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.221 [component_loader.py:1119] Worker 0 transformer attention backend: automatic selection
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.221 [fsdp_load.py:228] Loading model with default_dtype: torch.bfloat16
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:39:57.232 [fsdp_load.py:282] Loading transformer weights with to_cpu=False
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:02<00:02,  2.88s/it]
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:05<00:00,  2.79s/it]
+[1;36m(Worker pid=32017)[0;0m Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:05<00:00,  2.80s/it]
+[1;36m(Worker pid=32017)[0;0m 
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:02.844 [component_loader.py:1155] Loaded model with 7.12B parameters
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:07.557 [lazy_module.py:85] Loaded deferred module transformer, cuda allocated now 0.28 GiB
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:28.026 [lazy_module.py:141] Released deferred module transformer, cuda allocated 0.29 -> 0.03 GiB, freed 0.26 GiB
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:28.026 [lazy_module.py:71] Loading deferred module vae
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:28.026 [component_loader.py:1380] Loading vae using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:29.287 [lazy_module.py:85] Loaded deferred module vae, cuda allocated now 0.03 GiB
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:29.349 [pinned_offload.py:55] frozen offload: holding 0.68 GB of LazyModule on the host (pinned)
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:30.254 [lazy_module.py:141] Released deferred module vae, cuda allocated 0.05 -> 0.05 GiB, freed 0.00 GiB
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:30.254 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 00:40:30.317 [video_generator.py:864] Generated successfully in 51.11 seconds
+INFO 10-02 00:40:30.353 [video_generator.py:920] PostDecodeFrameProcessStage completed in 0.036 s
+INFO 10-02 00:40:30.654 [video_generator.py:947] Saved image to outputs/qwen_image21/teapot.png
+INFO 10-02 00:40:30.654 [video_generator.py:993] VideoSaveStage completed in 0.301 s
+INFO 10-02 00:40:30.654 [video_generator.py:996] AudioMuxStage completed in 0.000 s
+INFO 10-02 00:40:30.654 [video_generator.py:1001] End-to-end latency: 51.45 seconds
+INFO 10-02 00:40:30.655 [multiproc_executor.py:347] Shutting down MultiprocExecutor...
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:30.655 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:30.925 [gpu_worker.py:117] Worker 0 shutdown complete
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:30.925 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=32017)[0;0m INFO 10-02 00:40:31.166 [gpu_worker.py:117] Worker 0 shutdown complete
+INFO 10-02 00:40:34.058 [multiproc_executor.py:402] MultiprocExecutor shutdown complete

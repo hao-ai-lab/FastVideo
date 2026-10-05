@@ -1,0 +1,106 @@
+{
+  "torch": "2.12.0+cu130",
+  "height": 1024,
+  "width": 1024,
+  "steps": 40,
+  "seed": 42,
+  "backend": "inductor",
+  "fullgraph": false,
+  "attention_backend": "TORCH_SDPA",
+  "dit_offload": false,
+  "dit_layerwise_offload": false,
+  "pin_cpu_memory": true,
+  "kv_cache_device": "cuda",
+  "warmup_requests": 1,
+  "measured_requests": 1,
+  "config_path": "/root/FastVideo/examples/inference/basic/qwen_image21_t2i.yaml",
+  "initialization_seconds": 58.297644980999394,
+  "before_warmup": {
+    "enabled": true,
+    "inference_torch_compile": false,
+    "kwargs": {
+      "backend": "inductor",
+      "fullgraph": false
+    },
+    "wrapped_blocks": 0,
+    "total_blocks": 32,
+    "dynamo_stats": {},
+    "dynamo_frames": {},
+    "graph_breaks": {}
+  },
+  "warmup": {
+    "wall_seconds": 19.579092936999587,
+    "generation_seconds": 19.495091958999183,
+    "stage_seconds": {
+      "input_preparation": 5.6480001148884185e-05,
+      "text_encoding": 1.7040416910003842,
+      "latent_preparation": 0.0038147680006659357,
+      "timestep_preparation": 0.0011236819991609082,
+      "denoising": 15.53342492000047,
+      "decoding": 2.207471132000137,
+      "PostDecodeFrameProcessStage": 0.08110166100050265
+    },
+    "encoder_dit_decoder_seconds": 19.44493774300099,
+    "compile": {
+      "enabled": true,
+      "inference_torch_compile": false,
+      "kwargs": {
+        "backend": "inductor",
+        "fullgraph": false
+      },
+      "wrapped_blocks": 32,
+      "total_blocks": 32,
+      "dynamo_stats": {
+        "calls_captured": 329,
+        "unique_graphs": 3
+      },
+      "dynamo_frames": {
+        "total": 3,
+        "ok": 3
+      },
+      "graph_breaks": {}
+    }
+  },
+  "measured": {
+    "wall_seconds": 15.197543202000816,
+    "generation_seconds": 14.577870537999843,
+    "stage_seconds": {
+      "input_preparation": 6.144000144558959e-05,
+      "text_encoding": 0.5792984609997802,
+      "latent_preparation": 0.003729578000275069,
+      "timestep_preparation": 0.0006965410011616768,
+      "denoising": 13.155783660000452,
+      "decoding": 0.8293846679989656,
+      "PostDecodeFrameProcessStage": 0.0031226869996316964,
+      "VideoSaveStage": 0.6137285820004763,
+      "AudioMuxStage": 0.0
+    },
+    "encoder_dit_decoder_seconds": 14.564466788999198,
+    "compile": {
+      "enabled": true,
+      "inference_torch_compile": false,
+      "kwargs": {
+        "backend": "inductor",
+        "fullgraph": false
+      },
+      "wrapped_blocks": 32,
+      "total_blocks": 32,
+      "dynamo_stats": {
+        "calls_captured": 329,
+        "unique_graphs": 3
+      },
+      "dynamo_frames": {
+        "total": 3,
+        "ok": 3
+      },
+      "graph_breaks": {}
+    }
+  },
+  "warmup_vs_measured": {
+    "exact": true,
+    "max_abs": 0.0,
+    "mean_abs": 0.0
+  },
+  "status": "PASS",
+  "compile_enabled_after_run": false
+}

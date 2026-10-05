@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="59.845" timestamp="2026-10-02T01:59:02.170633+00:00" hostname="ac4ffb6d59b3"><testcase classname="tests.local_tests.qwen_image21.test_pipeline_parity" name="test_qwen_image21_modes_1024_pipeline_parity[i2i]" time="59.155"><failure message="AssertionError: Tensor-likes are not close!&#10;&#10;Mismatched elements: 9941 / 4194304 (0.2%)&#10;Greatest absolute difference: 0.29296875 at index (0, 0, 0, 185, 310) (up to 0.04 allowed)&#10;Greatest relative difference: 5.666666507720947 at index (0, 0, 0, 264, 443) (up to 0.02 allowed)">case = 'i2i'
+tmp_path = PosixPath('/root/FastVideo/outputs/qwen_image21/parity4-diagnostics/test_qwen_image21_modes_1024_p0')
+
+    @pytest.mark.parametrize("case", CASES)
+    def test_qwen_image21_modes_1024_pipeline_parity(case, tmp_path):
+&gt;       _run_parity(case, 1024, tmp_path)
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py:399: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+case = 'i2i', resolution = 1024
+tmp_path = PosixPath('/root/FastVideo/outputs/qwen_image21/parity4-diagnostics/test_qwen_image21_modes_1024_p0')
+
+    def _run_parity(case, resolution, tmp_path):
+        if os.environ.get("QWEN_IMAGE21_RUN_PIPELINE_PARITY") != "1":
+            pytest.skip("Set QWEN_IMAGE21_RUN_PIPELINE_PARITY=1 on an allocated CUDA node")
+        if not torch.cuda.is_available():
+            pytest.fail("Qwen-Image-2.1 pipeline parity requires CUDA", pytrace=False)
+        model = Path(os.environ.get("QWEN_IMAGE21_MODEL_ROOT", ROOT / "official_weights/Qwen-Image-2.1"))
+        reference = Path(os.environ.get("QWEN_IMAGE21_DIFFUSERS_DIR", ROOT / "official_reference/diffusers"))
+        if not (model / "model_index.json").is_file() or not (reference / "src").is_dir():
+            pytest.fail("Provide QWEN_IMAGE21_MODEL_ROOT and the pinned QWEN_IMAGE21_DIFFUSERS_DIR", pytrace=False)
+        revision = subprocess.check_output(["git", "-C", str(reference), "rev-parse", "HEAD"], text=True).strip()
+        assert revision == REFERENCE_REVISION
+        subprocess.run(["git", "-C", str(reference), "diff", "--exit-code", "HEAD", "--", "src/diffusers"], check=True)
+        files = _assets(tmp_path)
+        counts = dict(i2i=1, edit=1, ref2img=2, ten_refs=10, rgba_edit=1, annotation=2, mask_image=1, true_cfg=1)
+        refs = files[:counts.get(case, 0)]
+        prompt = "An elegant blue ceramic vase in a studio, with the word Qwen written on it."
+        if refs:
+            prompt = "Make a blue sculpture inspired by the shapes in the reference images."
+        if case == "edit":
+            prompt = "Change the object in image 1 into a blue ceramic sphere; retain the background and composition."
+        if case in ("rgba", "rgba_edit"):
+            prompt = "A blue sphere isolated on a transparent background."
+        if case == "annotation":
+            prompt = "Change the object enclosed by the red annotation in image 2 into a blue sphere in image 1."
+        if case == "mask_image":
+            refs.append(files[-1])
+            prompt = "Replace the white masked area of image 2 in image 1 with flowers."
+        noise_path = tmp_path / "initial_latents.pt"
+        spec = dict(model=str(model.resolve()), reference=str(reference.resolve()), prompt=prompt, refs=refs,
+                    resolution=resolution, steps=int(os.environ.get("QWEN_IMAGE21_PARITY_STEPS", "4")),
+                    negative_prompt="" if case == "true_cfg" else None,
+                    true_cfg_scale=2 if case == "true_cfg" else 1, cache=case != "uncached", latents=str(noise_path),
+                    seed=21, reference_resolution=1024, height=resolution, width=resolution,
+                    diagnostics=os.environ.get("QWEN_IMAGE21_PARITY_DIAGNOSTICS") == "1")
+        spec.update(_case_overrides(case))
+        height, width = spec["height"], spec["width"]
+        assert min(height, width, spec["reference_resolution"]) &gt; 0
+        assert all(value % 32 == 0 for value in (height, width, spec["reference_resolution"]))
+        assert spec["steps"] &gt; 0
+        spec.setdefault("sigmas", np.linspace(1.0, 1 / spec["steps"], spec["steps"]).tolist())
+        torch.save(torch.randn(1, (height // 16) * (width // 16), 64,
+                               generator=torch.Generator(device="cpu").manual_seed(spec["seed"]),
+                               dtype=torch.bfloat16), noise_path)
+        spec_path = tmp_path / "spec.json"
+        spec_path.write_text(json.dumps(spec))
+        outputs = []
+        for kind in ("native", "reference"):
+            output = tmp_path / f"{kind}.pt"
+            subprocess.run([sys.executable, str(Path(__file__).resolve()), "--worker", kind, str(spec_path), str(output)],
+                           check=True, cwd=ROOT)
+            outputs.append(torch.load(output, map_location="cpu", weights_only=True))
+        actual, expected = outputs[0]["pixels"], outputs[1]["pixels"]
+        assert actual.shape == expected.shape == (1, 4, 1, height, width)
+        assert torch.isfinite(actual).all() and bool(((actual &gt;= 0) &amp; (actual &lt;= 1)).all())
+        assert torch.isfinite(expected).all() and bool(((expected &gt;= 0) &amp; (expected &lt;= 1)).all())
+        metrics = {"case": case, "steps": spec["steps"], "cache": spec["cache"], "seed": spec["seed"],
+                   "rgb": _difference_metrics(actual[:, :3], expected[:, :3]),
+                   "all_channels": _difference_metrics(actual, expected)}
+        if spec["diagnostics"]:
+            stage_metrics = _diagnostic_metrics(outputs[0]["diagnostics"], outputs[1]["diagnostics"])
+            (tmp_path / "diagnostic_metrics.json").write_text(json.dumps(stage_metrics, indent=2) + "\n")
+            print("Stage diagnostics: " + json.dumps(stage_metrics), flush=True)
+        (tmp_path / "parity_metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
+        print(json.dumps(metrics), flush=True)
+        # Provisional tolerances: calibrate from measured BF16 CUDA evidence before release.
+&gt;       torch.testing.assert_close(actual, expected, atol=0.04, rtol=0.02)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 9941 / 4194304 (0.2%)
+E       Greatest absolute difference: 0.29296875 at index (0, 0, 0, 185, 310) (up to 0.04 allowed)
+E       Greatest relative difference: 5.666666507720947 at index (0, 0, 0, 264, 443) (up to 0.02 allowed)
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py:388: AssertionError</failure></testcase></testsuite></testsuites>

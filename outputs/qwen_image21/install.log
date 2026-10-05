@@ -1,0 +1,90 @@
+Using Python 3.12.14 environment at: /opt/venv
+Resolved 177 packages in 332ms
+   Building fastvideo @ file:///root/fv
+Downloading torchvision (7.2MiB)
+Downloading torchaudio (1.6MiB)
+Downloading torch (508.0MiB)
+Downloading nvidia-cublas (403.5MiB)
+Downloading nvidia-nccl-cu13 (196.4MiB)
+Downloading transformers (12.0MiB)
+Downloading nvidia-cuda-nvrtc (86.0MiB)
+Downloading flashinfer-python (15.3MiB)
+Downloading nvidia-cudnn-cu13 (349.2MiB)
+Downloading tokenizers (3.2MiB)
+Downloading nvidia-cusolver (191.6MiB)
+Downloading nvidia-cufile (1.2MiB)
+Downloading nvidia-nvjitlink (38.8MiB)
+Downloading nvidia-cudnn-frontend (5.4MiB)
+Downloading nvidia-nvshmem-cu13 (57.6MiB)
+Downloading nvidia-cuda-runtime (2.1MiB)
+Downloading nvidia-cuda-cupti (10.2MiB)
+Downloading nvidia-cufft (204.2MiB)
+Downloading nvidia-curand (56.8MiB)
+Downloading cuda-bindings (6.8MiB)
+Downloading nvidia-cusparselt-cu13 (162.3MiB)
+Downloading nvidia-cusparse (139.2MiB)
+ Downloaded torchaudio
+ Downloaded torchvision
+ Downloaded nvidia-cufile
+ Downloaded nvidia-cuda-runtime
+ Downloaded tokenizers
+ Downloaded nvidia-cudnn-frontend
+ Downloaded cuda-bindings
+ Downloaded nvidia-cuda-cupti
+ Downloaded transformers
+      Built fastvideo @ file:///root/fv
+ Downloaded flashinfer-python
+ Downloaded nvidia-nvjitlink
+ Downloaded nvidia-curand
+ Downloaded nvidia-nvshmem-cu13
+ Downloaded nvidia-cuda-nvrtc
+ Downloaded nvidia-cusparse
+ Downloaded nvidia-cusparselt-cu13
+ Downloaded nvidia-nccl-cu13
+ Downloaded nvidia-cusolver
+ Downloaded torch
+ Downloaded nvidia-cufft
+ Downloaded nvidia-cudnn-cu13
+ Downloaded nvidia-cublas
+Prepared 27 packages in 10.72s
+Uninstalled 12 packages in 12.84s
+Installed 27 packages in 522ms
+ - accelerate==1.0.1
+ + accelerate==1.15.0
+ - cuda-bindings==12.9.9
+ + cuda-bindings==13.4.3
+ - cuda-python==12.9.7
+ + cuda-python==13.4.1
+ - cuda-toolkit==12.6.3
+ + cuda-toolkit==13.0.2
+ - fastvideo==0.2.1 (from file:///FastVideo)
+ + fastvideo==0.2.1 (from file:///root/fv)
+ - flashinfer-python==0.7.0.post1
+ + flashinfer-python==0.6.17
+ + nvidia-cublas==13.1.1.3
+ + nvidia-cuda-cupti==13.0.85
+ + nvidia-cuda-nvrtc==13.0.88
+ + nvidia-cuda-runtime==13.0.96
+ + nvidia-cudnn-cu13==9.20.0.48
+ - nvidia-cudnn-frontend==1.30.0
+ + nvidia-cudnn-frontend==1.28.0
+ + nvidia-cufft==12.0.0.61
+ + nvidia-cufile==1.15.1.6
+ + nvidia-curand==10.4.0.35
+ + nvidia-cusolver==12.0.4.66
+ + nvidia-cusparse==12.6.3.3
+ + nvidia-cusparselt-cu13==0.8.1
+ + nvidia-nccl-cu13==2.29.7
+ + nvidia-nvjitlink==13.0.88
+ + nvidia-nvshmem-cu13==3.4.5
+ + nvidia-nvtx==13.0.85
+ - tokenizers==0.22.2
+ + tokenizers==0.23.2
+ - torch==2.12.0+cu126
+ + torch==2.12.0+cu130
+ - torchaudio==2.11.0+cu126
+ + torchaudio==2.11.0+cu130
+ - torchvision==0.27.0+cu126
+ + torchvision==0.27.0+cu130
+ - transformers==5.15.1
+ + transformers==5.18.0

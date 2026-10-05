@@ -1,0 +1,119 @@
+{
+  "preprocessing": {
+    "shape": [
+      1,
+      4,
+      1,
+      1184,
+      896
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  },
+  "small_posterior_mean": {
+    "shape": [
+      1,
+      64,
+      1,
+      4,
+      5
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  },
+  "small_posterior_logvar": {
+    "shape": [
+      1,
+      64,
+      1,
+      4,
+      5
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  },
+  "small_decode_identical_latents": {
+    "shape": [
+      1,
+      4,
+      1,
+      64,
+      80
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  },
+  "small_postprocess": {
+    "shape": [
+      1,
+      4,
+      1,
+      64,
+      80
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  },
+  "full_reference_posterior_mean": {
+    "shape": [
+      1,
+      64,
+      1,
+      74,
+      56
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  },
+  "full_reference_posterior_logvar": {
+    "shape": [
+      1,
+      64,
+      1,
+      74,
+      56
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  },
+  "full_reference_decode_identical_latents": {
+    "shape": [
+      1,
+      4,
+      1,
+      1184,
+      896
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  },
+  "full_reference_postprocess": {
+    "shape": [
+      1,
+      4,
+      1,
+      1184,
+      896
+    ],
+    "mean_abs": 0.0,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "mismatched": 0
+  }
+}

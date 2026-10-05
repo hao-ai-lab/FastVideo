@@ -27,6 +27,9 @@ class SamplingParam:
     pil_image: Any | None = None
     last_image: Any | None = None
     references: list[Any] | None = None
+    # Qwen-Image-2.1 reference area and step-independent prefix reuse.
+    reference_resolution: int = 1024
+    use_kv_cache: bool = True
 
     # Video inputs
     video_path: str | None = None
@@ -71,7 +74,7 @@ class SamplingParam:
 
     # Text inputs
     prompt: str | list[str] | None = None
-    negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+    negative_prompt: str | None = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
     max_sequence_length: int | None = None
     prompt_path: str | None = None
     output_path: str = "outputs/"

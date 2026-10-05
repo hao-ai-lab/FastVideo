@@ -1,0 +1,109 @@
+{
+  "backend": "flash",
+  "compiled": false,
+  "torch": "2.12.0+cu130",
+  "resolution": [
+    1024,
+    1024
+  ],
+  "steps": 40,
+  "seed": 42,
+  "runs": [
+    {
+      "name": "run-1",
+      "steps": 40,
+      "wall_seconds": 16.331190621000133,
+      "stage_seconds": {
+        "input_preparation": 6.448000021919142e-05,
+        "text_encoding": 0.5892703919998894,
+        "latent_preparation": 0.000362480999683612,
+        "timestep_preparation": 0.0006522410003526602,
+        "denoising": 14.244461124000736,
+        "decoding": 0.6641851789991051,
+        "PostDecodeFrameProcessStage": 0.008660127999974065
+      },
+      "core_seconds": 15.49791669499973
+    },
+    {
+      "name": "run-2",
+      "steps": 40,
+      "wall_seconds": 16.463247980000233,
+      "stage_seconds": {
+        "input_preparation": 4.665100095735397e-05,
+        "text_encoding": 0.5871224370002892,
+        "latent_preparation": 0.000389820999771473,
+        "timestep_preparation": 0.0005573420003202045,
+        "denoising": 14.277715684998839,
+        "decoding": 0.6509042109992151,
+        "PostDecodeFrameProcessStage": 0.01126074400053767
+      },
+      "core_seconds": 15.515742332998343
+    }
+  ],
+  "initialization_seconds": 148.90811026200026,
+  "warmup": {
+    "name": "warmup",
+    "steps": 4,
+    "wall_seconds": 18.194090475999474,
+    "stage_seconds": {
+      "input_preparation": 0.00010876000123971608,
+      "text_encoding": 1.4232613099993614,
+      "latent_preparation": 0.0006445620001613861,
+      "timestep_preparation": 0.0014054530001885723,
+      "denoising": 5.529829741000867,
+      "decoding": 10.321570079000594,
+      "PostDecodeFrameProcessStage": 0.07749262299876136
+    },
+    "core_seconds": 17.274661130000823
+  },
+  "repeat_exact": true,
+  "average_core_seconds": 15.506829513999037,
+  "average_denoising_seconds": 14.261088404499787,
+  "receipt": {
+    "resolved": "FLASH_ATTN",
+    "dense_layers": {
+      "transformer_blocks.0.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.1.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.2.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.3.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.4.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.5.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.6.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.7.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.8.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.9.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.10.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.11.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.12.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.13.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.14.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.15.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.16.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.17.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.18.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.19.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.20.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.21.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.22.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.23.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.24.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.25.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.26.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.27.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.28.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.29.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.30.attn.dense_attn": "FLASH_ATTN",
+      "transformer_blocks.31.attn.dense_attn": "FLASH_ATTN"
+    },
+    "peak_allocated_mib": 16005.31005859375
+  },
+  "pixel_difference_vs_sdpa": {
+    "exact": false,
+    "mean_abs": 0.0008945325389504433,
+    "max_abs": 0.2421875,
+    "rmse": 0.002658667042851448,
+    "fraction_outside_original_pipeline_tolerance": 0.00023055076599121094
+  },
+  "status": "FAIL",
+  "error": "AssertionError: Tensor-likes are not close!\n\nMismatched elements: 967 / 4194304 (0.0%)\nGreatest absolute difference: 0.2421875 at index (0, 1, 0, 654, 732) (up to 0.04 allowed)\nGreatest relative difference: inf at index (0, 1, 0, 632, 730) (up to 0.02 allowed)"
+}

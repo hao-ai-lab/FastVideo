@@ -171,6 +171,8 @@ class SamplingConfig:
     use_embedded_guidance: bool | None = None
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
+    reference_resolution: int | None = None
+    use_kv_cache: bool | None = None
 
 
 @dataclass

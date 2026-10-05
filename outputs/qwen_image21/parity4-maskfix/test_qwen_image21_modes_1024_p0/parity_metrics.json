@@ -1,0 +1,24 @@
+{
+  "case": "i2i",
+  "steps": 4,
+  "cache": true,
+  "seed": 42,
+  "rgb": {
+    "abs_mean": 0.002689911052584648,
+    "abs_max": 0.2890625,
+    "rmse": 0.0065877097658813,
+    "relative_l1": 0.003638737408827409,
+    "actual_abs_mean": 0.7379207611083984,
+    "reference_abs_mean": 0.7392429709434509,
+    "fraction_outside_tolerance": 0.0017703374614939094
+  },
+  "all_channels": {
+    "abs_mean": 0.0020302371121942997,
+    "abs_max": 0.2890625,
+    "rmse": 0.005720149260014296,
+    "relative_l1": 0.0025241775616658075,
+    "actual_abs_mean": 0.8033258318901062,
+    "reference_abs_mean": 0.8043162822723389,
+    "fraction_outside_tolerance": 0.0013391971588134766
+  }
+}

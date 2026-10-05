@@ -1,0 +1,215 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /root/FastVideo
+configfile: pyproject.toml
+plugins: anyio-4.15.1, platformdirs-4.12.2
+collecting ... collected 12 items / 11 deselected / 1 selected
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py::test_qwen_image21_modes_1024_pipeline_parity[i2i] INFO 10-02 01:55:20.958 [__init__.py:47] CUDA is available
+INFO 10-02 01:55:21.524 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:55:21.524 [multiproc_executor.py:107] Use master port: 53825
+INFO 10-02 01:55:25.353 [__init__.py:47] CUDA is available
+WARNING 10-02 01:55:26.016 [fastvideo_args.py:1006] dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.
+INFO 10-02 01:55:26.016 [parallel_state.py:909] Initializing distributed environment with world_size=1, device=cuda:0
+INFO 10-02 01:55:26.016 [parallel_state.py:737] Using nccl backend for CUDA platform
+[W1002 01:55:26.005647260 ProcessGroupNCCL.cpp:1001] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+INFO 10-02 01:55:26.031 [__init__.py:39] Building pipeline of type: basic
+INFO 10-02 01:55:26.031 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:55:26.031 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:55:26.031 [registry.py:1112] Pinning pipeline class name from QwenImage21Pipeline to QwenImage21Pipeline
+INFO 10-02 01:55:26.031 [pipeline_registry.py:134] Loading pipelines for types: ['basic']
+INFO 10-02 01:55:26.329 [pipeline_registry.py:176] Loaded 55 pipeline classes across 1 types
+INFO 10-02 01:55:26.329 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 01:55:26.329 [__init__.py:56] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 01:55:26.329 [profiler.py:198] Torch profiler disabled; returning no-op controller
+INFO 10-02 01:55:26.329 [composed_pipeline_base.py:171] Loading pipeline modules...
+INFO 10-02 01:55:26.329 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 01:55:26.329 [composed_pipeline_base.py:471] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 01:55:26.329 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:55:26.329 [composed_pipeline_base.py:532] Loading pipeline modules from config: {'_class_name': 'QwenImage21Pipeline', '_diffusers_version': '0.37.0.dev0', 'processor': ['transformers', 'Qwen3VLProcessor'], 'scheduler': ['diffusers', 'FlowMatchEulerDiscreteScheduler'], 'text_encoder': ['transformers', 'Qwen3VLForConditionalGeneration'], 'transformer': ['diffusers', 'QwenImage21Transformer2DModel'], 'vae': ['diffusers', 'AutoencoderKLQwenImage21']}
+INFO 10-02 01:55:26.329 [composed_pipeline_base.py:571] Loading required modules: ['processor', 'text_encoder', 'transformer', 'vae', 'scheduler']
+INFO 10-02 01:55:26.329 [component_loader.py:1380] Loading processor using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 01:55:26.329 [component_loader.py:600] Loading processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 01:55:26.494 [component_loader.py:605] Loaded processor: Qwen3VLProcessor
+INFO 10-02 01:55:26.494 [composed_pipeline_base.py:626] Loaded module processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 01:55:26.494 [component_loader.py:1380] Loading scheduler using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-02 01:55:26.494 [composed_pipeline_base.py:626] Loaded module scheduler from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-02 01:55:26.494 [composed_pipeline_base.py:623] Deferred module text_encoder from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-02 01:55:26.494 [composed_pipeline_base.py:623] Deferred module transformer from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-02 01:55:26.494 [composed_pipeline_base.py:623] Deferred module vae from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-02 01:55:26.494 [__init__.py:61] Pipelines instantiated
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.494 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 01:55:26.495 [multiproc_executor.py:707] 1 workers ready
+INFO 10-02 01:55:26.497 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:55:26.498 [video_generator.py:766] 
+INFO 10-02 01:55:26.498 [video_generator.py:766]                       height: 1024
+INFO 10-02 01:55:26.498 [video_generator.py:766]                        width: 1024
+INFO 10-02 01:55:26.498 [video_generator.py:766]                 video_length: 1
+INFO 10-02 01:55:26.498 [video_generator.py:766]                       prompt: A close-up portrait of the blue robotic rabbit shown in image 1, wearing a purple vest with gold trim and a star emblem, on a plain white background. Preserve its appearance and composition.
+INFO 10-02 01:55:26.498 [video_generator.py:766]                       image_path: None
+INFO 10-02 01:55:26.498 [video_generator.py:766]                   neg_prompt: None
+INFO 10-02 01:55:26.498 [video_generator.py:766]                         seed: 42
+INFO 10-02 01:55:26.498 [video_generator.py:766]                  infer_steps: 4
+INFO 10-02 01:55:26.498 [video_generator.py:766]        num_videos_per_prompt: 1
+INFO 10-02 01:55:26.498 [video_generator.py:766]               guidance_scale: 1
+INFO 10-02 01:55:26.498 [video_generator.py:766]                     n_tokens: 16384
+INFO 10-02 01:55:26.498 [video_generator.py:766]                   flow_shift: None
+INFO 10-02 01:55:26.498 [video_generator.py:766]      embedded_guidance_scale: 6.0
+INFO 10-02 01:55:26.498 [video_generator.py:766]                   save_video: True
+INFO 10-02 01:55:26.498 [video_generator.py:766]                   output_path: /root/FastVideo/outputs/qwen_image21/parity4-maskfix/test_qwen_image21_modes_1024_p0/native.png
+INFO 10-02 01:55:26.498 [video_generator.py:766]         
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.504 [composed_pipeline_base.py:388] Creating pipeline stages...
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.504 [composed_pipeline_base.py:702] Deferred modules to free after stage 1 (text_encoding): ['text_encoder']
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.504 [composed_pipeline_base.py:702] Deferred modules to free after stage 4 (denoising): ['transformer']
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.504 [composed_pipeline_base.py:702] Deferred modules to free after stage 5 (decoding): ['vae']
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.504 [composed_pipeline_base.py:758] Running pipeline stages: dict_keys(['input_preparation', 'text_encoding', 'latent_preparation', 'timestep_preparation', 'denoising', 'decoding'])
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.548 [lazy_module.py:71] Loading deferred module text_encoder
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.548 [component_loader.py:1380] Loading text_encoder using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:26.548 [component_loader.py:299] HF Model config: {'architectures': ['Qwen3VLForConditionalGeneration'], 'dtype': 'bfloat16', 'image_token_id': 151655, 'text_config': {'attention_bias': False, 'attention_dropout': 0.0, 'bos_token_id': 151643, 'dtype': 'bfloat16', 'eos_token_id': 151645, 'head_dim': 128, 'hidden_act': 'silu', 'hidden_size': 4096, 'initializer_range': 0.02, 'intermediate_size': 12288, 'max_position_embeddings': 262144, 'model_type': 'qwen3_vl_text', 'num_attention_heads': 32, 'num_hidden_layers': 36, 'num_key_value_heads': 8, 'rms_norm_eps': 1e-06, 'rope_scaling': {'mrope_interleaved': True, 'mrope_section': [24, 20, 20], 'rope_type': 'default'}, 'rope_theta': 5000000, 'use_cache': True, 'vocab_size': 151936}, 'tie_word_embeddings': False, 'video_token_id': 151656, 'vision_config': {'deepstack_visual_indexes': [8, 16, 24], 'depth': 27, 'dtype': 'bfloat16', 'hidden_act': 'gelu_pytorch_tanh', 'hidden_size': 1152, 'in_channels': 3, 'initializer_range': 0.02, 'intermediate_size': 4304, 'model_type': 'qwen3_vl', 'num_heads': 16, 'num_position_embeddings': 2304, 'out_hidden_size': 4096, 'patch_size': 16, 'spatial_merge_size': 2, 'temporal_patch_size': 2}, 'vision_end_token_id': 151653, 'vision_start_token_id': 151652}
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:00,  6.93it/s]
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:00<00:00,  2.78it/s]
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:01<00:00,  2.22it/s]
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:01<00:00,  2.06it/s]
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:01<00:00,  2.28it/s]
+[1;36m(Worker pid=87871)[0;0m 
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:29.841 [component_loader.py:448] Loading weights took 1.79 seconds
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:39.547 [lazy_module.py:85] Loaded deferred module text_encoder, cuda allocated now 0.00 GiB
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:41.066 [lazy_module.py:141] Released deferred module text_encoder, cuda allocated 0.04 -> 0.04 GiB, freed 0.00 GiB
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:41.067 [lazy_module.py:71] Loading deferred module vae
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:41.067 [component_loader.py:1380] Loading vae using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.234 [lazy_module.py:85] Loaded deferred module vae, cuda allocated now 0.04 GiB
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.327 [pinned_offload.py:55] frozen offload: holding 0.68 GB of LazyModule on the host (pinned)
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.582 [lazy_module.py:71] Loading deferred module transformer
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.582 [component_loader.py:1380] Loading transformer using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.582 [component_loader.py:1042] transformer cls_name: QwenImage21Transformer2DModel
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.582 [component_loader.py:1094] Loading model from 2 safetensors files: ['/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00002-of-00002.safetensors', '/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00001-of-00002.safetensors']
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.582 [component_loader.py:1103] Loading model from QwenImage21Transformer2DModel, default_dtype: torch.bfloat16
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.582 [component_loader.py:1119] Worker 0 transformer attention backend: automatic selection
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.582 [fsdp_load.py:228] Loading model with default_dtype: torch.bfloat16
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:42.589 [fsdp_load.py:282] Loading transformer weights with to_cpu=False
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:00<00:00,  2.03it/s]
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.13it/s]
+[1;36m(Worker pid=87871)[0;0m Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.21it/s]
+[1;36m(Worker pid=87871)[0;0m 
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:44.250 [component_loader.py:1155] Loaded model with 7.12B parameters
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:49.086 [lazy_module.py:85] Loaded deferred module transformer, cuda allocated now 0.29 GiB
+[1;36m(Worker pid=87871)[0;0m Denoising:   0%|          | 0/4 [00:00<?, ?it/s]Denoising:  25%|██▌       | 1/4 [00:01<00:04,  1.49s/it]Denoising:  50%|█████     | 2/4 [00:02<00:02,  1.04s/it]Denoising:  75%|███████▌  | 3/4 [00:02<00:00,  1.12it/s]Denoising: 100%|██████████| 4/4 [00:03<00:00,  1.22it/s]Denoising: 100%|██████████| 4/4 [00:03<00:00,  1.10it/s]
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:53.098 [lazy_module.py:141] Released deferred module transformer, cuda allocated 0.30 -> 0.04 GiB, freed 0.26 GiB
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:53.813 [lazy_module.py:141] Released deferred module vae, cuda allocated 0.06 -> 0.06 GiB, freed 0.00 GiB
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:53.816 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 01:55:53.822 [video_generator.py:864] Generated successfully in 27.32 seconds
+INFO 10-02 01:55:53.847 [video_generator.py:920] PostDecodeFrameProcessStage completed in 0.025 s
+INFO 10-02 01:55:54.053 [video_generator.py:947] Saved image to /root/FastVideo/outputs/qwen_image21/parity4-maskfix/test_qwen_image21_modes_1024_p0/native.png
+INFO 10-02 01:55:54.053 [video_generator.py:993] VideoSaveStage completed in 0.206 s
+INFO 10-02 01:55:54.053 [video_generator.py:996] AudioMuxStage completed in 0.000 s
+INFO 10-02 01:55:54.053 [video_generator.py:1001] End-to-end latency: 27.56 seconds
+INFO 10-02 01:55:54.081 [multiproc_executor.py:347] Shutting down MultiprocExecutor...
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:54.081 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:54.361 [gpu_worker.py:117] Worker 0 shutdown complete
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:54.361 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=87871)[0;0m INFO 10-02 01:55:54.615 [gpu_worker.py:117] Worker 0 shutdown complete
+INFO 10-02 01:55:57.884 [multiproc_executor.py:402] MultiprocExecutor shutdown complete
+/root/FastVideo/outputs/qwen_image21/upstream/diffusers/src/diffusers/utils/deprecation_utils.py:23: FutureWarning: `torch_dtype` is deprecated and will be removed in version 1.0.0. Please use `dtype` instead.
+  deprecate("torch_dtype", "1.0.0", _TORCH_DTYPE_DEPRECATION_MESSAGE)
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  20%|██        | 1/5 [00:00<00:00,  8.70it/s]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 292.31it/s]
+Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00,  6.16it/s]Loading pipeline components...:  60%|██████    | 3/5 [00:00<00:00,  3.99it/s]
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 750/750 [00:00<00:00, 21072.67it/s]
+Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  7.16it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  6.45it/s]
+  0%|          | 0/4 [00:00<?, ?it/s] 25%|██▌       | 1/4 [00:02<00:06,  2.04s/it] 50%|█████     | 2/4 [00:03<00:03,  1.68s/it] 75%|███████▌  | 3/4 [00:04<00:01,  1.58s/it]100%|██████████| 4/4 [00:06<00:00,  1.52s/it]100%|██████████| 4/4 [00:06<00:00,  1.59s/it]
+{"case": "i2i", "steps": 4, "cache": true, "seed": 42, "rgb": {"abs_mean": 0.002689911052584648, "abs_max": 0.2890625, "rmse": 0.0065877097658813, "relative_l1": 0.003638737408827409, "actual_abs_mean": 0.7379207611083984, "reference_abs_mean": 0.7392429709434509, "fraction_outside_tolerance": 0.0017703374614939094}, "all_channels": {"abs_mean": 0.0020302371121942997, "abs_max": 0.2890625, "rmse": 0.005720149260014296, "relative_l1": 0.0025241775616658075, "actual_abs_mean": 0.8033258318901062, "reference_abs_mean": 0.8043162822723389, "fraction_outside_tolerance": 0.0013391971588134766}}
+FAILED
+
+=================================== FAILURES ===================================
+______________ test_qwen_image21_modes_1024_pipeline_parity[i2i] _______________
+
+case = 'i2i'
+tmp_path = PosixPath('/root/FastVideo/outputs/qwen_image21/parity4-maskfix/test_qwen_image21_modes_1024_p0')
+
+    for path in spec["refs"]:
+        with Image.open(path) as image:
+>           references.append(ImageOps.exif_transpose(image).convert("RGBA"))
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+case = 'i2i', resolution = 1024
+tmp_path = PosixPath('/root/FastVideo/outputs/qwen_image21/parity4-maskfix/test_qwen_image21_modes_1024_p0')
+
+    
+    
+    def _worker(kind: str, spec_path: str, output_path: str) -> None:
+        spec = json.loads(Path(spec_path).read_text())
+        sys.path.insert(0, str(ROOT))
+        sys.path.insert(0, str(Path(spec["reference"]) / "src"))
+        height, width = spec.get("height", spec["resolution"]), spec.get("width", spec["resolution"])
+        seed = spec.get("seed", 21)
+        reference_resolution = spec.get("reference_resolution", 1024)
+        sigmas = spec.get("sigmas", np.linspace(1.0, 1 / spec["steps"], spec["steps"]).tolist())
+        noise = torch.load(spec["latents"], map_location="cpu", weights_only=True)
+        assert noise.dtype == torch.bfloat16
+        assert noise.shape == (1, (height // 16) * (width // 16), 64)
+        torch.manual_seed(seed)
+        diagnostics = spec.get("diagnostics", os.environ.get("QWEN_IMAGE21_PARITY_DIAGNOSTICS") == "1")
+        captured = {}
+        if kind == "native":
+            from fastvideo import VideoGenerator
+            from fastvideo.api import (EngineConfig, GenerationRequest, GeneratorConfig, InputConfig, OffloadConfig,
+                                       OutputConfig, ParallelismConfig, PipelineSelection, SamplingConfig)
+    
+            generator = VideoGenerator.from_config(
+                GeneratorConfig(
+                    model_path=spec["model"],
+                    engine=EngineConfig(num_gpus=1, parallelism=ParallelismConfig(tp_size=1, sp_size=1),
+                                        offload=OffloadConfig(dit=True, dit_layerwise=True, text_encoder=True,
+                                                              vae=True, lazy_module_load=True)),
+                    pipeline=PipelineSelection(workload_type="i2i" if spec["refs"] else "t2i"),
+                ))
+            original_execute = generator.executor.execute_forward
+            try:
+                if diagnostics:
+                    import cloudpickle
+    
+                    generator.executor.collective_rpc(cloudpickle.dumps(_install_native_diagnostics))
+    
+                    def execute(*args, **kwargs):
+                        batch = original_execute(*args, **kwargs)
+                        captured.update(batch.extra["qwen_image21_diagnostics"])
+                        return batch
+    
+                    generator.executor.execute_forward = execute
+                result = generator.generate(
+                    GenerationRequest(
+                        prompt=spec["prompt"], negative_prompt=spec["negative_prompt"],
+                        inputs=InputConfig(references=spec["refs"] or None, latents=noise.clone()),
+                        sampling=SamplingConfig(height=height, width=width, num_frames=1,
+                                                fps=1, num_inference_steps=spec["steps"], guidance_scale=1,
+                                                true_cfg_scale=spec["true_cfg_scale"], seed=seed,
+                                                reference_resolution=reference_resolution,
+                                                use_kv_cache=spec["cache"], sigmas=sigmas),
+                        output=OutputConfig(output_path=str(Path(output_path).with_suffix(".png")),
+                                            return_frames=True, save_video=True),
+                    ))
+                torch.save({"pixels": result.samples.detach().float().cpu(), "png_path": result.video_path,
+                            "peak_memory_mb": result.peak_memory_mb, "diagnostics": captured}, output_path)
+            finally:
+                generator.executor.execute_forward = original_execute
+                generator.shutdown()
+        else:
+>           from diffusers.pipelines.qwenimage21 import pipeline_qwenimage21
+E           AssertionError: Tensor-likes are not close!
+E           
+E           Mismatched elements: 5617 / 4194304 (0.1%)
+E           Greatest absolute difference: 0.2890625 at index (0, 1, 0, 664, 651) (up to 0.04 allowed)
+E           Greatest relative difference: 1.875 at index (0, 0, 0, 165, 302) (up to 0.02 allowed)
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py:204: AssertionError
+- generated xml file: /root/FastVideo/outputs/qwen_image21/pipeline-parity4-maskfix.xml -
+=========================== short test summary info ============================
+FAILED tests/local_tests/qwen_image21/test_pipeline_parity.py::test_qwen_image21_modes_1024_pipeline_parity[i2i]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+====================== 1 failed, 11 deselected in 59.17s =======================

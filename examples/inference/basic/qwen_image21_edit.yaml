@@ -1,0 +1,38 @@
+# Replace source.png and mask.png with your own images. The mask is an ordered
+# reference interpreted by the model, not a hard pixel-preservation constraint.
+generator:
+  model_path: Qwen/Qwen-Image-2.1
+  engine:
+    num_gpus: 1
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: true
+      dit_layerwise: true
+      text_encoder: true
+      vae: true
+      lazy_module_load: true
+  pipeline:
+    workload_type: i2i
+request:
+  prompt: In image 1, turn the object highlighted by the mask in image 2 blue.
+  inputs:
+    references:
+      - source.png
+      - mask.png
+  sampling:
+    height: 1024
+    width: 1024
+    num_frames: 1
+    fps: 1
+    num_inference_steps: 40
+    guidance_scale: 1.0
+    true_cfg_scale: 1.0
+    seed: 42
+    reference_resolution: 1024
+    use_kv_cache: true
+  output:
+    output_path: outputs/qwen_image21/edit.png
+    save_video: true
+    return_frames: false

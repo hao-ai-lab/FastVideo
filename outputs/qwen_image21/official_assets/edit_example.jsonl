@@ -1,0 +1,4 @@
+{"id": "1412128", "prompt": "Depict this symbol as a flag waving in the sky", "input_images": ["images/1412128.png"], "task_type": "single_scene_complex"}
+{"id": "1412215", "prompt": "Translate into Hindi.", "input_images": ["images/1412215.png"], "task_type": "text_edit"}
+{"id": "1413730", "prompt": "can u this image so that the head twist to the left while the body and arms not moved", "input_images": ["images/1413730.png"], "task_type": "basic_edit"}
+{"id": "1549226", "prompt": "将<image1>中的人物和<image2>中的人物置入一个现代抖音直播间的场景中，生成一张两人并排坐在直播桌后共同面向镜头介绍产品的合影照片。保持两位人物的面部特征、发型和服装外观完全不变。", "input_images": ["images/1549226_a.png", "images/1549226_b.png"], "task_type": "multi_portrait"}

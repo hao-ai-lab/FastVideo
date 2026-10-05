@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="59.169" timestamp="2026-10-02T01:55:16.616851+00:00" hostname="ac4ffb6d59b3"><testcase classname="tests.local_tests.qwen_image21.test_pipeline_parity" name="test_qwen_image21_modes_1024_pipeline_parity[i2i]" time="58.574"><failure message="AssertionError: Tensor-likes are not close!&#10;&#10;Mismatched elements: 5617 / 4194304 (0.1%)&#10;Greatest absolute difference: 0.2890625 at index (0, 1, 0, 664, 651) (up to 0.04 allowed)&#10;Greatest relative difference: 1.875 at index (0, 0, 0, 165, 302) (up to 0.02 allowed)">case = 'i2i'
+tmp_path = PosixPath('/root/FastVideo/outputs/qwen_image21/parity4-maskfix/test_qwen_image21_modes_1024_p0')
+
+    for path in spec["refs"]:
+        with Image.open(path) as image:
+&gt;           references.append(ImageOps.exif_transpose(image).convert("RGBA"))
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+case = 'i2i', resolution = 1024
+tmp_path = PosixPath('/root/FastVideo/outputs/qwen_image21/parity4-maskfix/test_qwen_image21_modes_1024_p0')
+
+    
+    
+    def _worker(kind: str, spec_path: str, output_path: str) -&gt; None:
+        spec = json.loads(Path(spec_path).read_text())
+        sys.path.insert(0, str(ROOT))
+        sys.path.insert(0, str(Path(spec["reference"]) / "src"))
+        height, width = spec.get("height", spec["resolution"]), spec.get("width", spec["resolution"])
+        seed = spec.get("seed", 21)
+        reference_resolution = spec.get("reference_resolution", 1024)
+        sigmas = spec.get("sigmas", np.linspace(1.0, 1 / spec["steps"], spec["steps"]).tolist())
+        noise = torch.load(spec["latents"], map_location="cpu", weights_only=True)
+        assert noise.dtype == torch.bfloat16
+        assert noise.shape == (1, (height // 16) * (width // 16), 64)
+        torch.manual_seed(seed)
+        diagnostics = spec.get("diagnostics", os.environ.get("QWEN_IMAGE21_PARITY_DIAGNOSTICS") == "1")
+        captured = {}
+        if kind == "native":
+            from fastvideo import VideoGenerator
+            from fastvideo.api import (EngineConfig, GenerationRequest, GeneratorConfig, InputConfig, OffloadConfig,
+                                       OutputConfig, ParallelismConfig, PipelineSelection, SamplingConfig)
+    
+            generator = VideoGenerator.from_config(
+                GeneratorConfig(
+                    model_path=spec["model"],
+                    engine=EngineConfig(num_gpus=1, parallelism=ParallelismConfig(tp_size=1, sp_size=1),
+                                        offload=OffloadConfig(dit=True, dit_layerwise=True, text_encoder=True,
+                                                              vae=True, lazy_module_load=True)),
+                    pipeline=PipelineSelection(workload_type="i2i" if spec["refs"] else "t2i"),
+                ))
+            original_execute = generator.executor.execute_forward
+            try:
+                if diagnostics:
+                    import cloudpickle
+    
+                    generator.executor.collective_rpc(cloudpickle.dumps(_install_native_diagnostics))
+    
+                    def execute(*args, **kwargs):
+                        batch = original_execute(*args, **kwargs)
+                        captured.update(batch.extra["qwen_image21_diagnostics"])
+                        return batch
+    
+                    generator.executor.execute_forward = execute
+                result = generator.generate(
+                    GenerationRequest(
+                        prompt=spec["prompt"], negative_prompt=spec["negative_prompt"],
+                        inputs=InputConfig(references=spec["refs"] or None, latents=noise.clone()),
+                        sampling=SamplingConfig(height=height, width=width, num_frames=1,
+                                                fps=1, num_inference_steps=spec["steps"], guidance_scale=1,
+                                                true_cfg_scale=spec["true_cfg_scale"], seed=seed,
+                                                reference_resolution=reference_resolution,
+                                                use_kv_cache=spec["cache"], sigmas=sigmas),
+                        output=OutputConfig(output_path=str(Path(output_path).with_suffix(".png")),
+                                            return_frames=True, save_video=True),
+                    ))
+                torch.save({"pixels": result.samples.detach().float().cpu(), "png_path": result.video_path,
+                            "peak_memory_mb": result.peak_memory_mb, "diagnostics": captured}, output_path)
+            finally:
+                generator.executor.execute_forward = original_execute
+                generator.shutdown()
+        else:
+&gt;           from diffusers.pipelines.qwenimage21 import pipeline_qwenimage21
+E           AssertionError: Tensor-likes are not close!
+E           
+E           Mismatched elements: 5617 / 4194304 (0.1%)
+E           Greatest absolute difference: 0.2890625 at index (0, 1, 0, 664, 651) (up to 0.04 allowed)
+E           Greatest relative difference: 1.875 at index (0, 0, 0, 165, 302) (up to 0.02 allowed)
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py:204: AssertionError</failure></testcase></testsuite></testsuites>

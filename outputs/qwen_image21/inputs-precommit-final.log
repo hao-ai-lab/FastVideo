@@ -1,0 +1,13 @@
+yapf.....................................................................Passed
+ruff (legacy alias)......................................................Passed
+codespell................................................................Passed
+PyMarkdown...........................................(no files to check)Skipped
+Lint GitHub Actions workflow files...................(no files to check)Skipped
+mypy.....................................................................Passed
+Check for spaces in all filenames........................................Passed
+Suggestion...............................................................Passed
+- hook id: suggestion
+- duration: 0s
+
+To bypass pre-commit hooks, add --no-verify to git commit.
+

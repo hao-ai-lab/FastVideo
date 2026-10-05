@@ -1,0 +1,8 @@
+...................                                                      [100%]
+=============================== warnings summary ===============================
+tests/local_tests/qwen_image21/test_pipeline_contracts.py::test_rgba_png_roundtrip_preserves_alpha
+  /root/FastVideo/tests/local_tests/qwen_image21/test_pipeline_contracts.py:258: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    rgba = Image.fromarray(np.array([[[11, 22, 33, 0], [44, 55, 66, 128]]], dtype=np.uint8), "RGBA")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+19 passed, 1 warning in 1.39s

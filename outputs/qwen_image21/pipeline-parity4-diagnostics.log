@@ -1,0 +1,222 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /root/FastVideo
+configfile: pyproject.toml
+plugins: anyio-4.15.1, platformdirs-4.12.2
+collecting ... collected 12 items / 11 deselected / 1 selected
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py::test_qwen_image21_modes_1024_pipeline_parity[i2i] INFO 10-02 01:59:06.543 [__init__.py:47] CUDA is available
+INFO 10-02 01:59:07.105 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:59:07.105 [multiproc_executor.py:107] Use master port: 58071
+INFO 10-02 01:59:10.852 [__init__.py:47] CUDA is available
+WARNING 10-02 01:59:11.517 [fastvideo_args.py:1006] dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.
+INFO 10-02 01:59:11.517 [parallel_state.py:909] Initializing distributed environment with world_size=1, device=cuda:0
+INFO 10-02 01:59:11.517 [parallel_state.py:737] Using nccl backend for CUDA platform
+[W1002 01:59:11.506613637 ProcessGroupNCCL.cpp:1001] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+INFO 10-02 01:59:11.541 [__init__.py:39] Building pipeline of type: basic
+INFO 10-02 01:59:11.541 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:59:11.541 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:59:11.541 [registry.py:1112] Pinning pipeline class name from QwenImage21Pipeline to QwenImage21Pipeline
+INFO 10-02 01:59:11.541 [pipeline_registry.py:134] Loading pipelines for types: ['basic']
+INFO 10-02 01:59:11.845 [pipeline_registry.py:176] Loaded 55 pipeline classes across 1 types
+INFO 10-02 01:59:11.845 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 01:59:11.845 [__init__.py:56] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 01:59:11.845 [profiler.py:198] Torch profiler disabled; returning no-op controller
+INFO 10-02 01:59:11.845 [composed_pipeline_base.py:171] Loading pipeline modules...
+INFO 10-02 01:59:11.845 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 01:59:11.845 [composed_pipeline_base.py:471] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 01:59:11.845 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:59:11.845 [composed_pipeline_base.py:532] Loading pipeline modules from config: {'_class_name': 'QwenImage21Pipeline', '_diffusers_version': '0.37.0.dev0', 'processor': ['transformers', 'Qwen3VLProcessor'], 'scheduler': ['diffusers', 'FlowMatchEulerDiscreteScheduler'], 'text_encoder': ['transformers', 'Qwen3VLForConditionalGeneration'], 'transformer': ['diffusers', 'QwenImage21Transformer2DModel'], 'vae': ['diffusers', 'AutoencoderKLQwenImage21']}
+INFO 10-02 01:59:11.845 [composed_pipeline_base.py:571] Loading required modules: ['processor', 'text_encoder', 'transformer', 'vae', 'scheduler']
+INFO 10-02 01:59:11.845 [component_loader.py:1380] Loading processor using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 01:59:11.845 [component_loader.py:600] Loading processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 01:59:12.005 [component_loader.py:605] Loaded processor: Qwen3VLProcessor
+INFO 10-02 01:59:12.005 [composed_pipeline_base.py:626] Loaded module processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 01:59:12.005 [component_loader.py:1380] Loading scheduler using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-02 01:59:12.005 [composed_pipeline_base.py:626] Loaded module scheduler from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-02 01:59:12.005 [composed_pipeline_base.py:623] Deferred module text_encoder from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-02 01:59:12.005 [composed_pipeline_base.py:623] Deferred module transformer from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-02 01:59:12.005 [composed_pipeline_base.py:623] Deferred module vae from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-02 01:59:12.005 [__init__.py:61] Pipelines instantiated
+INFO 10-02 01:59:12.006 [multiproc_executor.py:707] 1 workers ready
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.005 [multiproc_executor.py:716] Worker 0 starting event loop...
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.007 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 01:59:12.008 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 01:59:12.009 [video_generator.py:766] 
+INFO 10-02 01:59:12.009 [video_generator.py:766]                       height: 1024
+INFO 10-02 01:59:12.009 [video_generator.py:766]                        width: 1024
+INFO 10-02 01:59:12.009 [video_generator.py:766]                 video_length: 1
+INFO 10-02 01:59:12.009 [video_generator.py:766]                       prompt: A close-up portrait of the blue robotic rabbit shown in image 1, wearing a purple vest with gold trim and a star emblem, on a plain white background. Preserve its appearance and composition.
+INFO 10-02 01:59:12.009 [video_generator.py:766]                       image_path: None
+INFO 10-02 01:59:12.009 [video_generator.py:766]                   neg_prompt: None
+INFO 10-02 01:59:12.009 [video_generator.py:766]                         seed: 42
+INFO 10-02 01:59:12.009 [video_generator.py:766]                  infer_steps: 4
+INFO 10-02 01:59:12.009 [video_generator.py:766]        num_videos_per_prompt: 1
+INFO 10-02 01:59:12.009 [video_generator.py:766]               guidance_scale: 1
+INFO 10-02 01:59:12.009 [video_generator.py:766]                     n_tokens: 16384
+INFO 10-02 01:59:12.009 [video_generator.py:766]                   flow_shift: None
+INFO 10-02 01:59:12.009 [video_generator.py:766]      embedded_guidance_scale: 6.0
+INFO 10-02 01:59:12.009 [video_generator.py:766]                   save_video: True
+INFO 10-02 01:59:12.009 [video_generator.py:766]                   output_path: /root/FastVideo/outputs/qwen_image21/parity4-diagnostics/test_qwen_image21_modes_1024_p0/native.png
+INFO 10-02 01:59:12.009 [video_generator.py:766]         
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.015 [composed_pipeline_base.py:388] Creating pipeline stages...
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.016 [composed_pipeline_base.py:702] Deferred modules to free after stage 1 (text_encoding): ['text_encoder']
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.016 [composed_pipeline_base.py:702] Deferred modules to free after stage 4 (denoising): ['transformer']
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.016 [composed_pipeline_base.py:702] Deferred modules to free after stage 5 (decoding): ['vae']
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.016 [composed_pipeline_base.py:758] Running pipeline stages: dict_keys(['input_preparation', 'text_encoding', 'latent_preparation', 'timestep_preparation', 'denoising', 'decoding'])
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.059 [lazy_module.py:71] Loading deferred module text_encoder
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.059 [component_loader.py:1380] Loading text_encoder using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:12.060 [component_loader.py:299] HF Model config: {'architectures': ['Qwen3VLForConditionalGeneration'], 'dtype': 'bfloat16', 'image_token_id': 151655, 'text_config': {'attention_bias': False, 'attention_dropout': 0.0, 'bos_token_id': 151643, 'dtype': 'bfloat16', 'eos_token_id': 151645, 'head_dim': 128, 'hidden_act': 'silu', 'hidden_size': 4096, 'initializer_range': 0.02, 'intermediate_size': 12288, 'max_position_embeddings': 262144, 'model_type': 'qwen3_vl_text', 'num_attention_heads': 32, 'num_hidden_layers': 36, 'num_key_value_heads': 8, 'rms_norm_eps': 1e-06, 'rope_scaling': {'mrope_interleaved': True, 'mrope_section': [24, 20, 20], 'rope_type': 'default'}, 'rope_theta': 5000000, 'use_cache': True, 'vocab_size': 151936}, 'tie_word_embeddings': False, 'video_token_id': 151656, 'vision_config': {'deepstack_visual_indexes': [8, 16, 24], 'depth': 27, 'dtype': 'bfloat16', 'hidden_act': 'gelu_pytorch_tanh', 'hidden_size': 1152, 'in_channels': 3, 'initializer_range': 0.02, 'intermediate_size': 4304, 'model_type': 'qwen3_vl', 'num_heads': 16, 'num_position_embeddings': 2304, 'out_hidden_size': 4096, 'patch_size': 16, 'spatial_merge_size': 2, 'temporal_patch_size': 2}, 'vision_end_token_id': 151653, 'vision_start_token_id': 151652}
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:00,  7.26it/s]
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:00<00:00,  2.81it/s]
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:01<00:00,  2.21it/s]
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:01<00:00,  2.06it/s]
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:01<00:00,  2.29it/s]
+[1;36m(Worker pid=91216)[0;0m 
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:15.343 [component_loader.py:448] Loading weights took 1.79 seconds
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:25.037 [lazy_module.py:85] Loaded deferred module text_encoder, cuda allocated now 0.00 GiB
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:26.567 [lazy_module.py:141] Released deferred module text_encoder, cuda allocated 0.04 -> 0.04 GiB, freed 0.00 GiB
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:26.568 [lazy_module.py:71] Loading deferred module vae
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:26.568 [component_loader.py:1380] Loading vae using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:27.877 [lazy_module.py:85] Loaded deferred module vae, cuda allocated now 0.04 GiB
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:27.940 [pinned_offload.py:55] frozen offload: holding 0.68 GB of LazyModule on the host (pinned)
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:28.205 [lazy_module.py:71] Loading deferred module transformer
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:28.206 [component_loader.py:1380] Loading transformer using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:28.206 [component_loader.py:1042] transformer cls_name: QwenImage21Transformer2DModel
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:28.206 [component_loader.py:1094] Loading model from 2 safetensors files: ['/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00002-of-00002.safetensors', '/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00001-of-00002.safetensors']
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:28.206 [component_loader.py:1103] Loading model from QwenImage21Transformer2DModel, default_dtype: torch.bfloat16
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:28.206 [component_loader.py:1119] Worker 0 transformer attention backend: automatic selection
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:28.206 [fsdp_load.py:228] Loading model with default_dtype: torch.bfloat16
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:28.213 [fsdp_load.py:282] Loading transformer weights with to_cpu=False
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:00<00:00,  2.05it/s]
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.14it/s]
+[1;36m(Worker pid=91216)[0;0m Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.22it/s]
+[1;36m(Worker pid=91216)[0;0m 
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:29.859 [component_loader.py:1155] Loaded model with 7.12B parameters
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:34.753 [lazy_module.py:85] Loaded deferred module transformer, cuda allocated now 0.29 GiB
+[1;36m(Worker pid=91216)[0;0m Denoising:   0%|          | 0/4 [00:00<?, ?it/s]Denoising:  25%|██▌       | 1/4 [00:01<00:04,  1.46s/it]Denoising:  50%|█████     | 2/4 [00:02<00:02,  1.03s/it]Denoising:  75%|███████▌  | 3/4 [00:02<00:00,  1.12it/s]Denoising: 100%|██████████| 4/4 [00:03<00:00,  1.21it/s]Denoising: 100%|██████████| 4/4 [00:03<00:00,  1.10it/s]
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:38.947 [lazy_module.py:141] Released deferred module transformer, cuda allocated 0.30 -> 0.04 GiB, freed 0.26 GiB
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:39.673 [lazy_module.py:141] Released deferred module vae, cuda allocated 0.06 -> 0.06 GiB, freed 0.00 GiB
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:39.694 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 01:59:39.723 [video_generator.py:864] Generated successfully in 27.71 seconds
+INFO 10-02 01:59:39.744 [video_generator.py:920] PostDecodeFrameProcessStage completed in 0.021 s
+INFO 10-02 01:59:39.950 [video_generator.py:947] Saved image to /root/FastVideo/outputs/qwen_image21/parity4-diagnostics/test_qwen_image21_modes_1024_p0/native.png
+INFO 10-02 01:59:39.950 [video_generator.py:993] VideoSaveStage completed in 0.205 s
+INFO 10-02 01:59:39.950 [video_generator.py:996] AudioMuxStage completed in 0.000 s
+INFO 10-02 01:59:39.950 [video_generator.py:1001] End-to-end latency: 27.94 seconds
+INFO 10-02 01:59:40.041 [multiproc_executor.py:347] Shutting down MultiprocExecutor...
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:40.041 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:40.452 [gpu_worker.py:117] Worker 0 shutdown complete
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:40.454 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=91216)[0;0m INFO 10-02 01:59:40.838 [gpu_worker.py:117] Worker 0 shutdown complete
+INFO 10-02 01:59:44.144 [multiproc_executor.py:402] MultiprocExecutor shutdown complete
+/root/FastVideo/outputs/qwen_image21/upstream/diffusers/src/diffusers/utils/deprecation_utils.py:23: FutureWarning: `torch_dtype` is deprecated and will be removed in version 1.0.0. Please use `dtype` instead.
+  deprecate("torch_dtype", "1.0.0", _TORCH_DTYPE_DEPRECATION_MESSAGE)
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 11.57it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 11.56it/s]
+Loading pipeline components...:  20%|██        | 1/5 [00:00<00:00,  5.36it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00,  7.10it/s]
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 750/750 [00:00<00:00, 20214.81it/s]
+Loading pipeline components...:  60%|██████    | 3/5 [00:00<00:00,  7.82it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  6.36it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  6.52it/s]
+  0%|          | 0/4 [00:00<?, ?it/s] 25%|██▌       | 1/4 [00:02<00:06,  2.04s/it] 50%|█████     | 2/4 [00:03<00:03,  1.68s/it] 75%|███████▌  | 3/4 [00:04<00:01,  1.58s/it]100%|██████████| 4/4 [00:06<00:00,  1.53s/it]100%|██████████| 4/4 [00:06<00:00,  1.60s/it]
+Stage diagnostics: {"final_latents": {"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.01323623675853014, "abs_max": 0.26171875, "rmse": 0.019434064626693726, "relative_l1": 0.01052284430017347, "relative_l2": 0.012310950816156312, "actual_abs_mean": 1.2541086673736572, "reference_abs_mean": 1.257857322692871, "fraction_outside_tolerance": 0.8116722106933594}, "image_latents": {"actual_shape": [1, 4144, 64], "reference_shape": [1, 4144, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.0016365424962714314, "abs_max": 0.2294921875, "rmse": 0.00412346376106143, "relative_l1": 0.001476388325201356, "relative_l2": 0.0029891562100215797, "actual_abs_mean": 1.108475923538208, "reference_abs_mean": 1.108476996421814, "fraction_outside_tolerance": 0.2768121063709259}, "image_pad_mask": {"actual_shape": [1, 2113], "reference_shape": [1, 2113], "actual_dtype": "torch.bool", "reference_dtype": "torch.bool", "exact": true, "abs_mean": 0.0, "abs_max": 0.0, "rmse": 0.0, "relative_l1": 0.0, "relative_l2": 0.0, "actual_abs_mean": 0.9749171733856201, "reference_abs_mean": 0.9749171733856201, "fraction_outside_tolerance": 0.0}, "img_shapes": {"actual_length": 1, "reference_length": 1, "items": [{"actual_length": 2, "reference_length": 2, "items": [{"actual_length": 3, "reference_length": 3, "items": [{"actual": 1, "reference": 1, "exact": true}, {"actual": 74, "reference": 74, "exact": true}, {"actual": 56, "reference": 56, "exact": true}]}, {"actual_length": 3, "reference_length": 3, "items": [{"actual": 1, "reference": 1, "exact": true}, {"actual": 64, "reference": 64, "exact": true}, {"actual": 64, "reference": 64, "exact": true}]}]}]}, "initial_latents": {"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": true, "abs_mean": 0.0, "abs_max": 0.0, "rmse": 0.0, "relative_l1": 0.0, "relative_l2": 0.0, "actual_abs_mean": 0.7993699312210083, "reference_abs_mean": 0.7993699312210083, "fraction_outside_tolerance": 0.0}, "noise_predictions": {"actual_length": 4, "reference_length": 4, "items": [{"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.023836402222514153, "abs_max": 0.46875, "rmse": 0.034994710236787796, "relative_l1": 0.012486806815797427, "relative_l2": 0.01397673323840837, "actual_abs_mean": 1.8948369026184082, "reference_abs_mean": 1.9089269638061523, "fraction_outside_tolerance": 0.8501739501953125}, {"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.014836431480944157, "abs_max": 0.298828125, "rmse": 0.021952781826257706, "relative_l1": 0.010857723914096815, "relative_l2": 0.01288445354133548, "actual_abs_mean": 1.366848111152649, "reference_abs_mean": 1.3664402961730957, "fraction_outside_tolerance": 0.8135223388671875}, {"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.018660247325897217, "abs_max": 0.4609375, "rmse": 0.02762570045888424, "relative_l1": 0.01364376170312316, "relative_l2": 0.01618669490825758, "actual_abs_mean": 1.3666324615478516, "reference_abs_mean": 1.3676761388778687, "fraction_outside_tolerance": 0.8539085388183594}, {"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.07714018225669861, "abs_max": 1.578125, "rmse": 0.10969826579093933, "relative_l1": 0.06388478385112753, "relative_l2": 0.07286587294743588, "actual_abs_mean": 1.2044566869735718, "reference_abs_mean": 1.2074891328811646, "fraction_outside_tolerance": 0.9680290222167969}]}, "prompt_attention_mask": {"actual": null, "reference": null, "exact": true}, "prompt_embeds": {"actual_shape": [1, 1089, 4096], "reference_shape": [1, 1089, 4096], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": true, "abs_mean": 0.0, "abs_max": 0.0, "rmse": 0.0, "relative_l1": 0.0, "relative_l2": 0.0, "actual_abs_mean": 7.98208475112915, "reference_abs_mean": 7.98208475112915, "fraction_outside_tolerance": 0.0}, "reference_pixels": {"actual_length": 1, "reference_length": 1, "items": [{"actual_shape": [1, 4, 1, 1184, 896], "reference_shape": [1, 4, 1, 1184, 896], "actual_dtype": "torch.float32", "reference_dtype": "torch.float32", "exact": true, "abs_mean": 0.0, "abs_max": 0.0, "rmse": 0.0, "relative_l1": 0.0, "relative_l2": 0.0, "actual_abs_mean": 0.8326765298843384, "reference_abs_mean": 0.8326765298843384, "fraction_outside_tolerance": 0.0}]}, "reference_pixels_bf16": {"actual_length": 1, "reference_length": 1, "items": [{"actual_shape": [1, 4, 1, 1184, 896], "reference_shape": [1, 4, 1, 1184, 896], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": true, "abs_mean": 0.0, "abs_max": 0.0, "rmse": 0.0, "relative_l1": 0.0, "relative_l2": 0.0, "actual_abs_mean": 0.8329328894615173, "reference_abs_mean": 0.8329328894615173, "fraction_outside_tolerance": 0.0}]}, "runtime": {"cudnn_allow_tf32": {"actual": true, "reference": true, "exact": true}, "cudnn_benchmark": {"actual": false, "reference": false, "exact": true}, "cudnn_fp32_precision": {"actual": "none", "reference": "none", "exact": true}, "default_dtype": {"actual": "torch.float32", "reference": "torch.float32", "exact": true}, "float32_matmul_precision": {"actual": "highest", "reference": "highest", "exact": true}, "matmul_allow_tf32": {"actual": false, "reference": false, "exact": true}, "matmul_fp32_precision": {"actual": "none", "reference": "none", "exact": true}}, "sigmas": {"actual_shape": [5], "reference_shape": [5], "actual_dtype": "torch.float32", "reference_dtype": "torch.float32", "exact": false, "abs_mean": 2.3841858265427618e-08, "abs_max": 1.1920928955078125e-07, "rmse": 5.331201791136664e-08, "relative_l1": 5.316330370592938e-08, "relative_l2": 8.895654091079284e-08, "actual_abs_mean": 0.44846463203430176, "reference_abs_mean": 0.448464572429657, "fraction_outside_tolerance": 0.20000000298023224}, "step_latents": {"actual_length": 4, "reference_length": 4, "items": [{"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.005569648928940296, "abs_max": 0.109375, "rmse": 0.008539227768778801, "relative_l1": 0.007505737999845617, "relative_l2": 0.009115643387123878, "actual_abs_mean": 0.7399216890335083, "reference_abs_mean": 0.7420521378517151, "fraction_outside_tolerance": 0.6961860656738281}, {"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.007915806025266647, "abs_max": 0.11328125, "rmse": 0.011129596270620823, "relative_l1": 0.009551775794918727, "relative_l2": 0.010608701023351527, "actual_abs_mean": 0.8258360624313354, "reference_abs_mean": 0.8287261128425598, "fraction_outside_tolerance": 0.7804908752441406}, {"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.013019864447414875, "abs_max": 0.25390625, "rmse": 0.019145123660564423, "relative_l1": 0.010548349508184594, "relative_l2": 0.012357261383714348, "actual_abs_mean": 1.2306416034698486, "reference_abs_mean": 1.2343034744262695, "fraction_outside_tolerance": 0.7959213256835938}, {"actual_shape": [1, 4096, 64], "reference_shape": [1, 4096, 64], "actual_dtype": "torch.bfloat16", "reference_dtype": "torch.bfloat16", "exact": false, "abs_mean": 0.01323623675853014, "abs_max": 0.26171875, "rmse": 0.019434064626693726, "relative_l1": 0.01052284430017347, "relative_l2": 0.012310950816156312, "actual_abs_mean": 1.2541086673736572, "reference_abs_mean": 1.257857322692871, "fraction_outside_tolerance": 0.8116722106933594}]}, "timesteps": {"actual_shape": [4], "reference_shape": [4], "actual_dtype": "torch.float32", "reference_dtype": "torch.float32", "exact": false, "abs_mean": 3.0517578125e-05, "abs_max": 0.0001220703125, "rmse": 6.103515625e-05, "relative_l1": 5.443921888431176e-08, "relative_l2": 9.109148919463646e-08, "actual_abs_mean": 560.580810546875, "reference_abs_mean": 560.5807495117188, "fraction_outside_tolerance": 0.25}}
+{"case": "i2i", "steps": 4, "cache": true, "seed": 42, "rgb": {"abs_mean": 0.002806662814691663, "abs_max": 0.29296875, "rmse": 0.007503695320338011, "relative_l1": 0.0037966716289634644, "relative_l2": 0.009143360445116247, "actual_abs_mean": 0.7391400337219238, "reference_abs_mean": 0.7392429709434509, "fraction_outside_tolerance": 0.003141721012070775}, "all_channels": {"abs_mean": 0.002119422424584627, "abs_max": 0.29296875, "rmse": 0.00651466753333807, "relative_l1": 0.002635060947164809, "relative_l2": 0.007498010169423854, "actual_abs_mean": 0.8042372465133667, "reference_abs_mean": 0.8043162822723389, "fraction_outside_tolerance": 0.002370119094848633}}
+FAILED
+
+=================================== FAILURES ===================================
+______________ test_qwen_image21_modes_1024_pipeline_parity[i2i] _______________
+
+case = 'i2i'
+tmp_path = PosixPath('/root/FastVideo/outputs/qwen_image21/parity4-diagnostics/test_qwen_image21_modes_1024_p0')
+
+    @pytest.mark.parametrize("case", CASES)
+    def test_qwen_image21_modes_1024_pipeline_parity(case, tmp_path):
+>       _run_parity(case, 1024, tmp_path)
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py:399: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+case = 'i2i', resolution = 1024
+tmp_path = PosixPath('/root/FastVideo/outputs/qwen_image21/parity4-diagnostics/test_qwen_image21_modes_1024_p0')
+
+    def _run_parity(case, resolution, tmp_path):
+        if os.environ.get("QWEN_IMAGE21_RUN_PIPELINE_PARITY") != "1":
+            pytest.skip("Set QWEN_IMAGE21_RUN_PIPELINE_PARITY=1 on an allocated CUDA node")
+        if not torch.cuda.is_available():
+            pytest.fail("Qwen-Image-2.1 pipeline parity requires CUDA", pytrace=False)
+        model = Path(os.environ.get("QWEN_IMAGE21_MODEL_ROOT", ROOT / "official_weights/Qwen-Image-2.1"))
+        reference = Path(os.environ.get("QWEN_IMAGE21_DIFFUSERS_DIR", ROOT / "official_reference/diffusers"))
+        if not (model / "model_index.json").is_file() or not (reference / "src").is_dir():
+            pytest.fail("Provide QWEN_IMAGE21_MODEL_ROOT and the pinned QWEN_IMAGE21_DIFFUSERS_DIR", pytrace=False)
+        revision = subprocess.check_output(["git", "-C", str(reference), "rev-parse", "HEAD"], text=True).strip()
+        assert revision == REFERENCE_REVISION
+        subprocess.run(["git", "-C", str(reference), "diff", "--exit-code", "HEAD", "--", "src/diffusers"], check=True)
+        files = _assets(tmp_path)
+        counts = dict(i2i=1, edit=1, ref2img=2, ten_refs=10, rgba_edit=1, annotation=2, mask_image=1, true_cfg=1)
+        refs = files[:counts.get(case, 0)]
+        prompt = "An elegant blue ceramic vase in a studio, with the word Qwen written on it."
+        if refs:
+            prompt = "Make a blue sculpture inspired by the shapes in the reference images."
+        if case == "edit":
+            prompt = "Change the object in image 1 into a blue ceramic sphere; retain the background and composition."
+        if case in ("rgba", "rgba_edit"):
+            prompt = "A blue sphere isolated on a transparent background."
+        if case == "annotation":
+            prompt = "Change the object enclosed by the red annotation in image 2 into a blue sphere in image 1."
+        if case == "mask_image":
+            refs.append(files[-1])
+            prompt = "Replace the white masked area of image 2 in image 1 with flowers."
+        noise_path = tmp_path / "initial_latents.pt"
+        spec = dict(model=str(model.resolve()), reference=str(reference.resolve()), prompt=prompt, refs=refs,
+                    resolution=resolution, steps=int(os.environ.get("QWEN_IMAGE21_PARITY_STEPS", "4")),
+                    negative_prompt="" if case == "true_cfg" else None,
+                    true_cfg_scale=2 if case == "true_cfg" else 1, cache=case != "uncached", latents=str(noise_path),
+                    seed=21, reference_resolution=1024, height=resolution, width=resolution,
+                    diagnostics=os.environ.get("QWEN_IMAGE21_PARITY_DIAGNOSTICS") == "1")
+        spec.update(_case_overrides(case))
+        height, width = spec["height"], spec["width"]
+        assert min(height, width, spec["reference_resolution"]) > 0
+        assert all(value % 32 == 0 for value in (height, width, spec["reference_resolution"]))
+        assert spec["steps"] > 0
+        spec.setdefault("sigmas", np.linspace(1.0, 1 / spec["steps"], spec["steps"]).tolist())
+        torch.save(torch.randn(1, (height // 16) * (width // 16), 64,
+                               generator=torch.Generator(device="cpu").manual_seed(spec["seed"]),
+                               dtype=torch.bfloat16), noise_path)
+        spec_path = tmp_path / "spec.json"
+        spec_path.write_text(json.dumps(spec))
+        outputs = []
+        for kind in ("native", "reference"):
+            output = tmp_path / f"{kind}.pt"
+            subprocess.run([sys.executable, str(Path(__file__).resolve()), "--worker", kind, str(spec_path), str(output)],
+                           check=True, cwd=ROOT)
+            outputs.append(torch.load(output, map_location="cpu", weights_only=True))
+        actual, expected = outputs[0]["pixels"], outputs[1]["pixels"]
+        assert actual.shape == expected.shape == (1, 4, 1, height, width)
+        assert torch.isfinite(actual).all() and bool(((actual >= 0) & (actual <= 1)).all())
+        assert torch.isfinite(expected).all() and bool(((expected >= 0) & (expected <= 1)).all())
+        metrics = {"case": case, "steps": spec["steps"], "cache": spec["cache"], "seed": spec["seed"],
+                   "rgb": _difference_metrics(actual[:, :3], expected[:, :3]),
+                   "all_channels": _difference_metrics(actual, expected)}
+        if spec["diagnostics"]:
+            stage_metrics = _diagnostic_metrics(outputs[0]["diagnostics"], outputs[1]["diagnostics"])
+            (tmp_path / "diagnostic_metrics.json").write_text(json.dumps(stage_metrics, indent=2) + "\n")
+            print("Stage diagnostics: " + json.dumps(stage_metrics), flush=True)
+        (tmp_path / "parity_metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
+        print(json.dumps(metrics), flush=True)
+        # Provisional tolerances: calibrate from measured BF16 CUDA evidence before release.
+>       torch.testing.assert_close(actual, expected, atol=0.04, rtol=0.02)
+E       AssertionError: Tensor-likes are not close!
+E       
+E       Mismatched elements: 9941 / 4194304 (0.2%)
+E       Greatest absolute difference: 0.29296875 at index (0, 0, 0, 185, 310) (up to 0.04 allowed)
+E       Greatest relative difference: 5.666666507720947 at index (0, 0, 0, 264, 443) (up to 0.02 allowed)
+
+tests/local_tests/qwen_image21/test_pipeline_parity.py:388: AssertionError
+- generated xml file: /root/FastVideo/outputs/qwen_image21/pipeline-parity4-diagnostics.xml -
+=========================== short test summary info ============================
+FAILED tests/local_tests/qwen_image21/test_pipeline_parity.py::test_qwen_image21_modes_1024_pipeline_parity[i2i]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+====================== 1 failed, 11 deselected in 59.84s =======================

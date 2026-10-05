@@ -15,6 +15,7 @@ from fastvideo.configs.models.dits.mmaudio import MMAudioArchConfig, MMAudioTran
 from fastvideo.configs.models.dits.stable_audio import StableAudioConfig
 from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.configs.models.dits.zimage import ZImageDiTConfig
+from fastvideo.configs.models.dits.qwen_image21 import QwenImage21ArchConfig, QwenImage21Config
 from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
 from fastvideo.configs.models.dits.lingbotworld2 import LingBotWorld2CausalFastVideoConfig
@@ -25,5 +26,6 @@ __all__ = [
     "DreamXWorldARConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "FluxDiTConfig", "Flux2Config",
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "MagiHumanVideoConfig",
     "StableAudioConfig", "GlmImageDiTConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotVideoConfig",
-    "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig", "MMAudioTransformerConfig"
+    "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig", "MMAudioTransformerConfig", "QwenImage21ArchConfig",
+    "QwenImage21Config"
 ]

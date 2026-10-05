@@ -1,0 +1,11 @@
+Editable FastVideo: {"url": "file:///root/fv", "dir_info": {"editable": true}}
+Checkout: qwen-img-2.1
+Commit: 17a6af49f0cc1b5d4fb1e06444deb182c7c8899c
+torch: 2.12.0+cu130
+torchvision: 0.27.0+cu130
+torchaudio: 2.11.0+cu130
+transformers: 5.18.0
+tokenizers: 0.23.2
+accelerate: 1.15.0
+diffusers: 0.40.0
+Upstream source: 578c9b2c6636ab2424a0e56186268b83623656b2

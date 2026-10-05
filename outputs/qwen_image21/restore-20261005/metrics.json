@@ -1,0 +1,45 @@
+{
+  "model": "Qwen/Qwen-Image-2.1",
+  "revision": "d26bb61231c349cf6b7896fa83353113880e1ba3",
+  "torch": "2.12.0+cu130",
+  "height": 1024,
+  "width": 1024,
+  "steps": 40,
+  "seed": 42,
+  "prompt": "A red ceramic teapot on a white studio background, product photography.",
+  "dit_cpu_offload": false,
+  "dit_layerwise_offload": false,
+  "kv_cache_device": "cuda",
+  "lazy_module_load": false,
+  "initialization_seconds": 73.89846457599924,
+  "request_wall_seconds": 20.309723045000283,
+  "generation_seconds": 19.64416568100023,
+  "stage_seconds": {
+    "input_preparation": 0.0001102599999285303,
+    "text_encoding": 1.7721741139994265,
+    "latent_preparation": 0.006025224000040907,
+    "timestep_preparation": 0.002133845000571455,
+    "denoising": 14.579041848999623,
+    "decoding": 3.2638002439998672,
+    "PostDecodeFrameProcessStage": 0.06998202499926265,
+    "VideoSaveStage": 0.5902391380004701,
+    "AudioMuxStage": 0.0
+  },
+  "encoder_dit_decoder_seconds": 19.615016206998916,
+  "output_shape": [
+    1,
+    4,
+    1,
+    1024,
+    1024
+  ],
+  "finite_pixels": true,
+  "rgb_std": 0.33666688203811646,
+  "image_size": [
+    1024,
+    1024
+  ],
+  "image_mode": "RGBA",
+  "image_path": "/root/FastVideo/outputs/qwen_image21/restore-20261005/t2i.png",
+  "status": "PASS"
+}

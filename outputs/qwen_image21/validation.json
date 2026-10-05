@@ -1,0 +1,31 @@
+{
+  "path": "/root/fv/outputs/qwen_image21/teapot.png",
+  "format": "PNG",
+  "mode": "RGBA",
+  "size": [
+    1024,
+    1024
+  ],
+  "bytes": 1104629,
+  "rgb_std": 91.78149020118195,
+  "channel_extrema": [
+    [
+      61,
+      255
+    ],
+    [
+      0,
+      255
+    ],
+    [
+      0,
+      255
+    ],
+    [
+      181,
+      255
+    ]
+  ],
+  "transparent_pixels": 0,
+  "opaque_pixels": 1037716
+}

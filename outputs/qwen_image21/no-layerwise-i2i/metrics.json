@@ -1,0 +1,37 @@
+{
+  "case": "i2i",
+  "height": 1024,
+  "width": 1024,
+  "steps": 40,
+  "seed": 42,
+  "layerwise": false,
+  "text_encoder_offload": true,
+  "vae_offload": true,
+  "lazy_module_load": true,
+  "kv_cache_device": "cpu",
+  "use_kv_cache": true,
+  "initial_latents": "/root/FastVideo/outputs/qwen_image21/parity40/test_qwen_image21_modes_1024_p0/initial_latents.pt",
+  "prompt": "A close-up portrait of the blue robotic rabbit shown in image 1, wearing a purple vest with gold trim and a star emblem, on a plain white background. Preserve its appearance and composition.",
+  "references": [
+    "/root/FastVideo/outputs/qwen_image21/official_assets/1413730.png"
+  ],
+  "generator_initialization_seconds": 4.814333636313677,
+  "request_wall_seconds": 42.44557302258909,
+  "process_start_to_image_seconds": 51.41971208900213,
+  "initialization_plus_request_seconds": 47.259906658902764,
+  "gpu_metrics": {
+    "peak_allocated_mib": 14602.638671875,
+    "peak_reserved_mib": 16032.0,
+    "effective_dit_layerwise_offload": false,
+    "effective_dit_cpu_offload": false,
+    "effective_use_fsdp_inference": false
+  },
+  "api_generation_time_seconds": 42.22357625514269,
+  "compared_with_validated_output": {
+    "exact": true,
+    "mean_abs": 0.0,
+    "max_abs": 0.0
+  },
+  "status": "success",
+  "sampled_peak_gpu_used_mib": 17257.0
+}

@@ -1,0 +1,100 @@
+{
+  "atol": 0.01,
+  "cases": {
+    "images_1": {
+      "cosine": 0.9999999999999999,
+      "finite": true,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "mismatched_elements": 0,
+      "reference_rms": 18.644174575805664,
+      "relative_l2": 0.0,
+      "rmse": 0.0,
+      "shape": [
+        25,
+        4096
+      ],
+      "total_elements": 102400
+    },
+    "images_10": {
+      "cosine": 0.9999999999999999,
+      "finite": true,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "mismatched_elements": 0,
+      "reference_rms": 12.446188926696777,
+      "relative_l2": 0.0,
+      "rmse": 0.0,
+      "shape": [
+        134,
+        4096
+      ],
+      "total_elements": 548864
+    },
+    "images_2": {
+      "cosine": 1.0,
+      "finite": true,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "mismatched_elements": 0,
+      "reference_rms": 16.940481185913086,
+      "relative_l2": 0.0,
+      "rmse": 0.0,
+      "shape": [
+        37,
+        4096
+      ],
+      "total_elements": 151552
+    },
+    "left_padding": {
+      "cosine": 1.0,
+      "finite": true,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "mismatched_elements": 0,
+      "reference_rms": 24.055248260498047,
+      "relative_l2": 0.0,
+      "rmse": 0.0,
+      "shape": [
+        34,
+        4096
+      ],
+      "total_elements": 139264
+    },
+    "long_text": {
+      "cosine": 1.0,
+      "finite": true,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "mismatched_elements": 0,
+      "reference_rms": 12.555062294006348,
+      "relative_l2": 0.0,
+      "rmse": 0.0,
+      "shape": [
+        1546,
+        4096
+      ],
+      "total_elements": 6332416
+    },
+    "text": {
+      "cosine": 0.9999999999999999,
+      "finite": true,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "mismatched_elements": 0,
+      "reference_rms": 24.580148696899414,
+      "relative_l2": 0.0,
+      "rmse": 0.0,
+      "shape": [
+        15,
+        4096
+      ],
+      "total_elements": 61440
+    }
+  },
+  "checkpoint_revision": "d26bb61231c349cf6b7896fa83353113880e1ba3",
+  "component": "qwen_image21_conditioner",
+  "rtol": 0.01,
+  "torch_version": "2.12.0+cu130",
+  "transformers_version": "5.18.0"
+}

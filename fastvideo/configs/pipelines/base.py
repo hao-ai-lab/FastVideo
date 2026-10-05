@@ -64,6 +64,8 @@ class PipelineConfig:
     vae_decode_precision: str | None = None
     vae_tiling: bool = True
     vae_sp: bool = True
+    # Number of decoded pixel channels, including alpha for RGBA image models.
+    output_channels: int = 3
 
     # Image encoder configuration
     image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)

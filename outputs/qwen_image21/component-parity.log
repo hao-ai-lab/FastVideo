@@ -1,0 +1,40 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /root/FastVideo
+configfile: pyproject.toml
+plugins: anyio-4.15.1, platformdirs-4.12.2
+collecting ... collected 9 items
+
+tests/local_tests/transformers/test_qwen_image21_transformer_parity.py::test_qwen_image21_dit_random_reference_parity INFO 10-02 01:35:11.178 [__init__.py:47] CUDA is available
+PASSED
+tests/local_tests/transformers/test_qwen_image21_transformer_parity.py::test_qwen_image21_qk_norm_dtype_reference_parity PASSED
+tests/local_tests/transformers/test_qwen_image21_transformer_parity.py::test_qwen_image21_dit_reference_cache_parity[None] PASSED
+tests/local_tests/transformers/test_qwen_image21_transformer_parity.py::test_qwen_image21_dit_reference_cache_parity[cpu] PASSED
+tests/local_tests/transformers/test_qwen_image21_transformer_parity.py::test_qwen_image21_dit_production_loader_parity INFO 10-02 01:35:11.902 [component_loader.py:1042] transformer cls_name: QwenImage21Transformer2DModel
+INFO 10-02 01:35:11.902 [component_loader.py:1094] Loading model from 2 safetensors files: ['/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00002-of-00002.safetensors', '/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00001-of-00002.safetensors']
+INFO 10-02 01:35:11.902 [component_loader.py:1103] Loading model from QwenImage21Transformer2DModel, default_dtype: torch.bfloat16
+INFO 10-02 01:35:11.902 [component_loader.py:1119] Worker 0 transformer attention backend: automatic selection
+INFO 10-02 01:35:11.902 [fsdp_load.py:228] Loading model with default_dtype: torch.bfloat16
+INFO 10-02 01:35:11.909 [fsdp_load.py:282] Loading transformer weights with to_cpu=False
+Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:00<00:00,  1.65it/s]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.07it/s]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.13it/s]
+
+INFO 10-02 01:35:13.687 [component_loader.py:1155] Loaded model with 7.12B parameters
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 323.77it/s]
+PASSED
+tests/local_tests/vaes/test_qwen_image21_vae_parity.py::test_qwen_image21_vae_random_cpu_parity[False] PASSED
+tests/local_tests/vaes/test_qwen_image21_vae_parity.py::test_qwen_image21_vae_random_cpu_parity[True] PASSED
+tests/local_tests/vaes/test_qwen_image21_vae_parity.py::test_qwen_image21_vae_slicing_and_output_contract PASSED
+tests/local_tests/vaes/test_qwen_image21_vae_parity.py::test_qwen_image21_vae_production_loader_parity PASSED
+
+=============================== warnings summary ===============================
+tests/local_tests/transformers/test_qwen_image21_transformer_parity.py: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /root/FastVideo/outputs/qwen_image21/component-parity.xml -
+======================= 9 passed, 14 warnings in 10.67s ========================

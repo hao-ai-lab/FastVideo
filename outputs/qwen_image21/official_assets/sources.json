@@ -1,0 +1,61 @@
+{
+  "repository": "https://github.com/QwenLM/Qwen-Image-2.1",
+  "revision": "6627d87c6433151463ec4b48b8945a24fcf16a35",
+  "assets": [
+    {
+      "source": "https://raw.githubusercontent.com/QwenLM/Qwen-Image-2.1/6627d87c6433151463ec4b48b8945a24fcf16a35/prompt_rewrite/data/edit_example.jsonl",
+      "local_path": "/root/fv/outputs/qwen_image21/official_assets/edit_example.jsonl",
+      "bytes": 843
+    },
+    {
+      "source": "https://raw.githubusercontent.com/QwenLM/Qwen-Image-2.1/6627d87c6433151463ec4b48b8945a24fcf16a35/prompt_rewrite/data/images/1412128.png",
+      "local_path": "/root/fv/outputs/qwen_image21/official_assets/1412128.png",
+      "bytes": 35924,
+      "mode": "RGB",
+      "size": [
+        950,
+        650
+      ]
+    },
+    {
+      "source": "https://raw.githubusercontent.com/QwenLM/Qwen-Image-2.1/6627d87c6433151463ec4b48b8945a24fcf16a35/prompt_rewrite/data/images/1412215.png",
+      "local_path": "/root/fv/outputs/qwen_image21/official_assets/1412215.png",
+      "bytes": 6504471,
+      "mode": "RGB",
+      "size": [
+        3840,
+        2160
+      ]
+    },
+    {
+      "source": "https://raw.githubusercontent.com/QwenLM/Qwen-Image-2.1/6627d87c6433151463ec4b48b8945a24fcf16a35/prompt_rewrite/data/images/1413730.png",
+      "local_path": "/root/fv/outputs/qwen_image21/official_assets/1413730.png",
+      "bytes": 1081267,
+      "mode": "RGB",
+      "size": [
+        1088,
+        1440
+      ]
+    },
+    {
+      "source": "https://raw.githubusercontent.com/QwenLM/Qwen-Image-2.1/6627d87c6433151463ec4b48b8945a24fcf16a35/prompt_rewrite/data/images/1549226_a.png",
+      "local_path": "/root/fv/outputs/qwen_image21/official_assets/1549226_a.png",
+      "bytes": 582551,
+      "mode": "RGB",
+      "size": [
+        640,
+        925
+      ]
+    },
+    {
+      "source": "https://raw.githubusercontent.com/QwenLM/Qwen-Image-2.1/6627d87c6433151463ec4b48b8945a24fcf16a35/prompt_rewrite/data/images/1549226_b.png",
+      "local_path": "/root/fv/outputs/qwen_image21/official_assets/1549226_b.png",
+      "bytes": 168569,
+      "mode": "RGB",
+      "size": [
+        580,
+        307
+      ]
+    }
+  ]
+}

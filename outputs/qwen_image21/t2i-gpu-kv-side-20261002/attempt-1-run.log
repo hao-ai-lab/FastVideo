@@ -1,0 +1,181 @@
+INFO 10-02 03:01:12.948 [__init__.py:47] CUDA is available
+INFO 10-02 03:01:13.776 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 03:01:13.777 [multiproc_executor.py:107] Use master port: 41153
+INFO 10-02 03:01:17.458 [__init__.py:47] CUDA is available
+INFO 10-02 03:01:18.369 [parallel_state.py:909] Initializing distributed environment with world_size=1, device=cuda:0
+INFO 10-02 03:01:18.370 [parallel_state.py:737] Using nccl backend for CUDA platform
+[W1002 03:01:18.358681858 ProcessGroupNCCL.cpp:1001] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+INFO 10-02 03:01:18.392 [__init__.py:39] Building pipeline of type: basic
+INFO 10-02 03:01:18.392 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 03:01:18.392 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 03:01:18.392 [registry.py:1112] Pinning pipeline class name from QwenImage21Pipeline to QwenImage21Pipeline
+INFO 10-02 03:01:18.392 [pipeline_registry.py:134] Loading pipelines for types: ['basic']
+INFO 10-02 03:01:18.442 [pipeline_registry.py:176] Loaded 55 pipeline classes across 1 types
+INFO 10-02 03:01:18.442 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 03:01:18.442 [__init__.py:56] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 03:01:18.442 [profiler.py:198] Torch profiler disabled; returning no-op controller
+INFO 10-02 03:01:18.442 [composed_pipeline_base.py:171] Loading pipeline modules...
+INFO 10-02 03:01:18.442 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 03:01:18.443 [composed_pipeline_base.py:471] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-02 03:01:18.443 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 03:01:18.443 [composed_pipeline_base.py:532] Loading pipeline modules from config: {'_class_name': 'QwenImage21Pipeline', '_diffusers_version': '0.37.0.dev0', 'processor': ['transformers', 'Qwen3VLProcessor'], 'scheduler': ['diffusers', 'FlowMatchEulerDiscreteScheduler'], 'text_encoder': ['transformers', 'Qwen3VLForConditionalGeneration'], 'transformer': ['diffusers', 'QwenImage21Transformer2DModel'], 'vae': ['diffusers', 'AutoencoderKLQwenImage21']}
+INFO 10-02 03:01:18.443 [composed_pipeline_base.py:571] Loading required modules: ['processor', 'text_encoder', 'transformer', 'vae', 'scheduler']
+INFO 10-02 03:01:18.443 [component_loader.py:1380] Loading processor using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 03:01:18.443 [component_loader.py:600] Loading processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 03:01:18.889 [component_loader.py:605] Loaded processor: Qwen3VLProcessor
+INFO 10-02 03:01:18.889 [composed_pipeline_base.py:626] Loaded module processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-02 03:01:18.889 [component_loader.py:1380] Loading scheduler using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-02 03:01:18.889 [composed_pipeline_base.py:626] Loaded module scheduler from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-02 03:01:18.889 [component_loader.py:1380] Loading text_encoder using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-02 03:01:18.890 [component_loader.py:299] HF Model config: {'architectures': ['Qwen3VLForConditionalGeneration'], 'dtype': 'bfloat16', 'image_token_id': 151655, 'text_config': {'attention_bias': False, 'attention_dropout': 0.0, 'bos_token_id': 151643, 'dtype': 'bfloat16', 'eos_token_id': 151645, 'head_dim': 128, 'hidden_act': 'silu', 'hidden_size': 4096, 'initializer_range': 0.02, 'intermediate_size': 12288, 'max_position_embeddings': 262144, 'model_type': 'qwen3_vl_text', 'num_attention_heads': 32, 'num_hidden_layers': 36, 'num_key_value_heads': 8, 'rms_norm_eps': 1e-06, 'rope_scaling': {'mrope_interleaved': True, 'mrope_section': [24, 20, 20], 'rope_type': 'default'}, 'rope_theta': 5000000, 'use_cache': True, 'vocab_size': 151936}, 'tie_word_embeddings': False, 'video_token_id': 151656, 'vision_config': {'deepstack_visual_indexes': [8, 16, 24], 'depth': 27, 'dtype': 'bfloat16', 'hidden_act': 'gelu_pytorch_tanh', 'hidden_size': 1152, 'in_channels': 3, 'initializer_range': 0.02, 'intermediate_size': 4304, 'model_type': 'qwen3_vl', 'num_heads': 16, 'num_position_embeddings': 2304, 'out_hidden_size': 4096, 'patch_size': 16, 'spatial_merge_size': 2, 'temporal_patch_size': 2}, 'vision_end_token_id': 151653, 'vision_start_token_id': 151652}
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:00,  6.62it/s]
+Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:00<00:00,  2.64it/s]
+Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:01<00:00,  2.15it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:01<00:00,  1.93it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:01<00:00,  2.15it/s]
+
+INFO 10-02 03:01:22.336 [component_loader.py:448] Loading weights took 1.90 seconds
+INFO 10-02 03:01:32.411 [composed_pipeline_base.py:626] Loaded module text_encoder from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-02 03:01:32.412 [component_loader.py:1380] Loading transformer using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-02 03:01:32.412 [component_loader.py:1042] transformer cls_name: QwenImage21Transformer2DModel
+INFO 10-02 03:01:32.412 [component_loader.py:1094] Loading model from 2 safetensors files: ['/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00002-of-00002.safetensors', '/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00001-of-00002.safetensors']
+INFO 10-02 03:01:32.412 [component_loader.py:1103] Loading model from QwenImage21Transformer2DModel, default_dtype: torch.bfloat16
+INFO 10-02 03:01:32.412 [component_loader.py:1119] Worker 0 transformer attention backend: automatic selection
+INFO 10-02 03:01:32.412 [fsdp_load.py:228] Loading model with default_dtype: torch.bfloat16
+INFO 10-02 03:01:32.424 [fsdp_load.py:282] Loading transformer weights with to_cpu=False
+Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:00<00:00,  1.50it/s]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:02<00:00,  1.24s/it]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:02<00:00,  1.16s/it]
+
+INFO 10-02 03:01:34.755 [component_loader.py:1155] Loaded model with 7.12B parameters
+INFO 10-02 03:01:34.756 [composed_pipeline_base.py:626] Loaded module transformer from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-02 03:01:34.756 [component_loader.py:1380] Loading vae using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-02 03:01:36.294 [composed_pipeline_base.py:626] Loaded module vae from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-02 03:01:36.294 [__init__.py:61] Pipelines instantiated
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.294 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 03:01:36.294 [multiproc_executor.py:707] 1 workers ready
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.296 [multiproc_executor.py:716] Worker 0 starting event loop...
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.296 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 03:01:36.298 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-02 03:01:36.299 [video_generator.py:766] 
+INFO 10-02 03:01:36.299 [video_generator.py:766]                       height: 1024
+INFO 10-02 03:01:36.299 [video_generator.py:766]                        width: 1024
+INFO 10-02 03:01:36.299 [video_generator.py:766]                 video_length: 1
+INFO 10-02 03:01:36.299 [video_generator.py:766]                       prompt: An elegant blue ceramic vase in a studio, with the word Qwen written on it.
+INFO 10-02 03:01:36.299 [video_generator.py:766]                       image_path: None
+INFO 10-02 03:01:36.299 [video_generator.py:766]                   neg_prompt: None
+INFO 10-02 03:01:36.299 [video_generator.py:766]                         seed: 21
+INFO 10-02 03:01:36.299 [video_generator.py:766]                  infer_steps: 4
+INFO 10-02 03:01:36.299 [video_generator.py:766]        num_videos_per_prompt: 1
+INFO 10-02 03:01:36.299 [video_generator.py:766]               guidance_scale: 1
+INFO 10-02 03:01:36.299 [video_generator.py:766]                     n_tokens: 16384
+INFO 10-02 03:01:36.299 [video_generator.py:766]                   flow_shift: None
+INFO 10-02 03:01:36.299 [video_generator.py:766]      embedded_guidance_scale: 6.0
+INFO 10-02 03:01:36.299 [video_generator.py:766]                   save_video: False
+INFO 10-02 03:01:36.299 [video_generator.py:766]                   output_path: /root/FastVideo/outputs/qwen_image21/t2i-gpu-kv-side-20261002/warmup.png
+INFO 10-02 03:01:36.299 [video_generator.py:766]         
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.307 [composed_pipeline_base.py:388] Creating pipeline stages...
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.307 [composed_pipeline_base.py:758] Running pipeline stages: dict_keys(['input_preparation', 'text_encoding', 'latent_preparation', 'timestep_preparation', 'denoising', 'decoding'])
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.307 [base.py:182] [input_preparation|QwenImage21InputStage] Starting execution
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.307 [base.py:199] [input_preparation|QwenImage21InputStage] Error during execution after 0.012574717402458191 ms: reference_resolution must be a positive multiple of 32
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200] [input_preparation|QwenImage21InputStage] Traceback: Traceback (most recent call last):
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200]   File "/root/FastVideo/fastvideo/pipelines/stages/base.py", line 187, in _execute
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200]     result = self.forward(batch, fastvideo_args)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200]   File "/root/FastVideo/fastvideo/pipelines/basic/qwen_image21/stages.py", line 64, in forward
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200]     validate_request(batch, fastvideo_args)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200]   File "/root/FastVideo/fastvideo/pipelines/basic/qwen_image21/inputs.py", line 150, in validate_request
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200]     raise ValueError(f"{name} must be a positive multiple of 32")
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200] ValueError: reference_resolution must be a positive multiple of 32
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [base.py:200] 
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777] Worker 0 failed RPC without exiting
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777] Traceback (most recent call last):
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 744, in worker_busy_loop
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]     output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/worker/gpu_worker.py", line 96, in execute_forward
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]     output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]     return func(*args, **kwargs)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]            ^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/composed_pipeline_base.py", line 762, in forward
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]     batch = stage(batch, fastvideo_args)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/stages/base.py", line 157, in __call__
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]     result = self._execute(batch, fastvideo_args, stage_key, stage_class_name, stage_name)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/stages/base.py", line 187, in _execute
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]     result = self.forward(batch, fastvideo_args)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/basic/qwen_image21/stages.py", line 64, in forward
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]     validate_request(batch, fastvideo_args)
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/basic/qwen_image21/inputs.py", line 150, in validate_request
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777]     raise ValueError(f"{name} must be a positive multiple of 32")
+[1;36m(Worker pid=125702)[0;0m ERROR 10-02 03:01:36.308 [multiproc_executor.py:777] ValueError: reference_resolution must be a positive multiple of 32
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.309 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-02 03:01:36.371 [multiproc_executor.py:347] Shutting down MultiprocExecutor...
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.371 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.850 [gpu_worker.py:117] Worker 0 shutdown complete
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:36.850 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=125702)[0;0m INFO 10-02 03:01:37.204 [gpu_worker.py:117] Worker 0 shutdown complete
+INFO 10-02 03:01:39.774 [multiproc_executor.py:402] MultiprocExecutor shutdown complete
+T2I_GPU_KV_BENCHMARK {"workload": "t2i", "height": 1024, "width": 1024, "steps": 40, "seed": 21, "prompt": "An elegant blue ceramic vase in a studio, with the word Qwen written on it.", "model_path": "/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3", "kv_cache_device": "cuda", "warmup_steps": 4, "measurement_runs": 2, "observational_cache_checks": true, "stage_logging": true, "runs": [], "initialization_seconds": 22.518432054668665, "observer_installation": {"kv_cache_device": "cuda"}, "status": "failed", "error": "RuntimeError: Forward execution thread failed.\nTraceback (most recent call last):\n  File \"/root/FastVideo/fastvideo/entrypoints/video_generator.py\", line 796, in execute_forward_thread\n    result_container[\"output_batch\"] = self.executor.execute_forward(batch, fastvideo_args)\n                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 145, in execute_forward\n    responses = self.collective_rpc(\"execute_forward\",\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 321, in collective_rpc\n    raise e\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 308, in collective_rpc\n    _raise_for_rpc_errors(method, responses)\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 46, in _raise_for_rpc_errors\n    raise RuntimeError(f\"RPC {method!r} failed: \" + \"; \".join(errors))\nRuntimeError: RPC 'execute_forward' failed: worker 0: ValueError: reference_resolution must be a positive multiple of 32\n"}
+Traceback (most recent call last):
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 796, in execute_forward_thread
+    result_container["output_batch"] = self.executor.execute_forward(batch, fastvideo_args)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 145, in execute_forward
+    responses = self.collective_rpc("execute_forward",
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 321, in collective_rpc
+    raise e
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 308, in collective_rpc
+    _raise_for_rpc_errors(method, responses)
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 46, in _raise_for_rpc_errors
+    raise RuntimeError(f"RPC {method!r} failed: " + "; ".join(errors))
+RuntimeError: RPC 'execute_forward' failed: worker 0: ValueError: reference_resolution must be a positive multiple of 32
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/root/FastVideo/outputs/qwen_image21/t2i-gpu-kv-side-20261002/benchmark.py", line 201, in <module>
+    main()
+  File "/root/FastVideo/outputs/qwen_image21/t2i-gpu-kv-side-20261002/benchmark.py", line 167, in main
+    pixels, report["warmup"] = run(4, "warmup", False)
+                               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/outputs/qwen_image21/t2i-gpu-kv-side-20261002/benchmark.py", line 145, in run
+    result = generator.generate(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 316, in generate
+    return self._generate_request_impl(normalized_request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 495, in _generate_request_impl
+    return self._generate_single_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 515, in _generate_single_request
+    result = self._generate_video_impl(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 614, in _generate_video_impl
+    return self._generate_single_video(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 829, in _generate_single_video
+    raise RuntimeError("Forward execution thread failed.\n"
+RuntimeError: Forward execution thread failed.
+Traceback (most recent call last):
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 796, in execute_forward_thread
+    result_container["output_batch"] = self.executor.execute_forward(batch, fastvideo_args)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 145, in execute_forward
+    responses = self.collective_rpc("execute_forward",
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 321, in collective_rpc
+    raise e
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 308, in collective_rpc
+    _raise_for_rpc_errors(method, responses)
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 46, in _raise_for_rpc_errors
+    raise RuntimeError(f"RPC {method!r} failed: " + "; ".join(errors))
+RuntimeError: RPC 'execute_forward' failed: worker 0: ValueError: reference_resolution must be a positive multiple of 32
+

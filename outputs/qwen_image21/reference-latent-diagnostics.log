@@ -1,0 +1,9 @@
+INFO 10-02 02:02:30.350 [__init__.py:47] CUDA is available
+GPU input strides (4, 1, 4243456, 3584, 4) (4243456, 1, 4243456, 3584, 4)
+posterior_different_input_strides {"mean_abs": 0.006050683557987213, "max_abs": 0.90625, "rmse": 0.014044851996004581, "mismatched": 89846}
+normalized_native_vs_reference {"mean_abs": 0.0016365424962714314, "max_abs": 0.2294921875, "rmse": 0.004123463295400143, "mismatched": 73415}
+native_recomputed_vs_pipeline_native {"mean_abs": 0.0, "max_abs": 0.0, "rmse": 0.0, "mismatched": 0}
+native_recomputed_vs_pipeline_reference {"mean_abs": 0.0016365424962714314, "max_abs": 0.2294921875, "rmse": 0.004123463295400143, "mismatched": 73415}
+reference_recomputed_vs_pipeline_native {"mean_abs": 0.0016365424962714314, "max_abs": 0.2294921875, "rmse": 0.004123463295400143, "mismatched": 73415}
+reference_recomputed_vs_pipeline_reference {"mean_abs": 0.0, "max_abs": 0.0, "rmse": 0.0, "mismatched": 0}
+normalization_same_posterior {"mean_abs": 0.0, "max_abs": 0.0, "rmse": 0.0, "mismatched": 0}

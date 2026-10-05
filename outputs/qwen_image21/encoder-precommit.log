@@ -1,0 +1,9 @@
+yapf.................................................(no files to check)Skipped
+ruff (legacy alias)..................................(no files to check)Skipped
+codespell............................................(no files to check)Skipped
+PyMarkdown...........................................(no files to check)Skipped
+Lint GitHub Actions workflow files...................(no files to check)Skipped
+mypy.................................................(no files to check)Skipped
+Check for spaces in all filenames........................................Passed
+Suggestion...........................................(no files to check)Skipped
+- hook id: suggestion

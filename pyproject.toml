@@ -22,14 +22,12 @@ dependencies = [
 
     # Machine Learning & Transformers
     # GLM-Image's AR encoder (GlmImageForConditionalGeneration) first ships in
-    # transformers 5.0.0. Floor raised from >=5.0.0 to >=5.15.0 for the public
-    # vision interpolation helper (get_vision_interpolation_indices_and_weights)
-    # that the MiniMax-H3 Qwen3-VL encoder cross-checks against.
-    "transformers>=5.15.0",
-    # <0.23: tokenizers 0.23 renamed RobertaProcessing's binding args, so
-    # transformers' CLIP-style tokenizer loading dies with
-    # "RobertaProcessing.__new__() got an unexpected keyword argument 'cls'".
-    "tokenizers>=0.20.1,<0.23",
+    # transformers 5.0.0. Qwen-Image-2.1's Qwen3-VL processor requires 5.17;
+    # this also retains H3's public vision interpolation helper (5.15+).
+    "transformers>=5.17.0",
+    # Match the supported tokenizers range in Transformers 5.17. Its CLIP
+    # tokenizer uses the positional RobertaProcessing API introduced in 0.23.
+    "tokenizers>=0.23.1,<0.24",
     "sentencepiece>=0.2.0",
     "timm>=1.0.11",
     "peft>=0.15.0",
@@ -43,7 +41,7 @@ dependencies = [
     "flashinfer-python; sys_platform == 'linux'",
 
     # Acceleration & Optimization
-    "accelerate==1.0.1",
+    "accelerate>=1.1.0,<2",
 
     # Computer Vision & Image Processing
     "opencv-python>=4.10.0.84",

@@ -1,0 +1,40 @@
+# Run on an allocated CUDA GPU after installing FastVideo and providing weights.
+# fastvideo generate --config examples/inference/basic/qwen_image21_t2i.yaml
+generator:
+  model_path: Qwen/Qwen-Image-2.1
+  engine:
+    num_gpus: 1
+    compile:
+      enabled: false
+      backend: inductor
+      fullgraph: false
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: true
+      dit_layerwise: true
+      text_encoder: true
+      vae: true
+      lazy_module_load: true
+  pipeline:
+    workload_type: t2i
+    experimental:
+      kv_cache_device: cuda
+request:
+  prompt: A red ceramic teapot, isolated on a transparent background.
+  sampling:
+    height: 1024
+    width: 1024
+    num_frames: 1
+    fps: 1
+    num_inference_steps: 40
+    guidance_scale: 1.0
+    true_cfg_scale: 1.0
+    seed: 42
+    reference_resolution: 1024
+    use_kv_cache: true
+  output:
+    output_path: outputs/qwen_image21/teapot.png
+    save_video: true
+    return_frames: false

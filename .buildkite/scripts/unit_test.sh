@@ -24,6 +24,12 @@ exec pytest \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \
   ./fastvideo/tests/modal/test_ssim_test.py \
+  ./tests/local_tests/qwen_image21/test_pipeline_contracts.py \
+  ./tests/local_tests/qwen_image21/test_configs.py \
+  ./tests/local_tests/qwen_image21/test_scheduler.py \
+  ./tests/local_tests/transformers/test_qwen_image21_transformer_contracts.py \
+  ./tests/local_tests/encoders/test_qwen_image21_conditioner.py \
+  ./tests/local_tests/vaes/test_qwen_image21_vae_cpu.py \
   --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py \
   --ignore=./fastvideo/tests/train/models \
   --ignore=./fastvideo/tests/train/methods \

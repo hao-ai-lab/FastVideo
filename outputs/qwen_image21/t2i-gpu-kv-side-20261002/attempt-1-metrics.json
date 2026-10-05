@@ -1,0 +1,21 @@
+{
+  "workload": "t2i",
+  "height": 1024,
+  "width": 1024,
+  "steps": 40,
+  "seed": 21,
+  "prompt": "An elegant blue ceramic vase in a studio, with the word Qwen written on it.",
+  "model_path": "/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3",
+  "kv_cache_device": "cuda",
+  "warmup_steps": 4,
+  "measurement_runs": 2,
+  "observational_cache_checks": true,
+  "stage_logging": true,
+  "runs": [],
+  "initialization_seconds": 22.518432054668665,
+  "observer_installation": {
+    "kv_cache_device": "cuda"
+  },
+  "status": "failed",
+  "error": "RuntimeError: Forward execution thread failed.\nTraceback (most recent call last):\n  File \"/root/FastVideo/fastvideo/entrypoints/video_generator.py\", line 796, in execute_forward_thread\n    result_container[\"output_batch\"] = self.executor.execute_forward(batch, fastvideo_args)\n                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 145, in execute_forward\n    responses = self.collective_rpc(\"execute_forward\",\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 321, in collective_rpc\n    raise e\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 308, in collective_rpc\n    _raise_for_rpc_errors(method, responses)\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 46, in _raise_for_rpc_errors\n    raise RuntimeError(f\"RPC {method!r} failed: \" + \"; \".join(errors))\nRuntimeError: RPC 'execute_forward' failed: worker 0: ValueError: reference_resolution must be a positive multiple of 32\n"
+}

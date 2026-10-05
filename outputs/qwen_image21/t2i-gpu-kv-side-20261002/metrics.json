@@ -1,0 +1,159 @@
+{
+  "workload": "t2i",
+  "height": 1024,
+  "width": 1024,
+  "steps": 40,
+  "seed": 21,
+  "prompt": "An elegant blue ceramic vase in a studio, with the word Qwen written on it.",
+  "model_path": "/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3",
+  "kv_cache_device": "cuda",
+  "warmup_steps": 4,
+  "measurement_runs": 2,
+  "observational_cache_checks": true,
+  "stage_logging": true,
+  "runs": [
+    {
+      "label": "run-1",
+      "steps": 40,
+      "request_wall_seconds": 15.589539060369134,
+      "generation_time_seconds": 15.339234231039882,
+      "api_e2e_seconds": 15.587569685652852,
+      "stage_seconds": {
+        "input_preparation": 2.2130087018013e-05,
+        "text_encoding": 0.5617671683430672,
+        "latent_preparation": 0.00019705668091773987,
+        "timestep_preparation": 0.00025138817727565765,
+        "denoising": 14.341954238712788,
+        "decoding": 0.4278643876314163,
+        "PostDecodeFrameProcessStage": 0.0016224309802055359,
+        "VideoSaveStage": 0.24638818763196468,
+        "AudioMuxStage": 0.0
+      },
+      "encoder_dit_vae_seconds": 15.331585794687271,
+      "runtime": {
+        "cache": {
+          "current_bytes": 0,
+          "peak_bytes": 13631488,
+          "store_calls": 32,
+          "get_calls": 1248,
+          "layer_shape": [
+            1,
+            26,
+            32,
+            128
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0"
+        },
+        "gpu_peak_allocated_mib": 16005.34130859375,
+        "gpu_peak_reserved_mib": 17190.0,
+        "dit_cpu_offload": false,
+        "dit_layerwise_offload": false,
+        "text_encoder_cpu_offload": true,
+        "vae_cpu_offload": true,
+        "lazy_module_load": false,
+        "kv_cache_device": "cuda"
+      },
+      "sampled_peak_gpu_used_mib": 18535.0
+    },
+    {
+      "label": "run-2",
+      "steps": 40,
+      "request_wall_seconds": 15.690590707585216,
+      "generation_time_seconds": 15.449291322380304,
+      "api_e2e_seconds": 15.689017210155725,
+      "stage_seconds": {
+        "input_preparation": 1.8885359168052673e-05,
+        "text_encoding": 0.5622742604464293,
+        "latent_preparation": 0.0001979488879442215,
+        "timestep_preparation": 0.00024764426052570343,
+        "denoising": 14.418380929157138,
+        "decoding": 0.4573058821260929,
+        "PostDecodeFrameProcessStage": 0.0011051669716835022,
+        "VideoSaveStage": 0.2382871527224779,
+        "AudioMuxStage": 0.0
+      },
+      "encoder_dit_vae_seconds": 15.43796107172966,
+      "runtime": {
+        "cache": {
+          "current_bytes": 0,
+          "peak_bytes": 13631488,
+          "store_calls": 32,
+          "get_calls": 1248,
+          "layer_shape": [
+            1,
+            26,
+            32,
+            128
+          ],
+          "dtype": "torch.bfloat16",
+          "device": "cuda:0"
+        },
+        "gpu_peak_allocated_mib": 16005.34130859375,
+        "gpu_peak_reserved_mib": 17190.0,
+        "dit_cpu_offload": false,
+        "dit_layerwise_offload": false,
+        "text_encoder_cpu_offload": true,
+        "vae_cpu_offload": true,
+        "lazy_module_load": false,
+        "kv_cache_device": "cuda"
+      },
+      "sampled_peak_gpu_used_mib": 18535.0
+    }
+  ],
+  "initialization_seconds": 22.758909448981285,
+  "observer_installation": {
+    "kv_cache_device": "cuda"
+  },
+  "warmup": {
+    "label": "warmup",
+    "steps": 4,
+    "request_wall_seconds": 3.012783894315362,
+    "generation_time_seconds": 2.988728430122137,
+    "api_e2e_seconds": 3.0102931689471006,
+    "stage_seconds": {
+      "input_preparation": 2.417340874671936e-05,
+      "text_encoding": 0.8237599600106478,
+      "latent_preparation": 0.00030680373311042786,
+      "timestep_preparation": 0.00035269372165203094,
+      "denoising": 1.4514444898813963,
+      "decoding": 0.7009008955210447,
+      "PostDecodeFrameProcessStage": 0.021363401785492897
+    },
+    "encoder_dit_vae_seconds": 2.976105345413089,
+    "runtime": {
+      "cache": {
+        "current_bytes": 0,
+        "peak_bytes": 13631488,
+        "store_calls": 32,
+        "get_calls": 96,
+        "layer_shape": [
+          1,
+          26,
+          32,
+          128
+        ],
+        "dtype": "torch.bfloat16",
+        "device": "cuda:0"
+      },
+      "gpu_peak_allocated_mib": 15952.1044921875,
+      "gpu_peak_reserved_mib": 16002.0,
+      "dit_cpu_offload": false,
+      "dit_layerwise_offload": false,
+      "text_encoder_cpu_offload": true,
+      "vae_cpu_offload": true,
+      "lazy_module_load": false,
+      "kv_cache_device": "cuda"
+    },
+    "sampled_peak_gpu_used_mib": 17227.0
+  },
+  "warmup_output_vs_validated_upstream_parity": {
+    "exact": true,
+    "max_abs": 0.0,
+    "mean_abs": 0.0
+  },
+  "repeated_40_step_outputs_exact": true,
+  "average_encoder_dit_vae_seconds": 15.384773433208466,
+  "average_request_wall_seconds": 15.640064883977175,
+  "status": "success"
+}

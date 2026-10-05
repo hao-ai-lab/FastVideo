@@ -1,0 +1,26 @@
+{
+  "case": "i2i",
+  "steps": 40,
+  "cache": true,
+  "seed": 42,
+  "rgb": {
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 0.7295027375221252,
+    "reference_abs_mean": 0.7295027375221252,
+    "fraction_outside_tolerance": 0.0
+  },
+  "all_channels": {
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 0.7970592975616455,
+    "reference_abs_mean": 0.7970592975616455,
+    "fraction_outside_tolerance": 0.0
+  }
+}

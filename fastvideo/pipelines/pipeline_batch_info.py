@@ -80,6 +80,8 @@ class ForwardBatch:
     pil_image: torch.Tensor | PIL.Image.Image | None = None
     last_image: torch.Tensor | PIL.Image.Image | None = None
     references: list[Any] | None = None
+    reference_resolution: int = 1024
+    use_kv_cache: bool = True
     preprocessed_image: torch.Tensor | None = None
     # Text inputs
     prompt: str | list[str] | None = None

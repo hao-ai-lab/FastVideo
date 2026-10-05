@@ -1,0 +1,24 @@
+{
+  "i2i": {
+    "prompt": "A close-up portrait of the blue robotic rabbit shown in image 1, wearing a purple vest with gold trim and a star emblem, on a plain white background. Preserve its appearance and composition.",
+    "refs": [
+      "/root/fv/outputs/qwen_image21/official_assets/1413730.png"
+    ],
+    "seed": 42
+  },
+  "edit": {
+    "prompt": "Change the purple vest and bow tie in image 1 to bright red. Keep the blue robotic rabbit, its pose, gold trim, star emblem and white background unchanged.",
+    "refs": [
+      "/root/fv/outputs/qwen_image21/official_assets/1413730.png"
+    ],
+    "seed": 42
+  },
+  "ref2img": {
+    "prompt": "Place the two people from image 1 and image 2 side by side at a modern livestream desk, facing the camera. Preserve their facial features, hairstyles and clothing.",
+    "refs": [
+      "/root/fv/outputs/qwen_image21/official_assets/1549226_a.png",
+      "/root/fv/outputs/qwen_image21/official_assets/1549226_b.png"
+    ],
+    "seed": 42
+  }
+}

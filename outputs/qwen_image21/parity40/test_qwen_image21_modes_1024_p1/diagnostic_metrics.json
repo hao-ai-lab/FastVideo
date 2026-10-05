@@ -1,0 +1,2167 @@
+{
+  "final_latents": {
+    "actual_shape": [
+      1,
+      4096,
+      64
+    ],
+    "reference_shape": [
+      1,
+      4096,
+      64
+    ],
+    "actual_dtype": "torch.bfloat16",
+    "reference_dtype": "torch.bfloat16",
+    "exact": true,
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 1.1178473234176636,
+    "reference_abs_mean": 1.1178473234176636,
+    "fraction_outside_tolerance": 0.0
+  },
+  "image_latents": {
+    "actual_shape": [
+      1,
+      4144,
+      64
+    ],
+    "reference_shape": [
+      1,
+      4144,
+      64
+    ],
+    "actual_dtype": "torch.bfloat16",
+    "reference_dtype": "torch.bfloat16",
+    "exact": true,
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 1.108476996421814,
+    "reference_abs_mean": 1.108476996421814,
+    "fraction_outside_tolerance": 0.0
+  },
+  "image_pad_mask": {
+    "actual_shape": [
+      1,
+      2108
+    ],
+    "reference_shape": [
+      1,
+      2108
+    ],
+    "actual_dtype": "torch.bool",
+    "reference_dtype": "torch.bool",
+    "exact": true,
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 0.9772295951843262,
+    "reference_abs_mean": 0.9772295951843262,
+    "fraction_outside_tolerance": 0.0
+  },
+  "img_shapes": {
+    "actual_length": 1,
+    "reference_length": 1,
+    "items": [
+      {
+        "actual_length": 2,
+        "reference_length": 2,
+        "items": [
+          {
+            "actual_length": 3,
+            "reference_length": 3,
+            "items": [
+              {
+                "actual": 1,
+                "reference": 1,
+                "exact": true
+              },
+              {
+                "actual": 74,
+                "reference": 74,
+                "exact": true
+              },
+              {
+                "actual": 56,
+                "reference": 56,
+                "exact": true
+              }
+            ]
+          },
+          {
+            "actual_length": 3,
+            "reference_length": 3,
+            "items": [
+              {
+                "actual": 1,
+                "reference": 1,
+                "exact": true
+              },
+              {
+                "actual": 64,
+                "reference": 64,
+                "exact": true
+              },
+              {
+                "actual": 64,
+                "reference": 64,
+                "exact": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "initial_latents": {
+    "actual_shape": [
+      1,
+      4096,
+      64
+    ],
+    "reference_shape": [
+      1,
+      4096,
+      64
+    ],
+    "actual_dtype": "torch.bfloat16",
+    "reference_dtype": "torch.bfloat16",
+    "exact": true,
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 0.7993699312210083,
+    "reference_abs_mean": 0.7993699312210083,
+    "fraction_outside_tolerance": 0.0
+  },
+  "noise_predictions": {
+    "actual_length": 40,
+    "reference_length": 40,
+    "items": [
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.9364006519317627,
+        "reference_abs_mean": 1.9364006519317627,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.4037187099456787,
+        "reference_abs_mean": 1.4037187099456787,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.370605707168579,
+        "reference_abs_mean": 1.370605707168579,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3656984567642212,
+        "reference_abs_mean": 1.3656984567642212,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3653644323349,
+        "reference_abs_mean": 1.3653644323349,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.360466718673706,
+        "reference_abs_mean": 1.360466718673706,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3627614974975586,
+        "reference_abs_mean": 1.3627614974975586,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.36806058883667,
+        "reference_abs_mean": 1.36806058883667,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3652353286743164,
+        "reference_abs_mean": 1.3652353286743164,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3616182804107666,
+        "reference_abs_mean": 1.3616182804107666,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3604276180267334,
+        "reference_abs_mean": 1.3604276180267334,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3540879487991333,
+        "reference_abs_mean": 1.3540879487991333,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3579719066619873,
+        "reference_abs_mean": 1.3579719066619873,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.355934977531433,
+        "reference_abs_mean": 1.355934977531433,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3566498756408691,
+        "reference_abs_mean": 1.3566498756408691,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.354366660118103,
+        "reference_abs_mean": 1.354366660118103,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.359466314315796,
+        "reference_abs_mean": 1.359466314315796,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.358889102935791,
+        "reference_abs_mean": 1.358889102935791,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3536951541900635,
+        "reference_abs_mean": 1.3536951541900635,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3493483066558838,
+        "reference_abs_mean": 1.3493483066558838,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3569501638412476,
+        "reference_abs_mean": 1.3569501638412476,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3529701232910156,
+        "reference_abs_mean": 1.3529701232910156,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3533557653427124,
+        "reference_abs_mean": 1.3533557653427124,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3503379821777344,
+        "reference_abs_mean": 1.3503379821777344,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3480191230773926,
+        "reference_abs_mean": 1.3480191230773926,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.349799633026123,
+        "reference_abs_mean": 1.349799633026123,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3520071506500244,
+        "reference_abs_mean": 1.3520071506500244,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3449598550796509,
+        "reference_abs_mean": 1.3449598550796509,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.348138451576233,
+        "reference_abs_mean": 1.348138451576233,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3387928009033203,
+        "reference_abs_mean": 1.3387928009033203,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.332736849784851,
+        "reference_abs_mean": 1.332736849784851,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3353112936019897,
+        "reference_abs_mean": 1.3353112936019897,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3350565433502197,
+        "reference_abs_mean": 1.3350565433502197,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3231467008590698,
+        "reference_abs_mean": 1.3231467008590698,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3200714588165283,
+        "reference_abs_mean": 1.3200714588165283,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.3067675828933716,
+        "reference_abs_mean": 1.3067675828933716,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.2971818447113037,
+        "reference_abs_mean": 1.2971818447113037,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.274903655052185,
+        "reference_abs_mean": 1.274903655052185,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.2457691431045532,
+        "reference_abs_mean": 1.2457691431045532,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.1397470235824585,
+        "reference_abs_mean": 1.1397470235824585,
+        "fraction_outside_tolerance": 0.0
+      }
+    ]
+  },
+  "prompt_attention_mask": {
+    "actual": null,
+    "reference": null,
+    "exact": true
+  },
+  "prompt_embeds": {
+    "actual_shape": [
+      1,
+      1084,
+      4096
+    ],
+    "reference_shape": [
+      1,
+      1084,
+      4096
+    ],
+    "actual_dtype": "torch.bfloat16",
+    "reference_dtype": "torch.bfloat16",
+    "exact": true,
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 7.9706525802612305,
+    "reference_abs_mean": 7.9706525802612305,
+    "fraction_outside_tolerance": 0.0
+  },
+  "reference_pixels": {
+    "actual_length": 1,
+    "reference_length": 1,
+    "items": [
+      {
+        "actual_shape": [
+          1,
+          4,
+          1,
+          1184,
+          896
+        ],
+        "reference_shape": [
+          1,
+          4,
+          1,
+          1184,
+          896
+        ],
+        "actual_dtype": "torch.float32",
+        "reference_dtype": "torch.float32",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.8326765298843384,
+        "reference_abs_mean": 0.8326765298843384,
+        "fraction_outside_tolerance": 0.0
+      }
+    ]
+  },
+  "reference_pixels_bf16": {
+    "actual_length": 1,
+    "reference_length": 1,
+    "items": [
+      {
+        "actual_shape": [
+          1,
+          4,
+          1,
+          1184,
+          896
+        ],
+        "reference_shape": [
+          1,
+          4,
+          1,
+          1184,
+          896
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.8329328894615173,
+        "reference_abs_mean": 0.8329328894615173,
+        "fraction_outside_tolerance": 0.0
+      }
+    ]
+  },
+  "runtime": {
+    "cudnn_allow_tf32": {
+      "actual": true,
+      "reference": true,
+      "exact": true
+    },
+    "cudnn_benchmark": {
+      "actual": false,
+      "reference": false,
+      "exact": true
+    },
+    "cudnn_fp32_precision": {
+      "actual": "none",
+      "reference": "none",
+      "exact": true
+    },
+    "default_dtype": {
+      "actual": "torch.float32",
+      "reference": "torch.float32",
+      "exact": true
+    },
+    "float32_matmul_precision": {
+      "actual": "highest",
+      "reference": "highest",
+      "exact": true
+    },
+    "matmul_allow_tf32": {
+      "actual": false,
+      "reference": false,
+      "exact": true
+    },
+    "matmul_fp32_precision": {
+      "actual": "none",
+      "reference": "none",
+      "exact": true
+    }
+  },
+  "sigmas": {
+    "actual_shape": [
+      41
+    ],
+    "reference_shape": [
+      41
+    ],
+    "actual_dtype": "torch.float32",
+    "reference_dtype": "torch.float32",
+    "exact": true,
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 0.5998767018318176,
+    "reference_abs_mean": 0.5998767018318176,
+    "fraction_outside_tolerance": 0.0
+  },
+  "step_latents": {
+    "actual_length": 40,
+    "reference_length": 40,
+    "items": [
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7892892956733704,
+        "reference_abs_mean": 0.7892892956733704,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7791790962219238,
+        "reference_abs_mean": 0.7791790962219238,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7691236734390259,
+        "reference_abs_mean": 0.7691236734390259,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7591713070869446,
+        "reference_abs_mean": 0.7591713070869446,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.749336302280426,
+        "reference_abs_mean": 0.749336302280426,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7396948933601379,
+        "reference_abs_mean": 0.7396948933601379,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7301611304283142,
+        "reference_abs_mean": 0.7301611304283142,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7208933234214783,
+        "reference_abs_mean": 0.7208933234214783,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7118896245956421,
+        "reference_abs_mean": 0.7118896245956421,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7032331824302673,
+        "reference_abs_mean": 0.7032331824302673,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6950291395187378,
+        "reference_abs_mean": 0.6950291395187378,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.687341570854187,
+        "reference_abs_mean": 0.687341570854187,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6802547574043274,
+        "reference_abs_mean": 0.6802547574043274,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6737281084060669,
+        "reference_abs_mean": 0.6737281084060669,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6679369807243347,
+        "reference_abs_mean": 0.6679369807243347,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6630628705024719,
+        "reference_abs_mean": 0.6630628705024719,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6591482758522034,
+        "reference_abs_mean": 0.6591482758522034,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6563431024551392,
+        "reference_abs_mean": 0.6563431024551392,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6547220945358276,
+        "reference_abs_mean": 0.6547220945358276,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6545194387435913,
+        "reference_abs_mean": 0.6545194387435913,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.65591961145401,
+        "reference_abs_mean": 0.65591961145401,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6589529514312744,
+        "reference_abs_mean": 0.6589529514312744,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6638363599777222,
+        "reference_abs_mean": 0.6638363599777222,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6706625819206238,
+        "reference_abs_mean": 0.6706625819206238,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6795799732208252,
+        "reference_abs_mean": 0.6795799732208252,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.6907485127449036,
+        "reference_abs_mean": 0.6907485127449036,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7042721509933472,
+        "reference_abs_mean": 0.7042721509933472,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7203913331031799,
+        "reference_abs_mean": 0.7203913331031799,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7391842603683472,
+        "reference_abs_mean": 0.7391842603683472,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7605727314949036,
+        "reference_abs_mean": 0.7605727314949036,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.7848701477050781,
+        "reference_abs_mean": 0.7848701477050781,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.8122886419296265,
+        "reference_abs_mean": 0.8122886419296265,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.842951238155365,
+        "reference_abs_mean": 0.842951238155365,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.8764597177505493,
+        "reference_abs_mean": 0.8764597177505493,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.9133281111717224,
+        "reference_abs_mean": 0.9133281111717224,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.9536619782447815,
+        "reference_abs_mean": 0.9536619782447815,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 0.9974201321601868,
+        "reference_abs_mean": 0.9974201321601868,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.044805884361267,
+        "reference_abs_mean": 1.044805884361267,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.0960512161254883,
+        "reference_abs_mean": 1.0960512161254883,
+        "fraction_outside_tolerance": 0.0
+      },
+      {
+        "actual_shape": [
+          1,
+          4096,
+          64
+        ],
+        "reference_shape": [
+          1,
+          4096,
+          64
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "exact": true,
+        "abs_mean": 0.0,
+        "abs_max": 0.0,
+        "rmse": 0.0,
+        "relative_l1": 0.0,
+        "relative_l2": 0.0,
+        "actual_abs_mean": 1.1178473234176636,
+        "reference_abs_mean": 1.1178473234176636,
+        "fraction_outside_tolerance": 0.0
+      }
+    ]
+  },
+  "timesteps": {
+    "actual_shape": [
+      40
+    ],
+    "reference_shape": [
+      40
+    ],
+    "actual_dtype": "torch.float32",
+    "reference_dtype": "torch.float32",
+    "exact": true,
+    "abs_mean": 0.0,
+    "abs_max": 0.0,
+    "rmse": 0.0,
+    "relative_l1": 0.0,
+    "relative_l2": 0.0,
+    "actual_abs_mean": 614.8734741210938,
+    "reference_abs_mean": 614.8734741210938,
+    "fraction_outside_tolerance": 0.0
+  }
+}

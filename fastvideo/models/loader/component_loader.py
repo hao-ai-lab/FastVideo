@@ -909,7 +909,7 @@ class VAELoader(ComponentLoader):
 
         # Diffusers-format AutoencoderKL checkpoints should match exactly; load
         # strictly so missing/unexpected keys are surfaced early.
-        strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3"}
+        strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3", "AutoencoderKLQwenImage21"}
         vae.load_state_dict(loaded, strict=strict_load)
         if (class_name == "AutoencoderKLWan" and getattr(vae.config, "use_light_vae", False)
                 and target_device.type == "cuda" and hasattr(vae, "optimize_memory_format")):

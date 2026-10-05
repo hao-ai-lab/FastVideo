@@ -1,0 +1,67 @@
+{
+  "torch": "2.12.0+cu130",
+  "height": 1024,
+  "width": 1024,
+  "steps": 40,
+  "seed": 42,
+  "backend": "inductor",
+  "fullgraph": false,
+  "attention_backend": "TORCH_SDPA",
+  "dit_offload": false,
+  "dit_layerwise_offload": false,
+  "pin_cpu_memory": true,
+  "kv_cache_device": "cuda",
+  "warmup_requests": 1,
+  "measured_requests": 1,
+  "config_path": "/root/FastVideo/examples/inference/basic/qwen_image21_t2i.yaml",
+  "initialization_seconds": 62.22751630499988,
+  "before_warmup": {
+    "enabled": true,
+    "inference_torch_compile": false,
+    "kwargs": {
+      "backend": "inductor",
+      "fullgraph": false
+    },
+    "wrapped_blocks": 0,
+    "total_blocks": 32,
+    "dynamo_stats": {},
+    "dynamo_frames": {},
+    "graph_breaks": {}
+  },
+  "warmup": {
+    "wall_seconds": 28.1974487589996,
+    "generation_seconds": 28.12271885500013,
+    "stage_seconds": {
+      "input_preparation": 5.5479998991359025e-05,
+      "text_encoding": 1.2385160449994146,
+      "latent_preparation": 0.0038141879995237105,
+      "timestep_preparation": 0.0010964419998344965,
+      "denoising": 24.937761344001046,
+      "decoding": 1.890576814999804,
+      "PostDecodeFrameProcessStage": 0.07231410700114793
+    },
+    "encoder_dit_decoder_seconds": 28.066854204000265,
+    "compile": {
+      "enabled": true,
+      "inference_torch_compile": false,
+      "kwargs": {
+        "backend": "inductor",
+        "fullgraph": false
+      },
+      "wrapped_blocks": 32,
+      "total_blocks": 32,
+      "dynamo_stats": {
+        "calls_captured": 329,
+        "unique_graphs": 3
+      },
+      "dynamo_frames": {
+        "total": 3,
+        "ok": 3
+      },
+      "graph_breaks": {}
+    }
+  },
+  "status": "FAIL",
+  "error": "RuntimeError: Forward execution thread failed.\nTraceback (most recent call last):\n  File \"/root/FastVideo/fastvideo/entrypoints/video_generator.py\", line 796, in execute_forward_thread\n    result_container[\"output_batch\"] = self.executor.execute_forward(batch, fastvideo_args)\n                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 145, in execute_forward\n    responses = self.collective_rpc(\"execute_forward\",\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 321, in collective_rpc\n    raise e\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 308, in collective_rpc\n    _raise_for_rpc_errors(method, responses)\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 46, in _raise_for_rpc_errors\n    raise RuntimeError(f\"RPC {method!r} failed: \" + \"; \".join(errors))\nRuntimeError: RPC 'execute_forward' failed: worker 0: OutOfMemoryError: CUDA out of memory. Tried to allocate 1.16 GiB. GPU 0 has a total capacity of 31.36 GiB of which 479.06 MiB is free. Process 45358 has 13.88 GiB memory in use. Process 51552 has 646.00 MiB memory in use. Including non-PyTorch memory, this process has 16.29 GiB memory in use. Of the allocated memory 14.47 GiB is allocated by PyTorch, and 1.13 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)\n",
+  "compile_enabled_after_run": false
+}
