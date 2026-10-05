@@ -1,0 +1,313 @@
+INFO 10-05 02:43:09.699 [__init__.py:47] CUDA is available
+INFO 10-05 02:43:11.429 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:43:11.429 [multiproc_executor.py:107] Use master port: 34089
+INFO 10-05 02:43:20.392 [__init__.py:47] CUDA is available
+INFO 10-05 02:43:22.125 [parallel_state.py:909] Initializing distributed environment with world_size=1, device=cuda:0
+INFO 10-05 02:43:22.126 [parallel_state.py:737] Using nccl backend for CUDA platform
+[W1005 02:43:22.205876780 ProcessGroupNCCL.cpp:1001] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+INFO 10-05 02:43:22.155 [__init__.py:39] Building pipeline of type: basic
+INFO 10-05 02:43:22.155 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:43:22.155 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:43:22.155 [registry.py:1112] Pinning pipeline class name from QwenImage21Pipeline to QwenImage21Pipeline
+INFO 10-05 02:43:22.155 [pipeline_registry.py:134] Loading pipelines for types: ['basic']
+INFO 10-05 02:43:22.298 [pipeline_registry.py:176] Loaded 55 pipeline classes across 1 types
+INFO 10-05 02:43:22.298 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:43:22.298 [__init__.py:56] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:43:22.299 [profiler.py:198] Torch profiler disabled; returning no-op controller
+INFO 10-05 02:43:22.299 [composed_pipeline_base.py:171] Loading pipeline modules...
+INFO 10-05 02:43:22.299 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:43:22.299 [composed_pipeline_base.py:471] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:43:22.299 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:43:22.299 [composed_pipeline_base.py:532] Loading pipeline modules from config: {'_class_name': 'QwenImage21Pipeline', '_diffusers_version': '0.37.0.dev0', 'processor': ['transformers', 'Qwen3VLProcessor'], 'scheduler': ['diffusers', 'FlowMatchEulerDiscreteScheduler'], 'text_encoder': ['transformers', 'Qwen3VLForConditionalGeneration'], 'transformer': ['diffusers', 'QwenImage21Transformer2DModel'], 'vae': ['diffusers', 'AutoencoderKLQwenImage21']}
+INFO 10-05 02:43:22.299 [composed_pipeline_base.py:571] Loading required modules: ['processor', 'text_encoder', 'transformer', 'vae', 'scheduler']
+INFO 10-05 02:43:22.299 [component_loader.py:1380] Loading processor using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:43:22.299 [component_loader.py:600] Loading processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:43:23.065 [component_loader.py:605] Loaded processor: Qwen3VLProcessor
+INFO 10-05 02:43:23.065 [composed_pipeline_base.py:626] Loaded module processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:43:23.065 [component_loader.py:1380] Loading scheduler using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-05 02:43:23.066 [composed_pipeline_base.py:626] Loaded module scheduler from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-05 02:43:23.066 [component_loader.py:1380] Loading text_encoder using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-05 02:43:23.066 [component_loader.py:299] HF Model config: {'architectures': ['Qwen3VLForConditionalGeneration'], 'dtype': 'bfloat16', 'image_token_id': 151655, 'text_config': {'attention_bias': False, 'attention_dropout': 0.0, 'bos_token_id': 151643, 'dtype': 'bfloat16', 'eos_token_id': 151645, 'head_dim': 128, 'hidden_act': 'silu', 'hidden_size': 4096, 'initializer_range': 0.02, 'intermediate_size': 12288, 'max_position_embeddings': 262144, 'model_type': 'qwen3_vl_text', 'num_attention_heads': 32, 'num_hidden_layers': 36, 'num_key_value_heads': 8, 'rms_norm_eps': 1e-06, 'rope_scaling': {'mrope_interleaved': True, 'mrope_section': [24, 20, 20], 'rope_type': 'default'}, 'rope_theta': 5000000, 'use_cache': True, 'vocab_size': 151936}, 'tie_word_embeddings': False, 'video_token_id': 151656, 'vision_config': {'deepstack_visual_indexes': [8, 16, 24], 'depth': 27, 'dtype': 'bfloat16', 'hidden_act': 'gelu_pytorch_tanh', 'hidden_size': 1152, 'in_channels': 3, 'initializer_range': 0.02, 'intermediate_size': 4304, 'model_type': 'qwen3_vl', 'num_heads': 16, 'num_position_embeddings': 2304, 'out_hidden_size': 4096, 'patch_size': 16, 'spatial_merge_size': 2, 'temporal_patch_size': 2}, 'vision_end_token_id': 151653, 'vision_start_token_id': 151652}
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:01,  2.78it/s]
+Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:01<00:01,  1.11it/s]
+Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:02<00:00,  1.01it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.07s/it]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.02it/s]
+
+INFO 10-05 02:43:32.401 [component_loader.py:448] Loading weights took 4.05 seconds
+INFO 10-05 02:44:08.604 [composed_pipeline_base.py:626] Loaded module text_encoder from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-05 02:44:08.605 [component_loader.py:1380] Loading transformer using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-05 02:44:08.606 [component_loader.py:1042] transformer cls_name: QwenImage21Transformer2DModel
+INFO 10-05 02:44:08.606 [component_loader.py:1094] Loading model from 2 safetensors files: ['/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00002-of-00002.safetensors', '/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00001-of-00002.safetensors']
+INFO 10-05 02:44:08.606 [component_loader.py:1103] Loading model from QwenImage21Transformer2DModel, default_dtype: torch.bfloat16
+INFO 10-05 02:44:08.606 [component_loader.py:1119] Worker 0 transformer attention backend: TORCH_SDPA
+INFO 10-05 02:44:08.607 [fsdp_load.py:228] Loading model with default_dtype: torch.bfloat16
+INFO 10-05 02:44:08.626 [fsdp_load.py:282] Loading transformer weights with to_cpu=False
+Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:00<00:00,  1.03it/s]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:02<00:00,  1.51s/it]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:02<00:00,  1.43s/it]
+
+INFO 10-05 02:44:11.496 [component_loader.py:1155] Loaded model with 7.12B parameters
+INFO 10-05 02:44:11.497 [composed_pipeline_base.py:626] Loaded module transformer from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-05 02:44:11.497 [component_loader.py:1380] Loading vae using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-05 02:44:13.655 [composed_pipeline_base.py:626] Loaded module vae from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-05 02:44:13.655 [__init__.py:61] Pipelines instantiated
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.656 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-05 02:44:13.656 [multiproc_executor.py:707] 1 workers ready
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.657 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-05 02:44:13.657 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:44:13.658 [video_generator.py:766] 
+INFO 10-05 02:44:13.658 [video_generator.py:766]                       height: 1024
+INFO 10-05 02:44:13.658 [video_generator.py:766]                        width: 1024
+INFO 10-05 02:44:13.658 [video_generator.py:766]                 video_length: 1
+INFO 10-05 02:44:13.658 [video_generator.py:766]                       prompt: A red ceramic teapot on a white studio background, product photography.
+INFO 10-05 02:44:13.658 [video_generator.py:766]                       image_path: None
+INFO 10-05 02:44:13.658 [video_generator.py:766]                   neg_prompt: None
+INFO 10-05 02:44:13.658 [video_generator.py:766]                         seed: 42
+INFO 10-05 02:44:13.658 [video_generator.py:766]                  infer_steps: 40
+INFO 10-05 02:44:13.658 [video_generator.py:766]        num_videos_per_prompt: 1
+INFO 10-05 02:44:13.658 [video_generator.py:766]               guidance_scale: 1.0
+INFO 10-05 02:44:13.658 [video_generator.py:766]                     n_tokens: 16384
+INFO 10-05 02:44:13.658 [video_generator.py:766]                   flow_shift: None
+INFO 10-05 02:44:13.658 [video_generator.py:766]      embedded_guidance_scale: 6.0
+INFO 10-05 02:44:13.658 [video_generator.py:766]                   save_video: False
+INFO 10-05 02:44:13.658 [video_generator.py:766]                   output_path: /root/FastVideo/outputs/qwen_image21/compile-20261005/warmup.png
+INFO 10-05 02:44:13.658 [video_generator.py:766]         
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.694 [composed_pipeline_base.py:227] Enabled torch.compile for 32 submodules in transformer via _compile_conditions with kwargs={'backend': 'inductor', 'fullgraph': False}
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.694 [composed_pipeline_base.py:329] Torch Compile enabled for DiT
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.694 [composed_pipeline_base.py:388] Creating pipeline stages...
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.694 [composed_pipeline_base.py:758] Running pipeline stages: dict_keys(['input_preparation', 'text_encoding', 'latent_preparation', 'timestep_preparation', 'denoising', 'decoding'])
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.695 [base.py:182] [input_preparation|QwenImage21InputStage] Starting execution
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.695 [base.py:190] [input_preparation|QwenImage21InputStage] Execution completed in 0.055479998991359025 ms
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:13.695 [base.py:182] [text_encoding|QwenImage21TextEncodingStage] Starting execution
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:14.934 [base.py:190] [text_encoding|QwenImage21TextEncodingStage] Execution completed in 1238.5160449994146 ms
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:14.934 [base.py:182] [latent_preparation|QwenImage21LatentStage] Starting execution
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:14.938 [base.py:190] [latent_preparation|QwenImage21LatentStage] Execution completed in 3.8141879995237105 ms
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:14.938 [base.py:182] [timestep_preparation|QwenImage21ScheduleStage] Starting execution
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:14.939 [base.py:190] [timestep_preparation|QwenImage21ScheduleStage] Execution completed in 1.0964419998344965 ms
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:14.940 [base.py:182] [denoising|QwenImage21DenoisingStage] Starting execution
+[1;36m(Worker pid=51695)[0;0m Denoising:   0%|          | 0/40 [00:00<?, ?it/s]/opt/venv/lib/python3.12/site-packages/torch/_inductor/lowering.py:2412: UserWarning: Torchinductor does not support code generation for complex operators. Performance may be worse than eager.
+[1;36m(Worker pid=51695)[0;0m   warnings.warn(
+[1;36m(Worker pid=51695)[0;0m Denoising:   2%|▎         | 1/40 [00:06<04:25,  6.81s/it]Denoising:   5%|▌         | 2/40 [00:12<03:47,  5.99s/it]Denoising:   8%|▊         | 3/40 [00:12<02:05,  3.40s/it]Denoising:  10%|█         | 4/40 [00:12<01:18,  2.19s/it]Denoising:  12%|█▎        | 5/40 [00:13<00:53,  1.52s/it]Denoising:  15%|█▌        | 6/40 [00:13<00:37,  1.11s/it]Denoising:  18%|█▊        | 7/40 [00:13<00:28,  1.17it/s]Denoising:  20%|██        | 8/40 [00:14<00:21,  1.46it/s]Denoising:  22%|██▎       | 9/40 [00:14<00:17,  1.74it/s]Denoising:  25%|██▌       | 10/40 [00:14<00:14,  2.01it/s]Denoising:  28%|██▊       | 11/40 [00:15<00:12,  2.24it/s]Denoising:  30%|███       | 12/40 [00:15<00:11,  2.44it/s]Denoising:  32%|███▎      | 13/40 [00:15<00:10,  2.61it/s]Denoising:  35%|███▌      | 14/40 [00:16<00:09,  2.73it/s]Denoising:  38%|███▊      | 15/40 [00:16<00:08,  2.82it/s]Denoising:  40%|████      | 16/40 [00:16<00:08,  2.89it/s]Denoising:  42%|████▎     | 17/40 [00:17<00:07,  2.94it/s]Denoising:  45%|████▌     | 18/40 [00:17<00:07,  2.98it/s]Denoising:  48%|████▊     | 19/40 [00:17<00:07,  3.00it/s]Denoising:  50%|█████     | 20/40 [00:18<00:06,  3.02it/s]Denoising:  52%|█████▎    | 21/40 [00:18<00:06,  3.03it/s]Denoising:  55%|█████▌    | 22/40 [00:18<00:05,  3.04it/s]Denoising:  57%|█████▊    | 23/40 [00:19<00:05,  3.04it/s]Denoising:  60%|██████    | 24/40 [00:19<00:05,  3.05it/s]Denoising:  62%|██████▎   | 25/40 [00:19<00:04,  3.05it/s]Denoising:  65%|██████▌   | 26/40 [00:20<00:04,  3.06it/s]Denoising:  68%|██████▊   | 27/40 [00:20<00:04,  3.06it/s]Denoising:  70%|███████   | 28/40 [00:20<00:03,  3.06it/s]Denoising:  72%|███████▎  | 29/40 [00:21<00:03,  3.06it/s]Denoising:  75%|███████▌  | 30/40 [00:21<00:03,  3.06it/s]Denoising:  78%|███████▊  | 31/40 [00:21<00:02,  3.07it/s]Denoising:  80%|████████  | 32/40 [00:22<00:02,  3.06it/s]Denoising:  82%|████████▎ | 33/40 [00:22<00:02,  3.06it/s]Denoising:  85%|████████▌ | 34/40 [00:22<00:01,  3.06it/s]Denoising:  88%|████████▊ | 35/40 [00:22<00:01,  3.06it/s]Denoising:  90%|█████████ | 36/40 [00:23<00:01,  3.05it/s]Denoising:  92%|█████████▎| 37/40 [00:23<00:00,  3.06it/s]Denoising:  95%|█████████▌| 38/40 [00:23<00:00,  3.06it/s]Denoising:  98%|█████████▊| 39/40 [00:24<00:00,  3.06it/s]Denoising: 100%|██████████| 40/40 [00:24<00:00,  3.02it/s]Denoising: 100%|██████████| 40/40 [00:24<00:00,  1.62it/s]
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:39.878 [base.py:190] [denoising|QwenImage21DenoisingStage] Execution completed in 24937.761344001046 ms
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:39.879 [base.py:182] [decoding|QwenImage21DecodingStage] Starting execution
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:40.795 [pinned_offload.py:55] frozen offload: holding 0.68 GB of AutoencoderKLQwenImage21 on the host (pinned)
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.770 [base.py:190] [decoding|QwenImage21DecodingStage] Execution completed in 1890.576814999804 ms
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.772 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-05 02:44:41.781 [video_generator.py:864] Generated successfully in 28.12 seconds
+INFO 10-05 02:44:41.853 [video_generator.py:920] PostDecodeFrameProcessStage completed in 0.072 s
+INFO 10-05 02:44:41.854 [video_generator.py:1001] End-to-end latency: 28.20 seconds
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.855 [multiproc_executor.py:716] Worker 0 starting event loop...
+WARMUP {"wall_seconds": 28.1974487589996, "generation_seconds": 28.12271885500013, "stage_seconds": {"input_preparation": 5.5479998991359025e-05, "text_encoding": 1.2385160449994146, "latent_preparation": 0.0038141879995237105, "timestep_preparation": 0.0010964419998344965, "denoising": 24.937761344001046, "decoding": 1.890576814999804, "PostDecodeFrameProcessStage": 0.07231410700114793}, "encoder_dit_decoder_seconds": 28.066854204000265, "compile": {"enabled": true, "inference_torch_compile": false, "kwargs": {"backend": "inductor", "fullgraph": false}, "wrapped_blocks": 32, "total_blocks": 32, "dynamo_stats": {"calls_captured": 329, "unique_graphs": 3}, "dynamo_frames": {"total": 3, "ok": 3}, "graph_breaks": {}}}
+INFO 10-05 02:44:41.871 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:44:41.872 [video_generator.py:766] 
+INFO 10-05 02:44:41.872 [video_generator.py:766]                       height: 1024
+INFO 10-05 02:44:41.872 [video_generator.py:766]                        width: 1024
+INFO 10-05 02:44:41.872 [video_generator.py:766]                 video_length: 1
+INFO 10-05 02:44:41.872 [video_generator.py:766]                       prompt: A red ceramic teapot on a white studio background, product photography.
+INFO 10-05 02:44:41.872 [video_generator.py:766]                       image_path: None
+INFO 10-05 02:44:41.872 [video_generator.py:766]                   neg_prompt: None
+INFO 10-05 02:44:41.872 [video_generator.py:766]                         seed: 42
+INFO 10-05 02:44:41.872 [video_generator.py:766]                  infer_steps: 40
+INFO 10-05 02:44:41.872 [video_generator.py:766]        num_videos_per_prompt: 1
+INFO 10-05 02:44:41.872 [video_generator.py:766]               guidance_scale: 1.0
+INFO 10-05 02:44:41.872 [video_generator.py:766]                     n_tokens: 16384
+INFO 10-05 02:44:41.872 [video_generator.py:766]                   flow_shift: None
+INFO 10-05 02:44:41.872 [video_generator.py:766]      embedded_guidance_scale: 6.0
+INFO 10-05 02:44:41.872 [video_generator.py:766]                   save_video: True
+INFO 10-05 02:44:41.872 [video_generator.py:766]                   output_path: /root/FastVideo/outputs/qwen_image21/compile-20261005/compiled.png
+INFO 10-05 02:44:41.872 [video_generator.py:766]         
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.874 [composed_pipeline_base.py:758] Running pipeline stages: dict_keys(['input_preparation', 'text_encoding', 'latent_preparation', 'timestep_preparation', 'denoising', 'decoding'])
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.874 [base.py:182] [input_preparation|QwenImage21InputStage] Starting execution
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.875 [base.py:190] [input_preparation|QwenImage21InputStage] Execution completed in 0.07345099947997369 ms
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.875 [base.py:182] [text_encoding|QwenImage21TextEncodingStage] Starting execution
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.949 [base.py:199] [text_encoding|QwenImage21TextEncodingStage] Error during execution after 74.22866200067801 ms: CUDA out of memory. Tried to allocate 1.16 GiB. GPU 0 has a total capacity of 31.36 GiB of which 479.06 MiB is free. Process 45358 has 13.88 GiB memory in use. Process 51552 has 646.00 MiB memory in use. Including non-PyTorch memory, this process has 16.29 GiB memory in use. Of the allocated memory 14.47 GiB is allocated by PyTorch, and 1.13 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200] [text_encoding|QwenImage21TextEncodingStage] Traceback: Traceback (most recent call last):
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/root/FastVideo/fastvideo/pipelines/stages/base.py", line 187, in _execute
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     result = self.forward(batch, fastvideo_args)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     return func(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]            ^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/root/FastVideo/fastvideo/pipelines/basic/qwen_image21/stages.py", line 130, in forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     embeds, mask, state.image_pad_mask = self._encode(prompt, state, device)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/root/FastVideo/fastvideo/pipelines/basic/qwen_image21/stages.py", line 101, in _encode
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     hidden = self.text_encoder(
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]              ^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     return self._call_impl(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1884, in _call_impl
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     return inner()
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]            ^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1832, in inner
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     result = forward_call(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     return func(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]            ^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/root/FastVideo/fastvideo/models/encoders/qwen_image21.py", line 91, in forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     inputs_embeds = self.language_model.embed_tokens(input_ids)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     return self._call_impl(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1884, in _call_impl
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     return inner()
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]            ^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1811, in inner
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     args_kwargs_result = hook(self, args, kwargs)  # type: ignore[misc]
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]                          ^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_common.py", line 24, in wrapper
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     return torch._dynamo.disable(
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]            ^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1298, in _fn
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     return fn(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]            ^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_state.py", line 297, in _pre_forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param_group.py", line 482, in pre_forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     self.wait_for_unshard()
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param_group.py", line 420, in wait_for_unshard
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     alloc_storage(tensor)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param.py", line 991, in alloc_storage
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200]     storage.resize_(size)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200] torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.16 GiB. GPU 0 has a total capacity of 31.36 GiB of which 479.06 MiB is free. Process 45358 has 13.88 GiB memory in use. Process 51552 has 646.00 MiB memory in use. Including non-PyTorch memory, this process has 16.29 GiB memory in use. Of the allocated memory 14.47 GiB is allocated by PyTorch, and 1.13 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [base.py:200] 
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777] Worker 0 failed RPC without exiting
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777] Traceback (most recent call last):
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 744, in worker_busy_loop
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/worker/gpu_worker.py", line 96, in execute_forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return func(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/composed_pipeline_base.py", line 762, in forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     batch = stage(batch, fastvideo_args)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/stages/base.py", line 157, in __call__
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     result = self._execute(batch, fastvideo_args, stage_key, stage_class_name, stage_name)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/stages/base.py", line 187, in _execute
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     result = self.forward(batch, fastvideo_args)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return func(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/basic/qwen_image21/stages.py", line 130, in forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     embeds, mask, state.image_pad_mask = self._encode(prompt, state, device)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/pipelines/basic/qwen_image21/stages.py", line 101, in _encode
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     hidden = self.text_encoder(
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]              ^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return self._call_impl(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1884, in _call_impl
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return inner()
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1832, in inner
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     result = forward_call(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return func(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/root/FastVideo/fastvideo/models/encoders/qwen_image21.py", line 91, in forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     inputs_embeds = self.language_model.embed_tokens(input_ids)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return self._call_impl(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1884, in _call_impl
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return inner()
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1811, in inner
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     args_kwargs_result = hook(self, args, kwargs)  # type: ignore[misc]
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]                          ^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_common.py", line 24, in wrapper
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return torch._dynamo.disable(
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1298, in _fn
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     return fn(*args, **kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]            ^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_state.py", line 297, in _pre_forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param_group.py", line 482, in pre_forward
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     self.wait_for_unshard()
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param_group.py", line 420, in wait_for_unshard
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     alloc_storage(tensor)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param.py", line 991, in alloc_storage
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777]     storage.resize_(size)
+[1;36m(Worker pid=51695)[0;0m ERROR 10-05 02:44:41.951 [multiproc_executor.py:777] torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.16 GiB. GPU 0 has a total capacity of 31.36 GiB of which 479.06 MiB is free. Process 45358 has 13.88 GiB memory in use. Process 51552 has 646.00 MiB memory in use. Including non-PyTorch memory, this process has 16.29 GiB memory in use. Of the allocated memory 14.47 GiB is allocated by PyTorch, and 1.13 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.953 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-05 02:44:41.958 [multiproc_executor.py:347] Shutting down MultiprocExecutor...
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:41.958 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:42.504 [gpu_worker.py:117] Worker 0 shutdown complete
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:42.504 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=51695)[0;0m INFO 10-05 02:44:42.867 [gpu_worker.py:117] Worker 0 shutdown complete
+INFO 10-05 02:44:52.736 [multiproc_executor.py:402] MultiprocExecutor shutdown complete
+COMPILE_BENCHMARK {"torch": "2.12.0+cu130", "height": 1024, "width": 1024, "steps": 40, "seed": 42, "backend": "inductor", "fullgraph": false, "attention_backend": "TORCH_SDPA", "dit_offload": false, "dit_layerwise_offload": false, "pin_cpu_memory": true, "kv_cache_device": "cuda", "warmup_requests": 1, "measured_requests": 1, "config_path": "/root/FastVideo/examples/inference/basic/qwen_image21_t2i.yaml", "initialization_seconds": 62.22751630499988, "before_warmup": {"enabled": true, "inference_torch_compile": false, "kwargs": {"backend": "inductor", "fullgraph": false}, "wrapped_blocks": 0, "total_blocks": 32, "dynamo_stats": {}, "dynamo_frames": {}, "graph_breaks": {}}, "warmup": {"wall_seconds": 28.1974487589996, "generation_seconds": 28.12271885500013, "stage_seconds": {"input_preparation": 5.5479998991359025e-05, "text_encoding": 1.2385160449994146, "latent_preparation": 0.0038141879995237105, "timestep_preparation": 0.0010964419998344965, "denoising": 24.937761344001046, "decoding": 1.890576814999804, "PostDecodeFrameProcessStage": 0.07231410700114793}, "encoder_dit_decoder_seconds": 28.066854204000265, "compile": {"enabled": true, "inference_torch_compile": false, "kwargs": {"backend": "inductor", "fullgraph": false}, "wrapped_blocks": 32, "total_blocks": 32, "dynamo_stats": {"calls_captured": 329, "unique_graphs": 3}, "dynamo_frames": {"total": 3, "ok": 3}, "graph_breaks": {}}}, "status": "FAIL", "error": "RuntimeError: Forward execution thread failed.\nTraceback (most recent call last):\n  File \"/root/FastVideo/fastvideo/entrypoints/video_generator.py\", line 796, in execute_forward_thread\n    result_container[\"output_batch\"] = self.executor.execute_forward(batch, fastvideo_args)\n                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 145, in execute_forward\n    responses = self.collective_rpc(\"execute_forward\",\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 321, in collective_rpc\n    raise e\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 308, in collective_rpc\n    _raise_for_rpc_errors(method, responses)\n  File \"/root/FastVideo/fastvideo/worker/multiproc_executor.py\", line 46, in _raise_for_rpc_errors\n    raise RuntimeError(f\"RPC {method!r} failed: \" + \"; \".join(errors))\nRuntimeError: RPC 'execute_forward' failed: worker 0: OutOfMemoryError: CUDA out of memory. Tried to allocate 1.16 GiB. GPU 0 has a total capacity of 31.36 GiB of which 479.06 MiB is free. Process 45358 has 13.88 GiB memory in use. Process 51552 has 646.00 MiB memory in use. Including non-PyTorch memory, this process has 16.29 GiB memory in use. Of the allocated memory 14.47 GiB is allocated by PyTorch, and 1.13 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)\n", "compile_enabled_after_run": false}
+Traceback (most recent call last):
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 796, in execute_forward_thread
+    result_container["output_batch"] = self.executor.execute_forward(batch, fastvideo_args)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 145, in execute_forward
+    responses = self.collective_rpc("execute_forward",
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 321, in collective_rpc
+    raise e
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 308, in collective_rpc
+    _raise_for_rpc_errors(method, responses)
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 46, in _raise_for_rpc_errors
+    raise RuntimeError(f"RPC {method!r} failed: " + "; ".join(errors))
+RuntimeError: RPC 'execute_forward' failed: worker 0: OutOfMemoryError: CUDA out of memory. Tried to allocate 1.16 GiB. GPU 0 has a total capacity of 31.36 GiB of which 479.06 MiB is free. Process 45358 has 13.88 GiB memory in use. Process 51552 has 646.00 MiB memory in use. Including non-PyTorch memory, this process has 16.29 GiB memory in use. Of the allocated memory 14.47 GiB is allocated by PyTorch, and 1.13 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/root/FastVideo/outputs/qwen_image21/compile-20261005/benchmark_compile.py", line 158, in <module>
+    main()
+  File "/root/FastVideo/outputs/qwen_image21/compile-20261005/benchmark_compile.py", line 125, in main
+    measured_pixels, report["measured"] = generate("compiled", True)
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/outputs/qwen_image21/compile-20261005/benchmark_compile.py", line 98, in generate
+    result = generator.generate(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 316, in generate
+    return self._generate_request_impl(normalized_request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 495, in _generate_request_impl
+    return self._generate_single_request(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 515, in _generate_single_request
+    result = self._generate_video_impl(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 614, in _generate_video_impl
+    return self._generate_single_video(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 829, in _generate_single_video
+    raise RuntimeError("Forward execution thread failed.\n"
+RuntimeError: Forward execution thread failed.
+Traceback (most recent call last):
+  File "/root/FastVideo/fastvideo/entrypoints/video_generator.py", line 796, in execute_forward_thread
+    result_container["output_batch"] = self.executor.execute_forward(batch, fastvideo_args)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 145, in execute_forward
+    responses = self.collective_rpc("execute_forward",
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 321, in collective_rpc
+    raise e
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 308, in collective_rpc
+    _raise_for_rpc_errors(method, responses)
+  File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 46, in _raise_for_rpc_errors
+    raise RuntimeError(f"RPC {method!r} failed: " + "; ".join(errors))
+RuntimeError: RPC 'execute_forward' failed: worker 0: OutOfMemoryError: CUDA out of memory. Tried to allocate 1.16 GiB. GPU 0 has a total capacity of 31.36 GiB of which 479.06 MiB is free. Process 45358 has 13.88 GiB memory in use. Process 51552 has 646.00 MiB memory in use. Including non-PyTorch memory, this process has 16.29 GiB memory in use. Of the allocated memory 14.47 GiB is allocated by PyTorch, and 1.13 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
+

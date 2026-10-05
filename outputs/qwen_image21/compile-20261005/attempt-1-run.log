@@ -1,0 +1,157 @@
+INFO 10-05 02:32:00.763 [__init__.py:47] CUDA is available
+INFO 10-05 02:32:02.275 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:32:02.275 [multiproc_executor.py:107] Use master port: 34271
+INFO 10-05 02:32:11.972 [__init__.py:47] CUDA is available
+INFO 10-05 02:32:14.069 [parallel_state.py:909] Initializing distributed environment with world_size=1, device=cuda:0
+INFO 10-05 02:32:14.069 [parallel_state.py:737] Using nccl backend for CUDA platform
+[W1005 02:32:14.150544209 ProcessGroupNCCL.cpp:1001] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+INFO 10-05 02:32:14.100 [__init__.py:39] Building pipeline of type: basic
+INFO 10-05 02:32:14.100 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:32:14.101 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:32:14.101 [registry.py:1112] Pinning pipeline class name from QwenImage21Pipeline to QwenImage21Pipeline
+INFO 10-05 02:32:14.101 [pipeline_registry.py:134] Loading pipelines for types: ['basic']
+INFO 10-05 02:32:14.246 [pipeline_registry.py:176] Loaded 55 pipeline classes across 1 types
+INFO 10-05 02:32:14.246 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:32:14.246 [__init__.py:56] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:32:14.247 [profiler.py:198] Torch profiler disabled; returning no-op controller
+INFO 10-05 02:32:14.247 [composed_pipeline_base.py:171] Loading pipeline modules...
+INFO 10-05 02:32:14.247 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:32:14.247 [composed_pipeline_base.py:471] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:32:14.247 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:32:14.247 [composed_pipeline_base.py:532] Loading pipeline modules from config: {'_class_name': 'QwenImage21Pipeline', '_diffusers_version': '0.37.0.dev0', 'processor': ['transformers', 'Qwen3VLProcessor'], 'scheduler': ['diffusers', 'FlowMatchEulerDiscreteScheduler'], 'text_encoder': ['transformers', 'Qwen3VLForConditionalGeneration'], 'transformer': ['diffusers', 'QwenImage21Transformer2DModel'], 'vae': ['diffusers', 'AutoencoderKLQwenImage21']}
+INFO 10-05 02:32:14.247 [composed_pipeline_base.py:571] Loading required modules: ['processor', 'text_encoder', 'transformer', 'vae', 'scheduler']
+INFO 10-05 02:32:14.247 [component_loader.py:1380] Loading processor using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:32:14.247 [component_loader.py:600] Loading processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:32:15.017 [component_loader.py:605] Loaded processor: Qwen3VLProcessor
+INFO 10-05 02:32:15.017 [composed_pipeline_base.py:626] Loaded module processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:32:15.017 [component_loader.py:1380] Loading scheduler using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-05 02:32:15.018 [composed_pipeline_base.py:626] Loaded module scheduler from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-05 02:32:15.018 [component_loader.py:1380] Loading text_encoder using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-05 02:32:15.019 [component_loader.py:299] HF Model config: {'architectures': ['Qwen3VLForConditionalGeneration'], 'dtype': 'bfloat16', 'image_token_id': 151655, 'text_config': {'attention_bias': False, 'attention_dropout': 0.0, 'bos_token_id': 151643, 'dtype': 'bfloat16', 'eos_token_id': 151645, 'head_dim': 128, 'hidden_act': 'silu', 'hidden_size': 4096, 'initializer_range': 0.02, 'intermediate_size': 12288, 'max_position_embeddings': 262144, 'model_type': 'qwen3_vl_text', 'num_attention_heads': 32, 'num_hidden_layers': 36, 'num_key_value_heads': 8, 'rms_norm_eps': 1e-06, 'rope_scaling': {'mrope_interleaved': True, 'mrope_section': [24, 20, 20], 'rope_type': 'default'}, 'rope_theta': 5000000, 'use_cache': True, 'vocab_size': 151936}, 'tie_word_embeddings': False, 'video_token_id': 151656, 'vision_config': {'deepstack_visual_indexes': [8, 16, 24], 'depth': 27, 'dtype': 'bfloat16', 'hidden_act': 'gelu_pytorch_tanh', 'hidden_size': 1152, 'in_channels': 3, 'initializer_range': 0.02, 'intermediate_size': 4304, 'model_type': 'qwen3_vl', 'num_heads': 16, 'num_position_embeddings': 2304, 'out_hidden_size': 4096, 'patch_size': 16, 'spatial_merge_size': 2, 'temporal_patch_size': 2}, 'vision_end_token_id': 151653, 'vision_start_token_id': 151652}
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:00,  3.67it/s]
+Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:01<00:01,  1.39it/s]
+Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:02<00:00,  1.13it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.01s/it]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.11it/s]
+
+INFO 10-05 02:32:24.022 [component_loader.py:448] Loading weights took 3.73 seconds
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622] WorkerMultiprocProc failed to start.
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622] Traceback (most recent call last):
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 583, in worker_main
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     worker = WorkerMultiprocProc(*args, **kwargs)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 504, in __init__
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     self.worker.init_device()
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/worker/gpu_worker.py", line 93, in init_device
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     self.pipeline = build_pipeline(self.fastvideo_args)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/pipelines/__init__.py", line 59, in build_pipeline
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     pipeline = pipeline_cls(model_path, fastvideo_args)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/pipelines/composed_pipeline_base.py", line 173, in __init__
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     self.modules = self.load_modules(fastvideo_args, loaded_modules)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/pipelines/composed_pipeline_base.py", line 625, in load_modules
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     module = load_component()
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]              ^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/pipelines/composed_pipeline_base.py", line 614, in load_component
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     return PipelineComponentLoader.load_module(
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/models/loader/component_loader.py", line 1408, in load_module
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     return loader.load(component_model_path, fastvideo_args)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/models/loader/component_loader.py", line 332, in load
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     return self.load_model(
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]            ^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/models/loader/component_loader.py", line 497, in load_model
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     shard_model(
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/root/FastVideo/fastvideo/models/loader/fsdp_load.py", line 575, in shard_model
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     fully_shard(m, **module_kwargs)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/_composable/contract.py", line 152, in wrapper
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     updated = func(inp_module, *args, **kwargs)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fully_shard.py", line 248, in fully_shard
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     _init_param_group(
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py", line 465, in _init_param_group
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     FSDPParamGroup(
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param_group.py", line 152, in __init__
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     FSDPParam(
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param.py", line 208, in __init__
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     return func(*args, **kwargs)
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]            ^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param.py", line 311, in _init_sharded_param
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]     padded_sharded_param = padded_sharded_param.pin_memory()
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622]                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622] torch.AcceleratorError: CUDA error: invalid argument
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622] Search for `cudaErrorInvalidValue' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+ERROR 10-05 02:33:07.551 [multiproc_executor.py:622] 
+ERROR 10-05 02:33:07.554 [multiproc_executor.py:682] Worker 0 initialization failed: CUDA error: invalid argument
+ERROR 10-05 02:33:07.554 [multiproc_executor.py:682] Search for `cudaErrorInvalidValue' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
+ERROR 10-05 02:33:07.554 [multiproc_executor.py:682] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+ERROR 10-05 02:33:07.554 [multiproc_executor.py:682] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+ERROR 10-05 02:33:07.554 [multiproc_executor.py:682] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+ERROR 10-05 02:33:07.554 [multiproc_executor.py:682] 
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643] Worker 0 hit an exception: Traceback (most recent call last):
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 583, in worker_main
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     worker = WorkerMultiprocProc(*args, **kwargs)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/worker/multiproc_executor.py", line 504, in __init__
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     self.worker.init_device()
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/worker/gpu_worker.py", line 93, in init_device
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     self.pipeline = build_pipeline(self.fastvideo_args)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/pipelines/__init__.py", line 59, in build_pipeline
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     pipeline = pipeline_cls(model_path, fastvideo_args)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/pipelines/composed_pipeline_base.py", line 173, in __init__
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     self.modules = self.load_modules(fastvideo_args, loaded_modules)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/pipelines/composed_pipeline_base.py", line 625, in load_modules
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     module = load_component()
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]              ^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/pipelines/composed_pipeline_base.py", line 614, in load_component
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     return PipelineComponentLoader.load_module(
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/models/loader/component_loader.py", line 1408, in load_module
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     return loader.load(component_model_path, fastvideo_args)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/models/loader/component_loader.py", line 332, in load
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     return self.load_model(
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]            ^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/models/loader/component_loader.py", line 497, in load_model
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     shard_model(
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/root/FastVideo/fastvideo/models/loader/fsdp_load.py", line 575, in shard_model
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     fully_shard(m, **module_kwargs)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/_composable/contract.py", line 152, in wrapper
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     updated = func(inp_module, *args, **kwargs)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fully_shard.py", line 248, in fully_shard
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     _init_param_group(
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py", line 465, in _init_param_group
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     FSDPParamGroup(
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param_group.py", line 152, in __init__
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     FSDPParam(
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param.py", line 208, in __init__
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/opt/venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     return func(*args, **kwargs)
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]            ^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]   File "/opt/venv/lib/python3.12/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_param.py", line 311, in _init_sharded_param
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]     padded_sharded_param = padded_sharded_param.pin_memory()
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643]                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643] torch.AcceleratorError: CUDA error: invalid argument
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643] Search for `cudaErrorInvalidValue' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643] CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643] For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643] Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643] 
+ERROR 10-05 02:33:07.555 [multiproc_executor.py:643] 
+[rank0]:[W1005 02:33:08.541749733 ProcessGroupNCCL.cpp:1647] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+/root/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

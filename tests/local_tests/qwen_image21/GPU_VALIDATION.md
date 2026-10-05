@@ -1,6 +1,6 @@
 # Qwen-Image-2.1 GPU validation
 
-Updated: 2026-10-02 UTC. This file records completed checks, their evidence,
+Updated: 2026-10-05 UTC. This file records completed checks, their evidence,
 and the current verification status. Text run records under
 `outputs/qwen_image21/` are preserved in a separate Git commit: logs, JSON
 metrics/specifications, XML reports, source provenance, reproducer scripts,
@@ -410,3 +410,71 @@ Evidence: [successful log](../../../outputs/qwen_image21/t2i-gpu-kv-side-2026100
 [benchmark source](../../../outputs/qwen_image21/t2i-gpu-kv-side-20261002/benchmark.py),
 [first-attempt log](../../../outputs/qwen_image21/t2i-gpu-kv-side-20261002/attempt-1-run.log),
 and [first-attempt metrics](../../../outputs/qwen_image21/t2i-gpu-kv-side-20261002/attempt-1-metrics.json).
+
+## torch.compile T2I benchmark (2026-10-05)
+
+**PASS: one 1024 x 1024, 40-step warmup followed by one timed 40-step T2I
+request.** The successful retry started with no other GPU compute processes.
+It used the pinned Qwen checkpoint, seed 42, BF16, default SDPA, and the prompt
+`A red ceramic teapot on a white studio background, product photography.`
+
+Compilation used the existing DiT block path with `backend=inductor` and
+`fullgraph=False`. Whole/layerwise DiT offload and lazy loading were disabled;
+CUDA prefix KV caching, text/VAE CPU offload, VAE tiling and CPU memory pinning
+remained enabled. Only the DiT was compiled; text encoding and VAE decoding
+remained eager. Stage timers synchronize CUDA before and after each stage.
+
+| Measurement | Successful retry |
+| --- | --- |
+| Generator/model initialization, excluded from request timings | 58.29764 s |
+| Full 40-step warmup, excluded from measured request | **19.57909 s** |
+| Timed request including PNG saving | **15.19754 s** |
+| Encoder + DiT + decoder | **14.56447 s** |
+| Text encoding | 0.57930 s |
+| DiT denoising | **13.15578 s** |
+| VAE decoding | 0.82938 s |
+| PNG save stage | 0.61373 s |
+
+The successful retry reused Inductor disk-cache artifacts created by the
+earlier attempt. Its 19.58 s warmup therefore does not measure compilation
+from an empty compiler cache. Warmup and measurement used the same model
+instance, prompt, seed, dimensions and step count, covering both prefix-cache
+extraction and cached denoising. The worker reported all **32 blocks wrapped**,
+**3 captured graphs**, **329 captured operations**, and **zero graph breaks**.
+The graph/operation counts were unchanged after the timed request, confirming no
+additional graph capture during that measurement.
+
+Both requests produced finite four-channel pixels. Warmup and measured pixel
+tensors were exactly equal (mean/max error zero), and the saved 1024 x 1024
+RGBA image was visually confirmed as a red ceramic teapot. This establishes
+compiled execution and repeatability, not a new numerical comparison against
+eager or upstream. One timed request without a matched eager measurement does
+not establish a controlled speedup or a general latency guarantee.
+
+### Earlier attempts and final configuration
+
+The first attempt failed during text-encoder loading at a pinned-memory
+allocation, before generation or compiled execution. Its cause was not
+established. CPU pinning remained enabled on the final successful retry.
+
+The second attempt **completed its 40-step warmup** in 28.19745 s, then failed
+with CUDA OOM during the timed request. The error recorded another process
+holding 13.88 GiB, this worker using about 16.29 GiB, and only 479 MiB free
+when a further 1.16 GiB allocation was requested. This shared-GPU failure
+does not demonstrate that the compiled model alone exceeds the GPU capacity.
+The subsequent retry on the empty GPU completed successfully.
+
+After the benchmark, the worker shut down and the saved
+[T2I YAML](../../../examples/inference/basic/qwen_image21_t2i.yaml) was verified
+with **`generator.engine.compile.enabled: false`**. The benchmark enables
+compilation through temporary typed overrides; ordinary example execution
+keeps compilation disabled. The text run records are archived with this
+validation update, and the YAML change is in a separate commit. These changes
+have not been pushed.
+
+Evidence: [successful run log](../../../outputs/qwen_image21/compile-20261005/run.log),
+[timings, compile counters and final flag](../../../outputs/qwen_image21/compile-20261005/metrics.json),
+[benchmark source](../../../outputs/qwen_image21/compile-20261005/benchmark_compile.py),
+[initial loading failure](../../../outputs/qwen_image21/compile-20261005/attempt-1-run.log),
+[shared-GPU attempt log](../../../outputs/qwen_image21/compile-20261005/attempt-2-run.log),
+and [shared-GPU attempt metrics](../../../outputs/qwen_image21/compile-20261005/attempt-2-metrics.json).

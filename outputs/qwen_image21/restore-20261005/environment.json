@@ -1,0 +1,12 @@
+{
+  "fastvideo": "0.2.1",
+  "torch": "2.12.0+cu130",
+  "torchvision": "0.27.0+cu130",
+  "torchaudio": "2.11.0+cu130",
+  "transformers": "5.18.0",
+  "tokenizers": "0.23.2",
+  "accelerate": "1.15.0",
+  "flashinfer-python": "0.6.17",
+  "flash-attn-4": "4.0.0b24.dev3+g14c3779",
+  "nvidia-cutlass-dsl": "4.6.0.dev0"
+}

@@ -10,6 +10,7 @@
 | Pipeline | Separate input/text/latent/schedule/denoise/decode stages, strict loading, registry and presets | Exact upstream parity: 40-step plain I2I/editing and 4-step T2I/two-reference generation; functional I2I/editing visually confirmed |
 | Inputs/outputs | Ordered 0–10 refs, edit/ref shortcuts, RGBA preservation, white vision compositing, four-channel PNG allocation | CPU alpha/layout checks; real PNG export gate written |
 | API/CLI | `GenerationRequest`, legacy `generate_video`, two YAML presets and a Python example | Public Python generation PASS; CLI GPU smoke pending |
+| Optional torch.compile | Existing Inductor compilation of the 32 DiT blocks; text/VAE remain eager | 40-step T2I PASS after a full warmup; 14.56 s core / 15.20 s including saving; compiled-versus-eager/upstream parity remains unverified |
 
 The current CUDA results, exact model/reference revisions and persistent run
 logs are recorded in [GPU_VALIDATION.md](GPU_VALIDATION.md). Component parity
@@ -31,6 +32,32 @@ The four-step warmup matched the previously validated upstream baseline
 exactly; forty-step outputs matched each other. Logs and numerical reports are
 preserved separately in Git. Run images/tensors and the upstream source clone
 were local to the original pod and are excluded from this archive.
+
+## torch.compile benchmark (2026-10-05)
+
+One full 1024 x 1024, 40-step T2I warmup was followed by one timed request
+using the same prompt, seed 42 and model instance. With `backend=inductor`,
+`fullgraph=False`, SDPA, resident DiT, CUDA KV cache, text/VAE CPU offload
+and CPU pinning enabled, the measured times were:
+
+- **14.56447 s** for encoder + DiT + decoder, including **13.15578 s** DiT.
+- **15.19754 s** request wall time including PNG saving.
+- **19.57909 s** warmup, reusing existing Inductor disk-cache artifacts.
+- **58.29764 s** model initialization, excluded from both request timings.
+
+The worker confirmed all 32 DiT blocks compiled, three captured graphs and
+zero graph breaks; no new graphs were captured in the timed request. Warmup
+and measured pixel tensors were exactly equal, and the red-teapot output was
+visually checked. This is a successful compiled T2I run, not a matched
+eager/upstream parity gate or a controlled speedup comparison.
+
+An initial text-encoder pinning failure and a later shared-GPU OOM are retained
+in the run logs. The latter completed warmup before failing the timed request
+while another process held 13.88 GiB. The final retry on the empty GPU passed
+with CPU pinning enabled. Compile was restored to **`enabled: false`** in the
+T2I YAML, and the worker exited. The YAML change and compile text records are
+committed separately and have not been pushed. Detailed timings and attempt logs are linked
+from [GPU_VALIDATION.md](GPU_VALIDATION.md#torchcompile-t2i-benchmark-2026-10-05).
 
 ## Original Mac verification
 

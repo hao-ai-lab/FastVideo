@@ -1,0 +1,149 @@
+INFO 10-05 02:53:04.938 [__init__.py:47] CUDA is available
+INFO 10-05 02:53:06.831 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:53:06.832 [multiproc_executor.py:107] Use master port: 37189
+INFO 10-05 02:53:15.637 [__init__.py:47] CUDA is available
+INFO 10-05 02:53:17.429 [parallel_state.py:909] Initializing distributed environment with world_size=1, device=cuda:0
+INFO 10-05 02:53:17.429 [parallel_state.py:737] Using nccl backend for CUDA platform
+[W1005 02:53:17.509239307 ProcessGroupNCCL.cpp:1001] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+INFO 10-05 02:53:17.456 [__init__.py:39] Building pipeline of type: basic
+INFO 10-05 02:53:17.456 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:53:17.456 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:53:17.456 [registry.py:1112] Pinning pipeline class name from QwenImage21Pipeline to QwenImage21Pipeline
+INFO 10-05 02:53:17.456 [pipeline_registry.py:134] Loading pipelines for types: ['basic']
+INFO 10-05 02:53:17.565 [pipeline_registry.py:176] Loaded 55 pipeline classes across 1 types
+INFO 10-05 02:53:17.566 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:53:17.566 [__init__.py:56] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:53:17.566 [profiler.py:198] Torch profiler disabled; returning no-op controller
+INFO 10-05 02:53:17.566 [composed_pipeline_base.py:171] Loading pipeline modules...
+INFO 10-05 02:53:17.566 [utils.py:544] Model already exists locally at /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:53:17.566 [composed_pipeline_base.py:471] Model path: /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3
+INFO 10-05 02:53:17.566 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:53:17.566 [composed_pipeline_base.py:532] Loading pipeline modules from config: {'_class_name': 'QwenImage21Pipeline', '_diffusers_version': '0.37.0.dev0', 'processor': ['transformers', 'Qwen3VLProcessor'], 'scheduler': ['diffusers', 'FlowMatchEulerDiscreteScheduler'], 'text_encoder': ['transformers', 'Qwen3VLForConditionalGeneration'], 'transformer': ['diffusers', 'QwenImage21Transformer2DModel'], 'vae': ['diffusers', 'AutoencoderKLQwenImage21']}
+INFO 10-05 02:53:17.566 [composed_pipeline_base.py:571] Loading required modules: ['processor', 'text_encoder', 'transformer', 'vae', 'scheduler']
+INFO 10-05 02:53:17.566 [component_loader.py:1380] Loading processor using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:53:17.566 [component_loader.py:600] Loading processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:53:18.175 [component_loader.py:605] Loaded processor: Qwen3VLProcessor
+INFO 10-05 02:53:18.175 [composed_pipeline_base.py:626] Loaded module processor from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/processor
+INFO 10-05 02:53:18.175 [component_loader.py:1380] Loading scheduler using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-05 02:53:18.176 [composed_pipeline_base.py:626] Loaded module scheduler from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/scheduler
+INFO 10-05 02:53:18.176 [component_loader.py:1380] Loading text_encoder using transformers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-05 02:53:18.177 [component_loader.py:299] HF Model config: {'architectures': ['Qwen3VLForConditionalGeneration'], 'dtype': 'bfloat16', 'image_token_id': 151655, 'text_config': {'attention_bias': False, 'attention_dropout': 0.0, 'bos_token_id': 151643, 'dtype': 'bfloat16', 'eos_token_id': 151645, 'head_dim': 128, 'hidden_act': 'silu', 'hidden_size': 4096, 'initializer_range': 0.02, 'intermediate_size': 12288, 'max_position_embeddings': 262144, 'model_type': 'qwen3_vl_text', 'num_attention_heads': 32, 'num_hidden_layers': 36, 'num_key_value_heads': 8, 'rms_norm_eps': 1e-06, 'rope_scaling': {'mrope_interleaved': True, 'mrope_section': [24, 20, 20], 'rope_type': 'default'}, 'rope_theta': 5000000, 'use_cache': True, 'vocab_size': 151936}, 'tie_word_embeddings': False, 'video_token_id': 151656, 'vision_config': {'deepstack_visual_indexes': [8, 16, 24], 'depth': 27, 'dtype': 'bfloat16', 'hidden_act': 'gelu_pytorch_tanh', 'hidden_size': 1152, 'in_channels': 3, 'initializer_range': 0.02, 'intermediate_size': 4304, 'model_type': 'qwen3_vl', 'num_heads': 16, 'num_position_embeddings': 2304, 'out_hidden_size': 4096, 'patch_size': 16, 'spatial_merge_size': 2, 'temporal_patch_size': 2}, 'vision_end_token_id': 151653, 'vision_start_token_id': 151652}
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:00,  3.18it/s]
+Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:01<00:01,  1.30it/s]
+Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:02<00:00,  1.11it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.01s/it]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.10it/s]
+
+INFO 10-05 02:53:25.595 [component_loader.py:448] Loading weights took 3.75 seconds
+INFO 10-05 02:53:59.945 [composed_pipeline_base.py:626] Loaded module text_encoder from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/text_encoder
+INFO 10-05 02:53:59.946 [component_loader.py:1380] Loading transformer using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-05 02:53:59.946 [component_loader.py:1042] transformer cls_name: QwenImage21Transformer2DModel
+INFO 10-05 02:53:59.947 [component_loader.py:1094] Loading model from 2 safetensors files: ['/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00002-of-00002.safetensors', '/root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer/diffusion_pytorch_model-00001-of-00002.safetensors']
+INFO 10-05 02:53:59.947 [component_loader.py:1103] Loading model from QwenImage21Transformer2DModel, default_dtype: torch.bfloat16
+INFO 10-05 02:53:59.947 [component_loader.py:1119] Worker 0 transformer attention backend: TORCH_SDPA
+INFO 10-05 02:53:59.947 [fsdp_load.py:228] Loading model with default_dtype: torch.bfloat16
+INFO 10-05 02:53:59.967 [fsdp_load.py:282] Loading transformer weights with to_cpu=False
+Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:01<00:01,  1.04s/it]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:03<00:00,  1.59s/it]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:03<00:00,  1.51s/it]
+
+INFO 10-05 02:54:02.994 [component_loader.py:1155] Loaded model with 7.12B parameters
+INFO 10-05 02:54:02.996 [composed_pipeline_base.py:626] Loaded module transformer from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/transformer
+INFO 10-05 02:54:02.996 [component_loader.py:1380] Loading vae using diffusers from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-05 02:54:05.127 [composed_pipeline_base.py:626] Loaded module vae from /root/.cache/huggingface/hub/models--Qwen--Qwen-Image-2.1/snapshots/d26bb61231c349cf6b7896fa83353113880e1ba3/vae
+INFO 10-05 02:54:05.127 [__init__.py:61] Pipelines instantiated
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.128 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-05 02:54:05.128 [multiproc_executor.py:707] 1 workers ready
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.129 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-05 02:54:05.130 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:54:05.130 [video_generator.py:766] 
+INFO 10-05 02:54:05.130 [video_generator.py:766]                       height: 1024
+INFO 10-05 02:54:05.130 [video_generator.py:766]                        width: 1024
+INFO 10-05 02:54:05.130 [video_generator.py:766]                 video_length: 1
+INFO 10-05 02:54:05.130 [video_generator.py:766]                       prompt: A red ceramic teapot on a white studio background, product photography.
+INFO 10-05 02:54:05.130 [video_generator.py:766]                       image_path: None
+INFO 10-05 02:54:05.130 [video_generator.py:766]                   neg_prompt: None
+INFO 10-05 02:54:05.130 [video_generator.py:766]                         seed: 42
+INFO 10-05 02:54:05.130 [video_generator.py:766]                  infer_steps: 40
+INFO 10-05 02:54:05.130 [video_generator.py:766]        num_videos_per_prompt: 1
+INFO 10-05 02:54:05.130 [video_generator.py:766]               guidance_scale: 1.0
+INFO 10-05 02:54:05.130 [video_generator.py:766]                     n_tokens: 16384
+INFO 10-05 02:54:05.130 [video_generator.py:766]                   flow_shift: None
+INFO 10-05 02:54:05.130 [video_generator.py:766]      embedded_guidance_scale: 6.0
+INFO 10-05 02:54:05.130 [video_generator.py:766]                   save_video: False
+INFO 10-05 02:54:05.130 [video_generator.py:766]                   output_path: /root/FastVideo/outputs/qwen_image21/compile-20261005/warmup.png
+INFO 10-05 02:54:05.130 [video_generator.py:766]         
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.164 [composed_pipeline_base.py:227] Enabled torch.compile for 32 submodules in transformer via _compile_conditions with kwargs={'backend': 'inductor', 'fullgraph': False}
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.164 [composed_pipeline_base.py:329] Torch Compile enabled for DiT
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.164 [composed_pipeline_base.py:388] Creating pipeline stages...
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.164 [composed_pipeline_base.py:758] Running pipeline stages: dict_keys(['input_preparation', 'text_encoding', 'latent_preparation', 'timestep_preparation', 'denoising', 'decoding'])
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.165 [base.py:182] [input_preparation|QwenImage21InputStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.165 [base.py:190] [input_preparation|QwenImage21InputStage] Execution completed in 0.056480001148884185 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:05.165 [base.py:182] [text_encoding|QwenImage21TextEncodingStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:06.869 [base.py:190] [text_encoding|QwenImage21TextEncodingStage] Execution completed in 1704.0416910003842 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:06.870 [base.py:182] [latent_preparation|QwenImage21LatentStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:06.873 [base.py:190] [latent_preparation|QwenImage21LatentStage] Execution completed in 3.8147680006659357 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:06.874 [base.py:182] [timestep_preparation|QwenImage21ScheduleStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:06.875 [base.py:190] [timestep_preparation|QwenImage21ScheduleStage] Execution completed in 1.1236819991609082 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:06.875 [base.py:182] [denoising|QwenImage21DenoisingStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m Denoising:   0%|          | 0/40 [00:00<?, ?it/s]Denoising:   2%|▎         | 1/40 [00:01<01:00,  1.55s/it]Denoising:   5%|▌         | 2/40 [00:02<00:52,  1.38s/it]Denoising:   8%|▊         | 3/40 [00:03<00:33,  1.12it/s]Denoising:  10%|█         | 4/40 [00:03<00:24,  1.49it/s]Denoising:  12%|█▎        | 5/40 [00:03<00:19,  1.84it/s]Denoising:  15%|█▌        | 6/40 [00:04<00:15,  2.13it/s]Denoising:  18%|█▊        | 7/40 [00:04<00:13,  2.37it/s]Denoising:  20%|██        | 8/40 [00:04<00:12,  2.55it/s]Denoising:  22%|██▎       | 9/40 [00:05<00:11,  2.69it/s]Denoising:  25%|██▌       | 10/40 [00:05<00:10,  2.80it/s]Denoising:  28%|██▊       | 11/40 [00:05<00:10,  2.87it/s]Denoising:  30%|███       | 12/40 [00:06<00:09,  2.93it/s]Denoising:  32%|███▎      | 13/40 [00:06<00:09,  2.97it/s]Denoising:  35%|███▌      | 14/40 [00:06<00:08,  2.99it/s]Denoising:  38%|███▊      | 15/40 [00:07<00:08,  3.02it/s]Denoising:  40%|████      | 16/40 [00:07<00:07,  3.03it/s]Denoising:  42%|████▎     | 17/40 [00:07<00:07,  3.04it/s]Denoising:  45%|████▌     | 18/40 [00:08<00:07,  3.04it/s]Denoising:  48%|████▊     | 19/40 [00:08<00:06,  3.05it/s]Denoising:  50%|█████     | 20/40 [00:08<00:06,  3.05it/s]Denoising:  52%|█████▎    | 21/40 [00:09<00:06,  3.04it/s]Denoising:  55%|█████▌    | 22/40 [00:09<00:05,  3.05it/s]Denoising:  57%|█████▊    | 23/40 [00:09<00:05,  3.04it/s]Denoising:  60%|██████    | 24/40 [00:09<00:05,  3.05it/s]Denoising:  62%|██████▎   | 25/40 [00:10<00:04,  3.04it/s]Denoising:  65%|██████▌   | 26/40 [00:10<00:04,  3.06it/s]Denoising:  68%|██████▊   | 27/40 [00:10<00:04,  3.05it/s]Denoising:  70%|███████   | 28/40 [00:11<00:03,  3.05it/s]Denoising:  72%|███████▎  | 29/40 [00:11<00:03,  3.05it/s]Denoising:  75%|███████▌  | 30/40 [00:11<00:03,  3.05it/s]Denoising:  78%|███████▊  | 31/40 [00:12<00:02,  3.05it/s]Denoising:  80%|████████  | 32/40 [00:12<00:02,  3.05it/s]Denoising:  82%|████████▎ | 33/40 [00:12<00:02,  3.05it/s]Denoising:  85%|████████▌ | 34/40 [00:13<00:01,  3.05it/s]Denoising:  88%|████████▊ | 35/40 [00:13<00:01,  3.05it/s]Denoising:  90%|█████████ | 36/40 [00:13<00:01,  3.05it/s]Denoising:  92%|█████████▎| 37/40 [00:14<00:00,  3.05it/s]Denoising:  95%|█████████▌| 38/40 [00:14<00:00,  3.05it/s]Denoising:  98%|█████████▊| 39/40 [00:14<00:00,  3.05it/s]Denoising: 100%|██████████| 40/40 [00:15<00:00,  3.05it/s]Denoising: 100%|██████████| 40/40 [00:15<00:00,  2.63it/s]
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:22.409 [base.py:190] [denoising|QwenImage21DenoisingStage] Execution completed in 15533.42492000047 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:22.410 [base.py:182] [decoding|QwenImage21DecodingStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:23.655 [pinned_offload.py:55] frozen offload: holding 0.68 GB of AutoencoderKLQwenImage21 on the host (pinned)
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:24.618 [base.py:190] [decoding|QwenImage21DecodingStage] Execution completed in 2207.471132000137 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:24.620 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-05 02:54:24.626 [video_generator.py:864] Generated successfully in 19.50 seconds
+INFO 10-05 02:54:24.707 [video_generator.py:920] PostDecodeFrameProcessStage completed in 0.081 s
+INFO 10-05 02:54:24.707 [video_generator.py:1001] End-to-end latency: 19.58 seconds
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:24.709 [multiproc_executor.py:716] Worker 0 starting event loop...
+WARMUP {"wall_seconds": 19.579092936999587, "generation_seconds": 19.495091958999183, "stage_seconds": {"input_preparation": 5.6480001148884185e-05, "text_encoding": 1.7040416910003842, "latent_preparation": 0.0038147680006659357, "timestep_preparation": 0.0011236819991609082, "denoising": 15.53342492000047, "decoding": 2.207471132000137, "PostDecodeFrameProcessStage": 0.08110166100050265}, "encoder_dit_decoder_seconds": 19.44493774300099, "compile": {"enabled": true, "inference_torch_compile": false, "kwargs": {"backend": "inductor", "fullgraph": false}, "wrapped_blocks": 32, "total_blocks": 32, "dynamo_stats": {"calls_captured": 329, "unique_graphs": 3}, "dynamo_frames": {"total": 3, "ok": 3}, "graph_breaks": {}}}
+INFO 10-05 02:54:24.724 [utils.py:691] Diffusers version: 0.37.0.dev0
+INFO 10-05 02:54:24.724 [video_generator.py:766] 
+INFO 10-05 02:54:24.724 [video_generator.py:766]                       height: 1024
+INFO 10-05 02:54:24.724 [video_generator.py:766]                        width: 1024
+INFO 10-05 02:54:24.724 [video_generator.py:766]                 video_length: 1
+INFO 10-05 02:54:24.724 [video_generator.py:766]                       prompt: A red ceramic teapot on a white studio background, product photography.
+INFO 10-05 02:54:24.724 [video_generator.py:766]                       image_path: None
+INFO 10-05 02:54:24.724 [video_generator.py:766]                   neg_prompt: None
+INFO 10-05 02:54:24.724 [video_generator.py:766]                         seed: 42
+INFO 10-05 02:54:24.724 [video_generator.py:766]                  infer_steps: 40
+INFO 10-05 02:54:24.724 [video_generator.py:766]        num_videos_per_prompt: 1
+INFO 10-05 02:54:24.724 [video_generator.py:766]               guidance_scale: 1.0
+INFO 10-05 02:54:24.724 [video_generator.py:766]                     n_tokens: 16384
+INFO 10-05 02:54:24.724 [video_generator.py:766]                   flow_shift: None
+INFO 10-05 02:54:24.724 [video_generator.py:766]      embedded_guidance_scale: 6.0
+INFO 10-05 02:54:24.724 [video_generator.py:766]                   save_video: True
+INFO 10-05 02:54:24.724 [video_generator.py:766]                   output_path: /root/FastVideo/outputs/qwen_image21/compile-20261005/compiled.png
+INFO 10-05 02:54:24.724 [video_generator.py:766]         
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:24.727 [composed_pipeline_base.py:758] Running pipeline stages: dict_keys(['input_preparation', 'text_encoding', 'latent_preparation', 'timestep_preparation', 'denoising', 'decoding'])
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:24.727 [base.py:182] [input_preparation|QwenImage21InputStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:24.727 [base.py:190] [input_preparation|QwenImage21InputStage] Execution completed in 0.06144000144558959 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:24.727 [base.py:182] [text_encoding|QwenImage21TextEncodingStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:25.307 [base.py:190] [text_encoding|QwenImage21TextEncodingStage] Execution completed in 579.2984609997802 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:25.307 [base.py:182] [latent_preparation|QwenImage21LatentStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:25.311 [base.py:190] [latent_preparation|QwenImage21LatentStage] Execution completed in 3.729578000275069 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:25.311 [base.py:182] [timestep_preparation|QwenImage21ScheduleStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:25.312 [base.py:190] [timestep_preparation|QwenImage21ScheduleStage] Execution completed in 0.6965410011616768 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:25.312 [base.py:182] [denoising|QwenImage21DenoisingStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m Denoising:   0%|          | 0/40 [00:00<?, ?it/s]Denoising:   5%|▌         | 2/40 [00:00<00:06,  5.65it/s]Denoising:   8%|▊         | 3/40 [00:00<00:08,  4.18it/s]Denoising:  10%|█         | 4/40 [00:01<00:09,  3.66it/s]Denoising:  12%|█▎        | 5/40 [00:01<00:10,  3.42it/s]Denoising:  15%|█▌        | 6/40 [00:01<00:10,  3.29it/s]Denoising:  18%|█▊        | 7/40 [00:01<00:10,  3.21it/s]Denoising:  20%|██        | 8/40 [00:02<00:10,  3.15it/s]Denoising:  22%|██▎       | 9/40 [00:02<00:09,  3.12it/s]Denoising:  25%|██▌       | 10/40 [00:02<00:09,  3.10it/s]Denoising:  28%|██▊       | 11/40 [00:03<00:09,  3.08it/s]Denoising:  30%|███       | 12/40 [00:03<00:09,  3.07it/s]Denoising:  32%|███▎      | 13/40 [00:03<00:08,  3.05it/s]Denoising:  35%|███▌      | 14/40 [00:04<00:08,  3.04it/s]Denoising:  38%|███▊      | 15/40 [00:04<00:08,  3.04it/s]Denoising:  40%|████      | 16/40 [00:04<00:07,  3.04it/s]Denoising:  42%|████▎     | 17/40 [00:05<00:07,  3.04it/s]Denoising:  45%|████▌     | 18/40 [00:05<00:07,  3.03it/s]Denoising:  48%|████▊     | 19/40 [00:05<00:06,  3.04it/s]Denoising:  50%|█████     | 20/40 [00:06<00:06,  3.03it/s]Denoising:  52%|█████▎    | 21/40 [00:06<00:06,  3.04it/s]Denoising:  55%|█████▌    | 22/40 [00:06<00:05,  3.04it/s]Denoising:  57%|█████▊    | 23/40 [00:07<00:05,  3.04it/s]Denoising:  60%|██████    | 24/40 [00:07<00:05,  3.04it/s]Denoising:  62%|██████▎   | 25/40 [00:07<00:04,  3.04it/s]Denoising:  65%|██████▌   | 26/40 [00:08<00:04,  3.04it/s]Denoising:  68%|██████▊   | 27/40 [00:08<00:04,  3.04it/s]Denoising:  70%|███████   | 28/40 [00:08<00:03,  3.04it/s]Denoising:  72%|███████▎  | 29/40 [00:09<00:03,  3.04it/s]Denoising:  75%|███████▌  | 30/40 [00:09<00:03,  3.03it/s]Denoising:  78%|███████▊  | 31/40 [00:09<00:02,  3.04it/s]Denoising:  80%|████████  | 32/40 [00:10<00:02,  3.04it/s]Denoising:  82%|████████▎ | 33/40 [00:10<00:02,  3.04it/s]Denoising:  85%|████████▌ | 34/40 [00:10<00:01,  3.04it/s]Denoising:  88%|████████▊ | 35/40 [00:11<00:01,  3.04it/s]Denoising:  90%|█████████ | 36/40 [00:11<00:01,  3.04it/s]Denoising:  92%|█████████▎| 37/40 [00:11<00:00,  3.04it/s]Denoising:  95%|█████████▌| 38/40 [00:12<00:00,  3.04it/s]Denoising:  98%|█████████▊| 39/40 [00:12<00:00,  3.04it/s]Denoising: 100%|██████████| 40/40 [00:12<00:00,  3.04it/s]Denoising: 100%|██████████| 40/40 [00:12<00:00,  3.11it/s]
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:38.468 [base.py:190] [denoising|QwenImage21DenoisingStage] Execution completed in 13155.783660000452 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:38.469 [base.py:182] [decoding|QwenImage21DecodingStage] Starting execution
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:39.299 [base.py:190] [decoding|QwenImage21DecodingStage] Execution completed in 829.3846679989656 ms
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:39.300 [multiproc_executor.py:716] Worker 0 starting event loop...
+INFO 10-05 02:54:39.302 [video_generator.py:864] Generated successfully in 14.58 seconds
+INFO 10-05 02:54:39.306 [video_generator.py:920] PostDecodeFrameProcessStage completed in 0.003 s
+INFO 10-05 02:54:39.920 [video_generator.py:947] Saved image to /root/FastVideo/outputs/qwen_image21/compile-20261005/compiled.png
+INFO 10-05 02:54:39.920 [video_generator.py:993] VideoSaveStage completed in 0.614 s
+INFO 10-05 02:54:39.920 [video_generator.py:996] AudioMuxStage completed in 0.000 s
+INFO 10-05 02:54:39.920 [video_generator.py:1001] End-to-end latency: 15.20 seconds
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:39.922 [multiproc_executor.py:716] Worker 0 starting event loop...
+COMPILED {"wall_seconds": 15.197543202000816, "generation_seconds": 14.577870537999843, "stage_seconds": {"input_preparation": 6.144000144558959e-05, "text_encoding": 0.5792984609997802, "latent_preparation": 0.003729578000275069, "timestep_preparation": 0.0006965410011616768, "denoising": 13.155783660000452, "decoding": 0.8293846679989656, "PostDecodeFrameProcessStage": 0.0031226869996316964, "VideoSaveStage": 0.6137285820004763, "AudioMuxStage": 0.0}, "encoder_dit_decoder_seconds": 14.564466788999198, "compile": {"enabled": true, "inference_torch_compile": false, "kwargs": {"backend": "inductor", "fullgraph": false}, "wrapped_blocks": 32, "total_blocks": 32, "dynamo_stats": {"calls_captured": 329, "unique_graphs": 3}, "dynamo_frames": {"total": 3, "ok": 3}, "graph_breaks": {}}}
+INFO 10-05 02:54:39.949 [multiproc_executor.py:347] Shutting down MultiprocExecutor...
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:39.949 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:40.432 [gpu_worker.py:117] Worker 0 shutdown complete
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:40.432 [gpu_worker.py:108] Worker 0 shutting down...
+[1;36m(Worker pid=60540)[0;0m INFO 10-05 02:54:40.775 [gpu_worker.py:117] Worker 0 shutdown complete
+INFO 10-05 02:54:52.188 [multiproc_executor.py:402] MultiprocExecutor shutdown complete
+COMPILE_BENCHMARK {"torch": "2.12.0+cu130", "height": 1024, "width": 1024, "steps": 40, "seed": 42, "backend": "inductor", "fullgraph": false, "attention_backend": "TORCH_SDPA", "dit_offload": false, "dit_layerwise_offload": false, "pin_cpu_memory": true, "kv_cache_device": "cuda", "warmup_requests": 1, "measured_requests": 1, "config_path": "/root/FastVideo/examples/inference/basic/qwen_image21_t2i.yaml", "initialization_seconds": 58.297644980999394, "before_warmup": {"enabled": true, "inference_torch_compile": false, "kwargs": {"backend": "inductor", "fullgraph": false}, "wrapped_blocks": 0, "total_blocks": 32, "dynamo_stats": {}, "dynamo_frames": {}, "graph_breaks": {}}, "warmup": {"wall_seconds": 19.579092936999587, "generation_seconds": 19.495091958999183, "stage_seconds": {"input_preparation": 5.6480001148884185e-05, "text_encoding": 1.7040416910003842, "latent_preparation": 0.0038147680006659357, "timestep_preparation": 0.0011236819991609082, "denoising": 15.53342492000047, "decoding": 2.207471132000137, "PostDecodeFrameProcessStage": 0.08110166100050265}, "encoder_dit_decoder_seconds": 19.44493774300099, "compile": {"enabled": true, "inference_torch_compile": false, "kwargs": {"backend": "inductor", "fullgraph": false}, "wrapped_blocks": 32, "total_blocks": 32, "dynamo_stats": {"calls_captured": 329, "unique_graphs": 3}, "dynamo_frames": {"total": 3, "ok": 3}, "graph_breaks": {}}}, "measured": {"wall_seconds": 15.197543202000816, "generation_seconds": 14.577870537999843, "stage_seconds": {"input_preparation": 6.144000144558959e-05, "text_encoding": 0.5792984609997802, "latent_preparation": 0.003729578000275069, "timestep_preparation": 0.0006965410011616768, "denoising": 13.155783660000452, "decoding": 0.8293846679989656, "PostDecodeFrameProcessStage": 0.0031226869996316964, "VideoSaveStage": 0.6137285820004763, "AudioMuxStage": 0.0}, "encoder_dit_decoder_seconds": 14.564466788999198, "compile": {"enabled": true, "inference_torch_compile": false, "kwargs": {"backend": "inductor", "fullgraph": false}, "wrapped_blocks": 32, "total_blocks": 32, "dynamo_stats": {"calls_captured": 329, "unique_graphs": 3}, "dynamo_frames": {"total": 3, "ok": 3}, "graph_breaks": {}}}, "warmup_vs_measured": {"exact": true, "max_abs": 0.0, "mean_abs": 0.0}, "status": "PASS", "compile_enabled_after_run": false}
