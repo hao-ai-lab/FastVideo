@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Time a resident FastH3 eight-forward Spark recipe with the release prompts.
 
-One process loads the model, then each prompt gets one excluded warmup and at
-least two timed calls. Every call writes a video. This script does not alter
+One process loads the model, runs one excluded ceramics warmup, then times
+each prompt at least twice. Every call writes a video. This script does not alter
 the V2 schedule, VSA sparsity, or video resolution.
 """
 
@@ -67,14 +67,14 @@ def main() -> None:
     parser.add_argument("--prompts", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--model-path", type=Path)
-    parser.add_argument("--frames", type=int, default=243)
+    parser.add_argument("--frames", type=int, default=124)
     parser.add_argument("--width", type=int, default=832)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--repeats", type=int, default=2)
     args = parser.parse_args()
 
     if args.frames not in (124, 243):
-        parser.error("use 124 frames for roughly five seconds or 243 for the ten-second headline")
+        parser.error("use 124 frames for roughly five seconds or 243 for roughly ten seconds")
     if args.repeats < 2:
         parser.error("the release protocol requires at least two timed calls")
 
@@ -99,9 +99,10 @@ def main() -> None:
 
     generator = VideoGenerator.from_config(config.generator)
     try:
-        for prompt_id in PROMPT_IDS:
+        for prompt_index, prompt_id in enumerate(PROMPT_IDS):
             times = []
-            for index in range(args.repeats + 1):
+            first_index = 0 if prompt_index == 0 else 1
+            for index in range(first_index, args.repeats + 1):
                 warmup = index == 0
                 label = "warmup" if warmup else f"run-{index:02d}"
                 requested_path = args.output_dir / f"{prompt_id}-{args.width}x{args.height}-{args.frames}-{label}.mp4"

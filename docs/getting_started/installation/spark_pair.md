@@ -149,6 +149,29 @@ fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yam
 
 Stop the cluster when you are done: `ray stop` on both nodes.
 
+## Released V2 and Trim NVFP4 stacks
+
+The public eight-forward V2 and Trim stacks include the NVFP4 encoder and
+lightweight video VAE. Use the environment above plus the release kernel
+settings, then run one of these configs from the head:
+
+```bash
+export FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass
+export FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1
+export FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0
+export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1
+fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair_v2_nvfp4.yaml
+# Or basic_fasth3_spark_pair_pruned_nvfp4.yaml for FastH3 Trim.
+```
+
+Both configs use their released Hugging Face model paths, `h3_dit_vsa`,
+832x480, 124 frames, seed 1234, VSA 0.8 and 64-token tiles. All components
+stay resident; lazy/sequential loading and compilation are disabled for
+these compact stacks. The older BF16/Preview memory guidance below applies
+to those larger stacks. Set 1344x768 for native 768p with the same 124 frames.
+See [the resident release recipe](spark_performance.md#fasth3-v2-nvfp4-on-one-spark)
+for checkpoint contents and the timing protocol.
+
 ## FastH3 frame counts
 
 H3 is 24 fps. Legal `num_frames` values are `17n+5`. The pipeline rejects

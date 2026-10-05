@@ -1,22 +1,23 @@
-# FastH3 pruned ckpt300 eight-forward video+audio on one DGX Spark.
+# FastH3 Trim eight-forward video+audio on one DGX Spark.
 # Download the complete checkpoint, including its trained schedule, as described in
 # docs/getting_started/installation/spark_performance.md.
 #
-# GB10 uses Triton VSA. The packed transformer uses NVFP4 FFN weights with bf16 attention
-# and VSA gates (layer_profile: h3_dit_ffn). No temporal or spatial fast mode.
+# GB10 uses Triton VSA. The release packs attention, FFN and VSA gate weights.
+# The NVFP4 encoder and lightweight VAE ship in the same repository.
 #
 # FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass \
+# FASTVIDEO_H3_VAE_TILE_BATCH=1 \
 # FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml
 generator:
-  model_path: FastVideo/FastH3-Pruned-8Step-NVFP4-ckpt300
+  model_path: FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4
   engine:
     num_gpus: 1
     use_fsdp_inference: false
     quantization:
       transformer_quant: NVFP4
-      layer_profile: h3_dit_ffn
+      layer_profile: h3_dit_vsa
     parallelism:
       tp_size: 1
       sp_size: 1
@@ -46,10 +47,10 @@ request:
   prompt: A quiet pottery studio with a potter finishing a bowl at the wheel.
   negative_prompt: ""
   sampling:
-    seed: 2026
+    seed: 1234
     height: 480
     width: 832
-    num_frames: 243
+    num_frames: 124
     fps: 24
     num_inference_steps: 9  # nine sigma points, eight DiT forwards
     guidance_scale: 1.0
