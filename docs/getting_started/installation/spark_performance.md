@@ -303,42 +303,26 @@ The prompt JSON must contain `latency-ceramics-005` and
 `latency-harbor-005`. Pass `--width 1344 --height 768` for the native 768p
 protocol. Use the Trim repository and config for its corresponding run.
 
-### Historical eight-forward controls
+### Released model measurements
 
-Measured on October 4, 2026, with the trained eight-forward ladder, VSA 0.8,
-832x480 native video, the 50-layer NVFP4 encoder and light video/audio VAEs
-resident. Each cell is the median of two timed calls after one warmup, in
-seconds, for `latency-ceramics-005` / `latency-harbor-005`, seed 2026.
+The released Trim stack at revision `cae9ceb6feefe77d34a56640782cda3909363f19`
+completed the native 832x480, 124-frame protocol on one Spark, seed 1234.
+The tested code is `6ccdbc761e6b854003f472e39b826c06cb54de60`, using the
+resident recipe above. Medians exclude warmups and cover finished MP4 output.
 
-| Model | Frames | One Spark | Two Sparks, SP2 |
-|---|---:|---:|---:|
-| Pruned ckpt300, FFN NVFP4 | 124 | 134.361 / 134.675 | **78.245 / 78.272** |
-| Pruned ckpt300, FFN NVFP4 | 243 | 284.188 / 280.593 | **165.987 / 163.001** |
-| Full V2, NVFP4 FFN/attention/gates | 124 | 142.460 / 140.425 | **88.356 / 86.101** |
-| Full V2, NVFP4 FFN/attention/gates | 243 | 308.204 / 306.141 | **179.876 / 180.213** |
+| Released model | Resolution | One Spark, ceramics / harbor | Two Sparks |
+|---|---|---:|---|
+| FastH3 Trim NVFP4 | 832x480 | 124.090 / 127.519 s | Pending |
+| FastH3 Trim NVFP4 | 1344x768 | Review pending | Pending |
+| FastH3 V2 NVFP4-Consumer | 832x480 | Repeatability review pending | Pending |
+| FastH3 V2 NVFP4-Consumer | 1344x768 | Review pending | Pending |
 
-The base integrates upstream main `0cc41a22` with experimental NVFP4 support.
-One-Spark tested commits are `6d6b57fe` (pruned 124), `3f24557a` (pruned 243,
-with `CUDA_LAUNCH_BLOCKING=1`), `f5126f78` (V2 124) and `6e9d7a0b` (V2 243).
-The final pair uses `715d4a5f`, with matching actual-worker code fingerprints,
-CUTLASS FP4 GEMMs and Triton VSA. Light-VAE tile batch is 8 on one Spark and 1
-on the pair; pair batch 8 was slower at 124 frames (79.993 / 80.022 s pruned).
-All offload/deferred-loading and compile options are disabled. The pair uses
-QSFP RoCE, SP2/TP1 and parallel VAE gathering. These are historical controls, not measurements of the new recipe defaults.
-The pruned rows used the earlier FFN-only export, and all rows used seed
-2026 with the indicated frame counts. Public Trim packs attention and gates
-too; its recipe now defaults to seed 1234 and 124 frames.
-
-Every final pair warmup and repeat has correct dimensions/frame count, coherent
-sampled frames and identical full decoded-video hashes within its prompt.
-The V2 one-Spark 124-frame harbor warmup differs from the timed clips but remains
-coherent. These checks establish repeat reliability for the tested recipes;
-BF16 reference parity, speech accuracy and lip sync need separate review.
-
-The [older H3 local blog](https://haoailab.com/blogs/fasth3-local/) reports
-243 s on one Spark and 209 s on two Sparks at 124 frames. It uses the four-step
-Preview checkpoint and full VAE, so the old and new values are context, not a
-matched optimization comparison. It has no matching 243-frame baseline.
+The completed Trim 480p batch used one extra untimed harbor warmup in the
+same process, six calls total. Both warmups are excluded from the medians.
+Each prompt's three decoded videos and audio streams match exactly, and
+sampled frames are coherent. These checks do not establish BF16 parity,
+speech accuracy or lip sync. Pending cells are not measured substitutes
+from older checkpoints.
 
 ## Reproduce these numbers
 
