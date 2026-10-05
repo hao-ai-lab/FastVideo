@@ -62,8 +62,8 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert config.engine.attention.vsa_sparsity == 0.9
     assert config.engine.attention.vsa_tile_size == 64
     assert config.engine.compile.regional is True
-    assert config.pipeline.minimax_h3.vae_parallel_decode is True
-    assert config.pipeline.minimax_h3.vae_parallel_decode_strategy == "gather"
+    assert config.pipeline.model.vae_parallel_decode is True
+    assert config.pipeline.model.vae_parallel_decode_strategy == "gather"
 
     assert environment["FASTVIDEO_VSA_SM100A"] == "1"
     assert environment["FASTVIDEO_VSA_CUTEDSL"] == "0"
@@ -142,13 +142,13 @@ def test_strict_profile_changes_only_non_parity_fusions():
 
 def test_h3_sequential_load_is_opt_in():
     default = fasth3.build_generator_config(_args())
-    assert default.pipeline.minimax_h3.sequential_load is None
+    assert default.pipeline.model.sequential_load is None
 
     enabled = fasth3.build_generator_config(_args("--h3-sequential-load"))
-    assert enabled.pipeline.minimax_h3.sequential_load is True
+    assert enabled.pipeline.model.sequential_load is True
 
     disabled = fasth3.build_generator_config(_args("--no-h3-sequential-load"))
-    assert disabled.pipeline.minimax_h3.sequential_load is False
+    assert disabled.pipeline.model.sequential_load is False
 
 
 def test_opt_outs_override_inherited_environment(monkeypatch):
@@ -182,7 +182,7 @@ def test_opt_outs_override_inherited_environment(monkeypatch):
     assert fasth3.os.environ["FASTVIDEO_VAE_PARALLEL_DECODE"] == "0"
     assert fasth3.os.environ["FASTVIDEO_ULYSSES_A2A"] == "off"
     assert config.engine.compile.vae_enabled is False
-    assert config.pipeline.minimax_h3.vae_parallel_decode is False
+    assert config.pipeline.model.vae_parallel_decode is False
     assert config.engine.use_fsdp_inference is True
     assert config.engine.offload.pin_cpu_memory is False
 
@@ -264,8 +264,8 @@ def test_taeh3_backend_is_opt_in():
     default = fasth3.build_generator_config(_args())
     taeh3 = fasth3.build_generator_config(_args("--video-decode-backend", "taeh3"))
 
-    assert default.pipeline.minimax_h3.video_decode_backend is None
-    assert taeh3.pipeline.minimax_h3.video_decode_backend == "taeh3"
+    assert default.pipeline.model.video_decode_backend is None
+    assert taeh3.pipeline.model.video_decode_backend == "taeh3"
 
 
 EIGHT_STEP_EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_fasth3_8step.py"

@@ -317,7 +317,7 @@ gen.generate(request={"prompt": "A raccoon in sunflowers", "output": {"save_vide
 
 `engine.quantization.transformer_quant` takes a quantization registry name and builds that config with its default
 arguments. To pass constructor arguments, such as per-channel granularity, set the config instance on the DiT config
-through `pipeline.dit` instead:
+through `pipeline.model.generic.dit` instead:
 
 ```python
 from fastvideo import VideoGenerator
@@ -326,7 +326,11 @@ from fastvideo.layers.quantization import get_quantization_config
 gen = VideoGenerator.from_config({
     "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "pipeline": {
-        "dit": {"quant_config": get_quantization_config("FP8")(granularity="channel")},  # slower, higher accuracy
+        "model": {
+            "generic": {
+                "dit": {"quant_config": get_quantization_config("FP8")(granularity="channel")},  # slower, higher accuracy
+            },
+        },
     },
 })
 ```

@@ -84,7 +84,7 @@ def _args(pin: bool, offload: bool = True):
     )
     return make_resolved_config(pipeline_config, raw={
         "engine": {"offload": {"pin_cpu_memory": pin, "vae": offload}},
-        "pipeline": {"minimax_h3": {"vae_parallel_encode": False}},
+        "pipeline": {"model": {"minimax_h3": {"vae_parallel_encode": False}}},
     })
 
 

@@ -121,8 +121,8 @@ def test_ltx2_distilled_inference_similarity(
         full_cosine_threshold=FULL_COSINE_DISTANCE_THRESHOLD,
         init_kwargs_override={
             "engine.offload.dit": True,
-            "pipeline.ltx2.legacy_native_noise_order": True,
-            "pipeline.ltx2.use_distilled_sigmas": False,
+            "pipeline.model.ltx2.legacy_native_noise_order": True,
+            "pipeline.model.ltx2.use_distilled_sigmas": False,
         },
         generation_kwargs_override=LTX2_DISTILLED_REFERENCE_GUIDANCE_OVERRIDES,
     )

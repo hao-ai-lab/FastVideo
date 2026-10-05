@@ -7,6 +7,9 @@ from fastvideo.api.schema import AttentionConfig, EngineConfig, GeneratorConfig,
 from fastvideo.tests.api.config_snapshot import isolated_environment
 
 WAN_T2V = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+LTX2 = "FastVideo/LTX2-Distilled-Diffusers"
+MINIMAX_H3 = "FastVideo/FastVideo-FastH3-8-Step-V2"
+LONGCAT = "FastVideo/LongCat-Video-T2V-Diffusers"
 
 
 def _resolve(raw, env_values=None):
@@ -38,7 +41,7 @@ def test_unsupported_environment_attention_backend_raises():
 
 def test_environment_turns_on_regional_compile_and_parallel_vae():
     resolved = _resolve(
-        {"model_path": WAN_T2V},
+        {"model_path": MINIMAX_H3},
         {
             "FASTVIDEO_INFERENCE_TORCH_COMPILE": True,
             "FASTVIDEO_VAE_PARALLEL_DECODE": True,
@@ -47,18 +50,67 @@ def test_environment_turns_on_regional_compile_and_parallel_vae():
     )
 
     assert resolved.engine.compile.regional is True
-    assert resolved.pipeline.minimax_h3.vae_parallel_decode is True
-    assert resolved.pipeline.minimax_h3.vae_parallel_encode is False
-    assert resolved.provenance("pipeline.minimax_h3.vae_parallel_encode").source == "fill_runtime_defaults"
-    assert resolved.pipeline.minimax_h3.vae_parallel_decode_strategy == "all_gather"
+    assert resolved.pipeline.model.vae_parallel_decode is True
+    assert resolved.pipeline.model.vae_parallel_encode is False
+    assert resolved.provenance("pipeline.model.vae_parallel_encode").source == "fill_runtime_defaults"
+    assert resolved.pipeline.model.vae_parallel_decode_strategy == "all_gather"
     assert resolved.provenance("engine.compile.regional").source == "fill_regional_compile_from_env"
 
 
 def test_decode_strategy_defaults_to_gather():
-    resolved = _resolve({"model_path": WAN_T2V})
+    resolved = _resolve({"model_path": MINIMAX_H3})
 
-    provenance = resolved.provenance("pipeline.minimax_h3.vae_parallel_decode_strategy")
+    provenance = resolved.provenance("pipeline.model.vae_parallel_decode_strategy")
     assert (provenance.value, provenance.source) == ("gather", "fill_vae_parallel_from_env")
+
+
+def test_parallel_vae_environment_decides_nothing_for_another_family():
+    resolved = _resolve({"model_path": WAN_T2V}, {"FASTVIDEO_VAE_PARALLEL_DECODE": True})
+
+    assert resolved.pipeline.model.family == "generic"
+    assert [source for source, _ in resolved.decisions if source == "fill_vae_parallel_from_env"] == []
+
+
+@pytest.mark.parametrize(("model_path", "family", "options_type"), [
+    (LTX2, "ltx2", "LTX2Options"),
+    (MINIMAX_H3, "minimax_h3", "MiniMaxH3Options"),
+    (LONGCAT, "longcat", "LongCatOptions"),
+    (WAN_T2V, "generic", "GenericModelOptions"),
+])
+def test_fill_model_family_fills_the_family_block_of_the_model(model_path, family, options_type):
+    resolved = _resolve({"model_path": model_path})
+
+    model = resolved.pipeline.model
+    assert model.family == family
+    assert type(resolved.to_config().pipeline.model).__name__ == options_type
+    assert (model.dit, model.vae) == ({}, {})
+    assert resolved.provenance("pipeline.model").source == f"fill_model_family[{family}]"
+    assert resolved.provenance("pipeline.model").explicit is False
+
+
+def test_generic_block_on_a_family_model_becomes_the_family_block_with_its_overrides():
+    resolved = _resolve({"model_path": LTX2, "pipeline": {"model": {"generic": {"dit": {"prefix": "dit"}}}}})
+
+    assert resolved.pipeline.model.family == "ltx2"
+    assert resolved.pipeline.model.dit == {"prefix": "dit"}
+    assert resolved.pipeline.model.refine.enabled is False
+    assert resolved.provenance("pipeline.model.dit.prefix").explicit is True
+    assert resolved.pipeline_config.dit_config.prefix == "dit"
+
+
+def test_validate_model_family_names_the_registry_family():
+    with pytest.raises(ValueError, match=r"pipeline\.model\.ltx2 does not apply to .*WanT2V480PConfig.*pipeline\.model\.generic"):
+        _resolve({"model_path": WAN_T2V, "pipeline": {"model": {"ltx2": {"refine": {"enabled": True}}}}})
+    with pytest.raises(ValueError, match=r"pipeline\.model\.longcat does not apply to .*pipeline\.model\.minimax_h3"):
+        _resolve({"model_path": MINIMAX_H3, "pipeline": {"model": {"longcat": {"enable_bsa": True}}}})
+
+
+def test_written_family_block_is_explicit_without_its_tag():
+    resolved = _resolve({"model_path": LTX2, "pipeline": {"model": {"ltx2": {"refine": {"lora_path": ""}}}}})
+
+    assert resolved.is_explicit("pipeline.model.refine.lora_path") is True
+    assert resolved.is_explicit("pipeline.model.refine.enabled") is False
+    assert resolved.provenance("pipeline.model.refine.lora_path").source == "input"
 
 
 @pytest.mark.parametrize(("parallelism", "expected"), [
@@ -105,6 +157,8 @@ def test_environment_takes_precedence_over_model_defaults():
 
     names = [step.__qualname__ for step in inference_resolution_steps(GeneratorConfig(model_path=WAN_T2V))]
     assert names == [
+        "validate_model_family",
+        "fill_model_family[generic]",
         "fill_attention_backend_from_env",
         "fill_regional_compile_from_env",
         "fill_vae_parallel_from_env",
@@ -152,8 +206,8 @@ def test_video_generator_keeps_the_resolved_config(monkeypatch):
 
 
 @pytest.mark.parametrize(("pipeline", "expected"), [
-    ({"ltx2": {"vae_spatial_tile_size_in_pixels": 512}}, (True, "derive_vae_tiling_from_ltx2_tile_sizes")),
-    ({"ltx2": {"vae_spatial_tile_size_in_pixels": 512}, "vae_tiling": False}, (False, "input")),
+    ({"model": {"ltx2": {"vae_spatial_tile_size_in_pixels": 512}}}, (True, "derive_vae_tiling_from_ltx2_tile_sizes")),
+    ({"model": {"ltx2": {"vae_spatial_tile_size_in_pixels": 512}}, "vae_tiling": False}, (False, "input")),
     ({}, (True, "fill_vae_tiling_default[LTX2T2VConfig]")),
 ])
 def test_ltx2_tile_sizes_turn_on_unset_vae_tiling(pipeline, expected):

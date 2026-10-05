@@ -70,9 +70,11 @@ def main():
                 "components": {
                     "upsampler_weights": str(refine_upsampler_path),
                 },
-                "ltx2": {
-                    "refine": {
-                        "lora_path": "",  # disable refine LoRA for distilled model
+                "model": {
+                    "ltx2": {
+                        "refine": {
+                            "lora_path": "",  # disable refine LoRA for distilled model
+                        },
                     },
                 },
                 "preset_overrides": {

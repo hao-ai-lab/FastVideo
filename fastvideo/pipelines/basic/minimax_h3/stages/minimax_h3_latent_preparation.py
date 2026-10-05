@@ -129,7 +129,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         # uniform by construction: each rank encodes a clip subset and the
         # all-gather leaves the identical full posterior everywhere.
         parallel_group = None
-        if resolved_config.pipeline.minimax_h3.vae_parallel_encode and model_parallel_is_initialized():
+        if resolved_config.pipeline.model.vae_parallel_encode and model_parallel_is_initialized():
             sp_group = get_sp_group()
             if sp_group.world_size > 1:
                 parallel_group = sp_group

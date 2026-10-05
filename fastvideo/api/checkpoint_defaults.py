@@ -25,16 +25,16 @@ logger = init_logger(__name__)
 
 # Refine component paths, by the model_index.json key that supplies the checkpoint's default.
 LTX2_REFINE_PATH_KEYS = {
-    "pipeline.ltx2.refine.transformer_path": "fastvideo_refine_transformer_path",
-    "pipeline.ltx2.refine.lora_path": "fastvideo_refine_lora_path",
-    "pipeline.ltx2.refine.noise_path": "fastvideo_refine_noise_path",
-    "pipeline.ltx2.refine.audio_noise_path": "fastvideo_refine_audio_noise_path",
+    "pipeline.model.refine.transformer_path": "fastvideo_refine_transformer_path",
+    "pipeline.model.refine.lora_path": "fastvideo_refine_lora_path",
+    "pipeline.model.refine.noise_path": "fastvideo_refine_noise_path",
+    "pipeline.model.refine.audio_noise_path": "fastvideo_refine_audio_noise_path",
 }
 # Refine switches, by the model_index.json key that supplies the checkpoint's default and the value's type.
 LTX2_REFINE_SWITCH_KEYS = (
-    ("pipeline.ltx2.refine.num_inference_steps", "fastvideo_refine_num_inference_steps", int),
-    ("pipeline.ltx2.refine.guidance_scale", "fastvideo_refine_guidance_scale", float),
-    ("pipeline.ltx2.refine.add_noise", "fastvideo_refine_add_noise", bool),
+    ("pipeline.model.refine.num_inference_steps", "fastvideo_refine_num_inference_steps", int),
+    ("pipeline.model.refine.guidance_scale", "fastvideo_refine_guidance_scale", float),
+    ("pipeline.model.refine.add_noise", "fastvideo_refine_add_noise", bool),
 )
 # Directory names under which published LTX-2 checkpoints bundle the refine upsampler without declaring it.
 _UPSAMPLER_DIRECTORY_NAMES = ("spatial_upscaler", "spatial_upsampler")
@@ -136,8 +136,8 @@ def ltx2_refine_checkpoint_step(defaults: Any) -> ResolutionStep:
             return {}
         root = _ltx2_checkpoint_root(model_path, revision, model_index)
         values: dict[str, Any] = {}
-        if model_index.get("fastvideo_refine_enabled") is True and view.get("pipeline.ltx2.refine.enabled") is None:
-            values["pipeline.ltx2.refine.enabled"] = True
+        if model_index.get("fastvideo_refine_enabled") is True and view.get("pipeline.model.refine.enabled") is None:
+            values["pipeline.model.refine.enabled"] = True
         if view.get("pipeline.components.upsampler_weights") is None:
             upsampler_path = _resolve_refine_upsampler_path(root, model_index)
             if upsampler_path is not None:

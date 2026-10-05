@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 
 class ExecutionMode(str, Enum):
@@ -226,9 +226,32 @@ class LTX2RefineOptions:
 
 
 @dataclass
-class LTX2Options:
-    """LTX-2 settings. ``None`` keeps the model's default."""
+class ModelOptions:
+    """Settings of one model family, written as ``pipeline.model`` with exactly one key that names the family.
 
+    ``ModelOptions`` is a tagged union: the parser reads the single key of the mapping, looks the family up in
+    ``TAGS``, and parses the key's value as that family's options class, so a ``pipeline.model`` value is always an
+    instance of one of the ``TAGS`` classes with ``family`` set to its tag. The ``family`` key itself is not written
+    in the input. ``dit`` and ``vae`` hold overrides for fields of the model's DiT and VAE arch configs, such as
+    ``prefix`` or ``load_encoder``; the families add their own settings.
+    """
+
+    TAGS: ClassVar[dict[str, type[ModelOptions]]]
+    family: str = "generic"
+    dit: dict[str, Any] = field(default_factory=dict)
+    vae: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class GenericModelOptions(ModelOptions):
+    """The ``generic`` block: arch overrides for a model that has no family settings, such as Wan."""
+
+
+@dataclass
+class LTX2Options(ModelOptions):
+    """The ``ltx2`` block: LTX-2 settings. ``None`` keeps the model's default."""
+
+    family: str = "ltx2"
     vae_spatial_tile_size_in_pixels: int | None = None
     vae_spatial_tile_overlap_in_pixels: int | None = None
     vae_temporal_tile_size_in_frames: int | None = None
@@ -245,9 +268,10 @@ class LTX2Options:
 
 
 @dataclass
-class MiniMaxH3Options:
-    """MiniMax-H3 settings. ``None`` keeps the model's default."""
+class MiniMaxH3Options(ModelOptions):
+    """The ``minimax_h3`` block: MiniMax-H3 settings. ``None`` keeps the model's default."""
 
+    family: str = "minimax_h3"
     sequential_load: bool | None = None
     """Encode with Qwen3-VL, release that encoder, then load the DiT and VAEs. ``None`` enables it on
     unified-memory devices only."""
@@ -269,9 +293,10 @@ class MiniMaxH3Options:
 
 
 @dataclass
-class LongCatOptions:
-    """LongCat block sparse attention (BSA) settings. ``None`` keeps the model's default."""
+class LongCatOptions(ModelOptions):
+    """The ``longcat`` block: LongCat block sparse attention (BSA) settings. ``None`` keeps the model's default."""
 
+    family: str = "longcat"
     enable_bsa: bool | None = None
     bsa_sparsity: float | None = None
     bsa_cdf_threshold: float | None = None
@@ -279,6 +304,14 @@ class LongCatOptions:
     """Query chunk shape as ``[T, H, W]``."""
     bsa_chunk_k: list[int] | None = None
     """Key chunk shape as ``[T, H, W]``."""
+
+
+ModelOptions.TAGS = {
+    "generic": GenericModelOptions,
+    "ltx2": LTX2Options,
+    "minimax_h3": MiniMaxH3Options,
+    "longcat": LongCatOptions,
+}
 
 
 @dataclass
@@ -301,13 +334,10 @@ class PipelineSelection:
     """Mixture-of-experts switch point of a two-transformer model. ``None`` keeps the model's default."""
     output_type: str = "pil"
     """Output of the decoding stage: ``pil`` for decoded frames, ``latent`` to skip the VAE decode."""
-    dit: dict[str, Any] = field(default_factory=dict)
-    """Overrides for fields of the model's DiT config, such as ``prefix``."""
-    vae: dict[str, Any] = field(default_factory=dict)
-    """Overrides for fields of the model's VAE config, such as ``load_encoder`` or ``use_tiling``."""
-    ltx2: LTX2Options = field(default_factory=LTX2Options)
-    minimax_h3: MiniMaxH3Options = field(default_factory=MiniMaxH3Options)
-    longcat: LongCatOptions = field(default_factory=LongCatOptions)
+    model: ModelOptions | None = None
+    """Model-family settings and arch overrides, keyed by the family: ``ltx2``, ``minimax_h3``, ``longcat``, or
+    ``generic``. The family must be the one that the registry picks for ``model_path``, or ``generic``. Resolution
+    fills the family's empty block when the field is unset, so a resolved config always has ``pipeline.model``."""
     preset_overrides: dict[str, Any] = field(default_factory=dict)
     experimental: dict[str, Any] = field(default_factory=dict)
 
@@ -506,12 +536,14 @@ __all__ = [
     "GenerationPlan",
     "GenerationRequest",
     "GeneratorConfig",
+    "GenericModelOptions",
     "GpuPoolConfig",
     "InputConfig",
     "LTX2Options",
     "LTX2RefineOptions",
     "LongCatOptions",
     "MiniMaxH3Options",
+    "ModelOptions",
     "OffloadConfig",
     "OutputConfig",
     "ParallelismConfig",

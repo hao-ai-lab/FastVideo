@@ -89,7 +89,7 @@ def _apply_h3_checkpoint_arch_configs(model_path: str, resolved_config: Resolved
 
 def _use_taeh3_t2va(resolved_config: ResolvedGeneratorConfig | None, *, ref2va: bool) -> bool:
     return (not ref2va and resolved_config is not None
-            and resolved_config.pipeline.minimax_h3.video_decode_backend == "taeh3")
+            and resolved_config.pipeline.model.video_decode_backend == "taeh3")
 
 
 class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
@@ -219,7 +219,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if resolved_config.engine.offload.lazy_module_load:
             logger.info("MiniMax-H3 sequential module load off: lazy_module_load owns deferral")
             return False
-        requested = resolved_config.pipeline.minimax_h3.sequential_load
+        requested = resolved_config.pipeline.model.sequential_load
         if requested is True:
             return True
         if requested is False:

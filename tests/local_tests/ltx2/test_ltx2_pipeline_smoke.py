@@ -173,7 +173,7 @@ def test_ltx2_pipeline_smoke():
             },
             "pipeline": {
                 "vae_tiling": False,
-                "ltx2": {"initial_latent_path": latent_path},
+                "model": {"ltx2": {"initial_latent_path": latent_path}},
             },
         })
         result = generator.generate({

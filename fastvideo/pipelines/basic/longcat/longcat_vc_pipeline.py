@@ -48,7 +48,7 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
     def initialize_pipeline(self, resolved_config: ResolvedGeneratorConfig):
         """Initialize LongCat-specific components."""
         pipeline_config = resolved_config.pipeline_config
-        bsa_options = resolved_config.pipeline.longcat
+        bsa_options = resolved_config.pipeline.model
         transformer = self.get_module("transformer", None)
         if transformer is None:
             return

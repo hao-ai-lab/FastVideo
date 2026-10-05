@@ -277,7 +277,7 @@ def build_generator_config(args) -> "GeneratorConfig":
             workload_type=args.workload or "t2v",
             preset=args.preset,  # e.g. "ltx2_two_stage"
             components=ComponentConfig(upsampler_weights=args.refine_upsampler),
-            ltx2=LTX2Options(refine=LTX2RefineOptions(lora_path=args.refine_lora)),
+            model=LTX2Options(refine=LTX2RefineOptions(lora_path=args.refine_lora)),
         ),
     )
 ```

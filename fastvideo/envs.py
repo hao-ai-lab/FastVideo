@@ -363,12 +363,12 @@ FASTVIDEO_VAE_PARALLEL_DECODE = EnvBool(
     False,
     category="performance",
     doc="MiniMax-H3 VAE decode splits its temporal chunks across the sequence-parallel ranks instead of running "
-    "serially on the output rank. Same as pipeline.minimax_h3.vae_parallel_decode=True.")
+    "serially on the output rank. Same as pipeline.model.minimax_h3.vae_parallel_decode=True.")
 FASTVIDEO_VAE_PARALLEL_ENCODE = EnvBool(
     False,
     category="performance",
     doc="MiniMax-H3 reference-video VAE encode splits its temporal chunks across the sequence-parallel ranks. "
-    "Same as pipeline.minimax_h3.vae_parallel_encode=True.")
+    "Same as pipeline.model.minimax_h3.vae_parallel_encode=True.")
 FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY = EnvStr(
     None,
     category="performance",
@@ -496,7 +496,7 @@ FASTVIDEO_CFG_GATE_STEP = EnvFloat(
 FASTVIDEO_LTX2_USE_DISTILLED_SIGMAS = EnvBool(
     True,
     category="sampling",
-    doc="LTX-2 uses the distilled sigma schedule when pipeline.ltx2.use_distilled_sigmas is also true.",
+    doc="LTX-2 uses the distilled sigma schedule when pipeline.model.ltx2.use_distilled_sigmas is also true.",
     deprecated_names=("LTX2_USE_DISTILLED_SIGMAS", ))
 
 # ================== Evaluation ==================

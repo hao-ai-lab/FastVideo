@@ -24,9 +24,10 @@ generator:
       vsa_tile_size: 64
   pipeline:
     workload_type: t2v
-    minimax_h3:
-      vae_parallel_decode: true
-      vae_parallel_decode_strategy: gather
+    model:
+      minimax_h3:
+        vae_parallel_decode: true
+        vae_parallel_decode_strategy: gather
 
 server:
   host: 0.0.0.0

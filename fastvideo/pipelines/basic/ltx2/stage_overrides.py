@@ -9,7 +9,7 @@
 The refine upsampler path lives on
 :class:`~fastvideo.api.schema.ComponentConfig` (``upsampler_weights``), and the
 refine LoRA path on :class:`~fastvideo.api.schema.LTX2RefineOptions`
-(``pipeline.ltx2.refine.lora_path``).
+(``pipeline.model.ltx2.refine.lora_path``).
 """
 from __future__ import annotations
 

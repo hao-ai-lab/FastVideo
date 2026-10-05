@@ -27,9 +27,10 @@ generator:
       lora_path: /path/to/adapter_model.safetensors
       lora_nickname: fasth3-dense-datafree
       lora_strength: 1.0
-    minimax_h3:
-      vae_parallel_decode: true
-      vae_parallel_decode_strategy: gather
+    model:
+      minimax_h3:
+        vae_parallel_decode: true
+        vae_parallel_decode_strategy: gather
 
 server:
   host: 0.0.0.0

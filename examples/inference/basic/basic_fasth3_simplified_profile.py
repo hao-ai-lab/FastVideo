@@ -63,7 +63,7 @@ def main() -> None:
             model_path="MiniMaxAI/MiniMax-H3",
             pipeline=PipelineSelection(
                 components=ComponentConfig(lora_path=adapter_path, lora_strength=1.0),
-                minimax_h3=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
+                model=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
             ),
             engine=EngineConfig(
                 num_gpus=4,

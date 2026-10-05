@@ -200,13 +200,13 @@ def build_init_kwargs(base_params: dict[str, object], ) -> dict[str, object]:
         init_kwargs["engine.precision.text_encoders"] = list(base_params["text-encoder-precision"])
     if base_params.get("ltx2_vae_tiling"):
         init_kwargs["pipeline.vae_tiling"] = True
-        init_kwargs["pipeline.ltx2.vae_spatial_tile_size_in_pixels"] = base_params.get(
+        init_kwargs["pipeline.model.ltx2.vae_spatial_tile_size_in_pixels"] = base_params.get(
             "ltx2_vae_spatial_tile_size_in_pixels", 512)
-        init_kwargs["pipeline.ltx2.vae_spatial_tile_overlap_in_pixels"] = base_params.get(
+        init_kwargs["pipeline.model.ltx2.vae_spatial_tile_overlap_in_pixels"] = base_params.get(
             "ltx2_vae_spatial_tile_overlap_in_pixels", 64)
-        init_kwargs["pipeline.ltx2.vae_temporal_tile_size_in_frames"] = base_params.get(
+        init_kwargs["pipeline.model.ltx2.vae_temporal_tile_size_in_frames"] = base_params.get(
             "ltx2_vae_temporal_tile_size_in_frames", 64)
-        init_kwargs["pipeline.ltx2.vae_temporal_tile_overlap_in_frames"] = base_params.get(
+        init_kwargs["pipeline.model.ltx2.vae_temporal_tile_overlap_in_frames"] = base_params.get(
             "ltx2_vae_temporal_tile_overlap_in_frames", 24)
     return init_kwargs
 

@@ -93,8 +93,8 @@ def test_initialize_builds_vsa_datafree_fasth3_generator(monkeypatch):
     assert config.engine.attention.vsa_sparsity == 0.9
     assert config.engine.attention.vsa_tile_size == 64
     assert config.engine.compile.regional is False
-    assert config.pipeline.minimax_h3.vae_parallel_decode is True
-    assert config.pipeline.minimax_h3.vae_parallel_decode_strategy == "gather"
+    assert config.pipeline.model.vae_parallel_decode is True
+    assert config.pipeline.model.vae_parallel_decode_strategy == "gather"
     assert config.engine.num_gpus == 4
     assert config.engine.parallelism.tp_size == 1
     assert config.engine.parallelism.sp_size == 4

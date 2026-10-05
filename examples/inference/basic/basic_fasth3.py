@@ -263,7 +263,7 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
                 lora_path=getattr(args, "lora_path", None),
                 lora_strength=float(getattr(args, "lora_strength", 1.0)),
             ),
-            minimax_h3=MiniMaxH3Options(
+            model=MiniMaxH3Options(
                 sequential_load=args.h3_sequential_load,
                 video_decode_backend=None if args.video_decode_backend == "h3-vae" else args.video_decode_backend,
                 taeh3_checkpoint=args.taeh3_checkpoint,

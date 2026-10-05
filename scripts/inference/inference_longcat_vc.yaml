@@ -11,8 +11,9 @@ generator:
       dit: false
       pin_cpu_memory: false
   pipeline:
-    longcat:
-      enable_bsa: false
+    model:
+      longcat:
+        enable_bsa: false
 request:
   prompt: >-
     A person rides a motorcycle along a long, straight road that stretches

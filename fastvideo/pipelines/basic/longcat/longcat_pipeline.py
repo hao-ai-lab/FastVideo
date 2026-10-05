@@ -35,7 +35,7 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
 
         # Enable BSA (Block Sparse Attention) if configured
         pipeline_config = resolved_config.pipeline_config
-        bsa_options = resolved_config.pipeline.longcat
+        bsa_options = resolved_config.pipeline.model
         transformer = self.get_module("transformer", None)
         if transformer is None:
             raise RuntimeError("Transformer module not found during initializing LongCat pipeline.")

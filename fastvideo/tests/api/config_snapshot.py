@@ -376,7 +376,7 @@ def collect_cases() -> list[SnapshotCase]:
                 }
             },
             "pipeline": {
-                "ltx2": {
+                "preset_overrides": {
                     "refine": {
                         "enabled": True
                     }
@@ -398,9 +398,11 @@ def collect_cases() -> list[SnapshotCase]:
         "ltx2_refine_lora_path": {
             "model_path": LTX2,
             "pipeline": {
-                "ltx2": {
-                    "refine": {
-                        "lora_path": "/checkpoints/refine_lora.safetensors"
+                "model": {
+                    "ltx2": {
+                        "refine": {
+                            "lora_path": "/checkpoints/refine_lora.safetensors"
+                        }
                     }
                 }
             },
@@ -408,9 +410,11 @@ def collect_cases() -> list[SnapshotCase]:
         "ltx2_refine_lora_disabled": {
             "model_path": LTX2,
             "pipeline": {
-                "ltx2": {
-                    "refine": {
-                        "lora_path": ""
+                "model": {
+                    "ltx2": {
+                        "refine": {
+                            "lora_path": ""
+                        }
                     }
                 }
             },
@@ -438,9 +442,11 @@ def collect_cases() -> list[SnapshotCase]:
         "ltx2_vae_tile_sizes": {
             "model_path": LTX2,
             "pipeline": {
-                "ltx2": {
-                    "vae_spatial_tile_size_in_pixels": 512,
-                    "vae_temporal_tile_size_in_frames": 64
+                "model": {
+                    "ltx2": {
+                        "vae_spatial_tile_size_in_pixels": 512,
+                        "vae_temporal_tile_size_in_frames": 64
+                    }
                 }
             },
         },

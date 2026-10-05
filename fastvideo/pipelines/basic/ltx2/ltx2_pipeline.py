@@ -31,7 +31,7 @@ class LTX2Pipeline(LoRAPipeline):
     ]
 
     def create_pipeline_stages(self, resolved_config: ResolvedGeneratorConfig):
-        refine_enabled = resolved_config.pipeline.ltx2.refine.enabled
+        refine_enabled = resolved_config.pipeline.model.refine.enabled
 
         self.add_stage(
             stage_name="input_validation_stage",
@@ -66,7 +66,7 @@ class LTX2Pipeline(LoRAPipeline):
         )
 
         if refine_enabled:
-            stage2_steps = resolved_config.pipeline.ltx2.refine.num_inference_steps
+            stage2_steps = resolved_config.pipeline.model.refine.num_inference_steps
             # LTX-2 refine currently supports two explicitly tested step
             # counts:
             # - 3 steps: official distilled schedule
@@ -87,7 +87,7 @@ class LTX2Pipeline(LoRAPipeline):
             else:
                 logger.warning(
                     "For LTX-2 refinement, "
-                    "pipeline.ltx2.refine.num_inference_steps=%s is not a tested "
+                    "pipeline.model.ltx2.refine.num_inference_steps=%s is not a tested "
                     "setting. Using denoising steps other than 2 or 3 "
                     "may cause quality degradation.",
                     stage2_steps,
@@ -104,16 +104,16 @@ class LTX2Pipeline(LoRAPipeline):
                     vae=self.get_module("vae"),
                     transformer=transformer_refine,
                     sigmas=stage2_sigmas,
-                    add_noise=resolved_config.pipeline.ltx2.refine.add_noise,
+                    add_noise=resolved_config.pipeline.model.refine.add_noise,
                 ),
             )
 
-            if resolved_config.pipeline.ltx2.refine.lora_path:
+            if resolved_config.pipeline.model.refine.lora_path:
                 self.add_stage(
                     stage_name="ltx2_refine_lora_stage",
                     stage=LTX2RefineLoRAStage(
                         pipeline=self,
-                        lora_path=resolved_config.pipeline.ltx2.refine.lora_path,
+                        lora_path=resolved_config.pipeline.model.refine.lora_path,
                     ),
                 )
 
@@ -123,7 +123,7 @@ class LTX2Pipeline(LoRAPipeline):
                     transformer=transformer_refine,
                     sigmas_override=stage2_sigmas,
                     num_inference_steps_override=len(stage2_sigmas) - 1,
-                    force_guidance_scale=(resolved_config.pipeline.ltx2.refine.guidance_scale),
+                    force_guidance_scale=(resolved_config.pipeline.model.refine.guidance_scale),
                     initial_audio_latents_key="ltx2_audio_latents",
                 ),
             )
@@ -207,10 +207,10 @@ class LTX2Pipeline(LoRAPipeline):
             if module_name not in modules or modules[module_name] is None:
                 raise ValueError(f"Required module {module_name} was not loaded properly")
 
-        if resolved_config.pipeline.ltx2.refine.enabled:
+        if resolved_config.pipeline.model.refine.enabled:
             upsampler_path = resolved_config.pipeline.components.upsampler_weights
             if upsampler_path is None:
-                raise ValueError("pipeline.ltx2.refine.enabled is True but "
+                raise ValueError("pipeline.model.ltx2.refine.enabled is True but "
                                  "pipeline.components.upsampler_weights was not provided.")
             if not os.path.isdir(upsampler_path):
                 raise ValueError("pipeline.components.upsampler_weights must be a directory "
@@ -233,16 +233,16 @@ class LTX2Pipeline(LoRAPipeline):
 
             if (loaded_modules is not None and "transformer_refine" in loaded_modules):
                 modules["transformer_refine"] = loaded_modules["transformer_refine"]
-            elif resolved_config.pipeline.ltx2.refine.transformer_path:
+            elif resolved_config.pipeline.model.refine.transformer_path:
                 modules["transformer_refine"] = (PipelineComponentLoader.load_module(
                     module_name="transformer_refine",
-                    component_model_path=(resolved_config.pipeline.ltx2.refine.transformer_path),
+                    component_model_path=(resolved_config.pipeline.model.refine.transformer_path),
                     transformers_or_diffusers="diffusers",
                     resolved_config=resolved_config,
                 ))
                 logger.info(
                     "Loaded module transformer_refine from %s",
-                    resolved_config.pipeline.ltx2.refine.transformer_path,
+                    resolved_config.pipeline.model.refine.transformer_path,
                 )
 
         return modules

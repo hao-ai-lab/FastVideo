@@ -11,6 +11,7 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 import yaml
 
 from fastvideo.api import GeneratorConfig, RunConfig, ServeConfig
+from fastvideo.api.parser import TAG_FIELD, tagged_union_tags
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
@@ -46,11 +47,12 @@ def _flatten_status_section(section: dict, valid_statuses: set[str]) -> set[str]
 
 
 def _get_dataclass_leaf_paths(cls: type, prefix: str = "") -> set[str]:
-    """Collect the dotted paths of the leaf fields of a nested config dataclass.
+    """Collect the dotted paths of the leaf fields of a nested config dataclass, as the input spells them.
 
     A field whose annotation is a dataclass, or ``X | None`` of a dataclass,
     is walked into; every other field, including a dict-valued field, is one
-    leaf.
+    leaf. A tagged-union field is walked into once per tag, ``<field>.<tag>.<leaf>``,
+    without the tag field that the parser sets.
     """
     paths: set[str] = set()
     hints = get_type_hints(cls)
@@ -61,7 +63,12 @@ def _get_dataclass_leaf_paths(cls: type, prefix: str = "") -> set[str]:
             if len(non_none_args) == 1:
                 annotation = non_none_args[0]
         path = f"{prefix}{config_field.name}"
-        if dataclasses.is_dataclass(annotation):
+        tags = tagged_union_tags(annotation)
+        if tags is not None:
+            for tag, member_type in tags.items():
+                paths.update(leaf for leaf in _get_dataclass_leaf_paths(member_type, f"{path}.{tag}.")
+                             if leaf != f"{path}.{tag}.{TAG_FIELD}")
+        elif dataclasses.is_dataclass(annotation):
             paths.update(_get_dataclass_leaf_paths(annotation, f"{path}."))
         else:
             paths.add(path)
@@ -151,6 +158,11 @@ def _walk_schema_target(root_type: type, target: str) -> None:
         assert dataclasses.is_dataclass(current_annotation), (
             f"{target!r} diverges at {'.'.join(target.split('.')[:depth - 1]) or '<root>'}: "
             f"{current_annotation!r} is not a dataclass or open dict boundary")
+        tags = tagged_union_tags(current_annotation)
+        if tags is not None:
+            assert segment in tags, f"{target!r} missing family tag {segment!r}"
+            current_annotation = tags[segment]
+            continue
         hints = get_type_hints(current_annotation)
         assert segment in hints, f"{target!r} missing segment {segment!r}"
         current_annotation = hints[segment]

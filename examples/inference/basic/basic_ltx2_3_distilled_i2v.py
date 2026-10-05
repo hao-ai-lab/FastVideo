@@ -195,7 +195,7 @@ def main() -> None:
                 },
             },
             "components": {"upsampler_weights": str(refine_upsampler_path)},
-            "ltx2": {"refine": {"lora_path": ""}},
+            "model": {"ltx2": {"refine": {"lora_path": ""}}},
             "experimental": {"pipeline_config": pipeline_config},
             "vae_tiling": False,
         },

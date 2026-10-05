@@ -46,7 +46,7 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
         """Initialize LongCat-specific components."""
         # Same BSA initialization as base LongCat pipeline
         pipeline_config = resolved_config.pipeline_config
-        bsa_options = resolved_config.pipeline.longcat
+        bsa_options = resolved_config.pipeline.model
         transformer = self.get_module("transformer", None)
         if transformer is None:
             return

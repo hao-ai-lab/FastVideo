@@ -54,7 +54,7 @@ Recipe setting ↔ typed field
 - VAE tiling                       ↔ ``pipeline.vae_tiling``
 - Refine stage on                  ↔ ``pipeline.preset_overrides["refine"]["enabled"]``
 - Refine upsampler                 ↔ ``pipeline.components.upsampler_weights``
-- Refine LoRA                      ↔ ``pipeline.ltx2.refine.lora_path``
+- Refine LoRA                      ↔ ``pipeline.model.ltx2.refine.lora_path``
 - Refine denoising steps           ↔ ``pipeline.preset_overrides["refine"]["num_inference_steps"]``
 - Refine guidance scale            ↔ ``pipeline.preset_overrides["refine"]["guidance_scale"]``
 - Refine noise injection           ↔ ``pipeline.preset_overrides["refine"]["add_noise"]``

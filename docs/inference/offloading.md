@@ -50,7 +50,7 @@ jobs still need this split: sequence parallel replicates the DiT on each GB10
     `VideoGenerator.from_pretrained` accepts the option names below as keywords, except `lazy_module_load` and
     `h3_sequential_load`. In a YAML config or a dotted override, each option is a typed field:
     `engine.use_fsdp_inference`, `engine.offload.<field>` as listed in the defaults above, and
-    `pipeline.minimax_h3.sequential_load` for `h3_sequential_load`.
+    `pipeline.model.minimax_h3.sequential_load` for `h3_sequential_load`.
 
 ### `use_fsdp_inference`
 
@@ -109,8 +109,8 @@ because the encoder has been released.
 Leave the default on Spark / DGX Spark when `lazy_module_load` is off. When
 both would arm (the GB10 auto case), lazy owns deferral and sequential stands
 down so VAE `torch.compile` can attach to the lazy proxy. Force
-`pipeline.minimax_h3.sequential_load: true` only when you need the split on a discrete GPU without
-lazy load. Set `pipeline.minimax_h3.sequential_load: false` when you need more than one prompt per
+`pipeline.model.minimax_h3.sequential_load: true` only when you need the split on a discrete GPU without
+lazy load. Set `pipeline.model.minimax_h3.sequential_load: false` when you need more than one prompt per
 worker and have enough memory to keep the encoder.
 
 ### `text_encoder_cpu_offload`

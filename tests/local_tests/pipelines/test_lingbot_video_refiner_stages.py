@@ -225,7 +225,7 @@ def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(monkeypatch: pytes
     args = cast(
         Any,
         SimpleNamespace(
-            pipeline=SimpleNamespace(ltx2=SimpleNamespace(refine=SimpleNamespace(enabled=None))),
+            pipeline=SimpleNamespace(preset_overrides={"refine": {"enabled": None}}),
             pipeline_config=SimpleNamespace(vae_config=vae_config),
         ),
     )
@@ -249,6 +249,6 @@ def test_lingbot_video_pipeline_loads_refiner_and_vae_encoder(monkeypatch: pytes
         },
     })
     base_modules = base_pipe.load_modules(base_args)
-    assert base_args.pipeline.ltx2.refine.enabled is False
+    assert base_args.pipeline.preset_overrides["refine"]["enabled"] is False
     assert "transformer_2" not in base_modules
     assert base_args.pipeline_config.vae_config.load_encoder is False

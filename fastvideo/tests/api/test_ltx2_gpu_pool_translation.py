@@ -41,9 +41,11 @@ GPU_POOL_CONFIG = {
         },
         "vae_tiling": False,
         # An empty refine LoRA path keeps the refine LoRA disabled; None would load the checkpoint default.
-        "ltx2": {
-            "refine": {
-                "lora_path": ""
+        "model": {
+            "ltx2": {
+                "refine": {
+                    "lora_path": ""
+                }
             }
         },
         "preset_overrides": {
@@ -67,10 +69,10 @@ class TestGpuPoolResolution:
             return resolve_inference_config(GPU_POOL_CONFIG)
 
     def test_empty_refine_lora_path_kept(self, resolved) -> None:
-        assert resolved.pipeline.ltx2.refine.lora_path == ""
+        assert resolved.pipeline.model.refine.lora_path == ""
 
     def test_ltx2_refine_flags_copied_from_preset_overrides(self, resolved) -> None:
-        refine = resolved.pipeline.ltx2.refine
+        refine = resolved.pipeline.model.refine
         assert refine.enabled is True
         assert refine.add_noise is True
         assert refine.num_inference_steps == 2
@@ -99,7 +101,7 @@ class TestGpuPoolResolution:
 
 class TestRefinePresetOverridesCoverAllTypedFields:
     """Every field on LTX2Refine{Preset,Stage}Override must survive the
-    copy from preset_overrides.refine into ``pipeline.ltx2.refine``.
+    copy from preset_overrides.refine into ``pipeline.model.refine``.
     Guards against the hardcoded-key-tuple regression where
     image_crf / video_position_offset_sec silently dropped."""
 
@@ -110,9 +112,10 @@ class TestRefinePresetOverridesCoverAllTypedFields:
             refine_stage_override_fields,
         )
 
-        # The model path is not a registered model, so skip the model definition.
+        # The model path is not a registered model: stand in an LTX-2 model definition and skip its defaults.
         from fastvideo.api import inference_resolution
-        monkeypatch.setattr(inference_resolution, "build_model_pipeline_config", lambda config: None)
+        from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
+        monkeypatch.setattr(inference_resolution, "build_model_pipeline_config", lambda config: LTX2T2VConfig())
         monkeypatch.setattr(inference_resolution, "pipeline_config_defaults_step", lambda config, defaults=None: lambda view: {})
         monkeypatch.setattr(inference_resolution, "materialize_pipeline_config", lambda resolved, pipeline_config: None)
 
@@ -133,10 +136,11 @@ class TestRefinePresetOverridesCoverAllTypedFields:
             model_path="/models/ltx2",
             pipeline=PipelineSelection(preset_overrides={"refine": refine_payload}),
         )
-        resolved = resolve_inference_config(config)
+        with isolated_environment():
+            resolved = resolve_inference_config(config)
 
         for key, value in refine_payload.items():
-            assert getattr(resolved.pipeline.ltx2.refine, key) == value
+            assert getattr(resolved.pipeline.model.refine, key) == value
 
 
 class TestCompileExtrasPreserved:

@@ -34,7 +34,7 @@ import dataclasses
 from types import MappingProxyType
 from typing import Any
 
-from fastvideo.api.parser import parse_config
+from fastvideo.api.parser import parse_config, strip_union_tags
 from fastvideo.api.request_metadata import _record_value_paths, get_explicit_paths
 from fastvideo.api.schema import GenerationRequest, GeneratorConfig
 
@@ -505,15 +505,18 @@ def resolve_generator_config(
 
     ``raw`` is the merged YAML, CLI-override, and keyword input in the nested
     shape of ``config_class``, which is ``GeneratorConfig`` or one of its
-    subclasses. Every leaf written in ``raw`` is an explicit path. Each step
-    sees the decisions of the steps before it. ``materialize`` receives the
-    resolved values and returns the ``PipelineConfig`` that the result holds
-    as ``pipeline_config``.
+    subclasses. Every leaf written in ``raw`` is an explicit path, spelled as
+    the parsed config holds it (a tagged-union block loses its tag segment:
+    ``pipeline.model.ltx2.refine.enabled`` is explicit as
+    ``pipeline.model.refine.enabled``). Each step sees the decisions of the
+    steps before it. ``materialize`` receives the resolved values and returns
+    the ``PipelineConfig`` that the result holds as ``pipeline_config``.
     """
     if not isinstance(raw, Mapping):
         raise TypeError(f"expected a raw config mapping, got {type(raw).__name__}")
-    explicit_paths: set[str] = set()
-    _record_value_paths(raw, "", explicit_paths)
+    written_paths: set[str] = set()
+    _record_value_paths(raw, "", written_paths)
+    explicit_paths = strip_union_tags(config_class, written_paths)
     tree, raw_tree, decisions = _run_steps(parse_config(config_class, raw), frozenset(explicit_paths), steps)
     resolved = ResolvedGeneratorConfig(tree, raw_tree, frozenset(explicit_paths), decisions, ())
     if materialize is None:

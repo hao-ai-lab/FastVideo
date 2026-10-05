@@ -182,7 +182,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         model_path=args.model_path,
         pipeline=PipelineSelection(
             components=ComponentConfig(lora_path=args.lora_path, lora_strength=args.lora_strength),
-            minimax_h3=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
+            model=MiniMaxH3Options(vae_parallel_decode=True, vae_parallel_decode_strategy="gather"),
         ),
         engine=EngineConfig(
             num_gpus=args.num_gpus,

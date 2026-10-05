@@ -41,7 +41,19 @@ def test_resolution_builds_and_freezes_the_pipeline_config_once(monkeypatch):
     original = PipelineConfig.from_source.__func__
     monkeypatch.setattr(PipelineConfig, "from_source",
                         classmethod(lambda cls, *args: builds.append(args) or original(cls, *args)))
-    resolved = _resolve({"model_path": WAN_T2V, "pipeline": {"flow_shift": 5.0, "dit": {"prefix": "Probe"}}})
+    resolved = _resolve({
+        "model_path": WAN_T2V,
+        "pipeline": {
+            "flow_shift": 5.0,
+            "model": {
+                "generic": {
+                    "dit": {
+                        "prefix": "Probe"
+                    }
+                }
+            }
+        }
+    })
 
     assert len(builds) == 1
     assert type(resolved.pipeline_config).__name__ == "WanT2V480PConfig"
@@ -294,13 +306,13 @@ def test_ltx2_checkpoint_refine_defaults_are_resolved_from_a_local_checkpoint(tm
 
     refine_decisions = [values for source, values in resolved.decisions if source == "fill_ltx2_refine_from_checkpoint"]
     assert refine_decisions == [{
-        "pipeline.ltx2.refine.lora_path": "FastVideo/LTX2-Distilled-LoRA",
-        "pipeline.ltx2.refine.num_inference_steps": 2,
+        "pipeline.model.refine.lora_path": "FastVideo/LTX2-Distilled-LoRA",
+        "pipeline.model.refine.num_inference_steps": 2,
     }]
-    refine = resolved.pipeline.ltx2.refine
+    refine = resolved.pipeline.model.refine
     assert (refine.lora_path, refine.num_inference_steps) == ("FastVideo/LTX2-Distilled-LoRA", 2)
     assert (refine.enabled, refine.add_noise, refine.guidance_scale) == (False, True, 1.0)
-    assert resolved.provenance("pipeline.ltx2.refine.enabled").source == "fill_runtime_defaults"
+    assert resolved.provenance("pipeline.model.refine.enabled").source == "fill_runtime_defaults"
 
 
 def test_minimax_h3_checkpoint_schedule_is_resolved_and_reaches_the_first_forward(tmp_path, monkeypatch):
@@ -443,4 +455,5 @@ def test_decode_strategy_validation_matches_the_parallel_vae_module():
 
     assert VAE_PARALLEL_DECODE_STRATEGIES == tuple(DECODE_GATHER_STRATEGIES)
     with pytest.raises(ValueError, match="vae_parallel_decode_strategy"):
-        _resolve({"model_path": WAN_T2V}, {"FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY": "scatter"})
+        _resolve({"model_path": "FastVideo/FastVideo-FastH3-8-Step-V2"},
+                 {"FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY": "scatter"})

@@ -8,17 +8,21 @@ step's name, and then materializes the model's ``PipelineConfig`` once and attac
 The steps run in this order. A fill step sets a field only while it is ``None``, so an earlier step takes
 precedence over a later one: user input, then environment variables, then model defaults.
 
-1. Environment variables fill typed fields.
-2. Model defaults from the model's ``PipelineConfig`` fill the typed fields of ``PIPELINE_CONFIG_MIRRORS`` that are
-   still unset.
-3. ``pipeline.preset_overrides.refine`` sets the LTX-2 refine fields, and the checkpoint's bundled files fill the
+1. The model family steps check that a written ``pipeline.model`` block is the family of the model's
+   ``PipelineConfig`` and fill the family's empty block when none is written, so every later step and every runtime
+   reader finds ``pipeline.model`` set (``MODEL_FAMILY_CONFIG_CLASSES``).
+2. Environment variables fill typed fields.
+3. Model defaults from the model's ``PipelineConfig`` fill the typed fields of ``PIPELINE_CONFIG_MIRRORS`` and of the
+   family's ``MODEL_FAMILY_MIRRORS`` that are still unset.
+4. ``pipeline.preset_overrides.refine`` sets the LTX-2 refine fields, and the checkpoint's bundled files fill the
    LTX-2 refine fields and the MiniMax-H3 DMD schedule that are still unset (``fastvideo.api.checkpoint_defaults``).
-4. Derived values replace placeholders and load the files that a path names.
-5. The device policy settles the offload settings for the memory class of the local device
+5. Derived values replace placeholders and load the files that a path names.
+6. The device policy settles the offload settings for the memory class of the local device
    (``fastvideo.api.device_policy``).
-6. Validation steps raise on inconsistent values and decide nothing.
-7. ``fill_runtime_defaults`` gives every field that is still unset its runtime default.
+7. Validation steps raise on inconsistent values and decide nothing.
+8. ``fill_runtime_defaults`` gives every field that is still unset its runtime default.
 
+A step that decides a field of one family's block runs only when ``pipeline.model`` is that family's block.
 ``fastvideo.api.training_schema`` resolves the training and preprocessing roots with the same steps plus their own.
 """
 from __future__ import annotations
@@ -33,13 +37,73 @@ from typing import Any
 import fastvideo.envs as envs
 from fastvideo.api.checkpoint_defaults import dmd_schedule_checkpoint_step, ltx2_refine_checkpoint_step
 from fastvideo.api.device_policy import DEVICE_POLICY_STEPS
-from fastvideo.api.parser import parse_config
+from fastvideo.api.parser import parse_config, union_tag
 from fastvideo.api.resolution import (ResolutionStep, ResolutionView, ResolvedGeneratorConfig, resolve_generator_config,
                                       thaw)
-from fastvideo.api.schema import ExecutionMode, GeneratorConfig, WorkloadType
+from fastvideo.api.schema import ExecutionMode, GeneratorConfig, ModelOptions, WorkloadType
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+# Family tag of ``pipeline.model`` -> the dotted name of the ``PipelineConfig`` class whose models take that block,
+# including its subclasses. A model whose ``PipelineConfig`` is none of these is ``generic``.
+MODEL_FAMILY_CONFIG_CLASSES: dict[str, str] = {
+    "ltx2": "fastvideo.pipelines.basic.ltx2.pipeline_configs.LTX2T2VConfig",
+    "minimax_h3": "fastvideo.configs.pipelines.minimax_h3.MiniMaxH3PipelineConfig",
+    "longcat": "fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig",
+}
+GENERIC_FAMILY = "generic"
+
+
+def model_family(pipeline_config: Any) -> str:
+    """The ``pipeline.model`` family tag of a model, from the class of its ``PipelineConfig``."""
+    from fastvideo.utils import resolve_obj_by_qualname
+
+    for family, class_name in MODEL_FAMILY_CONFIG_CLASSES.items():
+        if isinstance(pipeline_config, resolve_obj_by_qualname(class_name)):
+            return family
+    return GENERIC_FAMILY
+
+
+def _family(view: ResolutionView) -> str:
+    """The family tag of the ``pipeline.model`` block; the model family steps have set the block."""
+    return view.get("pipeline.model").family
+
+
+def _input_path(path: str, family: str) -> str:
+    """The input spelling of a typed path through ``pipeline.model``: the family tag follows ``pipeline.model``."""
+    prefix = "pipeline.model."
+    return f"{prefix}{family}.{path[len(prefix):]}" if path.startswith(prefix) else path
+
+
+def model_family_steps(defaults: Any) -> tuple[ResolutionStep, ResolutionStep]:
+    """Build the two steps that settle ``pipeline.model`` for the model whose ``PipelineConfig`` is ``defaults``.
+
+    ``validate_model_family`` raises ``ValueError`` when the written block is of another family than the model;
+    the ``generic`` block is accepted for every model. ``fill_model_family`` sets the family's empty block when
+    ``pipeline.model`` is unset, and replaces a ``generic`` block on a family model with the family's block that
+    carries the same ``dit`` and ``vae`` overrides, so the model's readers always find their fields.
+    """
+    family = model_family(defaults)
+
+    def validate_model_family(view: ResolutionView) -> dict[str, Any]:
+        model = view.get("pipeline.model")
+        if model is not None and model.family not in (family, GENERIC_FAMILY):
+            raise ValueError(f"pipeline.model.{model.family} does not apply to {view.get('model_path')}: the registry "
+                             f"resolved it to {type(defaults).__name__}, whose block is pipeline.model.{family}")
+        return {}
+
+    def fill_model_family(view: ResolutionView) -> dict[str, Any]:
+        model = view.get("pipeline.model")
+        if model is None:
+            return {"pipeline.model": ModelOptions.TAGS[family]()}
+        if model.family == GENERIC_FAMILY and family != GENERIC_FAMILY:
+            return {"pipeline.model": ModelOptions.TAGS[family](dit=thaw(model.dit), vae=thaw(model.vae))}
+        return {}
+
+    validate_model_family.__qualname__ = "validate_model_family"
+    fill_model_family.__qualname__ = f"fill_model_family[{family}]"
+    return validate_model_family, fill_model_family
 
 
 def fill_attention_backend_from_env(view: ResolutionView) -> dict[str, Any]:
@@ -66,16 +130,18 @@ def fill_vae_parallel_from_env(view: ResolutionView) -> dict[str, Any]:
     """The ``FASTVIDEO_VAE_PARALLEL_*`` variables set the MiniMax-H3 sequence-parallel VAE options.
 
     Each switch turns on while it is unset. The decode strategy fills while it is unset, and is ``gather`` when
-    the variable is unset too.
+    the variable is unset too. The step decides nothing for a model of another family.
     """
+    if _family(view) != "minimax_h3":
+        return {}
     values: dict[str, Any] = {}
-    if view.get("pipeline.minimax_h3.vae_parallel_decode") is None and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
-        values["pipeline.minimax_h3.vae_parallel_decode"] = True
-    if view.get("pipeline.minimax_h3.vae_parallel_encode") is None and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
-        values["pipeline.minimax_h3.vae_parallel_encode"] = True
-    if view.get("pipeline.minimax_h3.vae_parallel_decode_strategy") is None:
+    if view.get("pipeline.model.vae_parallel_decode") is None and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
+        values["pipeline.model.vae_parallel_decode"] = True
+    if view.get("pipeline.model.vae_parallel_encode") is None and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
+        values["pipeline.model.vae_parallel_encode"] = True
+    if view.get("pipeline.model.vae_parallel_decode_strategy") is None:
         strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY.get() or "gather"
-        values["pipeline.minimax_h3.vae_parallel_decode_strategy"] = strategy
+        values["pipeline.model.vae_parallel_decode_strategy"] = strategy
     return values
 
 
@@ -97,15 +163,25 @@ PIPELINE_CONFIG_MIRRORS: dict[str, str] = {
     "pipeline.boundary_ratio": "boundary_ratio",
     "pipeline.vae_tiling": "vae_tiling",
     "pipeline.vae_sp": "vae_sp",
-    "pipeline.longcat.enable_bsa": "enable_bsa",
-    "pipeline.longcat.bsa_sparsity": "bsa_sparsity",
-    "pipeline.longcat.bsa_cdf_threshold": "bsa_cdf_threshold",
-    "pipeline.longcat.bsa_chunk_q": "bsa_chunk_q",
-    "pipeline.longcat.bsa_chunk_k": "bsa_chunk_k",
+}
+# Family tag -> the mirrors of that family's ``pipeline.model`` block, which apply only to a model of the family.
+MODEL_FAMILY_MIRRORS: dict[str, dict[str, str]] = {
+    "longcat": {
+        "pipeline.model.enable_bsa": "enable_bsa",
+        "pipeline.model.bsa_sparsity": "bsa_sparsity",
+        "pipeline.model.bsa_cdf_threshold": "bsa_cdf_threshold",
+        "pipeline.model.bsa_chunk_q": "bsa_chunk_q",
+        "pipeline.model.bsa_chunk_k": "bsa_chunk_k",
+    },
 }
 # Mirrored paths that the defaults step leaves unset: an LTX-2 tile size can turn ``pipeline.vae_tiling`` on before
 # :func:`vae_tiling_default_step` fills it from the model default.
 _FILLED_AFTER_DERIVATION = frozenset({"pipeline.vae_tiling"})
+
+
+def pipeline_config_mirrors(family: str) -> dict[str, str]:
+    """``PIPELINE_CONFIG_MIRRORS`` plus the mirrors of the ``pipeline.model`` block of ``family``."""
+    return {**PIPELINE_CONFIG_MIRRORS, **MODEL_FAMILY_MIRRORS.get(family, {})}
 
 
 def _pipeline_config_source(config: GeneratorConfig) -> Any:
@@ -132,15 +208,16 @@ def pipeline_config_defaults_step(config: GeneratorConfig, defaults: Any = None)
     """Build the step that fills unset typed fields with the values of the model's ``PipelineConfig``.
 
     ``defaults`` is the instance from :func:`build_model_pipeline_config`; it is built from ``config`` when it is
-    not given. A typed field of ``PIPELINE_CONFIG_MIRRORS`` is filled when its value is ``None`` and its attribute on
-    that ``PipelineConfig`` is not ``None``. The step's source name carries the ``PipelineConfig`` class name.
+    not given. A typed field of :func:`pipeline_config_mirrors` is filled when its value is ``None`` and its
+    attribute on that ``PipelineConfig`` is not ``None``. The step's source name carries the ``PipelineConfig`` class
+    name.
     """
     if defaults is None:
         defaults = build_model_pipeline_config(config)
 
     def fill_pipeline_config_defaults(view: ResolutionView) -> dict[str, Any]:
         values: dict[str, Any] = {}
-        for dotted_path, attribute in PIPELINE_CONFIG_MIRRORS.items():
+        for dotted_path, attribute in pipeline_config_mirrors(_family(view)).items():
             default = getattr(defaults, attribute, None)
             if dotted_path not in _FILLED_AFTER_DERIVATION and default is not None and view.get(dotted_path) is None:
                 values[dotted_path] = deepcopy(default)
@@ -162,16 +239,18 @@ def derive_parallel_sizes(view: ResolutionView) -> dict[str, Any]:
 
 
 _LTX2_VAE_TILE_FIELDS = (
-    "pipeline.ltx2.vae_spatial_tile_size_in_pixels",
-    "pipeline.ltx2.vae_spatial_tile_overlap_in_pixels",
-    "pipeline.ltx2.vae_temporal_tile_size_in_frames",
-    "pipeline.ltx2.vae_temporal_tile_overlap_in_frames",
+    "pipeline.model.vae_spatial_tile_size_in_pixels",
+    "pipeline.model.vae_spatial_tile_overlap_in_pixels",
+    "pipeline.model.vae_temporal_tile_size_in_frames",
+    "pipeline.model.vae_temporal_tile_overlap_in_frames",
 )
 
 
 def derive_vae_tiling_from_ltx2_tile_sizes(view: ResolutionView) -> dict[str, Any]:
     """An LTX-2 VAE tile size turns ``pipeline.vae_tiling`` on while the field is unset."""
-    if view.get("pipeline.vae_tiling") is not None or all(view.get(path) is None for path in _LTX2_VAE_TILE_FIELDS):
+    if _family(view) != "ltx2" or view.get("pipeline.vae_tiling") is not None:
+        return {}
+    if all(view.get(path) is None for path in _LTX2_VAE_TILE_FIELDS):
         return {}
     return {"pipeline.vae_tiling": True}
 
@@ -197,15 +276,16 @@ def copy_refine_preset_overrides(view: ResolutionView) -> dict[str, Any]:
 
     The keys are the refine preset and stage override fields (``enabled``, ``add_noise``, ``num_inference_steps``,
     ``guidance_scale``, ``image_crf``, ``video_position_offset_sec``); a ``None`` value leaves its field unchanged.
+    The step decides nothing for a model of another family; those pipelines read ``pipeline.preset_overrides``.
     """
     from fastvideo.pipelines.basic.ltx2.stage_overrides import (refine_preset_override_fields,
                                                                 refine_stage_override_fields)
 
     refine = view.get_plain("pipeline.preset_overrides").get("refine")
-    if not isinstance(refine, Mapping):
+    if _family(view) != "ltx2" or not isinstance(refine, Mapping):
         return {}
     keys = refine_preset_override_fields() | refine_stage_override_fields()
-    return {f"pipeline.ltx2.refine.{key}": refine[key] for key in sorted(keys) if refine.get(key) is not None}
+    return {f"pipeline.model.refine.{key}": refine[key] for key in sorted(keys) if refine.get(key) is not None}
 
 
 def load_moba_config(view: ResolutionView) -> dict[str, Any]:
@@ -256,10 +336,12 @@ def validate_unsupported_fields(view: ResolutionView) -> dict[str, Any]:
 def validate_experimental_keys(view: ResolutionView) -> dict[str, Any]:
     """A ``pipeline.experimental`` key must not name a ``PipelineConfig`` attribute that has a typed path.
 
-    Materialization writes those attributes from their typed paths (``PIPELINE_CONFIG_MIRRORS``), so the key is set at
-    the typed path instead.
+    Materialization writes those attributes from their typed paths (:func:`pipeline_config_mirrors`), so the key is
+    set at the typed path instead; the message spells a family field as the input writes it,
+    ``pipeline.model.<family>.<field>``.
     """
-    typed_paths = {attribute: path for path, attribute in PIPELINE_CONFIG_MIRRORS.items()}
+    family = _family(view)
+    typed_paths = {attribute: _input_path(path, family) for path, attribute in pipeline_config_mirrors(family).items()}
     misplaced = sorted(set(view.get("pipeline.experimental")) & set(typed_paths))
     if misplaced:
         moves = ", ".join(f"pipeline.experimental.{key} -> {typed_paths[key]}" for key in misplaced)
@@ -283,8 +365,11 @@ VAE_PARALLEL_DECODE_STRATEGIES = ("gather", "all_gather")
 
 
 def validate_vae_parallel_decode_strategy(view: ResolutionView) -> dict[str, Any]:
-    """``pipeline.minimax_h3.vae_parallel_decode_strategy`` must be ``gather`` or ``all_gather``, from any source."""
-    strategy = view.get("pipeline.minimax_h3.vae_parallel_decode_strategy")
+    """A MiniMax-H3 ``pipeline.model.vae_parallel_decode_strategy`` must be ``gather`` or ``all_gather``, from any
+    source."""
+    if _family(view) != "minimax_h3":
+        return {}
+    strategy = view.get("pipeline.model.vae_parallel_decode_strategy")
     if strategy not in VAE_PARALLEL_DECODE_STRATEGIES:
         raise ValueError(f"vae_parallel_decode_strategy must be one of {VAE_PARALLEL_DECODE_STRATEGIES}, "
                          f"got {strategy!r}.")
@@ -335,8 +420,7 @@ def torch_compile_kwargs(resolved_config: ResolvedGeneratorConfig) -> dict[str, 
     return kwargs
 
 
-# Values that runtime code uses for typed fields that no earlier step decided. The LTX-2 refine switches are the
-# stage-2 defaults of the LTX-2 pipeline; the checkpoint's model_index.json fills them first when it declares them.
+# Values that runtime code uses for typed fields that no earlier step decided.
 RUNTIME_DEFAULTS: dict[str, Any] = {
     "engine.attention.vsa_sparsity": 0.0,
     "engine.attention.vsa_tile_size": 256,
@@ -346,22 +430,32 @@ RUNTIME_DEFAULTS: dict[str, Any] = {
     "engine.compile.audio_vae_enabled": False,
     "engine.compile.regional": False,
     "pipeline.workload_type": WorkloadType.T2V,
-    "pipeline.minimax_h3.taeh3_chunk_size": 5,
-    "pipeline.minimax_h3.vae_parallel_decode": False,
-    "pipeline.minimax_h3.vae_parallel_encode": False,
-    "pipeline.minimax_h3.video_decode_backend": "h3-vae",
-    "pipeline.ltx2.legacy_native_noise_order": False,
-    "pipeline.ltx2.use_distilled_sigmas": True,
-    "pipeline.ltx2.refine.enabled": False,
-    "pipeline.ltx2.refine.add_noise": True,
-    "pipeline.ltx2.refine.guidance_scale": 1.0,
-    "pipeline.ltx2.refine.num_inference_steps": 3,
+}
+# Family tag -> the runtime defaults of that family's ``pipeline.model`` block. The LTX-2 refine switches are the
+# stage-2 defaults of the LTX-2 pipeline; the checkpoint's model_index.json fills them first when it declares them.
+MODEL_FAMILY_RUNTIME_DEFAULTS: dict[str, dict[str, Any]] = {
+    "minimax_h3": {
+        "pipeline.model.taeh3_chunk_size": 5,
+        "pipeline.model.vae_parallel_decode": False,
+        "pipeline.model.vae_parallel_encode": False,
+        "pipeline.model.video_decode_backend": "h3-vae",
+    },
+    "ltx2": {
+        "pipeline.model.legacy_native_noise_order": False,
+        "pipeline.model.use_distilled_sigmas": True,
+        "pipeline.model.refine.enabled": False,
+        "pipeline.model.refine.add_noise": True,
+        "pipeline.model.refine.guidance_scale": 1.0,
+        "pipeline.model.refine.num_inference_steps": 3,
+    },
 }
 
 
 def fill_runtime_defaults(view: ResolutionView) -> dict[str, Any]:
-    """Give each field in ``RUNTIME_DEFAULTS`` its runtime default while it is still unset; runs after every other step."""
-    return {path: deepcopy(default) for path, default in RUNTIME_DEFAULTS.items() if view.get(path) is None}
+    """Give each field in ``RUNTIME_DEFAULTS``, and in the ``MODEL_FAMILY_RUNTIME_DEFAULTS`` of the model's family,
+    its runtime default while it is still unset; runs after every other step."""
+    defaults = {**RUNTIME_DEFAULTS, **MODEL_FAMILY_RUNTIME_DEFAULTS.get(_family(view), {})}
+    return {path: deepcopy(default) for path, default in defaults.items() if view.get(path) is None}
 
 
 ENVIRONMENT_STEPS: tuple[ResolutionStep, ...] = (
@@ -390,14 +484,16 @@ def generator_resolution_steps(
 ) -> tuple[ResolutionStep, ...]:
     """The resolution steps of any generator root, in the order that they run.
 
-    ``before_placeholders`` runs after the checkpoint fills and before ``derive_parallel_sizes``, for checks that need
-    the -1 placeholders; ``after`` runs last. The device-policy steps run after every fill and derivation and before
-    the validations. ``validate_parallel_sizes`` checks the sizes before ``derive_num_gpus_from_parallel_sizes`` raises
-    ``num_gpus``.
+    The model family steps run first, because the environment and model-default fills write into the
+    ``pipeline.model`` block. ``before_placeholders`` runs after the checkpoint fills and before
+    ``derive_parallel_sizes``, for checks that need the -1 placeholders; ``after`` runs last. The device-policy steps
+    run after every fill and derivation and before the validations. ``validate_parallel_sizes`` checks the sizes
+    before ``derive_num_gpus_from_parallel_sizes`` raises ``num_gpus``.
     """
     if defaults is None:
         defaults = build_model_pipeline_config(config)
     return (
+        *model_family_steps(defaults),
         *ENVIRONMENT_STEPS,
         pipeline_config_defaults_step(config, defaults),
         copy_refine_preset_overrides,
@@ -424,10 +520,10 @@ def inference_resolution_steps(config: GeneratorConfig, defaults: Any = None) ->
 
 # LTX-2 VAE tile size path -> the ``vae_config`` attribute that the LTX-2 VAE reads.
 _LTX2_VAE_TILE_ATTRIBUTES = {
-    "pipeline.ltx2.vae_spatial_tile_size_in_pixels": "ltx2_spatial_tile_size_in_pixels",
-    "pipeline.ltx2.vae_spatial_tile_overlap_in_pixels": "ltx2_spatial_tile_overlap_in_pixels",
-    "pipeline.ltx2.vae_temporal_tile_size_in_frames": "ltx2_temporal_tile_size_in_frames",
-    "pipeline.ltx2.vae_temporal_tile_overlap_in_frames": "ltx2_temporal_tile_overlap_in_frames",
+    "pipeline.model.vae_spatial_tile_size_in_pixels": "ltx2_spatial_tile_size_in_pixels",
+    "pipeline.model.vae_spatial_tile_overlap_in_pixels": "ltx2_spatial_tile_overlap_in_pixels",
+    "pipeline.model.vae_temporal_tile_size_in_frames": "ltx2_temporal_tile_size_in_frames",
+    "pipeline.model.vae_temporal_tile_overlap_in_frames": "ltx2_temporal_tile_overlap_in_frames",
 }
 
 
@@ -467,26 +563,29 @@ def materialize_pipeline_config(resolved: ResolvedGeneratorConfig, pipeline_conf
 
     ``pipeline_config`` is the instance from :func:`build_model_pipeline_config`. In order, materialization sets the
     ``pipeline.experimental`` keys that are ``PipelineConfig`` attributes (model-only fields), the attributes of
-    ``PIPELINE_CONFIG_MIRRORS`` from their typed values, and the ``pipeline.vae`` and ``pipeline.dit`` entries on
-    ``vae_config`` and ``dit_config``; a ``None`` value leaves its attribute unchanged. It then writes the LTX-2 VAE
-    tile sizes onto ``vae_config``, pins the ``engine.quantization.transformer_quant`` config on ``dit_config``, runs
-    ``check_pipeline_config``, and loads the VAE encoder for a preprocessing run.
+    :func:`pipeline_config_mirrors` from their typed values, and the ``vae`` and ``dit`` entries of the
+    ``pipeline.model`` block on ``vae_config`` and ``dit_config``; a ``None`` value leaves its attribute unchanged. For
+    an LTX-2 model it then writes the VAE tile sizes onto ``vae_config``. It pins the
+    ``engine.quantization.transformer_quant`` config on ``dit_config``, runs ``check_pipeline_config``, and loads the
+    VAE encoder for a preprocessing run.
     """
     config = resolved.to_config()
+    family = config.pipeline.model.family
     _set_present_attributes(pipeline_config, {
         key: value
         for key, value in config.pipeline.experimental.items() if key != "pipeline_config"
     })
-    mirrored = {attribute: _config_value(config, path) for path, attribute in PIPELINE_CONFIG_MIRRORS.items()}
+    mirrored = {attribute: _config_value(config, path) for path, attribute in pipeline_config_mirrors(family).items()}
     if mirrored["text_encoder_precisions"] is not None:
         mirrored["text_encoder_precisions"] = tuple(mirrored["text_encoder_precisions"])
     _set_present_attributes(pipeline_config, mirrored)
-    _set_present_attributes(pipeline_config.vae_config, config.pipeline.vae)
-    _set_present_attributes(pipeline_config.dit_config, config.pipeline.dit)
-    _set_present_attributes(pipeline_config.vae_config, {
-        attribute: _config_value(config, path)
-        for path, attribute in _LTX2_VAE_TILE_ATTRIBUTES.items()
-    })
+    _set_present_attributes(pipeline_config.vae_config, config.pipeline.model.vae)
+    _set_present_attributes(pipeline_config.dit_config, config.pipeline.model.dit)
+    if family == "ltx2":
+        _set_present_attributes(pipeline_config.vae_config, {
+            attribute: _config_value(config, path)
+            for path, attribute in _LTX2_VAE_TILE_ATTRIBUTES.items()
+        })
     _apply_transformer_quant(pipeline_config, _config_value(config, "engine.quantization.transformer_quant"))
     pipeline_config.check_pipeline_config()
     if resolved.mode == ExecutionMode.PREPROCESS and not pipeline_config.vae_config.load_encoder:
@@ -540,19 +639,21 @@ def _non_default_fields(value: Any, default: Any) -> dict[str, Any]:
     """Fields of the dataclass ``value`` that differ from the same fields of ``default``, recursively.
 
     A nested config that is set while its default is ``None`` is kept, with its own non-default fields, so that
-    parsing recreates it.
+    parsing recreates it. A tagged-union block is written under its tag, ``{"ltx2": {...}}``, as the input spells it.
     """
     written: dict[str, Any] = {}
     for config_field in fields(value):
         current = getattr(value, config_field.name)
         base = getattr(default, config_field.name)
-        if is_dataclass(current) and is_dataclass(base):
+        if is_dataclass(current) and is_dataclass(base) and type(current) is type(base):
             nested = _non_default_fields(current, base)
             if nested:
                 written[config_field.name] = nested
         elif is_dataclass(current):
             nested_type: Any = type(current)
-            written[config_field.name] = _non_default_fields(current, nested_type())
+            nested = _non_default_fields(current, nested_type())
+            tag = union_tag(current)
+            written[config_field.name] = nested if tag is None else {tag: nested}
         elif current != base:
             written[config_field.name] = current
     return written
@@ -561,6 +662,10 @@ def _non_default_fields(value: Any, default: Any) -> dict[str, Any]:
 __all__ = [
     "torch_compile_kwargs",
     "ENVIRONMENT_STEPS",
+    "GENERIC_FAMILY",
+    "MODEL_FAMILY_CONFIG_CLASSES",
+    "MODEL_FAMILY_MIRRORS",
+    "MODEL_FAMILY_RUNTIME_DEFAULTS",
     "PIPELINE_CONFIG_MIRRORS",
     "VALIDATION_STEPS",
     "apply_nvfp4_fa4_env",
@@ -576,7 +681,10 @@ __all__ = [
     "inference_resolution_steps",
     "load_moba_config",
     "materialize_pipeline_config",
+    "model_family",
+    "model_family_steps",
     "pipeline_config_defaults_step",
+    "pipeline_config_mirrors",
     "resolve_config",
     "resolve_inference_config",
     "validate_attention_backend",

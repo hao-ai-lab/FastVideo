@@ -227,8 +227,10 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrid
             },
         },
         "pipeline": {
-            "longcat": {
-                "enable_bsa": False,
+            "model": {
+                "longcat": {
+                    "enable_bsa": False,
+                },
             },
         },
     }
@@ -333,8 +335,10 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrid
             },
         },
         "pipeline": {
-            "longcat": {
-                "enable_bsa": False,
+            "model": {
+                "longcat": {
+                    "enable_bsa": False,
+                },
             },
         },
     }
@@ -446,8 +450,10 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str, env_override
             },
         },
         "pipeline": {
-            "longcat": {
-                "enable_bsa": False,
+            "model": {
+                "longcat": {
+                    "enable_bsa": False,
+                },
             },
         },
     }

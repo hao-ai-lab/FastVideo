@@ -36,9 +36,10 @@ generator:
       vsa_sparsity: 0.9
       vsa_tile_size: 64
   pipeline:
-    minimax_h3:
-      vae_parallel_decode: true
-      vae_parallel_decode_strategy: gather
+    model:
+      minimax_h3:
+        vae_parallel_decode: true
+        vae_parallel_decode_strategy: gather
 request:
   prompt: >-
     A wide cinematic shot of an alpine meadow at sunrise, pale pink mountain

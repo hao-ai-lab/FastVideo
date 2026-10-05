@@ -67,7 +67,7 @@ class LTX2RefineInitStage(PipelineStage):
         batch: ForwardBatch,
         resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
-        if not resolved_config.pipeline.ltx2.refine.enabled:
+        if not resolved_config.pipeline.model.refine.enabled:
             return batch
 
         height = batch.height
@@ -137,7 +137,7 @@ class LTX2UpsampleStage(PipelineStage):
         batch: ForwardBatch,
         resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
-        if not resolved_config.pipeline.ltx2.refine.enabled:
+        if not resolved_config.pipeline.model.refine.enabled:
             return batch
 
         if batch.latents is None:
@@ -212,7 +212,7 @@ class LTX2UpsampleStage(PipelineStage):
             if patchifier is not None:
                 video_shape = VideoLatentShape.from_torch_shape(latents.shape)
                 patch_noise_shape = patchifier.patchify(latents).shape
-            noise_path = resolved_config.pipeline.ltx2.refine.noise_path
+            noise_path = resolved_config.pipeline.model.refine.noise_path
             noise = self._load_noise(
                 noise_path,
                 device=latents.device,
@@ -251,7 +251,7 @@ class LTX2UpsampleStage(PipelineStage):
                     audio_shape = AudioLatentShape.from_torch_shape(audio_latents.shape)
                     audio_patch = audio_patchifier.patchify(audio_latents)
                     audio_noise_shape = audio_patch.shape
-                    audio_noise_path = (resolved_config.pipeline.ltx2.refine.audio_noise_path)
+                    audio_noise_path = (resolved_config.pipeline.model.refine.audio_noise_path)
                     audio_noise = self._load_noise(
                         audio_noise_path,
                         device=audio_latents.device,
@@ -273,7 +273,7 @@ class LTX2UpsampleStage(PipelineStage):
                     audio_noised_patch = audio_noise * sigma0 + audio_patch * (1.0 - sigma0)
                     audio_latents = audio_patchifier.unpatchify(audio_noised_patch, audio_shape)
                 else:
-                    audio_noise_path = (resolved_config.pipeline.ltx2.refine.audio_noise_path)
+                    audio_noise_path = (resolved_config.pipeline.model.refine.audio_noise_path)
                     audio_noise = self._load_noise(
                         audio_noise_path,
                         device=audio_latents.device,
@@ -306,7 +306,7 @@ class LTX2UpsampleStage(PipelineStage):
         resolved_config: ResolvedGeneratorConfig,
     ) -> VerificationResult:
         result = VerificationResult()
-        if resolved_config.pipeline.ltx2.refine.enabled:
+        if resolved_config.pipeline.model.refine.enabled:
             result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
         return result
 
@@ -370,9 +370,9 @@ class LTX2RefineLoRAStage(PipelineStage):
         batch: ForwardBatch,
         resolved_config: ResolvedGeneratorConfig,
     ) -> ForwardBatch:
-        if not resolved_config.pipeline.ltx2.refine.enabled:
+        if not resolved_config.pipeline.model.refine.enabled:
             return batch
-        lora_path = resolved_config.pipeline.ltx2.refine.lora_path or self._lora_path
+        lora_path = resolved_config.pipeline.model.refine.lora_path or self._lora_path
         if not lora_path or self._applied:
             return batch
 

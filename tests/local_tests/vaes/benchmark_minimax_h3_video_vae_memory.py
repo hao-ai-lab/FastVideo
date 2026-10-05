@@ -98,7 +98,7 @@ def _build_operation(args, vae, device):
     runtime_args = SimpleNamespace(
         pipeline=SimpleNamespace(
             output_type="pil",
-            minimax_h3=SimpleNamespace(
+            model=SimpleNamespace(
                 vae_parallel_encode=False,
                 vae_parallel_decode=False,
                 vae_parallel_decode_strategy=None,

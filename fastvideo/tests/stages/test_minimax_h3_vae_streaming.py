@@ -25,7 +25,7 @@ def _decode_config(*, pin: bool = False, vae_offload: bool = False, parallel_dec
     pipeline_config = SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1)))
     return make_resolved_config(pipeline_config, raw={
         "engine": {"offload": {"pin_cpu_memory": pin, "vae": vae_offload}},
-        "pipeline": {"output_type": "pil", "minimax_h3": {"vae_parallel_decode": parallel_decode, **minimax_h3}},
+        "pipeline": {"output_type": "pil", "model": {"minimax_h3": {"vae_parallel_decode": parallel_decode, **minimax_h3}}},
     })
 
 
@@ -72,7 +72,7 @@ def test_reference_video_encode_keeps_pixels_on_cpu() -> None:
     )
     resolved_config = make_resolved_config(
         SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
-        raw={"pipeline": {"minimax_h3": {"vae_parallel_encode": False}}},
+        raw={"pipeline": {"model": {"minimax_h3": {"vae_parallel_encode": False}}}},
     )
     rows = stage._encode_visual_rows([reference], torch.device("cpu"), resolved_config)
 

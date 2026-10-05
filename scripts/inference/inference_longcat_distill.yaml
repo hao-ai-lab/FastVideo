@@ -14,8 +14,9 @@ generator:
     components:
       lora_path: FastVideo/LongCat-Video-T2V-Distilled-LoRA
       lora_nickname: distilled
-    longcat:
-      enable_bsa: false
+    model:
+      longcat:
+        enable_bsa: false
 request:
   prompt: >-
     In a realistic photography style, a white boy around seven or eight years

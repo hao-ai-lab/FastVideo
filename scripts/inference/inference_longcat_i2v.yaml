@@ -12,8 +12,9 @@ generator:
       pin_cpu_memory: false
   pipeline:
     workload_type: i2v
-    longcat:
-      enable_bsa: false
+    model:
+      longcat:
+        enable_bsa: false
 request:
   prompt: >-
     A woman sits at a wooden table by the window in a cozy café. She reaches

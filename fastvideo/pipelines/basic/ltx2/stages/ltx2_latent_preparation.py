@@ -114,7 +114,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         dtype = batch.prompt_embeds[0].dtype
         device = get_local_torch_device()
         generator = batch.generator
-        if generator is not None and not resolved_config.pipeline.ltx2.legacy_native_noise_order:
+        if generator is not None and not resolved_config.pipeline.model.legacy_native_noise_order:
             if isinstance(generator, list):
                 if generator and generator[0].device.type != device.type:
                     seeds = batch.seeds
@@ -134,7 +134,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames
         height = batch.height
         width = batch.width
-        latent_path = resolved_config.pipeline.ltx2.initial_latent_path
+        latent_path = resolved_config.pipeline.model.initial_latent_path
 
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
@@ -160,7 +160,7 @@ class LTX2LatentPreparationStage(PipelineStage):
                 loaded_latents = self._load_initial_latent(latent_path, device, dtype)
                 if loaded_latents is not None:
                     latents = loaded_latents
-                elif resolved_config.pipeline.ltx2.legacy_native_noise_order:
+                elif resolved_config.pipeline.model.legacy_native_noise_order:
                     latents = randn_tensor(
                         shape,
                         generator=generator,
@@ -178,7 +178,7 @@ class LTX2LatentPreparationStage(PipelineStage):
                     )
                     self._save_initial_latent(latent_path, latents)
             else:
-                if resolved_config.pipeline.ltx2.legacy_native_noise_order:
+                if resolved_config.pipeline.model.legacy_native_noise_order:
                     latents = randn_tensor(
                         shape,
                         generator=generator,

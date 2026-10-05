@@ -307,9 +307,9 @@ def test_resolved_strategy_literals_match_module() -> None:
 
     def resolve(minimax_h3):
         with isolated_environment():
-            return resolve_inference_config({"model_path": model_path, "pipeline": {"minimax_h3": minimax_h3}})
+            return resolve_inference_config({"model_path": model_path, "pipeline": {"model": {"minimax_h3": minimax_h3}}})
 
-    options = resolve({}).pipeline.minimax_h3
+    options = resolve({}).pipeline.model
     assert options.vae_parallel_decode is False
     assert options.vae_parallel_encode is False
     assert options.vae_parallel_decode_strategy == DEFAULT_DECODE_GATHER_STRATEGY
@@ -317,6 +317,6 @@ def test_resolved_strategy_literals_match_module() -> None:
 
     for strategy in DECODE_GATHER_STRATEGIES:
         resolved = resolve({"vae_parallel_decode_strategy": strategy})
-        assert resolved.pipeline.minimax_h3.vae_parallel_decode_strategy == strategy
+        assert resolved.pipeline.model.vae_parallel_decode_strategy == strategy
     with pytest.raises(ConfigValidationError, match="vae_parallel_decode_strategy"):
         resolve({"vae_parallel_decode_strategy": "scatter"})

@@ -257,12 +257,6 @@
  "pipeline_config_class": "fastvideo.pipelines.basic.ltx2.pipeline_configs.LTX2T2VConfig",
  "resolution_decisions": [
   [
-   "fill_vae_parallel_from_env",
-   {
-    "pipeline.minimax_h3.vae_parallel_decode_strategy": "gather"
-   }
-  ],
-  [
    "fill_pipeline_config_defaults[LTX2T2VConfig]",
    {
     "engine.precision.dit": "bf16",
@@ -299,16 +293,12 @@
     "engine.compile.regional": false,
     "engine.compile.text_encoder_enabled": false,
     "engine.compile.vae_enabled": false,
-    "pipeline.ltx2.legacy_native_noise_order": false,
-    "pipeline.ltx2.refine.add_noise": true,
-    "pipeline.ltx2.refine.enabled": false,
-    "pipeline.ltx2.refine.guidance_scale": 1.0,
-    "pipeline.ltx2.refine.num_inference_steps": 3,
-    "pipeline.ltx2.use_distilled_sigmas": true,
-    "pipeline.minimax_h3.taeh3_chunk_size": 5,
-    "pipeline.minimax_h3.vae_parallel_decode": false,
-    "pipeline.minimax_h3.vae_parallel_encode": false,
-    "pipeline.minimax_h3.video_decode_backend": "h3-vae",
+    "pipeline.model.legacy_native_noise_order": false,
+    "pipeline.model.refine.add_noise": true,
+    "pipeline.model.refine.enabled": false,
+    "pipeline.model.refine.guidance_scale": 1.0,
+    "pipeline.model.refine.num_inference_steps": 3,
+    "pipeline.model.use_distilled_sigmas": true,
     "pipeline.workload_type": "t2v"
    }
   ]
@@ -391,20 +381,14 @@
     "upsampler_weights": null,
     "vae_weights": null
    },
-   "dit": {},
    "dmd_denoising_steps": null,
    "embedded_cfg_scale": 6.0,
    "experimental": {},
    "flow_shift": null,
-   "longcat": {
-    "bsa_cdf_threshold": null,
-    "bsa_chunk_k": null,
-    "bsa_chunk_q": null,
-    "bsa_sparsity": null,
-    "enable_bsa": null
-   },
-   "ltx2": {
+   "model": {
     "audio_latent_path": null,
+    "dit": {},
+    "family": "ltx2",
     "initial_latent_path": null,
     "legacy_native_noise_order": false,
     "refine": {
@@ -420,25 +404,16 @@
      "video_position_offset_sec": null
     },
     "use_distilled_sigmas": true,
+    "vae": {},
     "vae_spatial_tile_overlap_in_pixels": null,
     "vae_spatial_tile_size_in_pixels": null,
     "vae_temporal_tile_overlap_in_frames": null,
     "vae_temporal_tile_size_in_frames": null
    },
-   "minimax_h3": {
-    "sequential_load": null,
-    "taeh3_checkpoint": null,
-    "taeh3_chunk_size": 5,
-    "vae_parallel_decode": false,
-    "vae_parallel_decode_strategy": "gather",
-    "vae_parallel_encode": false,
-    "video_decode_backend": "h3-vae"
-   },
    "output_type": "pil",
    "preset": null,
    "preset_overrides": {},
    "preset_version": null,
-   "vae": {},
    "vae_sp": false,
    "vae_tiling": true,
    "workload_type": "t2v"

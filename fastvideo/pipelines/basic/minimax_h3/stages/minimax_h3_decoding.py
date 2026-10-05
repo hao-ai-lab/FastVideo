@@ -80,8 +80,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
     def forward(self, batch: ForwardBatch, resolved_config: ResolvedGeneratorConfig) -> ForwardBatch:
         """Decode H3 video latents into normalized CPU pixels."""
         placeholder = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
-        sp_group, is_output_rank, parallel = _decode_participation(
-            resolved_config, resolved_config.pipeline.minimax_h3.vae_parallel_decode)
+        sp_group, is_output_rank, parallel = _decode_participation(resolved_config,
+                                                                   resolved_config.pipeline.model.vae_parallel_decode)
         if not is_output_rank and not parallel:
             # Consumers read the output rank's ForwardBatch. Keep a
             # verifier-compatible placeholder on other ranks and avoid
@@ -102,7 +102,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             h3_dit_patch_size(resolved_config),
         )
         device = get_local_torch_device()
-        backend = resolved_config.pipeline.minimax_h3.video_decode_backend
+        backend = resolved_config.pipeline.model.video_decode_backend
         if backend == "taeh3":
             from fastvideo.models.vaes.minimax_h3_taeh3 import decode_ncthw_latents_taeh3, taeh3_decoded_pixel_shape
 
@@ -115,8 +115,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                 pixels = decode_ncthw_latents_taeh3(
                     latents,
                     device=device,
-                    checkpoint_path=resolved_config.pipeline.minimax_h3.taeh3_checkpoint,
-                    chunk_size=int(resolved_config.pipeline.minimax_h3.taeh3_chunk_size or 5),
+                    checkpoint_path=resolved_config.pipeline.model.taeh3_checkpoint,
+                    chunk_size=int(resolved_config.pipeline.model.taeh3_chunk_size or 5),
                 )
             batch.output = pixels.float().cpu() if is_output_rank else placeholder
             if is_output_rank and tuple(batch.output.shape) != expected:
@@ -148,7 +148,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"),
             ):
                 if parallel:
-                    strategy = (resolved_config.pipeline.minimax_h3.vae_parallel_decode_strategy
+                    strategy = (resolved_config.pipeline.model.vae_parallel_decode_strategy
                                 or DEFAULT_DECODE_GATHER_STRATEGY)
                     logger.info("MiniMax-H3 VAE decode: sequence-parallel chunks across %d ranks (%s)",
                                 sp_group.world_size, strategy)

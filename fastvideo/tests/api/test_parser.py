@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 
+import pytest
 import yaml
 
 from fastvideo.api import (
@@ -20,6 +21,7 @@ from fastvideo.api import (
     StreamingConfig,
     WarmupConfig,
 )
+from fastvideo.api.errors import ConfigValidationError
 
 
 def test_parse_config_builds_nested_typed_config() -> None:
@@ -180,46 +182,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "dmd_denoising_steps": None,
                 "boundary_ratio": None,
                 "output_type": "pil",
-                "dit": {},
-                "vae": {},
-                "ltx2": {
-                    "vae_spatial_tile_size_in_pixels": None,
-                    "vae_spatial_tile_overlap_in_pixels": None,
-                    "vae_temporal_tile_size_in_frames": None,
-                    "vae_temporal_tile_overlap_in_frames": None,
-                    "initial_latent_path": None,
-                    "audio_latent_path": None,
-                    "legacy_native_noise_order": None,
-                    "use_distilled_sigmas": None,
-                    "refine": {
-                        "enabled": None,
-                        "num_inference_steps": None,
-                        "guidance_scale": None,
-                        "add_noise": None,
-                        "image_crf": None,
-                        "video_position_offset_sec": None,
-                        "transformer_path": None,
-                        "lora_path": None,
-                        "noise_path": None,
-                        "audio_noise_path": None,
-                    },
-                },
-                "minimax_h3": {
-                    "sequential_load": None,
-                    "video_decode_backend": None,
-                    "taeh3_checkpoint": None,
-                    "taeh3_chunk_size": None,
-                    "vae_parallel_decode": None,
-                    "vae_parallel_encode": None,
-                    "vae_parallel_decode_strategy": None,
-                },
-                "longcat": {
-                    "enable_bsa": None,
-                    "bsa_sparsity": None,
-                    "bsa_cdf_threshold": None,
-                    "bsa_chunk_q": None,
-                    "bsa_chunk_k": None,
-                },
+                "model": None,
                 "preset_overrides": {},
                 "experimental": {},
             },
@@ -410,3 +373,51 @@ def test_load_serve_config_with_streaming_from_yaml(tmp_path) -> None:
     assert loaded.streaming is not None
     assert loaded.streaming.stream_mode == "av_fmp4"
     assert loaded.streaming.pool.num_workers == 4
+
+
+def test_tagged_union_parses_the_single_family_key() -> None:
+    from fastvideo.api import LTX2Options, LongCatOptions
+
+    config = parse_config(
+        GeneratorConfig, {
+            "model_path": "/models/ltx2",
+            "pipeline": {
+                "model": {
+                    "ltx2": {
+                        "refine": {
+                            "enabled": True
+                        },
+                        "dit": {
+                            "prefix": "transformer"
+                        }
+                    }
+                }
+            },
+        })
+
+    assert isinstance(config.pipeline.model, LTX2Options)
+    assert config.pipeline.model.family == "ltx2"
+    assert config.pipeline.model.refine.enabled is True
+    assert config.pipeline.model.dit == {"prefix": "transformer"}
+    assert config_to_dict(config)["pipeline"]["model"]["ltx2"]["refine"]["enabled"] is True
+    assert "family" not in config_to_dict(config)["pipeline"]["model"]["ltx2"]
+    assert parse_config(GeneratorConfig, config_to_dict(config)) == config
+
+    longcat = parse_config(GeneratorConfig, {"model_path": "/models/longcat", "pipeline": {"model": {"longcat": {}}}})
+    assert isinstance(longcat.pipeline.model, LongCatOptions)
+    assert longcat.pipeline.model.family == "longcat"
+
+
+@pytest.mark.parametrize(("model", "path", "message"), [
+    ({}, "pipeline.model", "expected exactly one key"),
+    ({"ltx2": {}, "longcat": {}}, "pipeline.model", "expected exactly one key"),
+    ({"wan": {}}, "pipeline.model.wan", "unknown key"),
+    ({"ltx2": {"family": "ltx2"}}, "pipeline.model.ltx2.family", "set by the key"),
+    ({"ltx2": {"enable_bsa": True}}, "pipeline.model.ltx2.enable_bsa", "unknown field"),
+])
+def test_tagged_union_rejects_malformed_blocks(model, path, message) -> None:
+    with pytest.raises(ConfigValidationError) as error:
+        parse_config(GeneratorConfig, {"model_path": "/models/x", "pipeline": {"model": model}})
+
+    assert error.value.path == path
+    assert message in error.value.message

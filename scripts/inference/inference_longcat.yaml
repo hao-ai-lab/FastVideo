@@ -13,8 +13,9 @@ generator:
       vae: false
       pin_cpu_memory: false
   pipeline:
-    longcat:
-      enable_bsa: false
+    model:
+      longcat:
+        enable_bsa: false
 request:
   prompt: >-
     In a realistic photography style, a white boy around seven or eight years

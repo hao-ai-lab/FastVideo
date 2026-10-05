@@ -48,9 +48,18 @@ def parse_config(config_type: type[T], raw: Mapping[str, Any] | T) -> T:
 
 
 def config_to_dict(config: Any) -> Any:
-    """Serialize a typed config object into plain Python containers."""
+    """Serialize a typed config object into plain Python containers.
+
+    A tagged-union member is written in its input form, ``{tag: fields}``, without the ``family`` tag field, so the
+    result parses back with :func:`parse_config`.
+    """
     if dataclasses.is_dataclass(config) and not isinstance(config, type):
-        return {field.name: config_to_dict(getattr(config, field.name)) for field in dataclasses.fields(config)}
+        tag = union_tag(config)
+        fields = {
+            field.name: config_to_dict(getattr(config, field.name))
+            for field in dataclasses.fields(config) if tag is None or field.name != TAG_FIELD
+        }
+        return fields if tag is None else {tag: fields}
     if isinstance(config, list):
         return [config_to_dict(item) for item in config]
     if isinstance(config, dict):
@@ -109,6 +118,79 @@ def _load_raw_mapping(handle: Any, config_path: Path) -> Any:
     raise ValueError(f"Unsupported config file format: {config_path}")
 
 
+# A tagged union is a dataclass that defines ``TAGS`` in its own namespace: a mapping from tag to the dataclass that
+# the tag selects. Its input is a mapping with exactly one key, the tag, whose value is parsed as the selected class.
+# Every selected class carries the tag in the ``TAG_FIELD`` field, whose default is the tag; the input never writes it.
+TAG_FIELD = "family"
+
+
+def tagged_union_tags(config_type: Any) -> Mapping[str, type[Any]] | None:
+    """The ``TAGS`` table of a tagged-union dataclass, or ``None`` for any other annotation.
+
+    Only the class that defines ``TAGS`` is the union; the classes that it selects inherit the attribute and parse as
+    plain dataclasses.
+    """
+    if not isinstance(config_type, type) or not dataclasses.is_dataclass(config_type):
+        return None
+    return vars(config_type).get("TAGS")
+
+
+def union_tag(config: Any) -> str | None:
+    """The tag under which a tagged-union member instance is written, or ``None`` for any other value."""
+    for base in type(config).__mro__:
+        tags = tagged_union_tags(base)
+        if tags is not None:
+            for tag, member_type in tags.items():
+                if member_type is type(config):
+                    return tag
+            raise ConfigValidationError("", f"{type(config).__name__} is not in the TAGS of {base.__name__}")
+    return None
+
+
+def strip_union_tags(config_type: type[Any], paths: set[str]) -> set[str]:
+    """Rewrite dotted input paths through a tagged-union field into the field paths of the parsed config.
+
+    An input path ``pipeline.model.ltx2.refine.enabled`` names the member block by its tag; the parsed config holds
+    the block at ``pipeline.model``, so the path becomes ``pipeline.model.refine.enabled``. Paths that do not go
+    through a tagged-union field of ``config_type`` are unchanged.
+    """
+    union_paths = _tagged_union_field_paths(config_type, "")
+    if not union_paths:
+        return paths
+    stripped: set[str] = set()
+    for path in paths:
+        for union_path, tags in union_paths.items():
+            if path.startswith(union_path + "."):
+                tag, _, rest = path[len(union_path) + 1:].partition(".")
+                if tag in tags:
+                    path = _join_path(union_path, rest) if rest else union_path
+                break
+        stripped.add(path)
+    return stripped
+
+
+def _tagged_union_field_paths(config_type: type[Any], prefix: str) -> dict[str, Mapping[str, type[Any]]]:
+    """Dotted path -> ``TAGS`` for every tagged-union field reachable through the nested dataclass fields."""
+    found: dict[str, Mapping[str, type[Any]]] = {}
+    spec = _get_dataclass_spec(config_type)
+    for name in spec.fields_by_name:
+        field_path = _join_path(prefix, name)
+        for candidate in _annotation_classes(spec.type_hints[name]):
+            tags = tagged_union_tags(candidate)
+            if tags is not None:
+                found[field_path] = tags
+            elif dataclasses.is_dataclass(candidate):
+                found.update(_tagged_union_field_paths(candidate, field_path))
+    return found
+
+
+def _annotation_classes(annotation: Any) -> list[type[Any]]:
+    """The classes that an annotation names directly or as members of an optional or union annotation."""
+    if get_origin(annotation) in _UNION_ORIGINS:
+        return [candidate for candidate in get_args(annotation) if isinstance(candidate, type)]
+    return [annotation] if isinstance(annotation, type) else []
+
+
 class _SchemaParser:
 
     def parse_dataclass(
@@ -150,6 +232,9 @@ class _SchemaParser:
         if origin is tuple:
             return self._parse_tuple(annotation, value, path)
         if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
+            tags = tagged_union_tags(annotation)
+            if tags is not None:
+                return self._parse_tagged_union(annotation, tags, value, path)
             return self.parse_dataclass(annotation, value, path)
         if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
             return self._parse_enum(annotation, value, path)
@@ -171,6 +256,21 @@ class _SchemaParser:
                 raise ConfigValidationError(path, "expected mapping keys to be strings")
             if key not in spec.fields_by_name:
                 raise ConfigValidationError(_join_path(path, key), "unknown field")
+
+    def _parse_tagged_union(self, union_type: type[Any], tags: Mapping[str, type[Any]], value: Any, path: str) -> Any:
+        """Parse ``{tag: fields}`` into the member class that ``tags[tag]`` names, with ``TAG_FIELD`` set to the tag."""
+        if not isinstance(value, Mapping):
+            raise ConfigValidationError(path, f"expected mapping with one key for {union_type.__name__}")
+        choices = ", ".join(sorted(tags))
+        if len(value) != 1:
+            raise ConfigValidationError(path, f"expected exactly one key, one of ({choices}); got {sorted(value)!r}")
+        tag, fields = next(iter(value.items()))
+        if tag not in tags:
+            raise ConfigValidationError(_join_path(path, str(tag)), f"unknown key; expected one of ({choices})")
+        member_path = _join_path(path, tag)
+        if isinstance(fields, Mapping) and TAG_FIELD in fields:
+            raise ConfigValidationError(_join_path(member_path, TAG_FIELD), f"set by the key {tag!r}; remove it")
+        return self.parse_dataclass(tags[tag], fields, member_path)
 
     def _parse_union(self, annotation: Any, value: Any, path: str) -> Any:
         candidates = [candidate for candidate in get_args(annotation) if candidate is not type(None)]
@@ -328,10 +428,14 @@ def _type_name(annotation: Any) -> str:
 
 
 __all__ = [
+    "TAG_FIELD",
     "config_to_dict",
     "load_config",
     "load_raw_config",
     "load_run_config",
     "load_serve_config",
     "parse_config",
+    "strip_union_tags",
+    "tagged_union_tags",
+    "union_tag",
 ]

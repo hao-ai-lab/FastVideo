@@ -42,7 +42,7 @@ Everything the demo needs ships in the upstream `fastvideo` package:
   `pipeline_config.dit_config.quant_config = NVFP4Config()` in `app.py` (same
   pattern as `examples/inference/basic/basic_ltx2_distilled_fast_profile.py`).
 - **LTX-2.3 refine settings in the typed config** — `app.py` passes
-  `pipeline.components.upsampler_weights`, `pipeline.ltx2.refine.lora_path`,
+  `pipeline.components.upsampler_weights`, `pipeline.model.ltx2.refine.lora_path`,
   `pipeline.preset_overrides.refine` (`enabled`, `num_inference_steps`,
   `guidance_scale`, `add_noise`), and `pipeline.vae_tiling` to
   `VideoGenerator.from_config`. The typed fields are defined in

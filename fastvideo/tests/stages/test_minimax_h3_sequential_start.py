@@ -47,7 +47,7 @@ def _h3_config(*, enable_stage_verification: bool = True, lazy_module_load: bool
             "enable_stage_verification": enable_stage_verification,
             "offload": {"lazy_module_load": lazy_module_load},
         },
-        "pipeline": {"minimax_h3": minimax_h3},
+        "pipeline": {"model": {"minimax_h3": minimax_h3}},
     })
 
 
@@ -225,12 +225,12 @@ def test_auto_loads_together_without_unified_memory(monkeypatch) -> None:
 def test_cli_tri_state_h3_sequential_load() -> None:
 
     def sequential_load(argv: list[str]) -> bool | None:
-        raw = apply_overrides({}, parse_cli_overrides(argv))
-        return make_resolved_config(raw=raw).pipeline.minimax_h3.sequential_load
+        raw = apply_overrides({"pipeline": {"model": {"minimax_h3": {}}}}, parse_cli_overrides(argv))
+        return make_resolved_config(raw=raw).pipeline.model.sequential_load
 
     assert sequential_load([]) is None
-    assert sequential_load(["--pipeline.minimax_h3.sequential_load", "true"]) is True
-    assert sequential_load(["--pipeline.minimax_h3.sequential_load", "false"]) is False
+    assert sequential_load(["--pipeline.model.minimax_h3.sequential_load", "true"]) is True
+    assert sequential_load(["--pipeline.model.minimax_h3.sequential_load", "false"]) is False
 
 
 def test_taeh3_t2va_skips_video_vae_on_the_deferred_load(monkeypatch) -> None:

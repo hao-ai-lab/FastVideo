@@ -10,7 +10,7 @@ import torch
 from torch.testing import assert_close
 
 from fastvideo.api.checkpoint_defaults import dmd_schedule_checkpoint_step
-from fastvideo.api.inference_resolution import fill_runtime_defaults
+from fastvideo.api.inference_resolution import fill_runtime_defaults, model_family_steps
 from fastvideo.api.resolution import resolve_generator_config
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
@@ -42,10 +42,12 @@ def _pipeline(tmp_path, *, video_shift=10.0):
 
 
 def _resolve_checkpoint(tmp_path, raw=None):
-    """Resolve the local checkpoint ``tmp_path`` through the checkpoint schedule step and the runtime defaults."""
-    return resolve_generator_config({"model_path": str(tmp_path), **(raw or {})},
-                                    (dmd_schedule_checkpoint_step(MiniMaxH3PipelineConfig()), fill_runtime_defaults),
-                                    materialize=lambda _: MiniMaxH3PipelineConfig())
+    """Resolve the local checkpoint ``tmp_path`` through the family, checkpoint schedule, and runtime-default steps."""
+    defaults = MiniMaxH3PipelineConfig()
+    return resolve_generator_config(
+        {"model_path": str(tmp_path), **(raw or {})},
+        (*model_family_steps(defaults), dmd_schedule_checkpoint_step(defaults), fill_runtime_defaults),
+        materialize=lambda _: MiniMaxH3PipelineConfig())
 
 
 def _with_steps(steps):
@@ -196,8 +198,9 @@ def test_resolution_fills_the_exported_ladder_and_the_pipeline_accepts_it(tmp_pa
 
 def test_checkpoint_step_skips_other_models_and_checkpoints_without_a_schedule(tmp_path):
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps(CONTRACT))
-    other_model = resolve_generator_config({"model_path": str(tmp_path)},
-                                           (dmd_schedule_checkpoint_step(object()), fill_runtime_defaults))
+    other_model = resolve_generator_config(
+        {"model_path": str(tmp_path)},
+        (*model_family_steps(object()), dmd_schedule_checkpoint_step(object()), fill_runtime_defaults))
     assert other_model.pipeline.dmd_denoising_steps is None
 
     (tmp_path / "fastvideo_inference.json").unlink()

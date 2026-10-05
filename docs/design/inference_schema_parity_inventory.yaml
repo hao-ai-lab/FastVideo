@@ -78,47 +78,53 @@ surfaces:
       - pipeline.embedded_cfg_scale
       - pipeline.dmd_denoising_steps
       - pipeline.boundary_ratio
-      - pipeline.dit
-      - pipeline.vae
+      - pipeline.model.generic.dit
+      - pipeline.model.generic.vae
+      - pipeline.model.ltx2.dit
+      - pipeline.model.ltx2.vae
+      - pipeline.model.minimax_h3.dit
+      - pipeline.model.minimax_h3.vae
+      - pipeline.model.longcat.dit
+      - pipeline.model.longcat.vae
     unsupported:
       - pipeline.preset
       - pipeline.preset_version
       - pipeline.components.vae_weights
     moved:
       pipeline.preset_overrides:
-        target: generator.pipeline.ltx2.refine
-        note: "Only the refine mapping applies: resolution copies pipeline.preset_overrides.refine into the pipeline.ltx2.refine fields of the same names. Other keys have no effect."
+        target: generator.pipeline.model.ltx2.refine
+        note: "Only the refine mapping applies: resolution copies pipeline.preset_overrides.refine into the pipeline.model.ltx2.refine fields of the same names when the model is LTX-2. Other keys have no effect."
     preset_owned:
-      - pipeline.ltx2.vae_spatial_tile_size_in_pixels
-      - pipeline.ltx2.vae_spatial_tile_overlap_in_pixels
-      - pipeline.ltx2.vae_temporal_tile_size_in_frames
-      - pipeline.ltx2.vae_temporal_tile_overlap_in_frames
-      - pipeline.ltx2.initial_latent_path
-      - pipeline.ltx2.audio_latent_path
-      - pipeline.ltx2.legacy_native_noise_order
-      - pipeline.ltx2.use_distilled_sigmas
-      - pipeline.ltx2.refine.enabled
-      - pipeline.ltx2.refine.num_inference_steps
-      - pipeline.ltx2.refine.guidance_scale
-      - pipeline.ltx2.refine.add_noise
-      - pipeline.ltx2.refine.image_crf
-      - pipeline.ltx2.refine.video_position_offset_sec
-      - pipeline.ltx2.refine.transformer_path
-      - pipeline.ltx2.refine.lora_path
-      - pipeline.ltx2.refine.noise_path
-      - pipeline.ltx2.refine.audio_noise_path
-      - pipeline.minimax_h3.sequential_load
-      - pipeline.minimax_h3.video_decode_backend
-      - pipeline.minimax_h3.taeh3_checkpoint
-      - pipeline.minimax_h3.taeh3_chunk_size
-      - pipeline.minimax_h3.vae_parallel_decode
-      - pipeline.minimax_h3.vae_parallel_encode
-      - pipeline.minimax_h3.vae_parallel_decode_strategy
-      - pipeline.longcat.enable_bsa
-      - pipeline.longcat.bsa_sparsity
-      - pipeline.longcat.bsa_cdf_threshold
-      - pipeline.longcat.bsa_chunk_q
-      - pipeline.longcat.bsa_chunk_k
+      - pipeline.model.ltx2.vae_spatial_tile_size_in_pixels
+      - pipeline.model.ltx2.vae_spatial_tile_overlap_in_pixels
+      - pipeline.model.ltx2.vae_temporal_tile_size_in_frames
+      - pipeline.model.ltx2.vae_temporal_tile_overlap_in_frames
+      - pipeline.model.ltx2.initial_latent_path
+      - pipeline.model.ltx2.audio_latent_path
+      - pipeline.model.ltx2.legacy_native_noise_order
+      - pipeline.model.ltx2.use_distilled_sigmas
+      - pipeline.model.ltx2.refine.enabled
+      - pipeline.model.ltx2.refine.num_inference_steps
+      - pipeline.model.ltx2.refine.guidance_scale
+      - pipeline.model.ltx2.refine.add_noise
+      - pipeline.model.ltx2.refine.image_crf
+      - pipeline.model.ltx2.refine.video_position_offset_sec
+      - pipeline.model.ltx2.refine.transformer_path
+      - pipeline.model.ltx2.refine.lora_path
+      - pipeline.model.ltx2.refine.noise_path
+      - pipeline.model.ltx2.refine.audio_noise_path
+      - pipeline.model.minimax_h3.sequential_load
+      - pipeline.model.minimax_h3.video_decode_backend
+      - pipeline.model.minimax_h3.taeh3_checkpoint
+      - pipeline.model.minimax_h3.taeh3_chunk_size
+      - pipeline.model.minimax_h3.vae_parallel_decode
+      - pipeline.model.minimax_h3.vae_parallel_encode
+      - pipeline.model.minimax_h3.vae_parallel_decode_strategy
+      - pipeline.model.longcat.enable_bsa
+      - pipeline.model.longcat.bsa_sparsity
+      - pipeline.model.longcat.bsa_cdf_threshold
+      - pipeline.model.longcat.bsa_chunk_q
+      - pipeline.model.longcat.bsa_chunk_k
     compatibility_only:
       pipeline.experimental: "Open mapping for settings without a typed path: the pipeline_config source (a JSON path, a mapping, or a PipelineConfig), keys that runtime code reads by name (for example ray_runtime_env), and PipelineConfig attribute overrides for model-only fields (for example flow_shift_sr). Resolution rejects a key whose PipelineConfig attribute has a typed path."
     internal_only:
@@ -163,19 +169,19 @@ surfaces:
     moved:
       enable_bsa:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.enable_bsa
+        target: generator.pipeline.model.longcat.enable_bsa
       bsa_sparsity:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.bsa_sparsity
+        target: generator.pipeline.model.longcat.bsa_sparsity
       bsa_cdf_threshold:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.bsa_cdf_threshold
+        target: generator.pipeline.model.longcat.bsa_cdf_threshold
       bsa_chunk_q:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.bsa_chunk_q
+        target: generator.pipeline.model.longcat.bsa_chunk_q
       bsa_chunk_k:
         sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-        target: generator.pipeline.longcat.bsa_chunk_k
+        target: generator.pipeline.model.longcat.bsa_chunk_k
     preset_owned:
       flux2_text_encoder_type:
         sources:

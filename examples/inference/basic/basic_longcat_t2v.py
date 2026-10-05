@@ -53,7 +53,7 @@ def basic_generation():
                 "pin_cpu_memory": False,
             },
         },
-        "pipeline": {"longcat": {"enable_bsa": False}},
+        "pipeline": {"model": {"longcat": {"enable_bsa": False}}},
     })
 
     output_path = "outputs_video/longcat_t2v_basic"
@@ -105,7 +105,7 @@ def distill_refine_generation():
             },
         },
         "pipeline": {
-            "longcat": {"enable_bsa": False},
+            "model": {"longcat": {"enable_bsa": False}},
             "components": {
                 "lora_path": "FastVideo/LongCat-Video-T2V-Distilled-LoRA",
                 "lora_nickname": "distilled",
@@ -159,11 +159,13 @@ def distill_refine_generation():
             },
         },
         "pipeline": {
-            "longcat": {
-                "enable_bsa": True,
-                "bsa_sparsity": 0.875,
-                "bsa_chunk_q": [4, 4, 8],
-                "bsa_chunk_k": [4, 4, 8],
+            "model": {
+                "longcat": {
+                    "enable_bsa": True,
+                    "bsa_sparsity": 0.875,
+                    "bsa_chunk_q": [4, 4, 8],
+                    "bsa_chunk_k": [4, 4, 8],
+                },
             },
             "components": {
                 "lora_path": "FastVideo/LongCat-Video-T2V-Refinement-LoRA",

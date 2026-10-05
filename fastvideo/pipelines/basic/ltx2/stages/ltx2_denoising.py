@@ -244,7 +244,7 @@ class LTX2DenoisingStage(PipelineStage):
             logger.info("[LTX2] Using override sigma schedule, %s", self.sigmas_override)
         else:
             # Use distilled hardcoded schedule (or subsets) when enabled.
-            use_distilled_sigmas = (resolved_config.pipeline.ltx2.use_distilled_sigmas
+            use_distilled_sigmas = (resolved_config.pipeline.model.use_distilled_sigmas
                                     and envs.FASTVIDEO_LTX2_USE_DISTILLED_SIGMAS.get())
             max_distilled_steps = len(DISTILLED_SIGMA_VALUES) - 1
             if use_distilled_sigmas and num_inference_steps <= max_distilled_steps:
@@ -341,7 +341,7 @@ class LTX2DenoisingStage(PipelineStage):
                 audio_shape.frames,
                 audio_shape.mel_bins,
             )
-            audio_latent_path = resolved_config.pipeline.ltx2.audio_latent_path
+            audio_latent_path = resolved_config.pipeline.model.audio_latent_path
             audio_latents = self._load_audio_latents(
                 audio_latent_path,
                 device=latents.device,
@@ -350,7 +350,7 @@ class LTX2DenoisingStage(PipelineStage):
             ) if audio_latent_path else None
             if audio_latents is None:
                 audio_generator = None
-                if resolved_config.pipeline.ltx2.initial_latent_path and batch.seed is not None:
+                if resolved_config.pipeline.model.initial_latent_path and batch.seed is not None:
                     audio_generator = torch.Generator(device=latents.device).manual_seed(batch.seed)
                 elif batch.generator is not None:
                     audio_generator = (batch.generator[0] if isinstance(batch.generator, list) else batch.generator)
