@@ -1392,6 +1392,9 @@ def mlx_h3_dit_from_diffusers_safetensors(
         for key, source in shard_arrays.items():
             if _is_ignored_dense_key(key, include_vsa=include_vsa):
                 continue
+            if source.dtype == mx.uint8 and key.endswith(".weight"):
+                raise ValueError(f"Packed transformer weight {key} is not a floating-point source. "
+                                 "Convert the released BF16 transformer to MLX INT6 instead.")
             if temb is not None and (key.startswith("time_embedder.") or key == "adaln_basis.weight"):
                 continue
             if key.startswith("transformer_blocks."):
