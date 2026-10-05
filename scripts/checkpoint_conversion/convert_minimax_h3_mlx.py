@@ -23,9 +23,11 @@ The loader dequantizes each FP8 matrix before applying the requested MLX
 quantization. This saves download bytes but quantizes twice; compare its clips
 with the BF16-sourced export before using it for release.
 
-``--formats mxfp8`` tries native MLX FP8 weight storage and matrix
-multiplication. It is experimental and requires operator support from the
-installed MLX build; the default formats remain affine INT8/INT6/INT4.
+``--formats "mxfp8 mxfp4 nvfp4"`` tries native MLX floating-point quantized
+storage and matrix multiplication. These formats are experimental and require
+operator support from the installed MLX build. This converts BF16 or FP8 source
+weights; it does not import CUDA-packed NVFP4 DiT exports. The default formats
+remain affine INT8/INT6/INT4.
 
     python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \\
         --model-root ~/models/FastH3-Preview-v0.2/transformer \\
@@ -62,7 +64,7 @@ from fastvideo.mlx_runtime.minimax_h3 import (
 
 logger = init_logger(__name__)
 
-SUPPORTED_FORMATS = ("int8", "int6", "int4", "mxfp8")
+SUPPORTED_FORMATS = ("int8", "int6", "int4", "mxfp8", "mxfp4", "nvfp4")
 DEFAULT_FORMATS = "int8 int6 int4"
 
 

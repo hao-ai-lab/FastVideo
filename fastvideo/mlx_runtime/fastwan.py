@@ -90,6 +90,7 @@ class QuantizedMatrix:
     biases: mx.array | None
     spec: MLXQuantizationSpec
     dequantized_dtype: mx.Dtype
+    global_scale: float = 1.0
 
 
 def fastwan_shape(
@@ -281,14 +282,24 @@ def ensure_quantization_supported(spec: MLXQuantizationSpec | None) -> None:
                                           f"(int8 is currently the most reliable quality/memory target).")
 
 
-def quantize_matrix(weight, spec: MLXQuantizationSpec | None):
+def quantize_matrix(weight, spec: MLXQuantizationSpec | None, *, use_nvfp4_global_scale: bool = False):
     if spec is None:
         return weight
     import mlx.core as mx
 
     if len(weight.shape) < 2:
         return weight
-    q = mx.quantize(weight, group_size=spec.group_size, bits=spec.bits, mode=spec.mode)
+    global_scale = 1.0
+    quantization_input = weight
+    if spec.mode == "nvfp4" and use_nvfp4_global_scale:
+        # E4M3 block scales cannot represent typical small model weights
+        # directly. Normalize into E2M1's max 6 times E4M3's max 448.
+        maximum = float(mx.max(mx.abs(weight)).item())
+        global_scale = maximum / (6.0 * 448.0) if maximum > 0 else 1.0
+        # Normalize explicitly so this also works with older MLX operators
+        # without the global_scale keyword. Matmul restores this multiplier.
+        quantization_input = weight.astype(mx.float32) / global_scale
+    q = mx.quantize(quantization_input, group_size=spec.group_size, bits=spec.bits, mode=spec.mode)
     biases = q[2] if len(q) == 3 else None
     eval_args = [q[0], q[1]]
     if biases is not None:
@@ -300,6 +311,7 @@ def quantize_matrix(weight, spec: MLXQuantizationSpec | None):
         biases=biases,
         spec=spec,
         dequantized_dtype=weight.dtype,
+        global_scale=global_scale,
     )
 
 
@@ -371,7 +383,7 @@ def _quantized_linear(x, weight: QuantizedMatrix, *, use_affine_dq_gemm: bool = 
             _dq_gemm_logged = True
             logger.info("affine dequant+GEMM engaged (rows=%d, floor=%d, bits=%s)", rows, min_m, spec.bits)
         return y
-    return mx.quantized_matmul(
+    result = mx.quantized_matmul(
         x,
         weight.weight,
         weight.scales,
@@ -381,6 +393,9 @@ def _quantized_linear(x, weight: QuantizedMatrix, *, use_affine_dq_gemm: bool = 
         bits=spec.bits,
         mode=spec.mode,
     ).astype(x.dtype)
+    if weight.global_scale != 1.0:
+        result = (result.astype(mx.float32) * weight.global_scale).astype(x.dtype)
+    return result
 
 
 def linear(x, weight, bias=None, *, use_affine_dq_gemm: bool = False):
