@@ -843,7 +843,10 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                     per_call = _tile_batch_size()
                     for start in range(0, len(latent_tiles), per_call):
                         batch = torch.cat(latent_tiles[start:start + per_call], dim=0)
-                        decoded.extend(self.decoder(self._project_decoder_tile(batch)).split(z.shape[0], dim=0))
+                        # Clone before retaining: under the reduce-overhead compile the decoder output lives in
+                        # a CUDA-graph pool that the next batch's replay overwrites.
+                        out = self.decoder(self._project_decoder_tile(batch)).clone()
+                        decoded.extend(out.split(z.shape[0], dim=0))
                     columns = len(x_indices)
                     rows = [decoded[index:index + columns] for index in range(0, len(decoded), columns)]
             # The eager tile driver owns NVTX so each marker remains outside
