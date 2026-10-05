@@ -102,7 +102,7 @@ def test_edits_supported_response_format_still_generates(image_client):
 
 
 @pytest.mark.parametrize("payload", [
-    {"size": "bad-size"}, {"size": "0x16"}, {"size": "-16x16"},
+    {"size": ""}, {"output_format": ""}, {"size": "bad-size"}, {"size": "0x16"}, {"size": "-16x16"},
     {"output_format": "gif"}, {"n": 0}, {"n": -1}, {"n": 11},
 ])
 def test_invalid_image_parameters_do_not_start_generation(image_client, payload, tmp_path):
@@ -114,7 +114,7 @@ def test_invalid_image_parameters_do_not_start_generation(image_client, payload,
 
 
 @pytest.mark.parametrize("payload", [
-    {"size": "bad-size"}, {"size": "0x16"}, {"size": "-16x16"},
+    {"size": ""}, {"output_format": ""}, {"size": "bad-size"}, {"size": "0x16"}, {"size": "-16x16"},
     {"output_format": "gif"}, {"n": "0"}, {"n": "-1"}, {"n": "11"},
 ])
 def test_invalid_edit_parameters_do_not_save_uploads(image_client, payload, tmp_path):
@@ -133,3 +133,17 @@ def test_supported_image_sizes_are_forwarded(image_client, size):
     assert response.status_code == 200, response.text
     assert engine.generator.generate_video.call_args.kwargs["width"] == 512
     assert engine.generator.generate_video.call_args.kwargs["height"] == 768
+
+
+@pytest.mark.parametrize("size", ["512x768", "512X768", " 512 x 768 "])
+def test_supported_edit_size_and_saved_input_are_forwarded(image_client, size):
+    client, engine = image_client
+    response = client.post(
+        "/v1/images/edits", data={"prompt": "a cat", "size": size},
+        files={"image": ("cat.png", b"uploaded-image", "image/png")},
+    )
+    assert response.status_code == 200, response.text
+    kwargs = engine.generator.generate_video.call_args.kwargs
+    assert (kwargs["width"], kwargs["height"]) == (512, 768)
+    assert Path(kwargs["image_path"]).read_bytes() == b"uploaded-image"
+    engine.generator.generate_video.assert_called_once()

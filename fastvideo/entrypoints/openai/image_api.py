@@ -7,7 +7,7 @@ import time
 
 import aiofiles
 
-from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, UploadFile)
+from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, Request, UploadFile)
 from fastapi.responses import FileResponse
 
 from fastvideo.entrypoints.openai.protocol import (
@@ -78,10 +78,10 @@ def _build_generation_kwargs(
     kwargs: dict = {"prompt": prompt}
     if not 1 <= n <= 10:
         raise HTTPException(status_code=400, detail="n must be between 1 and 10")
-    if output_format and output_format.lower() not in {"png", "jpeg", "jpg", "webp"}:
+    if output_format is not None and output_format.lower() not in {"png", "jpeg", "jpg", "webp"}:
         raise HTTPException(status_code=400, detail="output_format must be png, jpeg, jpg, or webp")
 
-    if size:
+    if size is not None:
         w, h = parse_size(size)
         if w is None or h is None or w <= 0 or h <= 0:
             raise HTTPException(status_code=400, detail="size must contain positive WIDTHxHEIGHT dimensions")
@@ -183,6 +183,7 @@ async def generations(request: ImageGenerationsRequest):
 
 @router.post("/edits", response_model=ImageResponse)
 async def edits(
+        raw_request: Request,
         image: list[UploadFile] | None = File(None),  # noqa: B008
         image_array: list[UploadFile] | None = File(  # noqa: B008
             None, alias="image[]"),
@@ -207,6 +208,13 @@ async def edits(
 
     request_id = generate_request_id()
     engine = get_serving_engine()
+
+    # Optional Form parameters normalize explicit empty strings to None.
+    form = await raw_request.form()
+    if form.get("size") == "":
+        size = ""
+    if form.get("output_format") == "":
+        output_format = ""
 
     images = image or image_array
     urls = url or url_array
