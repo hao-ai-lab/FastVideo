@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import gc
 import json
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -429,11 +431,15 @@ def export_mlx_h3_nvfp4_encoder(component_dir: str | Path, output_dir: str | Pat
     embedding/norm values. Later loads skip CPU scale unswizzling and staging.
     """
     raw = _read_nvfp4_encoder_config(component_dir)
-    output_dir = Path(output_dir)
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise FileExistsError(f"Encoder cache output must be empty: {output_dir}")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    final_dir = Path(output_dir)
+    if final_dir.exists() and any(final_dir.iterdir()):
+        raise FileExistsError(f"Encoder cache output must be empty: {final_dir}")
+    # Build in a sibling staging directory and publish it with one rename, so an
+    # out-of-memory or out-of-disk failure never leaves a partial cache behind.
+    final_dir.parent.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(tempfile.mkdtemp(prefix=f".{final_dir.name}.partial-", dir=final_dir.parent))
     index = _ResidentNVFP4Index(_ShardIndex(Path(component_dir)))
+    published = False
     try:
         arrays = {}
         matrices = {}
@@ -456,9 +462,15 @@ def export_mlx_h3_nvfp4_encoder(component_dir: str | Path, output_dir: str | Pat
             "source_dir": str(Path(component_dir).resolve())
         }
         (output_dir / MLX_NVFP4_ENCODER_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
+        if final_dir.exists():
+            final_dir.rmdir()  # empty, checked above
+        output_dir.rename(final_dir)
+        published = True
     finally:
         index.close()
-    return output_dir
+        if not published:
+            shutil.rmtree(output_dir, ignore_errors=True)
+    return final_dir
 
 
 class _ResidentNVFP4Index:
