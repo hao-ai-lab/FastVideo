@@ -99,3 +99,37 @@ def test_edits_supported_response_format_still_generates(image_client):
     assert base64.b64decode(response.json()["data"][0]["b64_json"]) == b"test-image-content"
     engine.run_serialized.assert_awaited_once()
     engine.generator.generate_video.assert_called_once()
+
+
+@pytest.mark.parametrize("payload", [
+    {"size": "bad-size"}, {"size": "0x16"}, {"size": "-16x16"},
+    {"output_format": "gif"}, {"n": 0}, {"n": -1}, {"n": 11},
+])
+def test_invalid_image_parameters_do_not_start_generation(image_client, payload, tmp_path):
+    client, engine = image_client
+    response = client.post("/v1/images/generations", json={"prompt": "a cat", **payload})
+    assert response.status_code == 400, response.text
+    engine.run_serialized.assert_not_awaited()
+    assert not (tmp_path / "images").exists()
+
+
+@pytest.mark.parametrize("payload", [
+    {"size": "bad-size"}, {"size": "0x16"}, {"size": "-16x16"},
+    {"output_format": "gif"}, {"n": "0"}, {"n": "-1"}, {"n": "11"},
+])
+def test_invalid_edit_parameters_do_not_save_uploads(image_client, payload, tmp_path):
+    client, engine = image_client
+    response = client.post("/v1/images/edits", data={"prompt": "a cat", **payload},
+                           files={"image": ("cat.png", b"fake-image", "image/png")})
+    assert response.status_code == 400, response.text
+    engine.run_serialized.assert_not_awaited()
+    assert not (tmp_path / "uploads").exists()
+
+
+@pytest.mark.parametrize("size", ["512x768", "512X768", " 512 x 768 "])
+def test_supported_image_sizes_are_forwarded(image_client, size):
+    client, engine = image_client
+    response = client.post("/v1/images/generations", json={"prompt": "a cat", "size": size})
+    assert response.status_code == 200, response.text
+    assert engine.generator.generate_video.call_args.kwargs["width"] == 512
+    assert engine.generator.generate_video.call_args.kwargs["height"] == 768
