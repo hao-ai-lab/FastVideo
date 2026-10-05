@@ -21,6 +21,15 @@ def refuse_zero_initialized_h3_vsa(transformer: Any) -> None:
         if gate is None:
             continue
         weight = getattr(gate, "weight", None)
+        packed = getattr(gate, "_nvfp4_weight", None)
+        if (weight is None or weight.numel() == 0) and packed is not None and packed.numel() > 0:
+            # h3_dit_vsa: the gate is packed NVFP4 (weight is None). Two E2M1 codes per byte; the low three
+            # bits of each nibble are the magnitude, so a gate whose codes are all +-0 is a zero gate.
+            saw_weight = True
+            if bool(((packed & 0x77) != 0).any()):
+                any_trained = True
+                break
+            continue
         # Layerwise offload leaves a zero-element placeholder on the module; it says nothing about the gate.
         if weight is None or weight.numel() == 0:
             continue
