@@ -444,8 +444,14 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
         if x.numel() == 0:
             # An empty prompt has nothing to quantize; the FP4 kernels are not defined for zero rows.
             return x.new_zeros(*original_shape[:-1], layer.output_size_per_partition, dtype=torch.bfloat16)
-        x_fp4, x_scale = _quantize_activation_nvfp4(x.reshape(-1, original_shape[-1]), layer._nvfp4_x_global_scale)
-        output = _nvfp4_linear(x_fp4, x_scale, layer.weight_packed, layer.weight_scale, layer._nvfp4_alpha)
+        x_global_scale, alpha = layer._nvfp4_x_global_scale, layer._nvfp4_alpha
+        if alpha.device != layer.weight_packed.device:
+            # A streamed encoder layer is finalized on the host and only its packed weights visit the GPU;
+            # FlashInfer requires the scalars on the GEMM's device.
+            x_global_scale = x_global_scale.to(layer.weight_packed.device, non_blocking=True)
+            alpha = alpha.to(layer.weight_packed.device, non_blocking=True)
+        x_fp4, x_scale = _quantize_activation_nvfp4(x.reshape(-1, original_shape[-1]), x_global_scale)
+        output = _nvfp4_linear(x_fp4, x_scale, layer.weight_packed, layer.weight_scale, alpha)
         if bias is not None:
             # The GEMM emits bf16; keep it that way whatever dtype the bias was built in.
             output = output + bias.to(output.dtype)
