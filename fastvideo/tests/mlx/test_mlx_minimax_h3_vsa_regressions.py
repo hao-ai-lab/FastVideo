@@ -166,7 +166,8 @@ def test_dense_generate_ignores_unused_vsa_parameters(tmp_path, monkeypatch):
     pipeline = object.__new__(pipeline_mod.MiniMaxH3MLXPipeline)
     pipeline.video_decode_backend = "h3-vae"
     pipeline.dit_checkpoint = tmp_path
-    monkeypatch.setattr(pipeline_mod, "_validate_checkpoint_step_ladder", lambda *a: None)
+    pipeline.model_root = tmp_path
+    monkeypatch.setattr(pipeline_mod, "_validate_checkpoint_step_ladder", lambda *a, **k: None)
     def stop_at_media_preflight(**kwargs):
         raise RuntimeError("reached media preflight")
     monkeypatch.setattr(pipeline_mod, "_preflight_media_dependencies", stop_at_media_preflight)
@@ -321,7 +322,8 @@ def test_converter_continues_past_mismatched_existing_format(tmp_path, monkeypat
     (existing / h3.H3_MANIFEST_FILENAME).write_text(json.dumps({"vsa": {"capable": False}}))
     (existing / h3.H3_WEIGHTS_FILENAME).write_bytes(b"existing")
     monkeypatch.setattr(converter, "parse_args", lambda: argparse.Namespace(
-        formats="int8 int6", out=tmp_path, model_root="unused", include_vsa=True))
+        formats="int8 int6", out=tmp_path, model_root="unused", include_vsa=True,
+        nvfp4_conditioner_root=None, nvfp4_conditioner_out=None))
     monkeypatch.setattr(converter, "mlx_h3_dit_from_diffusers_safetensors", lambda *a, **k: _dit())
     saved = []
     monkeypatch.setattr(converter, "save_mlx_h3_checkpoint", lambda model, path: saved.append(path.name))
