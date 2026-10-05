@@ -65,7 +65,7 @@ def test_tile_first_matches_generic_vsa_with_partial_tiles(env_overrides, distri
     from fastvideo.models.dits.minimax_h3 import MiniMaxH3Attention
 
     env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("VIDEO_SPARSE_ATTN_H3"))
-    env_overrides.enter_context(envs.override_external("FASTVIDEO_VSA_TRITON", "1"))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_TRITON.override(True))
     env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(False))
     env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_FP4.override(False))
     env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_TILE_FIRST.override(False))
