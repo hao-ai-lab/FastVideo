@@ -1,5 +1,6 @@
 """Check serving snippets against their executable sources, without model imports."""
 
+import ast
 import copy
 import json
 from pathlib import Path
@@ -155,6 +156,81 @@ def test_example_docs_exclude_installed_client_dependencies(tmp_path):
         dependency.mkdir()
         (dependency / "README.md").write_text("Not example documentation")
     assert Example(tmp_path).other_files == [tmp_path / "client.mjs"]
+
+
+@pytest.mark.parametrize(
+    ("recipe_id", "config_name", "fps", "env_prefix"),
+    [
+        ("fastwan21-t2v", "openai_fastwan21_1_3b.yaml", 16, "FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN "),
+        ("wan22-t2v", "openai_wan22_t2v_a14b.yaml", 16, ""),
+        ("wan22-ti2v", "openai_wan22_ti2v_5b.yaml", 24, ""),
+    ],
+)
+def test_wan_text_recipes_publish_server_profiles(recipe_id, config_name, fps, env_prefix):
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    recipe = next(item for item in recipes if item["id"] == recipe_id)
+    assert "audio" not in recipe["serving"]
+    profile = cookbook_serving_profile(recipe)
+    # The playground router rejects non-H3 servers, so Wan pages must not link to it.
+    assert profile["playground_url"] is None
+    assert profile["audio"] is False
+    assert profile["command"].startswith(f"{env_prefix}fastvideo serve --config examples/serving/{config_name}")
+    assert "--server.host 127.0.0.1" in profile["command"]
+    assert profile["sampling"]["fps"] == fps
+    if recipe_id == "wan22-ti2v":
+        assert recipe["serving"]["task"] == "Text to video"
+        assert any("text prompt only" in item for item in recipe["serving"]["limitations"])
+
+
+def test_h3_serving_recipes_advertise_audio_and_playground():
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    h3 = [item for item in recipes if item["family"] == "minimax_h3" and "serving" in item]
+    assert h3
+    for recipe in h3:
+        profile = cookbook_serving_profile(recipe)
+        assert recipe["serving"]["audio"] is True, recipe["id"]
+        assert profile["audio"] is True, recipe["id"]
+        assert profile["playground_url"] == "http://127.0.0.1:8000/playground/", recipe["id"]
+
+
+def test_serving_profile_reports_explicit_compile_setting():
+    recipes = {item["id"]: item for item in json.loads(COOKBOOK_DATA.read_text())["recipes"]}
+    assert cookbook_serving_profile(recipes["fasth3-preview-cuda"])["compile_enabled"] is False
+    assert cookbook_serving_profile(recipes["fastwan21-t2v"])["compile_enabled"] is True
+    assert cookbook_serving_profile(recipes["wan22-t2v"])["compile_enabled"] is None
+
+
+@pytest.mark.parametrize(
+    ("config_name", "preset_name"),
+    [
+        ("openai_wan22_t2v_a14b.yaml", "WAN_2_2_T2V_A14B"),
+        ("openai_wan22_ti2v_5b.yaml", "WAN_2_2_TI2V_5B"),
+    ],
+)
+def test_wan_serving_sampling_matches_registered_preset(config_name, preset_name):
+    # Read the literal defaults from source so the test needs no model imports (torch).
+    tree = ast.parse((ROOT / "fastvideo/pipelines/basic/wan/presets.py").read_text())
+    call = next(
+        node.value for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+        and any(isinstance(target, ast.Name) and target.id == preset_name for target in node.targets))
+    defaults_node = next(keyword.value for keyword in call.keywords if keyword.arg == "defaults")
+    defaults = {
+        key.value: value.value
+        for key, value in zip(defaults_node.keys, defaults_node.values)
+        if isinstance(key, ast.Constant) and isinstance(value, ast.Constant)
+    }
+    assert defaults
+    config = yaml.safe_load((ROOT / "examples/serving" / config_name).read_text())
+    for key, value in config["default_request"]["sampling"].items():
+        if key in defaults:
+            assert defaults[key] == value, f"{config_name} {key} drifted from {preset_name}"
+
+
+def test_wan21_i2v_stays_python_only():
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    recipe = next(item for item in recipes if item["id"] == "wan21-i2v")
+    assert "serving" not in recipe
 
 
 def test_h3_command_blocks_have_unique_copy_targets():
