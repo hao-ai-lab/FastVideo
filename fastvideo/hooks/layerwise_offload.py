@@ -28,7 +28,6 @@ def _offload_tensors(module: nn.Module, names: dict[str, torch.Tensor] | None = 
     ``names`` restricts the walk to the tensors chosen at init: an offloaded buffer is a
     zero-element placeholder afterwards and would fail the size test.
     """
-    import os
     if names is not None:
         for name, tensor in chain(module.named_parameters(), module.named_buffers()):
             if name in names:
@@ -187,7 +186,6 @@ def enable_layerwise_offload(model: nn.Module,
     async_stream = torch.cuda.Stream()
     # The first N entries skip offloading and stay wherever the model is placed (normally the
     # GPU), so a GPU with spare memory streams only the remainder over PCIe.
-    import os
     if resident_blocks is not None:
         resident = max(0, resident_blocks)
     else:
