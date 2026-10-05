@@ -1,0 +1,89 @@
+{
+  "torch": "2.12.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "flash_attention_version": "4",
+  "dtype": "bfloat16",
+  "heads": 32,
+  "head_dim": 128,
+  "warmup": 3,
+  "iterations": 12,
+  "cases": [
+    {
+      "name": "t2i_1024",
+      "query_tokens": 4096,
+      "kv_tokens": 4122,
+      "milliseconds": {
+        "sdpa": 1.475887934366862,
+        "fa4": 1.4714454015096028,
+        "cudnn": 1.4134666124979656
+      },
+      "speedup": 1.0030191625545206,
+      "max_abs": 0.00048828125,
+      "mean_abs": 2.0786982801723752e-08,
+      "finite": true,
+      "sdpa_operators": [
+        "aten::scaled_dot_product_attention",
+        "aten::_scaled_dot_product_flash_attention",
+        "aten::_flash_attention_forward",
+        "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, false, true, false, false>(pytorch_flash::Flash_fwd_params)"
+      ],
+      "unavailable_backends": {}
+    },
+    {
+      "name": "i2i_1024",
+      "query_tokens": 4096,
+      "kv_tokens": 8296,
+      "milliseconds": {
+        "sdpa": 2.921168009440104,
+        "fa4": 2.9107707341512046,
+        "cudnn": 2.804149309794108
+      },
+      "speedup": 1.0035720007649216,
+      "max_abs": 0.00048828125,
+      "mean_abs": 1.95527043445054e-08,
+      "finite": true,
+      "sdpa_operators": [
+        "aten::scaled_dot_product_attention",
+        "aten::_scaled_dot_product_flash_attention",
+        "aten::_flash_attention_forward",
+        "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, false, true, false, false>(pytorch_flash::Flash_fwd_params)"
+      ],
+      "unavailable_backends": {}
+    },
+    {
+      "name": "t2i_2048",
+      "query_tokens": 16384,
+      "kv_tokens": 16410,
+      "milliseconds": {
+        "sdpa": 20.874523162841797,
+        "fa4": 20.692930857340496,
+        "cudnn": 19.862776438395183
+      },
+      "speedup": 1.008775572042125,
+      "max_abs": 0.000244140625,
+      "mean_abs": 1.976592400865229e-08,
+      "finite": true,
+      "sdpa_operators": [
+        "aten::scaled_dot_product_attention",
+        "aten::_scaled_dot_product_flash_attention",
+        "aten::_flash_attention_forward",
+        "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, false, true, false, false>(pytorch_flash::Flash_fwd_params)"
+      ],
+      "unavailable_backends": {}
+    }
+  ],
+  "cudnn_errors": {
+    "t2i_1024": {
+      "max_abs": 0.0009765625,
+      "mean_abs": 4.4724227336701006e-05
+    },
+    "i2i_1024": {
+      "max_abs": 0.00048828125,
+      "mean_abs": 3.222263330826536e-05
+    },
+    "t2i_2048": {
+      "max_abs": 0.00048828125,
+      "mean_abs": 2.3270318706636317e-05
+    }
+  }
+}

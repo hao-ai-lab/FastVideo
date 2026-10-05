@@ -1,0 +1,68 @@
+{
+  "backend": "sdpa",
+  "compiled": false,
+  "torch": "2.12.0+cu130",
+  "resolution": [
+    1024,
+    1024
+  ],
+  "steps": 40,
+  "seed": 42,
+  "runs": [
+    {
+      "name": "run-1",
+      "steps": 40,
+      "wall_seconds": 16.479828374000135,
+      "stage_seconds": {
+        "input_preparation": 5.601000157184899e-05,
+        "text_encoding": 0.5902604000002611,
+        "latent_preparation": 0.0004444109999894863,
+        "timestep_preparation": 0.0006366609995893668,
+        "denoising": 14.333388618000754,
+        "decoding": 0.7083147600005759,
+        "PostDecodeFrameProcessStage": 0.01261139700000058
+      },
+      "core_seconds": 15.631963778001591
+    },
+    {
+      "name": "run-2",
+      "steps": 40,
+      "wall_seconds": 16.58653584000058,
+      "stage_seconds": {
+        "input_preparation": 6.675999975414015e-05,
+        "text_encoding": 0.5899364790002437,
+        "latent_preparation": 0.00044448100015870295,
+        "timestep_preparation": 0.0006468810006481363,
+        "denoising": 14.352922530999422,
+        "decoding": 0.7146118939999724,
+        "PostDecodeFrameProcessStage": 0.017972919999010628
+      },
+      "core_seconds": 15.657470903999638
+    }
+  ],
+  "initialization_seconds": 162.91819038999893,
+  "warmup": {
+    "name": "warmup",
+    "steps": 4,
+    "wall_seconds": 14.997058269000263,
+    "stage_seconds": {
+      "input_preparation": 0.00017153099906863645,
+      "text_encoding": 2.0177278939991083,
+      "latent_preparation": 0.0007361320003838046,
+      "timestep_preparation": 0.0025373360003868584,
+      "denoising": 1.6148618669994903,
+      "decoding": 10.323089935000098,
+      "PostDecodeFrameProcessStage": 0.10392347900051391
+    },
+    "core_seconds": 13.955679695998697
+  },
+  "repeat_exact": true,
+  "average_core_seconds": 15.644717341000614,
+  "average_denoising_seconds": 14.343155574500088,
+  "receipt": {
+    "resolved": "TORCH_SDPA",
+    "dense_layers": {},
+    "peak_allocated_mib": 16005.31005859375
+  },
+  "status": "PASS"
+}
