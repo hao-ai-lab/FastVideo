@@ -46,108 +46,88 @@ is the higher-quality FastH3.
 Recorded shapes and evidence live in the
 [support matrix](../../inference/support_matrix.md#apple-silicon-native-runtime).
 
-## Pruned eight-forward checkpoint
+## FastH3 V2 and Trim with INT6
 
-The pruned FastH3 checkpoint has 42 transformer blocks and rank-16 AdaLN.
-Its `fastvideo_inference.json` fixes eight denoising forwards, video/audio
-shifts of 10/3, and VSA sparsity 0.8. Keep that file beside the transformer
-when converting. The converter reads its schedule to build the AdaLN cache.
+The released sources are `FastVideo/FastVideo-FastH3-8-Step-V2` and
+`FastVideo/FastVideo-FastH3-Trim-8-Step`. Trim has 42 transformer blocks and
+rank-16 AdaLN. Both use eight denoising forwards, video/audio shifts of 10/3,
+VSA sparsity 0.8, a native NVFP4 text encoder, and the 26-layer light video VAE.
+Keep `fastvideo_inference.json` beside `transformer/`; conversion reads its
+schedule to build the AdaLN cache.
+
+Convert the BF16 transformer to affine INT6 with its VSA gates:
 
 ```bash
-hf download FastVideo/FastH3-Pruned-8Step-BF16-ckpt300 \
-  --local-dir ./FastH3-Pruned-8Step-BF16-ckpt300 \
-  --exclude 'text_encoder/*'
-
-# Optional BF16 encoder fallback: stream the first 50 language layers.
-# The last three shards are unused. The packed NVFP4 option is described below.
-hf download MiniMaxAI/MiniMax-H3 \
-  --local-dir ./FastH3-Pruned-8Step-BF16-ckpt300 \
-  --include 'text_encoder/model-0000[1-9]-of-00014.safetensors' \
-  --include 'text_encoder/model-0001[0-1]-of-00014.safetensors' \
-  --include 'text_encoder/model.safetensors.index.json' \
-  --include 'text_encoder/config.json'
+hf download FastVideo/FastVideo-FastH3-Trim-8-Step \
+  --local-dir ./FastH3-Trim
 
 python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \
-  --model-root ./FastH3-Pruned-8Step-BF16-ckpt300/transformer \
-  --out ./FastH3-Pruned-MLX-vsa \
-  --formats "int8 int6" --include-vsa
-
-python examples/inference/basic/mlx_fasth3.py \
-  --model-root ./FastH3-Pruned-8Step-BF16-ckpt300 \
-  --mlx-checkpoint ./FastH3-Pruned-MLX-vsa/int8 \
-  --prompt "(S1) A potter asks <d>[English] Is the rim ready?</d>" \
-  --height 480 --width 832 --num-frames 243 --steps 8 \
-  --vsa --vsa-sparsity 0.8 --vsa-tile-size 64 \
-  --output-path ./outputs/fasth3_pruned_int8_480p.mp4
+  --model-root ./FastH3-Trim/transformer \
+  --out ./FastH3-Trim-MLX \
+  --formats "int6" --include-vsa
 ```
 
-At 24 fps, 124 frames is the legal H3 count for a roughly five-second clip.
-Use `--num-frames 124` and a separate output path for that run. The `--fast`
-and `--fast-spatial` options change the workload and are not part of the
-native-resolution benchmark. A 36 GB Mac may need INT6 and phased loading;
-measure memory before claiming all-resident operation.
+For V2, use `FastVideo/FastVideo-FastH3-8-Step-V2` and separate source/output
+directories. Preconverted release snapshots use the same names with the
+`-MLX-INT6` suffix. Each snapshot includes the encoder in MLX layout, both VAEs,
+and the trained schedule, so it does not require a second encoder download.
 
-### Packed encoder and resident loading
-
-The experimental MLX conditioner can read the released FastVideo NVFP4
-text encoder directly, using native `nvfp4` matrix multiplication. It keeps
-the packed weights and BF16 embedding table in memory, with FP32
-activations. CUDA uses quantized activations, so the two encoders are not
-bit-exact. Validate generated video and audio before publishing a timing.
-MLX 0.32.2 supports the required operator on Apple Silicon.
-
-Pass the packed encoder directory as `conditioner_dir`; `conditioner_mode="auto"`
-selects it from `config.json`. The BF16 fallback continues to stream layers.
-To request all-resident generation through the Python API:
+The 36 GiB M4 Max release recipe uses phased placement. It loads the encoder,
+DiT, and decoders in turn. Use reference attention and native output geometry:
 
 ```python
+from pathlib import Path
 from fastvideo.mlx_runtime.minimax_h3_pipeline import MiniMaxH3MLXPipeline
 
+root = Path("./FastH3-Trim")
 pipeline = MiniMaxH3MLXPipeline(
-    model_root="./FastH3-Pruned-8Step-BF16-ckpt300",
-    mlx_dit_checkpoint="./FastH3-Pruned-MLX-vsa/int6",
-    conditioner_dir="./FastH3-NVFP4-encoder",
+    model_root=root,
+    mlx_dit_checkpoint="./FastH3-Trim-MLX/int6",
     conditioner_mode="nvfp4",
-    resident=True,
+    resident=False,
     vae_dtype="fp16",
+    metal_wired_limit_gib=27,
 )
 try:
-    pipeline.prepare_resident()  # Load encoder, DiT, video VAE and audio VAE.
-    result = pipeline.generate(
-        "(S1) A potter asks <d>[English] Is the rim ready?</d>",
-        output_path="./outputs/fasth3_pruned_resident.mp4",
-        height=480, width=832, num_frames=243, num_steps=8,
-        vsa=True, vsa_sparsity=0.8, vsa_tile_size=64,
+    pipeline.generate(
+        "A corgi news anchor sits behind a desk and gives a cheerful bark.",
+        output_path="./outputs/trim-int6-corgi.mp4",
+        width=832, height=480, num_frames=124, seed=1234,
+        num_steps=8, vsa=True, vsa_sparsity=0.8, vsa_tile_size=64,
+        vsa_impl="reference", vae_tile_height=256, vae_tile_width=256,
     )
 finally:
     pipeline.close()
 ```
 
-Resident placement requires space for activations as well as all four
-components. On a 36 GiB Mac, try INT6 first and measure peak allocation.
-If loading or inference runs out of memory, use phased loading by leaving
-`resident=False`. Changing placement does not change frames or resolution.
+Set `FASTVIDEO_MLX_DQ_GEMM=1` before running this Python command. It selects the
+validated affine dequantization followed by dense matrix multiplication.
+124 frames at 24 fps is roughly five seconds. The recipe preserves all frames
+and the requested resolution.
+
+### Native NVFP4 encoder and cache
+
+The MLX conditioner reads the released packed NVFP4 weights without
+requantization. It retains the layers H3 reads and can cache the packed weights
+in MLX layout. The cache is written in a staging directory and published by a
+single rename. A cache hit changes storage layout, not encoder arithmetic.
+
+MLX uses BF16 embeddings and FP32 activations; CUDA uses quantized activations.
+Generated video and audio must be reviewed before claiming cross-runtime
+quality parity. MLX 0.32.2 supports the required operator on Apple Silicon.
 
 ### Metal wired memory
 
-MLX's allocation limit and wired-memory limit are separate. H3's optional
-`metal_wired_limit_gib` calls `mx.set_wired_limit` so selected Metal allocations
-stay in physical memory. It does not increase available RAM. Explicit requests
-fail visibly if the installed MLX build cannot apply them.
+MLX's allocation limit and wired-memory limit are separate. The optional
+`metal_wired_limit_gib` calls `mx.set_wired_limit` to keep selected Metal
+allocations in physical memory. It does not add RAM. An explicit request fails
+if the installed MLX build cannot apply it. `close()` restores the previous
+wired limit.
 
-Inspect the device's recommended working set before choosing a limit:
-
-```python
-import mlx.core as mx
-
-print(mx.device_info())
-```
-
-For the tested 36 GiB M4 Max, phased generation can request
-`metal_wired_limit_gib=27` in `MiniMaxH3MLXPipeline`. Leave room for macOS and
-other applications. All-resident generation also needs room for the encoder,
-DiT, both decoders and peak activations; wiring cannot make an oversized stack
-fit. An omitted wired limit preserves MLX's existing wiring setting.
+The tested 36 GiB M4 Max recipe uses 27 GiB and phased placement. Resident
+placement also requires capacity for all components and peak activations;
+wiring cannot make an oversized stack fit. Inspect `mx.device_info()` before
+choosing a limit on another Mac.
 
 ## Hardware
 
