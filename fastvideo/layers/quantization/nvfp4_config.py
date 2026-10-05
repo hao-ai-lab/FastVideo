@@ -380,6 +380,10 @@ def _load_amax_table(path: str) -> dict[str, float]:
 
 class NVFP4QuantizeMethod(QuantizeMethodBase):
 
+    # Lazily resolved by _static_activation_global_sf; class defaults also cover object.__new__ test doubles.
+    _static_sf_checked: bool = False
+    _static_sf: torch.Tensor | None = None
+
     def __init__(self, layer_prefix: str = ""):
         super().__init__()
         self.weight_fp4 = None
