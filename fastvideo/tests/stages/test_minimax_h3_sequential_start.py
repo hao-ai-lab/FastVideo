@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import fastvideo.envs as envs
+
 import fastvideo.pipelines.composed_pipeline_base as composed_pipeline_base
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.utils import FlexibleArgumentParser
@@ -51,9 +53,13 @@ def _stub_module(name: str) -> SimpleNamespace:
     return module
 
 
-def _patch_pipeline_construction(monkeypatch, events: list, *, unified_memory: bool = False) -> None:
+@pytest.fixture(autouse=True)
+def _no_pinned_swap(env_overrides):
     # These contract tests use lightweight objects, not tensor-bearing modules.
-    monkeypatch.setenv("FASTVIDEO_H3_PINNED_SWAP", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_PINNED_SWAP.override(False))
+
+
+def _patch_pipeline_construction(monkeypatch, events: list, *, unified_memory: bool = False) -> None:
     monkeypatch.setattr(
         composed_pipeline_base,
         "maybe_init_distributed_environment_and_model_parallel",

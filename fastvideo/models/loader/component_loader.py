@@ -13,6 +13,8 @@ from typing import Any, cast
 
 import torch
 import torch.distributed as dist
+
+import fastvideo.envs as envs
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file, safe_open
 from torch.distributed import init_device_mesh
@@ -468,7 +470,7 @@ class TextEncoderLoader(ComponentLoader):
             model = model.to(target_device)
 
             prepare_layerwise = getattr(model, "prepare_layerwise_offload", None)
-            if os.environ.get("FASTVIDEO_H3_ENCODER_LAYERWISE", "0") == "1" and callable(prepare_layerwise):
+            if envs.FASTVIDEO_H3_ENCODER_LAYERWISE.get() and callable(prepare_layerwise):
                 if target_device.type != "cpu":
                     raise ValueError("Layerwise H3 encoder requires text_encoder_cpu_offload=True")
                 prepare_layerwise(runtime_device)
@@ -1153,9 +1155,9 @@ class TransformerLoader(ComponentLoader):
             layerwise_load = (fastvideo_args.inference_mode and fastvideo_args.dit_layerwise_offload
                               and not fastvideo_args.use_fsdp_inference)
             # The AdaLN host cache also needs the projection weights to stay off the device from the start.
-            adaln_table = os.environ.get("FASTVIDEO_H3_ADALN_TABLE") or None
+            adaln_table = envs.FASTVIDEO_H3_ADALN_TABLE.get() or None
             adaln_host_cache = (fastvideo_args.inference_mode and not fastvideo_args.use_fsdp_inference
-                                and (os.environ.get("FASTVIDEO_H3_ADALN_CACHE") == "1" or adaln_table is not None))
+                                and (envs.FASTVIDEO_H3_ADALN_CACHE.get() or adaln_table is not None))
             layerwise_load = layerwise_load or adaln_host_cache
             model = maybe_load_fsdp_model(
                 model_cls=model_cls,
@@ -1221,7 +1223,7 @@ class TransformerLoader(ComponentLoader):
         # FASTVIDEO_H3_SPLICE_TRANSFORMER=<transformer dir>: a second checkpoint of the same architecture
         # runs denoising steps FASTVIDEO_H3_SPLICE_FROM_STEP (default 4) onward.
         # Only the primary ``transformer`` component splices; the spliced load itself never does.
-        splice_path = os.environ.get("FASTVIDEO_H3_SPLICE_TRANSFORMER")
+        splice_path = envs.FASTVIDEO_H3_SPLICE_TRANSFORMER.get()
         if (splice_path and not getattr(self, "_loading_splice", False) and hasattr(model, "attach_step_splice")
                 and os.path.basename(os.path.normpath(model_path)) == "transformer"):
             self._loading_splice = True
@@ -1229,7 +1231,7 @@ class TransformerLoader(ComponentLoader):
                 late = self.load(splice_path, fastvideo_args)
             finally:
                 self._loading_splice = False
-            from_step = int(os.environ.get("FASTVIDEO_H3_SPLICE_FROM_STEP", "4"))
+            from_step = envs.FASTVIDEO_H3_SPLICE_FROM_STEP.get()
             model.attach_step_splice(late, from_step)
             logger.info("Step splice: steps >= %d run the transformer from %s", from_step, splice_path)
         return model

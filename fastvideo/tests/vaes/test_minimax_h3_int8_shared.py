@@ -5,6 +5,8 @@ from unittest.mock import patch
 import pytest
 import torch
 
+import fastvideo.envs as envs
+
 from fastvideo.models.vaes.minimax_h3_int8_convrot import Int8ConvRotLinear, shared_int8_projections
 
 
@@ -12,8 +14,8 @@ from fastvideo.models.vaes.minimax_h3_int8_convrot import Int8ConvRotLinear, sha
 @pytest.mark.parametrize("rows", [3, 17, 129])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
 @pytest.mark.parametrize("convrot", [False, True])
-def test_shared_int8_and_transpose_views_are_exact(rows, dtype, convrot, monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW", "0")
+def test_shared_int8_and_transpose_views_are_exact(rows, dtype, convrot, env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW.override(False))
     torch.manual_seed(73)
     layers = tuple(Int8ConvRotLinear(256, out, bias=index != 1, convrot=convrot, group_size=256)
                    .to("cuda") for index, out in enumerate([128, 256, 64]))
@@ -51,11 +53,11 @@ def test_shared_int8_keeps_cpu_fallback_exact():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for VAE attention parity")
-def test_vae_attention_shares_quantized_projections_exactly(distributed_setup, monkeypatch):
+def test_vae_attention_shares_quantized_projections_exactly(distributed_setup, env_overrides):
     from fastvideo.models.vaes.minimax_h3_video import MiniMaxH3VideoAttention
 
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_INT8_SHARED_QKV", "0")
-    monkeypatch.setenv("FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_INT8_SHARED_QKV.override(False))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW.override(False))
     torch.manual_seed(49)
     attention = MiniMaxH3VideoAttention(256, 2, 128).to("cuda").eval()
     for name in ("to_q", "to_k", "to_v"):

@@ -6,6 +6,8 @@ import weakref
 
 import pytest
 import torch
+
+import fastvideo.envs as envs
 from torch import nn
 
 from fastvideo.hooks.hooks import ModuleHookManager
@@ -62,8 +64,8 @@ def test_registration_failure_uses_pinned_allocator(monkeypatch):
     arena.close()
 
 
-def test_offload_mutation_and_prefetched_detach(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS", "1")
+def test_offload_mutation_and_prefetched_detach(env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS.override(True))
     module = nn.Linear(16, 16, device="cuda", dtype=torch.bfloat16)
     module.register_buffer("packed", torch.arange(1 << 20, device="cuda").to(torch.uint8))
     expected = {name: tensor.clone() for name, tensor in list(module.named_parameters()) + list(module.named_buffers())}

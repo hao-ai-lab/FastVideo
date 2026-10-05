@@ -19,14 +19,14 @@ with one gather before ``to_out``.
 from __future__ import annotations
 
 import math
-import os
 from typing import Any
 
 import torch
 
+import fastvideo.envs as envs
+
 from fastvideo.attention.backends.video_sparse_attn_h3 import (MiniMaxH3VSAMetadata, _build_block_mask, _pool_tiles)
 
-VSA_FP4_ENV = "FASTVIDEO_H3_VSA_FP4"
 _BLOCK = 128
 
 
@@ -38,7 +38,7 @@ class _StageTimer:
     """
 
     def __init__(self) -> None:
-        self.enabled = os.environ.get("FASTVIDEO_H3_SP_PROFILE", "0") == "1"
+        self.enabled = envs.FASTVIDEO_H3_SP_PROFILE.get()
         self._spans: list[tuple[str, torch.cuda.Event, torch.cuda.Event]] = []
 
     def span(self, name: str):
@@ -75,7 +75,7 @@ _fp4_api: Any = None
 
 
 def vsa_fp4_requested() -> bool:
-    return os.environ.get(VSA_FP4_ENV, "0") == "1"
+    return envs.FASTVIDEO_H3_VSA_FP4.get()
 
 
 def _api() -> Any:
@@ -172,7 +172,7 @@ def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
         with STAGES.span("gate_proj"):
             gate, _ = attn.to_gate_compress(x_tiles)
             gate = gate.unflatten(-1, (heads, dim))
-    capture_root = os.environ.get("FASTVIDEO_H3_CAPTURE_QKV")
+    capture_root = envs.FASTVIDEO_H3_CAPTURE_QKV.get()
     if capture_root and attn._layer_idx in (0, 20, 41):
         from pathlib import Path
         root = Path(capture_root)
@@ -219,7 +219,7 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
             query = attn._apply_rotary_emb(attn.norm_q(query), rope)
             key = attn._apply_rotary_emb(attn.norm_k(key), rope)
 
-    sim_fp8 = os.environ.get(SIM_SP_FP8_ENV, "0") == "1"
+    sim_fp8 = envs.FASTVIDEO_H3_SIM_SP_FP8.get()
     if sim_fp8:
         query, key, value = (_fp8_roundtrip(t) for t in (query, key, value))
 
@@ -270,7 +270,6 @@ _FP8_MAX = 448.0
 # Debug: apply the SP path's FP8 rounding on one GPU (q/k/v after RoPE and the
 # attention output, one scale per token and head), to separate exchange
 # rounding from sharding errors when comparing SP>1 against SP=1.
-SIM_SP_FP8_ENV = "FASTVIDEO_H3_SIM_SP_FP8"
 
 
 @torch.compile(dynamic=True, fullgraph=True)

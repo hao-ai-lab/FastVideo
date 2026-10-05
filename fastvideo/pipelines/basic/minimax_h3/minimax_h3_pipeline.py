@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gc
-import os
 import json
 import math
 from dataclasses import dataclass
@@ -12,6 +11,8 @@ from typing import Any
 
 import torch
 from torch.distributed.tensor import DTensor
+
+import fastvideo.envs as envs
 
 from fastvideo.attention.selector import (_active_component_attention_backend_scope, coerce_attn_backend,
                                           get_env_variable_attn_backend)
@@ -470,7 +471,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             return True
         if _module_has_dtensor_params(module):
             return False
-        if os.environ.get("FASTVIDEO_H3_PINNED_SWAP", "1") == "1":
+        if envs.FASTVIDEO_H3_PINNED_SWAP.get():
             _pinned_swap(module, torch.device(device))
         else:
             module.to(device)
@@ -482,7 +483,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
 
         Cards with room for the DiT next to the encoder park only the VAEs and keep the DiT resident.
         """
-        requested = os.environ.get("FASTVIDEO_H3_PARK_MODULES")
+        requested = envs.FASTVIDEO_H3_PARK_MODULES.get()
         if not requested:
             return _DENOISE_MODULE_NAMES
         return tuple(name for name in requested.split(",") if name in _DENOISE_MODULE_NAMES)

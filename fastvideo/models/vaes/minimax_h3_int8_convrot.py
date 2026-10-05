@@ -28,6 +28,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from safetensors.torch import load_file as safetensors_load_file
 
+import fastvideo.envs as envs
+
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -104,8 +106,8 @@ class Int8ConvRotLinear(nn.Module):
         self.out_features = out_features
         self.convrot = convrot
         self.group_size = group_size
-        self._transpose_view = os.environ.get("FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW", "0") == "1"
-        self._fused_dequant = os.environ.get("FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT", "0") == "1"
+        self._transpose_view = envs.FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW.get()
+        self._fused_dequant = envs.FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT.get()
         self.register_buffer("weight", torch.empty(out_features, in_features, dtype=torch.int8))
         self.register_buffer("weight_scale", torch.empty(out_features, 1, dtype=torch.float32))
         if bias:

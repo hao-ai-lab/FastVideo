@@ -6,6 +6,8 @@ from unittest.mock import patch
 import pytest
 import torch
 
+import fastvideo.envs as envs
+
 from fastvideo.hooks.hooks import ModuleHookManager
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLArchConfig, MiniMaxH3Qwen3VLConfig
 from fastvideo.models.encoders.minimax_h3_checkpoint_nvfp4 import MiniMaxH3SerializedNVFP4Config
@@ -18,10 +20,11 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for encoder streaming")
 @pytest.mark.parametrize("quantized,fused", [(False, False), (True, False), (True, True)])
-def test_streamed_encoder_matches_resident_and_releases_layers(distributed_setup, monkeypatch, quantized, fused):
+def test_streamed_encoder_matches_resident_and_releases_layers(distributed_setup, monkeypatch, env_overrides, quantized,
+                                                               fused):
     # DiT residency must not accidentally keep encoder layers resident too.
-    monkeypatch.setenv("FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS", "6")
-    monkeypatch.setenv("FASTVIDEO_H3_ENCODER_FUSED_DEQUANT", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS.override(6))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_ENCODER_FUSED_DEQUANT.override(False))
     config = MiniMaxH3Qwen3VLConfig()
     config.arch_config = MiniMaxH3Qwen3VLArchConfig(
         vocab_size=64, hidden_size=128, intermediate_size=256,

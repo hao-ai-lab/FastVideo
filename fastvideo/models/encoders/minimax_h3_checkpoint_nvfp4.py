@@ -37,12 +37,13 @@ loader's strict check before the post-load hook runs; the hook adds only the
 content checks a copied tensor can still fail.
 """
 
-import os
 from typing import Any
 
 import torch
 from torch import nn
 from torch.nn.parameter import Parameter
+
+import fastvideo.envs as envs
 
 from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.linear import LinearBase, LinearMethodBase
@@ -422,7 +423,7 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
         # validated scalar on the host avoids a CUDA synchronization per linear
         # on the BF16 fallback used by consumer GPUs.
         layer._nvfp4_dequant_global_scale = global_scale
-        layer._nvfp4_fused_dequant = os.environ.get("FASTVIDEO_H3_ENCODER_FUSED_DEQUANT", "0") == "1"
+        layer._nvfp4_fused_dequant = envs.FASTVIDEO_H3_ENCODER_FUSED_DEQUANT.get()
         layer.register_buffer("_nvfp4_alpha", torch.tensor(1.0 / global_scale, dtype=torch.float32, device=device),
                               persistent=False)
         layer.register_buffer("_nvfp4_x_global_scale", torch.ones((), dtype=torch.float32, device=device),
