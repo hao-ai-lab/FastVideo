@@ -4,6 +4,10 @@ generator:
   model_path: Qwen/Qwen-Image-2.1
   engine:
     num_gpus: 1
+    compile:
+      enabled: false
+      backend: inductor
+      fullgraph: false
     parallelism:
       tp_size: 1
       sp_size: 1
