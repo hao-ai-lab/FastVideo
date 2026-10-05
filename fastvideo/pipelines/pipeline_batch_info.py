@@ -253,6 +253,7 @@ class ForwardBatch:
     # Misc
     save_video: bool = True
     return_frames: bool = False
+    return_samples: bool = field(default=False, kw_only=True)
 
     is_cfg_negative: bool = False
 

@@ -1079,3 +1079,23 @@ def test_ffmpeg_pipe_preserves_video_duration(tmp_path, env_overrides, audio_sec
     assert int(video["nb_read_frames"]) == frame_count
     assert float(video["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
     assert float(sound["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.uint8])
+def test_return_samples_only_skips_preview_processing(monkeypatch, tmp_path, dtype):
+    output = torch.ones((2, 3, 1, 16, 16), dtype=dtype)
+    generator = _single_video_generator(_single_video_output_batch(output), _single_video_args())
+    monkeypatch.setattr("fastvideo.entrypoints.video_generator.pixels_to_uint8",
+                        lambda *args: pytest.fail("Samples-only requests must not quantize a preview"))
+    monkeypatch.setattr("fastvideo.entrypoints.video_generator.torchvision.utils.make_grid",
+                        lambda *args, **kwargs: pytest.fail("Samples-only requests must not build a preview grid"))
+    sampling = _small_sampling_param()
+    sampling.num_frames = 1
+    sampling.num_videos_per_prompt = 2
+    sampling.return_samples = True
+    result = generator._generate_single_video("samples only", sampling,
+                                             output_path=str(tmp_path / "unused.mp4"))
+    torch.testing.assert_close(result["samples"], output.float() / (255 if dtype == torch.uint8 else 1))
+    assert result["frames"] is None
+    assert result["video_path"] is None
+    assert result["size"] == (16, 16, 1)

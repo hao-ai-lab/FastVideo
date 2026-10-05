@@ -71,6 +71,10 @@ def test_image_generation_routes(path, response_format, monkeypatch, tmp_path):
 @pytest.mark.parametrize("response_format", ["url", "b64_json"])
 @pytest.mark.parametrize("output_format", ["png", "jpeg", "webp"])
 def test_image_batch_returns_individual_images(path, response_format, output_format, monkeypatch, tmp_path):
+    monkeypatch.setattr("fastvideo.entrypoints.video_generator.pixels_to_uint8",
+                        Mock(side_effect=AssertionError("Unexpected batch preview conversion")))
+    monkeypatch.setattr("fastvideo.entrypoints.video_generator.torchvision.utils.make_grid",
+                        Mock(side_effect=AssertionError("Unexpected batch preview grid")))
     samples = torch.zeros(2, 3, 1, 16, 16)
     samples[0, 0] = 1
     samples[1, 2] = 1
@@ -123,4 +127,5 @@ def test_image_batch_returns_individual_images(path, response_format, output_for
     generate.assert_called_once()
     assert generate.call_args.kwargs["num_videos_per_prompt"] == 2
     assert generate.call_args.kwargs["save_video"] is False
-    assert generate.call_args.kwargs["return_frames"] is True
+    assert generate.call_args.kwargs["return_frames"] is False
+    assert generate.call_args.kwargs["return_samples"] is True

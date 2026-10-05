@@ -122,7 +122,11 @@ async def _generate_image_files(engine, gen_kwargs: dict) -> list[str]:
         return [output_path]
 
     # Keep one native model batch, but save separate images instead of its preview grid.
-    batch_kwargs = dict(gen_kwargs, save_video=False, return_frames=True, output_path=os.path.dirname(output_path))
+    batch_kwargs = dict(gen_kwargs,
+                        save_video=False,
+                        return_frames=False,
+                        return_samples=True,
+                        output_path=os.path.dirname(output_path))
     result = await engine.run_serialized(engine.generator.generate_video, **batch_kwargs)
 
     def save_images() -> list[str]:

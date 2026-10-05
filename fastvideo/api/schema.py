@@ -192,6 +192,7 @@ class OutputConfig:
     save_video: bool = True
     return_frames: bool = True
     return_state: bool = False
+    return_samples: bool = field(default=False, kw_only=True)
 
 
 @dataclass

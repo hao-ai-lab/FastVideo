@@ -133,9 +133,9 @@ class Worker:
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
-        needs_output = forward_batch.return_frames or (forward_batch.save_video
-                                                       and fastvideo_args.output_type != "latent"
-                                                       and not output_batch.extra.get("audio_only"))
+        needs_output = forward_batch.return_frames or forward_batch.return_samples or (
+            forward_batch.save_video and fastvideo_args.output_type != "latent"
+            and not output_batch.extra.get("audio_only"))
         if output_batch.output is not None and not needs_output:
             # Drop the decoded tensor before multiprocessing or Ray transports
             # the worker result back to the generator.
