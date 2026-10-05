@@ -28,7 +28,8 @@ class QwenImage21ArchConfig(DiTArchConfig):
     cast_prompt_embeds_to_dit_dtype: bool = True
 
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_transformer_block])
-    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (AttentionBackendEnum.TORCH_SDPA, )
+    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
+        AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.SAGE_ATTN)
     param_names_mapping: dict = field(default_factory=lambda: {r"^(.*)$": r"\1"})
     reverse_param_names_mapping: dict = field(default_factory=lambda: {r"^(.*)$": r"\1"})
 

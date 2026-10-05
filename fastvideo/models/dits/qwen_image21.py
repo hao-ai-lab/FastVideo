@@ -3,8 +3,10 @@
 """Native Qwen-Image-2.1 single-stream diffusion transformer.
 
 The interleaved text/image block-causal stream has no matching FastVideo
-sequence-parallel attention primitive. This implementation runs exact segmented
-PyTorch SDPA on one device; tensor and sequence parallelism are not implemented.
+sequence-parallel attention primitive. This implementation runs segmented
+PyTorch SDPA on one device by default; tensor and sequence parallelism are not
+implemented. Explicit FlashAttention or SageAttention requests replace only
+mask-free dense calls, retaining SDPA for causal text and padding masks.
 Prefix K/V can reside on the host, so decoding restores only one layer's cache
 at a time instead of keeping every layer's reference images on the GPU.
 """
@@ -12,7 +14,7 @@ at a time instead of keeping every layer's reference images on the GPU.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
@@ -22,6 +24,9 @@ from fastvideo.configs.models.dits.qwen_image21 import QwenImage21Config
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
+
+if TYPE_CHECKING:
+    from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
@@ -236,9 +241,53 @@ def _attention(query, key, value, mask=None):
     return output.transpose(1, 2)
 
 
+def _make_dense_attention(heads: int, dim_head: int,
+                          supported_attention_backends: tuple[AttentionBackendEnum, ...],
+                          requested_backend: AttentionBackendEnum) -> nn.Module | None:
+    # Keep optional attention kernels and GPU dispatch imports off the SDPA path.
+    from fastvideo.attention.layer import LocalAttention
+    from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
+    from fastvideo.platforms import AttentionBackendEnum
+    from fastvideo.utils import get_compute_dtype
+
+    dtype = get_compute_dtype()
+    backend_cls = get_attn_backend(dim_head, dtype,
+                                   supported_attention_backends=supported_attention_backends,
+                                   default_backend=AttentionBackendEnum.TORCH_SDPA,
+                                   requested=requested_backend)
+    backend = backend_name_to_enum(backend_cls.get_name())
+    if backend is AttentionBackendEnum.TORCH_SDPA:
+        return None
+
+    class DenseLocalAttention(LocalAttention):
+        """Qwen owns segment lengths and has already applied its complex RoPE.
+
+        LocalAttention's constructor has not yet threaded explicit component
+        requests to the selector. Resolve through the public selector above,
+        bypassing ambient construction scopes. Its ordinary forward also reads
+        unrelated global metadata, which must not reach our unequal Q/KV calls.
+        """
+
+        def __init__(self):
+            nn.Module.__init__(self)
+            self.softmax_scale = dim_head**-0.5
+            self.attn_impl = backend_cls.get_impl_cls()(num_heads=heads, head_size=dim_head,
+                                                        softmax_scale=self.softmax_scale,
+                                                        num_kv_heads=heads, causal=False)
+            self.num_heads = self.num_kv_heads = heads
+            self.head_size, self.backend, self.dtype = dim_head, backend, dtype
+
+        def forward(self, q, k, v):
+            return self.attn_impl.forward(q, k, v, None)
+
+    return DenseLocalAttention()
+
+
 class QwenImage21Attention(nn.Module):
 
-    def __init__(self, dim: int, heads: int, dim_head: int, eps: float):
+    def __init__(self, dim: int, heads: int, dim_head: int, eps: float, *,
+                 requested_backend: AttentionBackendEnum | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None):
         super().__init__()
         self.heads = heads
         self.inner_dim = heads * dim_head
@@ -248,6 +297,15 @@ class QwenImage21Attention(nn.Module):
         self.to_out = nn.ModuleList([ReplicatedLinear(self.inner_dim, dim, bias=False), nn.Dropout(0.0)])
         self.norm_q = QwenImage21RMSNorm(dim_head, eps)
         self.norm_k = QwenImage21RMSNorm(dim_head, eps)
+        self.dense_attn = None
+        if requested_backend is not None and requested_backend.name != "TORCH_SDPA":
+            supported = supported_attention_backends or _DEFAULT_CONFIG.arch_config._supported_attention_backends
+            self.dense_attn = _make_dense_attention(heads, dim_head, supported, requested_backend)
+
+    def _attend(self, query, key, value, mask=None):
+        if mask is not None or self.dense_attn is None:
+            return _attention(query, key, value, mask)
+        return self.dense_attn(query, key, value)
 
     def forward(self,
                 hidden_states: torch.Tensor,
@@ -276,7 +334,7 @@ class QwenImage21Attention(nn.Module):
                 value = torch.cat([cached_v, value], dim=1)
                 del cached_k, cached_v
         if segments is None:
-            output = _attention(query, key, value, attention_mask)
+            output = self._attend(query, key, value, attention_mask)
         else:
             outputs = []
             for start, end, is_text in segments:
@@ -289,10 +347,10 @@ class QwenImage21Attention(nn.Module):
                 if key_valid is not None:
                     valid = key_valid[:, None, None, :end]
                     mask = valid if mask is None else mask & valid
-                outputs.append(_attention(query[:, start:end], key[:, :end], value[:, :end], mask))
+                outputs.append(self._attend(query[:, start:end], key[:, :end], value[:, :end], mask))
             prefix_len = segments[-1][1] if segments else 0
             mask = None if key_valid is None else key_valid[:, None, None, :]
-            outputs.append(_attention(query[:, prefix_len:], key, value, mask))
+            outputs.append(self._attend(query[:, prefix_len:], key, value, mask))
             output = torch.cat(outputs, dim=1)
         output = output.flatten(2, 3).to(query.dtype)
         return self.to_out[1](self.to_out[0](output)[0])
@@ -300,10 +358,14 @@ class QwenImage21Attention(nn.Module):
 
 class QwenImage21TransformerBlock(nn.Module):
 
-    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int, mlp_ratio: int, eps: float):
+    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int, mlp_ratio: int, eps: float, *,
+                 requested_backend: AttentionBackendEnum | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None):
         super().__init__()
         self.img_norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
-        self.attn = QwenImage21Attention(dim, num_attention_heads, attention_head_dim, eps)
+        self.attn = QwenImage21Attention(dim, num_attention_heads, attention_head_dim, eps,
+                                       requested_backend=requested_backend,
+                                       supported_attention_backends=supported_attention_backends)
         self.img_norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
         self.img_mlp = QwenImage21SwiGLUFeedForward(dim, dim * mlp_ratio)
 
@@ -391,9 +453,12 @@ class QwenImage21Transformer2DModel(BaseDiT):
         self.txt_in = QwenImage21TextProjection(config.context_in_dim, self.inner_dim, config.eps)
         self.img_in = ReplicatedLinear(config.in_channels * config.patch_size**2, self.inner_dim, bias=False)
         self.modulation = nn.Sequential(nn.SiLU(), ReplicatedLinear(self.inner_dim, 4 * self.inner_dim, bias=False))
+        requested_backend = getattr(config, "_resolved_attention_backend", None)
         self.transformer_blocks = nn.ModuleList([
             QwenImage21TransformerBlock(self.inner_dim, config.num_attention_heads, config.attention_head_dim,
-                                        config.mlp_ratio, config.eps) for _ in range(config.num_layers)
+                                        config.mlp_ratio, config.eps, requested_backend=requested_backend,
+                                        supported_attention_backends=self._supported_attention_backends)
+            for _ in range(config.num_layers)
         ])
         self.norm_out = QwenImage21AdaLayerNormContinuous(self.inner_dim, config.eps)
         self.proj_out = ReplicatedLinear(self.inner_dim, config.patch_size**2 * config.out_channels, bias=False)
