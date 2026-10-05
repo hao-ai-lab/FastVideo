@@ -147,6 +147,10 @@ def _detect_arch_from_torch() -> str:
         major, minor = torch.cuda.get_device_capability(0)
         if major == 9 and minor == 0:
             return "9.0a"
+        if major == 10 and minor in (0, 3):
+            # Match build.sh: data-center Blackwell VSA kernels require the
+            # architecture-specific target, not the generic compute capability.
+            return f"{major}.{minor}a"
         if major == 12 and minor == 0:
             return "12.0a"
         return f"{major}.{minor}"

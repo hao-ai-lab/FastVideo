@@ -5,9 +5,12 @@ from __future__ import annotations
 import errno
 import importlib.util
 import json
+import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -168,7 +171,7 @@ def test_ci_runner_image_targets_arm64_sm100_with_opencv_runtime() -> None:
     assert job["with"]["tag_suffix"] == "py3.12-cuda13.0.0-sm100"
     assert "CUDA_VERSION=13.0.0" in job["with"]["build_args"]
     assert "UV_TORCH_BACKEND=cu130" in job["with"]["build_args"]
-    assert "TORCH_CUDA_ARCH_LIST=10.0" in job["with"]["build_args"]
+    assert "TORCH_CUDA_ARCH_LIST=10.0a" in job["with"]["build_args"].splitlines()
 
     dockerfile = (REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
     assert "    ffmpeg \\\n" in dockerfile
@@ -191,23 +194,68 @@ def test_docker_image_bakes_modal_apt_and_rust_layer() -> None:
     assert "ENV PATH=/root/.cargo/bin:${PATH}" in dockerfile
 
 
-def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path) -> None:
-    _patch_stable_metadata(monkeypatch)
-    monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "9.0a")
+def _patch_cuda_capability(monkeypatch, capability) -> None:
+    cuda = SimpleNamespace(is_available=lambda: True, get_device_capability=lambda device: capability)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=cuda))
 
-    monkeypatch.setenv("TORCH_CUDA_ARCH_LIST", "9.0a")
-    explicit_hopper = kernel_build_cache._build_metadata(tmp_path)
+
+@pytest.mark.parametrize("capability, expected", [
+    ((8, 9), "8.9"),
+    ((9, 0), "9.0a"),
+    ((10, 0), "10.0a"),
+    ((10, 3), "10.3a"),
+    ((12, 0), "12.0a"),
+    ((12, 1), "12.1"),
+])
+def test_detected_arch_enables_device_specific_kernels(monkeypatch, capability, expected) -> None:
+    _patch_cuda_capability(monkeypatch, capability)
+
+    assert kernel_build_cache._detect_arch_from_torch() == expected
+
+
+@pytest.mark.parametrize("arch", ["9.0a", "10.0a", "10.3a"])
+def test_cache_key_uses_resolved_arch_not_raw_env(monkeypatch, tmp_path, arch) -> None:
+    _patch_stable_metadata(monkeypatch)
+    # An explicit target must win even when the detected GPU differs.
+    monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "8.9")
+
+    monkeypatch.setenv("TORCH_CUDA_ARCH_LIST", arch)
+    explicit = kernel_build_cache._build_metadata(tmp_path)
 
     monkeypatch.delenv("TORCH_CUDA_ARCH_LIST", raising=False)
-    detected_hopper = kernel_build_cache._build_metadata(tmp_path)
+    monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: arch)
+    detected = kernel_build_cache._build_metadata(tmp_path)
 
-    monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: "8.9")
-    detected_l40s = kernel_build_cache._build_metadata(tmp_path)
+    monkeypatch.setattr(kernel_build_cache, "_detect_arch_from_torch", lambda: arch.removesuffix("a"))
+    generic = kernel_build_cache._build_metadata(tmp_path)
 
-    assert explicit_hopper["cache_key"] == detected_hopper["cache_key"]
-    assert explicit_hopper["build"]["torch_cuda_arch_list"] == "9.0a"
-    assert detected_hopper["build"]["torch_cuda_arch_list"] == ""
-    assert detected_l40s["cache_key"] != detected_hopper["cache_key"]
+    assert explicit["cache_key"] == detected["cache_key"]
+    assert explicit["build"]["torch_cuda_arch_list"] == arch
+    assert detected["build"]["torch_cuda_arch_list"] == ""
+    assert generic["cache_key"] != detected["cache_key"]
+
+
+@pytest.mark.parametrize("capability, expected", [((10, 0), "10.0a"), ((10, 3), "10.3a")])
+def test_blackwell_detection_reaches_kernel_build(monkeypatch, tmp_path, capability, expected) -> None:
+    _patch_stable_metadata(monkeypatch)
+    _patch_cuda_capability(monkeypatch, capability)
+    metadata = kernel_build_cache._build_metadata(tmp_path)
+    build_arches = []
+
+    def fake_run(command, *, cwd, env):
+        assert command[:2] == ["./build.sh", "--wheel-dir"]
+        assert cwd == tmp_path / "fastvideo-kernel"
+        build_arches.append(env["TORCH_CUDA_ARCH_LIST"])
+        _write_wheel(Path(command[2]) / WHEEL_NAME)
+        return ""
+
+    monkeypatch.setattr(kernel_build_cache, "_run", fake_run)
+    wheel = kernel_build_cache._build_wheel(tmp_path, metadata)
+    try:
+        assert wheel.is_file()
+        assert build_arches == [expected]
+    finally:
+        shutil.rmtree(wheel.parent)
 
 
 def test_cache_key_ignores_runtime_only_torch_config(monkeypatch, tmp_path) -> None:

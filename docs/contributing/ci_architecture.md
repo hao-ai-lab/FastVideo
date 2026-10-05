@@ -440,8 +440,11 @@ before later jobs consume the updated image pin.
 The same workflow publishes a single-architecture ARM64, CUDA 13, SM100 image
 for the self-hosted CI runner under the
 `py3.12-cuda13.0.0-sm100-{latest,sha-*}` tags. It carries the matching prebuilt
-kernel wheel so runner jobs can validate and install the exact source and ABI
-match instead of recompiling it in every lane.
+kernel wheel compiled with `TORCH_CUDA_ARCH_LIST=10.0a` to include the GB200
+VSA CUDA extensions. Runtime kernel detection uses the same target, so runner
+jobs can validate and install the exact source and ABI match instead of
+recompiling it in every lane. Older artifacts built for `10.0` have a different
+cache key and trigger a local rebuild when the worker detects `10.0a`.
 
 The optional Dreamverse matrix builds backend and UI images for CUDA 12.6 and
 CUDA 13 on `amd64`. Dreamverse remains `amd64`-only because its FA4 dependency

@@ -203,7 +203,8 @@ jobs:
           docker buildx imagetools create "${TAG_ARGS[@]}" "${IMAGE_REFS[@]}"
           docker buildx imagetools inspect "${TAGS[0]}"
 
-  # The CI runner is ARM64 like DGX Spark, but targets sm_100 rather than sm_121.
+  # The CI runner is ARM64 like DGX Spark, but targets sm_100a rather than sm_121.
+  # The architecture-specific target includes the GB200 VSA CUDA extensions.
   # Publish a single-architecture variant so the self-hosted CI runner can reuse
   # the exact prebuilt kernel instead of compiling it in every job.
   build-ci-runner-image:
@@ -219,7 +220,7 @@ jobs:
         PYTHON_VERSION=3.12
         CUDA_VERSION=13.0.0
         UV_TORCH_BACKEND=cu130
-        TORCH_CUDA_ARCH_LIST=10.0
+        TORCH_CUDA_ARCH_LIST=10.0a
         CMAKE_BUILD_PARALLEL_LEVEL=1
         FLASH_ATTN_WHEEL_TAG=cu130torch2.12
         FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
