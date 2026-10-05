@@ -39,6 +39,7 @@ METAL_FUNC void scale_rows_simd8x8(thread simdgroup_float8x8 &mat, const threadg
 # One threadgroup = one (head, video query tile). 8 SIMD-groups x 32 = 256
 # threads cover 64 query rows. K/V stage 32 keys, with 28.25 KiB total smem.
 # Updating online softmax once per 32 keys reduces accumulator rescaling barriers.
+# Four SIMD lanes cooperate per query row in the softmax reduction.
 _SIMD_SOURCE = """
     const int TILE = 64;
     const int D = 128;
@@ -129,25 +130,27 @@ _SIMD_SOURCE = """
             }
             simdgroup_barrier(mem_flags::mem_threadgroup);
 
-            float scores[KCHUNK];
+            float scores[KCHUNK / 4];
             float cmax = -3.402823466e+38f;
-            if (lane < (uint)ROWS) {
-                int grow = qrow0 + (int)lane;
-                for (int t = 0; t < KCHUNK; t++) {
-                    int gtok = j0 + t;
-                    float sc = -3.402823466e+38f;
-                    if (grow < q_valid && gtok < k_valid && gtok < TILE) {
-                        sc = sg_scores[(int)lane * KCHUNK + t] * scale;
-                    }
-                    scores[t] = sc;
-                    cmax = metal::max(cmax, sc);
+            int row = (int)lane / 4;
+            int col_lane = (int)lane % 4;
+            int grow = qrow0 + row;
+            for (int t = col_lane; t < KCHUNK; t += 4) {
+                int gtok = j0 + t;
+                float sc = -3.402823466e+38f;
+                if (grow < q_valid && gtok < k_valid && gtok < TILE) {
+                    sc = sg_scores[row * KCHUNK + t] * scale;
                 }
-                float m_new = metal::max(row_m, cmax);
-                float alpha = metal::exp(row_m - m_new);
-                row_lse *= alpha;
-                row_m = m_new;
-                sg_alpha[(int)lane] = alpha;
+                scores[t / 4] = sc;
+                cmax = metal::max(cmax, sc);
             }
+            cmax = metal::max(cmax, simd_shuffle_xor(cmax, 1));
+            cmax = metal::max(cmax, simd_shuffle_xor(cmax, 2));
+            float m_new = metal::max(row_m, cmax);
+            float alpha = metal::exp(row_m - m_new);
+            row_lse *= alpha;
+            row_m = m_new;
+            if (col_lane == 0) sg_alpha[row] = alpha;
             simdgroup_barrier(mem_flags::mem_threadgroup);
             for (int kk = 0; kk < 16; kk++) {
                 scale_rows_simd8x8(acc[kk], sg_alpha, sg_tmp, lane);
@@ -167,18 +170,15 @@ _SIMD_SOURCE = """
             threadgroup_barrier(mem_flags::mem_threadgroup);
 
             float local = 0.0f;
-            if (lane < (uint)ROWS) {
-                int grow = qrow0 + (int)lane;
-                for (int t = 0; t < KCHUNK; t++) {
-                    float w = 0.0f;
-                    if (grow < q_valid) {
-                        w = metal::exp(scores[t] - row_m);
-                    }
-                    sg_scores[(int)lane * KCHUNK + t] = w;
-                    local += w;
-                }
-                row_lse += local;
+            for (int t = col_lane; t < KCHUNK; t += 4) {
+                float w = 0.0f;
+                if (grow < q_valid) w = metal::exp(scores[t / 4] - row_m);
+                sg_scores[row * KCHUNK + t] = w;
+                local += w;
             }
+            local += simd_shuffle_xor(local, 1);
+            local += simd_shuffle_xor(local, 2);
+            row_lse += local;
             simdgroup_barrier(mem_flags::mem_threadgroup);
 
             for (int kc = 0; kc < KCHUNK; kc += 8) {
@@ -194,8 +194,8 @@ _SIMD_SOURCE = """
         }
     }
 
-    if (lane < (uint)ROWS) {
-        sg_alpha[(int)lane] = row_lse > 0.0f ? 1.0f / row_lse : 0.0f;
+    if (lane % 4 == 0) {
+        sg_alpha[(int)lane / 4] = row_lse > 0.0f ? 1.0f / row_lse : 0.0f;
     }
     simdgroup_barrier(mem_flags::mem_threadgroup);
     for (int kk = 0; kk < 16; kk++) {
@@ -216,6 +216,7 @@ _SIMD_SOURCE = """
         }
         simdgroup_barrier(mem_flags::mem_threadgroup);
     }
+
 """
 
 
