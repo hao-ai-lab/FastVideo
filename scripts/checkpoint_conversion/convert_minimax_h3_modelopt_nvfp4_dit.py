@@ -58,6 +58,10 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 EXPORT_FILENAME = "nvfp4_weights.safetensors"
+# ModelOpt keys intentionally not carried into the export. ``input_scale`` is ModelOpt's static
+# activation scale; FastVideo either quantizes activations per call with a unit global scale or,
+# with ``--act-amax``, stores its own calibrated ``_nvfp4_input_global_sf`` per linear.
+DROPPED_MODELOPT_SUFFIXES = ("input_scale",)
 _BLOCK_ATTN = re.compile(r"^transformer_blocks\.\d+\.attn\.(?:to_q|to_k|to_v|to_out\.0)$")
 _BLOCK_FFN = re.compile(r"^transformer_blocks\.\d+\.ff\.net\.(?:0\.proj|2)$")
 _BLOCK_GATE = re.compile(r"^transformer_blocks\.\d+\.attn\.to_gate_compress$")
@@ -160,14 +164,18 @@ def main() -> None:
     index = json.loads((args.src / "diffusion_pytorch_model.safetensors.index.json").read_text())
     weight_map: dict[str, str] = index["weight_map"]
     modelopt = sorted(k[:-len(".weight_scale_2")] for k in weight_map if k.endswith(".weight_scale_2"))
-    modelopt_keys = {f"{p}.{s}" for p in modelopt for s in ("weight", "weight_scale", "weight_scale_2", "input_scale")}
+    modelopt_keys = {f"{p}.{s}" for p in modelopt for s in ("weight", "weight_scale", "weight_scale_2", *DROPPED_MODELOPT_SUFFIXES)}
     if args.quantize_gate and not args.quantize_attention:
         parser.error("--quantize-gate requires --quantize-attention")
     selected = ([_BLOCK_ATTN.pattern] if args.quantize_attention else []) + (
         [_BLOCK_GATE.pattern] if args.quantize_gate else []) + ([_BLOCK_FFN.pattern] if args.quantize_ffn else [])
     dense_pattern = re.compile("|".join(selected)) if selected else None
+    # Projections ModelOpt already quantized stay on the ModelOpt path; re-quantizing their packed
+    # uint8 weight as if it were dense BF16 would corrupt them.
+    modelopt_set = set(modelopt)
     attention = sorted(k[:-len(".weight")] for k in weight_map
-                       if k.endswith(".weight") and dense_pattern.match(k[:-len(".weight")])) if dense_pattern else []
+                       if k.endswith(".weight") and dense_pattern.match(k[:-len(".weight")])
+                       and k[:-len(".weight")] not in modelopt_set) if dense_pattern else []
     if args.quantize_ffn and any(_BLOCK_FFN.match(p) for p in modelopt):
         parser.error("--quantize-ffn needs a bf16 source; this one already holds ModelOpt FFN linears")
     amax_table = None
