@@ -23,6 +23,7 @@ class HostMemoryPeak:
         self.peak_bytes = 0
         self.peak_anon_bytes = 0
         self.peak_gpu_bytes = None
+        self.host_error: str | None = None
         self._gpu_used = None
         self._nvml_shutdown = None
         self.thread = threading.Thread(target=self._sample, daemon=True)
@@ -44,7 +45,9 @@ class HostMemoryPeak:
                 self.peak_anon_bytes = max(self.peak_anon_bytes, int(stats["anon"]))
                 if self._gpu_used is not None:
                     self.peak_gpu_bytes = max(self.peak_gpu_bytes or 0, self._gpu_used())
-            except (OSError, KeyError, ValueError):
+            except (OSError, KeyError, ValueError) as exc:
+                self.host_error = f"{type(exc).__name__}: {exc}"
+                print(f"host memory sampling stopped: {self.host_error}", flush=True)
                 return
             self.stop.wait(0.1)
 
@@ -164,8 +167,12 @@ def main():
                                     "clip": request["output"]["output_path"],
                                     "peak_gpu_used_gib": (round(host_peak.peak_gpu_bytes / 2**30, 3)
                                                           if host_peak.peak_gpu_bytes is not None else None),
-                                    "peak_host_cgroup_gib": round(host_peak.peak_bytes / 2**30, 3),
-                                    "peak_host_anon_gib": round(host_peak.peak_anon_bytes / 2**30, 3)})
+                                    # None when sampling failed: an unmeasured run must not read as 0 GiB.
+                                    "peak_host_cgroup_gib": (round(host_peak.peak_bytes / 2**30, 3)
+                                                             if host_peak.host_error is None else None),
+                                    "peak_host_anon_gib": (round(host_peak.peak_anon_bytes / 2**30, 3)
+                                                           if host_peak.host_error is None else None),
+                                    "host_memory_error": host_peak.host_error})
             timed = [run["wall_s"] for run in results["runs"] if not run["warmup"]]
             if timed:
                 results["median_e2e_s"] = statistics.median(timed)

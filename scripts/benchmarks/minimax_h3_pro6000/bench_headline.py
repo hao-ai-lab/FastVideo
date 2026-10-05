@@ -63,7 +63,8 @@ def main():
             engine[key] = value
     experimental.update(json.loads(os.environ.get("HEADLINE_EXPERIMENTAL_JSON", "{}")))
     config = {"model_path": a.model_dir, "engine": engine, "pipeline": {"experimental": experimental}}
-    env = {k: v for k, v in os.environ.items() if k.startswith(("FASTVIDEO_", "PYTORCH_CUDA"))}
+    # HEADLINE_* switches (VAE_PARALLEL, ENGINE_JSON, ...) change the run, so record them with the rest.
+    env = {k: v for k, v in os.environ.items() if k.startswith(("FASTVIDEO_", "PYTORCH_CUDA", "HEADLINE_"))}
     run = None
     if os.environ.get("WANDB_PROJECT"):
         import wandb
@@ -72,6 +73,7 @@ def main():
                          dir=out_dir, config={"model_dir": a.model_dir, "num_gpus": a.num_gpus,
                                               "nvfp4_profile": a.nvfp4_profile, "dmd_steps": steps,
                                               "vsa_sparsity": sparsity, "settings": a.settings, "engine": engine,
+                                              "experimental": experimental,
                                               "env": env, "device": os.environ.get("HEADLINE_DEVICE", "")})
 
     from fastvideo import VideoGenerator
@@ -79,7 +81,7 @@ def main():
     generator = VideoGenerator.from_config(config)
     results = {"run_name": a.run_name, "model_dir": a.model_dir, "num_gpus": a.num_gpus,
                "nvfp4_profile": a.nvfp4_profile, "load_s": round(time.perf_counter() - t0, 1), "env": env,
-               "settings": {}}
+               "engine": engine, "experimental": experimental, "settings": {}}
     try:
         for name in a.settings.split(","):
             width, height, frames = SETTINGS[name]

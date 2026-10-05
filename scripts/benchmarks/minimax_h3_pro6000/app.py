@@ -558,7 +558,8 @@ def headline_fetch(repo: str) -> str:
 def _headline(repo: str, gpus: int, profile: str, extra_env: dict | None, tag: str = "") -> dict:
     _install_kernel()
     model = f"/vol/models/{repo.split('/')[-1]}"
-    run_name = f"pro6000x{gpus}-{repo.split('/')[-1]}{tag}"
+    # The run name is a single path component locally and on the volume.
+    run_name = f"pro6000x{gpus}-{repo.split('/')[-1]}{tag}".replace("/", "-")
     env = {**os.environ, **FAST_ENV, **(extra_env or {}), "HEADLINE_OUT": "/vol/outputs/headline",
            "HEADLINE_DEVICE": f"{gpus}x RTX PRO 6000", "PYTHONPATH": "/src/fastvideo"}
     proc = subprocess.run(["python", "/root/bench_headline.py", run_name, model, str(gpus), profile,
