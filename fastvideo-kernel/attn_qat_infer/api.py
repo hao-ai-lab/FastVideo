@@ -277,6 +277,22 @@ def vsa_tile_mask_to_fp4_blocks(
     return q2k_idx, q2k_num, kv_valid, q2k_quad
 
 
+def check_sparse_block_lists(q2k_idx: torch.Tensor, q2k_num: torch.Tensor, kv_len: int) -> None:
+    """Reject block lists the sparse kernel would read out of bounds (host sync).
+
+    Each row needs ``1 <= q2k_num <= q2k_idx.size(-1)`` and every listed index
+    in ``[0, ceil(kv_len / BLOCK_N))``; a zero count or an out-of-range index
+    makes the kernel load outside its index row or the KV tensors.
+    """
+    num_kv_blocks = -(-kv_len // BLOCK_N)
+    if int(q2k_num.min()) < 1 or int(q2k_num.max()) > q2k_idx.size(-1):
+        raise ValueError(f"q2k_num must be in [1, {q2k_idx.size(-1)}]")
+    listed = torch.arange(q2k_idx.size(-1), device=q2k_idx.device) < q2k_num.unsqueeze(-1)
+    idx = q2k_idx[listed]
+    if idx.numel() and (int(idx.min()) < 0 or int(idx.max()) >= num_kv_blocks):
+        raise ValueError(f"q2k_idx entries must be in [0, {num_kv_blocks})")
+
+
 def sageattn_blackwell_sparse(q,
                               k,
                               v,
@@ -286,16 +302,20 @@ def sageattn_blackwell_sparse(q,
                               q2k_quad: torch.Tensor | None = None,
                               per_block_mean=True,
                               single_level_p_quant=True,
-                              sm_scale: float | None = None):
+                              sm_scale: float | None = None,
+                              validate: bool = False):
     """Block-sparse SageAttention3 FP4 forward (non-causal).
 
     Query block ``m`` (``BLOCK_M`` rows) of each (batch, head) attends only to
     the ``BLOCK_N``-token KV blocks in ``q2k_idx[b, h, m, :q2k_num[b, h, m]]``,
     restricted to the quadrants in ``q2k_quad`` when given; see
     :func:`vsa_tile_mask_to_fp4_blocks`. Q/K/V are ``[B, H, L, D]``.
+    ``validate=True`` runs :func:`check_sparse_block_lists` first.
     """
     QL = q.size(2)
     KL = k.size(2)
+    if validate:
+        check_sparse_block_lists(q2k_idx, q2k_num, KL)
     is_bf16 = q.dtype == torch.bfloat16
     q, k, v, delta_s = preprocess_qkv(q, k, v, per_block_mean)
     per_block_mean = delta_s.shape[2] > 1
@@ -316,7 +336,8 @@ def sageattn_blackwell_sparse_bshd(q,
                                    kv_valid: torch.Tensor | None = None,
                                    q2k_quad: torch.Tensor | None = None,
                                    single_level_p_quant=True,
-                                   sm_scale: float | None = None) -> torch.Tensor:
+                                   sm_scale: float | None = None,
+                                   validate: bool = False) -> torch.Tensor:
     """:func:`sageattn_blackwell_sparse` for ``[B, L, H, D]`` inputs, without copies.
 
     The FP4 quantizers read strided input, so the sequence-major tensors a
@@ -327,6 +348,8 @@ def sageattn_blackwell_sparse_bshd(q,
     batch, seq_len, heads, _ = q.shape
     if seq_len % BLOCK_M:
         raise ValueError(f"sequence length {seq_len} must be a multiple of {BLOCK_M}")
+    if validate:
+        check_sparse_block_lists(q2k_idx, q2k_num, seq_len)
     qh, kh, vh = (x.transpose(1, 2) for x in (q, k, v))
     delta_s = _zero_delta_s(batch, heads, seq_len, q.device)
     return blockscaled_fp4_attn_sparse(scale_and_quant_fp4(qh), scale_and_quant_fp4_permute(kh),
