@@ -1079,3 +1079,28 @@ def test_ffmpeg_pipe_preserves_video_duration(tmp_path, env_overrides, audio_sec
     assert int(video["nb_read_frames"]) == frame_count
     assert float(video["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
     assert float(sound["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
+
+
+@pytest.mark.parametrize("extension,format_name", [(".png", "PNG"), (".jpg", "JPEG"), (".jpeg", "JPEG"), (".webp", "WEBP")])
+def test_image_output_path_preserves_requested_format(tmp_path, extension, format_name):
+    from PIL import Image
+
+    args = _single_video_args()
+    args.workload_type = WorkloadType.from_string("t2i")
+    generator = _single_video_generator(_single_video_output_batch(torch.zeros(1, 3, 1, 16, 16)), args)
+    target = tmp_path / ("image" + extension)
+    output_path = generator._prepare_output_path(str(target), "a cat")
+    assert output_path == str(target)
+    sampling = _small_sampling_param(save_video=True)
+    sampling.num_frames = 1
+    result = generator._generate_single_video("a cat", sampling, output_path=output_path)
+    assert result["video_path"] == str(target)
+    with Image.open(target) as image:
+        assert image.format == format_name
+        assert image.size == (16, 16)
+
+
+def test_image_output_directory_defaults_to_png(tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = SimpleNamespace(workload_type=WorkloadType.from_string("t2i"))
+    assert generator._prepare_output_path(str(tmp_path), "a cat") == str(tmp_path / "a cat.png")
