@@ -59,9 +59,9 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 EXPORT_FILENAME = "nvfp4_weights.safetensors"
-# ModelOpt keys intentionally not carried into the export. ``input_scale`` is ModelOpt's static
-# activation scale; FastVideo either quantizes activations per call with a unit global scale or,
-# with ``--act-amax``, stores its own calibrated ``_nvfp4_input_global_sf`` per linear.
+# ModelOpt keys not copied as dense tensors. ``input_scale`` (ModelOpt's static activation scale)
+# is carried into the packed export as ``_nvfp4_input_global_sf`` = 1 / input_scale, unless
+# ``--act-amax`` supplies a replacement calibration.
 DROPPED_MODELOPT_SUFFIXES = ("input_scale",)
 _BLOCK_ATTN = re.compile(r"^transformer_blocks\.\d+\.attn\.(?:to_q|to_k|to_v|to_out\.0)$")
 _BLOCK_FFN = re.compile(r"^transformer_blocks\.\d+\.ff\.net\.(?:0\.proj|2)$")

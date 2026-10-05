@@ -303,14 +303,16 @@ def sageattn_blackwell_sparse(q,
                               per_block_mean=True,
                               single_level_p_quant=True,
                               sm_scale: float | None = None,
-                              validate: bool = False):
+                              validate: bool = True):
     """Block-sparse SageAttention3 FP4 forward (non-causal).
 
     Query block ``m`` (``BLOCK_M`` rows) of each (batch, head) attends only to
     the ``BLOCK_N``-token KV blocks in ``q2k_idx[b, h, m, :q2k_num[b, h, m]]``,
     restricted to the quadrants in ``q2k_quad`` when given; see
     :func:`vsa_tile_mask_to_fp4_blocks`. Q/K/V are ``[B, H, L, D]``.
-    ``validate=True`` runs :func:`check_sparse_block_lists` first.
+    Block lists are checked with :func:`check_sparse_block_lists` (a host
+    sync) unless ``validate=False``; pass that only for lists built by
+    :func:`vsa_tile_mask_to_fp4_blocks`, which are in range by construction.
     """
     QL = q.size(2)
     KL = k.size(2)
@@ -337,7 +339,7 @@ def sageattn_blackwell_sparse_bshd(q,
                                    q2k_quad: torch.Tensor | None = None,
                                    single_level_p_quant=True,
                                    sm_scale: float | None = None,
-                                   validate: bool = False) -> torch.Tensor:
+                                   validate: bool = True) -> torch.Tensor:
     """:func:`sageattn_blackwell_sparse` for ``[B, L, H, D]`` inputs, without copies.
 
     The FP4 quantizers read strided input, so the sequence-major tensors a
