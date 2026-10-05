@@ -72,3 +72,17 @@ def test_refuse_zero_initialized_h3_vsa_skips_unmaterialized_lazy_module() -> No
 
     refuse_zero_initialized_h3_vsa(LazyModule("transformer", loader))
     assert loads == []
+
+
+def _packed_gate_transformer(codes: int) -> SimpleNamespace:
+    """An h3_dit_vsa gate: ``weight`` purged, two E2M1 codes per ``_nvfp4_weight`` byte."""
+    gate = SimpleNamespace(weight=None, _nvfp4_weight=torch.full((4, 2), codes, dtype=torch.uint8))
+    return SimpleNamespace(transformer_blocks=[SimpleNamespace(attn=SimpleNamespace(to_gate_compress=gate))])
+
+
+def test_refuse_zero_initialized_h3_vsa_checks_packed_nvfp4_gates() -> None:
+    # 0x88 is -0 in both nibbles: still a zero gate.
+    for zero_codes in (0x00, 0x88):
+        with pytest.raises(RuntimeError, match="to_gate_compress"):
+            refuse_zero_initialized_h3_vsa(_packed_gate_transformer(zero_codes))
+    refuse_zero_initialized_h3_vsa(_packed_gate_transformer(0x12))
