@@ -27,6 +27,20 @@ import fastvideo.envs as envs
 
 from fastvideo.attention.backends.video_sparse_attn_h3 import (MiniMaxH3VSAMetadata, _build_block_mask, _pool_tiles)
 
+
+def _sparse_fp4_attention(api: Any, *args: Any) -> torch.Tensor:
+    """Run the block-sparse FP4 kernel on lists built by vsa_tile_mask_to_fp4_blocks.
+
+    Those lists are in range by construction, so skip the host-sync validation where the installed
+    fastvideo-kernel supports turning it off; older releases have no ``validate`` argument.
+    """
+    try:
+        return api.sageattn_blackwell_sparse_bshd(*args, validate=False)
+    except TypeError as error:
+        if "validate" not in str(error):
+            raise
+        return api.sageattn_blackwell_sparse_bshd(*args)
+
 _BLOCK = 128
 
 
@@ -235,8 +249,7 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
         q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
     with STAGES.span("fp4_attention"):
         # Lists come from vsa_tile_mask_to_fp4_blocks and are in range; skip the per-call host sync.
-        out = api.sageattn_blackwell_sparse_bshd(query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad,
-                                                 validate=False)
+        out = _sparse_fp4_attention(api, query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad)
     with STAGES.span("out_untile"):
         out = out.transpose(1, 2).index_select(1, layout.untile)  # [B, L, H, D], packed order
     if sim_fp8:
@@ -402,8 +415,7 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
                                  meta.span_sparsities)
         q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
     with STAGES.span("fp4_attention"):
-        out_bhsd = api.sageattn_blackwell_sparse_bshd(q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad,
-                                                      validate=False)
+        out_bhsd = _sparse_fp4_attention(api, q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad)
 
     with STAGES.span("out_pack"):
         payload, scale = _pack_seq_fp8(out_bhsd, layout.untile, world, local_rows)

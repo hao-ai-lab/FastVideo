@@ -13,7 +13,7 @@ import os
 import statistics
 import time
 
-SETTINGS = {"480p5s": (832, 480, 124), "768p10s": (1344, 768, 243)}  # 17n+5 frames at 24 fps
+SETTINGS = {"480p5s": (832, 480, 124), "768p5s": (1344, 768, 124), "768p10s": (1344, 768, 243)}  # 17n+5 frames at 24 fps
 PROMPT_IDS = ("latency-ceramics-005", "latency-harbor-005")
 
 
@@ -23,7 +23,11 @@ def main():
     ap.add_argument("model_dir")
     ap.add_argument("num_gpus", type=int)
     ap.add_argument("nvfp4_profile")
-    ap.add_argument("--settings", default="480p5s,768p10s")
+    ap.add_argument("--settings", default=os.environ.get("HEADLINE_SETTINGS", "480p5s,768p10s"))
+    ap.add_argument("--showcase", default=os.environ.get("HEADLINE_SHOWCASE"),
+                    help="JSON {key: prompt}: after timing, render each prompt at 480p5s for every seed")
+    ap.add_argument("--showcase-seeds", default=os.environ.get("HEADLINE_SHOWCASE_SEEDS", "1234,42"))
+    ap.add_argument("--clip-prefix", default=os.environ.get("HEADLINE_CLIP_PREFIX", "model"))
     ap.add_argument("--prompts", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "headline_prompts.json"))
     ap.add_argument("--out", default=os.environ.get("HEADLINE_OUT", "headline"))
     ap.add_argument("--timed", type=int, default=2)
@@ -106,6 +110,25 @@ def main():
             if run is not None:
                 run.summary[f"{name}_e2e_median_s"] = statistics.median(timed)
             json.dump(results, open(os.path.join(out_dir, "results.json"), "w"), indent=1)
+        if a.showcase:
+            # Gallery candidates: one clip per (prompt, seed) at 480p 5 s, named <prefix>-<key>[-s<seed>].mp4.
+            showcase = json.load(open(a.showcase))
+            width, height, frames = SETTINGS["480p5s"]
+            seeds = [int(x) for x in a.showcase_seeds.split(",")]
+            os.makedirs(os.path.join(out_dir, "showcase"), exist_ok=True)
+            results["showcase"] = []
+            for seed in seeds:
+                for key, text in showcase.items():
+                    suffix = "" if seed == 1234 else f"-s{seed}"
+                    path = os.path.join(out_dir, "showcase", f"{a.clip_prefix}-{key}{suffix}.mp4")
+                    t = time.perf_counter()
+                    generator.generate_video(prompt=text, height=height, width=width, num_frames=frames, fps=24,
+                                             guidance_scale=1.0, num_inference_steps=len(steps) + 1, seed=seed,
+                                             output_path=path, save_video=True)
+                    wall = round(time.perf_counter() - t, 2)
+                    results["showcase"].append({"prompt": key, "seed": seed, "e2e_s": wall, "path": path})
+                    print("SHOWCASE", key, seed, wall, flush=True)
+                    json.dump(results, open(os.path.join(out_dir, "results.json"), "w"), indent=1)
     finally:
         generator.shutdown()
     if run is not None:

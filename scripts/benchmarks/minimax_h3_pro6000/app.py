@@ -542,7 +542,8 @@ def main(step: str = "all", ladder: str = "base"):
 # MODAL_PROFILE=aryan5v modal run --detach app.py::headline --repo FastVideo/<repo> --profile h3_dit_ffn --gpus 1,4,8
 HERE = pathlib.Path(__file__).resolve().parent
 headline_image = (image.add_local_file(HERE / "bench_headline.py", "/root/bench_headline.py")
-                  .add_local_file(HERE / "headline_prompts.json", "/root/headline_prompts.json"))
+                  .add_local_file(HERE / "headline_prompts.json", "/root/headline_prompts.json")
+                  .add_local_file(HERE / "showcase_prompts.json", "/root/showcase_prompts.json"))
 SECRETS = [modal.Secret.from_name("hf-fastvideo")]
 
 
