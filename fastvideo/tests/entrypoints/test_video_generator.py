@@ -1104,3 +1104,21 @@ def test_image_output_directory_defaults_to_png(tmp_path):
     generator = _new_video_generator()
     generator.fastvideo_args = SimpleNamespace(workload_type=WorkloadType.from_string("t2i"))
     assert generator._prepare_output_path(str(tmp_path), "a cat") == str(tmp_path / "a cat.png")
+
+
+@pytest.mark.parametrize("extension,target_extension,workload", [
+    (".png", ".png", "t2i"), (".jpg", ".png", "t2i"), (".jpeg", ".png", "t2i"),
+    (".webp", ".png", "t2i"), (".JPEG", ".png", "t2i"),
+    (".mp4", ".mp4", "t2v"), (".wav", ".wav", "t2a"),
+])
+def test_existing_image_extension_directory_receives_output(tmp_path, extension, target_extension, workload):
+    generator = _new_video_generator()
+    generator.fastvideo_args = SimpleNamespace(workload_type=WorkloadType.from_string("t2i"))
+    generator.fastvideo_args.workload_type = WorkloadType.from_string(workload)
+    directory = tmp_path / ("renders" + extension)
+    directory.mkdir()
+    existing = directory / ("a cat" + target_extension)
+    existing.write_bytes(b"existing image")
+    result = generator._prepare_output_path(str(directory), "a cat")
+    assert result == str(directory / ("a cat_1" + target_extension))
+    assert existing.read_bytes() == b"existing image"

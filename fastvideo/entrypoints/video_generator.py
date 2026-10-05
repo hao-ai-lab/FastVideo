@@ -653,8 +653,10 @@ class VideoGenerator:
         """
         base_path, extension = os.path.splitext(output_path)
         extension_lower = extension.lower()
+        is_directory = os.path.isdir(output_path)
         if self._is_image_workload():
-            target_ext = extension_lower if extension_lower in {".png", ".jpg", ".jpeg", ".webp"} else ".png"
+            target_ext = extension_lower if not is_directory and extension_lower in {".png", ".jpg", ".jpeg", ".webp"
+                                                                                     } else ".png"
         elif self._is_audio_workload():
             target_ext = ".wav"
         else:
@@ -667,7 +669,7 @@ class VideoGenerator:
             sanitized = re.sub(r'\s+', ' ', sanitized)
             return sanitized or "output"
 
-        if extension_lower == target_ext:
+        if extension_lower == target_ext and not is_directory:
             output_dir = os.path.dirname(output_path)
             base_name = os.path.basename(base_path)  # filename without extension
             sanitized_base = _sanitize_filename_component(base_name)
