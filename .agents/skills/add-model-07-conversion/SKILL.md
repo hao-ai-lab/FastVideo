@@ -43,11 +43,12 @@ from `../add-model/contracts/conversion_request.md`.
 - `scripts/checkpoint_conversion/stable_audio_to_diffusers.py`: monolithic
   `model.safetensors` split into transformer/VAE/conditioner, plus copied
   passthrough subfolders. Use this shape for single-checkpoint official repos.
-- `scripts/checkpoint_conversion/convert_gamecraft_full.py`: separate official
-  sources for transformer, VAE, text encoders, tokenizers, scheduler, and root
-  `model_index.json`.
-- `scripts/checkpoint_conversion/longcat_to_fastvideo.py`: fused QKV/KV split,
-  renamed native transformer weights, and copied existing Diffusers components.
+- `scripts/checkpoint_conversion/convert_mmaudio_to_diffusers.py`: separate
+  official sources for transformer, VAE, encoders, and vocoder, assembled under
+  a root `model_index.json`.
+- `scripts/checkpoint_conversion/convert_flux2_klein.py`: fused QKV split,
+  renamed native transformer weights, and copied passthrough text encoder,
+  tokenizer, and scheduler components.
 - `scripts/checkpoint_conversion/pt_to_safetensors.py`: simple `.pt` extraction
   helper for nested checkpoint dictionaries.
 

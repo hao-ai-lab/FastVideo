@@ -232,8 +232,7 @@ Dataclass carrying all pipeline state between stages. Key field groups:
 - **Scheduler**: `timesteps`, `num_inference_steps`, `guidance_scale`,
   `sigmas`.
 - **Task-specific**: `mouse_cond`/`keyboard_cond` (Matrix-Game 2.0), `pose`
-  (HYWorld), `camera_states` (GameCraft), `c2ws_plucker_emb`
-  (LingBotWorld).
+  (HYWorld), `c2ws_plucker_emb` (LingBotWorld).
 - **Output**: `output: Tensor | None`.
 - **Logging**: `logging_info: PipelineLoggingInfo`.
 
@@ -256,7 +255,6 @@ Standard stages (typical execution order):
 | `DecodingStage` | `stages/decoding.py` | Decodes latents to video via VAE |
 
 Specialized variants: `CausalDenoisingStage`, `LTX2DenoisingStage`,
-`LongCatDenoisingStage`, `GameCraftDenoisingStage`,
 `HYWorldDenoisingStage`, `MatrixGame2CausalDenoisingStage`,
 `SRDenoisingStage`, `LTX2AudioDecodingStage`, `SD35ConditioningStage`,
 `LTX2TextEncodingStage`, `LTX2LatentPreparationStage`.

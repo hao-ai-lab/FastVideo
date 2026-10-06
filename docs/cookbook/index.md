@@ -163,50 +163,6 @@ hide:
           </ul>
         </span>
       </a>
-
-      <a class="cookbook-family-tile cookbook-family-tile--ready" href="./longcat/" aria-label="Open LongCat recipes">
-        <span class="cookbook-family-tile__visual" data-evervault>
-          <span class="cookbook-evervault" aria-hidden="true">
-            <span class="cookbook-evervault__gradient"></span>
-            <span class="cookbook-evervault__noise" data-cookbook-pattern></span>
-          </span>
-          <span class="cookbook-family-tile__logo-wrap">
-            <img class="off-glb" src="../assets/logos/meituan-longcat.webp" alt="" width="132" height="132" loading="lazy">
-          </span>
-        </span>
-        <span class="cookbook-family-tile__footer">
-          <span class="cookbook-family-tile__footer-top">
-            <span><strong>LongCat</strong><small>T2V, I2V, optional refine</small></span>
-            <span class="cookbook-count">2 recipes</span>
-          </span>
-          <ul class="cookbook-mode-row">
-            <li>T2V</li>
-            <li>I2V</li>
-          </ul>
-        </span>
-      </a>
-
-      <a class="cookbook-family-tile cookbook-family-tile--ready" href="./turbodiffusion/" aria-label="Open TurboDiffusion recipes">
-        <span class="cookbook-family-tile__visual" data-evervault>
-          <span class="cookbook-evervault" aria-hidden="true">
-            <span class="cookbook-evervault__gradient"></span>
-            <span class="cookbook-evervault__noise" data-cookbook-pattern></span>
-          </span>
-          <span class="cookbook-family-tile__logo-wrap">
-            <span class="cookbook-family-tile__monogram" aria-hidden="true">Turbo</span>
-          </span>
-        </span>
-        <span class="cookbook-family-tile__footer">
-          <span class="cookbook-family-tile__footer-top">
-            <span><strong>TurboDiffusion</strong><small>Accelerated Wan profiles</small></span>
-            <span class="cookbook-count">3 recipes</span>
-          </span>
-          <ul class="cookbook-mode-row">
-            <li>T2V</li>
-            <li>I2V</li>
-          </ul>
-        </span>
-      </a>
     </div>
   </section>
 
@@ -229,49 +185,6 @@ hide:
           <span class="cookbook-family-tile__footer-top">
             <span><strong>FLUX</strong><small>FLUX.1 and FLUX.2</small></span>
             <span class="cookbook-count">3 recipes</span>
-          </span>
-          <ul class="cookbook-mode-row">
-            <li>T2I</li>
-          </ul>
-        </span>
-      </a>
-
-      <a class="cookbook-family-tile cookbook-family-tile--ready" href="./glm-image/" aria-label="Open GLM-Image recipes">
-        <span class="cookbook-family-tile__visual" data-evervault>
-          <span class="cookbook-evervault" aria-hidden="true">
-            <span class="cookbook-evervault__gradient"></span>
-            <span class="cookbook-evervault__noise" data-cookbook-pattern></span>
-          </span>
-          <span class="cookbook-family-tile__logo-wrap">
-            <img class="off-glb" src="../assets/logos/zai.webp" alt="" width="132" height="132" loading="lazy">
-          </span>
-        </span>
-        <span class="cookbook-family-tile__footer">
-          <span class="cookbook-family-tile__footer-top">
-            <span><strong>GLM-Image</strong><small>Generate and edit</small></span>
-            <span class="cookbook-count">2 recipes</span>
-          </span>
-          <ul class="cookbook-mode-row">
-            <li>T2I</li>
-            <li>Edit</li>
-          </ul>
-        </span>
-      </a>
-
-      <a class="cookbook-family-tile cookbook-family-tile--ready" href="./z-image/" aria-label="Open Z-Image recipes">
-        <span class="cookbook-family-tile__visual" data-evervault>
-          <span class="cookbook-evervault" aria-hidden="true">
-            <span class="cookbook-evervault__gradient"></span>
-            <span class="cookbook-evervault__noise" data-cookbook-pattern></span>
-          </span>
-          <span class="cookbook-family-tile__logo-wrap">
-            <img class="off-glb" src="../assets/logos/tongyi.webp" alt="" width="132" height="132" loading="lazy">
-          </span>
-        </span>
-        <span class="cookbook-family-tile__footer">
-          <span class="cookbook-family-tile__footer-top">
-            <span><strong>Z-Image</strong><small>Turbo text to image</small></span>
-            <span class="cookbook-count">1 recipe</span>
           </span>
           <ul class="cookbook-mode-row">
             <li>T2I</li>
@@ -407,20 +320,6 @@ hide:
       <p>These families already have runnable examples. The cookbook page is not ready, so the cards are not links.</p>
     </div>
     <div class="cookbook-family-grid">
-      <article class="cookbook-family-tile cookbook-family-tile--coming" aria-label="GameCraft cookbook page planned; runnable examples exist">
-        <span class="cookbook-family-tile__visual">
-          <span class="cookbook-family-tile__logo-wrap">
-            <img class="off-glb" src="../assets/logos/tencent-hunyuan.webp" alt="" width="132" height="132" loading="lazy">
-          </span>
-        </span>
-        <span class="cookbook-family-tile__footer">
-          <span class="cookbook-family-tile__footer-top">
-            <span><strong>GameCraft</strong><small>Game world generation</small></span>
-            <span class="cookbook-count">Page planned</span>
-          </span>
-        </span>
-      </article>
-
       <article class="cookbook-family-tile cookbook-family-tile--coming" aria-label="GEN3C cookbook page planned; runnable examples exist">
         <span class="cookbook-family-tile__visual">
           <span class="cookbook-family-tile__logo-wrap">
@@ -444,20 +343,6 @@ hide:
         <span class="cookbook-family-tile__footer">
           <span class="cookbook-family-tile__footer-top">
             <span><strong>HY-World</strong><small>Interactive world play</small></span>
-            <span class="cookbook-count">Page planned</span>
-          </span>
-        </span>
-      </article>
-
-      <article class="cookbook-family-tile cookbook-family-tile--coming" aria-label="DreamX cookbook page planned; runnable examples exist">
-        <span class="cookbook-family-tile__visual">
-          <span class="cookbook-family-tile__logo-wrap">
-            <img class="off-glb" src="../assets/logos/fastvideo.webp" alt="" width="132" height="132" loading="lazy">
-          </span>
-        </span>
-        <span class="cookbook-family-tile__footer">
-          <span class="cookbook-family-tile__footer-top">
-            <span><strong>DreamX</strong><small>World generation</small></span>
             <span class="cookbook-count">Page planned</span>
           </span>
         </span>

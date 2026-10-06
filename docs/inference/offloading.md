@@ -168,8 +168,8 @@ and logs a warning if the flag is set.
 
 Deferral is opt-in per pipeline. Releasing a component and loading it again is
 only safe when nothing outside the loader has changed it, and two common habits
-break that without raising: mutating a component after load, as LongCat does
-when it enables block-sparse attention, and reading a component's attributes
+break that without raising: mutating a component after load, such as enabling
+a sparse-attention mode in `initialize_pipeline`, and reading a component's attributes
 while stages are built, as the shared denoising stage does to pick an attention
 backend. A pipeline therefore lists the components it has checked in
 `_lazy_module_names`, which is empty in the base class. MiniMax-H3 opts in. On

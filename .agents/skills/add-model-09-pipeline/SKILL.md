@@ -247,7 +247,7 @@ setup gap, not a pass.
 - `fastvideo/configs/pipelines/stable_audio.py` and
   `fastvideo/pipelines/basic/stable_audio/presets.py` for config/preset shape.
 - `fastvideo/registry.py` for `register_configs(...)` and preset registration.
-- `tests/local_tests/pipelines/test_gamecraft_pipeline_parity.py` for latent
+- `tests/local_tests/pipelines/test_lingbot_video_pipeline_parity.py` for latent
   parity structure.
 - `tests/local_tests/pipelines/test_stable_audio_pipeline_parity.py` for audio
   parity structure.

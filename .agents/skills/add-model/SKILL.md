@@ -413,7 +413,7 @@ matching `*secret*`.
 - `fastvideo/pipelines/basic/wan/` for standard T2V/I2V/DMD/Causal variants.
 - `fastvideo/pipelines/basic/ltx2/` for non-standard stages and audio/video
   patterns.
-- `tests/local_tests/pipelines/test_gamecraft_pipeline_parity.py` for pipeline
+- `tests/local_tests/pipelines/test_lingbot_video_pipeline_parity.py` for pipeline
   parity shape.
 - `tests/local_tests/transformers/test_ltx2.py`,
   `tests/local_tests/vaes/test_ltx2_vae.py`, and

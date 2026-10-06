@@ -52,8 +52,8 @@ scaling constants, dtype casts, state-dict names, and every output head.
 - Loader path: `TransformerLoader` reads `transformer/config.json`, calls
   `dit_config.update_model_arch(config)`, resolves `_class_name` through
   `ModelRegistry`, and constructs the class with `config` and `hf_config`.
-- Reference examples: `stable_audio.py`, `wanvideo.py`, `sd3.py`, `longcat.py`,
-  and `ltx2.py`.
+- Reference examples: `stable_audio.py`, `wanvideo.py`, `sd3.py`, and
+  `ltx2.py`.
 - Layer guidance: `fastvideo/layers/AGENTS.md`.
 
 ## Implementation Rules

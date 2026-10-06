@@ -19,7 +19,7 @@ train/
 │   └── rl/                      #   RL methods, sampling helpers, rewards
 ├── models/
 │   ├── base.py             #   ModelBase / CausalModelBase wrappers
-│   ├── wan/, hunyuan/, cosmos/, kandinsky5/, longcat/, ltx2/, matrixgame2/, minimax_h3/  # Per-family wrappers
+│   ├── wan/, hunyuan/, cosmos/, kandinsky5/, ltx2/, matrixgame2/, minimax_h3/  # Per-family wrappers
 ├── callbacks/              # callback.py base + ema, grad_clip, validation
 └── utils/
     ├── training_config.py  #   Hierarchical YAML config dataclasses

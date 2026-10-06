@@ -15,8 +15,8 @@ explicit compatibility exports.
 
 - Keep `__init__.py` lightweight: no eager model or pipeline imports.
 - Keep `definition.py` data-only. Config and preset names reference their
-  existing owners; do not copy defaults into the catalog. Its registration
-  groups preserve first-match detector ordering around DreamX. Checkpoint
+  existing owners; do not copy defaults into the catalog. Declaration order
+  is first-match detector order. Checkpoint
   manifests and explicit pipeline overrides still choose the executable
   pipeline; a definition must not silently pin that choice.
 - Keep `configs.pipelines.wan` as explicit compatibility aliases, including

@@ -38,18 +38,14 @@ COOKBOOK_SOURCE_ROOTS = (
 # (e.g. black-forest-labs/FLUX.1-dev) and are grouped for documentation only.
 COOKBOOK_FAMILIES = {
     "wan",
-    "turbodiffusion",
     "ltx2",
     "hunyuan",
     "cosmos",
     "kandinsky5",
     "kandinsky6",
     "flux",
-    "glm_image",
-    "zimage",
     "sd35",
     "minimax_h3",
-    "longcat",
     "stable_audio",
     "mmaudio",
     "matrixgame",

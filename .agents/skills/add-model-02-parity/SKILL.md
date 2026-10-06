@@ -68,7 +68,7 @@ Copy `templates/component_parity_test.py` and fill every `TODO` marker. The
 template is distilled from:
 
 - `tests/local_tests/transformers/test_ltx2.py`
-- `tests/local_tests/transformers/test_gamecraft_parity.py`
+- `tests/local_tests/gen3c/test_gen3c.py`
 - `tests/local_tests/encoders/test_ltx2_gemma_parity.py`
 - `tests/local_tests/vaes/test_oobleck_vae_parity.py`
 - `tests/local_tests/sd35/test_sd35_component_parity.py`
