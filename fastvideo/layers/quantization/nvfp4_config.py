@@ -19,6 +19,7 @@ use time, with a clear error.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
@@ -171,6 +172,44 @@ def _get_ltx2_fp4_stage_profile(default: str = "refine") -> str:
         return default
 
 
+@functools.cache
+def _is_dgx_spark(device_index: int) -> bool:
+    return torch.cuda.get_device_capability(device_index) == (12, 1)
+
+
+def nvfp4_quantize_fenced(
+    x: torch.Tensor,
+    global_sf: torch.Tensor,
+    sf_layout: int,
+    do_shuffle: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """FlashInfer NVFP4 quantization with the DGX Spark (GB10) ordering fence.
+
+    Every FastVideo NVFP4 quantization goes through here, so the GB10
+    workaround covers inference and the QAT straight-through linear alike.
+    """
+    device_index = x.device.index if x.device.index is not None else torch.cuda.current_device()
+    spark = _is_dgx_spark(device_index)
+    if spark and torch.cuda.is_current_stream_capturing():
+        raise RuntimeError("NVFP4 activation quantization on DGX Spark requires a completion fence; "
+                           "disable CUDA graph capture.")
+    SfLayout, _, nvfp4_quantize = _require_flashinfer()
+    if not spark:
+        return nvfp4_quantize(x, global_sf, sfLayout=SfLayout(sf_layout), do_shuffle=do_shuffle)
+    # FlashInfer's PDL kernel reads the global scale before its
+    # dependency wait. Fresh dynamic scales require normal ordering.
+    quantized, scales = nvfp4_quantize(x,
+                                       global_sf,
+                                       sfLayout=SfLayout(sf_layout),
+                                       do_shuffle=do_shuffle,
+                                       enable_pdl=False)
+    # With FlashInfer 0.6.18 on GB10, queued activation quantization
+    # plus GEMM can diverge. Completing quantization while its padded
+    # input is alive prevents the observed intermittent corruption.
+    torch.cuda.current_stream(x.device).synchronize()
+    return quantized, scales
+
+
 _OPS_REGISTERED = False
 
 
@@ -193,8 +232,7 @@ def _register_ops_once() -> None:
         sf_layout: int,
         do_shuffle: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        SfLayout, _, nvfp4_quantize = _require_flashinfer()
-        return nvfp4_quantize(x, global_sf, sfLayout=SfLayout(sf_layout), do_shuffle=do_shuffle)
+        return nvfp4_quantize_fenced(x, global_sf, sf_layout, do_shuffle)
 
     @_nvfp4_quantize_op.register_fake
     def _nvfp4_quantize_op_fake(

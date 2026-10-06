@@ -331,6 +331,10 @@ FASTVIDEO_VSA_SM100A = EnvBool(
     category="attention",
     doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a) kernel. "
     "fastvideo-kernel reads the same variable with the same rule.")
+FASTVIDEO_VSA_TRITON = EnvBool(
+    False,
+    category="attention",
+    doc="Force the Triton MiniMax-H3 sparse attention kernel. fastvideo-kernel reads the same variable.")
 FASTVIDEO_NVFP4_FA4 = EnvBool(
     False,
     category="attention",
