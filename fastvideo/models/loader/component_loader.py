@@ -27,7 +27,7 @@ from fastvideo.attention.selector import (
     coerce_attn_backend,
     record_resolved_attention_backend,
 )
-from fastvideo.configs.models import EncoderConfig
+from fastvideo.configs.models import EncoderConfig, UpsamplerConfig
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.quantization import get_quantization_config
@@ -124,6 +124,9 @@ class ComponentLoader(ABC):
             # generic config-only loader.
             "spatial_upsampler": (UpsamplerLoader, "diffusers"),
             "temporal_upsampler": (UpsamplerLoader, "diffusers"),
+            # Kandinsky6 SR latent-upscaler bank (x2 / x4 entries).
+            # (the official Diffusers save_pretrained writes the library as "kandinsky6", the Hub repo as "diffusers")
+            "latent_upscaler": (UpsamplerLoader, ("diffusers", "kandinsky6")),
         }
 
         if module_type in module_loaders:
@@ -133,7 +136,8 @@ class ComponentLoader(ABC):
             is_fastvideo_module = transformers_or_diffusers.startswith("fastvideo.")
             if not is_fastvideo_module:
                 # Assert that the library matches what's expected for this module type
-                assert transformers_or_diffusers == expected_library, f"{module_type} must be loaded from {expected_library}, got {transformers_or_diffusers}"
+                allowed = (expected_library, ) if isinstance(expected_library, str) else tuple(expected_library)
+                assert transformers_or_diffusers in allowed, f"{module_type} must be loaded from {expected_library}, got {transformers_or_diffusers}"
             return loader_cls()
 
         # For unknown module types, use a generic loader
@@ -772,8 +776,10 @@ class VAELoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
-        class_name = config.pop("_class_name")
+        class_name = config.pop("_class_name", None)
         config.pop("_name_or_path", None)
+        if class_name is None:
+            class_name = getattr(fastvideo_args, "_model_index_class_names", {}).get("vae")
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported.")
         fastvideo_args.model_paths["vae"] = model_path
@@ -933,7 +939,8 @@ class VAELoader(ComponentLoader):
 
         # Diffusers-format AutoencoderKL checkpoints should match exactly; load
         # strictly so missing/unexpected keys are surfaced early.
-        strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3"}
+        # Kandinsky6SRVAE: a partially loaded KVAE decodes plausible-looking garbage, so it is strict as well.
+        strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3", "Kandinsky6SRVAE"}
         vae.load_state_dict(loaded, strict=strict_load)
         if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:
             from fastvideo.models.vaes.minimax_h3_int8_convrot import overlay_minimax_h3_int8_convrot_decoder
@@ -950,7 +957,18 @@ class AudioDecoderLoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         config = get_diffusers_config(model=model_path)
-        class_name = config.pop("_class_name", None) or "LTX2AudioDecoder"
+        class_name = (config.pop("_class_name", None)
+                      or getattr(fastvideo_args, "_model_index_class_names", {}).get("audio_vae")
+                      or "LTX2AudioDecoder")
+        # The K6 Diffusers MMAudioVAE's config.json still nests a `vocoder_config` (checked here, not
+        # used for construction -- Kandinsky6AudioVAE itself has no vocoder submodule; the pipeline
+        # loads a separate `vocoder` component instead, see Kandinsky6AudioDecodingStage). The
+        # checkpoint's audio_vae/*.safetensors correspondingly still bundles a redundant `vocoder.*`
+        # copy of those weights for backward compatibility with pre-split code; filtered out below.
+        bundled_mmaudio = class_name == "MMAudioVAE" and "vocoder_config" in config
+        if bundled_mmaudio:
+            class_name = "Kandinsky6AudioVAE"
+            config["need_vae_encoder"] = True
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
         target_device = get_local_torch_device()
 
@@ -981,8 +999,11 @@ class AudioDecoderLoader(ComponentLoader):
         # fp32 and only then casts the whole feature utility module to bf16.
         # Constructing/loading directly in bf16 quantizes the unnormalized
         # checkpoint first and changes the decoded mel trajectory.
-        construction_precision = "fp32" if class_name == "MMAudioVAE" else precision
-        construction_device = torch.device("cpu") if class_name == "MMAudioVAE" else target_device
+        # Kandinsky6AudioVAE wraps MMAudioVAE internally (self.vae), so the
+        # same precision constraint applies to it too.
+        _needs_fp32_construction = class_name in ("MMAudioVAE", "Kandinsky6AudioVAE")
+        construction_precision = "fp32" if _needs_fp32_construction else precision
+        construction_device = torch.device("cpu") if _needs_fp32_construction else target_device
         with set_default_torch_dtype(PRECISION_TO_TYPE[construction_precision]):
             audio_decoder = model_cls(config).to(construction_device)
 
@@ -991,9 +1012,15 @@ class AudioDecoderLoader(ComponentLoader):
         for sf_file in safetensors_list:
             loaded.update(safetensors_load_file(sf_file))
 
-        if class_name == "MMAudioVAE":
+        if class_name in ("MMAudioVAE", "Kandinsky6AudioVAE"):
+            if bundled_mmaudio:
+                loaded = {k: v for k, v in loaded.items() if not k.startswith("vocoder.")}
             audio_decoder.load_state_dict(loaded, strict=True)
-            audio_decoder.remove_weight_norm()
+            if bundled_mmaudio:
+                # Diffusers removes MPConv normalization before saving this export.
+                audio_decoder.vae._weights_normalized = True
+            else:
+                audio_decoder.remove_weight_norm()
             return audio_decoder.to(device=target_device, dtype=PRECISION_TO_TYPE[precision]).eval()
 
         decoder_state = {}
@@ -1008,12 +1035,36 @@ class AudioDecoderLoader(ComponentLoader):
         return audio_decoder.eval()
 
 
+def _mmaudio_vocoder_to_bigvgan(class_name: str, config: dict) -> tuple[str, dict]:
+    """Diffusers' standalone MMAudioVocoder is BigVGAN-v2. Its config.json omits a few hyperparameters
+    that Diffusers' fixed-architecture reimplementation hardcodes instead of exposing (resblock type "1",
+    snakebeta activation with log-scale, no output bias/tanh); fill them in. A no-op for any other
+    class_name.
+    """
+    if class_name != "MMAudioVocoder":
+        return class_name, config
+    config = dict(config)
+    config.setdefault("resblock", "1")
+    config.setdefault("activation", "snakebeta")
+    config.setdefault("snake_logscale", True)
+    config.setdefault("use_bias_at_final", False)
+    config.setdefault("use_tanh_at_final", False)
+    # The checkpoint's vocoder/*.safetensors is saved with weight_norm already removed (plain
+    # `conv_pre.weight`, not `conv_pre.parametrizations.weight.original0/1`). BigVGANV2's constructor
+    # applies weight_norm parametrization by default; strip it during construction (before
+    # VocoderLoader's subsequent load_state_dict(strict=True) below) so the fresh module's keys match
+    # what's on disk.
+    config.setdefault("weight_norm_removed", True)
+    return "BigVGANV2", config
+
+
 class VocoderLoader(ComponentLoader):
     """Loader for native vocoders."""
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name", None) or "LTX2Vocoder"
+        class_name, config = _mmaudio_vocoder_to_bigvgan(class_name, config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
         target_device = get_local_torch_device()
@@ -1060,8 +1111,13 @@ class TransformerLoader(ComponentLoader):
         """Load the transformer based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
-        cls_name = config.pop("_class_name")
+        cls_name = config.pop("_class_name", None)
         config.pop("_name_or_path", None)
+        if cls_name is None:
+            # Some checkpoints' component config.json omits _class_name even
+            # though model_index.json declares it (see composed_pipeline_base
+            # .load_modules); fall back to that before giving up.
+            cls_name = getattr(fastvideo_args, "_model_index_class_names", {}).get("transformer")
         if cls_name is None:
             raise ValueError("Model config does not contain a _class_name attribute. "
                              "Only diffusers format is supported.")
@@ -1244,11 +1300,22 @@ class SchedulerLoader(ComponentLoader):
         """Load the scheduler based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
 
-        class_name = config.pop("_class_name")
+        class_name = config.pop("_class_name", None)
+        if class_name is None:
+            class_name = getattr(fastvideo_args, "_model_index_class_names", {}).get("scheduler")
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported.")
 
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+
+        if getattr(scheduler_cls, "is_piflow", False):
+            overrides = {
+                name: value
+                for name in ("eps", "final_step_size_scale", "num_policy_substeps")
+                if (value := getattr(fastvideo_args.pipeline_config, "piflow_" + name, None)) is not None
+            }
+            # Retain the checkpoint shift, not the base K6 pipeline default.
+            return scheduler_cls.from_config(config, **overrides)
 
         scheduler = scheduler_cls(**config)
         if fastvideo_args.pipeline_config.flow_shift is not None:
@@ -1315,7 +1382,11 @@ class UpsamplerLoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the upsampler based on the model path, and inference args."""
         config_dict = get_diffusers_config(model=model_path)
-        class_name = config_dict.pop("_class_name", None)
+        # Some bundles (e.g. Kandinsky6 SR's latent_upscaler) declare the class only in model_index.json, whose
+        # entries are keyed by the component directory name.
+        component_name = os.path.basename(os.path.normpath(str(model_path)))
+        class_name = (config_dict.pop("_class_name", None)
+                      or getattr(fastvideo_args, "_model_index_class_names", {}).get(component_name))
 
         if class_name is None:
             raise ValueError("Model config does not contain a _class_name attribute. "
@@ -1328,6 +1399,7 @@ class UpsamplerLoader(ComponentLoader):
         # otherwise the LTX-2 branch below handles the single-class
         # path that takes the diffusers config dict directly.
         upsampler_config_attr = getattr(fastvideo_args.pipeline_config, "upsampler_config", None)
+        single_config = False
         if isinstance(upsampler_config_attr, list | tuple):
             try:
                 upsampler_cfg = deepcopy(upsampler_config_attr[0])
@@ -1340,15 +1412,24 @@ class UpsamplerLoader(ComponentLoader):
             # `LTX2LatentUpsampler` wrapper takes the raw diffusers config
             # dict directly via LatentUpsamplerConfigurator.
             upsampler_cfg = deepcopy(config_dict)
+        elif isinstance(upsampler_config_attr, UpsamplerConfig) and type(upsampler_config_attr) is not UpsamplerConfig:
+            # A pipeline that declares one concrete upsampler config: fill it from the component's config.json.
+            config_dict.pop("_name_or_path", None)
+            upsampler_cfg = deepcopy(upsampler_config_attr)
+            upsampler_cfg.update_model_config(config_dict)
+            single_config = True
         else:
             raise AttributeError("pipeline_config.upsampler_config is missing; cannot build "
                                  f"upsampler config for class {class_name}")
 
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-        model = model_cls(upsampler_cfg)
+        upsampler_precision = getattr(fastvideo_args.pipeline_config, "upsampler_precision", "bf16")
+        # Build directly in the target precision: large upsamplers (the Kandinsky6 SR bank has 3.7B parameters)
+        # would otherwise be materialised and initialised in fp32 first.
+        with (set_default_torch_dtype(PRECISION_TO_TYPE[upsampler_precision]) if single_config else nullcontext()):
+            model = model_cls(upsampler_cfg)
 
         target_device = get_local_torch_device()
-        upsampler_precision = getattr(fastvideo_args.pipeline_config, "upsampler_precision", "bf16")
         model = model.to(target_device, dtype=PRECISION_TO_TYPE[upsampler_precision])
 
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
@@ -1374,6 +1455,8 @@ class UpsamplerLoader(ComponentLoader):
         else:
             target_module.load_state_dict(loaded, strict=True)
 
+        if single_config:
+            model.requires_grad_(False)
         return model.eval()
 
 

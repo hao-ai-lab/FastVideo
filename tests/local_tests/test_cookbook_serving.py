@@ -257,3 +257,30 @@ def test_h3_command_blocks_have_unique_copy_targets():
         "cookbook-client-code",
     ]
     assert len(set(parser.ids)) == len(parser.ids)
+
+
+def test_kandinsky6_cookbook_recipes_match_maintained_examples():
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    family = [recipe for recipe in recipes if recipe["family"] == "kandinsky6"]
+    assert [recipe["id"] for recipe in family] == [
+        "kandinsky6-ti2va-base",
+        "kandinsky6-ti2va-piflow",
+        "kandinsky6-vsr",
+        "kandinsky6-vsr-distilled",
+    ]
+    assert all((ROOT / recipe["source"]).is_file() for recipe in family)
+    assert all(recipe["evidence"] == "Source-backed" for recipe in family)
+    assert all(recipe["hardware"] == {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured",
+    } for recipe in family)
+    assert all("accelerator" not in recipe["hardware"] and "peak_memory" not in recipe["hardware"]
+               for recipe in family)
+    assert family[1]["model"].endswith("Pro-distill-5s-Diffusers")
+    # The distilled recipe reruns the shared example with KANDINSKY6_MODEL_PATH; the repo id selects the 10-step preset.
+    assert family[1]["command"].startswith("KANDINSKY6_MODEL_PATH=" + family[1]["model"] + " ")
+    assert "KANDINSKY6_MODEL_PATH" in (ROOT / family[1]["source"]).read_text()
+    assert all("INPUT_VIDEO" in recipe["command"] for recipe in family[2:])
+    assert "VSR-distilled2steps" in family[3]["command"]
+    validate_cookbook()

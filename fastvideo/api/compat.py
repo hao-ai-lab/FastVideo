@@ -26,6 +26,7 @@ from fastvideo.api.schema import (
     SamplingConfig,
 )
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.configs.pipelines.kandinsky6_sr_options import SR_REQUEST_FIELDS
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.ltx2.stage_overrides import (
     refine_preset_override_fields,
@@ -53,6 +54,8 @@ REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS = (
     "vsa_mode",
     "vsa_dense_first_n_steps",
     "vsa_dense_layers",
+    # Recognized transport keys; validate_request_batch_extra restricts them to Kandinsky6 SR.
+    *SR_REQUEST_FIELDS,
 )
 # torch.compile kwargs that map to first-class CompileConfig fields.
 _COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
@@ -393,6 +396,7 @@ def request_to_sampling_param(
     if request.output.return_state:
         sampling_param.return_continuation_state = True
     updates = explicit_request_updates(request)
+    validate_request_batch_extra(updates, model_path=model_path)
 
     for key, value in updates.items():
         if hasattr(sampling_param, key):
@@ -494,6 +498,18 @@ def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
         if key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
             overrides[key] = deepcopy(value)
     return overrides
+
+
+def validate_request_batch_extra(updates: Mapping[str, Any], *, model_path: str) -> None:
+    """Reject Kandinsky6 SR extensions for other model families, including the legacy API."""
+    sr_keys = sorted(set(updates).intersection(SR_REQUEST_FIELDS))
+    if not sr_keys:
+        return
+    from fastvideo.registry import get_preset_selection
+
+    _, model_family = get_preset_selection(model_path)
+    if model_family != "kandinsky6_sr":
+        raise ValueError(f"Request fields {sr_keys} are only supported by Kandinsky6 SR, not {model_path}")
 
 
 def request_to_batch_extra(request: GenerationRequest) -> dict[str, Any]:
@@ -687,6 +703,7 @@ __all__ = [
     "normalize_generator_config",
     "register_continuation_kind",
     "request_to_batch_extra",
+    "validate_request_batch_extra",
     "request_to_pipeline_overrides",
     "request_to_sampling_param",
 ]
