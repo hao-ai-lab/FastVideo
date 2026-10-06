@@ -209,7 +209,10 @@ def test_sequential_skips_host_offload_for_dtensor_params(monkeypatch) -> None:
     pipeline.forward(ForwardBatch(data_type="video", prompt="alpine dancer"), args)
     pipeline.forward(ForwardBatch(data_type="video", prompt="second clip"), args)
 
-    assert len(loads) == 2
+    # A sharded (DTensor-params) encoder cannot be parked on the host, so after
+    # conditioning it is released (as on main) and reloaded for the next request.
+    assert len(loads) == 3
+    assert loads[2] == ["text_encoder"]
     assert encoder.moved_to == []
     transformer = pipeline.get_module("transformer")
     assert transformer is not None

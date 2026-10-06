@@ -2,6 +2,7 @@
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import time
 
@@ -34,6 +35,7 @@ app = modal.App("h3-pro6000-fastest", image=image)
 
 
 def _sh(cmd: str, **kw) -> str:
+    # Fixed in-container commands that need cd, && and globs; quote any caller-supplied value.
     proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, **kw)
     out = (proc.stdout + proc.stderr)[-8000:]
     if proc.returncode != 0:
@@ -553,7 +555,7 @@ def headline_fetch(repo: str) -> str:
     local = f"/vol/models/{repo.split('/')[-1]}"
     snapshot_download(repo, local_dir=local, token=os.environ["HF_TOKEN"], max_workers=16)
     volume.commit()
-    return _sh(f"du -sh {local}/*")
+    return _sh(f"du -sh {shlex.quote(local)}/*")
 
 
 def _headline(repo: str, gpus: int, profile: str, extra_env: dict | None, tag: str = "") -> dict:

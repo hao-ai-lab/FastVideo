@@ -144,7 +144,9 @@ def _shared_input_projections(linears: tuple[Any, ...], x: torch.Tensor) -> list
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
     from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
 
-    methods = [linear.quant_method for linear in linears]
+    methods = [getattr(linear, "quant_method", None) for linear in linears]
+    if any(m is None for m in methods):  # LoRA wrappers keep quant_method on base_layer.
+        return [linear(x)[0] for linear in linears]
     same_nvfp4 = all(type(m) is NVFP4QuantizeMethod and m.wants_prequantized_input()
                      and m.uses_unit_activation_scale(linear)
                      for m, linear in zip(methods, linears, strict=True))

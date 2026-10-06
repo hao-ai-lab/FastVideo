@@ -1208,8 +1208,9 @@ class TransformerLoader(ComponentLoader):
             # Layerwise offload keeps every block's weights in pinned host memory, so load them on the CPU and
             # attach the hooks before anything moves to the GPU; loading on the GPU first would need the whole
             # DiT resident once, which is exactly what offload exists to avoid on small cards.
-            layerwise_load = (fastvideo_args.inference_mode and fastvideo_args.dit_layerwise_offload
-                              and not fastvideo_args.use_fsdp_inference)
+            # Scoped to H3: other models keep main's GPU load, which their quantization paths expect.
+            layerwise_load = (cls_name.startswith("MiniMaxH3") and fastvideo_args.inference_mode
+                              and fastvideo_args.dit_layerwise_offload and not fastvideo_args.use_fsdp_inference)
             # The AdaLN host cache also needs the projection weights to stay off the device from the start.
             adaln_table = envs.FASTVIDEO_H3_ADALN_TABLE.get() or None
             adaln_host_cache = (fastvideo_args.inference_mode and not fastvideo_args.use_fsdp_inference
