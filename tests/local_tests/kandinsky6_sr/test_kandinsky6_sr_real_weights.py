@@ -94,7 +94,7 @@ def test_sr_generates_a_decodable_video_of_the_expected_geometry(generator, tmp_
 
     source = decode_rgb(VIDEO)
     out = decode_rgb(result.video_path)
-    expected_frames = sr_io.read_video_for_sr(VIDEO)[0].shape[0]  # fps rule + 1+8k alignment of the request contract
+    expected_frames = sr_io.read_video(VIDEO)[0].shape[0]  # fps rule + 1+8k alignment of the request contract
     assert out.shape[0] == expected_frames
     assert out.shape[1] >= int(source.shape[1] * scale) - 16 and out.shape[2] >= int(source.shape[2] * scale) - 16
     assert out.dtype == np.uint8 and out.std() > 1.0, "output is constant / empty"

@@ -209,8 +209,8 @@ def _add_unexpected(tensors):
     ("transformer", "transformer", _add_unexpected),
     ("vae", "vae", _drop_first("decoder")),
     ("vae", "vae", lambda t: t.__setitem__("model.unexpected_extra_weight", torch.zeros(3))),
-    ("latent_upscaler", "latent_upscaler", _drop_first("_models.2x.")),
-    ("latent_upscaler", "latent_upscaler", lambda t: t.__setitem__("_models.2x.unexpected", torch.zeros(3))),
+    ("latent_upscaler", "latent_upscaler", _drop_first("_models.0.")),
+    ("latent_upscaler", "latent_upscaler", lambda t: t.__setitem__("_models.0.unexpected", torch.zeros(3))),
 ])
 def test_partial_or_extra_weights_never_load_silently(distilled_bundle, fv_args, tmp_path, component, name, mutate):
     # A silently partial load runs plausible-looking garbage: every SR component must refuse it.

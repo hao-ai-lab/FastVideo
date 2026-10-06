@@ -48,7 +48,7 @@ def test_temporal_patching_is_rejected():
         _arch(patch_size=[2, 1, 1])
 
 
-def test_param_names_mapping_renames_only_the_feed_forward_layers():
+def test_param_names_mapping_maps_the_official_diffusers_names():
     import re
 
     mapping = Kandinsky6SRArchConfig().param_names_mapping
@@ -58,7 +58,11 @@ def test_param_names_mapping_renames_only_the_feed_forward_layers():
             key = re.sub(pattern, replacement, key)
         return key
 
-    assert rename("visual_transformer_blocks.0.feed_forward.in_layer.weight") == (
+    assert rename("visual_transformer_blocks.0.feed_forward.net.0.proj.weight") == (
         "visual_transformer_blocks.0.feed_forward.mlp.fc_in.weight")
+    assert rename("visual_transformer_blocks.0.feed_forward.net.2.bias") == (
+        "visual_transformer_blocks.0.feed_forward.mlp.fc_out.bias")
+    assert rename("time_embeddings.timestep_embedder.linear_1.weight") == "time_embeddings.in_layer.weight"
+    assert rename("time_embeddings.timestep_embedder.linear_2.bias") == "time_embeddings.out_layer.bias"
     assert rename("visual_transformer_blocks.0.self_attention.to_query.weight") == (
         "visual_transformer_blocks.0.self_attention.to_query.weight")

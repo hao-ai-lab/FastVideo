@@ -278,7 +278,9 @@ def test_kandinsky6_cookbook_recipes_match_maintained_examples():
     assert all("accelerator" not in recipe["hardware"] and "peak_memory" not in recipe["hardware"]
                for recipe in family)
     assert family[1]["model"].endswith("Pro-distill-5s-Diffusers")
-    assert "--num-inference-steps 10" in family[1]["command"]
+    # The distilled recipe reruns the shared example with KANDINSKY6_MODEL_PATH; the repo id selects the 10-step preset.
+    assert family[1]["command"].startswith("KANDINSKY6_MODEL_PATH=" + family[1]["model"] + " ")
+    assert "KANDINSKY6_MODEL_PATH" in (ROOT / family[1]["source"]).read_text()
     assert all("INPUT_VIDEO" in recipe["command"] for recipe in family[2:])
     assert "VSR-distilled2steps" in family[3]["command"]
     validate_cookbook()

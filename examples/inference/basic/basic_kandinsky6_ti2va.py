@@ -1,3 +1,5 @@
+import os
+
 from fastvideo import VideoGenerator
 
 DEFAULT_PROMPT = (
@@ -11,20 +13,21 @@ DEFAULT_PROMPT = (
 
 OUTPUT_PATH = "video_samples_kandinsky6_ti2va"
 
-# The base checkpoint uses 50 steps and guidance 5.0. You can also run the
+# The base checkpoint uses 50 steps and guidance 5.0. Set KANDINSKY6_MODEL_PATH to run the
 # distilled pi-Flow checkpoint with this same example:
 #   kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers
 # or a local directory named ``Kandinsky-6.0-Pro-distill-5s-Diffusers``.
 # That name selects the registered distilled defaults automatically: 10 steps,
 # guidance 1.0, eps 1e-6, final_step_size_scale 0.5, and
 # num_policy_substeps 128.
+MODEL_PATH = os.environ.get("KANDINSKY6_MODEL_PATH", "kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers")
 
-IMAGE_PATH = None #"assets/girl.png"
+IMAGE_PATH = None  # e.g. "assets/girl.png" to condition on an image
 
 
 def main():
     generator = VideoGenerator.from_pretrained(
-        "kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers",
+        MODEL_PATH,
         num_gpus=1,
         use_fsdp_inference=False,
         dit_cpu_offload=False,

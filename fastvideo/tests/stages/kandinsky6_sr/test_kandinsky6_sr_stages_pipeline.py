@@ -165,7 +165,9 @@ def test_a_missing_upscaler_scale_is_reported(fv_args, distilled_bundle, tmp_pat
     clip = tmp_path / "square.mp4"
     k6_sr_tiny.write_mp4(clip, 20, 24, size=(64, 64))
     pipeline = _load(distilled_bundle, fv_args)
-    pipeline.get_module("latent_upscaler")._models.pop("4x")
+    bank = pipeline.get_module("latent_upscaler")
+    bank.config.scales = (2, )  # a bank that only serves x2
+    del bank._models[1]
     with pytest.raises(ValueError, match="no x4"):
         pipeline.forward(_batch(video_path=str(clip), sr_resolution_scale=4.0), fv_args)
 

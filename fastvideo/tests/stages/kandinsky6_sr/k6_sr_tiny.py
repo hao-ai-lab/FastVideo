@@ -87,8 +87,13 @@ def build_vae(seed: int = 0):
 
 
 def lu_config_dict(scales=("2x", "4x")) -> dict[str, Any]:
-    return {"models": [{"target_scale": s, "model": copy.deepcopy(TINY_LU_MODEL)} for s in scales],
-            "scaling_factor": TINY_SCALING_FACTOR}
+    """``latent_upscaler/config.json``. The release config has no ``scales`` field (the bank defaults to (2, 4), which
+    fixes the ``_models.<index>`` order); any other bank must declare its scales to match its ``models``."""
+    config = {"models": [{"target_scale": s, "model": copy.deepcopy(TINY_LU_MODEL)} for s in scales],
+              "scaling_factor": TINY_SCALING_FACTOR}
+    if sorted(int(s.removesuffix("x")) for s in scales) != [2, 4]:
+        config["scales"] = [int(s.removesuffix("x")) for s in scales]
+    return config
 
 
 def build_lu(scales=("2x", "4x"), seed: int = 0):
@@ -100,11 +105,15 @@ def build_lu(scales=("2x", "4x"), seed: int = 0):
 
 
 def to_official_dit_keys(dit_state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-    """FastVideo DiT keys -> official Diffusers keys (no prefix, ``feed_forward.mlp.fc_*`` -> ``in/out_layer``)."""
+    """FastVideo DiT keys -> official Diffusers keys: the inverse of ``Kandinsky6SRArchConfig.param_names_mapping``
+    (``feed_forward.mlp.fc_in/fc_out`` -> ``feed_forward.net.0.proj/net.2``,
+    ``time_embeddings.in/out_layer`` -> ``time_embeddings.timestep_embedder.linear_1/2``)."""
     out = {}
     for key, value in dit_state.items():
-        key = key.replace("feed_forward.mlp.fc_in.", "feed_forward.in_layer.")
-        key = key.replace("feed_forward.mlp.fc_out.", "feed_forward.out_layer.")
+        key = key.replace("feed_forward.mlp.fc_in.", "feed_forward.net.0.proj.")
+        key = key.replace("feed_forward.mlp.fc_out.", "feed_forward.net.2.")
+        key = key.replace("time_embeddings.in_layer.", "time_embeddings.timestep_embedder.linear_1.")
+        key = key.replace("time_embeddings.out_layer.", "time_embeddings.timestep_embedder.linear_2.")
         out[key] = value.detach().clone().contiguous()
     return out
 

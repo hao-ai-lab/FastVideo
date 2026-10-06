@@ -105,6 +105,9 @@ def test_kandinsky6_transformer_parity():
         pipeline_config=PipelineConfig(dit_config=config, dit_precision=precision_str),
     )
     args.device = device
+    # The official transformer/config.json has no _class_name; the pipeline loader takes it from model_index.json
+    # (composed_pipeline_base.load_modules), so hand the loader the same hint when loading the component directly.
+    args._model_index_class_names = {"transformer": "Kandinsky6Transformer3DModel"}
     fastvideo_model = TransformerLoader().load(str(transformer_path), args).to(device=device, dtype=precision)
     fastvideo_model.eval()
 

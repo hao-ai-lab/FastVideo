@@ -150,9 +150,10 @@ def test_real_latent_upscaler_config_builds_the_release_bank():
     with torch.device("meta"):
         bank = Kandinsky6SRLatentUpscalerBank(Kandinsky6SRLatentUpscalerConfig(**RELEASE_LATENT_UPSCALER_CONFIG))
     state = bank.state_dict()
-    assert len(state) == 489 and _prefixes(state) == Counter({"_models.2x": 311, "_models.4x": 178})
+    # Entries are indexed in ``config.scales`` order (default (2, 4)), as in the release safetensors.
+    assert len(state) == 489 and _prefixes(state) == Counter({"_models.0": 311, "_models.1": 178})
     assert not any("motion_attention" in entry["model"] for entry in RELEASE_LATENT_UPSCALER_CONFIG["models"])
-    x2 = [key for key in state if key.startswith("_models.2x.")]
-    assert _prefixes((key.split(".", 2)[2] for key in x2), 2)["x2_branch.private_blocks"] == 44
+    x2 = [key for key in state if key.startswith("_models.0.")]
+    assert _prefixes((key.split(".", 2)[2] for key in x2), 2)["x2_branch.blocks"] == 44
     assert _prefixes((key.split(".", 2)[2] for key in x2), 2)["x2_branch.adapter"] == 28
     assert bank.scales == (2, 4)
