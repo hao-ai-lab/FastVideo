@@ -122,7 +122,9 @@ MLX's allocation limit and wired-memory limit are separate. The optional
 `metal_wired_limit_gib` calls `mx.set_wired_limit` to keep selected Metal
 allocations in physical memory. It does not add RAM. An explicit request fails
 if the installed MLX build cannot apply it. `close()` restores the previous
-wired limit.
+wired limit. The phased pipeline also sets a 30 GiB maximum allocator guideline
+and restores its previous value on close. Resident placement keeps the existing
+allocator limit so larger Macs can hold all components.
 
 The tested 36 GiB M4 Max recipe uses 27 GiB and phased placement. Resident
 placement also requires capacity for all components and peak activations;

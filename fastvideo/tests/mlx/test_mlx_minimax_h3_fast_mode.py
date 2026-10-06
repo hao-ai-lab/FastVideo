@@ -24,6 +24,8 @@ from fastvideo.mlx_runtime.minimax_h3_pipeline import (  # noqa: E402
     _configure_metal_memory_limits,
     _default_metal_wired_limit_gib,
     _preflight_media_dependencies,
+    _restore_metal_memory_limit,
+    _restore_metal_wired_limit,
     _validate_checkpoint_step_ladder,
     plan_fast_temporal,
 )
@@ -150,11 +152,25 @@ def test_explicit_wired_limit_uses_wired_api_separately_from_allocator():
     calls = []
     fake = SimpleNamespace(
         metal=SimpleNamespace(device_info=lambda: {"memory_size": 36 * 2**30}),
-        set_memory_limit=lambda size: calls.append(("allocator", size)),
+        set_memory_limit=lambda size: calls.append(("allocator", size)) or 40 * 2**30,
         set_wired_limit=lambda size: calls.append(("wired", size)) or 0,
     )
-    _configure_metal_memory_limits(fake, 27.0)
+    previous_memory, previous_wired = _configure_metal_memory_limits(fake, 27.0)
     assert calls == [("allocator", 30 * 2**30), ("wired", 27 * 2**30)]
+    assert (previous_memory, previous_wired) == (40 * 2**30, 0)
+    _restore_metal_wired_limit(fake, previous_wired)
+    _restore_metal_memory_limit(fake, previous_memory)
+    assert calls[-2:] == [("wired", 0), ("allocator", 40 * 2**30)]
+
+
+def test_resident_placement_keeps_the_existing_allocator_limit():
+    calls = []
+    fake = SimpleNamespace(
+        set_memory_limit=lambda size: calls.append(("allocator", size)) or 40 * 2**30,
+        set_wired_limit=lambda size: calls.append(("wired", size)) or 0,
+    )
+    assert _configure_metal_memory_limits(fake, 36.0, resident=True) == (None, 0)
+    assert calls == [("wired", 36 * 2**30)]
 
 
 def test_explicit_wired_limit_failure_is_not_silently_ignored():
@@ -167,3 +183,32 @@ def test_explicit_wired_limit_failure_is_not_silently_ignored():
         _configure_metal_memory_limits(fake, float("nan"))
     with pytest.raises(RuntimeError, match="cannot set"):
         _configure_metal_memory_limits(SimpleNamespace(), 27.0)
+
+
+def test_wired_limit_failure_restores_allocator_limit():
+    calls = []
+
+    def set_memory(size):
+        calls.append(("allocator", size))
+        return 40 * 2**30
+
+    def reject(size):
+        calls.append(("wired", size))
+        raise ValueError("exceeds system wired limit")
+
+    fake = SimpleNamespace(metal=SimpleNamespace(device_info=lambda: {"memory_size": 36 * 2**30}),
+                           set_memory_limit=set_memory,
+                           set_wired_limit=reject)
+    with pytest.raises(ValueError, match="system wired limit"):
+        _configure_metal_memory_limits(fake, 27.0)
+    assert calls == [("allocator", 30 * 2**30), ("wired", 27 * 2**30), ("allocator", 40 * 2**30)]
+
+
+def test_invalid_pipeline_options_do_not_change_process_memory_limits(monkeypatch):
+    calls = []
+    monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline._configure_metal_memory_limits",
+                        lambda *args, **kwargs: calls.append((args, kwargs)))
+    with pytest.raises(ValueError, match="Unknown H3 conditioner mode"):
+        MiniMaxH3MLXPipeline(model_root="missing", mlx_dit_checkpoint="missing", conditioner_mode="invalid",
+                             metal_wired_limit_gib=27.0)
+    assert calls == []

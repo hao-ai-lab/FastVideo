@@ -134,6 +134,7 @@ openspec/
 fastvideo/tests/ssim/reference_videos/**
 !fastvideo/tests/ssim/reference_videos/**/*.mp4
 !fastvideo/tests/ssim/reference_videos/**/*.png
+fastvideo/tests/ssim/.reference_videos_download.lock
 
 # Local H3 MLX kernel / exactness benches (JSON, logs, frames, videos)
 .kernel_bench/

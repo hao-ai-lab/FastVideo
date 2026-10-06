@@ -245,33 +245,40 @@ def _default_metal_wired_limit_gib(mx) -> float:
     return min(30.0, 0.84 * total_bytes / 2**30)
 
 
-def _configure_metal_memory_limits(mx, wired_limit_gib: float | None) -> int | None:
-    """Keep allocator capacity separate from explicitly requested wired residency.
-
-    Returns the previous wired limit in bytes when one was set, so the caller can
-    restore it; the limit is process-wide and would otherwise outlive the pipeline.
-    """
-    set_memory = getattr(mx, "set_memory_limit", None)
-    if set_memory is None and hasattr(mx, "metal"):
-        set_memory = getattr(mx.metal, "set_memory_limit", None)
-    if set_memory is not None:
-        try:
-            set_memory(int(_default_metal_wired_limit_gib(mx) * 2**30))
-        except Exception as error:  # noqa: BLE001 - older MLX best effort
-            logger.info("Could not set the Metal allocation limit: %s", error)
-    if wired_limit_gib is None:
-        return None
-    if not math.isfinite(wired_limit_gib) or wired_limit_gib <= 0:
+def _configure_metal_memory_limits(mx,
+                                   wired_limit_gib: float | None,
+                                   *,
+                                   resident: bool = False) -> tuple[int | None, int | None]:
+    """Set Metal limits and return their previous process-wide values."""
+    if wired_limit_gib is not None and (not math.isfinite(wired_limit_gib) or wired_limit_gib <= 0):
         raise ValueError("metal_wired_limit_gib must be finite and positive")
     set_wired = getattr(mx, "set_wired_limit", None)
     if set_wired is None and hasattr(mx, "metal"):
         set_wired = getattr(mx.metal, "set_wired_limit", None)
-    if set_wired is None:
+    if wired_limit_gib is not None and set_wired is None:
         raise RuntimeError("This MLX build cannot set the requested wired-memory limit")
+
+    previous_memory = None
+    set_memory = getattr(mx, "set_memory_limit", None)
+    if set_memory is None and hasattr(mx, "metal"):
+        set_memory = getattr(mx.metal, "set_memory_limit", None)
+    if set_memory is not None and not resident:
+        try:
+            previous_memory = int(set_memory(int(_default_metal_wired_limit_gib(mx) * 2**30)))
+        except Exception as error:  # noqa: BLE001 - older MLX best effort
+            logger.info("Could not set the Metal allocation limit: %s", error)
+    if wired_limit_gib is None:
+        return previous_memory, None
     # Explicit requests must succeed; do not silently benchmark an unwired model.
-    previous = set_wired(int(wired_limit_gib * 2**30))
+    assert set_wired is not None
+    try:
+        previous = set_wired(int(wired_limit_gib * 2**30))
+    except Exception:
+        if previous_memory is not None and set_memory is not None:
+            set_memory(previous_memory)
+        raise
     logger.info("MLX wired limit %.2f GiB (previous %.2f GiB)", wired_limit_gib, previous / 2**30)
-    return int(previous)
+    return previous_memory, int(previous)
 
 
 def _restore_metal_wired_limit(mx, previous_bytes: int | None) -> None:
@@ -282,6 +289,16 @@ def _restore_metal_wired_limit(mx, previous_bytes: int | None) -> None:
         set_wired = getattr(mx.metal, "set_wired_limit", None)
     if set_wired is not None:
         set_wired(previous_bytes)
+
+
+def _restore_metal_memory_limit(mx, previous_bytes: int | None) -> None:
+    if previous_bytes is None:
+        return
+    set_memory = getattr(mx, "set_memory_limit", None)
+    if set_memory is None and hasattr(mx, "metal"):
+        set_memory = getattr(mx.metal, "set_memory_limit", None)
+    if set_memory is not None:
+        set_memory(previous_bytes)
 
 
 MINIMAX_H3_PROMPT_CACHE_VERSION = "v2-attention-layout"
@@ -373,7 +390,6 @@ class MiniMaxH3MLXPipeline:
     ) -> None:
         import mlx.core as mx
 
-        self._previous_wired_limit = _configure_metal_memory_limits(mx, metal_wired_limit_gib)
         self.model_root = Path(model_root)
         if conditioner_mode not in ("auto", "streamed", "nvfp4"):
             raise ValueError(f"Unknown H3 conditioner mode: {conditioner_mode}")
@@ -406,6 +422,9 @@ class MiniMaxH3MLXPipeline:
         self._dit_in_channels = int(dit_config["in_channels"])
         self.last_dit_forward_s = 0.0
         self.last_vsa_stats: dict[str, Any] | None = None
+        self._previous_memory_limit, self._previous_wired_limit = _configure_metal_memory_limits(mx,
+                                                                                                 metal_wired_limit_gib,
+                                                                                                 resident=resident)
 
     # -- input validation (before anything heavy loads) -------------------
 
@@ -502,6 +521,12 @@ class MiniMaxH3MLXPipeline:
 
             _restore_metal_wired_limit(mx, previous)
             self._previous_wired_limit = None
+        previous_memory = getattr(self, "_previous_memory_limit", None)
+        if previous_memory is not None:
+            import mlx.core as mx
+
+            _restore_metal_memory_limit(mx, previous_memory)
+            self._previous_memory_limit = None
 
     def encode_prompt(self, prompt: str) -> tuple[np.ndarray, np.ndarray]:
         """Returns (hidden states (S, hidden), token tags). Uses the cache or
