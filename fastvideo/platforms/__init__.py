@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/__init__.py
 
+import glob
 import os
 import traceback
 from typing import TYPE_CHECKING
@@ -90,13 +91,21 @@ def cpu_platform_plugin() -> str | None:
 
 
 def _rocm_device_node_accessible() -> bool:
-    """True when this process has read/write permission on the AMD compute device node.
+    """True when this process has read/write permission on the AMD compute
+    device node and on at least one GPU render node.
 
-    Looking at the node rather than querying the GPU runtime keeps platform
-    detection from initializing ROCm when fastvideo is imported. Permission
-    bits are not proof that an open() succeeds, so this stays a heuristic.
+    The ROCm runtime opens both: /dev/kfd for compute and a DRM render node
+    under /dev/dri for each GPU, so a container given /dev/kfd but no render
+    node has no usable GPU. Looking at the nodes rather than querying the GPU
+    runtime keeps platform detection from initializing ROCm when fastvideo is
+    imported. Permission bits are not proof that an open() succeeds, so this
+    stays a heuristic.
     """
-    return os.access("/dev/kfd", os.R_OK | os.W_OK)
+    read_write = os.R_OK | os.W_OK
+    if not os.access("/dev/kfd", read_write):
+        return False
+    render_nodes = sorted(glob.glob("/dev/dri/renderD*"))  # codespell:ignore renderd
+    return any(os.access(node, read_write) for node in render_nodes)
 
 
 def rocm_platform_plugin() -> str | None:
@@ -118,8 +127,8 @@ def rocm_platform_plugin() -> str | None:
         # Images built on rocm/pytorch ship a ROCm (HIP) torch but no amdsmi
         # Python package, and the PyPI amdsmi wheel cannot load its library
         # there, so the amdsmi check above finds no device and the CPU
-        # platform wins. A HIP torch build plus the AMD compute device node
-        # is a ROCm GPU.
+        # platform wins. A HIP torch build plus the AMD compute and render
+        # device nodes is a ROCm GPU.
         try:
             import torch
             hip_version = getattr(torch.version, "hip", None)
