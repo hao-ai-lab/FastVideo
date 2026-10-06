@@ -52,7 +52,9 @@ from fastvideo.training.training_utils import (
 
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.activation_checkpoint import (
-    apply_activation_checkpointing, )
+    apply_activation_checkpointing,
+    resolve_checkpointing_type,
+)
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
@@ -103,7 +105,10 @@ class Kandinsky5Model(ModelBase):
             init_from=self._init_from,
             trainable=self._trainable,
             disable_custom_init_weights=(disable_custom_init_weights),
-            enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            enable_gradient_checkpointing_type=resolve_checkpointing_type(
+                enable_gradient_checkpointing_type,
+                training_config,
+            ),
             training_config=training_config,
             transformer_override_safetensor=(transformer_override_safetensor),
         )
@@ -150,15 +155,10 @@ class Kandinsky5Model(ModelBase):
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
         )
-        ckpt_type = (enable_gradient_checkpointing_type or getattr(
-            getattr(training_config, "model", None),
-            "enable_gradient_checkpointing_type",
-            None,
-        ))
-        if trainable and ckpt_type:
+        if trainable and enable_gradient_checkpointing_type:
             transformer = apply_activation_checkpointing(
                 transformer,
-                checkpointing_type=ckpt_type,
+                checkpointing_type=enable_gradient_checkpointing_type,
             )
         if self._enable_lora_if_configured(transformer):
             return transformer

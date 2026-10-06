@@ -426,7 +426,7 @@ class WanCausalModel(WanModel, CausalModelBase):
         return kv_cache
 
     def _should_use_checkpoint_safe_kv_cache(self, ) -> bool:
-        return (bool(self._resolved_gradient_checkpointing_type) and bool(self._trainable))
+        return self._activation_checkpointing_applied
 
     def _should_snapshot_streaming_cache(self, ) -> bool:
         return (self._should_use_checkpoint_safe_kv_cache())

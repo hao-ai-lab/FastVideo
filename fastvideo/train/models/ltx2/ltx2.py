@@ -163,18 +163,13 @@ class LTX2Model(WanModel):
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=attention_backend,
         )
-        ckpt_type = (enable_gradient_checkpointing_type or getattr(
-            getattr(training_config, "model", None),
-            "enable_gradient_checkpointing_type",
-            None,
-        ))
-        if trainable and ckpt_type:
+        if trainable and enable_gradient_checkpointing_type:
             # LTX-2 nests transformer_blocks under ``.model``; applying
             # checkpointing at the wrapper level raises because no block
             # list is found there.
             transformer.model = apply_activation_checkpointing(
                 transformer.model,
-                checkpointing_type=ckpt_type,
+                checkpointing_type=enable_gradient_checkpointing_type,
             )
         if self._enable_lora_if_configured(transformer):
             return transformer

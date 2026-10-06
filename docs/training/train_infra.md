@@ -80,16 +80,24 @@ Common model parameters:
 | `trainable` | `true` | Whether the model's parameters require gradients |
 | `disable_custom_init_weights` | `false` | Skip custom weight initialization (use for teacher/critic) |
 | `flow_shift` | `3.0` | Timestep shifting factor |
-| `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"`, `"ops"`, or `null`) |
+| `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"`, `"ops"`, `"block_skip"`, or `null`); a role that leaves it unset uses `training.model`'s value |
 | `attention_backend` | `null` | Optional role-local backend for Wan models (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
 
-`full` recomputes every transformer-block operation and is the
-memory-conservative choice. `ops` retains outputs from supported,
-dispatcher-visible fused attention operations. It can reduce recompute time at
-the cost of higher activation memory, so use it only when the training shape has
-verified memory headroom. Math SDPA, VMoBA, FA3, and `ATTN_QAT_TRAIN` do not
-expose a retainable dispatcher boundary and therefore still use full attention
-recomputation under `ops`.
+`full` and `ops` checkpoint the same transformer blocks; layers outside them,
+such as embeddings and the output head, keep their activations under either.
+`full` recomputes every block operation and is the memory-conservative choice.
+`ops` also retains the outputs of fused attention ops that the PyTorch
+dispatcher can see. It can reduce recompute time at the cost of higher
+activation memory, so use it only when the training shape has verified memory
+headroom. `block_skip` currently behaves like `full`, because the modular
+trainer has no setting for its layer interval.
+
+These attention paths have no retainable dispatcher op, so they still
+recompute in full under `ops`: math SDPA, VMoBA, SLA, `ATTN_QAT_TRAIN`, every
+FA3 path, FA4 masked self-attention, FA4 below sm90, and CuTe VSA with 128- or
+256-token blocks (`FASTVIDEO_VSA_CUTEDSL=1`). A run in which a checkpointed
+block retains nothing logs a one-time warning. With sequence parallelism, the
+Ulysses all-to-alls inside each block also run again during recompute.
 
 Which roles are needed depends on the training method:
 
