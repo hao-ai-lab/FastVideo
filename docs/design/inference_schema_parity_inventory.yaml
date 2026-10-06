@@ -458,6 +458,14 @@ surfaces:
         sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
       video_txt_guidance_scale:
         sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
+      piflow_eps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      piflow_final_step_size_scale:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      piflow_num_policy_substeps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      sample_fps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -481,6 +489,8 @@ surfaces:
       z_dim: "MagiHuman internal VAE latent channel setting."
       vocoder_config: "Legacy internal component config object."
       vocoder_precision: "Precision override pending dedicated component precision design."
+      audio_sample_rate: "Kandinsky6 audio-latent length constant (audio VAE sample rate); tied to the checkpoint, not a request knob."
+      audio_downsample_factor: "Kandinsky6 audio-latent length constant (audio VAE downsample factor); tied to the checkpoint, not a request knob."
 
   sampling_param_base:
     moved:

@@ -165,6 +165,7 @@ nav:
       - LTX: cookbook/ltx.md
       - Hunyuan: cookbook/hunyuan.md
       - Kandinsky 5: cookbook/kandinsky5.md
+      - Kandinsky 6: cookbook/kandinsky6.md
       - LongCat: cookbook/longcat.md
       - TurboDiffusion: cookbook/turbodiffusion.md
     - Image:
@@ -185,6 +186,8 @@ nav:
     - Optimizations: inference/optimizations.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
+    - Kandinsky 6 T2IVA: inference/kandinsky6.md
+    - Kandinsky 6 Video SR: inference/kandinsky6_sr.md
     - CLI: inference/cli.md
     - Add Pipeline: inference/add_pipeline.md
     - Examples:
