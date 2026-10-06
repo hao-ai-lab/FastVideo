@@ -262,6 +262,16 @@ def test_no_metal_probe_is_cached(monkeypatch):
     assert not simd.simd_kernel_available()
 
 
+def test_m1_simd_falls_back_before_compilation(monkeypatch):
+    monkeypatch.setattr(simd, "_SIMD_KERNEL", None)
+    monkeypatch.setattr(simd, "_SIMD_KERNEL_ERROR", None)
+    monkeypatch.setattr(mx.metal, "is_available", lambda: True)
+    monkeypatch.setattr(mx.metal, "device_info", lambda: {"device_name": "Apple M1"})
+    monkeypatch.setattr(mx.fast, "metal_kernel", lambda **kwargs: pytest.fail("M1 must not compile SIMD VSA"))
+    assert not simd.simd_kernel_available()
+    assert "BF16 reference on Apple M1" in simd.simd_kernel_error()
+
+
 def _require_metal():
     if not mx.metal.is_available() or mx.default_device() != mx.gpu:
         pytest.skip("requires actual Metal execution")
