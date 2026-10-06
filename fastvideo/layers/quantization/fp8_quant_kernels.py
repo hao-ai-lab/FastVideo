@@ -7,6 +7,11 @@ shapes that costs about as much as the FP8 ``_scaled_mm`` it feeds (1.06 ms next
 to a 1.25 ms GEMM for a 65,536 x 5,376 activation on MI355X). These kernels do the
 same math in one pass (rowwise) or an ``aminmax`` reduction plus one pass
 (tensorwise): 3x (tensorwise) and 4-5x (rowwise) faster at those shapes.
+
+NaN handling follows the eager formulas: a NaN anywhere in a row (rowwise) or in
+the tensor (tensorwise) makes its scale and its FP8 values NaN. Triton's default
+``maximum``/``minimum`` and ``tl.max`` return the non-NaN operand, so every max,
+min and clamp below asks for NaN propagation.
 """
 from __future__ import annotations
 
@@ -26,6 +31,15 @@ except Exception:  # noqa: BLE001
 if _HAS_TRITON:
 
     @triton.jit
+    def _max_keep_nan(a, b):
+        return tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
+
+    @triton.jit
+    def _clamp_keep_nan(x, FP8_MAX: tl.constexpr):
+        y = tl.maximum(x, -FP8_MAX, propagate_nan=tl.PropagateNan.ALL)
+        return tl.minimum(y, FP8_MAX, propagate_nan=tl.PropagateNan.ALL)
+
+    @triton.jit
     def _rowwise_quant_kernel(x_ptr, out_ptr, scale_ptr, K, stride_x, stride_out, FP8_MAX: tl.constexpr,
                               MIN_SCALE: tl.constexpr, BLOCK: tl.constexpr):
         """One program per row: amax over the row, then scale/clamp/cast in a second sweep.
@@ -38,14 +52,15 @@ if _HAS_TRITON:
         for start in range(0, K, BLOCK):
             offs = start + tl.arange(0, BLOCK)
             x = tl.load(x_row + offs, mask=offs < K, other=0.0).to(tl.float32)
-            amax = tl.maximum(amax, tl.abs(x))
-        scale = tl.maximum(tl.max(amax, axis=0) / FP8_MAX, MIN_SCALE)
+            amax = _max_keep_nan(amax, tl.abs(x))
+        row_amax = tl.reduce(amax, 0, _max_keep_nan)
+        scale = tl.maximum(row_amax / FP8_MAX, MIN_SCALE, propagate_nan=tl.PropagateNan.ALL)
         inv = 1.0 / scale
         out_row = out_ptr + row * stride_out
         for start in range(0, K, BLOCK):
             offs = start + tl.arange(0, BLOCK)
             x = tl.load(x_row + offs, mask=offs < K, other=0.0).to(tl.float32)
-            y = tl.minimum(tl.maximum(x * inv, -FP8_MAX), FP8_MAX)
+            y = _clamp_keep_nan(x * inv, FP8_MAX)
             tl.store(out_row + offs, y.to(out_ptr.dtype.element_ty), mask=offs < K)
         tl.store(scale_ptr + row, scale)
 
@@ -57,7 +72,7 @@ if _HAS_TRITON:
         mask = offs < n_elements
         inv = tl.load(inv_scale_ptr)
         x = tl.load(x_ptr + offs, mask=mask, other=0.0).to(tl.float32)
-        y = tl.minimum(tl.maximum(x * inv, -FP8_MAX), FP8_MAX)
+        y = _clamp_keep_nan(x * inv, FP8_MAX)
         tl.store(out_ptr + offs, y.to(out_ptr.dtype.element_ty), mask=mask)
 
 
@@ -88,6 +103,7 @@ def quantize_rowwise_fused(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tens
 def quantize_tensorwise_fused(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Returns ``(x_fp8 [M, K], x_scale [1] float32)``; an ``aminmax`` reduction + one pass."""
     x_2d = x_2d.contiguous()
+    # aminmax, maximum and clamp all propagate NaN, as the eager amax does.
     lo, hi = torch.aminmax(x_2d)
     amax = torch.maximum(lo.abs(), hi.abs()).float()
     scale = (amax / FP8_MAX).clamp(min=FP8_MIN_SCALE).view(1)
