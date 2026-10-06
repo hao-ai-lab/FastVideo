@@ -786,8 +786,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # ``sm89_strided`` marks the INT8-QK entry, the only one that reads
             # the BSHD strided views directly.
             sm89_route = (self._sm89_kernel != "original" and not torch.is_grad_enabled() and not compiling
-                          and query.dtype == torch.bfloat16 and query.shape[-1] == 128
-                          and query.is_cuda and torch.cuda.get_device_capability(query.device) == (8, 9))
+                          and query.dtype == torch.bfloat16 and query.shape[-1] == 128 and query.is_cuda
+                          and torch.cuda.get_device_capability(query.device) == (8, 9))
             sm89_strided = sm89_route and self._sm89_kernel == "int8"
             q_bhsd = query.transpose(1, 2)
             k_bhsd = key.transpose(1, 2)
