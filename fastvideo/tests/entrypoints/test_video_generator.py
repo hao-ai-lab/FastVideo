@@ -1099,3 +1099,26 @@ def test_return_samples_only_skips_preview_processing(monkeypatch, tmp_path, dty
     assert result["frames"] is None
     assert result["video_path"] is None
     assert result["size"] == (16, 16, 1)
+
+
+@pytest.mark.parametrize("return_frames", [False, True])
+def test_input_sized_output_skips_request_pixel_preallocation(monkeypatch, tmp_path, return_frames):
+    output = torch.full((1, 3, 1, 24, 32), 0.5)
+    args = _single_video_args()
+    args.pipeline_config.output_shape_from_input = True
+    generator = _single_video_generator(_single_video_output_batch(output), args)
+    monkeypatch.setattr(
+        video_generator_module, "allocate_cpu_tensor_with_pin_fallback",
+        lambda *args, **kwargs: pytest.fail("Input-sized outputs must not allocate request-sized pixel buffers"))
+    sampling = _small_sampling_param(return_frames=return_frames)
+    sampling.num_frames = 1
+    sampling.return_samples = True
+    result = generator._generate_single_video("input-sized output", sampling,
+                                             output_path=str(tmp_path / "unused.mp4"))
+    torch.testing.assert_close(result["samples"], output)
+    assert result["size"] == (24, 32, 1)
+    if return_frames:
+        assert len(result["frames"]) == 1
+    else:
+        assert result["frames"] is None
+    assert result["video_path"] is None
