@@ -131,11 +131,6 @@ class FamilyCoverage:
 
 FAMILY_COVERAGE = (
     FamilyCoverage(
-        re.compile(r"(^|[/_.-])dreamx(_world)?([/_.-]|$)"),
-        ("test_dreamx.py", ),
-        ("test_dreamx_world_similarity.py", ),
-    ),
-    FamilyCoverage(
         re.compile(r"(^|[/_.-])flux[_-]?2([/_.-]|$)"),
         ("test_flux2_klein.py", ),
         ("test_flux2_similarity.py", ),
@@ -146,19 +141,9 @@ FAMILY_COVERAGE = (
         ("test_flux_t2i_similarity.py", ),
     ),
     FamilyCoverage(
-        re.compile(r"(^|[/_.-])(hunyuan)?gamecraft([/_.-]|$)"),
-        ("test_gamecraft.py", ),
-        ("test_gamecraft_similarity.py", ),
-    ),
-    FamilyCoverage(
         re.compile(r"(^|[/_.-])gen3c([/_.-]|$)"),
         ("test_gen3c.py", ),
         ("test_gen3c_similarity.py", ),
-    ),
-    FamilyCoverage(
-        re.compile(r"(^|[/_.-])glm[_-]?image([/_.-]|$)"),
-        ("test_glm_image.py", ),
-        ("test_glm_image_similarity.py", ),
     ),
     FamilyCoverage(
         re.compile(r"(^|[/_.-])kandinsky[_-]?5([/_.-]|$)"),
@@ -169,11 +154,6 @@ FAMILY_COVERAGE = (
         re.compile(r"(^|[/_.-])lingbot([a-z0-9_-]*)([/_.-]|$)"),
         ("test_lingbot.py", ),
         ("test_lingbot_similarity.py", ),
-    ),
-    FamilyCoverage(
-        re.compile(r"(^|[/_.-])longcat([/_.-]|$)"),
-        ("test_longcat.py", ),
-        ("test_longcat_similarity.py", ),
     ),
     FamilyCoverage(
         re.compile(r"(^|[/_.-])ltx[_-]?2([/_.-]|$)"),
@@ -206,11 +186,6 @@ FAMILY_COVERAGE = (
         ("test_stable_audio_similarity.py", ),
     ),
     FamilyCoverage(
-        re.compile(r"(^|[/_.-])turbo(diffusion)?([/_.-]|$)"),
-        (),
-        ("test_turbodiffusion_similarity.py", ),
-    ),
-    FamilyCoverage(
         re.compile(r"(^|[/_.-])wan(video|vae)?([/_.-]|$)"),
         ("test_wan_t2v.py", "test_wan_vae.py", "test_wan_causal.py", "test_wan_denoising.py"),
         (
@@ -218,11 +193,6 @@ FAMILY_COVERAGE = (
             "test_wan_i2v_similarity.py",
             "test_wan_t2v_similarity.py",
         ),
-    ),
-    FamilyCoverage(
-        re.compile(r"(^|[/_.-])z[_-]?image([/_.-]|$)"),
-        ("test_zimage.py", ),
-        ("test_zimage_similarity.py", ),
     ),
 )
 

@@ -19,7 +19,6 @@ from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, Matri
                                                        MatrixGame3ImageVAEEncodingStage, RefImageEncodingStage,
                                                        ImageVAEEncodingStage, VideoVAEEncodingStage,
                                                        Hy15ImageEncodingStage, HYWorldImageEncodingStage)
-from fastvideo.pipelines.stages.gamecraft_image_encoding import (GameCraftImageVAEEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (Cosmos25LatentPreparationStage, CosmosLatentPreparationStage,
                                                            Cosmos25AutoLatentPreparationStage,
@@ -37,16 +36,10 @@ from fastvideo.pipelines.stages.kandinsky5 import (Kandinsky5DecodingStage, Kand
 from fastvideo.pipelines.stages.kandinsky6 import (Kandinsky6AudioDecodingStage, Kandinsky6DecodingStage,
                                                    Kandinsky6DenoisingStage, Kandinsky6ImageEncodingStage,
                                                    Kandinsky6LatentPreparationStage)
-from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.gen3c_stages import (Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
                                                      Gen3CLatentPreparationStage)
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage, TextEncodingStage)
 from fastvideo.pipelines.stages.timestep_preparation import (Cosmos25TimestepPreparationStage, TimestepPreparationStage)
-
-# LongCat stages
-from fastvideo.pipelines.stages.longcat_video_vae_encoding import LongCatVideoVAEEncodingStage
-from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitStage
-from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
 
 __all__ = [
     "PipelineStage",
@@ -77,7 +70,6 @@ __all__ = [
     "Kandinsky6DenoisingStage",
     "Kandinsky6ImageEncodingStage",
     "Kandinsky6LatentPreparationStage",
-    "GameCraftDenoisingStage",
     "Gen3CCFGPolicyStage",
     "Gen3CConditioningStage",
     "Gen3CLatentPreparationStage",
@@ -101,13 +93,8 @@ __all__ = [
     "RefImageEncodingStage",
     "ImageVAEEncodingStage",
     "VideoVAEEncodingStage",
-    "GameCraftImageVAEEncodingStage",
     "TextEncodingStage",
     "Cosmos25TextEncodingStage",
-    # LongCat stages
-    "LongCatVideoVAEEncodingStage",
-    "LongCatKVCacheInitStage",
-    "LongCatVCDenoisingStage",
 ]
 
 

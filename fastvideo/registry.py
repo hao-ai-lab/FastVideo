@@ -20,9 +20,7 @@ from fastvideo.configs.pipelines.cosmos2_5 import (
     Cosmos25Config,
     Cosmos25_14BConfig,
 )
-from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConfig, DreamXWorld5BCamPipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
-from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.gen3c import Gen3CConfig
 from fastvideo.configs.pipelines.hunyuan15 import (Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
                                                    Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig,
@@ -34,7 +32,6 @@ from fastvideo.configs.pipelines.kandinsky6_sr import Kandinsky6SRPipelineConfig
 from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
-from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.pipelines.basic.ltx2.pipeline_configs import LTX2T2VConfig
 from fastvideo.configs.pipelines.flux_2 import (
     Flux2KleinPipelineConfig,
@@ -44,18 +41,11 @@ from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.configs.pipelines.mmaudio import MMAudioV2AConfig
-from fastvideo.configs.pipelines.turbodiffusion import (
-    TurboDiffusionI2V_A14B_Config,
-    TurboDiffusionT2V_14B_Config,
-    TurboDiffusionT2V_1_3B_Config,
-)
 from fastvideo.models.wan import pipeline_config as wan_pipeline_config
-from fastvideo.models.wan.definition import WAN_MODEL_DEFINITION_GROUPS, WanModelDefinition
-from fastvideo.configs.pipelines.glm_image import GlmImageConfig
+from fastvideo.models.wan.definition import WAN_MODEL_DEFINITIONS, WanModelDefinition
 from fastvideo.configs.pipelines.flux import FluxPipelineConfig
 from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.pipelines.stable_audio import (StableAudioOpenSmallConfig, StableAudioT2AConfig)
-from fastvideo.configs.pipelines.zimage import ZImagePipelineConfig
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.api.matrixgame2 import MatrixGame2SamplingParam
 from fastvideo.api.matrixgame3 import MatrixGame3SamplingParam
@@ -474,7 +464,7 @@ def _register_configs() -> None:
         default_preset="hunyuan15_sr_1080p",
     )
 
-    # Hunyuan (excludes gamecraft, hyworld, and versioned models)
+    # Hunyuan (excludes hyworld and versioned models)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=HunyuanConfig,
@@ -483,8 +473,8 @@ def _register_configs() -> None:
             "hunyuanvideo-community/HunyuanVideo",
         ],
         model_detectors=[
-            lambda path: "hunyuan" in path.lower() and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
-            ) and "1.5" not in path.lower() and "1-5" not in path.lower()
+            lambda path: "hunyuan" in path.lower() and "hyworld" not in path.lower() and "1.5" not in path.lower() and
+            "1-5" not in path.lower()
         ],
         model_family="hunyuan",
         default_preset="hunyuan_t2v",
@@ -513,18 +503,6 @@ def _register_configs() -> None:
         default_preset="hyworld_t2v",
     )
 
-    # HunyuanGameCraft
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=HunyuanGameCraftPipelineConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "FastVideo/HunyuanGameCraft-Diffusers",
-        ],
-        model_detectors=[lambda path: "gamecraft" in path.lower()],
-        model_family="gamecraft",
-        default_preset="gamecraft_i2v",
-    )
     # LingBotWorld2 causal-fast
     register_configs(
         sampling_param_cls=None,
@@ -838,43 +816,6 @@ def _register_configs() -> None:
         pipeline_cls_name="Kandinsky6TI2VAPipeline",
     )
 
-    # LongCat (T2V, I2V, VC use same config; workload varies by path)
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LongCatT2V480PConfig,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=["FastVideo/LongCat-Video-T2V-Diffusers"],
-        model_detectors=[
-            lambda path: "longcat" in path.lower() and "i2v" not in path.lower() and "imagetovideo" not in path.lower()
-            and "vc" not in path.lower() and "videocontinuation" not in path.lower(),
-        ],
-        model_family="longcat",
-        default_preset="longcat_t2v",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LongCatT2V480PConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=["FastVideo/LongCat-Video-I2V-Diffusers"],
-        model_detectors=[
-            lambda path: "longcatimagetovideo" in path.lower() or ("longcat" in path.lower() and "i2v" in path.lower()),
-        ],
-        model_family="longcat",
-        default_preset="longcat_i2v",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=LongCatT2V480PConfig,
-        workload_types=(),
-        hf_model_paths=["FastVideo/LongCat-Video-VC-Diffusers"],
-        model_detectors=[
-            lambda path: "longcatvideocontinuation" in path.lower() or
-            ("longcat" in path.lower() and "vc" in path.lower()),
-        ],
-        model_family="longcat",
-        default_preset="longcat_vc",
-    )
-
     # MatrixGame 2.0 (I2V)
     register_configs(
         sampling_param_cls=MatrixGame2SamplingParam,
@@ -994,76 +935,7 @@ def _register_configs() -> None:
         default_preset="cosmos_predict2_2b",
     )
 
-    # TurboDiffusion
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=TurboDiffusionT2V_1_3B_Config,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
-        ],
-        model_detectors=[lambda path: "turbodiffusion" in path.lower() or "turbowan" in path.lower()],
-        model_family="turbodiffusion",
-        default_preset="turbo_t2v_1_3b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=TurboDiffusionT2V_14B_Config,
-        workload_types=(WorkloadType.T2V, ),
-        hf_model_paths=[
-            "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
-        ],
-        model_family="turbodiffusion",
-        default_preset="turbo_t2v_14b",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=TurboDiffusionI2V_A14B_Config,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
-        ],
-        model_family="turbodiffusion",
-        default_preset="turbo_i2v_a14b",
-    )
-
-    # Preserve first-match ordering around the DreamX registrations below.
-    _register_wan_configs(WAN_MODEL_DEFINITION_GROUPS[0])
-
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=DreamXWorld5BCamPipelineConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "FastVideo/DreamX-World-5B-Cam-Diffusers",
-        ],
-        model_detectors=[
-            # Mutually exclusive with the AR detector below: Cam requires an
-            # explicit "cam" marker so hyphenated AR local paths (e.g.
-            # /ckpts/dreamx-world-5b-converted) don't first-match here —
-            # detector resolution is first-match in registration order.
-            lambda path:
-            ("dreamx-world" in path.lower() and "cam" in path.lower()) or "dreamxworldpipeline" in path.lower()
-        ],
-        model_family="dreamx_world",
-        default_preset="dreamx_world_5b_cam",
-    )
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=DreamXWorld5BARPipelineConfig,
-        workload_types=(WorkloadType.I2V, ),
-        hf_model_paths=[
-            "FastVideo/DreamX-World-5B-Diffusers",
-        ],
-        model_detectors=[
-            lambda path:
-            ("dreamx-world-5b" in path.lower() and "cam" not in path.lower()) or "dreamxworldarpipeline" in path.lower(
-            )
-        ],
-        model_family="dreamx_world",
-        default_preset="dreamx_world_5b_ar",
-    )
-    _register_wan_configs(WAN_MODEL_DEFINITION_GROUPS[1])
+    _register_wan_configs(WAN_MODEL_DEFINITIONS)
 
     # MiniMax H3
     register_configs(
@@ -1110,18 +982,6 @@ def _register_configs() -> None:
         default_preset="sd35_medium",
     )
 
-    # GLM-Image
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=GlmImageConfig,
-        hf_model_paths=[
-            "zai-org/GLM-Image",
-        ],
-        model_detectors=[lambda path: "glmimage" in path.lower() or "glm-image" in path.lower()],
-        workload_types=(WorkloadType.T2I, ),
-        model_family="glm_image",
-    )
-
     # FLUX.1-dev (Diffusers)
     register_configs(
         sampling_param_cls=FluxSamplingParam,
@@ -1135,19 +995,6 @@ def _register_configs() -> None:
             lambda path: "flux.1-dev" in path or "flux_1_dev" in path,
             lambda path: "/flux/" in path or path.endswith("/flux"),
         ],
-    )
-
-    # Z-Image-Turbo
-    register_configs(
-        sampling_param_cls=None,
-        pipeline_config_cls=ZImagePipelineConfig,
-        workload_types=(WorkloadType.T2I, ),
-        hf_model_paths=["Tongyi-MAI/Z-Image-Turbo"],
-        model_detectors=[
-            lambda path: "zimagepipeline" in path or "z-image" in path or "z_image" in path,
-        ],
-        model_family="zimage",
-        default_preset="zimage_turbo",
     )
 
 
@@ -1241,10 +1088,6 @@ def _register_presets() -> None:
     from fastvideo.api.presets import register_preset
     from fastvideo.pipelines.basic.cosmos.presets import (
         ALL_PRESETS as COSMOS_PRESETS, )
-    from fastvideo.pipelines.basic.dreamx_world.presets import (
-        ALL_PRESETS as DREAMX_WORLD_PRESETS, )
-    from fastvideo.pipelines.basic.gamecraft.presets import (
-        ALL_PRESETS as GAMECRAFT_PRESETS, )
     from fastvideo.pipelines.basic.gen3c.presets import (
         ALL_PRESETS as GEN3C_PRESETS, )
     from fastvideo.pipelines.basic.hunyuan.presets import (
@@ -1265,8 +1108,6 @@ def _register_presets() -> None:
         ALL_PRESETS as LINGBOTWORLD2_PRESETS, )
     from fastvideo.pipelines.basic.lingbot_video.presets import (
         ALL_PRESETS as LINGBOT_VIDEO_PRESETS, )
-    from fastvideo.pipelines.basic.longcat.presets import (
-        ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
         ALL_PRESETS as LTX2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame2.presets import (
@@ -1281,20 +1122,14 @@ def _register_presets() -> None:
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
         ALL_PRESETS as STABLE_AUDIO_PRESETS, )
-    from fastvideo.pipelines.basic.turbodiffusion.presets import (
-        ALL_PRESETS as TURBODIFFUSION_PRESETS, )
     from fastvideo.pipelines.basic.wan.presets import (
         ALL_PRESETS as WAN_PRESETS, )
-    from fastvideo.pipelines.basic.zimage.presets import (
-        ALL_PRESETS as ZIMAGE_PRESETS, )
     from fastvideo.pipelines.basic.flux_2.presets import (
         ALL_PRESETS as FLUX2_PRESETS, )
 
     all_preset_groups = (
         COSMOS_PRESETS,
-        DREAMX_WORLD_PRESETS,
         FLUX2_PRESETS,
-        GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,
         HUNYUAN15_PRESETS,
@@ -1305,7 +1140,6 @@ def _register_presets() -> None:
         LINGBOT_VIDEO_PRESETS,
         LINGBOTWORLD_PRESETS,
         LINGBOTWORLD2_PRESETS,
-        LONGCAT_PRESETS,
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
@@ -1313,9 +1147,7 @@ def _register_presets() -> None:
         MMAUDIO_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
-        TURBODIFFUSION_PRESETS,
         WAN_PRESETS,
-        ZIMAGE_PRESETS,
     )
     for group in all_preset_groups:
         for preset in group:

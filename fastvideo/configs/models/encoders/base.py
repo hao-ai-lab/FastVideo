@@ -44,7 +44,7 @@ class TextEncoderArchConfig(EncoderArchConfig):
 
     def __post_init__(self) -> None:
         # update_model_arch re-runs __post_init__ after pipeline configs may
-        # have customized tokenizer_kwargs (e.g. kandinsky5/gen3c/longcat set
+        # have customized tokenizer_kwargs (e.g. kandinsky5/gen3c set
         # "padding"); rebuilding the dict here would silently wipe those
         # customizations, so only fill in defaults for keys not already set.
         defaults = {

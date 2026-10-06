@@ -289,35 +289,43 @@ longer exists also fails the test, so the fixing pull request deletes its entry.
 | `FASTVIDEO_TEST_WAN22_5B_ALLOW_LOW_MEMORY`                 | bool                           | `0`                                                   | test        | Run the MLX Wan2.2 5B real-weights parity test on hosts with little memory. Deprecated names: `FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY`.                                                                                                                     |
 | `FASTVIDEO_TEST_WAN22_5B_ROOT`                             | str                            | unset                                                 | test        | Local Wan2.2 5B checkpoint for the MLX real-weights parity test. Deprecated names: `FASTVIDEO_WAN22_5B_ROOT`.                                                                                                                                            |
 | `FASTVIDEO_TEST_GRADNORM_UPDATE`                           | bool                           | `0`                                                   | test        | Gradient-norm regression tests update their references. Deprecated names: `FASTVIDEO_GRADNORM_UPDATE`.                                                                                                                                                   |
-| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`              | str                            | `FastVideo/DreamX-World-5B-Cam-Diffusers`             | test        | Model for the DreamX-World camera SSIM test. Deprecated names: `DREAMX_WORLD_SSIM_MODEL_PATH`.                                                                                                                                                           |
-| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH`           | str                            | `FastVideo/DreamX-World-5B-Diffusers`                 | test        | Model for the DreamX-World autoregressive SSIM test. Deprecated names: `DREAMX_WORLD_AR_SSIM_MODEL_PATH`.                                                                                                                                                |
 | `FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR`                        | str                            | `black-forest-labs/FLUX.1-dev`                        | test        | Model for the Flux text-to-image SSIM test. Deprecated names: `FLUX_T2I_MODEL_DIR`.                                                                                                                                                                      |
 | `FASTVIDEO_TEST_FLUX_TRANSFORMER_PATH`                     | str                            | unset                                                 | test        | Local Flux transformer for the Flux transformer test. Deprecated names: `FLUX_TRANSFORMER_PATH`.                                                                                                                                                         |
-| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`                      | str                            | `FastVideo/HunyuanGameCraft-Diffusers`                | test        | Model for the HunyuanGameCraft SSIM test. Deprecated names: `GAMECRAFT_MODEL_PATH`.                                                                                                                                                                      |
 | `FASTVIDEO_TEST_GEN3C_MODEL_PATH`                          | str                            | `FastVideo/GEN3C-Cosmos-7B-Diffusers`                 | test        | Model for the GEN3C SSIM test. Deprecated names: `GEN3C_MODEL_PATH`.                                                                                                                                                                                     |
 | `FASTVIDEO_TEST_GEN3C_IMAGE_PATH`                          | str                            | unset                                                 | test        | Input image for the GEN3C SSIM test. Deprecated names: `GEN3C_TEST_IMAGE_PATH`.                                                                                                                                                                          |
-| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`               | str                            | unset                                                 | test        | Local official GLM-Image weights for the GLM-Image SSIM test. Deprecated names: `GLM_IMAGE_LOCAL_WEIGHTS_DIR`.                                                                                                                                           |
-| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`                       | str                            | unset                                                 | test        | Model for the GLM-Image SSIM test. Deprecated names: `GLM_IMAGE_MODEL_DIR`.                                                                                                                                                                              |
 | `FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS`                   | int                            | `1`                                                   | test        | GPUs for the Kandinsky5 nightly end-to-end overfit test. Deprecated names: `KANDINSKY5_E2E_NUM_GPUS`.                                                                                                                                                    |
 | `FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE`            | bool                           | `0`                                                   | test        | The Kandinsky5 nightly end-to-end test writes a missing reference video. Deprecated names: `KANDINSKY5_E2E_WRITE_REFERENCE`.                                                                                                                             |
-| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`                        | str                            | unset                                                 | test        | Local LongCat-Video checkpoint for the golden-gate test. Deprecated names: `LONGCAT_MODEL_ROOT`.                                                                                                                                                         |
 | `FASTVIDEO_TEST_MINIMAX_H3_GATE_GOLDEN_DIR`                | str                            | unset                                                 | test        | Local directory of MiniMax-H3 golden-gate tensors. Deprecated names: `MINIMAX_H3_GATE_GOLDEN_DIR`.                                                                                                                                                       |
 | `FASTVIDEO_TEST_MINIMAX_H3_GATE_LAYER`                     | int                            | `0`                                                   | test        | Transformer layer that the MiniMax-H3 golden-gate test checks. Deprecated names: `MINIMAX_H3_GATE_LAYER`.                                                                                                                                                |
 | `FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT`                     | str                            | unset                                                 | test        | Local MiniMax-H3 checkpoint for the golden-gate test. Deprecated names: `MINIMAX_H3_MODEL_ROOT`.                                                                                                                                                         |
 | `FASTVIDEO_TEST_SD35_MODEL_DIR`                            | str                            | `stabilityai/stable-diffusion-3.5-medium`             | test        | Model for the Stable Diffusion 3.5 SSIM test. Deprecated names: `SD35_MODEL_DIR`.                                                                                                                                                                        |
 | `FASTVIDEO_TEST_TAEH3_REFERENCE_DIR`                       | str                            | unset                                                 | test        | Upstream taehv checkout for the MLX TAEH3 parity test. Deprecated names: `TAEH3_REFERENCE_DIR`.                                                                                                                                                          |
-| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                          | str                            | `Tongyi-MAI/Z-Image-Turbo`                            | test        | Model for the Z-Image SSIM test. Deprecated names: `ZIMAGE_MODEL_DIR`.                                                                                                                                                                                   |
-| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`                     | str                            | `f332072aa78be7aecdf3ee76d5c247082da564a6`            | test        | Hugging Face revision of the Z-Image model for its SSIM test. Deprecated names: `ZIMAGE_MODEL_REVISION`.                                                                                                                                                 |
 
 Variables that FastVideo no longer reads; setting one logs a warning:
 
-| Deprecated variable                       | Reason           |
-| ----------------------------------------- | ---------------- |
-| `FASTVIDEO_TARGET_DEVICE`                 | no code reads it |
-| `FASTVIDEO_USE_PRECOMPILED`               | no code reads it |
-| `FASTVIDEO_RINGBUFFER_WARNING_INTERVAL`   | no code reads it |
-| `FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S`    | no code reads it |
-| `FASTVIDEO_SERVER_DEV_MODE`               | no code reads it |
-| `FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE` | no code reads it |
-| `FASTVIDEO_TRACE_FUNCTION`                | no code reads it |
+| Deprecated variable                              | Reason                       |
+| ------------------------------------------------ | ---------------------------- |
+| `FASTVIDEO_TARGET_DEVICE`                        | no code reads it             |
+| `FASTVIDEO_USE_PRECOMPILED`                      | no code reads it             |
+| `FASTVIDEO_RINGBUFFER_WARNING_INTERVAL`          | no code reads it             |
+| `FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S`           | no code reads it             |
+| `FASTVIDEO_SERVER_DEV_MODE`                      | no code reads it             |
+| `FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE`        | no code reads it             |
+| `FASTVIDEO_TRACE_FUNCTION`                       | no code reads it             |
+| `FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH`    | DreamX World was removed     |
+| `DREAMX_WORLD_SSIM_MODEL_PATH`                   | DreamX World was removed     |
+| `FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH` | DreamX World was removed     |
+| `DREAMX_WORLD_AR_SSIM_MODEL_PATH`                | DreamX World was removed     |
+| `FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH`            | HunyuanGameCraft was removed |
+| `GAMECRAFT_MODEL_PATH`                           | HunyuanGameCraft was removed |
+| `FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR`     | GLM-Image was removed        |
+| `GLM_IMAGE_LOCAL_WEIGHTS_DIR`                    | GLM-Image was removed        |
+| `FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR`             | GLM-Image was removed        |
+| `GLM_IMAGE_MODEL_DIR`                            | GLM-Image was removed        |
+| `FASTVIDEO_TEST_LONGCAT_MODEL_ROOT`              | LongCat was removed          |
+| `LONGCAT_MODEL_ROOT`                             | LongCat was removed          |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_DIR`                | Z-Image was removed          |
+| `ZIMAGE_MODEL_DIR`                               | Z-Image was removed          |
+| `FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION`           | Z-Image was removed          |
+| `ZIMAGE_MODEL_REVISION`                          | Z-Image was removed          |
 <!-- END GENERATED ENV TABLE -->

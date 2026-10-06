@@ -149,8 +149,6 @@ class InputConfig:
     grid_sizes: Any | None = None
     c2ws_plucker_emb: Any | None = None
     action_path: str | None = None
-    refine_from: str | None = None
-    stage1_video: Any | None = None
 
 
 @dataclass
@@ -169,8 +167,6 @@ class SamplingConfig:
     guidance_scale: float = 1.0
     batch_cfg: bool = False
     guidance_scale_2: float | None = None
-    cfg_normalization: bool = False
-    cfg_truncation: float | None = 1.0
     guidance_rescale: float = 0.0
     true_cfg_scale: float | None = None
     use_embedded_guidance: bool | None = None

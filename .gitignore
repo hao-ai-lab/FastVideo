@@ -36,7 +36,6 @@ env
 *.log
 weights/
 logs/
-/Z-Image/
 official_weights/
 converted_weights/
 

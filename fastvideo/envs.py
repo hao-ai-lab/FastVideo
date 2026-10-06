@@ -719,14 +719,6 @@ FASTVIDEO_TEST_GRADNORM_UPDATE = EnvBool(False,
                                          category="test",
                                          doc="Gradient-norm regression tests update their references.",
                                          deprecated_names=("FASTVIDEO_GRADNORM_UPDATE", ))
-FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH = EnvStr("FastVideo/DreamX-World-5B-Cam-Diffusers",
-                                                     category="test",
-                                                     doc="Model for the DreamX-World camera SSIM test.",
-                                                     deprecated_names=("DREAMX_WORLD_SSIM_MODEL_PATH", ))
-FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH = EnvStr("FastVideo/DreamX-World-5B-Diffusers",
-                                                        category="test",
-                                                        doc="Model for the DreamX-World autoregressive SSIM test.",
-                                                        deprecated_names=("DREAMX_WORLD_AR_SSIM_MODEL_PATH", ))
 FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR = EnvStr("black-forest-labs/FLUX.1-dev",
                                            category="test",
                                            doc="Model for the Flux text-to-image SSIM test.",
@@ -735,10 +727,6 @@ FASTVIDEO_TEST_FLUX_TRANSFORMER_PATH = EnvStr(None,
                                               category="test",
                                               doc="Local Flux transformer for the Flux transformer test.",
                                               deprecated_names=("FLUX_TRANSFORMER_PATH", ))
-FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH = EnvStr("FastVideo/HunyuanGameCraft-Diffusers",
-                                             category="test",
-                                             doc="Model for the HunyuanGameCraft SSIM test.",
-                                             deprecated_names=("GAMECRAFT_MODEL_PATH", ))
 FASTVIDEO_TEST_GEN3C_MODEL_PATH = EnvStr("FastVideo/GEN3C-Cosmos-7B-Diffusers",
                                          category="test",
                                          doc="Model for the GEN3C SSIM test.",
@@ -747,14 +735,6 @@ FASTVIDEO_TEST_GEN3C_IMAGE_PATH = EnvStr(None,
                                          category="test",
                                          doc="Input image for the GEN3C SSIM test.",
                                          deprecated_names=("GEN3C_TEST_IMAGE_PATH", ))
-FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR = EnvStr(None,
-                                                    category="test",
-                                                    doc="Local official GLM-Image weights for the GLM-Image SSIM test.",
-                                                    deprecated_names=("GLM_IMAGE_LOCAL_WEIGHTS_DIR", ))
-FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR = EnvStr(None,
-                                            category="test",
-                                            doc="Model for the GLM-Image SSIM test.",
-                                            deprecated_names=("GLM_IMAGE_MODEL_DIR", ))
 FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS = EnvInt(1,
                                                 category="test",
                                                 doc="GPUs for the Kandinsky5 nightly end-to-end overfit test.",
@@ -764,10 +744,6 @@ FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE = EnvBool(
     category="test",
     doc="The Kandinsky5 nightly end-to-end test writes a missing reference video.",
     deprecated_names=("KANDINSKY5_E2E_WRITE_REFERENCE", ))
-FASTVIDEO_TEST_LONGCAT_MODEL_ROOT = EnvStr(None,
-                                           category="test",
-                                           doc="Local LongCat-Video checkpoint for the golden-gate test.",
-                                           deprecated_names=("LONGCAT_MODEL_ROOT", ))
 FASTVIDEO_TEST_MINIMAX_H3_GATE_GOLDEN_DIR = EnvStr(None,
                                                    category="test",
                                                    doc="Local directory of MiniMax-H3 golden-gate tensors.",
@@ -788,14 +764,6 @@ FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
                                             category="test",
                                             doc="Upstream taehv checkout for the MLX TAEH3 parity test.",
                                             deprecated_names=("TAEH3_REFERENCE_DIR", ))
-FASTVIDEO_TEST_ZIMAGE_MODEL_DIR = EnvStr("Tongyi-MAI/Z-Image-Turbo",
-                                         category="test",
-                                         doc="Model for the Z-Image SSIM test.",
-                                         deprecated_names=("ZIMAGE_MODEL_DIR", ))
-FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION = EnvStr("f332072aa78be7aecdf3ee76d5c247082da564a6",
-                                              category="test",
-                                              doc="Hugging Face revision of the Z-Image model for its SSIM test.",
-                                              deprecated_names=("ZIMAGE_MODEL_REVISION", ))
 
 # Variables that FastVideo no longer reads. Setting one logs a warning; delete
 # the entries in the next minor release.
@@ -807,6 +775,22 @@ DEPRECATED_VARIABLES = {
     "FASTVIDEO_SERVER_DEV_MODE": "no code reads it",
     "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE": "no code reads it",
     "FASTVIDEO_TRACE_FUNCTION": "no code reads it",
+    "FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH": "DreamX World was removed",
+    "DREAMX_WORLD_SSIM_MODEL_PATH": "DreamX World was removed",
+    "FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH": "DreamX World was removed",
+    "DREAMX_WORLD_AR_SSIM_MODEL_PATH": "DreamX World was removed",
+    "FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH": "HunyuanGameCraft was removed",
+    "GAMECRAFT_MODEL_PATH": "HunyuanGameCraft was removed",
+    "FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR": "GLM-Image was removed",
+    "GLM_IMAGE_LOCAL_WEIGHTS_DIR": "GLM-Image was removed",
+    "FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR": "GLM-Image was removed",
+    "GLM_IMAGE_MODEL_DIR": "GLM-Image was removed",
+    "FASTVIDEO_TEST_LONGCAT_MODEL_ROOT": "LongCat was removed",
+    "LONGCAT_MODEL_ROOT": "LongCat was removed",
+    "FASTVIDEO_TEST_ZIMAGE_MODEL_DIR": "Z-Image was removed",
+    "ZIMAGE_MODEL_DIR": "Z-Image was removed",
+    "FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION": "Z-Image was removed",
+    "ZIMAGE_MODEL_REVISION": "Z-Image was removed",
 }
 
 

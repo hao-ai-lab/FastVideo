@@ -655,37 +655,6 @@ class FastVideoArgs:
             help="Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
         )
 
-        # BSA runtime control (LongCat)
-        parser.add_argument(
-            "--enable-bsa",
-            action=StoreBoolean,
-            help="Enable Block Sparse Attention (BSA) at runtime (overrides config).",
-        )
-        parser.add_argument(
-            "--bsa-sparsity",
-            type=float,
-            help="BSA sparsity (e.g., 0.9375).",
-        )
-        parser.add_argument(
-            "--bsa-cdf-threshold",
-            type=float,
-            help="BSA CDF threshold (optional).",
-        )
-        parser.add_argument(
-            "--bsa-chunk-q",
-            nargs=3,
-            type=int,
-            metavar=("T", "H", "W"),
-            help="BSA chunk_3d_shape_q as three ints, e.g., 4 4 4.",
-        )
-        parser.add_argument(
-            "--bsa-chunk-k",
-            nargs=3,
-            type=int,
-            metavar=("T", "H", "W"),
-            help="BSA chunk_3d_shape_k as three ints, e.g., 4 4 4.",
-        )
-
         parser.add_argument(
             "--enable-torch-compile",
             action=StoreBoolean,
@@ -936,8 +905,8 @@ class FastVideoArgs:
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
         # Filter to only FastVideoArgs dataclass fields — pipeline-specific CLI
-        # args (e.g. enable_bsa, bsa_sparsity) live in PipelineConfig and must
-        # not be forwarded to the FastVideoArgs constructor.
+        # args live in PipelineConfig and must not be forwarded to the
+        # FastVideoArgs constructor.
         valid_fields = {f.name for f in dataclasses.fields(cls)}
         return cls(**{k: v for k, v in kwargs.items() if k in valid_fields})
 
