@@ -97,7 +97,8 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         choices=("triton", "sm100a", "tk"),
                         default="sm100a",
                         help="tile-64 sparse kernel; sm100a is the measured GB200 route and requires a compatible "
-                        "fastvideo-kernel build; tk is the ThunderKittens sm_90a (Hopper) kernel")
+                        "fastvideo-kernel build; tk keeps the sm100a route off and requires the ThunderKittens "
+                        "sm_90a extension, which fastvideo-kernel already picks on sm_90 whenever it is built")
     parser.add_argument("--fa4",
                         action=argparse.BooleanOptionalAction,
                         default=True,

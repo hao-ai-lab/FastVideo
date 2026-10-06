@@ -146,8 +146,11 @@ Pass `--no-inference-torch-compile` to recover the eager sparse-DiT route.
 Hopper has no FA4 and no sm_100a VSA kernel, so the GB200 profile above does
 not apply there. The measured Hopper route keeps the same checkpoint, four
 forwards and 90% VSA sparsity and changes three things: the 64-token VSA path
-runs on the ThunderKittens sm_90a kernel (`--vsa-kernel tk`, built with
-`cd fastvideo-kernel && CMAKE_ARGS='-DFASTVIDEO_KERNEL_BUILD_TK=ON' ./build.sh`),
+runs on the ThunderKittens sm_90a kernel, which fastvideo-kernel picks on sm_90
+whenever it is built with
+`cd fastvideo-kernel && CMAKE_ARGS='-DFASTVIDEO_KERNEL_BUILD_TK=ON' ./build.sh`
+(`--vsa-kernel tk` keeps the sm100a route off and fails early when that
+extension is missing),
 the DiT is FSDP-sharded across the GPUs instead of replicated
 (`--no-replicated-dit`; a replicated 66 GB BF16 DiT does not fit 80 GB), and
 the Qwen3-VL text encoder stays resident as block-scaled FP8 (35.5 GB instead
