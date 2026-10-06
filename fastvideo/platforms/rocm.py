@@ -5,6 +5,8 @@ This file is a platform abstraction for ROCm GPUs,
 adjusted to match the structure and interface of `cuda.py`.
 """
 
+import os
+
 import torch
 
 import fastvideo.envs as envs
@@ -12,6 +14,19 @@ from fastvideo.logger import init_logger
 from fastvideo.platforms.interface import (AttentionBackendEnum, DeviceCapability, Platform, PlatformEnum)
 
 logger = init_logger(__name__)
+
+
+def _vsa_cute_opt_in() -> bool:
+    """True when fastvideo_kernel would send its 128/256-token block-sparse
+    forward to the FlashAttention-4 CuTe kernels, which are CUDA-only.
+
+    These variables belong to fastvideo-kernel; this mirrors its rule in
+    fastvideo_kernel.block_sparse_attn_256._resolve_backend: the CuTe opt-in
+    applies unless one of the force-Triton switches is set.
+    """
+    force_triton = (os.environ.get("FASTVIDEO_VSA_TRITON", "0") == "1"
+                    or os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1")
+    return not force_triton and os.environ.get("FASTVIDEO_VSA_CUTEDSL", "0") == "1"
 
 
 # ROCm uses the same torch.cuda interface
@@ -94,6 +109,12 @@ class RocmPlatform(Platform):
                                   "its block-sparse kernels run through Triton; build it with "
                                   "fastvideo-kernel/build.sh --rocm or pick a different "
                                   "FASTVIDEO_ATTENTION_BACKEND.") from e
+            if _vsa_cute_opt_in():
+                # Without this check the backend is selected and the first
+                # 256-token forward fails inside the CuTe import.
+                raise ValueError("FASTVIDEO_VSA_CUTEDSL=1 sends VIDEO_SPARSE_ATTN_H3 to the FlashAttention-4 CuTe "
+                                 "kernels, which are CUDA-only. Unset it on ROCm, or set FASTVIDEO_VSA_TRITON=1 "
+                                 "to keep the Triton kernels.")
             logger.info("Using MiniMax-H3 Video Sparse Attention backend (Triton kernels).")
             return "fastvideo.attention.backends.video_sparse_attn_h3.MiniMaxH3VSABackend"
 
