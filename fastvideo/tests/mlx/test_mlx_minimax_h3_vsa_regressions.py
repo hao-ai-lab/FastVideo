@@ -379,7 +379,9 @@ def test_converter_rerun_skips_published_encoder_cache(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("memory_gib,budget_mib", [(16, 256), (32, 256), (64, 512), (128, 1024), (512, 2048)])
 def test_reference_gather_budget_scales_with_unified_memory(monkeypatch, memory_gib, budget_mib):
-    monkeypatch.setattr(mx.metal, "device_info", lambda: {"memory_size": memory_gib * 2**30})
+    info = lambda: {"memory_size": memory_gib * 2**30}  # noqa: E731
+    monkeypatch.setattr(mx, "device_info", info, raising=False)
+    monkeypatch.setattr(mx.metal, "device_info", info)
     vsa._reference_gather_target_bytes.cache_clear()
     try:
         assert vsa._reference_gather_target_bytes() == budget_mib * 2**20

@@ -553,8 +553,9 @@ def _reference_gather_target_bytes() -> int:
     """1/128 of unified memory in 256 MiB-2 GiB: 32 GB Macs keep room for resident weights."""
     import mlx.core as mx
 
+    device_info = getattr(mx, "device_info", None) or mx.metal.device_info
     try:
-        total = int(mx.metal.device_info().get("memory_size", 0))
+        total = int(device_info().get("memory_size", 0))
     except (AttributeError, RuntimeError, TypeError, ValueError):
         total = 0
     return min(_REFERENCE_GATHER_MAX_BYTES, max(_REFERENCE_GATHER_MIN_BYTES, total // 128))
