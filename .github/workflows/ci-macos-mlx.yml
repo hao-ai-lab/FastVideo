@@ -33,8 +33,9 @@ jobs:
     env:
       FASTVIDEO_ATTENTION_BACKEND: TORCH_SDPA
       TOKENIZERS_PARALLELISM: "false"
-      MASTER_ADDR: localhost
+      MASTER_ADDR: "127.0.0.1"
       MASTER_PORT: "29513"
+      GLOO_SOCKET_IFNAME: lo0
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +51,7 @@ jobs:
             --index-url https://download.pytorch.org/whl/cpu \
             torch==2.12.0 torchvision torchaudio
           uv pip install --system \
-            pytest numpy scipy pillow imageio einops cloudpickle filelock \
+            pytest pytest-timeout numpy scipy pillow imageio einops cloudpickle filelock \
             PyYAML diffusers huggingface_hub remote-pdb safetensors loguru mlx \
             "ftfy>=6.3.1" "opencv-python>=4.10.0.84" psutil "transformers>=5.0.0"
 
@@ -101,7 +102,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_backend_regression_is_not_skip_eligible \
             fastvideo/tests/platforms/test_mps_vsa_error.py \
             fastvideo/tests/platforms/test_cpu_sdpa.py \
-            -v -s -o faulthandler_timeout=120
+            -v -s --timeout=120 -o faulthandler_timeout=120
 
   # Same tests on MLX's CPU backend. Hosted macOS runners are scarce and
   # slower to schedule; this Linux job gives fast PR signal on the identical
@@ -131,7 +132,7 @@ jobs:
             --index-url https://download.pytorch.org/whl/cpu \
             torch==2.12.0 torchvision torchaudio
           uv pip install --system \
-            pytest numpy scipy pillow imageio einops cloudpickle filelock \
+            pytest pytest-timeout numpy scipy pillow imageio einops cloudpickle filelock \
             PyYAML diffusers huggingface_hub remote-pdb safetensors loguru "mlx[cpu]" \
             "ftfy>=6.3.1" "opencv-python>=4.10.0.84" psutil "transformers>=5.0.0"
 
@@ -166,4 +167,4 @@ jobs:
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_backend_regression_is_not_skip_eligible \
             fastvideo/tests/platforms/test_mps_vsa_error.py \
             fastvideo/tests/platforms/test_cpu_sdpa.py \
-            -v -s -o faulthandler_timeout=120
+            -v -s --timeout=120 -o faulthandler_timeout=120
