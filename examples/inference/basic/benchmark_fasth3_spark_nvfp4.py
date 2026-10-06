@@ -42,8 +42,11 @@ def _peak_mb(metrics: dict[str, dict], key: str) -> float | None:
     return max(values) if values else None
 
 
-def _stage_total(stages: dict[str, float], fragment: str) -> float | None:
-    matches = [seconds for name, seconds in stages.items() if fragment in name.lower()]
+def _stage_total(stages: dict[str, float], fragment: str, exclude: str | None = None) -> float | None:
+    matches = [
+        seconds for name, seconds in stages.items()
+        if fragment in name.lower() and (exclude is None or exclude not in name.lower())
+    ]
     return sum(matches) if matches else None
 
 
@@ -124,7 +127,8 @@ def main() -> None:
                     "height": args.height,
                     "e2e_seconds": round(wall, 3),
                     "denoise_seconds": _stage_total(stages, "denois"),
-                    "decode_seconds": _stage_total(stages, "decod"),
+                    "decode_seconds": _stage_total(stages, "decod", exclude="postdecode"),
+                    "postprocess_seconds": _stage_total(stages, "postdecode"),
                     "peak_memory_mb": _peak_mb(metrics, "peak_allocated_mb"),
                     "peak_reserved_mb": _peak_mb(metrics, "peak_reserved_mb"),
                     "result_peak_memory_mb": result.peak_memory_mb,

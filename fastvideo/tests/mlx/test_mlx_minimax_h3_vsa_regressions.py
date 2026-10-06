@@ -350,3 +350,38 @@ def test_converter_continues_past_mismatched_existing_format(tmp_path, monkeypat
     converter.main()
     assert saved == ["int6"]
     assert (existing / h3.H3_WEIGHTS_FILENAME).read_bytes() == b"existing"
+
+
+def test_converter_rerun_skips_published_encoder_cache(tmp_path, monkeypatch):
+    path = Path(__file__).resolve().parents[3] / "scripts/checkpoint_conversion/convert_minimax_h3_mlx.py"
+    spec = importlib.util.spec_from_file_location("h3_converter_encoder_rerun", path)
+    converter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(converter)
+    from fastvideo.mlx_runtime import minimax_h3_conditioner as conditioner
+
+    existing = tmp_path / "int8"
+    existing.mkdir()
+    (existing / h3.H3_MANIFEST_FILENAME).write_text(json.dumps({"vsa": {"capable": False}}))
+    (existing / h3.H3_WEIGHTS_FILENAME).write_bytes(b"existing")
+    encoder = tmp_path / "nvfp4-encoder"
+    encoder.mkdir()
+    (encoder / conditioner.MLX_NVFP4_ENCODER_MANIFEST).write_text("{}")
+    (encoder / "model.safetensors").write_bytes(b"cached")
+    monkeypatch.setattr(converter, "parse_args", lambda: argparse.Namespace(
+        formats="int8", out=tmp_path, model_root="unused", include_vsa=False,
+        nvfp4_conditioner_root=tmp_path / "packed", nvfp4_conditioner_out=None))
+    exported = []
+    monkeypatch.setattr(conditioner, "export_mlx_h3_nvfp4_encoder", lambda *args: exported.append(args))
+    converter.main()
+    assert exported == []
+    assert (encoder / "model.safetensors").read_bytes() == b"cached"
+
+
+@pytest.mark.parametrize("memory_gib,budget_mib", [(16, 256), (32, 256), (64, 512), (128, 1024), (512, 2048)])
+def test_reference_gather_budget_scales_with_unified_memory(monkeypatch, memory_gib, budget_mib):
+    monkeypatch.setattr(mx.metal, "device_info", lambda: {"memory_size": memory_gib * 2**30})
+    vsa._reference_gather_target_bytes.cache_clear()
+    try:
+        assert vsa._reference_gather_target_bytes() == budget_mib * 2**20
+    finally:
+        vsa._reference_gather_target_bytes.cache_clear()

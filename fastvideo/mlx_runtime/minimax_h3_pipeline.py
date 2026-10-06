@@ -65,6 +65,7 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     video_latent_num_frames,
 )
 from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAConfig
+from fastvideo.mlx_runtime.prompt_cache import fingerprint_digest, text_encoder_fingerprint
 
 logger = init_logger(__name__)
 
@@ -263,8 +264,10 @@ def _configure_metal_memory_limits(mx,
     if set_memory is None and hasattr(mx, "metal"):
         set_memory = getattr(mx.metal, "set_memory_limit", None)
     if set_memory is not None and not resident:
+        # An explicit wired request must fit under the allocator cap, or it pins memory MLX cannot allocate.
+        memory_limit_gib = max(_default_metal_wired_limit_gib(mx), wired_limit_gib or 0.0)
         try:
-            previous_memory = int(set_memory(int(_default_metal_wired_limit_gib(mx) * 2**30)))
+            previous_memory = int(set_memory(int(memory_limit_gib * 2**30)))
         except Exception as error:  # noqa: BLE001 - older MLX best effort
             logger.info("Could not set the Metal allocation limit: %s", error)
     if wired_limit_gib is None:
@@ -331,6 +334,27 @@ def _cached_adaln_timesteps(checkpoint_dir: str | Path) -> np.ndarray | None:
     return np.asarray(cache_info["timesteps"], dtype=np.float32)
 
 
+def _load_resident_dit(checkpoint_dir: str | Path):
+    """Load an H3 DiT and materialize every weight before timed requests."""
+    import mlx.core as mx
+
+    dit = load_mlx_h3_checkpoint(checkpoint_dir)
+    for group in [dit.weights, *dit.blocks, *dit.refiner]:
+        for value in group.values():
+            # With the converter's AdaLN cache, dropped AdaLN projection weights are None.
+            if value is not None:
+                _eval_value(value)
+    cache = dit._adaln_cache
+    if cache is not None:
+        mx.eval(cache.block_tables, cache.norm_out_shift, cache.norm_out_scale)
+    return dit
+
+
+def _adaln_weights_dropped(dit: Any) -> bool:
+    key = "adaln_proj.linear.weight"
+    return any(key in block and block[key] is None for block in getattr(dit, "blocks", ()))
+
+
 def _validate_checkpoint_step_ladder(checkpoint_dir: str | Path,
                                      num_steps: int,
                                      *,
@@ -371,6 +395,10 @@ def _preflight_media_dependencies(*,
 
 class MiniMaxH3MLXPipeline:
     """Text-to-video-with-audio generation through the native MLX runtime."""
+
+    # Defaults for pipelines built without __init__ (unit tests use __new__).
+    resident = False
+    conditioner_mode = "auto"
 
     def __init__(
         self,
@@ -488,16 +516,7 @@ class MiniMaxH3MLXPipeline:
                 conditioner.close()
                 raise ValueError("All-resident generation requires the packed NVFP4 text encoder.")
             self._resident_components["conditioner"] = conditioner
-            dit = load_mlx_h3_checkpoint(self.dit_checkpoint)
-            self._resident_components["dit"] = dit
-            for group in [dit.weights, *dit.blocks, *dit.refiner]:
-                for value in group.values():
-                    # With the converter's AdaLN cache, dropped AdaLN projection weights are None.
-                    if value is not None:
-                        _eval_value(value)
-            cache = dit._adaln_cache
-            if cache is not None:
-                mx.eval(cache.block_tables, cache.norm_out_shift, cache.norm_out_scale)
+            self._resident_components["dit"] = _load_resident_dit(self.dit_checkpoint)
             self._resident_components["video_vae"] = mlx_h3_video_vae_from_dir(self.model_root / "vae",
                                                                                include_encoder=False,
                                                                                storage_dtype=self.vae_dtype)
@@ -531,24 +550,19 @@ class MiniMaxH3MLXPipeline:
     def encode_prompt(self, prompt: str) -> tuple[np.ndarray, np.ndarray]:
         """Returns (hidden states (S, hidden), token tags). Uses the cache or
         the streamed conditioner."""
-        cache_key = None
-        if self.prompt_cache_dir is not None:
-            identity = (f"{self.model_root}::conditioner="
-                        f"{getattr(self, 'conditioner_dir', self.model_root / 'text_encoder')}::"
-                        f"{getattr(self, 'conditioner_mode', 'auto')}")
-            cache_key = prompt_cache_path(self.prompt_cache_dir, identity, prompt)
-            if cache_key.exists():
-                data = np.load(cache_key)
-                logger.info("Loaded prompt embeddings from cache %s", cache_key)
-                return data["hidden_states"], data["token_tags"]
+        cache_key = self._prompt_cache_key(prompt)
+        if cache_key is not None and cache_key.exists():
+            data = np.load(cache_key)
+            logger.info("Loaded prompt embeddings from cache %s", cache_key)
+            return data["hidden_states"], data["token_tags"]
 
-        if getattr(self, "resident", False):
+        if self.resident:
             self.prepare_resident()
             conditioner = self._resident_components["conditioner"]
         else:
             conditioner = self._load_conditioner()
         hidden, tags = conditioner.encode_prompt(prompt)
-        if not getattr(self, "resident", False):
+        if not self.resident:
             conditioner.close()
         _cleanup_mlx()
         if cache_key is not None:
@@ -561,6 +575,19 @@ class MiniMaxH3MLXPipeline:
             finally:
                 tmp_cache.unlink(missing_ok=True)
         return hidden, tags
+
+    def _prompt_cache_key(self, prompt: str) -> Path | None:
+        """Cache path bound to the effective encoder and its files; None skips the cache."""
+        if self.prompt_cache_dir is None:
+            return None
+        fingerprint = {
+            "conditioner": self._conditioner_kind(),
+            "text_encoder": text_encoder_fingerprint(self.conditioner_dir),
+            "tokenizer": text_encoder_fingerprint(self.tokenizer_dir),
+        }
+        if not (fingerprint["text_encoder"]["complete"] and fingerprint["tokenizer"]["complete"]):
+            return None
+        return prompt_cache_path(self.prompt_cache_dir, fingerprint_digest(fingerprint), prompt)
 
     def load_prompt_cache(self, path: str | Path) -> tuple[np.ndarray, np.ndarray]:
         data = np.load(path)
@@ -577,13 +604,19 @@ class MiniMaxH3MLXPipeline:
             StreamedMiniMaxH3TextConditioner,
         )
 
-        config = json.loads((self.conditioner_dir / "config.json").read_text())
-        packed = config.get("quantization_config", {}).get("quant_method") == "nvfp4"
-        if self.conditioner_mode == "nvfp4" or (self.conditioner_mode == "auto" and packed):
+        if self._conditioner_kind() == "nvfp4":
             return ResidentNVFP4MiniMaxH3TextConditioner(self.conditioner_dir, self.tokenizer_dir)
+        return StreamedMiniMaxH3TextConditioner(self.conditioner_dir, self.tokenizer_dir)
+
+    def _conditioner_kind(self) -> str:
+        """The encoder that conditioner_mode selects for these weights: 'nvfp4' or 'streamed'."""
+        config = json.loads((self.conditioner_dir / "config.json").read_text())
+        packed = str(config.get("quantization_config", {}).get("quant_method", "")).lower() == "nvfp4"
+        if self.conditioner_mode == "nvfp4" or (self.conditioner_mode == "auto" and packed):
+            return "nvfp4"
         if packed:
             raise ValueError("The streamed conditioner requires BF16 weights; use conditioner_mode='nvfp4'.")
-        return StreamedMiniMaxH3TextConditioner(self.conditioner_dir, self.tokenizer_dir)
+        return "streamed"
 
     # -- phase 2: denoise --------------------------------------------------
 
@@ -609,7 +642,8 @@ class MiniMaxH3MLXPipeline:
         geometry = self.resolve_geometry(height, width, num_frames, enforce_duration=audio_num_frames is None)
         audio_frames = geometry["num_frames"] if audio_num_frames is None else align_num_frames(audio_num_frames)
 
-        if dit is None and getattr(self, "resident", False):
+        resident_dit = dit is None and self.resident
+        if resident_dit:
             _validate_checkpoint_step_ladder(self.dit_checkpoint, num_steps, model_root=self.model_root)
             self.prepare_resident()
             dit = self._resident_components["dit"]
@@ -619,6 +653,35 @@ class MiniMaxH3MLXPipeline:
             t0 = time.perf_counter()
             dit = load_mlx_h3_checkpoint(self.dit_checkpoint)
             logger.info("Loaded MLX H3 DiT from %s in %.1fs", self.dit_checkpoint, time.perf_counter() - t0)
+
+        schedule = resolve_h3_denoise_schedule(self.model_root, num_steps)
+        video_scheduler = schedule.video
+        audio_scheduler = schedule.audio
+        union = schedule.adaln_timesteps
+        num_steps = schedule.num_steps
+        # The keyframe-noise timestep (0.999) is only exercised by FL2VA/Ref2VA
+        # conditioning rows; those modes recompute the ladder before denoise.
+
+        cache = getattr(dit, "_adaln_cache", None)
+        if cache is None or not np.array_equal(cache.timesteps.astype(np.float32), union):
+            if cache is not None:
+                extra = np.setdiff1d(union, cache.timesteps)
+                logger.info("Recomputing AdaLN cache for %d-step ladder (extra timesteps %s).", num_steps, extra)
+            if _adaln_weights_dropped(dit):
+                # An earlier request on this DiT already released the AdaLN projections.
+                if not resident_dit:
+                    raise ValueError("This H3 DiT dropped its AdaLN weights for another step ladder; "
+                                     "pass a freshly loaded DiT for a different num_steps.")
+                logger.info("Reloading the resident H3 DiT for the %d-step ladder.", num_steps)
+                cache = dit = None
+                self._resident_components.pop("dit", None)
+                _cleanup_mlx()
+                dit = self._resident_components["dit"] = _load_resident_dit(self.dit_checkpoint)
+            dit.precompute_adaln(union, drop_weights=True)
+
+        if resident_dit:
+            # The resident DiT keeps the previous request's VSA mode unless reset to the default.
+            vsa_config = vsa_config or MiniMaxH3VSAConfig()
         if vsa_config is not None:
             dit.configure_vsa(vsa_config)
         if hasattr(dit, "reset_vsa_stats"):
@@ -636,22 +699,6 @@ class MiniMaxH3MLXPipeline:
         )
         if getattr(dit, "vsa_config", None) is not None and dit.vsa_config.enabled:
             dit.prepare_vsa_geometry(layout)
-
-        schedule = resolve_h3_denoise_schedule(self.model_root, num_steps)
-        video_scheduler = schedule.video
-        audio_scheduler = schedule.audio
-        union = schedule.adaln_timesteps
-        num_steps = schedule.num_steps
-        # The keyframe-noise timestep (0.999) is only exercised by FL2VA/Ref2VA
-        # conditioning rows; those modes recompute the ladder before denoise.
-
-        cache = getattr(dit, "_adaln_cache", None)
-        if cache is None:
-            dit.precompute_adaln(union, drop_weights=True)
-        elif not np.array_equal(cache.timesteps.astype(np.float32), union):
-            extra = np.setdiff1d(union, cache.timesteps)
-            logger.info("Recomputing AdaLN cache for %d-step ladder (extra timesteps %s).", num_steps, extra)
-            dit.precompute_adaln(union, drop_weights=True)
 
         video_key, audio_key = mx.random.split(mx.random.key(seed))
         target_video_rows = int(layout.video_indices.shape[0] - layout.num_condition_video_rows)
@@ -759,7 +806,7 @@ class MiniMaxH3MLXPipeline:
                 raise RuntimeError(f"TAEH3 produced unexpected frame shape: {frames.shape}")
             _cleanup_mlx()
             return frames
-        if getattr(self, "resident", False):
+        if self.resident:
             self.prepare_resident()
             vae = self._resident_components["video_vae"]
         else:
@@ -807,7 +854,7 @@ class MiniMaxH3MLXPipeline:
 
         num_audio_latents = audio_latent_num_frames(align_num_frames(num_frames))
         latents = unpack_audio_tokens(audio_rows, num_audio_latents)
-        if getattr(self, "resident", False):
+        if self.resident:
             self.prepare_resident()
             vae = self._resident_components["audio_vae"]
         else:

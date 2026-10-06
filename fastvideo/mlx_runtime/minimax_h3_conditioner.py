@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import gc
 import json
+import os
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -399,9 +400,9 @@ class StreamedMiniMaxH3TextConditioner:
 def unswizzle_nvfp4_scales(scale: np.ndarray, rows: int, cols: int) -> np.ndarray:
     """FlashInfer 128x4 scale bytes -> MLX row-major group-16 scale bytes."""
     pad_rows, pad_cols = -(-rows // 128) * 128, -(-cols // 4) * 4
-    if scale.size != pad_rows * pad_cols:
+    if scale.size < pad_rows * pad_cols:
         raise ValueError(f"NVFP4 scales need {pad_rows * pad_cols} bytes, got {scale.size}.")
-    tiles = scale.reshape(pad_rows // 128, pad_cols // 4, 32, 4, 4)
+    tiles = scale.reshape(-1)[:pad_rows * pad_cols].reshape(pad_rows // 128, pad_cols // 4, 32, 4, 4)
     return np.ascontiguousarray(tiles.transpose(0, 3, 2, 1, 4).reshape(pad_rows, pad_cols)[:rows, :cols])
 
 
@@ -410,16 +411,17 @@ MLX_NVFP4_ENCODER_MANIFEST = "mlx_h3_nvfp4_encoder.json"
 
 def _read_nvfp4_encoder_config(component_dir: str | Path) -> dict[str, Any]:
     raw = json.loads((Path(component_dir) / "config.json").read_text())
-    expected = {
-        "quant_method": "nvfp4",
-        "fmt": "e2m1",
-        "group_size": 16,
-        "scale_fmt": "e4m3",
-        "scale_layout": "128x4",
-        "activation_scheme": "dynamic",
+    # Same accepted spellings as the CUDA loader (MiniMaxH3SerializedNVFP4Config.from_config).
+    accepted = {
+        "quant_method": ("nvfp4", ),
+        "fmt": ("e2m1", "float4_e2m1fn", "nvfp4"),
+        "scale_fmt": ("e4m3", "float8_e4m3fn"),
+        "activation_scheme": ("dynamic", ),
     }
     quant = raw.get("quantization_config", {})
-    if any(quant.get(key) != value for key, value in expected.items()):
+    group_size = quant.get("group_size")
+    if (any(str(quant.get(key, "")).lower() not in values for key, values in accepted.items())
+            or isinstance(group_size, bool) or group_size != 16 or quant.get("scale_layout") != "128x4"):
         raise ValueError("MLX NVFP4 conditioning requires the FastVideo group-16, 128x4 encoder export.")
     return raw
 
@@ -462,6 +464,9 @@ def export_mlx_h3_nvfp4_encoder(component_dir: str | Path, output_dir: str | Pat
             "source_dir": str(Path(component_dir).resolve())
         }
         (output_dir / MLX_NVFP4_ENCODER_MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
+        umask = os.umask(0)
+        os.umask(umask)
+        output_dir.chmod(0o777 & ~umask)  # mkdtemp is owner-only; shared model dirs need the umask mode
         if final_dir.exists():
             final_dir.rmdir()  # empty, checked above
         output_dir.rename(final_dir)

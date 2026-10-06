@@ -149,13 +149,19 @@ def main() -> None:
             mx.clear_cache()
 
     if args.nvfp4_conditioner_root is not None:
-        from fastvideo.mlx_runtime.minimax_h3_conditioner import export_mlx_h3_nvfp4_encoder
+        from fastvideo.mlx_runtime.minimax_h3_conditioner import (
+            MLX_NVFP4_ENCODER_MANIFEST,
+            export_mlx_h3_nvfp4_encoder,
+        )
 
         encoder_out = args.nvfp4_conditioner_out or out_base / "nvfp4-encoder"
-        started = time.perf_counter()
-        export_mlx_h3_nvfp4_encoder(args.nvfp4_conditioner_root, encoder_out)
-        print(f"[encoder] cached packed NVFP4 encoder in {time.perf_counter() - started:.1f}s at {encoder_out}",
-              flush=True)
+        if (encoder_out / MLX_NVFP4_ENCODER_MANIFEST).exists() and (encoder_out / "model.safetensors").exists():
+            print(f"[skip] NVFP4 encoder already cached at {encoder_out}", flush=True)
+        else:
+            started = time.perf_counter()
+            export_mlx_h3_nvfp4_encoder(args.nvfp4_conditioner_root, encoder_out)
+            print(f"[encoder] cached packed NVFP4 encoder in {time.perf_counter() - started:.1f}s at {encoder_out}",
+                  flush=True)
 
 
 if __name__ == "__main__":
