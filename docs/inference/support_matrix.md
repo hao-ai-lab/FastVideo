@@ -54,6 +54,9 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
+| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Pro-sft-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| kandinsky6_sr | `kandinskylab/Kandinsky-6.0-VSR-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-VSR-distilled2steps-5s-Diffusers` | — | [basic_kandinsky6_sr.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_sr.py) |
 | lingbot_video | `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbot_video | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbotworld | `FastVideo/LingBot-World-Base-Cam-Diffusers` | I2V | [basic_lingbotworld_base_cam.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_base_cam.py) |
@@ -105,6 +108,11 @@ references. Distilled Ref2VA PDD students (eight transformer forwards, with
 reference videos as sparse VSA regions) run through
 [basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py);
 see [FastH3 distilled checkpoint schedules](fasth3-distilled.md#ref2va-pdd-students).
+
+**Note (Kandinsky 6)**: the two `kandinsky6` IDs generate video with audio from
+text, optionally plus an image (see the [T2IVA guide](kandinsky6.md)); the
+`kandinsky6_sr` IDs upscale an existing video (see the
+[Video SR guide](kandinsky6_sr.md)).
 
 **Note (Wan-VACE)**: not currently supported — no VACE pipeline or registered
 model ID exists on `main`

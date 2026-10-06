@@ -5,13 +5,7 @@ hide:
 
 # MiniMax H3 recipes
 
-FastH3 is two distilled MiniMax-H3 checkpoints. **V1** is the four-step
-launch. Some Hub repo names still say Preview. That name is historical. V1 is
-a full model, not a demo. **V2** is the eight-step checkpoint. More forwards
-is why V2 is the higher-quality FastH3. The V2 schedule contract is in
-[FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
-
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=12">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=13">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
