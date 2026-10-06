@@ -382,12 +382,6 @@ FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     category="performance",
     doc="MiniMax-H3 inference-only Triton fusions: all, 1, or a comma-separated subset of "
     "modulate,qknorm_rope,swiglu. Empty, 0, or none keeps the eager implementation.")
-FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(
-    1, category="performance", doc="Spatial tiles per MiniMax-H3 light-VAE decoder call. Values below 1 use one tile.")
-FASTVIDEO_NVFP4_MM_BACKEND = EnvStr(
-    "auto",
-    category="performance",
-    doc="FlashInfer NVFP4 matrix multiplication backend: auto, cutlass, cudnn, trtllm, or b12x.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "
@@ -557,6 +551,9 @@ FASTVIDEO_H3_FP8_GRANULARITY = EnvChoice("tensor",
                                          choices=("tensor", "channel"),
                                          category="performance",
                                          doc="FP8 scaling granularity for FASTVIDEO_H3_FP8_ATTENTION.")
+FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
+                                    category="performance",
+                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
 FASTVIDEO_NVFP4_ACT_AMAX = EnvPath(None,
                                    category="performance",
                                    doc="JSON of calibrated NVFP4 input amax per linear, keyed b<block>.<sub> or "
@@ -591,6 +588,10 @@ FASTVIDEO_H3_ENCODER_FUSED_DEQUANT = EnvBool(False,
                                              category="performance",
                                              doc="Expand the serialized NVFP4 MiniMax-H3 text encoder with one "
                                              "fused Triton pass on GPUs without FP4 GEMM.")
+FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
+                                     category="performance",
+                                     doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
+                                     "tile.")
 FASTVIDEO_H3_VAE_INT8_SHARED_QKV = EnvBool(False,
                                            category="performance",
                                            doc="Share the INT8 activation rotation and quantization across the "

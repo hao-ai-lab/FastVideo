@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+"""FastVideo composed pipelines for MiniMax H3."""
 
 from __future__ import annotations
 
@@ -40,6 +41,9 @@ from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
+# Same split as the MLX runtime: condition, release the ~66 GB Qwen3-VL stack,
+# then load DiT + VAEs. Keeping them resident together OOMs unified-memory
+# boxes (GB10 / Spark) even though host offload is correctly disabled there.
 _DENOISE_MODULE_NAMES = ("vae", "audio_vae", "transformer")
 
 
@@ -83,6 +87,8 @@ def _pinned_swap(module: Any, device: torch.device) -> None:
 
     Inference weights never change, so a parameter's pinned copy is made once and parking just repoints the
     parameter at it (no transfer); restoring is one pinned host-to-device copy. Buffers are copied every time.
+    A LoRA swap/merge/unmerge drops the cached copies (``_drop_pinned_host_copies``), so the next park
+    re-copies whichever parameters the adapter changed.
     """
     store = module.__dict__.setdefault("_pinned_host_tensors", {})
     params = dict(module.named_parameters())
@@ -145,6 +151,7 @@ def _default_audio_geometry() -> _H3AudioGeometry:
 
 def _apply_h3_checkpoint_arch_configs(model_path: str, fastvideo_args: FastVideoArgs,
                                       extra_config_module_map: dict[str, str]) -> None:
+    """Overlay checkpoint config.json onto pipeline configs without loading weights."""
     root = Path(model_path)
     vae_dir = root / extra_config_module_map.get("vae", "vae")
     if (vae_dir / "config.json").is_file():
@@ -173,7 +180,19 @@ def _use_taeh3_t2va(fastvideo_args: FastVideoArgs | None, *, ref2va: bool) -> bo
 
 
 class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
+    """Shared loading and target-generation path for MiniMax H3.
 
+    Inherits ``LoRAPipeline`` so acceleration and distillation adapters can be merged
+    in; without it every adapter is rejected with "pipeline is not a LoRAPipeline".
+    """
+
+    # The linears every published H3 adapter targets. Left unset, ``LoRAPipeline``
+    # wraps *every* linear in the DiT -- including ``proj_in``, whose ``.weight`` the
+    # forward pass reads directly, and the attention projections whose
+    # ``quant_method`` the packed NVFP4 forward reads. The wrappers resolve those
+    # reads through ``base_layer`` (with a non-quantized fallback for
+    # ``quant_method``), but an explicit list avoids wrapping linears no published
+    # adapter trains.
     lora_target_modules = [
         "attn.to_q",
         "attn.to_k",
@@ -182,6 +201,8 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         "ff.fc_in",
         "ff.fc_out",
         "adaln_proj.linear",
+        # The final AdaLN projection. Published community adapters (larryvrh's Turbo)
+        # target it as `final_layer.adaln_proj.linear`.
         "norm_out.linear",
     ]
 
@@ -197,7 +218,33 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         "scheduler",
         "audio_scheduler",
     ]
+    # Deferral is safe here: geometry scalars come from checkpoint config.json
+    # (applied in initialize_pipeline without loading weights), no stage
+    # constructor reads a deferred component, and initialize_pipeline only
+    # inspects the schedulers, which are never deferred.
     _lazy_module_names = ("text_encoder", "transformer", "vae", "audio_vae")
+
+    def _drop_pinned_host_copies(self) -> None:
+        """Drop every module's pinned host copies so the next park re-copies the weights.
+
+        ``_pinned_swap`` reuses a parameter's stored host copy across parks; a LoRA
+        swap/merge/unmerge changes the weights, so the stale copy must not win.
+        """
+        for module in self.modules.values():
+            getattr(module, "__dict__", {}).pop("_pinned_host_tensors", None)
+
+    def set_lora_adapter(self, *args, **kwargs):  # type: ignore[override]
+        result = super().set_lora_adapter(*args, **kwargs)
+        self._drop_pinned_host_copies()
+        return result
+
+    def merge_lora_weights(self) -> None:
+        super().merge_lora_weights()
+        self._drop_pinned_host_copies()
+
+    def unmerge_lora_weights(self) -> None:
+        super().unmerge_lora_weights()
+        self._drop_pinned_host_copies()
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._ref2va = getattr(self, "_ref2va_default", False)
@@ -218,6 +265,9 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         _apply_h3_checkpoint_arch_configs(self.model_path, fastvideo_args, self._extra_config_module_map)
+        # Each modality's scheduler_config.json owns its shift. Base H3 keeps
+        # 12/3; a distilled checkpoint can serialize a different trained pair
+        # (for example 10/3) without being silently rewritten to base defaults.
         for module_name, modality in (("scheduler", "video"), ("audio_scheduler", "audio")):
             shift = getattr(self.get_module(module_name), "shift", None)
             if shift is None or not math.isfinite(float(shift)) or float(shift) <= 0:
@@ -337,6 +387,13 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
     def _defer_denoise_modules(self, fastvideo_args: FastVideoArgs) -> bool:
         if not fastvideo_args.inference_mode or bool(getattr(fastvideo_args, "training_mode", False)):
             return False
+        # Both mechanisms defer the same four modules and both decide when to
+        # free them. Running them together strips DiT/VAEs from the first load
+        # (sequential) while the base wraps the encoder in a proxy (lazy), so
+        # post_init's VAE compile transform has nothing to attach to. Lazy is
+        # the more general owner — including auto-on for unified memory — so it
+        # wins whenever it is on. Sequential remains the H3-only fallback when
+        # lazy is off.
         if bool(getattr(fastvideo_args, "lazy_module_load", False)):
             logger.info("MiniMax-H3 sequential module load off: lazy_module_load owns deferral")
             return False
@@ -383,6 +440,8 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             return super().load_modules(fastvideo_args, loaded_modules)
 
         saved = list(self.required_config_modules)
+        # Always defer the full denoise set on the first load. TAEH3 T2VA then
+        # omits the video VAE from the second load via `_denoise_module_names`.
         self._required_config_modules = [name for name in saved if name not in _DENOISE_MODULE_NAMES]
         try:
             logger.info("Loading MiniMax-H3 condition modules first: %s", self._required_config_modules)
@@ -420,27 +479,28 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         encoder = self.get_module("text_encoder")
         if encoder is None:
             return
-        # Unified-memory boxes cannot keep Qwen around even on "CPU". Discrete
-        # GPUs can: pin it in host RAM and borrow the GPU only for encode.
-        if self._unified_memory_host():
-            stage = self._stage_name_mapping.get("conditioning_stage")
-            if stage is not None:
-                stage.conditioner = None
-            self.modules.pop("text_encoder", None)
-            logger.info("Released MiniMax-H3 text encoder after conditioning")
-            del encoder
+        # Discrete GPUs can keep Qwen in host RAM and borrow the GPU only for
+        # encode. Unified-memory boxes cannot keep it around even on "CPU", and
+        # an encoder that cannot move (sharded DTensor params) is released, as
+        # on main.
+        if not self._unified_memory_host() and self._move_module(encoder, "cpu"):
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            logger.info("Moved MiniMax-H3 text encoder to CPU after conditioning")
             return
-        if not self._move_module(encoder, "cpu"):
-            return
+        stage = self._stage_name_mapping.get("conditioning_stage")
+        if stage is not None:
+            stage.conditioner = None
+        self.modules.pop("text_encoder", None)
+        logger.info("Released MiniMax-H3 text encoder after conditioning")
+        del encoder
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        logger.info("Moved MiniMax-H3 text encoder to CPU after conditioning")
 
     def _ensure_text_encoder(self, fastvideo_args: FastVideoArgs) -> None:
+        """Reload Qwen3-VL after `_release_text_encoder` so a later request can encode."""
         encoder = self.get_module("text_encoder")
         stage = self._stage_name_mapping.get("conditioning_stage")
         if encoder is not None:
@@ -471,9 +531,6 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             return True
         if _module_has_dtensor_params(module):
             return False
-        if not callable(getattr(module, "named_parameters", None)):
-            module.to(device)
-            return True
         if envs.FASTVIDEO_H3_PINNED_SWAP.get():
             _pinned_swap(module, torch.device(device))
         else:
@@ -543,6 +600,7 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         return batch
 
     def _input_video_geometry(self, fastvideo_args: FastVideoArgs) -> Any:
+        """Read canvas scalars from checkpoint JSON, not a live VAE proxy."""
         arch = getattr(getattr(fastvideo_args.pipeline_config, "vae_config", None), "arch_config", None)
         if arch is not None:
             return arch
@@ -626,6 +684,11 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if not self.post_init_called:
             self.post_init()
 
+        # Sequential encode-then-release is the H3-only fallback. Lazy and the
+        # fully-resident discrete-GPU path both keep a complete stage list and
+        # must use the base forward so abort cleanup and text_encoder_cpu_offload
+        # still apply. Releasing Qwen on every request was re-reading it from disk
+        # when neither deferral flag was on.
         if self._defer_denoise_modules(fastvideo_args):
             try:
                 if not self._unified_memory_host():

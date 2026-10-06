@@ -4,31 +4,33 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
 import torch
+import fastvideo.envs as envs
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import k6_sr_tiny  # noqa: E402
 
-_DIST_ENV_DEFAULTS = {
-    "MASTER_ADDR": "localhost",
-    "MASTER_PORT": "29531",
-    "RANK": "0",
-    "WORLD_SIZE": "1",
-    "LOCAL_RANK": "0",
-}
-
-
 @pytest.fixture(autouse=True)
-def _single_process_dist_env(monkeypatch):
+def _single_process_dist_env():
     """torch.distributed needs a rendezvous even for one process. Fill only what is missing (never overwrite what a CI
     runner leased) and undo it after the test so the settings do not leak into other tests of the same session."""
-    for name, value in _DIST_ENV_DEFAULTS.items():
-        if name not in os.environ:
-            monkeypatch.setenv(name, value)
+    with ExitStack() as stack:
+        if "MASTER_ADDR" not in os.environ:
+            stack.enter_context(envs.override_external("MASTER_ADDR", "localhost"))
+        if "MASTER_PORT" not in os.environ:
+            stack.enter_context(envs.override_external("MASTER_PORT", "29531"))
+        if "RANK" not in os.environ:
+            stack.enter_context(envs.override_external("RANK", "0"))
+        if "WORLD_SIZE" not in os.environ:
+            stack.enter_context(envs.override_external("WORLD_SIZE", "1"))
+        if "LOCAL_RANK" not in os.environ:
+            stack.enter_context(envs.override_external("LOCAL_RANK", "0"))
+        yield
 
 
 @pytest.fixture(scope="session")

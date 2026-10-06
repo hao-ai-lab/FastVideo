@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 import fastvideo.envs as envs
+
 from fastvideo.attention import get_attn_backend
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
 from fastvideo.platforms import AttentionBackendEnum

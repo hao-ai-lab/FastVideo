@@ -781,9 +781,14 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # kernels' granularity. These entries take BHSD ([B, H, S_pad, D]);
             # mirror block_sparse_attn_256_bshd's Triton branch and transpose
             # around the call.
-            sm89_strided = (self._sm89_kernel == "int8" and not torch.is_grad_enabled() and not compiling
-                            and query.dtype == torch.bfloat16 and query.shape[-1] == 128
-                            and torch.cuda.get_device_capability(query.device) == (8, 9))
+            # One gate for the sm89 QK/PV route below: the kernels are
+            # inference-only, BF16, head-128, and validated for Ada (8, 9).
+            # ``sm89_strided`` marks the INT8-QK entry, the only one that reads
+            # the BSHD strided views directly.
+            sm89_route = (self._sm89_kernel != "original" and not torch.is_grad_enabled() and not compiling
+                          and query.dtype == torch.bfloat16 and query.shape[-1] == 128 and query.is_cuda
+                          and torch.cuda.get_device_capability(query.device) == (8, 9))
+            sm89_strided = sm89_route and self._sm89_kernel == "int8"
             q_bhsd = query.transpose(1, 2)
             k_bhsd = key.transpose(1, 2)
             v_bhsd = value.transpose(1, 2)
@@ -890,9 +895,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     v_bhsd = v_bhsd[:, :, :logical_seq_len]
                     if not sm89_strided:
                         q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
-                if (self._sm89_kernel != "original" and not torch.is_grad_enabled() and not compiling
-                        and q_bhsd.dtype == torch.bfloat16 and q_bhsd.shape[-1] == 128
-                        and torch.cuda.get_device_capability(q_bhsd.device) == (8, 9)):
+                if sm89_route:
                     from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
                     logger.info_once(f"MiniMax-H3 VSA tile-64 forward: sm89 {self._sm89_kernel} QK / BF16 PV")
                     out_bhsd = sparse_sm89_attention(q_bhsd,
@@ -900,8 +903,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                                                      v_bhsd,
                                                      mask,
                                                      attn_metadata.variable_block_sizes,
-                                                     int8_qk=self._sm89_kernel == "int8",
-                                                     fp8_pv=False)
+                                                     int8_qk=self._sm89_kernel == "int8")
                 else:
                     out_bhsd, _ = block_sparse_attn_64_bhsd(
                         q_bhsd,

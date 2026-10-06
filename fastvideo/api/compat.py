@@ -287,6 +287,8 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
     quantization = engine.quantization
     if quantization is not None and quantization.text_encoder_quant is not None:
         kwargs["override_text_encoder_quant"] = quantization.text_encoder_quant
+    if quantization is not None and quantization.layer_profile is not None and quantization.transformer_quant is None:
+        raise ValueError("engine.quantization.layer_profile requires transformer_quant (for example NVFP4)")
     if quantization is not None and quantization.transformer_quant is not None:
         # Resolve the typed quant name to a concrete ``QuantizationConfig``
         # instance and pin it on ``dit_config.quant_config``. The legacy

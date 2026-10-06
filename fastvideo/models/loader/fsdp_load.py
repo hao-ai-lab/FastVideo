@@ -5,8 +5,6 @@
 # Copyright 2025 The FastVideo Authors.
 
 from __future__ import annotations
-
-import os
 import contextlib
 import re
 from collections.abc import Callable, Generator
@@ -382,7 +380,9 @@ def maybe_load_fsdp_model(
                 + ", ".join(missing_vsa_gates[:3]) + (" ..." if len(missing_vsa_gates) > 3 else ""))
     skip_param_names = set(nvfp4_skip_param_names)
     fp8_targets: dict[str, str] = {}
-    fp8_prefixes = _prequantized_fp8_prefixes(weight_dir_list)
+    # Pre-quantized FP8 checkpoints are an H3 release format; other models load as on main.
+    fp8_prefixes = (_prequantized_fp8_prefixes(weight_dir_list)
+                    if type(model).__name__.startswith("MiniMaxH3") else [])
     if fp8_prefixes:
         fp8_targets = {prefix: param_names_mapping_fn(f"{prefix}.weight")[0] for prefix in fp8_prefixes}
         skip_param_names |= set(fp8_targets.values())

@@ -29,6 +29,7 @@ import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
 import fastvideo.envs as envs
+
 from fastvideo.layers.quantization.base_config import (
     QuantizationConfig,
     QuantizeMethodBase,
