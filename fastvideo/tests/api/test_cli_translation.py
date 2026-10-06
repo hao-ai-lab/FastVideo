@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fastvideo.api.compat import explicit_request_updates, request_to_sampling_param
+from fastvideo.api.compat import request_to_sampling_param
 from fastvideo.entrypoints.cli import main as cli_main
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
 from fastvideo.entrypoints.cli.inference_config import (
@@ -322,44 +322,14 @@ def test_generate_subcommand_requires_config():
         GenerateSubcommand().validate(args)
 
 
-@pytest.mark.parametrize("argv", [[], ["--generator.engine.num_gpus", "1"]])
-def test_serve_subcommand_requires_model_without_config(argv):
-    args, _ = _parse_serve_args(argv)
+def test_serve_subcommand_requires_config():
+    args, _ = _parse_serve_args([])
 
     with pytest.raises(
             ValueError,
-            match="missing required field",
+            match="fastvideo serve requires --config PATH",
     ):
         ServeSubcommand().validate(args)
-
-
-def test_serve_without_config_resolves_options_and_preserves_explicit_defaults():
-    args, unknown = _parse_serve_args([
-        "--generator.model_path", "serve-model",
-        "--generator.engine.num_gpus", "4",
-        "--generator.engine.parallelism.sp_size", "4",
-        "--server.port", "9000",
-        "--default_request.sampling.seed", "42",
-        "--default_request.output.return_frames", "false",
-    ])
-    ServeSubcommand().validate(args)
-    config = build_serve_config(args, unknown)
-
-    assert config.generator.model_path == "serve-model"
-    assert config.generator.engine.num_gpus == 4
-    assert config.generator.engine.parallelism.sp_size == 4
-    assert config.server.port == 9000
-    assert explicit_request_updates(config.default_request) == {
-        "seed": 42,
-        "return_frames": False,
-    }
-
-
-def test_serve_without_config_does_not_pin_unset_request_defaults():
-    args, unknown = _parse_serve_args(["--generator.model_path", "serve-model"])
-    config = build_serve_config(args, unknown)
-
-    assert explicit_request_updates(config.default_request) == {}
 
 
 def test_generate_subcommand_rejects_non_positive_num_gpus(tmp_path):

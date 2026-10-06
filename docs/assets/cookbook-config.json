@@ -1,0 +1,190 @@
+{
+  "model": {
+    "id": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+    "label": "Wan 2.2 TI2V 5B",
+    "workload": "t2v",
+    "preset": "wan_2_2_ti2v_5b"
+  },
+  "runtime": {
+    "id": "cuda",
+    "label": "CUDA",
+    "launch_argv": [
+      "fastvideo",
+      "serve",
+      "--config",
+      "config.yaml"
+    ]
+  },
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "generator": {
+        "type": "object",
+        "properties": {
+          "model_path": {
+            "title": "Model Path",
+            "type": "string",
+            "const": "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+          },
+          "engine": {
+            "type": "object",
+            "properties": {
+              "num_gpus": {
+                "default": 1,
+                "title": "Num Gpus",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "offload": {
+                "type": "object",
+                "properties": {
+                  "vae": {
+                    "default": true,
+                    "title": "Vae",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "vae"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "num_gpus",
+              "offload"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "model_path",
+          "engine"
+        ],
+        "additionalProperties": false
+      },
+      "server": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "default": "0.0.0.0",
+            "title": "Host",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]+$"
+          },
+          "port": {
+            "default": 8000,
+            "title": "Port",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "required": [
+          "host",
+          "port"
+        ],
+        "additionalProperties": false
+      },
+      "default_request": {
+        "type": "object",
+        "properties": {
+          "sampling": {
+            "type": "object",
+            "properties": {
+              "num_frames": {
+                "default": 121,
+                "title": "Num Frames",
+                "type": "integer",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "description": "Requested frame count; the runtime may align it for the model's VAE."
+              },
+              "height": {
+                "default": 704,
+                "title": "Height",
+                "type": "integer",
+                "maximum": 9007199254740991,
+                "minimum": 8,
+                "multipleOf": 8
+              },
+              "width": {
+                "default": 1280,
+                "title": "Width",
+                "type": "integer",
+                "maximum": 9007199254740991,
+                "minimum": 8,
+                "multipleOf": 8
+              },
+              "fps": {
+                "default": 24,
+                "title": "Fps",
+                "type": "integer",
+                "maximum": 9007199254740991,
+                "minimum": 1
+              },
+              "num_inference_steps": {
+                "default": 50,
+                "title": "Num Inference Steps",
+                "type": "integer",
+                "maximum": 200,
+                "minimum": 1
+              },
+              "guidance_scale": {
+                "default": 5.0,
+                "title": "Guidance Scale",
+                "type": "number",
+                "maximum": 20.0,
+                "minimum": 0.0
+              },
+              "seed": {
+                "default": 1024,
+                "title": "Seed",
+                "type": "integer",
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991
+              }
+            },
+            "required": [
+              "num_frames",
+              "height",
+              "width",
+              "fps",
+              "num_inference_steps",
+              "guidance_scale",
+              "seed"
+            ],
+            "additionalProperties": false
+          },
+          "output": {
+            "type": "object",
+            "properties": {
+              "return_frames": {
+                "title": "Return Frames",
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": [
+              "return_frames"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "sampling",
+          "output"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "generator",
+      "server",
+      "default_request"
+    ],
+    "additionalProperties": false
+  }
+}

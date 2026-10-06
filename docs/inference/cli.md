@@ -1,8 +1,9 @@
 # FastVideo CLI Inference
 
-FastVideo uses a nested configuration with dotted-path command-line options.
-`generate` requires a JSON or YAML config. `serve` accepts either a config file
-with overrides or all settings directly on the command line.
+The FastVideo CLI is config-first. Inference runs are driven by a nested JSON or
+YAML config, with optional dotted-path overrides on the command line. The
+contract matches training: use an explicit subcommand plus `--config`, then add
+any dotted overrides you need.
 
 ## Basic Usage
 
@@ -10,20 +11,6 @@ with overrides or all settings directly on the command line.
 fastvideo generate --config config.yaml
 fastvideo serve --config serve.yaml
 ```
-
-Serving without a config file uses the same typed settings and validation:
-
-```bash
-fastvideo serve --generator.model_path MODEL_ID --server.port 9000
-```
-
-<!-- TODO(cookbook-ui): Point the example link below to the final cookbook page
-when the demo is removed. Keep the CLI-only serving documentation. -->
-
-Supply the model's required engine, pipeline, and sampling options too. The
-[serving cookbook example](../cookbook/serving-example.md) shows a complete
-generated command for FastH3 V2. Only explicitly supplied request defaults are
-pinned; omitted values continue to use the model's defaults.
 
 ## View All Arguments
 

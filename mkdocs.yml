@@ -8,7 +8,12 @@ docs_dir: docs
 exclude_docs: |
   README.md
   generate_examples.py
-  cookbook_serving.py
+  cookbook_config.py
+  package.json
+  package-lock.json
+  build-validator.mjs
+  js/
+  node_modules/
   **/__pycache__/**
 
 # Repository
@@ -59,7 +64,6 @@ theme:
 # Native MkDocs hooks
 hooks:
   - docs/generate_examples.py
-  - docs/cookbook_serving.py
 
 # Plugins
 plugins:
@@ -162,7 +166,7 @@ nav:
     - Overview: cookbook/index.md
     - H3 server and playground: cookbook/openai-api.md
     # TODO(cookbook-ui): Remove this demo entry when the new UI replaces its page.
-    - Serving recipe example: cookbook/serving-example.md
+    - Config builder example: cookbook/config-builder.md
     - Video:
       - MiniMax H3: cookbook/minimax-h3.md
       - Wan: cookbook/wan.md
@@ -268,6 +272,6 @@ extra_css:
 extra_javascript:
   - assets/copy-page.js
   - assets/cookbook.js
-  # TODO(cookbook-ui): Replace this demo UI script entry with the new components'
-  # bundle after preserving the reusable recipe resolver and command formatters.
-  - assets/cookbook-serving.js
+  # TODO(cookbook-ui): Replace the config-builder page and DOM adapter with the final UI.
+  - assets/cookbook-validator.js
+  - assets/cookbook-config.js

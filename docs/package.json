@@ -1,0 +1,13 @@
+{
+  "name": "fastvideo-cookbook-demo",
+  "private": true,
+  "scripts": {
+    "build:validator": "node build-validator.mjs"
+  },
+  "dependencies": {
+    "ajv": "8.20.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

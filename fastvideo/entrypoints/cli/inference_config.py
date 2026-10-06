@@ -40,8 +40,7 @@ def build_serve_config(
     args: argparse.Namespace,
     overrides: list[str] | None = None,
 ) -> ServeConfig:
-    config_path = getattr(args, "config", None)
-    raw = _load_nested_config(config_path) if config_path else {}
+    raw = _load_nested_config(getattr(args, "config", None))
     raw.setdefault("server", {})
     raw.setdefault("default_request", {})
     raw = _apply_dotted_overrides(
