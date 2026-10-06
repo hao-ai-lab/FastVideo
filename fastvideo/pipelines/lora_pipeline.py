@@ -2,6 +2,7 @@
 from collections import defaultdict
 from collections.abc import Hashable
 from contextlib import nullcontext
+import math
 from typing import Any
 from collections.abc import Generator
 
@@ -22,11 +23,43 @@ from fastvideo.layers.lora.linear import (
     replace_submodule,
 )
 from fastvideo.logger import init_logger
+from fastvideo.models.loader.lora_patch import DenseLoRAPatch, normalize_lora_key
 from fastvideo.models.loader.utils import get_param_names_mapping
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lazy_module import is_lazy_module
 from fastvideo.utils import maybe_download_lora
 
 logger = init_logger(__name__)
+
+
+def _has_quantized_mxfp8_weights(transformer_modules: dict[str, nn.Module]) -> bool:
+    """Return whether any transformer contains an initialized MXFP8 weight."""
+    from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
+
+    return any(
+        isinstance(getattr(module, "quant_method", None), MXFP8QuantizeMethod)
+        and getattr(module, "_mxfp8_weight", None) is not None for transformer in transformer_modules.values()
+        for module in transformer.modules())
+
+
+def _has_nvfp4_weights_without_bf16(transformer_modules: dict[str, nn.Module]) -> bool:
+    """Return whether NVFP4 quantization removed any transformer's BF16 weight."""
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    return any(
+        isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
+        and getattr(module, "_nvfp4_weight", None) is not None and getattr(module, "weight", None) is None
+        for transformer in transformer_modules.values() for module in transformer.modules())
+
+
+def _has_quantized_nvfp4_weights(transformer_modules: dict[str, nn.Module]) -> bool:
+    """Return whether any transformer contains an initialized NVFP4 weight."""
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    return any(
+        isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
+        and getattr(module, "_nvfp4_weight", None) is not None for transformer in transformer_modules.values()
+        for module in transformer.modules())
 
 
 def _get_hook_ctx(module: nn.Module | None):
@@ -38,6 +71,24 @@ def _get_hook_ctx(module: nn.Module | None):
         if offload_hook is not None:
             return offload_hook.mutate_params_scope()  # type: ignore
     return nullcontext()
+
+
+def _convert_quantized_weights_after_lora_merge(transformer_modules: dict[str, nn.Module]) -> None:
+    """Pack deferred NVFP4 or MXFP8 weights after all LoRA layers are merged."""
+    from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
+    from fastvideo.layers.quantization.mxfp8_config import convert_model_to_mxfp8
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+    from fastvideo.layers.quantization.nvfp4_config import convert_model_to_nvfp4
+
+    for transformer_module in transformer_modules.values():
+        for module in transformer_module.modules():
+            quant_method = getattr(module, "quant_method", None)
+            if isinstance(quant_method, NVFP4QuantizeMethod):
+                convert_model_to_nvfp4(transformer_module)
+                break
+            if isinstance(quant_method, MXFP8QuantizeMethod):
+                convert_model_to_mxfp8(transformer_module)
+                break
 
 
 def _named_module_by_prefix(module: nn.Module,
@@ -112,14 +163,27 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_target_modules: list[str] | None = None
     lora_path: str | None = None
     lora_nickname: str = "default"
+    lora_strength: float = 1.0
     lora_rank: int | None = None
     lora_alpha: int | None = None
     lora_initialized: bool = False
+    _constructor_dense_lora_path: str | None = None
+    _setting_constructor_adapter: bool = False
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.device = get_local_torch_device()
+        # Adapter tensors and wrapped model layers belong to this pipeline's module
+        # instances. Sharing either cache across two generators can apply one model's
+        # adapter to another model's layers.
+        self.trainable_transformer_modules = {}
+        self.lora_adapters = defaultdict(dict)
         self.lora_adapter_paths = {}
+        self.lora_layers = {}
+        self.exclude_lora_layers = {}
+        self.cur_adapter_name = ""
+        self.cur_adapter_path = ""
+        self.cur_adapter_strength = 1.0
         # build list of trainable transformers
         for transformer_name in self.trainable_transformer_names:
             if (transformer_name in self.modules and self.modules[transformer_name] is not None):
@@ -140,14 +204,16 @@ class LoRAPipeline(ComposedPipelineBase):
             self.trainable_transformer_modules.keys(),
         )
 
-        for (
-                transformer_name,
-                transformer_module,
-        ) in self.trainable_transformer_modules.items():
-            self.exclude_lora_layers[transformer_name] = (transformer_module.config.arch_config.exclude_lora_layers)
-        self.lora_target_modules = self.fastvideo_args.lora_target_modules
+        # Only override the pipeline class's own default when the caller actually set
+        # one. Assigning unconditionally erases per-model defaults, and a model that
+        # declares one usually does so because wrapping every linear breaks its forward.
+        if self.fastvideo_args.lora_target_modules is not None:
+            self.lora_target_modules = self.fastvideo_args.lora_target_modules
         self.lora_path = self.fastvideo_args.lora_path
         self.lora_nickname = self.fastvideo_args.lora_nickname
+        self.lora_strength = self.fastvideo_args.lora_strength
+        constructor_patch = DenseLoRAPatch.from_adapter(self.lora_path) if self.lora_path else None
+        self._constructor_dense_lora_path = self.lora_path if constructor_patch is not None else None
         self.training_mode = self.fastvideo_args.training_mode
         if self.training_mode and getattr(self.fastvideo_args, "lora_training", False):
             assert isinstance(self.fastvideo_args, TrainingArgs)
@@ -187,10 +253,16 @@ class LoRAPipeline(ComposedPipelineBase):
         # Inference
         elif not self.training_mode and self.lora_path is not None:
             self.convert_to_lora_layers()
-            self.set_lora_adapter(
-                self.lora_nickname,  # type: ignore
-                self.lora_path,
-            )  # type: ignore
+            if not any(is_lazy_module(module) for module in self.trainable_transformer_modules.values()):
+                self._setting_constructor_adapter = True
+                try:
+                    self.set_lora_adapter(
+                        self.lora_nickname,  # type: ignore
+                        self.lora_path,
+                        strength=self.lora_strength,
+                    )  # type: ignore
+                finally:
+                    self._setting_constructor_adapter = False
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.lora_target_modules is None:
@@ -228,6 +300,91 @@ class LoRAPipeline(ComposedPipelineBase):
             else:
                 raise ValueError(f"Transformer {transformer_name} should be trainable but not found in lora_layers")
 
+    def _exclude_lora_layers_for(self, transformer_name: str, transformer_module: Any) -> list[str]:
+        excluded = self.exclude_lora_layers.get(transformer_name)
+        if excluded is not None:
+            return excluded
+        # Prefer the pipeline config so a LazyModule is not materialized just to
+        # read a list of layer name fragments.
+        dit_config = getattr(getattr(self.fastvideo_args, "pipeline_config", None), "dit_config", None)
+        arch = getattr(dit_config, "arch_config", None)
+        if arch is not None and hasattr(arch, "exclude_lora_layers"):
+            excluded = list(arch.exclude_lora_layers)
+        elif is_lazy_module(transformer_module):
+            excluded = []
+        else:
+            excluded = list(transformer_module.config.arch_config.exclude_lora_layers)
+        self.exclude_lora_layers[transformer_name] = excluded
+        return excluded
+
+    def _apply_constructor_adapter(self) -> None:
+        if self.lora_path is None:
+            return
+        self.cur_adapter_name = ""
+        self.cur_adapter_path = ""
+        self._setting_constructor_adapter = True
+        try:
+            self.set_lora_adapter(
+                self.lora_nickname,
+                self.lora_path,
+                strength=self.lora_strength,
+            )
+        finally:
+            self._setting_constructor_adapter = False
+
+    def _convert_one_transformer(self, transformer_name: str, transformer_module: nn.Module) -> None:
+        excluded_lora_layers = self._exclude_lora_layers_for(transformer_name, transformer_module)
+        # Fresh instance after a lazy rematerialize must not keep the previous
+        # block mapping — those modules pin the released DiT and never get freed.
+        block_list = []
+        for name, submodule in transformer_module.named_children():
+            if isinstance(submodule, nn.ModuleList):
+                block_list = [(f"{name}.{i}", m) for i, m in enumerate(submodule)]
+                break
+        self.lora_layers[transformer_name] = LoRAModelLayers(block_list)
+        logger.info("Converting %s to LoRA Transformer", transformer_name)
+        converted_count = 0
+        for block_name, block_modules in _named_module_by_prefix(
+                transformer_module,
+                list(self.lora_layers[transformer_name].block_mapping),
+        ):
+            if block_name is not None and (not self.fastvideo_args.training_mode
+                                           and self.fastvideo_args.dit_layerwise_offload):
+                scope_ctx = _get_hook_ctx(self.lora_layers[transformer_name].block_mapping[block_name])
+            else:
+                scope_ctx = nullcontext()
+            with scope_ctx:
+                for name, layer in block_modules:
+                    if not self.is_target_layer(name):
+                        continue
+
+                    excluded = False
+                    for exclude_layer in excluded_lora_layers:
+                        if exclude_layer in name:
+                            excluded = True
+                            break
+                    if excluded:
+                        continue
+
+                    layer = get_lora_layer(
+                        layer,
+                        lora_rank=self.lora_rank,
+                        lora_alpha=self.lora_alpha,
+                        training_mode=self.training_mode,
+                    )
+                    if layer is not None:
+                        block_name_split = name.split(".", 2)
+                        if len(block_name_split) > 2:
+                            block_name = (block_name_split[0] + "." + block_name_split[1])
+                        else:
+                            block_name = None
+                        if (block_name not in self.lora_layers[transformer_name].block_mapping):
+                            block_name = None
+                        self.lora_layers[transformer_name].add_lora_layer(block_name, name, layer)
+                        replace_submodule(transformer_module, name, layer)
+                        converted_count += 1
+        logger.info("Converted %d layers to LoRA layers", converted_count)
+
     def convert_to_lora_layers(self) -> None:
         """
         Unified method to convert the transformer to a LoRA transformer.
@@ -239,59 +396,22 @@ class LoRAPipeline(ComposedPipelineBase):
                 transformer_name,
                 transformer_module,
         ) in self.trainable_transformer_modules.items():
-            converted_count = 0
-            # init bookkeeping structures
-            if transformer_name not in self.lora_layers:
-                # get block list
-                block_list = []
-                for name, submodule in transformer_module.named_children():
-                    if isinstance(submodule, nn.ModuleList):
-                        block_list = [(f"{name}.{i}", m) for i, m in enumerate(submodule)]
-                        break
-                self.lora_layers[transformer_name] = LoRAModelLayers(block_list)
-            logger.info("Converting %s to LoRA Transformer", transformer_name)
-            # scan every module and convert to LoRA layer if applicable
+            if is_lazy_module(transformer_module):
 
-            for block_name, block_modules in _named_module_by_prefix(
-                    transformer_module,
-                    list(self.lora_layers[transformer_name].block_mapping),
-            ):
-                if block_name is not None and (not self.fastvideo_args.training_mode
-                                               and self.fastvideo_args.dit_layerwise_offload):
-                    scope_ctx = _get_hook_ctx(self.lora_layers[transformer_name].block_mapping[block_name])
-                else:
-                    scope_ctx = nullcontext()
-                with scope_ctx:
-                    for name, layer in block_modules:
-                        if not self.is_target_layer(name):
-                            continue
+                def _drop_lora_refs(*, _name: str = transformer_name) -> None:
+                    self.lora_layers.pop(_name, None)
+                    self.cur_adapter_name = ""
+                    self.cur_adapter_path = ""
 
-                        excluded = False
-                        for exclude_layer in self.exclude_lora_layers[transformer_name]:
-                            if exclude_layer in name:
-                                excluded = True
-                                break
-                        if excluded:
-                            continue
+                def _lora_after_load(module: nn.Module, *, _name: str = transformer_name) -> nn.Module:
+                    self._convert_one_transformer(_name, module)
+                    self._apply_constructor_adapter()
+                    return module
 
-                        layer = get_lora_layer(
-                            layer,
-                            lora_rank=self.lora_rank,
-                            lora_alpha=self.lora_alpha,
-                            training_mode=self.training_mode,
-                        )
-                        if layer is not None:
-                            block_name_split = name.split(".", 2)
-                            if len(block_name_split) > 2:
-                                block_name = (block_name_split[0] + "." + block_name_split[1])
-                            else:
-                                block_name = None
-                            if (block_name not in self.lora_layers[transformer_name].block_mapping):
-                                block_name = None
-                            self.lora_layers[transformer_name].add_lora_layer(block_name, name, layer)
-                            replace_submodule(transformer_module, name, layer)
-                            converted_count += 1
-            logger.info("Converted %d layers to LoRA layers", converted_count)
+                transformer_module.add_release_callback(_drop_lora_refs)
+                transformer_module.set_materialize_transform(_lora_after_load)
+                continue
+            self._convert_one_transformer(transformer_name, transformer_module)
 
     def set_lora_adapter(self,
                          lora_nickname: str,
@@ -303,7 +423,37 @@ class LoRAPipeline(ComposedPipelineBase):
         Args:
             lora_nickname: The "nick name" of the adapter when referenced in the pipeline.
             lora_path: The path to the adapter, either a local path or a Hugging Face repo id.
+            strength: Scale for the low-rank adapter. Hybrid adapters must set this at construction
+                so their dense payload receives the same scale.
+            accumulate: Add this adapter to an already merged pure low-rank adapter.
         """
+
+        if not math.isfinite(strength):
+            raise ValueError(f"LoRA strength must be finite, got {strength}")
+
+        requested_path = lora_path or self.lora_adapter_paths.get(lora_nickname)
+        exact_current_adapter = (self.cur_adapter_name == lora_nickname and self.cur_adapter_path == requested_path
+                                 and self.cur_adapter_strength == strength and not accumulate)
+        if exact_current_adapter:
+            return
+
+        if not self._setting_constructor_adapter and _has_nvfp4_weights_without_bf16(
+                self.trainable_transformer_modules):
+            # TODO(David): Restore the BF16 weights and requantize them after an NVFP4 LoRA adapter change.
+            raise RuntimeError(
+                "Runtime LoRA adapter changes are unsupported after NVFP4 quantization removed the BF16 weights. "
+                "Create a new VideoGenerator with the desired LoRA adapter.")
+
+        if not self._setting_constructor_adapter:
+            if self._constructor_dense_lora_path is not None:
+                raise RuntimeError(
+                    "The active LoRA contains constructor-time .diff/.set_weight payload. "
+                    "Changing its adapter or strength at runtime would leave that dense payload stale; "
+                    "create a new VideoGenerator with ComponentConfig(lora_path=..., lora_strength=...).")
+            if requested_path is not None and DenseLoRAPatch.from_adapter(requested_path) is not None:
+                raise RuntimeError(
+                    "Adapters containing .diff/.set_weight payload must be supplied when VideoGenerator is "
+                    "constructed with ComponentConfig(lora_path=..., lora_strength=...).")
 
         if lora_nickname not in self.lora_adapters and lora_path is None:
             raise ValueError(f"Adapter {lora_nickname} not found in the pipeline. Please provide lora_path to load it.")
@@ -324,7 +474,10 @@ class LoRAPipeline(ComposedPipelineBase):
             to_merge_params: defaultdict[Hashable, dict[Any, Any]] = (defaultdict(dict))
             for name, weight in lora_state_dict.items():
                 # Extract weights (lora_A, lora_B, and lora_alpha)
-                name = name.replace("diffusion_model.", "")
+                normalized = normalize_lora_key(name)
+                if normalized is None:
+                    continue
+                name = normalized
                 name = name.replace(".weight", "")
 
                 if "lora_alpha" in name:
@@ -369,6 +522,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
         # Merge the new adapter
         adapted_count = 0
+        consumed: set[str] = set()
         for (
                 transformer_name,
                 transformer_lora_layers,
@@ -407,6 +561,7 @@ class LoRAPipeline(ComposedPipelineBase):
                                 )
                                 raise e
                             adapted_count += 1
+                            consumed.update((lora_A_name, lora_B_name, lora_alpha_name))
                         else:
                             if rank == 0:
                                 logger.warning(
@@ -421,6 +576,18 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_path,
             adapted_count,
         )
+        # The loop above reports model layers the adapter has nothing for. This is the
+        # other direction -- adapter weights that reached no layer -- which is the
+        # quieter failure: the adapter loads, generation runs, and the result is simply
+        # a partially-applied model with nothing in the log to say so.
+        if rank == 0:
+            unmatched = sorted(set(self.lora_adapters[lora_nickname]) - consumed)
+            for target in unmatched:
+                logger.warning("LoRA key not loaded: %s (adapter %s has no matching layer in the model)", target,
+                               lora_path)
+            if unmatched:
+                logger.warning("LoRA adapter %s: %d weights did not reach a layer", lora_path, len(unmatched))
+        _convert_quantized_weights_after_lora_merge(self.trainable_transformer_modules)
 
     def merge_lora_weights(self) -> None:
         for (
@@ -436,6 +603,17 @@ class LoRAPipeline(ComposedPipelineBase):
                         layer.merge_lora_weights()
 
     def unmerge_lora_weights(self) -> None:
+        """Unmerge LoRA weights when the transformer's quantized weights remain valid."""
+        if _has_quantized_mxfp8_weights(self.trainable_transformer_modules):
+            # TODO(David): Requantize MXFP8 weights after LoRA unmerge before enabling this operation.
+            raise RuntimeError(
+                "LoRA unmerge is unsupported after MXFP8 weight quantization because the quantized weights still "
+                "contain the merged LoRA adapter.")
+        if _has_quantized_nvfp4_weights(self.trainable_transformer_modules):
+            # TODO(David): Preserve BF16 weights and requantize NVFP4 weights after LoRA unmerge.
+            raise RuntimeError(
+                "LoRA unmerge is unsupported after NVFP4 weight quantization because the quantized weights would "
+                "not reflect the unmerged LoRA adapter.")
         for (
                 transformer_name,
                 transformer_lora_layers,

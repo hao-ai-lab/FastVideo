@@ -10,10 +10,9 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from tqdm.auto import tqdm
 
-import fastvideo.envs as envs
 from fastvideo.attention import LocalAttention
 from fastvideo.attention.backends.nabla import NablaAttentionMetadataBuilder
-from fastvideo.attention.selector import backend_name_to_enum
+from fastvideo.attention.selector import component_attention_backend
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -203,12 +202,12 @@ class Kandinsky5DenoisingStage(PipelineStage):
         ``Kandinsky5Attention.forward`` catches the ``AssertionError``
         ``LocalAttention`` raises when no pipeline forward context is set and
         falls back to plain ``F.scaled_dot_product_attention`` -- silently
-        skipping whichever kernel ``FASTVIDEO_ATTENTION_BACKEND`` requested
-        (the fake-quantized ``ATTN_QAT_TRAIN`` kernel).
+        skipping the transformer's recorded attention backend (the
+        fake-quantized ``ATTN_QAT_TRAIN`` kernel).
         ``LocalAttention.backend`` is resolved once at module construction,
         independent of whether a forward context is later set, so this only
-        catches a backend that failed to resolve to what the env var
-        requested -- it does not prove forward context was present for a
+        catches a backend that failed to resolve to the recorded decision
+        -- it does not prove forward context was present for a
         given forward call. Pair it with always wrapping the actual
         transformer call in ``set_forward_context`` (see the denoising loops
         below), which is what prevents the runtime fallback.
@@ -220,17 +219,14 @@ class Kandinsky5DenoisingStage(PipelineStage):
         ``_STRICT_BACKENDS``'s comment), so asserting on those would flag
         expected behavior as a bug.
         """
-        backend_env = envs.FASTVIDEO_ATTENTION_BACKEND
-        if not backend_env:
-            return
-        expected = backend_name_to_enum(backend_env)
-        if expected is None or expected not in self._STRICT_BACKENDS:
+        expected = component_attention_backend(self.transformer)
+        if expected not in self._STRICT_BACKENDS:
             return
         for module in self.transformer.modules():
             if isinstance(module, LocalAttention):
                 assert module.backend == expected, (
                     f"Kandinsky5 local attention resolved to backend {module.backend}, expected "
-                    f"{expected} from FASTVIDEO_ATTENTION_BACKEND={backend_env}. This likely means "
+                    f"{expected}, the transformer's recorded attention backend. This likely means "
                     "LocalAttention's missing-forward-context guard silently fell back to SDPA.")
                 return
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
 
 __all__ = ["distributed_runtime"]
@@ -78,7 +79,9 @@ SPEC = GateSpec(
     prefix_template="layers.{N}.",
     renames=(),
     attention_backend="TORCH_SDPA",
-    model_root_env="ZIMAGE_MODEL_DIR",
+    # The registry default is the Hugging Face repo id, so only an explicitly set value names a local checkout.
+    model_root=lambda: (envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.get()
+                        if envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.is_set() else None),
 )
 
 

@@ -7,13 +7,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+import fastvideo.envs as envs
 
-def test_inference_bsa():
+
+def test_inference_bsa(env_overrides):
     """Test FastVideo BSA_ATTN inference pipeline"""
 
     output_dir = Path("outputs_video/bsa_1.3B/")
 
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "BSA_ATTN"
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("BSA_ATTN"))
 
     config = {
         "generator": {

@@ -186,6 +186,20 @@ def test_active_pipeline_has_no_modal_or_untrusted_compute_path():
     assert all(str(step.get("command", "")).startswith("/opt/fastvideo-ci-runner/") for step in steps)
 
 
+def test_expensive_integration_lanes_wait_for_selected_goldens():
+    # A skipped conditional golden step satisfies the dependency (direct
+    # reruns/training-only plans remain available); a failed selected gate does
+    # not. Never permit allow_failure or a soft-fail dependency here.
+    for step in _pipeline_steps():
+        key = step["key"]
+        fastcheck = key in {"encoder", "vae", "transformer", "kernel-tests", "unit", "dreamverse"}
+        if fastcheck or key == "golden-gate":
+            assert "depends_on" not in step
+        else:
+            assert step["depends_on"] == "golden-gate"
+        assert "allow_dependency_failure" not in step
+
+
 def test_gpu_tests_preserve_a_launcher_assigned_rendezvous_port():
     hard_assignment = re.compile(r'''os\.environ\[\s*["']MASTER_PORT["']\s*\]\s*=''')
     overwrites = []
