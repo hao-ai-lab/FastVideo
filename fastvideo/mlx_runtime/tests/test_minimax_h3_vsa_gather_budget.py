@@ -15,10 +15,10 @@ def test_gather_budget_preserves_attention_with_partial_tiles(monkeypatch):
     # Reverse video order also exercises the selected-key order, not a dense mask.
     selected = np.array([0, 1, geom.num_tiles - 1, geom.num_prefix_tiles], dtype=np.int32)
     idx = mx.array(np.broadcast_to(selected, (2, geom.num_video_tiles, selected.size)).copy())
-    monkeypatch.setattr(vsa, '_REFERENCE_GATHER_TARGET_BYTES', 2 * 1024**3)
+    monkeypatch.setattr(vsa, '_reference_gather_target_bytes', lambda: 2 * 1024**3)
     expected = vsa._reference_gather_sdpa(q, k, value, idx, geom, 128**-0.5)
     mx.eval(expected)
-    monkeypatch.setattr(vsa, '_REFERENCE_GATHER_TARGET_BYTES', 1)
+    monkeypatch.setattr(vsa, '_reference_gather_target_bytes', lambda: 1)
     actual = vsa._reference_gather_sdpa(q, k, value, idx, geom, 128**-0.5)
     mx.eval(actual)
     np.testing.assert_array_equal(np.array(actual.astype(mx.float32)), np.array(expected.astype(mx.float32)))
