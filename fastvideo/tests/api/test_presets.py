@@ -481,30 +481,6 @@ class TestCosmosPresets:
 
 
 # -------------------------------------------------------------------
-# TurboDiffusion preset integration
-# -------------------------------------------------------------------
-
-
-class TestTurboDiffusionPresets:
-
-    def test_turbo_presets_registered(self) -> None:
-        import fastvideo.registry  # noqa: F401
-        presets = get_presets_for_family("turbodiffusion")
-        names = {p.name for p in presets}
-        assert names == {
-            "turbo_t2v_1_3b",
-            "turbo_t2v_14b",
-            "turbo_i2v_a14b",
-        }
-
-    def test_turbo_4_step(self) -> None:
-        import fastvideo.registry  # noqa: F401
-        p = get_preset("turbo_t2v_14b", "turbodiffusion")
-        assert p.defaults["num_inference_steps"] == 4
-        assert p.defaults["guidance_scale"] == 1.0
-
-
-# -------------------------------------------------------------------
 # SD35 preset integration
 # -------------------------------------------------------------------
 
@@ -663,12 +639,6 @@ class TestSinglePresetFamilies:
         p = get_preset("hyworld_t2v", "hyworld")
         assert p.workload_type == "t2v"
 
-    def test_gamecraft_registered(self) -> None:
-        import fastvideo.registry  # noqa: F401
-        p = get_preset("gamecraft_i2v", "gamecraft")
-        assert p.workload_type == "i2v"
-        assert p.defaults["num_frames"] == 33
-
     def test_gen3c_registered(self) -> None:
         import fastvideo.registry  # noqa: F401
         p = get_preset("gen3c_cosmos_7b", "gen3c")
@@ -682,12 +652,6 @@ class TestSinglePresetFamilies:
         p3 = get_preset("matrixgame3_i2v", "matrixgame")
         assert p3.defaults["num_inference_steps"] == 3
         assert p3.defaults["height"] == 720
-
-    def test_longcat_presets_registered(self) -> None:
-        import fastvideo.registry  # noqa: F401
-        presets = get_presets_for_family("longcat")
-        names = {p.name for p in presets}
-        assert names == {"longcat_t2v", "longcat_i2v", "longcat_vc"}
 
 
 # -------------------------------------------------------------------
@@ -718,8 +682,8 @@ class TestPresetDefaultTypes:
         ``ltx2_cfg_scale_video`` or ``ltx2_cfg_scale_audio`` is != 1.0,
         so any non-1.0 default silently forces CFG on for every model
         family that doesn't explicitly override these fields. Guard
-        against the regression that surfaced as the TurboDiffusion I2V
-        SSIM crash (``text_encoding.py:81`` assertion on
+        against the regression that surfaced as a Wan-based I2V SSIM
+        crash (``text_encoding.py:81`` assertion on
         ``negative_prompt``)."""
         from fastvideo.api.sampling_param import SamplingParam
         sp = SamplingParam()

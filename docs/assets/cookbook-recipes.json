@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 15,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -160,53 +160,6 @@
       "limitations": [
         "Native MLX FastMetal T2V on 36 GB+ unified memory. Same --fast, --fast-spatial, and --refine flags as the 1.3B script."
       ]
-    },
-    {
-      "id": "turbodiffusion-wan21-1-3b-t2v",
-      "family": "turbodiffusion",
-      "stage": "inference",
-      "task": "Text to video",
-      "label": "TurboWan2.1 1.3B",
-      "summary": "A TurboDiffusion-accelerated Wan2.1 1.3B text-to-video run from its maintained single-GPU example.",
-      "model": "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
-      "source": "examples/inference/basic/basic_turbodiffusion.py",
-      "command": "python examples/inference/basic/basic_turbodiffusion.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 videos under video_samples_turbodiffusion/",
-      "related": ["turbodiffusion-wan21-14b-t2v", "turbowan22-i2v"]
-    },
-    {
-      "id": "turbodiffusion-wan21-14b-t2v",
-      "family": "turbodiffusion",
-      "stage": "inference",
-      "task": "Text to video",
-      "label": "TurboWan2.1 14B",
-      "summary": "TurboDiffusion acceleration applied to the 14B Wan2.1 text-to-video checkpoint; the checked-in source is configured for two GPUs.",
-      "model": "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
-      "source": "examples/inference/basic/basic_turbodiffusion_14b.py",
-      "command": "python examples/inference/basic/basic_turbodiffusion_14b.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 2, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 videos under video_samples_turbodiffusion_14B/",
-      "related": ["turbodiffusion-wan21-1-3b-t2v", "turbowan22-i2v"]
-    },
-    {
-      "id": "turbowan22-i2v",
-      "family": "turbodiffusion",
-      "stage": "inference",
-      "task": "Image to video",
-      "label": "TurboWan2.2 A14B",
-      "summary": "A one-to-four-step image-to-video path using TurboDiffusion and the SLA attention backend from its maintained example.",
-      "model": "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
-      "source": "examples/inference/basic/basic_turbodiffusion_i2v.py",
-      "command": "python examples/inference/basic/basic_turbodiffusion_i2v.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 2, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "related": ["turbodiffusion-wan21-14b-t2v"]
     },
     {
       "id": "ltx2-distilled-t2v",
@@ -443,53 +396,6 @@
       "evidence": "Source-backed",
       "expected_artifact": "PNG images under outputs/flux_dev/samples/",
       "limitations": ["FLUX.1 is loadable by ID but registers no model_family in fastvideo/registry.py; it is grouped under FLUX for documentation only."]
-    },
-    {
-      "id": "glm-image-t2i",
-      "family": "glm_image",
-      "stage": "inference",
-      "task": "Text to image",
-      "label": "GLM-Image",
-      "summary": "GLM-Image text-to-image generation from its maintained example.",
-      "model": "zai-org/GLM-Image",
-      "source": "examples/inference/basic/basic_glm_image.py",
-      "command": "python examples/inference/basic/basic_glm_image.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "PNG image at image_output/landscape.png",
-      "related": ["glm-image-edit"]
-    },
-    {
-      "id": "glm-image-edit",
-      "family": "glm_image",
-      "stage": "inference",
-      "task": "Image editing",
-      "label": "GLM-Image editing",
-      "summary": "Edit an input image with an instruction prompt using GLM-Image, from its maintained editing example.",
-      "model": "zai-org/GLM-Image",
-      "source": "examples/inference/basic/edit_glm_image.py",
-      "command": "python examples/inference/basic/edit_glm_image.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "PNG image at image_output/edited.png (input: assets/images/couple.jpg)",
-      "related": ["glm-image-t2i"]
-    },
-    {
-      "id": "zimage-turbo-t2i",
-      "family": "zimage",
-      "stage": "inference",
-      "task": "Text to image",
-      "label": "Z-Image Turbo",
-      "summary": "Z-Image Turbo text-to-image on a single GPU from its maintained example.",
-      "model": "Tongyi-MAI/Z-Image-Turbo",
-      "source": "examples/inference/basic/basic_zimage.py",
-      "command": "python examples/inference/basic/basic_zimage.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "PNG image at outputs/zimage/zimage_turbo.png"
     },
     {
       "id": "sd35-medium-t2i",
@@ -881,38 +787,6 @@
         {"key": "video_decode_backend", "label": "VAE decode", "hint": "Fidelity vs. speed", "flag": "--video-decode-backend", "options": [{"value": "h3-vae", "label": "Full H3 VAE"}, {"value": "taeh3", "label": "TAEH3 preview"}], "default": "h3-vae"}
       ],
       "limitations": ["Supply a compatible FastH3 adapter. The script infers dense or VSA attention from the adapter payload unless you override it."]
-    },
-    {
-      "id": "longcat-t2v",
-      "family": "longcat",
-      "stage": "inference",
-      "task": "Text to video",
-      "label": "LongCat Video T2V",
-      "summary": "LongCat Video text-to-video at 480p (50 steps), with distilled and 720p refinement passes included in the same maintained script.",
-      "model": "FastVideo/LongCat-Video-T2V-Diffusers",
-      "source": "examples/inference/basic/basic_longcat_t2v.py",
-      "command": "python examples/inference/basic/basic_longcat_t2v.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 videos under outputs_video/longcat_t2v_basic/, longcat_t2v_distill/, and longcat_t2v_refine_720p/",
-      "related": ["longcat-i2v"]
-    },
-    {
-      "id": "longcat-i2v",
-      "family": "longcat",
-      "stage": "inference",
-      "task": "Image to video",
-      "label": "LongCat Video I2V",
-      "summary": "LongCat Video image-to-video with optional distilled and refinement passes, from its maintained example.",
-      "model": "FastVideo/LongCat-Video-I2V-Diffusers",
-      "source": "examples/inference/basic/basic_longcat_i2v.py",
-      "command": "python examples/inference/basic/basic_longcat_i2v.py",
-      "gpu_types": ["NVIDIA"],
-      "hardware": {"gpu_count": 1, "evidence": "source-configured"},
-      "evidence": "Source-backed",
-      "expected_artifact": "MP4 videos under outputs_video/longcat_i2v_basic/ and longcat_i2v_distill/",
-      "related": ["longcat-t2v"]
     },
     {
       "id": "stable-audio-open-t2a",

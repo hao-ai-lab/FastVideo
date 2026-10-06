@@ -90,8 +90,6 @@ def test_legacy_aliases_and_sampling_defaults(model_path, config_name, preset_na
     # during a relocation, including when path and class detectors disagree.
     ("lucy-edit-custom", "WanPipeline", "wan", "wan_t2v_1_3b"),
     ("sfwan2.2-i2v-custom", "WanCausalDMDPipeline", "wan", "sf_wan_t2v_1_3b"),
-    ("dreamx-world-5b-lucy-edit-custom", "UnknownPipeline", "dreamx_world", "dreamx_world_5b_ar"),
-    ("dreamx-world-5b-custom", "WanPipeline", "wan", "wan_t2v_1_3b"),
 ])
 def test_local_manifest_detectors_keep_first_match(tmp_path, directory, manifest_class, expected_family, expected_preset):
     checkpoint = tmp_path / directory

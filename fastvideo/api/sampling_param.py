@@ -46,28 +46,13 @@ class SamplingParam:
     prompt_attention_mask: list = field(default_factory=list)
     negative_attention_mask: list = field(default_factory=list)
 
-    # Camera/action control inputs (GameCraft)
-    camera_states: Any | None = None  # Plücker coordinates [B, T_video, 6, H, W]
-    camera_trajectory: str | None = None
-    action_list: list[str] | None = None
-    action_speed_list: list[float] | None = None
-    gt_latents: Any | None = None  # Ground truth latents [B, 16, T, H, W]
-    conditioning_mask: Any | None = None  # Mask [B, 1, T, H, W]
-
     # Camera control inputs (LingBotWorld and LingBotWorld2)
     c2ws_plucker_emb: Any | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
     action_path: str | None = None  # Directory containing poses.npy and intrinsics.npy
 
-    # Refine inputs (LongCat 480p->720p upscaling)
-    # Path-based refine (load stage1 video from disk, e.g. MP4)
-    refine_from: str | None = None  # Path to stage1 video (480p output from distill)
+    # Refine / conditioning-frame inputs
     t_thresh: float = 0.5  # Threshold for timestep scheduling in refinement
-    spatial_refine_only: bool = False  # If True, only spatial (no temporal doubling)
     num_cond_frames: int = 0  # Number of conditioning frames
-    # In-memory refine input (for two-stage pipeline where stage1 frames are already in memory)
-    # This mirrors LongCat's demo where a list of frames (e.g. np.ndarray or PIL.Image)
-    # is passed directly to the refinement pipeline instead of reloading from disk.
-    stage1_video: Any | None = None
 
     # Text inputs
     prompt: str | list[str] | None = None
@@ -95,11 +80,6 @@ class SamplingParam:
     guidance_scale: float = 1.0
     batch_cfg: bool = False
     guidance_scale_2: float | None = None
-    # Z-Image CFG controls. ``cfg_normalization=True`` caps the guided
-    # prediction norm at the positive-prediction norm; ``cfg_truncation``
-    # disables CFG above the normalized-noise threshold.
-    cfg_normalization: bool = False
-    cfg_truncation: float | None = 1.0
     # Embedded guidance (FLUX): do not treat ``guidance_scale > 1`` as classic CFG.
     use_embedded_guidance: bool = False
     # Diffusers-style true CFG for FLUX when > 1 (requires negative prompt encoding).
@@ -334,18 +314,6 @@ class SamplingParam:
             help="Classifier-free guidance scale",
         )
         parser.add_argument(
-            "--cfg-normalization",
-            action=StoreBoolean,
-            default=SamplingParam.cfg_normalization,
-            help="Cap Z-Image CFG prediction norm to the positive-prediction norm",
-        )
-        parser.add_argument(
-            "--cfg-truncation",
-            type=float,
-            default=SamplingParam.cfg_truncation,
-            help="Disable Z-Image CFG above this normalized-noise threshold",
-        )
-        parser.add_argument(
             "--batch-cfg",
             action=StoreBoolean,
             default=SamplingParam.batch_cfg,
@@ -406,22 +374,10 @@ class SamplingParam:
             help="Path to input video for video-to-video generation",
         )
         parser.add_argument(
-            "--refine-from",
-            type=str,
-            default=SamplingParam.refine_from,
-            help="Path to stage1 video for refinement (LongCat 480p->720p)",
-        )
-        parser.add_argument(
             "--t-thresh",
             type=float,
             default=SamplingParam.t_thresh,
             help="Threshold for timestep scheduling in refinement (default: 0.5)",
-        )
-        parser.add_argument(
-            "--spatial-refine-only",
-            action=StoreBoolean,
-            default=SamplingParam.spatial_refine_only,
-            help="Only perform spatial super-resolution (no temporal doubling)",
         )
         parser.add_argument(
             "--num-cond-frames",

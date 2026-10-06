@@ -31,14 +31,10 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | cosmos | `nvidia/Cosmos-Predict2-2B-Video2World` | T2V | — |
 | cosmos25 | `KyleShao/Cosmos-Predict2.5-2B-Diffusers` | T2V | [basic_cosmos2_5_t2w.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_cosmos2_5_t2w.py) |
 | cosmos25 | `nvidia/Cosmos-Predict2.5-14B` | T2V | [basic_cosmos2_5_t2w.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_cosmos2_5_t2w.py) |
-| dreamx_world | `FastVideo/DreamX-World-5B-Cam-Diffusers` | I2V | [basic_dreamx_world.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dreamx_world.py) |
-| dreamx_world | `FastVideo/DreamX-World-5B-Diffusers` | I2V | [basic_dreamx_world.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dreamx_world.py) |
 | flux | `black-forest-labs/FLUX.1-dev` | T2I | [basic_flux_dev.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_flux_dev.py) |
 | flux2 | `black-forest-labs/FLUX.2-klein-4B`<br>`black-forest-labs/FLUX.2-klein-9B` | T2I | [basic_flux2_klein.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_flux2_klein.py) |
 | flux2 | `black-forest-labs/FLUX.2-dev` | T2I | [basic_flux2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_flux2.py) |
-| gamecraft | `FastVideo/HunyuanGameCraft-Diffusers` | I2V | [basic_gamecraft.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_gamecraft.py) |
 | gen3c | `FastVideo/GEN3C-Cosmos-7B-Diffusers` | T2V | [basic_gen3c.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_gen3c.py) |
-| glm_image | `zai-org/GLM-Image` | T2I | [basic_glm_image.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_glm_image.py) |
 | hunyuan | `hunyuanvideo-community/HunyuanVideo` | T2V | — |
 | hunyuan | `FastVideo/FastHunyuan-diffusers` | T2V | — |
 | hunyuan15 | `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v` | T2V | [basic_hy15.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_hy15.py) |
@@ -61,9 +57,6 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | lingbot_video | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbotworld | `FastVideo/LingBot-World-Base-Cam-Diffusers` | I2V | [basic_lingbotworld_base_cam.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_base_cam.py) |
 | lingbotworld2 | `robbyant/lingbot-world-v2-14b-causal-fast` | I2V | [basic_lingbotworld2_causal_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld2_causal_fast.py) |
-| longcat | `FastVideo/LongCat-Video-T2V-Diffusers` | T2V | [basic_longcat_t2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_t2v.py) |
-| longcat | `FastVideo/LongCat-Video-I2V-Diffusers` | I2V | [basic_longcat_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_i2v.py) |
-| longcat | `FastVideo/LongCat-Video-VC-Diffusers` | — | [basic_longcat_vc.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_vc.py) |
 | ltx2 | `FastVideo/LTX2-Distilled-Diffusers`<br>`FastVideo/LTX2.3-Distilled-Diffusers`<br>`FastVideo/LTX-2.3-Distilled-Diffusers` | T2V | [basic_ltx2_distilled.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_distilled.py) |
 | ltx2 | `Lightricks/LTX-2.3`<br>`FastVideo/LTX2.3-base`<br>`FastVideo/LTX2.3-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
 | ltx2 | `Lightricks/LTX-2`<br>`FastVideo/LTX2-base`<br>`FastVideo/LTX2-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
@@ -74,9 +67,6 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | sd35 | `stabilityai/stable-diffusion-3.5-medium` | T2I | [basic_sd35_t2i.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_sd35_t2i.py) |
 | stable_audio | `FastVideo/stable-audio-open-1.0-Diffusers` | T2V | [basic_stable_audio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_stable_audio.py) |
 | stable_audio | `FastVideo/stable-audio-open-small-Diffusers` | T2V | [basic_stable_audio_small.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_stable_audio_small.py) |
-| turbodiffusion | `loayrashid/TurboWan2.1-T2V-1.3B-Diffusers` | T2V | [basic_turbodiffusion.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_turbodiffusion.py) |
-| turbodiffusion | `loayrashid/TurboWan2.1-T2V-14B-Diffusers` | T2V | [basic_turbodiffusion_14b.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_turbodiffusion_14b.py) |
-| turbodiffusion | `loayrashid/TurboWan2.2-I2V-A14B-Diffusers` | I2V | [basic_turbodiffusion_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_turbodiffusion_i2v.py) |
 | wan | `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` | T2V | [basic.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic.py) |
 | wan | `Wan-AI/Wan2.1-T2V-14B-Diffusers`<br>`FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers` | T2V | — |
 | wan | `Wan-AI/Wan2.1-I2V-14B-480P-Diffusers` | I2V | — |
@@ -92,7 +82,6 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | wan | `wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers` | T2V | [basic_self_forcing_causal.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal.py) |
 | wan | `rand0nmr/SFWan2.2-T2V-A14B-Diffusers` | T2V | [basic_self_forcing_causal_wan2_2_t2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal_wan2_2_t2v.py) |
 | wan | `FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers` | I2V | [basic_self_forcing_causal_wan2_2_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal_wan2_2_i2v.py) |
-| zimage | `Tongyi-MAI/Z-Image-Turbo` | T2I | [basic_zimage.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_zimage.py) |
 
 **Note (stable_audio)**: the Stable Audio Open pipelines generate audio
 (`StableAudioT2AConfig` / `StableAudioOpenSmallConfig`); they are registered
@@ -168,8 +157,6 @@ optimizations: absence means **untested**, not incompatible.
 | FastWan2.1 T2V 1.3B | `FastVideo/FastWan2.1-T2V-1.3B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ✅ | ⭕ |
 | FastWan2.2 TI2V 5B Full Attn | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers` | 720P | ⭕ | ⭕ | ⭕ | ✅ | ⭕ |
 | Wan2.2 TI2V 5B | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | 720P | ⭕ | ⭕ | ✅ | ⭕ | ⭕ |
-| DreamX-World 5B Cam | `FastVideo/DreamX-World-5B-Cam-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
-| DreamX-World 5B AR | `FastVideo/DreamX-World-5B-Diffusers` | 704px1280p | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Lucy Edit Dev 5B*** | `decart-ai/Lucy-Edit-Dev` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Wan2.2 T2V A14B | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
 | Wan2.2 I2V A14B | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
@@ -179,10 +166,6 @@ optimizations: absence means **untested**, not incompatible.
 | Wan2.1 T2V 14B | `Wan-AI/Wan2.1-T2V-14B-Diffusers` | 480P, 720P | ✅ | ✅ | ✅ | ⭕ | ⭕ |
 | Wan2.1 I2V 480P | `Wan-AI/Wan2.1-I2V-14B-480P-Diffusers` | 480P | ✅ | ✅ | ✅ | ⭕ | ⭕ |
 | Wan2.1 I2V 720P | `Wan-AI/Wan2.1-I2V-14B-720P-Diffusers` | 720P | ✅ | ✅ | ✅ | ⭕ | ⭕ |
-| TurboWan2.1 T2V 1.3B | `loayrashid/TurboWan2.1-T2V-1.3B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
-| TurboWan2.1 T2V 14B | `loayrashid/TurboWan2.1-T2V-14B-Diffusers` | 480P, 720P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
-| TurboWan2.2 I2V A14B | `loayrashid/TurboWan2.2-I2V-A14B-Diffusers` | 480P<br>720P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
-| LongCat T2V 13.6B | `FastVideo/LongCat-Video-T2V-Diffusers` | 480P<br>720P | ❌ | ❌ | ❌ | ⭕ | ✅ |
 | Matrix Game 2.0 Base Distilled | `FastVideo/Matrix-Game-2.0-Base-Distilled-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 GTA Distilled | `FastVideo/Matrix-Game-2.0-GTA-Distilled-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 TempleRun Distilled | `FastVideo/Matrix-Game-2.0-TempleRun-Distilled-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
@@ -250,11 +233,6 @@ listed under [Special requirements](#special-requirements).
 - Full STA pipeline usage is on the archived branch:
   https://github.com/hao-ai-lab/FastVideo/tree/sta_do_not_delete
 - STA currently requires Hopper GPUs (H100s).
-
-### TurboWan2.1 (TurboDiffusion)
-- Uses TurboDiffusionPipeline with RCM scheduler for 1-4 step generation
-- Requires SLA attention backend: `export FASTVIDEO_ATTENTION_BACKEND=SLA_ATTN`
-- Uses `guidance_scale=1.0` (no classifier-free guidance)
 
 ### Matrix Game 2.0
 - Image-to-video game world models with keyboard/mouse control input

@@ -87,7 +87,7 @@ def _load_official_model(device: torch.device, dtype: torch.dtype) -> torch.nn.M
     # TODO: import official class/factory and load real weights strictly.
     # Examples in-tree:
     # - LTX2: SingleGPUModelBuilder(...).build(device=device, dtype=dtype)
-    # - GameCraft: torch.load(...)["module"] -> official_model.load_state_dict(...)
+    # - GEN3C: torch.load(...)["state_dict"] -> official_model.load_state_dict(...)
     # - Oobleck: create_model_from_config(config) + ckpt state_dict
     OfficialClass = _import_or_skip(OFFICIAL_MODULE, OFFICIAL_CLASS)
     model = OfficialClass()  # TODO: pass official config kwargs.

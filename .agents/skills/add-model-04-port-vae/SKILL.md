@@ -51,7 +51,7 @@ posterior behavior, encode/decode output objects, tiling flags, and cropping.
 - Loader path: VAE loaders resolve `_class_name` through `ModelRegistry` and
   load converted component weights from the VAE subdir.
 - Reference examples: `oobleck.py`, `autoencoder_kl.py`, `wanvae.py`,
-  `ltx2vae.py`, and `gamecraftvae.py`.
+  `ltx2vae.py`, and `hunyuanvae.py`.
 - Layer guidance: `fastvideo/layers/AGENTS.md`.
 
 ## Implementation Rules

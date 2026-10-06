@@ -40,4 +40,4 @@ def test_fine_tuning_recipe_constructs(recipe: Path) -> None:
 
 def test_recipe_glob_found_recipes() -> None:
     # Guard against the glob silently matching nothing after a move.
-    assert len(_RECIPES) >= 20
+    assert len(_RECIPES) >= 15

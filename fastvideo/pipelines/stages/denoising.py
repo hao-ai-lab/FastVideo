@@ -195,26 +195,6 @@ class DenoisingStage(PipelineStage):
             },
         )
 
-        camera_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "camera_states": batch.camera_states,
-            },
-        )
-
-        dreamx_y_camera = batch.extra.get("dreamx_y_camera", batch.extra.get("y_camera"))
-        if isinstance(dreamx_y_camera, dict):
-            dreamx_y_camera = {
-                key: value.to(device=local_device, dtype=target_dtype) if torch.is_tensor(value) else value
-                for key, value in dreamx_y_camera.items()
-            }
-        dreamx_camera_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "y_camera": dreamx_y_camera,
-            },
-        )
-
         for key in ("flux2_txt_ids", "flux2_img_ids"):
             value = batch.extra.get(key)
             if torch.is_tensor(value):
@@ -417,8 +397,6 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
-                            **camera_kwargs,
-                            **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
                         )
@@ -461,8 +439,6 @@ class DenoisingStage(PipelineStage):
                                     **image_kwargs,
                                     **neg_cond_kwargs,
                                     **action_kwargs,
-                                    **camera_kwargs,
-                                    **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
                                 )

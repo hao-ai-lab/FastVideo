@@ -188,7 +188,7 @@ KNOWN_VIOLATIONS: dict[str, int] = {
     'fastvideo/tests/train/methods/test_minimax_h3_finetune.py: whole-environ': 2,
     'fastvideo/tests/train/models/test_load_kandinsky5.py: write FASTVIDEO_ATTENTION_BACKEND': 1,
     'fastvideo/tests/training/distill/test_anyflow_smoke.py: whole-environ': 2,
-    'fastvideo/train/entrypoint/train.py: write FASTVIDEO_ATTENTION_BACKEND': 2,
+    'fastvideo/train/entrypoint/train.py: write FASTVIDEO_ATTENTION_BACKEND': 1,
     'fastvideo/utils.py: read <dynamic>': 5,
     'fastvideo/utils.py: write <dynamic>': 1,
     'fastvideo/worker/ray_distributed_executor.py: read <dynamic>': 2,

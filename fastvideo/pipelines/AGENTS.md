@@ -20,15 +20,13 @@ pipelines/
 │   ├── conditioning.py         #   CFG / negative prompt fan-out
 │   ├── denoising.py            #   Standard diffusion loop
 │   ├── sd35_conditioning.py    #   Per-model overrides (named by family)
-│   ├── longcat_*.py            #   LongCat I2V/V2V/refine variants
 │   ├── gen3c_stages.py         #   Gen3C-specific stages
-│   ├── gamecraft_denoising.py  #   GameCraft-specific
 │   └── matrixgame2_denoising.py #  Matrix-Game 2.0-specific
 ├── basic/                      # Per-model end-to-end pipelines
-│   ├── cosmos/, dreamx_world/, flux/, flux_2/, gamecraft/, gen3c/, glm_image/
+│   ├── cosmos/, flux/, flux_2/, gen3c/
 │   ├── hunyuan/, hunyuan15/, hyworld/, kandinsky5/, lingbot_video/, lingbotworld/
-│   ├── lingbotworld2/, longcat/, ltx2/, magi_human/, matrixgame2/, matrixgame3/
-│   ├── minimax_h3/, mmaudio/, sd35/, stable_audio/, turbodiffusion/, wan/, zimage/
+│   ├── lingbotworld2/, ltx2/, magi_human/, matrixgame2/, matrixgame3/
+│   ├── minimax_h3/, mmaudio/, sd35/, stable_audio/, wan/
 │   └── <model>/{<model>_pipeline.py, presets.py, __init__.py}
 ├── preprocess/                 # Data preprocessing pipelines (ltx2, wan, matrixgame2)
 └── training/                   # Training-time pipeline glue
@@ -63,7 +61,7 @@ Reuse `stages/text_encoding.py` if your model takes text → embeddings via a st
 - The model needs a **different ForwardBatch shape** (extra inputs, different output keys).
 - The denoising loop has structural differences (causal, refine-then-denoise, multi-stream).
 
-When forking, keep the file name model-prefixed (`longcat_*`, `gamecraft_*`) so the registry stays grep-able.
+When forking, keep the file name model-prefixed (`gen3c_*`, `matrixgame2_*`) so the registry stays grep-able.
 
 Wan's family-specific stages live in `basic/wan/stages/`; see
 `basic/wan/AGENTS.md`. Shared dense scheduling/CFG stays in `stages/denoising.py`.

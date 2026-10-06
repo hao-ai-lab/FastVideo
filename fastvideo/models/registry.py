@@ -25,18 +25,12 @@ logger = init_logger(__name__)
 _TEXT_TO_VIDEO_DIT_MODELS = {
     "MMAudioTransformer": ("dits", "mmaudio", "MMAudioTransformer"),
     "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
-    "HunyuanGameCraftTransformer3DModel": ("dits", "hunyuangamecraft", "HunyuanGameCraftTransformer3DModel"),
     "HunyuanVideo15Transformer3DModel": ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
     "HYWorldTransformer3DModel": ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("wan", "transformer", "WanTransformer3DModel"),
-    "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
-    "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
     "CausalWanTransformer3DModel": ("wan", "causal_transformer", "CausalWanTransformer3DModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
-    "LongCatVideoTransformer3DModel":
-    ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
-    "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
     "SD3Transformer2DModel": ("dits", "sd3", "SD3Transformer2DModel"),
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
@@ -54,8 +48,6 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("wan", "transformer", "WanTransformer3DModel"),
-    "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
-    "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
     "CausalWanTransformer3DModel": ("wan", "causal_transformer", "CausalWanTransformer3DModel"),
     "LingBotWorld2CausalFastTransformer3DModel": (
         "dits",
@@ -72,8 +64,6 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
 
 # Text-to-image DiT models (2D image generation)
 _TEXT_TO_IMAGE_DIT_MODELS = {
-    "GlmImageTransformer2DModel": ("dits", "glm_image", "GlmImageTransformer2DModel"),
-    "ZImageTransformer2DModel": ("dits", "zimage", "ZImageTransformer2DModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
@@ -88,9 +78,6 @@ _TEXT_ENCODER_MODELS = {
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
     "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
     "Qwen2_5_VLForConditionalGeneration": ("encoders", "reason1", "Reason1TextEncoder"),
-    # Z-Image-Turbo's text_encoder/config.json declares architecture
-    # "Qwen3Model"; route it to the shared Qwen3 encoder (added for Flux2 Klein).
-    "Qwen3Model": ("encoders", "qwen3", "Qwen3ForCausalLM"),
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
     "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
     "Mistral3ForConditionalGeneration": ("encoders", "mistral3", "Mistral3ForConditionalGeneration"),
@@ -111,7 +98,6 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
 
 _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo": ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
-    "AutoencoderKLCausal3D": ("vaes", "gamecraftvae", "GameCraftVAE"),
     "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("wan", "vae", "AutoencoderKLWan"),
@@ -142,7 +128,6 @@ _SCHEDULERS = {
     "FlowUniPCMultistepScheduler": ("schedulers", "scheduling_flow_unipc_multistep", "FlowUniPCMultistepScheduler"),
     "SelfForcingFlowMatchScheduler":
     ("schedulers", "scheduling_self_forcing_flow_match", "SelfForcingFlowMatchScheduler"),
-    "RCMScheduler": ("schedulers", "scheduling_rcm", "RCMScheduler"),
 }
 
 _UPSAMPLERS = {

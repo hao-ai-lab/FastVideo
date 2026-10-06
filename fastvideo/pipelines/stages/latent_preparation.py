@@ -137,12 +137,8 @@ class LatentPreparationStage(PipelineStage):
             if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
         else:
-            # Pre-initialized latents:
-            # - For LongCat refine (refine_from or stage1_video present), we should not re-scale by init_noise_sigma.
-            # - For other models, keep the original behavior.
             latents = latents.to(device)
-            is_longcat_refine = (batch.refine_from is not None) or (batch.stage1_video is not None)
-            if (not is_longcat_refine) and hasattr(self.scheduler, "init_noise_sigma"):
+            if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
 
         # Update batch with prepared latents
