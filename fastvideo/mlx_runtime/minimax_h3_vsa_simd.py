@@ -242,12 +242,14 @@ def _simd_kernel() -> Any | None:
         if not mx.metal.is_available():
             _SIMD_KERNEL_ERROR = "Metal is not available in this MLX build"
             return None
-        # The SIMD kernel compiles on M1 but fails the BF16 reference parity
-        # check on the macOS 15 hosted M1 runner. Keep this opt-in path on
-        # validated newer GPUs and use the reference VSA on M1.
-        device_name = str(mx.metal.device_info().get("device_name", ""))
-        if device_name.startswith("Apple M1"):
-            _SIMD_KERNEL_ERROR = "SIMD VSA does not match the BF16 reference on Apple M1"
+        # The SIMD kernel compiles but fails BF16 parity on the 7 GiB virtual
+        # Metal device in GitHub's M1 runner. Physical M1 devices also use the
+        # reference path until this kernel is validated on that GPU family.
+        device_info = mx.metal.device_info()
+        device_name = str(device_info.get("device_name", ""))
+        memory_size = int(device_info.get("memory_size", 0))
+        if device_name.startswith("Apple M1") or 0 < memory_size <= 8 * 2**30:
+            _SIMD_KERNEL_ERROR = "SIMD VSA BF16 parity is unvalidated on Apple M1 or 8 GiB Metal devices"
             return None
         if not hasattr(mx.fast, "metal_kernel"):
             _SIMD_KERNEL_ERROR = "mx.fast.metal_kernel is not available in this MLX build"

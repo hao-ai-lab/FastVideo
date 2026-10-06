@@ -65,8 +65,8 @@ jobs:
           print("machine:", platform.machine())
           print("processor:", platform.processor())
           print("mlx default device:", mx.default_device())
-          memory_size = mx.metal.device_info().get("memory_size") if mx.metal.is_available() else "metal unavailable"
-          print("mlx memory_size:", memory_size)
+          device_info = mx.metal.device_info() if mx.metal.is_available() else "metal unavailable"
+          print("mlx device_info:", device_info)
           print("torch:", torch.__version__)
           print("torch mps available:", torch.backends.mps.is_available())
           PY
