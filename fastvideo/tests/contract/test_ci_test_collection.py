@@ -159,6 +159,16 @@ def test_merge_comment_has_one_change_aware_trigger_path():
     assert "actions: write" not in merge_jobs
     assert "api.buildkite.com" not in merge_jobs
     assert "workflow_call:" in ready_workflow
+    # Both entry points share one concurrency group, and the newest trigger wins:
+    # a `/merge` call must not queue a second serialized gate run. The group is
+    # job-level so an unrelated `labeled` event (which skips the guarded job)
+    # cannot cancel an in-flight gate and then skip its replacement.
+    workflow_header = ready_workflow.split("\njobs:", maxsplit=1)[0]
+    assert "concurrency:" not in workflow_header
+    trigger_job = ready_workflow.split("\n  trigger:", maxsplit=1)[1]
+    assert "concurrency:" in trigger_job
+    assert "group: merge-gate-${{ inputs.pr_number || github.event.pull_request.number }}" in trigger_job
+    assert "cancel-in-progress: true" in trigger_job
     assert "BUILDKITE_API_TOKEN:\n        required: true" in ready_workflow
     assert "CALLED_PR_NUMBER: ${{ inputs.pr_number }}" in ready_workflow
     assert "Number.isSafeInteger(prNumber)" in ready_workflow

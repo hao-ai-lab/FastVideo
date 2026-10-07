@@ -18,10 +18,6 @@ permissions:
   pull-requests: read
   actions: read
 
-concurrency:
-  group: merge-gate-${{ inputs.pr_number || github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   trigger:
     if: >-
@@ -29,6 +25,14 @@ jobs:
       || (github.event.action == 'labeled' && github.event.label.name == 'ready')
       || github.event.action == 'synchronize'
     runs-on: ubuntu-latest
+    # Job-level concurrency: only this guarded job acquires the group, so an
+    # unrelated `labeled` event (which skips the job) cannot cancel an in-flight
+    # gate and then skip its replacement. The newest real trigger (`ready`,
+    # push, or `/merge`) supersedes the in-flight run, whose Buildkite build the
+    # cancel step below replaces.
+    concurrency:
+      group: merge-gate-${{ inputs.pr_number || github.event.pull_request.number }}
+      cancel-in-progress: true
     # Gate below may wait for cheap checks (up to MAX_WAIT_SECS = 25 min).
     timeout-minutes: 35
     steps:
