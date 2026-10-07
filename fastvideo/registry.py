@@ -177,6 +177,33 @@ def get_model_short_name(model_id: str) -> str:
     return model_id
 
 
+def _longest_common_substring_length(left: str, right: str) -> int:
+    """Length of the longest substring shared by ``left`` and ``right``."""
+    if not left or not right:
+        return 0
+    previous = [0] * (len(right) + 1)
+    longest = 0
+    for left_char in left:
+        current = [0] * (len(right) + 1)
+        for index, right_char in enumerate(right, start=1):
+            if left_char == right_char:
+                current[index] = previous[index - 1] + 1
+                longest = max(longest, current[index])
+        previous = current
+    return longest
+
+
+def _pattern_specificity(model_id: str, path_lower: str) -> int:
+    """How specifically ``path_lower`` points at ``model_id``: the longest
+    substring it shares with any of the model's registered HF paths (short
+    names). Unlike plain containment this still scores truncated or
+    re-hyphenated local directory names (e.g. ``ltx-2.3-distilled``). An
+    entry registered only through detectors scores 0."""
+    return max((_longest_common_substring_length(path_lower, get_model_short_name(registered_path.lower()))
+                for registered_path, mapped_id in _MODEL_HF_PATH_TO_NAME.items() if mapped_id == model_id),
+               default=0)
+
+
 def _resolve_class_name(config: dict[str, Any]) -> str | None:
     """Read `_class_name` from a model_index.json/component config dict.
 
@@ -235,12 +262,25 @@ def _get_config_info(
 
     if matched_model_names:
         if len(matched_model_names) > 1:
-            logger.warning(
-                "Multiple models matched for path '%s': %s. Using the first matched: '%s'.",
-                model_path,
-                matched_model_names,
-                matched_model_names[0],
-            )
+            # The first detector match always wins: registration order is the
+            # supported precedence (dedicated entries register before broad
+            # family ones, e.g. LTX-2 distilled before LTX-2 base), even when
+            # a path detector and a class-name detector disagree.
+            # Specificity only decides whether that choice is ambiguous. When
+            # the first match shares more of the query path with its
+            # registered HF paths than every other match does (e.g. an
+            # LTX-2.3 distilled directory that the LTX-2 base detector also
+            # claims through the shared pipeline class name), resolve
+            # silently. Otherwise warn.
+            path_lower = model_path.lower()
+            first_score, *other_scores = [_pattern_specificity(name, path_lower) for name in matched_model_names]
+            if first_score <= max(other_scores):
+                logger.warning(
+                    "Multiple models matched for path '%s': %s. Using the first matched: '%s'.",
+                    model_path,
+                    matched_model_names,
+                    matched_model_names[0],
+                )
         model_id = matched_model_names[0]
         return _CONFIG_REGISTRY.get(model_id)
 

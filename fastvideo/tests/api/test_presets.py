@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
+from pathlib import Path
 
 import pytest
 
@@ -64,6 +65,32 @@ def _make_preset(
         stage_schemas=stage_schemas,
         **kwargs,
     )
+
+
+def _write_minimal_model_index(model_dir: Path, class_name: str) -> None:
+    """Minimal on-disk diffusers repo so registry resolution can read ``_class_name``."""
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "transformer").mkdir(exist_ok=True)
+    (model_dir / "model_index.json").write_text(
+        json.dumps({
+            "_class_name": class_name,
+            "_diffusers_version": "0.39.0"
+        }),
+        encoding="utf-8",
+    )
+
+
+def _record_registry_warnings(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    """Capture ``fastvideo.registry`` warnings.
+
+    The ``fastvideo`` logger sets ``propagate = False``, so ``caplog`` never
+    sees these records.
+    """
+    from fastvideo import registry
+
+    warnings: list[tuple] = []
+    monkeypatch.setattr(registry.logger, "warning", lambda *args, **kwargs: warnings.append(args))
+    return warnings
 
 
 # -------------------------------------------------------------------
@@ -326,6 +353,19 @@ class TestWanPresets:
         family = get_model_family("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
         assert family == "wan"
 
+    def test_more_specific_later_detector_match_keeps_first_and_warns(self, tmp_path, monkeypatch) -> None:
+        """A later detector match that shares more of the path never overrides
+        registration order (test_wan_definitions pins that resolution), so the
+        choice stays ambiguous and still warns."""
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+        warnings = _record_registry_warnings(monkeypatch)
+        model_dir = tmp_path / "lucy-edit-custom"
+        _write_minimal_model_index(model_dir, "WanPipeline")
+        assert get_preset_selection(str(model_dir)) == ("wan_t2v_1_3b", "wan")
+        assert len(warnings) == 1
+        assert "Multiple models matched" in warnings[0][0]
+
 
 # -------------------------------------------------------------------
 # LTX2 preset integration
@@ -385,6 +425,38 @@ class TestLtx2Presets:
         with pytest.raises(ConfigValidationError):
             validate_stage_overrides(p, {"refine": {"bogus_field": 1}})
 
+    @pytest.mark.parametrize(
+        "directory_name",
+        ("ltx-2.3-distilled", "ltx2.3-distilled", "LTX-2.3-Distilled-Diffusers-ckpt"),
+    )
+    def test_ltx23_distilled_local_dir_resolves_to_distilled(
+        self,
+        tmp_path,
+        monkeypatch,
+        directory_name: str,
+    ) -> None:
+        """Truncated/re-hyphenated local dirs must not be shadowed by the base
+        entry, whose detector fires on the shared pipeline class name."""
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+        warnings = _record_registry_warnings(monkeypatch)
+        model_dir = tmp_path / directory_name
+        _write_minimal_model_index(model_dir, "LTX2Pipeline")
+        assert get_preset_selection(str(model_dir)) == ("ltx2_distilled", "ltx2")
+        assert warnings == []
+
+    def test_ltx2_equally_specific_local_dir_still_warns(self, tmp_path, monkeypatch) -> None:
+        """Equally specific matches stay ambiguous: warn, keep registration order."""
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+        warnings = _record_registry_warnings(monkeypatch)
+        model_dir = tmp_path / "ltx2_distilled_diffusers"
+        _write_minimal_model_index(model_dir, "LTX2Pipeline")
+        assert get_preset_selection(str(model_dir)) == ("ltx2_distilled", "ltx2")
+        assert len(warnings) == 1
+        assert "Multiple models matched" in warnings[0][0]
+        assert str(model_dir) in warnings[0][1]
+
 
 # -------------------------------------------------------------------
 # Hunyuan preset integration
@@ -440,6 +512,20 @@ class TestHunyuan15Presets:
         # Invalid: height not in sr allowed_overrides.
         with pytest.raises(ConfigValidationError):
             validate_stage_overrides(p, {"sr": {"height": 1080}})
+
+    def test_hunyuan15_local_dir_resolves_to_15(self, tmp_path) -> None:
+        """A truncated local dir must not fall back to the generic Hunyuan entry.
+
+        Both entries share the same amount of text with this name, so the tie
+        is broken by registration order, which keeps the dedicated entry.
+        """
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig
+        from fastvideo.registry import get_pipeline_config_cls_from_name, get_preset_selection
+        model_dir = tmp_path / "hunyuanvideo15-480p_t2v"
+        _write_minimal_model_index(model_dir, "HunyuanVideoPipeline")
+        assert get_pipeline_config_cls_from_name(str(model_dir)) is Hunyuan15T2V480PConfig
+        assert get_preset_selection(str(model_dir)) == ("hunyuan15_t2v_480p", "hunyuan15")
 
 
 # -------------------------------------------------------------------
