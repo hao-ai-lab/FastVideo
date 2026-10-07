@@ -59,7 +59,13 @@ def _run_build(tmp_path: Path, capability: str, cuda_release: str) -> tuple[subp
 
 @pytest.mark.parametrize(
     "capability,torch_arch,cmake_arch",
-    [("9.0", "9.0a", "90a"), ("12.0", "12.0a", "120"), ("12.1", "12.1a", "121")],
+    [
+        ("9.0", "9.0a", "90a"),
+        ("10.0", "10.0a", "100"),
+        ("10.3", "10.3a", "103"),
+        ("12.0", "12.0a", "120"),
+        ("12.1", "12.1a", "121"),
+    ],
 )
 def test_build_script_maps_architecture_specific_targets(
     tmp_path: Path, capability: str, torch_arch: str, cmake_arch: str

@@ -28,7 +28,7 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 |---|---|---|---|---|---|---|
 | PyPI wheels (`.github/workflows/publish-kernel.yml`) | version bump in `fastvideo-kernel/pyproject.toml` on main, or manual dispatch | x86_64 cu126 | `9.0a` | ON | AUTO | — (CUDA < 12.8) |
 | | | x86_64 cu130 | `9.0a;10.0a;12.0a` | ON | AUTO | ON |
-| | | aarch64 cu130 | `10.0a;12.0a;12.1a` | — | AUTO | ON |
+| | | aarch64 cu130 | `10.0a;10.3a;12.0a;12.1a` | — | AUTO | ON |
 | Docker images `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev` (`.github/workflows/infra-build-image.yml`) | `docker/Dockerfile` changes on main, or manual dispatch | amd64 cuda12.6.3 + cuda13.0.0 | `9.0a` | ON | AUTO | — |
 | | | arm64 cuda12.6.3 (GH200) | `9.0a` | — (aarch64) | AUTO | — |
 | | | arm64 cuda13.0.0 (GB10 / DGX Spark) | `12.1` | — | AUTO | — |

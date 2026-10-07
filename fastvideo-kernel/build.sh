@@ -138,7 +138,10 @@ if [ "${GPU_BACKEND}" = "CUDA" ]; then
     # Respect explicit overrides.
     if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
         case "${cc_major}.${cc_minor}" in
-            9.0|12.0|12.1)
+            # 10.0/10.3 preserve main's data-center Blackwell mapping (VSA
+            # sm_100a/sm_103a arch-conditional instructions need the `a` target);
+            # 9.0/12.0/12.1 as before.
+            9.0|10.0|10.3|12.0|12.1)
                 # Architecture-specific instructions require the `a` target.
                 export TORCH_CUDA_ARCH_LIST="${cc_major}.${cc_minor}a"
                 ;;
