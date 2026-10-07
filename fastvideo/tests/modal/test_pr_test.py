@@ -410,3 +410,22 @@ def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
     eval_source = (Path(__file__).resolve().parent / "pr_test.py").read_text()
     assert "bash .buildkite/scripts/lanes/eval.sh" in eval_source
     assert 'install_command=\'uv pip install -e ".[test,eval-full]"\'' in eval_source
+
+
+def test_run_performance_tests_collects_only_benchmark_gate(monkeypatch):
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_performance_tests()
+
+    assert len(commands) == 1
+    command = commands[0]
+    assert "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs;" in command
+    assert "pytest ./fastvideo/tests/performance -vs;" not in command
+
+
+def test_performance_lane_script_collects_only_benchmark_gate():
+    lane_script = (Path(__file__).resolve().parents[3] / ".buildkite/scripts/lanes/performance.sh").read_text()
+    assert "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs" in lane_script
+    assert "pytest ./fastvideo/tests/performance -vs" not in lane_script
