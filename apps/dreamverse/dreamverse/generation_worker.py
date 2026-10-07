@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dreamverse.config import MODEL_CONFIG
 from dreamverse.generation_contracts import GenerationBackend, StepResult
+from dreamverse.generation_inputs import GenerationInputs
 
 
 def _create_generation_backend(backend_name: str, gpu_id: int) -> GenerationBackend:
@@ -80,6 +81,7 @@ class VideoGenerationWorker:
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        generation_inputs: GenerationInputs | None = None,
     ) -> StepResult:
         """Generate one segment through the selected model backend."""
         return self._require_backend().generate_step(
@@ -87,6 +89,7 @@ class VideoGenerationWorker:
             segment_idx,
             image_path,
             reset_conditioning,
+            generation_inputs=generation_inputs,
         )
 
     def warmup(self, prompt: str) -> dict[str, float]:

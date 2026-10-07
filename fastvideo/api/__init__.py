@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+from typing import TYPE_CHECKING, Any
+
 from fastvideo.api.schema import (
     CompileConfig,
     ComponentConfig,
@@ -56,6 +58,20 @@ from fastvideo.api.results import (
 )
 from fastvideo.api.sampling_param import SamplingParam
 
+if TYPE_CHECKING:
+    from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3Reference as MiniMaxH3Reference
+
+
+def __getattr__(name: str) -> Any:
+    """Load model-specific request types only when callers explicitly use them."""
+    if name == "MiniMaxH3Reference":
+        from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3Reference
+
+        globals()[name] = MiniMaxH3Reference
+        return MiniMaxH3Reference
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "CompileConfig",
     "ComponentConfig",
@@ -68,6 +84,7 @@ __all__ = [
     "GeneratorConfig",
     "GpuPoolConfig",
     "InputConfig",
+    "MiniMaxH3Reference",
     "OffloadConfig",
     "OutputConfig",
     "ParallelismConfig",

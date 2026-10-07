@@ -161,6 +161,11 @@ FAMILY_COVERAGE = (
         ("test_glm_image_similarity.py", ),
     ),
     FamilyCoverage(
+        re.compile(r"(^|[/_.-])hunyuan(video)?15([a-z0-9_-]*)([/_.-]|$)"),
+        (),
+        ("test_hunyuan15_i2v_similarity.py", ),
+    ),
+    FamilyCoverage(
         re.compile(r"(^|[/_.-])kandinsky[_-]?5([/_.-]|$)"),
         ("test_kandinsky5.py", ),
         ("test_kandinsky5_similarity.py", ),

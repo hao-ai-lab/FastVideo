@@ -1298,6 +1298,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
         ALL_PRESETS as LTX2_PRESETS, )
+    from fastvideo.pipelines.basic.magi_human.presets import (
+        ALL_PRESETS as MAGI_HUMAN_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame2.presets import (
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
@@ -1337,6 +1339,7 @@ def _register_presets() -> None:
         LINGBOTWORLD_FAST_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,
+        MAGI_HUMAN_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
         MINIMAX_H3_PRESETS,
