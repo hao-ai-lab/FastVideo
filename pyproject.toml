@@ -176,6 +176,21 @@ test = [
 # judge.* metrics (eval-judge) call a remote API and need a key, so they
 # are opt-in and intentionally kept out of the default [eval] set.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
+eval-vqeval = [
+    # MediaPipe is deliberately not declared. VQeval's anatomical-error
+    # detector wants the legacy mp.solutions API, which only exists in
+    # mediapipe 0.10.x, and every 0.10.x pins protobuf<5 (0.10.21:
+    # protobuf<5,>=4.25.3) -- unsatisfiable next to the base
+    # protobuf>=5.28.3 pin above. mediapipe 1.x dropped mp.solutions.
+    # Upstream's artifact_detection wraps its mediapipe import in
+    # try/except and reports zero anatomical errors without it.
+    # cv2 comes from the base opencv-python pin; declaring
+    # opencv-contrib-python here too would install two providers of the
+    # cv2 package (mixed cv2 trees on version skew). Upstream's
+    # cv2.quality BRISQUE path falls back to pyiqa when contrib is absent.
+    "open_clip_torch>=2.24.0",
+    "pyiqa>=0.1.10",
+]
 eval-physics-iq = []
 eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
 eval-judge = ["google-genai"]
@@ -186,7 +201,7 @@ eval = [
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
 eval-fast-decode = ["decord"]
-eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
+eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "fastvideo[eval-vqeval]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
@@ -273,7 +288,9 @@ skip = "./data,./wandb,apps/fastvideo_studio/package-lock.json,apps/performance_
 # "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
 # Early Drop). codespell lowercases ignore-words entries, so the single
 # lowercase form silences all case variants.
-ignore-words-list = "tread,passt,dout"
+# "padd" is the literal value of Wan2.2-S2V's ``framepack_drop_mode`` in the
+# published checkpoint config; it must be spelled exactly to match.
+ignore-words-list = "tread,passt,dout,padd"
 
 [tool.ruff]
 # Allow lines to be as long as 120.
