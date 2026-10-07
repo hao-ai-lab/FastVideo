@@ -13,7 +13,10 @@ generator = VideoGenerator.from_pretrained(
 ```
 
 One node uses the multiprocessing executor (`execution_backend: mp`, the
-default). Two machines — for example two DGX Sparks, one GPU each — need Ray:
+default). With `num_gpus=1`, `mp` automatically selects the in-process (`uni`)
+executor so weights load in the current process. Set `execution_backend: uni`
+to force that path. Two machines — for example two DGX Sparks, one GPU each —
+need Ray:
 
 ```yaml
 generator:
