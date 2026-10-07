@@ -74,6 +74,11 @@ training:
 
   model:
     enable_gradient_checkpointing_type: full
+    # Regional fullgraph compile. Requires a compile-safe attention path
+    # (FA2, FA4 via FASTVIDEO_FA4=1, or TORCH_SDPA). On flash-attn 3
+    # machines the loader auto-disables this with a warning — or use
+    # dmd2_t2v_fa3.yaml, which turns it off explicitly.
+    enable_torch_compile: true
 
 callbacks:
   grad_clip:

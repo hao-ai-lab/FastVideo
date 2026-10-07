@@ -25,6 +25,7 @@ from fastvideo.pipelines.basic.ltx2.stages.ltx2_image_conditioning import (LTX2_
                                                                            LTX2_VIDEO_DENOISE_MASK_KEY,
                                                                            apply_ltx2_gaussian_noiser,
                                                                            post_process_ltx2_denoised)
+from fastvideo.pipelines.basic.ltx2.stages.ltx2_latent_preparation import _randn_ltx2_video_latents
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.logger import init_logger
@@ -43,6 +44,7 @@ MAX_SHIFT_ANCHOR = 4096
 # Official distilled sigma schedule (8 denoising steps)
 # From LTX-2/packages/ltx-pipelines/src/ltx_pipelines/utils/constants.py
 DISTILLED_SIGMA_VALUES = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0]
+ANCESTRAL_NOISE_SEED_OFFSET = 10000
 
 logger = init_logger(__name__)
 
@@ -100,6 +102,24 @@ def _ltx2_sigmas(
     return sigmas
 
 
+def _ltx2_first_frame_keyframes_mask(
+    *,
+    batch_size: int,
+    token_count: int,
+    latent_frames: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Mark the target's first causal latent frame, matching LTX-2.5."""
+    if latent_frames < 1 or token_count % latent_frames != 0:
+        raise ValueError(
+            "LTX-2 keyframe mask requires a positive latent frame count that divides the video token count: "
+            f"tokens={token_count}, frames={latent_frames}")
+    tokens_per_frame = token_count // latent_frames
+    mask = torch.zeros((batch_size, token_count, 1), device=device, dtype=torch.float32)
+    mask[:, :tokens_per_frame] = 1.0
+    return mask
+
+
 def _distilled_subset_sigmas(
     steps: int,
     device: torch.device,
@@ -149,6 +169,45 @@ def _distilled_subset_sigmas(
     subset_indices = torch.tensor(best_indices, dtype=torch.long, device=device)
     subset_sigmas = base_sigmas.index_select(0, subset_indices)
     return subset_sigmas, list(best_indices)
+
+
+def _ltx2_euler_ancestral_step(
+    sample: torch.Tensor,
+    denoised_sample: torch.Tensor,
+    sigma: torch.Tensor,
+    sigma_next: torch.Tensor,
+    noise: torch.Tensor | None,
+    *,
+    eta: float = 1.0,
+    s_noise: float = 1.0,
+) -> torch.Tensor:
+    """Apply the official rectified-flow ancestral Euler update.
+
+    LTX-2.5 distilled generation advances to an intermediate
+    ``sigma_down`` and then re-noises to ``sigma_next`` while preserving the
+    signal/noise variance. This is intentionally not the VE/DDIM ancestral
+    formula used by conventional Euler schedulers.
+    """
+    sigma = sigma.to(device=sample.device, dtype=torch.float32)
+    sigma_next = sigma_next.to(device=sample.device, dtype=torch.float32)
+    if bool(sigma_next == 0):
+        return denoised_sample.to(sample.dtype)
+    if eta > 0 and noise is None:
+        raise ValueError("LTX-2 ancestral Euler sampling requires noise when eta > 0.")
+
+    sample_float = sample.float()
+    denoised_float = denoised_sample.float()
+    downstep_ratio = 1.0 + (sigma_next / sigma - 1.0) * eta
+    sigma_down = sigma_next * downstep_ratio
+
+    sigma_down_ratio = sigma_down / sigma
+    sample_next = sigma_down_ratio * sample_float + (1.0 - sigma_down_ratio) * denoised_float
+    if eta > 0:
+        alpha_next = 1.0 - sigma_next
+        alpha_down = 1.0 - sigma_down
+        renoise_coeff = (sigma_next**2 - sigma_down**2 * alpha_next**2 / alpha_down**2).clamp(min=0).sqrt()
+        sample_next = ((alpha_next / alpha_down) * sample_next + noise.float() * s_noise * renoise_coeff)
+    return sample_next.to(sample.dtype)
 
 
 class LTX2DenoisingStage(PipelineStage):
@@ -272,8 +331,8 @@ class LTX2DenoisingStage(PipelineStage):
                 )
                 logger.info("[LTX2] Using computed sigma schedule, "
                             "num_inference_steps=%s", num_inference_steps)
+        video_shape = VideoLatentShape.from_torch_shape(latents.shape)
         if hasattr(self.transformer, "patchifier"):
-            video_shape = VideoLatentShape.from_torch_shape(latents.shape)
             token_count = self.transformer.patchifier.get_token_count(video_shape)
         else:
             token_count = 1
@@ -282,6 +341,12 @@ class LTX2DenoisingStage(PipelineStage):
             (latents.shape[0], token_count, 1),
             device=latents.device,
             dtype=torch.float32,
+        )
+        keyframes_mask = _ltx2_first_frame_keyframes_mask(
+            batch_size=latents.shape[0],
+            token_count=token_count,
+            latent_frames=video_shape.frames,
+            device=latents.device,
         )
         if video_denoise_mask is not None:
             patchifier = getattr(self.transformer, "patchifier", None)
@@ -379,7 +444,7 @@ class LTX2DenoisingStage(PipelineStage):
                         audio_shape.channels,
                         audio_shape.mel_bins,
                     ).permute(0, 2, 1, 3).contiguous()
-                if audio_latent_path:
+                if audio_latent_path and fastvideo_args.is_output_rank:
                     self._save_audio_latents(audio_latent_path, audio_latents)
             audio_timestep_template = torch.ones(
                 (latents.shape[0], audio_shape.frames, 1),
@@ -457,6 +522,18 @@ class LTX2DenoisingStage(PipelineStage):
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
+        use_ancestral_sampler = bool(batch.ltx2_use_ancestral_sampler and self.sigmas_override is None)
+        ancestral_generator = None
+        if use_ancestral_sampler:
+            if batch.seed is None:
+                raise ValueError("LTX-2 ancestral sampling requires an explicit seed.")
+            ancestral_generator = torch.Generator(
+                device=latents.device).manual_seed(int(batch.seed) + ANCESTRAL_NOISE_SEED_OFFSET)
+            logger.info(
+                "[LTX2] Using official ancestral Euler stage-1 sampler "
+                "(eta=1, s_noise=1, seed_offset=%d)",
+                ANCESTRAL_NOISE_SEED_OFFSET,
+            )
         # Hint runtime FP4 layer gating (single shared transformer path):
         # stage-1 denoising uses "base", stage-2 refine uses "refine".
         batch.extra["ltx2_fp4_stage_profile"] = ("refine" if self.sigmas_override is not None else "base")
@@ -474,6 +551,9 @@ class LTX2DenoisingStage(PipelineStage):
         vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder() if use_vsa else None)
 
         for step_index in tqdm(range(len(sigmas) - 1)):
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             sigma = sigmas[step_index]
             sigma_next = sigmas[step_index + 1]
             # Per-sample sigma for LTX-2.3 cross-attention AdaLN prompt
@@ -513,6 +593,7 @@ class LTX2DenoisingStage(PipelineStage):
                         audio_timestep=audio_timestep,
                         video_sigma=sigma_batch,
                         audio_sigma=sigma_batch,
+                        keyframes_mask=keyframes_mask,
                         video_position_offset_sec=video_position_offset_sec,
                     )
                 if isinstance(pos_outputs, tuple):
@@ -542,6 +623,7 @@ class LTX2DenoisingStage(PipelineStage):
                                 audio_timestep=audio_timestep,
                                 video_sigma=sigma_batch,
                                 audio_sigma=sigma_batch,
+                                keyframes_mask=keyframes_mask,
                                 video_position_offset_sec=video_position_offset_sec,
                             )
                         if isinstance(neg_outputs, tuple):
@@ -563,6 +645,7 @@ class LTX2DenoisingStage(PipelineStage):
                                 audio_timestep=audio_timestep,
                                 video_sigma=sigma_batch,
                                 audio_sigma=sigma_batch,
+                                keyframes_mask=keyframes_mask,
                                 skip_cross_modal_attn=True,
                                 video_position_offset_sec=video_position_offset_sec,
                             )
@@ -585,6 +668,7 @@ class LTX2DenoisingStage(PipelineStage):
                                 audio_timestep=audio_timestep,
                                 video_sigma=sigma_batch,
                                 audio_sigma=sigma_batch,
+                                keyframes_mask=keyframes_mask,
                                 skip_video_self_attn_blocks=(stg_blocks_video if do_stg_video else None),
                                 skip_audio_self_attn_blocks=(stg_blocks_audio if do_stg_audio else None),
                                 video_position_offset_sec=video_position_offset_sec,
@@ -638,11 +722,86 @@ class LTX2DenoisingStage(PipelineStage):
             )
             dt = sigma_next - sigma
             with _nvtx_range("ltx2.denoise.scheduler_update"):
-                velocity = ((latents.float() - pos_denoised.float()) / sigma_value).to(latents.dtype)
-                latents = (latents.float() + velocity.float() * dt).to(latents.dtype)
-                if pos_audio is not None and audio_latents is not None:
-                    audio_velocity = ((audio_latents.float() - pos_audio.float()) / sigma_value).to(audio_latents.dtype)
-                    audio_latents = (audio_latents.float() + audio_velocity.float() * dt).to(audio_latents.dtype)
+                if use_ancestral_sampler:
+                    assert ancestral_generator is not None
+                    # Match the official joint-AV random stream: video draws
+                    # first, then audio, from one seed+10000 generator. The
+                    # official loop draws on the patchified latent state, so
+                    # sample in token order and unpatchify back to the native
+                    # layout (same order as the initial latent draw).
+                    video_noise = None
+                    audio_noise = None
+                    if bool(sigma_next != 0):
+                        video_noise = _randn_ltx2_video_latents(
+                            shape=tuple(latents.shape),
+                            transformer=self.transformer,
+                            generator=ancestral_generator,
+                            device=latents.device,
+                            dtype=latents.dtype,
+                        )
+                        if pos_audio is not None and audio_latents is not None:
+                            audio_patchifier = getattr(self.transformer, "audio_patchifier", None)
+                            if audio_patchifier is not None:
+                                audio_noise_shape = AudioLatentShape.from_torch_shape(audio_latents.shape)
+                                audio_patch_shape = (
+                                    audio_noise_shape.batch,
+                                    audio_noise_shape.frames,
+                                    audio_noise_shape.channels * audio_noise_shape.mel_bins,
+                                )
+                                audio_noise_patch = torch.randn(
+                                    audio_patch_shape,
+                                    generator=ancestral_generator,
+                                    device=audio_latents.device,
+                                    dtype=audio_latents.dtype,
+                                )
+                                audio_noise = audio_patchifier.unpatchify(audio_noise_patch, audio_noise_shape)
+                            else:
+                                audio_noise = torch.randn(
+                                    audio_latents.shape,
+                                    generator=ancestral_generator,
+                                    device=audio_latents.device,
+                                    dtype=audio_latents.dtype,
+                                )
+                    latents = _ltx2_euler_ancestral_step(
+                        latents,
+                        pos_denoised,
+                        sigma,
+                        sigma_next,
+                        video_noise,
+                    )
+                    if pos_audio is not None and audio_latents is not None:
+                        audio_latents = _ltx2_euler_ancestral_step(
+                            audio_latents,
+                            pos_audio,
+                            sigma,
+                            sigma_next,
+                            audio_noise,
+                        )
+                    # Re-apply clean conditioning after stochastic noise.
+                    # Skipped on the terminal step (sigma_next == 0): the
+                    # denoised output is already mask-corrected above and the
+                    # official loop does not re-apply the blend there.
+                    if bool(sigma_next != 0):
+                        if video_clean_latent is not None and video_denoise_mask is not None:
+                            latents = post_process_ltx2_denoised(
+                                denoised=latents,
+                                denoise_mask=video_denoise_mask,
+                                clean_latent=video_clean_latent,
+                            )
+                        if (audio_clean_latent is not None and audio_denoise_mask is not None
+                                and audio_latents is not None):
+                            audio_latents = post_process_ltx2_denoised(
+                                denoised=audio_latents,
+                                denoise_mask=audio_denoise_mask,
+                                clean_latent=audio_clean_latent,
+                            )
+                else:
+                    velocity = ((latents.float() - pos_denoised.float()) / sigma_value).to(latents.dtype)
+                    latents = (latents.float() + velocity.float() * dt).to(latents.dtype)
+                    if pos_audio is not None and audio_latents is not None:
+                        audio_velocity = ((audio_latents.float() - pos_audio.float()) / sigma_value).to(
+                            audio_latents.dtype)
+                        audio_latents = (audio_latents.float() + audio_velocity.float() * dt).to(audio_latents.dtype)
 
         batch.latents = latents
         if (batch.return_continuation_state and self.sigmas_override is not None):

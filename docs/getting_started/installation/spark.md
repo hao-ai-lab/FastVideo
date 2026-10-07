@@ -58,7 +58,7 @@ With no GPU visible the kernel build can't probe the arch and `auto` can't detec
 the driver — name both explicitly:
 
 ```bash
-UV_TORCH_BACKEND=cu130 TORCH_CUDA_ARCH_LIST=12.1 uv pip install -e .
+UV_TORCH_BACKEND=cu130 TORCH_CUDA_ARCH_LIST=12.1a uv pip install -e .
 ```
 
 ## Verify the install
@@ -128,8 +128,8 @@ uv pip install "https://github.com/mjun0812/flash-attention-prebuild-wheels/rele
 |---|---|
 | `Could NOT find Python (missing: ... Development.Module)` | venv built from system Python without headers. Recreate with `--python-preference only-managed` (add `--clear` to reuse the path), or `sudo apt install python3.12-dev`. |
 | kernel build can't find cutlass headers | Submodules not initialised — run the `git submodule update` step. |
-| `fastvideo-kernel: could not determine the target CUDA architecture` | The build couldn't see a GPU and no arch was given. Build on the Spark itself, or pass `TORCH_CUDA_ARCH_LIST=12.1` (see [Building without a visible GPU](#building-without-a-visible-gpu-ci--docker)). |
-| `nvcc fatal: Unsupported gpu architecture 'compute_121'` | `nvcc` older than CUDA 12.9/13. Confirm `nvcc --version` is 13.x and `CUDACXX=/usr/local/cuda/bin/nvcc`. |
+| `fastvideo-kernel: could not determine the target CUDA architecture` | The build couldn't see a GPU and no arch was given. Build on the Spark itself, or pass `TORCH_CUDA_ARCH_LIST=12.1a` (see [Building without a visible GPU](#building-without-a-visible-gpu-ci--docker)). |
+| `sm_121a requires CUDA Toolkit 13.0+` | Confirm `nvcc --version` is 13.x and `CUDACXX=/usr/local/cuda/bin/nvcc`; architecture-specific sm_120a code cannot run on sm_121. |
 | `ninja: command not found` (manual build only) | `uv pip install scikit-build-core cmake ninja setuptools wheel`. |
 
 If you hit other issues, please open an issue on our
@@ -143,6 +143,9 @@ Installed and verified? See [DGX Spark: Performance & Tuning](spark_performance.
 for which models are practical on the GB10, what makes them faster, and what
 won't help on this hardware (and why) — so you don't spend a night tuning knobs
 that can't move here.
+
+For the eight-forward FastH3 V2 NVFP4 stack with a trimmed encoder and light
+VAE, use the [one-Spark resident recipe](spark_performance.md#fasth3-v2-nvfp4-on-one-spark).
 
 Two Sparks with QSFP cables: [Pair two NVIDIA DGX Sparks](spark_pair.md) for
 one FastH3 clip across both GPUs (`sp_size=2` over Ray). Copy-paste commands

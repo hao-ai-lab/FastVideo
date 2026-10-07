@@ -18,6 +18,7 @@ from fastvideo.train.utils.training_config import (
     DistributedConfig,
     ModelTrainingConfig,
     OptimizerConfig,
+    PerformanceConfig,
     TrackerConfig,
     TrainingLoopConfig,
 )
@@ -343,7 +344,8 @@ def _build_training_config(
 
     ``preprocessed_data_type`` selects the dataloader's tensor contract:
     ``t2v`` carries video and text, ``t2va`` carries synchronized video,
-    audio, and text, and ``text_only`` carries prompt conditioning.
+    audio, and text, ``text_only`` carries prompt conditioning, and
+    ``mmaudio_features`` carries cached MMAudio V2A features.
     """
     d = dict(t.get("distributed", {}) or {})
     da = dict(t.get("data", {}) or {})
@@ -351,6 +353,7 @@ def _build_training_config(
     lo = dict(t.get("loop", {}) or {})
     ck = dict(t.get("checkpoint", {}) or {})
     tr = dict(t.get("tracker", {}) or {})
+    perf = dict(t.get("performance", {}) or {})
     vs = dict(t.get("vsa", {}) or {})
     m = dict(t.get("model", {}) or {})
 
@@ -377,13 +380,26 @@ def _build_training_config(
         data_path = str(raw_data_path)
 
     preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
-    if preprocessed_data_type not in {"t2v", "t2va", "text_only"}:
+    if preprocessed_data_type not in {"t2v", "t2va", "text_only", "mmaudio_features"}:
         raise ValueError("training.data.preprocessed_data_type must be one of "
-                         "{'t2v', 't2va', 'text_only'}, got "
+                         "{'t2v', 't2va', 'text_only', 'mmaudio_features'}, got "
                          f"{preprocessed_data_type!r}")
+
+    peak_tflops = get_optional_float(
+        perf,
+        "peak_tflops_per_gpu",
+        where="training.performance.peak_tflops_per_gpu",
+    )
+    if peak_tflops is not None and peak_tflops <= 0.0:
+        raise ValueError("training.performance.peak_tflops_per_gpu must be "
+                         f"> 0, got {peak_tflops}")
+
+    from fastvideo.train.utils.distributed_strategy import (
+        normalize_distributed_strategy, )
 
     return TrainingConfig(
         distributed=DistributedConfig(
+            strategy=normalize_distributed_strategy(str(d.get("strategy", "fsdp") or "fsdp")),
             num_gpus=num_gpus,
             tp_size=int(d.get("tp_size", 1) or 1),
             sp_size=int(d.get("sp_size", num_gpus) or num_gpus),
@@ -406,12 +422,16 @@ def _build_training_config(
         optimizer=OptimizerConfig(
             learning_rate=float(o.get("learning_rate", 0.0) or 0.0),
             betas=betas,
+            eps=float(o.get("eps", 1e-8) or 1e-8),
             weight_decay=float(o.get("weight_decay", 0.0) or 0.0),
             lr_scheduler=str(o.get("lr_scheduler", "constant") or "constant"),
             lr_warmup_steps=int(o.get("lr_warmup_steps", 0) or 0),
             lr_num_cycles=int(o.get("lr_num_cycles", 0) or 0),
             lr_power=float(o.get("lr_power", 0.0) or 0.0),
             min_lr_ratio=float(o.get("min_lr_ratio", 0.5) or 0.5),
+            lr_milestones=tuple(int(step) for step in (o.get("lr_milestones", []) or [])),
+            lr_gamma=float(o.get("lr_gamma", 0.1) or 0.1),
+            fused=bool(o.get("fused", False)),
         ),
         loop=TrainingLoopConfig(
             max_train_steps=int(lo.get("max_train_steps", 0) or 0),
@@ -429,6 +449,10 @@ def _build_training_config(
             project_name=str(tr.get("project_name", "fastvideo") or "fastvideo"),
             run_name=str(tr.get("run_name", "") or ""),
         ),
+        performance=PerformanceConfig(
+            enabled=bool(perf.get("enabled", True)),
+            peak_tflops_per_gpu=peak_tflops,
+        ),
         vsa_sparsity=float(vs.get("sparsity", 0.0) or 0.0),
         vsa_cache_tile_buf=bool(vs.get("cache_tile_buf", False) or False),
         model=ModelTrainingConfig(
@@ -439,6 +463,9 @@ def _build_training_config(
             precondition_outputs=bool(m.get("precondition_outputs", False)),
             moba_config=dict(m.get("moba_config", {}) or {}),
             enable_gradient_checkpointing_type=(m.get("enable_gradient_checkpointing_type")),
+            enable_torch_compile=bool(m.get("enable_torch_compile", False)),
+            compile_train_fn=bool(m.get("compile_train_fn", False)),
+            torch_compile_kwargs=dict(m.get("torch_compile_kwargs", {}) or {}),
         ),
         pipeline_config=pipeline_config,
         model_path=model_path,
