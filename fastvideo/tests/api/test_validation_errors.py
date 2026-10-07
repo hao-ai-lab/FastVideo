@@ -41,7 +41,7 @@ def test_invalid_literal_error_includes_path() -> None:
     with pytest.raises(
             ConfigValidationError,
             match=(r"generator\.engine\.execution_backend: expected one of "
-                   r"\['external_launcher', 'mp', 'ray'\]"),
+                   r"\['external_launcher', 'mp', 'ray', 'uni'\]"),
     ):
         parse_config(
             RunConfig,

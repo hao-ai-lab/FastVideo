@@ -13,7 +13,10 @@ generator = VideoGenerator.from_pretrained(
 ```
 
 One node uses the multiprocessing executor (`execution_backend: mp`, the
-default). Two machines — for example two DGX Sparks, one GPU each — need Ray:
+default). With `num_gpus=1`, `mp` automatically selects the in-process (`uni`)
+executor so weights load in the current process. Set `execution_backend: uni`
+to force that path. Two machines — for example two DGX Sparks, one GPU each —
+need Ray:
 
 ```yaml
 generator:
@@ -119,7 +122,7 @@ request:
     output_path: outputs/
 ```
 
-`generator.engine.execution_backend` accepts `mp`, `ray`, or
+`generator.engine.execution_backend` accepts `mp`, `uni`, `ray`, or
 `external_launcher`. The last option is for synchronized offline generation
 under `torchrun` or `srun`; it is not supported by `fastvideo serve`. Set
 `generator.engine.num_gpus` and the relevant parallelism sizes to the total

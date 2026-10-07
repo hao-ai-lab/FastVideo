@@ -474,6 +474,9 @@ class LTX2DenoisingStage(PipelineStage):
         vsa_metadata_builder = (VideoSparseAttentionMetadataBuilder() if use_vsa else None)
 
         for step_index in tqdm(range(len(sigmas) - 1)):
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             sigma = sigmas[step_index]
             sigma_next = sigmas[step_index + 1]
             # Per-sample sigma for LTX-2.3 cross-attention AdaLN prompt

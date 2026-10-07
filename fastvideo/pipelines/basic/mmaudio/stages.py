@@ -387,6 +387,9 @@ class MMAudioDenoisingStage(PipelineStage):
         empty_conditions = batch.extra["mmaudio_empty_conditions"]
         latents = batch.latents
         for index, timestep in enumerate(self.scheduler.timesteps):
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             flow = self.transformer.guided_flow(
                 timestep / self.scheduler.config.num_train_timesteps,
                 latents,

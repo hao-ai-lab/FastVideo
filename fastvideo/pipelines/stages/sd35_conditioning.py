@@ -241,6 +241,9 @@ class SD35DenoisingStage(PipelineStage):
             {"generator": batch.generator[0] if isinstance(batch.generator, list) else batch.generator})
 
         for t in timesteps:
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             latents_4d = latents.squeeze(2)
 
             if batch.do_classifier_free_guidance:

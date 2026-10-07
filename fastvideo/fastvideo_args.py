@@ -512,9 +512,12 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp", "ray", "external_launcher"],
+            choices=["mp", "uni", "ray", "external_launcher"],
             default=FastVideoArgs.distributed_executor_backend,
-            help="The distributed executor backend to use",
+            help=("Executor backend: mp (multiprocess; in-process when num_gpus=1), "
+                  "uni (always in-process, num_gpus=1), ray, or external_launcher "
+                  "(one SPMD worker per torchrun/srun process, offline generation only; "
+                  "FASTVIDEO_EXTERNAL_LAUNCHER=1 also selects it for mp)."),
         )
 
         parser.add_argument(

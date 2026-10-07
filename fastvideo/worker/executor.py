@@ -53,19 +53,24 @@ class Executor(ABC):
         allow_external_launcher: bool = False,
     ) -> type["Executor"]:
         backend = fastvideo_args.distributed_executor_backend
+        # Checked first: FASTVIDEO_EXTERNAL_LAUNCHER=1 turns the default mp
+        # backend into launcher-owned SPMD even for a single launched process.
         if external_launcher_requested(backend):
             if not allow_external_launcher:
                 reject_external_launcher(backend, entrypoint="this entrypoint")
             from fastvideo.worker.external_launcher_executor import ExternalLauncherExecutor
             return cast(type["Executor"], ExternalLauncherExecutor)
+        # Single-GPU default mp path stays in-process so weights load once.
+        if backend == "uni" or (backend == "mp" and fastvideo_args.num_gpus == 1):
+            from fastvideo.worker.uniproc_executor import UniprocExecutor
+            return cast(type["Executor"], UniprocExecutor)
         if backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
-        elif backend == "ray":
+        if backend == "ray":
             from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
             return cast(type["Executor"], RayDistributedExecutor)
-        else:
-            raise ValueError(f"Unsupported distributed executor backend: {backend}")
+        raise ValueError(f"Unsupported distributed executor backend: {backend}")
 
     @property
     def is_output_rank(self) -> bool:

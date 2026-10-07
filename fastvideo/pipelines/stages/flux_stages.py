@@ -292,6 +292,9 @@ class FluxDenoisingStage(PipelineStage):
         step_extras = self._step_kwargs(self.scheduler.step, batch)
 
         for t in timesteps:
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             t_scalar = t
             if not isinstance(t_scalar, torch.Tensor):
                 t_scalar = torch.tensor([t_scalar], device=device, dtype=torch.float32)

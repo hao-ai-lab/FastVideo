@@ -142,6 +142,11 @@ class VideoGenerator:
                                 if worker.is_alive():
                                     os.kill(worker.pid, signal.SIGINT)
                             print("Interrupt signal sent to worker processes")
+                        elif hasattr(self.generator.executor, 'interrupt'):
+                            # In-process executor (num_gpus=1): no worker process to
+                            # signal, so flag the denoise loop instead.
+                            self.generator.executor.interrupt()
+                            print("Interrupt flag set on in-process executor")
                     except Exception as e:
                         print(f"Error sending interrupt signal: {e}")
 
