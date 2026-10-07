@@ -16,7 +16,7 @@ checkpoint. Skipped in CI; CUDA required.
 | Official commit/version | `<TODO: diffusers + transformers versions>` |
 | HF weights | `stabilityai/stable-diffusion-3.5-medium` |
 | HF revision | `<TODO>` |
-| Local weights dir | `official_weights/stabilityai__stable-diffusion-3.5-medium` (env: `SD35_MODEL_DIR`) |
+| Local weights dir | `official_weights/stabilityai__stable-diffusion-3.5-medium` (env: `FASTVIDEO_TEST_SD35_MODEL_DIR`) |
 | Source layout | `diffusers` |
 | Needs conversion | `<TODO>` |
 

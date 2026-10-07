@@ -17,7 +17,7 @@ EXTERNAL_LAUNCHER_BACKEND = "external_launcher"
 
 def external_launcher_requested(backend: str) -> bool:
     """Return whether ``backend`` opts into launcher-owned SPMD execution."""
-    return backend == EXTERNAL_LAUNCHER_BACKEND or (backend == "mp" and envs.FASTVIDEO_EXTERNAL_LAUNCHER)
+    return backend == EXTERNAL_LAUNCHER_BACKEND or (backend == "mp" and envs.FASTVIDEO_EXTERNAL_LAUNCHER.get())
 
 
 def reject_external_launcher(backend: str, *, entrypoint: str) -> None:

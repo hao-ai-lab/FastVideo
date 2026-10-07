@@ -66,6 +66,7 @@ class ServeSubcommand(CLISubcommand):
             port=serve_config.server.port,
             output_dir=serve_config.server.output_dir,
             default_request=serve_config.default_request,
+            served_model_name=serve_config.server.served_model_name,
         )
 
     def validate(self, args: argparse.Namespace) -> None:

@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
+import fastvideo.envs as envs
 import fastvideo.worker.external_launcher_executor as external_launcher
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.worker.executor import Executor
@@ -31,47 +32,50 @@ TORCHRUN_ENV = {
 }
 
 
-def _clear_launcher_env(monkeypatch):
-    for name in (
-        "RANK",
-        "LOCAL_RANK",
-        "LOCAL_WORLD_SIZE",
-        "WORLD_SIZE",
-        "MASTER_ADDR",
-        "MASTER_PORT",
-        "SLURM_LOCALID",
-        "SLURM_PROCID",
-        "SLURM_NTASKS",
-        "SLURM_NTASKS_PER_NODE",
-        "SLURM_STEP_TASKS_PER_NODE",
-        "SLURM_TASKS_PER_NODE",
-        "FASTVIDEO_EXTERNAL_LAUNCHER",
-    ):
-        monkeypatch.delenv(name, raising=False)
+def _set_env(env_overrides, values):
+    """Set the launcher variables to ``values`` until the end of the test; unset the others.
+
+    Each name is spelled literally because the env-policy contract test only
+    accepts literal names in envs.override_external().
+    """
+    env_overrides.enter_context(envs.override_external("RANK", values.get("RANK")))
+    env_overrides.enter_context(envs.override_external("LOCAL_RANK", values.get("LOCAL_RANK")))
+    env_overrides.enter_context(envs.override_external("LOCAL_WORLD_SIZE", values.get("LOCAL_WORLD_SIZE")))
+    env_overrides.enter_context(envs.override_external("WORLD_SIZE", values.get("WORLD_SIZE")))
+    env_overrides.enter_context(envs.override_external("MASTER_ADDR", values.get("MASTER_ADDR")))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", values.get("MASTER_PORT")))
+    env_overrides.enter_context(envs.override_external("SLURM_LOCALID", values.get("SLURM_LOCALID")))
+    env_overrides.enter_context(envs.override_external("SLURM_PROCID", values.get("SLURM_PROCID")))
+    env_overrides.enter_context(envs.override_external("SLURM_NTASKS", values.get("SLURM_NTASKS")))
+    env_overrides.enter_context(envs.override_external("SLURM_NTASKS_PER_NODE", values.get("SLURM_NTASKS_PER_NODE")))
+    env_overrides.enter_context(
+        envs.override_external("SLURM_STEP_TASKS_PER_NODE", values.get("SLURM_STEP_TASKS_PER_NODE")))
+    env_overrides.enter_context(envs.override_external("SLURM_TASKS_PER_NODE", values.get("SLURM_TASKS_PER_NODE")))
 
 
-def _set_env(monkeypatch, environ):
-    for name, value in environ.items():
-        monkeypatch.setenv(name, value)
+def _clear_launcher_env(env_overrides):
+    """Unset every launcher variable and the FASTVIDEO_EXTERNAL_LAUNCHER opt-in until the end of the test."""
+    _set_env(env_overrides, {})
+    env_overrides.enter_context(envs.FASTVIDEO_EXTERNAL_LAUNCHER.override(None))
 
 
-def test_resolve_torchrun_env(monkeypatch):
-    _clear_launcher_env(monkeypatch)
-    _set_env(monkeypatch, TORCHRUN_ENV)
+def test_resolve_torchrun_env(env_overrides):
+    _clear_launcher_env(env_overrides)
+    _set_env(env_overrides, TORCHRUN_ENV)
 
-    context = resolve_external_launcher_env(os.environ)
+    context = resolve_external_launcher_env(external_launcher.read_external_launcher_environ())
 
     assert (context.rank, context.local_rank, context.world_size) == (5, 1, 8)
 
 
-def test_resolve_falls_back_to_slurm_localid(monkeypatch):
-    _clear_launcher_env(monkeypatch)
+def test_resolve_falls_back_to_slurm_localid(env_overrides):
+    _clear_launcher_env(env_overrides)
     environ = dict(TORCHRUN_ENV)
     del environ["LOCAL_RANK"]
     environ["SLURM_LOCALID"] = "3"
-    _set_env(monkeypatch, environ)
+    _set_env(env_overrides, environ)
 
-    context = resolve_external_launcher_env(os.environ)
+    context = resolve_external_launcher_env(external_launcher.read_external_launcher_environ())
 
     assert context.local_rank == 3
 
@@ -166,38 +170,38 @@ def test_resolve_rejects_out_of_bounds_identity(name, value):
         resolve_external_launcher_env(environ)
 
 
-def test_get_class_default_stays_multiproc(monkeypatch):
-    _clear_launcher_env(monkeypatch)
+def test_get_class_default_stays_multiproc(env_overrides):
+    _clear_launcher_env(env_overrides)
     args = FastVideoArgs(model_path="test")
 
     assert Executor.get_class(args) is MultiprocExecutor
 
 
-def test_get_class_env_flag_selects_external_launcher(monkeypatch):
-    _clear_launcher_env(monkeypatch)
-    monkeypatch.setenv("FASTVIDEO_EXTERNAL_LAUNCHER", "1")
+def test_get_class_env_flag_selects_external_launcher(env_overrides):
+    _clear_launcher_env(env_overrides)
+    env_overrides.enter_context(envs.FASTVIDEO_EXTERNAL_LAUNCHER.override(True))
     args = FastVideoArgs(model_path="test")
 
     assert Executor.get_class(args, allow_external_launcher=True) is ExternalLauncherExecutor
 
 
-def test_get_class_explicit_backend_selects_external_launcher(monkeypatch):
-    _clear_launcher_env(monkeypatch)
+def test_get_class_explicit_backend_selects_external_launcher(env_overrides):
+    _clear_launcher_env(env_overrides)
     args = FastVideoArgs(model_path="test", distributed_executor_backend="external_launcher")
 
     assert Executor.get_class(args, allow_external_launcher=True) is ExternalLauncherExecutor
 
 
-def test_get_class_rejects_external_launcher_without_spmd_opt_in(monkeypatch):
-    _clear_launcher_env(monkeypatch)
+def test_get_class_rejects_external_launcher_without_spmd_opt_in(env_overrides):
+    _clear_launcher_env(env_overrides)
     args = FastVideoArgs(model_path="test", distributed_executor_backend="external_launcher")
 
     with pytest.raises(ValueError, match="synchronized offline generation"):
         Executor.get_class(args)
 
 
-def test_streaming_generator_rejects_external_launcher(monkeypatch):
-    _clear_launcher_env(monkeypatch)
+def test_streaming_generator_rejects_external_launcher(env_overrides):
+    _clear_launcher_env(env_overrides)
     from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
     args = FastVideoArgs(model_path="test", distributed_executor_backend="external_launcher")
 
@@ -205,9 +209,9 @@ def test_streaming_generator_rejects_external_launcher(monkeypatch):
         StreamingVideoGenerator.from_fastvideo_args(args)
 
 
-def test_env_flag_does_not_override_explicit_ray_backend(monkeypatch):
-    _clear_launcher_env(monkeypatch)
-    monkeypatch.setenv("FASTVIDEO_EXTERNAL_LAUNCHER", "1")
+def test_env_flag_does_not_override_explicit_ray_backend(monkeypatch, env_overrides):
+    _clear_launcher_env(env_overrides)
+    env_overrides.enter_context(envs.FASTVIDEO_EXTERNAL_LAUNCHER.override(True))
 
     class StubRayExecutor:
         pass
@@ -220,29 +224,29 @@ def test_env_flag_does_not_override_explicit_ray_backend(monkeypatch):
     assert Executor.get_class(args) is StubRayExecutor
 
 
-def test_init_rejects_num_gpus_world_size_mismatch(monkeypatch):
-    _clear_launcher_env(monkeypatch)
-    _set_env(monkeypatch, TORCHRUN_ENV)
+def test_init_rejects_num_gpus_world_size_mismatch(env_overrides):
+    _clear_launcher_env(env_overrides)
+    _set_env(env_overrides, TORCHRUN_ENV)
     args = FastVideoArgs(model_path="test", num_gpus=4, sp_size=4)
 
     with pytest.raises(ValueError, match="WORLD_SIZE"):
         ExternalLauncherExecutor(args)
 
 
-def test_init_requires_launcher_env(monkeypatch):
-    _clear_launcher_env(monkeypatch)
+def test_init_requires_launcher_env(env_overrides):
+    _clear_launcher_env(env_overrides)
     args = FastVideoArgs(model_path="test", num_gpus=8, sp_size=8)
 
     with pytest.raises(RuntimeError, match="torchrun/srun"):
         ExternalLauncherExecutor(args)
 
 
-def test_init_normalizes_slurm_localid_before_worker_device_init(monkeypatch):
-    _clear_launcher_env(monkeypatch)
+def test_init_normalizes_slurm_localid_before_worker_device_init(monkeypatch, env_overrides):
+    _clear_launcher_env(env_overrides)
     environ = dict(TORCHRUN_ENV)
     del environ["LOCAL_RANK"]
     environ["SLURM_LOCALID"] = "3"
-    _set_env(monkeypatch, environ)
+    _set_env(env_overrides, environ)
 
     wrappers = []
 
@@ -287,10 +291,10 @@ def test_init_normalizes_slurm_localid_before_worker_device_init(monkeypatch):
     assert wrappers[0].shutdown_called
 
 
-def test_init_rejects_local_rank_outside_visible_cuda_devices(monkeypatch):
-    _clear_launcher_env(monkeypatch)
+def test_init_rejects_local_rank_outside_visible_cuda_devices(monkeypatch, env_overrides):
+    _clear_launcher_env(env_overrides)
     environ = dict(TORCHRUN_ENV, LOCAL_RANK="3")
-    _set_env(monkeypatch, environ)
+    _set_env(env_overrides, environ)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     args = FastVideoArgs(model_path="test", num_gpus=8, sp_size=8)
@@ -299,9 +303,9 @@ def test_init_rejects_local_rank_outside_visible_cuda_devices(monkeypatch):
         ExternalLauncherExecutor(args)
 
 
-def test_init_failure_cleans_up_partially_initialized_worker(monkeypatch):
-    _clear_launcher_env(monkeypatch)
-    _set_env(monkeypatch, TORCHRUN_ENV)
+def test_init_failure_cleans_up_partially_initialized_worker(monkeypatch, env_overrides):
+    _clear_launcher_env(env_overrides)
+    _set_env(env_overrides, TORCHRUN_ENV)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     shutdown = Mock()
 
@@ -433,12 +437,12 @@ def test_worker_non_output_rank_clears_latents_audio_and_trajectories():
 
 
 @pytest.mark.parametrize("mode", ["success", "rank-failure"])
-def test_external_launcher_real_two_process_lifecycle(mode):
+def test_external_launcher_real_two_process_lifecycle(mode, env_overrides):
     helper = Path(__file__).with_name("external_launcher_lifecycle_smoke.py")
     repo_root = Path(__file__).resolve().parents[3]
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(repo_root)
-    env["FASTVIDEO_TARGET_DEVICE"] = "cpu"
+    # The helper forces the CPU platform itself; the child inherits this
+    # environment with PYTHONPATH pointed at the checkout.
+    env_overrides.enter_context(envs.override_external("PYTHONPATH", str(repo_root)))
     completed = subprocess.run(
         [
             sys.executable,
@@ -451,7 +455,6 @@ def test_external_launcher_real_two_process_lifecycle(mode):
             mode,
         ],
         cwd=repo_root,
-        env=env,
         capture_output=True,
         text=True,
         timeout=45,
@@ -463,12 +466,12 @@ def test_external_launcher_real_two_process_lifecycle(mode):
     assert completed.stdout.count(marker) == 2
 
 
-def test_external_launcher_real_two_process_peer_exit_is_bounded():
+def test_external_launcher_real_two_process_peer_exit_is_bounded(env_overrides):
     helper = Path(__file__).with_name("external_launcher_lifecycle_smoke.py")
     repo_root = Path(__file__).resolve().parents[3]
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(repo_root)
-    env["FASTVIDEO_TARGET_DEVICE"] = "cpu"
+    # The helper forces the CPU platform itself; the child inherits this
+    # environment with PYTHONPATH pointed at the checkout.
+    env_overrides.enter_context(envs.override_external("PYTHONPATH", str(repo_root)))
     completed = subprocess.run(
         [
             sys.executable,
@@ -481,7 +484,6 @@ def test_external_launcher_real_two_process_peer_exit_is_bounded():
             "rank-exit",
         ],
         cwd=repo_root,
-        env=env,
         capture_output=True,
         text=True,
         timeout=30,
@@ -492,12 +494,12 @@ def test_external_launcher_real_two_process_peer_exit_is_bounded():
     assert "injected pre-request rank exit" in completed.stderr
 
 
-def test_external_launcher_real_two_process_missing_collective_honors_dist_timeout():
+def test_external_launcher_real_two_process_missing_collective_honors_dist_timeout(env_overrides):
     helper = Path(__file__).with_name("external_launcher_lifecycle_smoke.py")
     repo_root = Path(__file__).resolve().parents[3]
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(repo_root)
-    env["FASTVIDEO_TARGET_DEVICE"] = "cpu"
+    # The helper forces the CPU platform itself; the child inherits this
+    # environment with PYTHONPATH pointed at the checkout.
+    env_overrides.enter_context(envs.override_external("PYTHONPATH", str(repo_root)))
     completed = subprocess.run(
         [
             sys.executable,
@@ -510,7 +512,6 @@ def test_external_launcher_real_two_process_missing_collective_honors_dist_timeo
             "collective-timeout",
         ],
         cwd=repo_root,
-        env=env,
         capture_output=True,
         text=True,
         timeout=30,

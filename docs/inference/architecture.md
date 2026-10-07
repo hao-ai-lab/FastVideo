@@ -23,7 +23,7 @@ to FastVideo model classes. Two discovery mechanisms:
    `fastvideo/models/` and parses each `.py` file's AST looking for an
    `EntryClass` variable assignment. Discovered models take priority over
    hardcoded entries. For example,
-   `fastvideo/models/dits/wanvideo.py` exports
+   `fastvideo/models/wan/transformer.py` exports
    `EntryClass = WanTransformer3DModel`.
 
 Both feed into a unified `_FAST_VIDEO_MODELS` dict, which populates the
@@ -86,7 +86,7 @@ from `model_index.json`.
 
 ```
 PipelineConfig                    (fastvideo/configs/pipelines/base.py)
-├── WanT2V480PConfig              (fastvideo/configs/pipelines/wan.py)
+├── WanT2V480PConfig              (fastvideo/models/wan/pipeline_config.py)
 │   ├── WanT2V720PConfig
 │   └── WanI2V480PConfig
 ├── HunyuanConfig                 (fastvideo/configs/pipelines/hunyuan.py)
@@ -106,6 +106,11 @@ PipelineConfig                    (fastvideo/configs/pipelines/base.py)
 Model-specific subclasses override defaults. For example,
 `WanT2V480PConfig` sets `flow_shift=3.0` and uses `WanVideoConfig` as
 its DiT config.
+
+Wan's `models/wan/definition.py` links each registered variant to its pipeline
+config and sampling preset. The shared registry consumes these definitions
+without changing detector precedence or checkpoint/override-based pipeline
+selection. `configs/pipelines/wan.py` remains a compatibility import.
 
 ### ModelConfig / ArchConfig (`fastvideo/configs/models/base.py`)
 
@@ -255,6 +260,16 @@ Specialized variants: `CausalDenoisingStage`, `LTX2DenoisingStage`,
 `HYWorldDenoisingStage`, `MatrixGame2CausalDenoisingStage`,
 `SRDenoisingStage`, `LTX2AudioDecodingStage`, `SD35ConditioningStage`,
 `LTX2TextEncodingStage`, `LTX2LatentPreparationStage`.
+
+Wan owns its sampling recipes under `basic/wan/stages/`. `WanDenoisingStage`
+specializes input packing, expert selection, timesteps, and first-frame
+restoration around the shared dense loop. `WanFirstFrameEncodingStage`
+produces normalized `ForwardBatch.first_frame_latent` before sampling; the
+sampler no longer executes a VAE. Dense DMD and the two causal samplers have
+family-local implementations and explicit scheduler ownership. Standard and
+DMD causal sampling share cache allocation, not their sampling algorithm.
+Legacy imports from `stages/` remain compatibility aliases. Sampling invariants
+also live beside the code in `fastvideo/pipelines/basic/wan/AGENTS.md`.
 
 ### Verification System (`fastvideo/pipelines/stages/validators.py`)
 

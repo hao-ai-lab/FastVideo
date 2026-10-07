@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from fastvideo import VideoGenerator
@@ -38,7 +39,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=4)
+    parser.add_argument(
+        "--execution-backend",
+        choices=("mp", "ray"),
+        default=None,
+        help="mp for one node; ray for a Ray cluster (two DGX Sparks). "
+        "Default: ray when RAY_ADDRESS is set, otherwise mp",
+    )
     parser.add_argument("--torch-compile", action="store_true", help="torch.compile the DiT transformer path")
+    parser.add_argument("--compile-vae",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="compile the video VAE decoder independently of the DiT (on by default; "
+                        "the Spark lazy-load path needs this registered before first materialize)")
     parser.add_argument("--compile-mode",
                         default=None,
                         help='torch.compile mode, e.g. "reduce-overhead" for CUDA graphs')
@@ -48,6 +61,14 @@ def parse_args() -> argparse.Namespace:
                         "training-port semantics: no kwargs; fullgraph + emulate_precision_casts injected). "
                         "First generation pays the inductor JIT (~1-2 min); use --repeats >= 2 and time "
                         "the last repeat. FASTVIDEO_INFERENCE_TORCH_COMPILE=1 is equivalent")
+    parser.add_argument("--lazy-module-load",
+                        action=argparse.BooleanOptionalAction,
+                        default=None,
+                        help="load each heavy component on first use and free it after the last stage that "
+                        "needs it, so peak memory is the largest overlapping set instead of the sum of every "
+                        "component. Omit for auto (on for unified-memory devices such as GB10; off on discrete "
+                        "GPUs). Costs a reload per generation; pass --no-lazy-module-load to keep every "
+                        "component resident")
     parser.add_argument("--repeats",
                         type=int,
                         default=1,
@@ -67,12 +88,14 @@ def main() -> None:
     if args.inference_torch_compile:
         experimental["inference_torch_compile"] = True
 
+    execution_backend = args.execution_backend or ("ray" if os.environ.get("RAY_ADDRESS") else "mp")
     generator = VideoGenerator.from_config(
         GeneratorConfig(
             model_path=args.model_path,
             pipeline=PipelineSelection(experimental=experimental),
             engine=EngineConfig(
                 num_gpus=args.num_gpus,
+                execution_backend=execution_backend,
                 use_fsdp_inference=args.num_gpus > 1,
                 parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
                 offload=OffloadConfig(
@@ -81,10 +104,12 @@ def main() -> None:
                     text_encoder=True,
                     vae=True,
                     pin_cpu_memory=False,
+                    lazy_module_load=args.lazy_module_load,
                 ),
                 compile=CompileConfig(
                     enabled=args.torch_compile,
                     mode=args.compile_mode,
+                    vae_enabled=args.compile_vae,
                 ),
             ),
         ))

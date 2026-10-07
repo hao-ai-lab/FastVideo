@@ -14,6 +14,7 @@ from __future__ import annotations
 import torch
 
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
+from fastvideo.tests.golden_gate._wan_checkpoint import WAN_REVISION
 
 __all__ = ["distributed_runtime"]
 
@@ -22,8 +23,8 @@ TEXT_LEN = 512
 
 
 def _build_block(layer: int) -> torch.nn.Module:
-    from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
-    from fastvideo.models.dits.wanvideo import WanTransformerBlock
+    from fastvideo.models.wan.config import WanVideoArchConfig
+    from fastvideo.models.wan.transformer import WanTransformerBlock
 
     arch = WanVideoArchConfig(
         num_attention_heads=12,
@@ -94,6 +95,7 @@ SPEC = GateSpec(
         (r"\.norm2\.", ".self_attn_residual_norm.norm."),
     ),
     attention_backend="FLASH_ATTN",
+    revision=WAN_REVISION,
 )
 
 

@@ -81,6 +81,30 @@ def _slurm_local_world_size(environ: Mapping[str, str]) -> int | None:
     return _parse_int(source, match.group(1))
 
 
+def read_external_launcher_environ() -> dict[str, str]:
+    """Return the launcher variables that :func:`resolve_external_launcher_env` reads.
+
+    Each name is read explicitly rather than handing over the whole process
+    environment (docs/contributing/env_vars.md): torchrun's identity variables
+    and Slurm's per-task ``SLURM_*`` identity for native ``srun`` launches.
+    """
+    values = {
+        "RANK": os.environ.get("RANK"),
+        "WORLD_SIZE": os.environ.get("WORLD_SIZE"),
+        "LOCAL_RANK": os.environ.get("LOCAL_RANK"),
+        "LOCAL_WORLD_SIZE": os.environ.get("LOCAL_WORLD_SIZE"),
+        "MASTER_ADDR": os.environ.get("MASTER_ADDR"),
+        "MASTER_PORT": os.environ.get("MASTER_PORT"),
+        "SLURM_PROCID": os.environ.get("SLURM_PROCID"),
+        "SLURM_NTASKS": os.environ.get("SLURM_NTASKS"),
+        "SLURM_LOCALID": os.environ.get("SLURM_LOCALID"),
+        "SLURM_NTASKS_PER_NODE": os.environ.get("SLURM_NTASKS_PER_NODE"),
+        "SLURM_STEP_TASKS_PER_NODE": os.environ.get("SLURM_STEP_TASKS_PER_NODE"),
+        "SLURM_TASKS_PER_NODE": os.environ.get("SLURM_TASKS_PER_NODE"),
+    }
+    return {name: value for name, value in values.items() if value is not None}
+
+
 def resolve_external_launcher_env(environ: Mapping[str, str]) -> ExternalLauncherEnv:
     """Parse and validate a torchrun/srun distributed environment."""
 
@@ -158,7 +182,7 @@ class ExternalLauncherExecutor(Executor):
     """Run this externally launched process's single worker inline."""
 
     def _init_executor(self) -> None:
-        env_ctx = resolve_external_launcher_env(os.environ)
+        env_ctx = resolve_external_launcher_env(read_external_launcher_environ())
         if self.fastvideo_args.num_gpus != env_ctx.world_size:
             raise ValueError(
                 f"num_gpus={self.fastvideo_args.num_gpus} does not match the external launcher's "
@@ -172,14 +196,14 @@ class ExternalLauncherExecutor(Executor):
                     "process-visible CUDA device(s). Configure launcher GPU visibility so each process can address "
                     "its local rank before model loading.")
 
-        # get_local_torch_device() reads LOCAL_RANK through fastvideo.envs.
+        # get_local_torch_device() reads LOCAL_RANK from the environment.
         # Normalize both torchrun and native Slurm names before
         # Worker.init_device() performs any accelerator or process-group work.
-        os.environ["RANK"] = str(env_ctx.rank)
-        os.environ["WORLD_SIZE"] = str(env_ctx.world_size)
-        os.environ["LOCAL_RANK"] = str(env_ctx.local_rank)
+        envs.set_external("RANK", str(env_ctx.rank))
+        envs.set_external("WORLD_SIZE", str(env_ctx.world_size))
+        envs.set_external("LOCAL_RANK", str(env_ctx.local_rank))
         if env_ctx.local_world_size is not None:
-            os.environ["LOCAL_WORLD_SIZE"] = str(env_ctx.local_world_size)
+            envs.set_external("LOCAL_WORLD_SIZE", str(env_ctx.local_world_size))
 
         # Downstream Worker initialization must preserve the launcher's
         # global rank/world rather than deriving a local multiprocess layout.
@@ -254,7 +278,7 @@ class ExternalLauncherExecutor(Executor):
         # executor only stamps the peak-memory reading and rebuilds the batch.
         output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
 
-        logging_info = output_batch.logging_info if envs.FASTVIDEO_STAGE_LOGGING else None
+        logging_info = output_batch.logging_info if envs.FASTVIDEO_STAGE_LOGGING.get() else None
         extra = output_batch.extra or {}
         if torch.cuda.is_available():
             extra["peak_memory_mb"] = torch.cuda.max_memory_allocated() / (1024 * 1024)

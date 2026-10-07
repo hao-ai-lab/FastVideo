@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.api.compat import request_to_sampling_param
 from fastvideo.entrypoints.cli import main as cli_main
 from fastvideo.entrypoints.cli.generate import GenerateSubcommand
@@ -391,7 +392,7 @@ def test_serve_subcommand_rejects_external_launcher_backend(tmp_path):
         ServeSubcommand().validate(args)
 
 
-def test_serve_subcommand_rejects_external_launcher_env_opt_in(tmp_path, monkeypatch):
+def test_serve_subcommand_rejects_external_launcher_env_opt_in(tmp_path, env_overrides):
     config_path = tmp_path / "serve.yaml"
     config_path.write_text(
         "generator:\n"
@@ -399,7 +400,7 @@ def test_serve_subcommand_rejects_external_launcher_env_opt_in(tmp_path, monkeyp
         encoding="utf-8",
     )
     args, _ = _parse_serve_args(["--config", str(config_path)])
-    monkeypatch.setenv("FASTVIDEO_EXTERNAL_LAUNCHER", "1")
+    env_overrides.enter_context(envs.FASTVIDEO_EXTERNAL_LAUNCHER.override(True))
 
     with pytest.raises(ValueError, match="synchronized offline generation"):
         ServeSubcommand().validate(args)
@@ -472,7 +473,7 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
         captured["config"] = config
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir, default_request):
+    def fake_run_server(fastvideo_args, host, port, output_dir, default_request, served_model_name=None):
         captured["fastvideo_args"] = fastvideo_args
         captured["host"] = host
         captured["port"] = port
@@ -511,7 +512,7 @@ def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     def fake_generator_config_to_fastvideo_args(config):
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir, default_request):
+    def fake_run_server(fastvideo_args, host, port, output_dir, default_request, served_model_name=None):
         captured["default_request"] = default_request
 
     monkeypatch.setattr(
