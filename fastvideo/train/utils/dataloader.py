@@ -14,8 +14,15 @@ def build_parquet_t2v_train_dataloader(
     *,
     text_len: int,
     parquet_schema: Any,
+    cfg_rate: float | None = None,
 ) -> Any:
-    """Build a parquet dataloader for T2V-style datasets."""
+    """Build a parquet dataloader for T2V-style datasets.
+
+    ``cfg_rate`` overrides ``data_config.training_cfg_rate`` for models
+    that perform CFG dropout themselves (e.g. LTX2Model swaps in the
+    unconditional embedding in ``prepare_batch``); pass 0.0 to keep the
+    collate's zeroing drop off so the two drops do not stack.
+    """
 
     from fastvideo.dataset import (
         build_parquet_map_style_dataloader, )
@@ -25,7 +32,8 @@ def build_parquet_t2v_train_dataloader(
         data_config.train_batch_size,
         num_data_workers=(data_config.dataloader_num_workers),
         parquet_schema=parquet_schema,
-        cfg_rate=data_config.training_cfg_rate,
+        cfg_rate=(float(data_config.training_cfg_rate or 0.0)
+                  if cfg_rate is None else float(cfg_rate)),
         drop_last=True,
         text_padding_length=int(text_len),
         seed=int(data_config.seed or 0),

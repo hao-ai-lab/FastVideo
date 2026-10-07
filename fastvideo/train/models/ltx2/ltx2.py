@@ -81,6 +81,25 @@ _DEFAULT_ROPE_FPS = 24.0
 LTX2_UNCONDITIONAL_PROMPT = ""
 
 
+def _resolve_unconditional_prompt(model_path: str) -> str:
+    """The prompt LTX-2 inference feeds its CFG unconditional branch.
+
+    Mirrors ``WanModel.ensure_negative_conditioning``: the unconditional
+    branch must match what the sampler actually feeds at inference, which
+    is the checkpoint preset's ``negative_prompt`` — empty for the
+    distilled presets (``negative_prompt=""``, guidance 1.0) and the long
+    quality-negative prompt for the base presets that run CFG
+    (``LTX2_BASE`` / ``LTX2_3_BASE``). When *model_path* resolves to no
+    preset, ``SamplingParam.from_pretrained`` falls back to its default
+    ``negative_prompt`` — the same fallback the sampler's default
+    ``SamplingParam`` uses — so training and inference stay consistent.
+    """
+    from fastvideo.api.sampling_param import SamplingParam
+
+    negative_prompt = SamplingParam.from_pretrained(model_path).negative_prompt
+    return negative_prompt if negative_prompt else LTX2_UNCONDITIONAL_PROMPT
+
+
 class LTX2Model(WanModel):
     """LTX-2 per-role model for the modular trainer."""
 
@@ -194,15 +213,25 @@ class LTX2Model(WanModel):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def _dataloader_cfg_rate(self) -> float | None:
+        # CFG dropout is performed in ``prepare_batch`` via
+        # ``_apply_cfg_dropout``, which swaps in the cached unconditional
+        # embedding. The shared parquet collate's zeroing drop must stay
+        # off here: stacking both would leave an independent ~p*(1-p) of
+        # rows training against an all-zero text embedding.
+        return 0.0
+
     def ensure_negative_conditioning(self) -> None:
         """Cache the unconditional conditioning used by CFG dropout.
 
-        LTX-2 inference feeds an empty prompt through Gemma + the
-        Embeddings1D connector to build its unconditional branch, so the
-        dropped samples have to carry that embedding rather than zeros.
-        ``LTX2GemmaTextEncoderModel`` owns the connector, which means the
-        shared ``encode_negative_prompt`` helper already produces the
-        post-connector tensor.
+        LTX-2 inference builds its CFG unconditional branch from the
+        checkpoint preset's ``negative_prompt`` encoded through Gemma +
+        the Embeddings1D connector — empty for the distilled presets, the
+        preset's quality-negative prompt for the base presets that run
+        CFG — so the dropped samples have to carry that embedding rather
+        than zeros. ``LTX2GemmaTextEncoderModel`` owns the connector,
+        which means the shared ``encode_negative_prompt`` helper already
+        produces the post-connector tensor.
         """
         if self.negative_prompt_embeds is not None:  # type: ignore[has-type]
             return
@@ -210,7 +239,8 @@ class LTX2Model(WanModel):
         assert self.training_config is not None
         embeds, mask = encode_negative_prompt(
             self.training_config,
-            prompt=LTX2_UNCONDITIONAL_PROMPT,
+            prompt=_resolve_unconditional_prompt(
+                self.training_config.model_path),
             device=self.device,
             dtype=self._get_training_dtype(),
         )
@@ -280,9 +310,17 @@ class LTX2Model(WanModel):
         mask = encoder_attention_mask.clone()
         neg_embeds = neg_embeds.to(device=embeds.device, dtype=embeds.dtype)
         neg_mask = neg_mask.to(device=mask.device, dtype=mask.dtype)
+        if (neg_embeds.shape[1] != embeds.shape[1]
+                or neg_mask.shape[1] != mask.shape[1]):
+            raise ValueError(
+                "LTX-2 unconditional embedding length does not match the batch "
+                f"text length: unconditional {tuple(neg_embeds.shape)} / "
+                f"{tuple(neg_mask.shape)} vs batch {tuple(embeds.shape)} / "
+                f"{tuple(mask.shape)}. The dataset was likely preprocessed with a "
+                "different text_len than the checkpoint config used for training.")
         for idx in torch.nonzero(drop, as_tuple=False).flatten().tolist():
-            embeds[idx] = neg_embeds[0, :embeds.shape[1]]
-            mask[idx] = neg_mask[0, :mask.shape[1]]
+            embeds[idx] = neg_embeds[0]
+            mask[idx] = neg_mask[0]
         return embeds, mask
 
     def prepare_batch(

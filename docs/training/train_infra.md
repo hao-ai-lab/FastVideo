@@ -162,6 +162,8 @@ training:
     decay_interval_steps: 0
 ```
 
+`training.data.training_cfg_rate` enables classifier-free-guidance dropout. For most models the shared dataloader drops text conditioning by zeroing the stored embedding. LTX-2 is the exception: `LTX2Model` performs the drop itself and swaps in the checkpoint preset's unconditional embedding (the preset's `negative_prompt` — empty for the distilled presets, the quality-negative prompt for the base presets), because a zeroed post-connector embedding is not the model's unconditional input. The legacy `LTX2TrainingPipeline` (`fastvideo/training/`) does not implement the drop and rejects `training_cfg_rate > 0`.
+
 `training.data.data_path` can also mix multiple preprocessed datasets by using a mapping from dataset path to repeat count:
 
 ```yaml

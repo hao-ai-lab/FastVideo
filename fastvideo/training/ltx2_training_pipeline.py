@@ -98,6 +98,14 @@ class LTX2TrainingPipeline(TrainingPipeline):
             last_epoch=self.init_steps - 1,
         )
 
+        if float(getattr(training_args, "training_cfg_rate", 0.0) or 0.0) > 0.0:
+            raise NotImplementedError(
+                "--training-cfg-rate > 0 is not implemented in LTX2TrainingPipeline: "
+                "this legacy pipeline never instantiates LTX2Model, so nothing would "
+                "perform the CFG drop and the flag would be silently ignored. Use the "
+                "modular trainer (fastvideo/train LTX2Model, which swaps in the "
+                "unconditional embedding) or set --training-cfg-rate 0.")
+
         if self._has_precomputed_pt_data(training_args.data_path):
             data_sources = self._get_ltx2_data_sources(training_args.data_path)
             self.with_audio = "audio_latents" in data_sources
@@ -114,8 +122,11 @@ class LTX2TrainingPipeline(TrainingPipeline):
         else:
             text_padding_length = (training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len)
             self.with_audio = False
-            # cfg_rate stays 0 here: LTX2Model.prepare_batch does the CFG drop
-            # so dropped samples carry the empty-prompt embedding, not zeros.
+            # cfg_rate stays 0 here: this pipeline performs no CFG drop
+            # (LTX2Model.prepare_batch's drop lives in the modular trainer,
+            # which this pipeline never instantiates), and the shared
+            # zeroing drop would train against an all-zero embedding.
+            # --training-cfg-rate > 0 is rejected above.
             self.train_dataset, self.train_dataloader = (build_parquet_map_style_dataloader(
                 training_args.data_path,
                 training_args.train_batch_size,
