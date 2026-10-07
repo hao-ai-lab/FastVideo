@@ -6,12 +6,12 @@ from pathlib import Path
 current_dir = str(Path(__file__).parent.parent.parent.parent.parent)
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
-os.environ["PYTHONPATH"] = current_dir + ":" + os.environ.get("PYTHONPATH", "")
 
 import subprocess
 import torch
 import json
 from huggingface_hub import snapshot_download
+import fastvideo.envs as envs
 from fastvideo.utils import logger
 # Import the training pipeline
 from fastvideo.training.wan_training_pipeline import main
@@ -31,8 +31,8 @@ NUM_GPUS_PER_NODE = "2"
 GRAD_ACCUM = "1"
 MASTER_PORT = os.environ.get("MASTER_PORT", "29504")
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", MASTER_PORT)
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", MASTER_PORT)
 
 
 def run_worker():
@@ -131,8 +131,6 @@ def run_worker():
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ.setdefault("WANDB_MODE", "offline")
-
     data_dir = Path("data/crush-smol_processed_t2v")
 
     if not data_dir.exists():
@@ -150,7 +148,10 @@ def test_distributed_training():
         "torchrun", "--nnodes", NUM_NODES, "--nproc_per_node", NUM_GPUS_PER_NODE, "--master_port", MASTER_PORT,
         str(current_file)
     ]
-    process = subprocess.run(cmd, capture_output=True, text=True)
+    # The torchrun workers run this file and import fastvideo from the repository root.
+    worker_pythonpath = current_dir + ":" + os.environ.get("PYTHONPATH", "")
+    with envs.override_external("WANDB_MODE", "offline"), envs.override_external("PYTHONPATH", worker_pythonpath):
+        process = subprocess.run(cmd, capture_output=True, text=True)
 
     # Print stdout and stderr for debugging
     if process.stdout:
