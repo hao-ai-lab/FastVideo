@@ -401,11 +401,17 @@ def maybe_load_fsdp_model(
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=load_weights_to_cpu)
     logger.info("Loading transformer weights with to_cpu=%s", load_weights_to_cpu)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
-    dense_lora_patch = DenseLoRAPatch.from_adapter(
-        lora_path,
-        param_names_mapping_fn,
-        strength=lora_strength,
-    )
+    dense_lora_patch = None
+    if lora_path:
+        # LoRA-specific mappings are optional and must not become a dependency of ordinary model loading.
+        lora_mapping = getattr(model, "lora_param_names_mapping", None)
+        lora_param_names_mapping_fn = get_param_names_mapping(lora_mapping) if lora_mapping else None
+        dense_lora_patch = DenseLoRAPatch.from_adapter(
+            lora_path,
+            param_names_mapping_fn,
+            lora_param_names_mapping=lora_param_names_mapping_fn,
+            strength=lora_strength,
+        )
     if dense_lora_patch is not None:
         model_parameter_names = {name for name, _ in model.named_parameters()}
         missing_vsa_gates = sorted(name for name in dense_lora_patch.replacement_parameters
@@ -980,7 +986,7 @@ def load_model_from_full_model_state_dict(
         else:
             if tuple(initialized_tensor.shape) != tuple(meta_sharded_param.shape):
                 if adapter_value is not None:
-                    raise ValueError(f"LoRA set_weight for {new_param_name} has shape {tuple(initialized_tensor.shape)}, "
+                    raise ValueError(f"LoRA replacement for {new_param_name} has shape {tuple(initialized_tensor.shape)}, "
                                      f"but the parameter is {tuple(meta_sharded_param.shape)}")
                 raise ValueError(f"Initializer returned shape {tuple(initialized_tensor.shape)} for {new_param_name!r}; "
                                  f"expected {tuple(meta_sharded_param.shape)}")
