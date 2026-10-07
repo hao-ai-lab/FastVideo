@@ -1944,7 +1944,7 @@ def test_upload_policy_pass_allows_calibration_record(monkeypatch):
     }) is True
 
 
-def _run_main_with_static_breach(monkeypatch, tmp_path, raw_overrides):
+def _run_main_with_static_breach(monkeypatch, tmp_path, raw_overrides, env_overrides):
     results_dir = tmp_path / "results"
     reports_dir = tmp_path / "reports"
     tracking_root = tmp_path / "tracking"
@@ -1957,8 +1957,8 @@ def _run_main_with_static_breach(monkeypatch, tmp_path, raw_overrides):
     )
     (results_dir / "perf_breach.json").write_text(json.dumps(raw_result), encoding="utf-8")
 
-    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
-    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "scheduled_main"))
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", None))
     monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
     monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
@@ -1968,12 +1968,12 @@ def _run_main_with_static_breach(monkeypatch, tmp_path, raw_overrides):
     assert compare_baseline.main() == 1
 
 
-def test_static_threshold_failure_prints_worker_log_tail(monkeypatch, tmp_path, capsys):
+def test_static_threshold_failure_prints_worker_log_tail(monkeypatch, tmp_path, capsys, env_overrides):
     worker_log = tmp_path / "worker_wan-t2v-1.3b-2gpu.log"
     worker_log.write_text("attention backend fell back to slow path\n", encoding="utf-8")
 
     _run_main_with_static_breach(
-        monkeypatch, tmp_path, {"worker_log_path": str(worker_log)})
+        monkeypatch, tmp_path, {"worker_log_path": str(worker_log)}, env_overrides)
 
     output = capsys.readouterr().out
     assert "exceeded fixed threshold" in output
@@ -1982,8 +1982,8 @@ def test_static_threshold_failure_prints_worker_log_tail(monkeypatch, tmp_path, 
 
 
 def test_static_threshold_failure_without_worker_log_degrades_gracefully(
-        monkeypatch, tmp_path, capsys):
-    _run_main_with_static_breach(monkeypatch, tmp_path, {})
+        monkeypatch, tmp_path, capsys, env_overrides):
+    _run_main_with_static_breach(monkeypatch, tmp_path, {}, env_overrides)
 
     output = capsys.readouterr().out
     assert "exceeded fixed threshold" in output

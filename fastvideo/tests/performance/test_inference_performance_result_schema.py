@@ -139,8 +139,8 @@ def test_build_result_record_emits_v2_wan_shape(monkeypatch, env_overrides):
     assert record["vae_decode_time_s"] == 3.2
 
 
-def test_build_result_record_defaults_worker_log_path_to_none(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+def test_build_result_record_defaults_worker_log_path_to_none(monkeypatch, env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "scheduled_main"))
     record = perf_test._build_result_record(
         cfg={"benchmark_id": "wan-t2v-1.3b-2gpu"},
         model_info={},
