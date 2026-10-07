@@ -511,6 +511,11 @@ surfaces:
       last_image: request.inputs.last_image
       references: request.inputs.references
       video_path: request.inputs.video_path
+      pose_video_path: request.inputs.pose_video_path
+      face_video_path: request.inputs.face_video_path
+      background_video_path: request.inputs.background_video_path
+      mask_video_path: request.inputs.mask_video_path
+      animate_mode: request.inputs.animate_mode
       latents: request.inputs.latents
       audio_latents: request.inputs.audio_latents
       audio_path: request.inputs.audio_path

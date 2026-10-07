@@ -71,6 +71,14 @@ WAN_MODEL_DEFINITION_GROUPS = (
             workload_types=("i2v", ),
         ),
         WanModelDefinition(
+            pipeline_config="WanAnimate14BConfig",
+            preset="wan_animate_14b",
+            sampling="unipc",
+            hf_model_paths=("Wan-AI/Wan2.2-Animate-14B-Diffusers", ),
+            workload_types=("i2v", ),
+            match_any=("animate", ),
+        ),
+        WanModelDefinition(
             pipeline_config="WanI2V480PConfig",
             preset="wan_fun_1_3b_inp",
             sampling="unipc",
