@@ -15,10 +15,11 @@ NaNs.
 
 from __future__ import annotations
 
-import os
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29523")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29523")
 
 from pathlib import Path
 

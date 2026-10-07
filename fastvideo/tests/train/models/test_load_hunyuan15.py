@@ -16,12 +16,13 @@ the kwargs in ``Hunyuan15Model._build_distill_input_kwargs``.
 
 from __future__ import annotations
 
-import os
 
 # Required by the ``distributed_setup`` fixture pulled from
 # ``fastvideo/tests/conftest.py``.  Set before any fastvideo import.
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29522")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29522")
 
 from pathlib import Path
 
