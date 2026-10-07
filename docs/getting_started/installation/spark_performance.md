@@ -111,7 +111,7 @@ this hardware, for reasons specific to it:
 | bf16 VAE decode | ~1.14×, lossless; ~5–7% e2e on few-step | ✅ default for Wan |
 | VSA (video sparse attention) | works out of the box (Triton kernel auto-selects on `sm_121`) | ✅ automatic |
 | Building FlashAttention | **no speedup** — Torch SDPA already hits an efficient flash kernel on `sm_121`, and FA2 ties it | ❌ not worth building |
-| `torch.compile` of the VAE decode | recompile storm (per-frame varying shapes) → ~1.1× | ❌ dead end |
+| `torch.compile` of the Wan VAE decode | recompile storm (per-frame varying shapes) → ~1.1× | ❌ dead end (the H3 ViT decoder compiles well, see [FastH3](#fasth3-decode-gemms-and-attention-on-gb10)) |
 | Linear (fp8 / nvfp4) quantization on long-sequence models (e.g. Cosmos) | ~nothing — see below | ❌ wrong lever here |
 | FP4 attention (`ATTN_QAT_INFER`) | works on `sm_121` (runtime allowlist landed in #1647; kernel build is #1598); helps, but needs a QAT-trained checkpoint | ⚠️ opt-in — see below |
 | FP4 linear on short-sequence models (LTX2) | up to −24% denoise at 1080p (#1594) | ⚠️ model/resolution-dependent |
@@ -260,8 +260,8 @@ It does not use frame dropping or spatial upscaling.
 
 ```bash
 FASTVIDEO_MINIMAX_H3_FUSIONS=all \
-FASTVIDEO_NVFP4_MM_BACKEND=cutlass \
-FASTVIDEO_H3_VAE_TILE_BATCH=1 \
+FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
+FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
 FASTVIDEO_STAGE_LOGGING=1 \
@@ -276,7 +276,7 @@ H3 permits frame counts of `17n+5`; 124 is the nearest legal count above
 five seconds and 243 is the nearest above ten seconds.
 
 For Trim, use `basic_fasth3_spark_pruned_nvfp4.yaml` with the same environment.
-Both recipes keep the encoder, DiT and VAEs resident, disable compilation,
+Both recipes keep the encoder, DiT and VAEs resident, compile only the VAE decoder,
 and use `h3_dit_vsa`. On two Sparks, use the corresponding
 `basic_fasth3_spark_pair_{pruned,v2}_nvfp4.yaml` after following the
 [pair setup guide](spark_pair.md). The pair uses SP2/TP1 and parallel VAE
@@ -308,6 +308,63 @@ Set the environment from the generation command above before benchmarking.
 The prompt JSON must contain `latency-ceramics-005` and
 `latency-harbor-005`. Pass `--width 1344 --height 768` for the native 768p
 protocol. Use the Trim repository and config for its corresponding run.
+
+### FastH3 decode, GEMMs and attention on GB10
+
+The recipes decode with the light VAE's dense weights
+(`FASTVIDEO_H3_VAE_INT8_OVERLAY=0`), 12 spatial tiles per decoder call and a
+compiled decoder (`compile.vae_enabled: true`). The INT8 ConvRot overlay that
+ships next to the VAE is slower on GB10 and stops tile batching from helping.
+Decoder-only timings on identical 832x480, 124-frame latents (one GB10):
+
+| Light VAE decoder | 1 tile per call | 12 tiles per call | PSNR vs FP32 decode |
+|---|---:|---:|---:|
+| INT8 ConvRot overlay, fp16 autocast | 42.2 s | 43.5 s | 63.4 dB |
+| Dense, fp16 autocast | 24.4 s | 14.4 s | 77.5 dB |
+| Dense, fp16 autocast, compiled | 21.6 s | 9.8 s | 77.7 dB |
+
+The first one or two calls in a process include decoder compiles; later calls
+in the same process reuse them.
+
+NVFP4 linears use FlashInfer's cuDNN backend (`FASTVIDEO_NVFP4_MM_BACKEND=cudnn`).
+The CUTLASS backend used on RTX Blackwell is much slower on GB10 for the
+FFN projections, and both backends return identical outputs. FlashInfer
+`mm_fp4` with 19,392 activation rows (FastH3 at 832x480, 124 frames):
+
+| Projection (K→N) | `cutlass` | `cudnn` | `auto` |
+|---|---:|---:|---:|
+| attention q/k/v, gate (5376→7168) | 5.5 ms | 10.0 ms | 10.0 ms |
+| attention out (7168→5376) | 5.5 ms | 4.6 ms | 8.3 ms |
+| FFN in (5376→28672) | 52.9 ms | 19.6 ms | 20.0 ms |
+| FFN out (14336→5376) | 26.6 ms | 8.9 ms | 9.0 ms |
+
+`FASTVIDEO_H3_VSA_FP4=1` runs VSA-H3's block-sparse attention on the FP4
+SageAttention3 kernel, as on RTX Blackwell. It is off by default and needs
+`fastvideo-kernel` built for `12.1a` (the default when building on a Spark).
+On a captured FastH3 Trim attention input (19,392 tokens, 56 heads, 64-token
+tiles) it runs in 29 ms against 59 ms for Triton VSA, with a relative L2 error
+of 0.13 versus an FP32 reference (0.002 for Triton BF16).
+
+It changes the output for now. The released FastH3 checkpoints were not trained with
+FP4 attention, so the same seed gives a different, though coherent, clip. On V2
+at 832x480 with four prompts, denoising was 24-33% faster (60-68 s to 43-51 s)
+and the clips scored LPIPS 0.39-0.55 against the BF16-attention clips. The
+recipes leave it off; review outputs before enabling it.
+
+Measured on one Spark (832x480, 124 frames, seed 1234, the ceramics release
+prompt), timing warm `generate()` calls in one process through finished MP4
+output:
+
+| Model and configuration | End to end | Denoise | Video decode |
+|---|---:|---:|---:|
+| Trim, previous recipe (CUTLASS, INT8 overlay, 1 tile per call) | 121-122 s | 77-78 s | 43 s |
+| Trim, current recipe | 68 s | 58 s | 9.5 s |
+| Trim, current recipe + `FASTVIDEO_H3_VSA_FP4=1` | 54 s | 43 s | 9.6 s |
+| V2, previous recipe | 139-141 s | 95-96 s | 42-43 s |
+| V2, current recipe | 79 s | 68 s | 9.6 s |
+
+Within each configuration, repeated calls produced bit-identical frames
+except the previous V2 recipe, whose repeated calls diverged.
 
 ### Released model measurements
 

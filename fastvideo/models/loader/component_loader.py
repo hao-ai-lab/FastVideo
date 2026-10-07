@@ -974,9 +974,9 @@ class VAELoader(ComponentLoader):
         if class_name == "AutoencoderKLMiniMaxH3":
             from fastvideo.models.vaes.minimax_h3_int8_convrot import (
                 dense_vae_safetensors,
-                find_int8_convrot_vae_path,
+                int8_convrot_overlay_to_apply,
             )
-            int8_convrot_path = find_int8_convrot_vae_path(model_path)
+            int8_convrot_path = int8_convrot_overlay_to_apply(model_path)
             safetensors_list = dense_vae_safetensors(safetensors_list)
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
