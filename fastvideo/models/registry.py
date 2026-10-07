@@ -23,14 +23,15 @@ logger = init_logger(__name__)
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
+    "MMAudioTransformer": ("dits", "mmaudio", "MMAudioTransformer"),
     "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "HunyuanGameCraftTransformer3DModel": ("dits", "hunyuangamecraft", "HunyuanGameCraftTransformer3DModel"),
     "HunyuanVideo15Transformer3DModel": ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
     "HYWorldTransformer3DModel": ("dits", "hyworld", "HYWorldTransformer3DModel"),
-    "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "WanTransformer3DModel": ("wan", "transformer", "WanTransformer3DModel"),
     "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
     "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
-    "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "CausalWanTransformer3DModel": ("wan", "causal_transformer", "CausalWanTransformer3DModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
     "LongCatVideoTransformer3DModel":
@@ -46,15 +47,16 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     ),
     "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
     "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
+    "Kandinsky6Transformer3DModel": ("dits", "kandinsky6", "Kandinsky6Transformer3DModel"),
     "Flux2Transformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
-    "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "WanTransformer3DModel": ("wan", "transformer", "WanTransformer3DModel"),
     "DreamXWorldTransformer3DModel": ("dits", "dreamx_world", "DreamXWorldTransformer3DModel"),
     "DreamXWorldARTransformer3DModel": ("dits", "dreamx_world_ar", "DreamXWorldARTransformer3DModel"),
-    "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "CausalWanTransformer3DModel": ("wan", "causal_transformer", "CausalWanTransformer3DModel"),
     "LingBotWorld2CausalFastTransformer3DModel": (
         "dits",
         "lingbotworld2",
@@ -75,6 +77,7 @@ _TEXT_TO_IMAGE_DIT_MODELS = {
 }
 
 _TEXT_ENCODER_MODELS = {
+    "MMAudioDFNCLIPTextEncoder": ("encoders", "mmaudio_clip", "MMAudioDFNCLIPTextEncoder"),
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "CLIPTextModelWithProjection": ("encoders", "clip", "CLIPTextModelWithProjection"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
@@ -94,6 +97,12 @@ _TEXT_ENCODER_MODELS = {
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
+    "MMAudioDFNCLIPVisionEncoder": ("encoders", "mmaudio_clip", "MMAudioDFNCLIPVisionEncoder"),
+    "MMAudioSynchformerVisualEncoder": (
+        "encoders",
+        "mmaudio_synchformer",
+        "MMAudioSynchformerVisualEncoder",
+    ),
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
     "CLIPVisionModelWithProjection": ("encoders", "clip", "CLIPVisionModel"),
     "CLIPVisionModel": ("encoders", "clip", "CLIPVisionModel"),
@@ -105,7 +114,7 @@ _VAE_MODELS = {
     "AutoencoderKLCausal3D": ("vaes", "gamecraftvae", "GameCraftVAE"),
     "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
-    "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
+    "AutoencoderKLWan": ("wan", "vae", "AutoencoderKLWan"),
     "LingBotWorld2WanVAE": ("vaes", "lingbotworld2_wanvae", "LingBotWorld2WanVAE"),
     "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
     "AutoencoderKLGen3CTokenizer": ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
@@ -118,6 +127,9 @@ _VAE_MODELS = {
 }
 
 _AUDIO_MODELS = {
+    "MMAudioVAE": ("audio", "mmaudio_vae", "MMAudioVAE"),
+    "BigVGANV2": ("audio", "bigvgan", "BigVGANV2"),
+    "Kandinsky6AudioVAE": ("audio", "kandinsky6_audio_vae", "Kandinsky6AudioVAE"),
     "LTX2AudioEncoder": ("audio", "ltx2_audio_vae", "LTX2AudioEncoder"),
     "LTX2AudioDecoder": ("audio", "ltx2_audio_vae", "LTX2AudioDecoder"),
     "LTX2Vocoder": ("audio", "ltx2_audio_vae", "LTX2Vocoder"),

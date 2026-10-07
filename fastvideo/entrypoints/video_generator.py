@@ -26,7 +26,9 @@ import torch
 import torchvision
 from einops import rearrange
 
+import fastvideo.envs as envs
 from fastvideo.api.compat import (
+    REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     expand_request_prompt_batch,
     generator_config_to_fastvideo_args,
     legacy_from_pretrained_to_config,
@@ -34,6 +36,8 @@ from fastvideo.api.compat import (
     load_generator_config_from_file,
     normalize_generation_request,
     normalize_generator_config,
+    request_to_batch_extra,
+    validate_request_batch_extra,
     request_to_pipeline_overrides,
     request_to_sampling_param,
 )
@@ -50,10 +54,10 @@ from fastvideo.api.schema import (
     SamplingConfig,
 )
 from fastvideo.api.sampling_param import SamplingParam
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.utils import align_to, shallow_asdict
+from fastvideo.utils import align_to, allocate_cpu_tensor_with_pin_fallback, pixels_to_uint8, shallow_asdict
 from fastvideo.worker.executor import Executor
 
 fcntl: types.ModuleType | None
@@ -65,18 +69,7 @@ except ImportError:
 logger = init_logger(__name__)
 _FFMPEG_ENCODER_OPTION_CACHE: dict[tuple[str, str, str], bool] = {}
 
-_BATCH_EXTRA_PASSTHROUGH_KEYS: tuple[str, ...] = (
-    "ltx2_audio_latents",
-    "ltx2_audio_clean_latent",
-    "ltx2_audio_denoise_mask",
-    "audio_num_frames",
-    "video_position_offset_sec",
-    # MiniMax-H3 VSA per-request knobs (read by the H3 denoising stage;
-    # sparsity itself flows through the existing ForwardBatch.VSA_sparsity)
-    "vsa_mode",
-    "vsa_dense_first_n_steps",
-    "vsa_dense_layers",
-)
+_BATCH_EXTRA_PASSTHROUGH_KEYS = tuple(REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS)
 
 _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "num_gpus",
@@ -99,6 +92,8 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "pin_cpu_memory",
     "enable_torch_compile",
     "torch_compile_kwargs",
+    "lora_path",
+    "lora_strength",
     "output_type",
     "nvfp4_fa4",
 })
@@ -133,6 +128,35 @@ def _resolve_output_size(
     if pixel_output and samples.ndim == 5:
         return (int(samples.shape[-2]), int(samples.shape[-1]), int(samples.shape[-3]))
     return fallback
+
+
+def _quantize_video_frames_to_uint8(src: torch.Tensor) -> torch.Tensor:
+    """`[b, c, t, h, w]` decoded output -> CPU uint8 `[t, b, c, h, w]`.
+
+    Quantizes on ``src``'s own device (typically CUDA) before the device->host copy: a full fp32 D->H copy scales with
+    resolution x frames x batch, while casting to uint8 first makes the transfer 4x smaller and moves the elementwise
+    work onto the GPU. ``clamp_()`` also fixes a latent overflow bug (VAE output slightly outside [0, 1] wrapped mod
+    256 in the old unclamped cast). Equivalence with a CPU quantize is SSIM-gated, not bit-exact (float->uint8 differs
+    <=1 LSB CPU vs GPU). uint8 input is already quantized by the worker (MiniMax-H3 decode stage) and passes through
+    untouched (see ``pixels_to_uint8``).
+
+    A large DiT run with ``dit_cpu_offload=False`` can leave a GPU with only a few hundred MB free once denoising and
+    decode are done, in a *different* process than the one that allocates ``src`` (the worker keeps the model
+    resident); the tiny elementwise allocation this needs can then be the single straw that OOMs. That failure is
+    recoverable -- the data itself is already on the device (``src`` is IPC-shared, not a fresh allocation) and only
+    needs a device->host copy, which does not need a device allocation -- so on ``torch.cuda.OutOfMemoryError`` this
+    falls back to copying ``src`` to CPU first and quantizing there instead of crashing the whole generation.
+    """
+    try:
+        vid_u8 = pixels_to_uint8(src)
+        return rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
+    except torch.cuda.OutOfMemoryError:
+        logger.warning("GPU out of memory quantizing the decoded video (the DiT/VAE likely still hold the device "
+                       "resident); falling back to a CPU quantize. Pass dit_cpu_offload=True / "
+                       "vae_cpu_offload=True to avoid this, at some speed cost.")
+        src_cpu = src.detach().to("cpu")
+        vid_u8 = pixels_to_uint8(src_cpu if src_cpu.dtype == torch.uint8 else src_cpu.float())
+        return rearrange(vid_u8, "b c t h w -> t b c h w")
 
 
 def _validate_request_stage_overrides(model_path: str, request: GenerationRequest) -> None:
@@ -207,7 +231,7 @@ class VideoGenerator:
         if kwargs.pop("nvfp4_fa4", False):
             import os
             os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
-            os.environ.setdefault("CUTE_DSL_ENABLE_TVM_FFI", "1")
+            envs.setdefault_external("CUTE_DSL_ENABLE_TVM_FFI", "1")
         typed_config = kwargs.pop("config", None)
         if typed_config is not None:
             if model_path is not None:
@@ -464,9 +488,9 @@ class VideoGenerator:
                         raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
                     setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
 
-            resolved_sampling_param = request_to_sampling_param(
+            resolved_sampling_param = fastvideo_args.pipeline_config.apply_request_constraints(
                 request,
-                model_path=self.fastvideo_args.model_path,
+                request_to_sampling_param(request, model_path=self.fastvideo_args.model_path),
             )
             return self._generate_video_impl(
                 prompt=request.prompt,
@@ -514,14 +538,16 @@ class VideoGenerator:
                     raise ValueError(f"Request field {key!r} is not supported by pipeline config overrides")
                 setattr(fastvideo_args.pipeline_config, key, deepcopy(value))
 
-        sampling_param = request_to_sampling_param(
+        sampling_param = fastvideo_args.pipeline_config.apply_request_constraints(
             request,
-            model_path=self.fastvideo_args.model_path,
+            request_to_sampling_param(request, model_path=self.fastvideo_args.model_path),
         )
+        batch_extra = request_to_batch_extra(request)
         result = self._generate_video_impl(
             prompt=request.prompt,
             sampling_param=sampling_param,
             fastvideo_args=fastvideo_args,
+            **batch_extra,
         )
         return self._wrap_legacy_result(result)
 
@@ -539,6 +565,8 @@ class VideoGenerator:
         """Internal implementation of generate_video."""
         if fastvideo_args is None:
             fastvideo_args = self.fastvideo_args
+
+        validate_request_batch_extra(kwargs, model_path=fastvideo_args.model_path)
 
         # Handle batch processing from text file
         if sampling_param is None:
@@ -604,9 +632,24 @@ class VideoGenerator:
             return results
 
         # Single prompt generation (original behavior)
+        output_name_hint: str | None = None
         if prompt is None:
-            raise ValueError("Either prompt or prompt_txt must be provided")
-        output_path = self._prepare_output_path(sampling_param.output_path, prompt)
+            if fastvideo_args.workload_type is WorkloadType.V2A:
+                # Video semantics are sufficient conditioning for V2A models;
+                # model-specific text stages interpret the empty string using
+                # their native tokenizer/empty-prompt contract.
+                prompt = ""
+            elif getattr(fastvideo_args.pipeline_config, "prompt_optional", False):
+                # Video-to-video pipelines without a text tower (Kandinsky6 SR)
+                # are conditioned by the input video alone; name the output
+                # after that video instead of the (empty) prompt.
+                prompt = ""
+                if isinstance(sampling_param.video_path, str) and sampling_param.video_path:
+                    output_name_hint = os.path.splitext(os.path.basename(sampling_param.video_path))[0]
+            else:
+                raise ValueError("Either prompt or prompt_txt must be provided")
+        output_path = self._prepare_output_path(sampling_param.output_path,
+                                                output_name_hint if output_name_hint else prompt)
         kwargs["output_path"] = output_path
         if prompt_embeds is not None:
             kwargs["prompt_embeds"] = prompt_embeds
@@ -623,6 +666,13 @@ class VideoGenerator:
         if args is None:
             return False
         return args.workload_type.value.endswith("2i")
+
+    def _is_audio_workload(self) -> bool:
+        """Return True when the workload produces standalone audio."""
+        args = getattr(self, "fastvideo_args", None)
+        if args is None:
+            return False
+        return args.workload_type.value.endswith("2a")
 
     def _prepare_output_path(
         self,
@@ -643,7 +693,12 @@ class VideoGenerator:
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
         """
-        target_ext = ".png" if self._is_image_workload() else ".mp4"
+        if self._is_image_workload():
+            target_ext = ".png"
+        elif self._is_audio_workload():
+            target_ext = ".wav"
+        else:
+            target_ext = ".mp4"
 
         def _sanitize_filename_component(name: str) -> str:
             # Remove characters invalid on common filesystems, strip spaces/dots
@@ -790,20 +845,27 @@ class VideoGenerator:
         latent_batch_size = _infer_latent_batch_size(batch)
         is_latent_output = fastvideo_args.output_type == "latent"
         needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
-        needs_samples_buffer = batch.return_frames or needs_frame_output
-        # When ``output_type == "latent"`` the forward output has latent
-        # shape (e.g. ``[B, C_latent, T_latent, H_latent, W_latent]``)
-        # rather than the pre-allocation's pixel shape. Skip the pinned
-        # ~50 MB buffer entirely. Also skip it for metadata-only calls;
-        # neither the result nor save path will consume the decoded tensor.
+        # A populated ``samples`` has exactly one consumer — the result
+        # dict (``"samples": samples if batch.return_frames else None``).
+        # Post-decode frame building reads ``output_batch.output``
+        # directly (the GPU ``vid_u8`` path), not ``samples``. So when
+        # ``return_frames=False`` the pinned fp32 alloc + D->H copy are
+        # dead weight — the CLI generate flow (``save_video=True``,
+        # ``return_frames=False``) hits this on every call.
+        # ``output_type == "latent"`` keeps its existing branch (shape
+        # mismatch falls through to ``.cpu()`` below) for callers that
+        # *do* ask for the latent samples via ``return_frames=True``.
         # ``skip_pixel_prealloc`` also gates the slow-path warning.
-        skip_pixel_prealloc = is_latent_output or not needs_samples_buffer
+        needs_samples_out = batch.return_frames
+        # ``output_shape_from_input`` pipelines (Kandinsky6 SR) decide the output geometry from the input video, so the
+        # request's height / width / num_frames say nothing about the buffer to pre-allocate.
+        output_shape_from_input = bool(getattr(fastvideo_args.pipeline_config, "output_shape_from_input", False))
+        skip_pixel_prealloc = is_latent_output or not needs_samples_out or output_shape_from_input
         if skip_pixel_prealloc:
             samples = torch.empty(0, device='cpu')
         else:
-            samples = torch.empty(
+            samples = allocate_cpu_tensor_with_pin_fallback(
                 (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
-                device='cpu',
                 pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 
@@ -817,9 +879,11 @@ class VideoGenerator:
                                "This usually means the executor/pipeline failed earlier.")
 
         audio_only = bool(output_batch.extra.get("audio_only"))
-        if not needs_samples_buffer or (audio_only and not batch.return_frames):
-            # Metadata-only/audio-only request: keep the empty placeholder and
-            # avoid the decoded tensor D->H copy.
+        if not needs_samples_out:
+            # Nothing downstream reads ``samples`` (the result dict
+            # returns None when ``return_frames=False``); keep the empty
+            # placeholder allocated above and skip the fp32 D->H copy
+            # entirely.
             pass
         elif audio_only:
             # Audio-only return-frames requests expose the small placeholder
@@ -827,11 +891,17 @@ class VideoGenerator:
             samples = output_batch.output.cpu()
         elif output_batch.output.shape == samples.shape:
             samples.copy_(output_batch.output)
+            if output_batch.output.dtype == torch.uint8:
+                # A worker may hand back uint8 pixels (the MiniMax-H3 decode
+                # stage does); keep ``samples`` on its [0, 1] float contract.
+                samples.div_(255)
         else:
             if not skip_pixel_prealloc:
                 logger.warning("Output shape %s does not match expected shape %s; use slow path",
                                output_batch.output.shape, samples.shape)
             samples = output_batch.output.cpu()
+            if samples.dtype == torch.uint8:
+                samples = samples.float().div_(255)
         logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
@@ -851,8 +921,13 @@ class VideoGenerator:
         # `GenerationResult.size` describes the produced media, not only the
         # base-stage request. Refiner pipelines can change the final pixel
         # dimensions, so derive this result metadata from the decoded output.
+        # Read the geometry from `output_batch.output` (a shape-only access,
+        # no D->H copy): when `return_frames=False` the `samples` mirror
+        # stays an empty placeholder and no longer carries the decoded
+        # shape. Metadata-only calls keep the request fallback and never
+        # inspect the (possibly dropped) worker output.
         output_size = _resolve_output_size(
-            samples,
+            output_batch.output if needs_frame_output else samples,
             (target_height, target_width, batch.num_frames),
             pixel_output=not is_latent_output and not audio_only,
         )
@@ -864,13 +939,13 @@ class VideoGenerator:
         elif not needs_frame_output:
             frames = None
         else:
-            videos = rearrange(samples, "b c t h w -> t b c h w")
-            frames = []
-            for x in videos:
-                x = torchvision.utils.make_grid(x, nrow=6)
-                x = x.permute(1, 2, 0).squeeze(-1)
-                x = (x * 255).to(torch.uint8)
-                frames.append(x.contiguous().cpu().numpy())
+            # `samples` above is just the pinned-CPU mirror of `output_batch.output` (`samples.copy_(output)` or
+            # `output.cpu()`) with no intervening preprocessing, so reading `output_batch.output` here is the same
+            # data. See `_quantize_video_frames_to_uint8` for why this quantizes on-device and its OOM fallback.
+            vid_u8 = _quantize_video_frames_to_uint8(output_batch.output)
+            frames = [
+                torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
+            ]
         postprocess_time = time.perf_counter() - postprocess_start
         logger.info("PostDecodeFrameProcessStage completed in %.3f s", postprocess_time)
         if logging_info is not None:
@@ -902,6 +977,9 @@ class VideoGenerator:
                 logger.info("Saved image to %s", output_path)
             else:
                 assert frames is not None  # implied by save_to_disk and not audio_only
+                # ``batch`` is the request-side batch. A pipeline that derives the frame rate from its input (Kandinsky6
+                # SR follows the source clip) mutates a worker-side copy, so it reports the rate via ``extra``.
+                save_fps = int(output_batch.extra.get("output_fps") or batch.fps)
                 audio = output_batch.extra.get("audio")
                 audio_sample_rate = output_batch.extra.get("audio_sample_rate")
                 if audio is not None and audio_sample_rate is not None:
@@ -912,7 +990,7 @@ class VideoGenerator:
                     save_ok = self._save_video_with_audio_ffmpeg_pipe(
                         output_path=output_path,
                         frames=frames,
-                        fps=batch.fps,
+                        fps=save_fps,
                         audio=audio,
                         sample_rate=int(audio_sample_rate),
                     )
@@ -921,7 +999,7 @@ class VideoGenerator:
                         save_ok = self._save_video_with_audio_single_pass(
                             output_path=output_path,
                             frames=frames,
-                            fps=batch.fps,
+                            fps=save_fps,
                             audio=audio,
                             sample_rate=int(audio_sample_rate),
                         )
@@ -931,7 +1009,7 @@ class VideoGenerator:
                     else:
                         logger.warning("Single-pass save failed; falling back to two-step save/mux.")
                         save_start = time.perf_counter()
-                        imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                        imageio.mimsave(output_path, frames, fps=save_fps, format="mp4")
                         save_video_time = time.perf_counter() - save_start
                         mux_start = time.perf_counter()
                         mux_ok = self._mux_audio(output_path, audio, int(audio_sample_rate))
@@ -940,7 +1018,7 @@ class VideoGenerator:
                             logger.warning("Audio mux failed; saved video without audio.")
                 else:
                     save_start = time.perf_counter()
-                    imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                    imageio.mimsave(output_path, frames, fps=save_fps, format="mp4")
                     save_video_time = time.perf_counter() - save_start
                     audio_mux_time = 0.0
                 logger.info("Saved video to %s", output_path)
@@ -1147,7 +1225,7 @@ class VideoGenerator:
         sample_rate: int,
     ) -> bool:
         """Encode video+audio using ffmpeg via rawvideo stdin + WAV input."""
-        ffmpeg_bin = shutil.which(os.getenv("FASTVIDEO_FFMPEG_BIN", "ffmpeg"))
+        ffmpeg_bin = shutil.which(envs.FASTVIDEO_FFMPEG_BIN.get())
         if ffmpeg_bin is None:
             logger.warning("ffmpeg not found; cannot use ffmpeg pipe save.")
             return False
@@ -1157,7 +1235,7 @@ class VideoGenerator:
 
         height = int(frames[0].shape[0])
         width = int(frames[0].shape[1])
-        codec = os.getenv("FASTVIDEO_VIDEO_CODEC", "libx264")
+        codec = envs.FASTVIDEO_VIDEO_CODEC.get()
 
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -1192,24 +1270,31 @@ class VideoGenerator:
 
                 if codec.endswith("_nvenc"):
                     nvenc_options = [
-                        ("preset", os.getenv("FASTVIDEO_NVENC_PRESET", "p1")),
-                        ("tune", os.getenv("FASTVIDEO_NVENC_TUNE", "ull")),
-                        ("rc", os.getenv("FASTVIDEO_NVENC_RC", "constqp")),
-                        ("qp", os.getenv("FASTVIDEO_NVENC_QP", "28")),
-                        ("bf", os.getenv("FASTVIDEO_NVENC_BF", "0")),
+                        ("preset", envs.FASTVIDEO_NVENC_PRESET.get()),
+                        ("tune", envs.FASTVIDEO_NVENC_TUNE.get()),
+                        ("rc", envs.FASTVIDEO_NVENC_RC.get()),
+                        ("qp", envs.FASTVIDEO_NVENC_QP.get()),
+                        ("bf", envs.FASTVIDEO_NVENC_BF.get()),
                     ]
                     for option_name, option_value in nvenc_options:
                         if cls._ffmpeg_encoder_supports_option(ffmpeg_bin, codec, option_name):
                             cmd += [f"-{option_name}", option_value]
                 else:
-                    cmd += ["-preset", os.getenv("FASTVIDEO_X264_PRESET", "ultrafast")]
+                    cmd += ["-preset", envs.FASTVIDEO_X264_PRESET.get()]
 
                 cmd += [
                     "-c:a",
                     "aac",
                     "-pix_fmt",
-                    os.getenv("FASTVIDEO_OUTPUT_PIX_FMT", "yuv420p"),
-                    "-shortest",
+                    envs.FASTVIDEO_OUTPUT_PIX_FMT.get(),
+                    # Audio and video decoders may produce different durations.
+                    # Preserve every video frame and pad/trim audio to match.
+                    # No -frames:v: ffmpeg 4.4 closes every stream once the video
+                    # reaches that count, which cuts the padded audio short.
+                    "-af",
+                    "apad",
+                    "-t",
+                    str(len(frames) / fps),
                     "-movflags",
                     "+faststart",
                     output_path,

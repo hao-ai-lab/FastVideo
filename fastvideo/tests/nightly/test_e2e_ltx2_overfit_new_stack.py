@@ -14,7 +14,7 @@ Requires the FastVideo LTX-2 distilled checkpoints (set HF_HOME to a
 cache that contains them, or allow ~60GB of downloads per version).
 The NVFP4-QAT case additionally requires FlashInfer FP4 support and SM100+.
 
-Guarded by FASTVIDEO_NIGHTLY=1 so the default test suite stays fast.
+Guarded by FASTVIDEO_TEST_NIGHTLY=1 so the default test suite stays fast.
 """
 
 import glob
@@ -32,6 +32,7 @@ from huggingface_hub import snapshot_download
 
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 
+import fastvideo.envs as envs  # noqa: E402
 from fastvideo.tests.utils import compute_video_ssim_torchvision  # noqa: E402
 
 NUM_GPUS_TRAINING = "4"
@@ -82,9 +83,9 @@ def download_data():
 def run_preprocessing(case: dict):
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = env.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
-    env["LTX2_OVERFIT_DATA_DIR"] = str(LOCAL_RAW_DATA_DIR)
-    env["LTX2_OVERFIT_OUTPUT_DIR"] = str(case["prep_dir"])
-    env["LTX2_OVERFIT_MODEL"] = case["model"]
+    env["FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR"] = str(LOCAL_RAW_DATA_DIR)
+    env["FASTVIDEO_TEST_LTX2_OVERFIT_OUTPUT_DIR"] = str(case["prep_dir"])
+    env["FASTVIDEO_TEST_LTX2_OVERFIT_MODEL"] = case["model"]
     cmd = [sys.executable, PREPROCESSING_SCRIPT]
     print(f"Running preprocessing: {cmd} (model={case['model']})")
     subprocess.run(cmd, check=True, env=env)
@@ -136,12 +137,10 @@ def _validation_videos_by_step(out_dir: Path) -> dict[int, str]:
     return videos
 
 
-@pytest.mark.skipif(
-    os.environ.get("FASTVIDEO_NIGHTLY") != "1",
-    reason="nightly e2e overfit test; set FASTVIDEO_NIGHTLY=1 to run",
-)
 @pytest.mark.parametrize("case_id", _CASES.keys())
 def test_e2e_ltx2_overfit_new_stack(case_id: str):
+    if not envs.FASTVIDEO_TEST_NIGHTLY.get():
+        pytest.skip("nightly e2e overfit test; set FASTVIDEO_TEST_NIGHTLY=1 to run")
     case = _CASES[case_id]
     if case.get("requires_nvfp4"):
         if (not torch.cuda.is_available() or torch.cuda.get_device_capability(0) < (10, 0)):
@@ -186,6 +185,6 @@ def test_e2e_ltx2_overfit_new_stack(case_id: str):
 
 
 if __name__ == "__main__":
-    os.environ.setdefault("FASTVIDEO_NIGHTLY", "1")
-    for _case_id in _CASES:
-        test_e2e_ltx2_overfit_new_stack(_case_id)
+    with envs.FASTVIDEO_TEST_NIGHTLY.override(True):
+        for _case_id in _CASES:
+            test_e2e_ltx2_overfit_new_stack(_case_id)

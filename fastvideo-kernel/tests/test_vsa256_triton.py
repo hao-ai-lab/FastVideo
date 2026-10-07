@@ -22,6 +22,7 @@ def _torch_vsa256_reference(
     q_var: torch.Tensor,
     kv_var: torch.Tensor,
     topk_logical: int,
+    compress_attn_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
     bsz, heads, _sq, dim = q.shape
     q_blocks = q_var.numel()
@@ -55,6 +56,8 @@ def _torch_vsa256_reference(
     logits = logits.masked_fill(~token_mask, float("-inf"))
     prob = torch.softmax(logits, dim=-1)
     out_s = torch.matmul(prob, vf).to(q.dtype)
+    if compress_attn_weight is not None:
+        return out_c * compress_attn_weight + out_s
     return out_c + out_s
 
 
