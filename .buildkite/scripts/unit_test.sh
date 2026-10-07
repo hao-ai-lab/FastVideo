@@ -23,6 +23,7 @@ exec pytest \
   ./fastvideo/tests/stages/ \
   ./fastvideo/tests/ops/ \
   ./fastvideo/tests/worker/ \
+  ./fastvideo/tests/training/test_runner.py \
   ./fastvideo/tests/training/test_trackers.py \
   ./fastvideo/tests/inference/test_basic_fasth3_omniref_pdd.py \
   ./fastvideo/tests/attention/ \
