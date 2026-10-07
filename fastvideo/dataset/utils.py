@@ -146,6 +146,15 @@ def collate_latents_embs_masks(batch_to_process,
     return all_latents, all_embs, all_masks, caption_text
 
 
+# Text streams are padded to a fixed length and paired with the attention mask
+# the trainer trims against. The second entry is HunyuanVideo 1.5's ByT5 glyph
+# stream, which rides alongside the primary Qwen one.
+_TEXT_STREAM_MASKS = {
+    "text_embedding": "text_attention_mask",
+    "text_embedding_2": "text_attention_mask_2",
+}
+
+
 def collate_rows_from_parquet_schema(rows,
                                      parquet_schema,
                                      text_padding_length,
@@ -191,19 +200,30 @@ def collate_rows_from_parquet_schema(rows,
         bytes_key = f"{tensor_name}_bytes"
         dtype_key = f"{tensor_name}_dtype"
 
+        # A secondary text stream that this parquet predates: leave the key out
+        # so the trainer's own zero-token fallback (and its warning) applies,
+        # rather than a placeholder of the wrong width.
+        if (tensor_name == "text_embedding_2" and not any(row.get(bytes_key) is not None for row in rows)):
+            continue
+
         for row in rows:
             # Get tensor data from row using the existing helper function pattern
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
                 bytes_data = row[bytes_key]
 
-                if len(bytes_data) == 0:
-                    tensor = torch.zeros(0, dtype=torch.bfloat16)
+                if bytes_data is None or len(bytes_data) == 0:
+                    # Keep the declared shape: a zero-token stream (e.g. a
+                    # caption with no glyph text) still carries its width.
+                    if shape:
+                        tensor = torch.zeros(*shape, dtype=torch.bfloat16)
+                    else:
+                        tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
                     # Deterministic per-sample CFG dropout
                     # using sample index (resume-safe).
                     drop = False
-                    if (tensor_name == 'text_embedding' and cfg_rate > 0):
+                    if (tensor_name in _TEXT_STREAM_MASKS and cfg_rate > 0):
                         sample_idx = row.get("_sample_index")
                         if sample_idx is not None:
                             drop = (random.Random(seed ^ sample_idx).random() < cfg_rate)
@@ -226,10 +246,18 @@ def collate_rows_from_parquet_schema(rows,
                 tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
 
         # Stack tensors with special handling for text embeddings
-        if tensor_name == 'text_embedding':
+        if tensor_name in _TEXT_STREAM_MASKS:
             # Handle text embeddings with padding
             padded_tensors = []
             attention_masks = []
+            # Empty entries have to stack against the real ones, so follow
+            # their dtype instead of the bfloat16 placeholder default.
+            empty_dtype = next((t.dtype for t in tensor_list if t.numel() > 0), torch.bfloat16)
+            # ...and their width: a row whose stream is missing entirely (a
+            # legacy shard mixed into the same batch) carries only a 1-D
+            # placeholder, and must not inject a 768-wide stub that cannot
+            # stack against the real rows.
+            empty_width = next((int(t.shape[1]) for t in tensor_list if t.dim() > 1), 768)
 
             for tensor in tensor_list:
                 if tensor.numel() > 0:
@@ -238,11 +266,12 @@ def collate_rows_from_parquet_schema(rows,
                     attention_masks.append(mask)
                 else:
                     # Handle empty embeddings - assume default embedding dimension
-                    padded_tensors.append(torch.zeros(text_padding_length, 768, dtype=torch.bfloat16))
+                    width = (int(tensor.shape[1]) if tensor.dim() > 1 else empty_width)
+                    padded_tensors.append(torch.zeros(text_padding_length, width, dtype=empty_dtype))
                     attention_masks.append(torch.zeros(text_padding_length))
 
             batch_data[tensor_name] = torch.stack(padded_tensors)
-            batch_data['text_attention_mask'] = torch.stack(attention_masks)
+            batch_data[_TEXT_STREAM_MASKS[tensor_name]] = torch.stack(attention_masks)
         else:
             # Stack all tensors to preserve batch consistency
             # Don't filter out None or empty tensors as this breaks batch sizing

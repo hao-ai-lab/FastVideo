@@ -85,6 +85,9 @@ class GlmImageDenoisingStage(DenoisingStage):
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                # Stop if interrupted
+                if getattr(self, "interrupt", False):
+                    break
                 latent_model_input = torch.cat([latents] * 2) if do_cfg else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t).to(dtype)
                 t_expand = t.expand(latent_model_input.shape[0]) - 1
@@ -150,6 +153,9 @@ class GlmImageDenoisingStage(DenoisingStage):
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                # Stop if interrupted
+                if getattr(self, "interrupt", False):
+                    break
                 latent_model_input = self.scheduler.scale_model_input(latents, t).to(dtype)
                 t_expand = t.expand(1) - 1
 
