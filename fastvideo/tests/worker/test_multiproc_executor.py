@@ -384,6 +384,8 @@ def test_standard_workers_survive_semaphore_removal_during_spawn(captured_worker
     from spawn_ipc_probe import gate_dir  # importable once spawn_probe has extended sys.path
 
     gate = gate_dir(os.getpid())
+    # A stale gate left behind by a killed run would silently release the barrier.
+    shutil.rmtree(gate, ignore_errors=True)
     gate.mkdir()
     children, pipes = [], []
     try:
