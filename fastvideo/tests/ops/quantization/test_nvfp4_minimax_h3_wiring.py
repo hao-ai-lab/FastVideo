@@ -22,6 +22,40 @@ class _TaggedModel(nn.Module):
         self.linear.quant_method = quant_method
 
 
+class _RecordingLoRALayer(nn.Module):
+    """LoRA layer stand-in that records the lifecycle call it receives."""
+
+    def __init__(self, events: list[str], quant_method: object) -> None:
+        super().__init__()
+        self.events = events
+        self.quant_method = quant_method
+
+    def unmerge_lora_weights(self, **kwargs) -> None:
+        del kwargs
+        self.events.append("adapter unmerged")
+
+    def merge_lora_weights(self, **kwargs) -> None:
+        del kwargs
+        self.events.append("adapter merged")
+
+    def set_lora_weights(self, lora_a: torch.Tensor, lora_b: torch.Tensor, **kwargs) -> None:
+        del lora_a, lora_b, kwargs
+        self.events.append("adapter merged")
+
+
+def _mxfp8_pipeline(events: list[str], **extra: object) -> SimpleNamespace:
+    """Build a pipeline stand-in whose only LoRA layer is not inside a block."""
+    transformer = _TaggedModel(object.__new__(mxfp8.MXFP8QuantizeMethod))
+    transformer.linear.register_buffer("_mxfp8_weight", torch.empty(1))
+    layer = _RecordingLoRALayer(events, object.__new__(mxfp8.MXFP8QuantizeMethod))
+    transformer_lora_layers = SimpleNamespace(lora_layers_by_block=lambda: iter([(None, {"linear": layer})]))
+    return SimpleNamespace(
+        lora_layers={"transformer": transformer_lora_layers},
+        trainable_transformer_modules={"transformer": transformer},
+        **extra,
+    )
+
+
 @pytest.mark.parametrize(
     "prefix",
     [
@@ -154,10 +188,10 @@ def test_maybe_quantize_model_lora_defers_nvfp4(monkeypatch: pytest.MonkeyPatch)
     assert converted == [model]
 
 
-def test_convert_quantized_weights_after_lora_merge_dispatches_nvfp4(
+def test_convert_quantized_weights_after_lora_change_dispatches_nvfp4(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastvideo.pipelines.lora_pipeline import _convert_quantized_weights_after_lora_merge
+    from fastvideo.pipelines.lora_pipeline import _convert_quantized_weights_after_lora_change
 
     model = _TaggedModel(object.__new__(nvfp4.NVFP4QuantizeMethod))
     nvfp4_converted: list[nn.Module] = []
@@ -165,22 +199,56 @@ def test_convert_quantized_weights_after_lora_merge_dispatches_nvfp4(
     monkeypatch.setattr(nvfp4, "convert_model_to_nvfp4", nvfp4_converted.append)
     monkeypatch.setattr(mxfp8, "convert_model_to_mxfp8", mxfp8_converted.append)
 
-    _convert_quantized_weights_after_lora_merge({"transformer": model})
+    _convert_quantized_weights_after_lora_change([model])
 
     assert nvfp4_converted == [model]
     assert mxfp8_converted == []
 
 
-def test_unmerge_lora_weights_rejects_quantized_mxfp8() -> None:
-    """Reject LoRA unmerge while the MXFP8 weight still contains the merged adapter."""
+def test_unmerge_lora_weights_mxfp8_requantizes_after_unmerge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requantize MXFP8 weights after unmerging the LoRA adapter from BF16."""
     from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
-    transformer = _TaggedModel(object.__new__(mxfp8.MXFP8QuantizeMethod))
-    transformer.linear.register_buffer("_mxfp8_weight", torch.empty(1))
-    pipeline = SimpleNamespace(trainable_transformer_modules={"transformer": transformer})
+    events: list[str] = []
+    pipeline = _mxfp8_pipeline(events)
+    monkeypatch.setattr(mxfp8, "convert_model_to_mxfp8", lambda model: events.append("weights requantized"))
 
-    with pytest.raises(RuntimeError, match="LoRA unmerge is unsupported after MXFP8 weight quantization"):
-        LoRAPipeline.unmerge_lora_weights(pipeline)
+    LoRAPipeline.unmerge_lora_weights(pipeline)
+
+    assert events == ["adapter unmerged", "weights requantized"]
+
+
+def test_merge_lora_weights_mxfp8_requantizes_after_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requantize MXFP8 weights after merging the LoRA adapter into BF16."""
+    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+
+    events: list[str] = []
+    pipeline = _mxfp8_pipeline(events)
+    monkeypatch.setattr(mxfp8, "convert_model_to_mxfp8", lambda model: events.append("weights requantized"))
+
+    LoRAPipeline.merge_lora_weights(pipeline)
+
+    assert events == ["adapter merged", "weights requantized"]
+
+
+def test_unmerge_then_merge_lora_weights_mxfp8_requantizes_each_step(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requantize MXFP8 weights after both unmerge and the following remerge."""
+    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+
+    events: list[str] = []
+    pipeline = _mxfp8_pipeline(events)
+    monkeypatch.setattr(mxfp8, "convert_model_to_mxfp8", lambda model: events.append("weights requantized"))
+
+    LoRAPipeline.unmerge_lora_weights(pipeline)
+    LoRAPipeline.merge_lora_weights(pipeline)
+
+    assert events == [
+        "adapter unmerged",
+        "weights requantized",
+        "adapter merged",
+        "weights requantized",
+    ]
 
 
 @pytest.mark.parametrize("retain_bf16_weight", [False, True])
@@ -225,19 +293,8 @@ def test_set_lora_adapter_mxfp8_requantizes_after_adapter_merge(monkeypatch: pyt
     from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
     events: list[str] = []
-
-    class _RecordingLoRALayer:
-
-        def set_lora_weights(self, lora_a: torch.Tensor, lora_b: torch.Tensor, **kwargs) -> None:
-            del lora_a, lora_b, kwargs
-            events.append("adapter merged")
-
-    transformer = _TaggedModel(object.__new__(mxfp8.MXFP8QuantizeMethod))
-    transformer.linear.register_buffer("_mxfp8_weight", torch.empty(1))
-    transformer_lora_layers = SimpleNamespace(
-        lora_layers_by_block=lambda: iter([(None, {"linear": _RecordingLoRALayer()})])
-    )
-    pipeline = SimpleNamespace(
+    pipeline = _mxfp8_pipeline(
+        events,
         _setting_constructor_adapter=False,
         _constructor_dense_lora_path=None,
         cur_adapter_name="first-adapter",
@@ -251,9 +308,7 @@ def test_set_lora_adapter_mxfp8_requantizes_after_adapter_merge(monkeypatch: pyt
             }
         },
         lora_initialized=True,
-        lora_layers={"transformer": transformer_lora_layers},
         fastvideo_args=SimpleNamespace(training_mode=False),
-        trainable_transformer_modules={"transformer": transformer},
     )
     monkeypatch.setattr("fastvideo.pipelines.lora_pipeline.dist.get_rank", lambda: 0)
     monkeypatch.setattr(mxfp8, "convert_model_to_mxfp8", lambda model: events.append("weights requantized"))
@@ -261,3 +316,26 @@ def test_set_lora_adapter_mxfp8_requantizes_after_adapter_merge(monkeypatch: pyt
     LoRAPipeline.set_lora_adapter(pipeline, "second-adapter")
 
     assert events == ["adapter merged", "weights requantized"]
+
+
+@pytest.mark.parametrize("retain_bf16_weight", [False, True])
+def test_merge_lora_weights_rejects_nvfp4_without_bf16(retain_bf16_weight: bool) -> None:
+    """Reject the NVFP4 LoRA merge only once the BF16 weight is gone."""
+    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+
+    transformer = _TaggedModel(object.__new__(nvfp4.NVFP4QuantizeMethod))
+    transformer.linear.register_parameter(
+        "weight",
+        nn.Parameter(torch.empty(1), requires_grad=False) if retain_bf16_weight else None,
+    )
+    transformer.linear.register_buffer("_nvfp4_weight", torch.empty(1))
+    pipeline = SimpleNamespace(
+        trainable_transformer_modules={"transformer": transformer},
+        lora_layers={},
+    )
+
+    if retain_bf16_weight:
+        LoRAPipeline.merge_lora_weights(pipeline)
+    else:
+        with pytest.raises(RuntimeError, match="LoRA merge is unsupported after NVFP4 weight quantization"):
+            LoRAPipeline.merge_lora_weights(pipeline)
