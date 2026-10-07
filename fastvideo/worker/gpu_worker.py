@@ -126,8 +126,9 @@ class Worker:
 
         # Initialize the distributed environment.
         sp_size = self.fastvideo_args.sp_size
-        sp_group_ranks = None
-        dp_group_ranks = None
+        # Explicit group layouts only for the encoder split; every other run
+        # keeps the default call.
+        group_ranks: dict[str, Any] = {}
         if getattr(self.fastvideo_args, "h3_encoder_split", False):
             # MiniMax-H3 component-level pipeline parallel: encoder ranks get
             # singleton SP groups and never load the DiT/VAEs; the denoise
@@ -136,11 +137,9 @@ class Worker:
 
             sp_size, sp_group_ranks, dp_group_ranks = h3_prepare_split_worker_parallelism(
                 self.fastvideo_args, self.rank, int(os.environ["WORLD_SIZE"]))
-        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size,
-                                                              sp_size,
-                                                              self.distributed_init_method,
-                                                              sp_group_ranks=sp_group_ranks,
-                                                              dp_group_ranks=dp_group_ranks)
+            group_ranks = {"sp_group_ranks": sp_group_ranks, "dp_group_ranks": dp_group_ranks}
+        maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, sp_size,
+                                                              self.distributed_init_method, **group_ranks)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
         if envs.FASTVIDEO_MEMORY_REPORT.get() and self.rank == 0:
