@@ -9,9 +9,79 @@ import torch
 import torch.nn.functional as F
 
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.models.base import ModelBase, NoisePrediction
 from fastvideo.train.utils.optimizer import (
     build_optimizer_and_scheduler, )
+
+
+def _compute_finetune_loss_map(
+    prediction: NoisePrediction,
+    clean_video_latents: torch.Tensor,
+    noisy_video_latents: torch.Tensor,
+    video_noise: torch.Tensor,
+    video_sigmas: torch.Tensor,
+    training_batch: Any,
+    *,
+    precondition_outputs: bool,
+) -> dict[str, torch.Tensor]:
+    """Compute supervised flow-matching losses for one or two modalities.
+
+    A tensor prediction follows the video-only model contract. An ordered
+    ``(video, audio)`` prediction uses each modality's independently shifted
+    noise level and sums both mean-squared errors so one backward pass trains
+    both output branches.
+    """
+    if isinstance(prediction, torch.Tensor):
+        if precondition_outputs:
+            predicted_clean_video = noisy_video_latents - prediction * video_sigmas
+            loss = F.mse_loss(predicted_clean_video.float(), clean_video_latents.float())
+        else:
+            video_target = video_noise - clean_video_latents
+            loss = F.mse_loss(prediction.float(), video_target.float())
+        return {
+            "total_loss": loss,
+            "finetune_loss": loss,
+        }
+
+    if len(prediction) != 2:
+        raise ValueError("A multimodal prediction must contain video and audio tensors")
+    video_prediction, audio_prediction = prediction
+    required_audio_tensors = {
+        "audio_latents": training_batch.audio_latents,
+        "audio_noisy_model_input": training_batch.audio_noisy_model_input,
+        "audio_noise": training_batch.audio_noise,
+        "audio_sigmas": training_batch.audio_sigmas,
+    }
+    missing = [name for name, value in required_audio_tensors.items() if value is None]
+    if missing:
+        raise RuntimeError("prepare_batch() must set " + ", ".join(f"TrainingBatch.{name}" for name in missing))
+
+    clean_audio_latents = required_audio_tensors["audio_latents"]
+    noisy_audio_latents = required_audio_tensors["audio_noisy_model_input"]
+    audio_noise = required_audio_tensors["audio_noise"]
+    audio_sigmas = required_audio_tensors["audio_sigmas"]
+    assert isinstance(clean_audio_latents, torch.Tensor)
+    assert isinstance(noisy_audio_latents, torch.Tensor)
+    assert isinstance(audio_noise, torch.Tensor)
+    assert isinstance(audio_sigmas, torch.Tensor)
+
+    if precondition_outputs:
+        predicted_clean_video = noisy_video_latents - video_prediction * video_sigmas
+        predicted_clean_audio = noisy_audio_latents - audio_prediction * audio_sigmas
+        video_loss = F.mse_loss(predicted_clean_video.float(), clean_video_latents.float())
+        audio_loss = F.mse_loss(predicted_clean_audio.float(), clean_audio_latents.float())
+    else:
+        video_target = video_noise - clean_video_latents
+        audio_target = audio_noise - clean_audio_latents
+        video_loss = F.mse_loss(video_prediction.float(), video_target.float())
+        audio_loss = F.mse_loss(audio_prediction.float(), audio_target.float())
+    total_loss = video_loss + audio_loss
+    return {
+        "total_loss": total_loss,
+        "finetune_loss": total_loss,
+        "video_finetune_loss": video_loss,
+        "audio_finetune_loss": audio_loss,
+    }
 
 
 class FineTuneMethod(TrainingMethod):
@@ -55,6 +125,11 @@ class FineTuneMethod(TrainingMethod):
             dict[str, Any],
             dict[str, LogScalar],
     ]:
+        """Prepare synchronized targets and compute supervised flow loss.
+
+        The returned forward context lets model-specific backward methods
+        restore activation-checkpoint metadata during recomputation.
+        """
         del iteration
         training_batch = self.student.prepare_batch(
             batch,
@@ -92,19 +167,18 @@ class FineTuneMethod(TrainingMethod):
             attn_kind=self._attn_kind,
         )
 
-        if bool(self.training_config.model.precondition_outputs):
-            pred_x0 = noisy_latents - pred * sigmas
-            loss = F.mse_loss(pred_x0.float(), clean_latents.float())
-        else:
-            target = noise - clean_latents
-            loss = F.mse_loss(pred.float(), target.float())
+        loss_map = _compute_finetune_loss_map(
+            pred,
+            clean_latents,
+            noisy_latents,
+            noise,
+            sigmas,
+            training_batch,
+            precondition_outputs=bool(self.training_config.model.precondition_outputs),
+        )
 
         attn_metadata = training_batch.attn_metadata_vsa if self._attn_kind == "vsa" else training_batch.attn_metadata
 
-        loss_map = {
-            "total_loss": loss,
-            "finetune_loss": loss,
-        }
         outputs: dict[str, Any] = {
             "_fv_backward": (
                 training_batch.timesteps,
@@ -122,6 +196,11 @@ class FineTuneMethod(TrainingMethod):
         *,
         grad_accum_rounds: int = 1,
     ) -> None:
+        """Backpropagate an accumulation-scaled loss through the student model.
+
+        Delegating to ``ModelBase.backward`` lets each model restore its forward
+        context before the distributed wrapper synchronizes parameter gradients.
+        """
         grad_accum_rounds = max(1, int(grad_accum_rounds))
         ctx = outputs.get("_fv_backward")
         if ctx is None:

@@ -6,7 +6,6 @@ import pytest
 
 pytest.importorskip("torchvision")
 
-
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.registry import (
     get_pipeline_config_cls_from_name,
@@ -55,15 +54,11 @@ def test_ltx2_pipeline_registry_exact_ids(model_id: str) -> None:
     assert resolved_cls is LTX2T2VConfig
 
 
-def _write_minimal_diffusers_repo(
-    model_dir: Path, class_name: str
-) -> None:
+def _write_minimal_diffusers_repo(model_dir: Path, class_name: str) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "transformer").mkdir(exist_ok=True)
     (model_dir / "vae").mkdir(exist_ok=True)
-    with (model_dir / "model_index.json").open(
-        "w", encoding="utf-8"
-    ) as f:
+    with (model_dir / "model_index.json").open("w", encoding="utf-8") as f:
         json.dump(
             {
                 "_class_name": class_name,
@@ -78,18 +73,14 @@ def _write_minimal_diffusers_repo(
         )
 
 
-def test_ltx2_ambiguous_local_path_has_no_sampling_fallback(
-    tmp_path: Path,
-) -> None:
+def test_ltx2_ambiguous_local_path_has_no_sampling_fallback(tmp_path: Path, ) -> None:
     model_dir = tmp_path / "converted" / "ltx2_diffusers"
     _write_minimal_diffusers_repo(model_dir, "LTX2Pipeline")
     resolved_cls = get_sampling_param_cls_for_name(str(model_dir))
     assert resolved_cls is None
 
 
-def test_ltx2_ambiguous_local_path_resolves_via_detector(
-    tmp_path: Path,
-) -> None:
+def test_ltx2_ambiguous_local_path_resolves_via_detector(tmp_path: Path, ) -> None:
     # Both base and distilled share LTX2T2VConfig, so the
     # "ltx2" detector correctly resolves ambiguous local paths.
     model_dir = tmp_path / "converted" / "ltx2_diffusers"

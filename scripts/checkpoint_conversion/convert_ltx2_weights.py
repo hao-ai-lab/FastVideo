@@ -36,16 +36,15 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     snapshot_download = None
 
-
 PARAM_NAME_MAP: dict[str, str] = {
     r"^model\.diffusion_model\.(.*)$": r"\1",
 }
 
 COMPONENT_PREFIXES: dict[str, tuple[str, ...]] = {
-    "transformer": ("model.diffusion_model.",),
-    "vae": ("vae.",),
-    "audio_vae": ("audio_vae.",),
-    "vocoder": ("vocoder.",),
+    "transformer": ("model.diffusion_model.", ),
+    "vae": ("vae.", ),
+    "audio_vae": ("audio_vae.", ),
+    "vocoder": ("vocoder.", ),
     "text_embedding_projection": ("text_embedding_projection.", "model.text_embedding_projection."),
 }
 
@@ -117,9 +116,7 @@ def _filter_transformer_config(config: dict) -> dict:
     return filtered
 
 
-def _build_text_embedding_projection_config(
-    gemma_model_path: str = "",
-) -> dict:
+def _build_text_embedding_projection_config(gemma_model_path: str = "", ) -> dict:
     return {
         "architectures": ["LTX2GemmaTextEncoderModel"],
         "hidden_size": 3840,
@@ -278,9 +275,7 @@ def convert_components(
             metadata_config.get("vocoder"),
             class_name="LTX2Vocoder",
         ),
-        "text_embedding_projection": _build_text_embedding_projection_config(
-            gemma_model_path=gemma_model_path
-        ),
+        "text_embedding_projection": _build_text_embedding_projection_config(gemma_model_path=gemma_model_path),
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -308,9 +303,7 @@ def convert_components(
         if not required_for_index.issubset(split_weights.keys()):
             print("Skipping model_index.json; missing diffusers components in weights.")
             return
-        vae_class_name = (component_configs.get("vae") or {}).get(
-            "_class_name", "CausalVideoAutoencoder"
-        )
+        vae_class_name = (component_configs.get("vae") or {}).get("_class_name", "CausalVideoAutoencoder")
         model_index = _build_model_index(
             transformer_class_name=transformer_class_name,
             vae_class_name=vae_class_name,
@@ -369,9 +362,7 @@ def copy_gemma_tokenizer(gemma_src: Path, tokenizer_dest: Path) -> None:
             shutil.copy2(src_path, tokenizer_dest / file_name)
             copied += 1
     if copied == 0:
-        raise FileNotFoundError(
-            f"No tokenizer files found in {gemma_src}. Expected at least one tokenizer file."
-        )
+        raise FileNotFoundError(f"No tokenizer files found in {gemma_src}. Expected at least one tokenizer file.")
     print(f"Copied {copied} tokenizer files to {tokenizer_dest}")
 
 
@@ -411,10 +402,8 @@ def main() -> None:
         "--components",
         type=str,
         default="",
-        help=(
-            "Comma-separated component list to write "
-            "(transformer,vae,audio_vae,vocoder,text_embedding_projection)."
-        ),
+        help=("Comma-separated component list to write "
+              "(transformer,vae,audio_vae,vocoder,text_embedding_projection)."),
     )
     parser.add_argument(
         "--gemma-path",
@@ -444,11 +433,7 @@ def main() -> None:
     if args.transformer_only:
         components_to_write = {"transformer"}
     elif args.components:
-        components_to_write = {
-            component.strip()
-            for component in args.components.split(",")
-            if component.strip()
-        }
+        components_to_write = {component.strip() for component in args.components.split(",") if component.strip()}
 
     gemma_model_path = ""
     if args.gemma_path:

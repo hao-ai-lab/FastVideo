@@ -19,12 +19,12 @@ device-keyed grad-norm regression on top of this same harness.
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
 # Required by the ``distributed_setup`` fixture pulled from
-# ``fastvideo/tests/conftest.py``.  Set before any fastvideo import.
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29516")
+# ``fastvideo/tests/conftest.py``.  Set at import, before the fixture runs.
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29516")
 
 from pathlib import Path
 
@@ -38,10 +38,7 @@ from fastvideo.train.utils.config import load_run_config
 
 from .grad_norm_regression import check_grad_norm_regression
 
-
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures"
-    / "wan_t2v_finetune_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "wan_t2v_finetune_min.yaml")
 
 
 def _build_synthetic_batch(
@@ -56,23 +53,19 @@ def _build_synthetic_batch(
     """
     batch_size = 1
     return {
-        "text_embedding":
-        torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
+        "text_embedding": torch.randn(batch_size, 16, 4096, device=device, dtype=dtype),
         # float32 mask, matching the production dataloader
         # (``fastvideo/dataset/utils.py`` emits ``torch.ones``/``zeros``).
         # ``prepare_batch`` casts to training dtype either way.
-        "text_attention_mask":
-        torch.ones(batch_size, 16, device=device),
+        "text_attention_mask": torch.ones(batch_size, 16, device=device),
         # vae_latent in (B, C, T, H, W); ``prepare_batch`` will
         # truncate T to ``training.data.num_latent_t``.
-        "vae_latent":
-        torch.randn(batch_size, 16, 4, 8, 8, device=device, dtype=dtype),
+        "vae_latent": torch.randn(batch_size, 16, 4, 8, 8, device=device, dtype=dtype),
     }
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_wan_finetune_single_train_step(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wan_finetune_single_train_step(monkeypatch: pytest.MonkeyPatch) -> None:
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
@@ -85,7 +78,7 @@ def test_wan_finetune_single_train_step(
     # ``single_train_step``, so the parquet train dataloader that
     # ``init_preprocessors`` builds is never iterated.  Stub it out so
     # construction does not require a real ``training.data.data_path``:
-    # the minimal fixture deliberately omits one, and the Modal CI job
+    # the minimal fixture deliberately omits one, and the Slurm CI worker
     # mounts model weights rather than a parquet dataset.
     monkeypatch.setattr(
         "fastvideo.train.utils.dataloader."
@@ -115,14 +108,12 @@ def test_wan_finetune_single_train_step(
 
     loss = loss_map["total_loss"]
     assert torch.is_tensor(loss), "total_loss must be a torch.Tensor"
-    assert torch.isfinite(loss).item(), (
-        f"total_loss is not finite: {loss.item()}")
+    assert torch.isfinite(loss).item(), (f"total_loss is not finite: {loss.item()}")
 
     method.backward(loss_map, outputs, grad_accum_rounds=1)
 
     blocks = getattr(model.transformer, "blocks", None)
-    assert blocks is not None and len(blocks) > 0, (
-        "Wan transformer is expected to expose ``.blocks``")
+    assert blocks is not None and len(blocks) > 0, ("Wan transformer is expected to expose ``.blocks``")
     layer0 = blocks[0]
 
     trainable = [p for p in layer0.parameters() if p.requires_grad]
@@ -130,17 +121,14 @@ def test_wan_finetune_single_train_step(
 
     for i, p in enumerate(trainable):
         assert p.grad is not None, f"layer 0 param[{i}] has None grad"
-        assert torch.isfinite(p.grad).all().item(), (
-            f"layer 0 param[{i}] grad contains NaN/Inf")
+        assert torch.isfinite(p.grad).all().item(), (f"layer 0 param[{i}] grad contains NaN/Inf")
 
     # At least one layer-0 grad must have non-zero L2 norm so we
     # catch the case where backward ran but the first block was
     # detached from the loss (silent connectivity bug).
-    any_nonzero = any(
-        p.grad.detach().float().norm().item() > 0.0 for p in trainable)
-    assert any_nonzero, (
-        "all layer-0 grads are exactly zero; backward did not "
-        "reach the first transformer block")
+    any_nonzero = any(p.grad.detach().float().norm().item() > 0.0 for p in trainable)
+    assert any_nonzero, ("all layer-0 grads are exactly zero; backward did not "
+                         "reach the first transformer block")
 
     # 5a-ii: device-keyed grad-norm regression on top of the same harness.
     # Skips when the current GPU has no seeded reference.

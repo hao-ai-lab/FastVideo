@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""LTX-2 NVFP4 quantization (FlashInfer-backed).
+"""NVFP4 linear quantization for supported transformer layer sets.
 
 NVFP4 is NVIDIA's block-scaled FP4 format (e2m1 mantissa, fp32 alpha,
 ``layout_128x4`` scale layout, group size 16) — distinct from
@@ -8,9 +8,9 @@ explicitly so downstream callers don't conflate it with other FP4
 variants that may land later (e.g. AMD's MX-FP4 or vendor-neutral
 e3m0).
 
-Upstreamed from ``FastVideo-internal`` so consumers that load LTX-2
-weights with NVFP4 quantization can drive the public package
-end-to-end.
+The registered config targets the curated LTX-2 deployment set, the
+main MiniMax-H3 transformer-block FFN linears, and the packed MiniMax-H3
+DiT export (``layer_profile="h3_dit"``) covering attention plus FFN.
 
 `flashinfer` is imported lazily inside the call paths that need it.
 This keeps ``import fastvideo`` cheap on hosts where flashinfer is
@@ -19,12 +19,17 @@ use time, with a clear error.
 """
 from __future__ import annotations
 
+import functools
 import logging
+import os
+import re
 from typing import Any
 
 import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
+
+import fastvideo.envs as envs
 
 from fastvideo.layers.quantization.base_config import (
     QuantizationConfig,
@@ -75,11 +80,65 @@ _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES = (
 _LTX2_NVFP4_LINEAR_PREFIXES = frozenset(f"ltx2.blocks.{block_idx}.{suffix}" for block_idx in range(48)
                                         for suffix in _LTX2_NVFP4_BLOCK_LINEAR_SUFFIXES) | frozenset(
                                             ("ltx2.adaln_single.linear", ))
+_MINIMAX_H3_NVFP4_FF_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.ff\.(?:fc_in|fc_out)$")
+_MINIMAX_H3_NVFP4_DIT_PREFIX = re.compile(
+    r"(?:^|\.)transformer_blocks\.\d+\.(?:attn\.to_(?:q|k|v|out)|ff\.(?:fc_in|fc_out))$")
+_H3_BLOCK_ATTN_PROJ = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.attn\.(?:to_q|to_k|to_v|to_out)$")
+_MINIMAX_H3_NVFP4_VSA_GATE_PREFIX = re.compile(r"(?:^|\.)transformer_blocks\.\d+\.attn\.to_gate_compress$")
+H3_NVFP4_DIT_EXPORT_FILENAME = "nvfp4_weights.safetensors"
+H3_NVFP4_DIT_KEY_SEP = "::"
+H3_NVFP4_DIT_BUFFER_NAMES = (
+    "_nvfp4_weight",
+    "_nvfp4_weight_scale",
+    "_nvfp4_alpha",
+    "_weight_global_sf",
+)
+# Optional per-layer static activation global scale (448 * 6 / calibrated input amax).
+# Exports without it quantize activations with the unit global scale.
+H3_NVFP4_DIT_INPUT_SF_NAME = "_nvfp4_input_global_sf"
 
 
 def is_ltx2_nvfp4_linear_prefix(prefix: str) -> bool:
     """Return whether *prefix* belongs to the LTX-2 NVFP4 deployment set."""
     return prefix in _LTX2_NVFP4_LINEAR_PREFIXES
+
+
+def is_minimax_h3_nvfp4_linear_prefix(prefix: str) -> bool:
+    return _MINIMAX_H3_NVFP4_FF_PREFIX.search(prefix) is not None
+
+
+def is_minimax_h3_nvfp4_dit_linear_prefix(prefix: str) -> bool:
+    """Return whether *prefix* is a MiniMax-H3 DiT attention or FFN linear.
+
+    This is the packed NVFP4H3 export set: ``attn.to_{q,k,v,out}`` and
+    ``ff.{fc_in,fc_out}`` in each main transformer block. Token-refiner,
+    AdaLN, and embedding linears stay dense.
+    """
+    return _MINIMAX_H3_NVFP4_DIT_PREFIX.search(prefix) is not None
+
+
+def is_minimax_h3_nvfp4_dit_export_path(path: str) -> bool:
+    return os.path.basename(path) == H3_NVFP4_DIT_EXPORT_FILENAME
+
+
+def find_minimax_h3_nvfp4_dit_export(weight_paths: list[str]) -> str | None:
+    seen: list[str] = []
+    for path in weight_paths:
+        if is_minimax_h3_nvfp4_dit_export_path(path) and os.path.isfile(path):
+            return path
+        directory = path if os.path.isdir(path) else os.path.dirname(path)
+        if directory and directory not in seen:
+            seen.append(directory)
+    for directory in seen:
+        candidate = os.path.join(directory, H3_NVFP4_DIT_EXPORT_FILENAME)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def dense_transformer_safetensors(weight_paths: list[str]) -> list[str]:
+    """Drop the packed NVFP4 DiT export so it is not loaded as bf16 weights."""
+    return [path for path in weight_paths if not is_minimax_h3_nvfp4_dit_export_path(path)]
 
 
 def _is_ltx2_refine_only_prefix(prefix: str) -> bool:
@@ -113,6 +172,44 @@ def _get_ltx2_fp4_stage_profile(default: str = "refine") -> str:
         return default
 
 
+@functools.cache
+def _is_dgx_spark(device_index: int) -> bool:
+    return torch.cuda.get_device_capability(device_index) == (12, 1)
+
+
+def nvfp4_quantize_fenced(
+    x: torch.Tensor,
+    global_sf: torch.Tensor,
+    sf_layout: int,
+    do_shuffle: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """FlashInfer NVFP4 quantization with the DGX Spark (GB10) ordering fence.
+
+    Every FastVideo NVFP4 quantization goes through here, so the GB10
+    workaround covers inference and the QAT straight-through linear alike.
+    """
+    device_index = x.device.index if x.device.index is not None else torch.cuda.current_device()
+    spark = _is_dgx_spark(device_index)
+    if spark and torch.cuda.is_current_stream_capturing():
+        raise RuntimeError("NVFP4 activation quantization on DGX Spark requires a completion fence; "
+                           "disable CUDA graph capture.")
+    SfLayout, _, nvfp4_quantize = _require_flashinfer()
+    if not spark:
+        return nvfp4_quantize(x, global_sf, sfLayout=SfLayout(sf_layout), do_shuffle=do_shuffle)
+    # FlashInfer's PDL kernel reads the global scale before its
+    # dependency wait. Fresh dynamic scales require normal ordering.
+    quantized, scales = nvfp4_quantize(x,
+                                       global_sf,
+                                       sfLayout=SfLayout(sf_layout),
+                                       do_shuffle=do_shuffle,
+                                       enable_pdl=False)
+    # With FlashInfer 0.6.18 on GB10, queued activation quantization
+    # plus GEMM can diverge. Completing quantization while its padded
+    # input is alive prevents the observed intermittent corruption.
+    torch.cuda.current_stream(x.device).synchronize()
+    return quantized, scales
+
+
 _OPS_REGISTERED = False
 
 
@@ -135,8 +232,7 @@ def _register_ops_once() -> None:
         sf_layout: int,
         do_shuffle: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        SfLayout, _, nvfp4_quantize = _require_flashinfer()
-        return nvfp4_quantize(x, global_sf, sfLayout=SfLayout(sf_layout), do_shuffle=do_shuffle)
+        return nvfp4_quantize_fenced(x, global_sf, sf_layout, do_shuffle)
 
     @_nvfp4_quantize_op.register_fake
     def _nvfp4_quantize_op_fake(
@@ -284,6 +380,16 @@ def _mm_fp4(
     )
 
 
+def _mm_fp4_backend() -> str:
+    """FlashInfer ``mm_fp4`` backend (``FASTVIDEO_NVFP4_MM_BACKEND``, default ``auto``).
+
+    On sm_120 ``auto`` picks a kernel about 2x slower than ``cutlass`` or
+    ``cudnn`` once activations reach tens of thousands of rows (measured at
+    73k rows on an RTX PRO 6000); short sequences are unaffected.
+    """
+    return envs.FASTVIDEO_NVFP4_MM_BACKEND.get()
+
+
 def _coerce_fp4_input_dtype(x: torch.Tensor) -> torch.Tensor:
     """Coerce an activation to a dtype the FP4 linear accepts.
 
@@ -300,7 +406,23 @@ def _coerce_fp4_input_dtype(x: torch.Tensor) -> torch.Tensor:
     return x
 
 
+_AMAX_TABLES: dict[str, dict[str, float]] = {}
+
+
+def _load_amax_table(path: str) -> dict[str, float]:
+    if path not in _AMAX_TABLES:
+        import json
+        with open(path) as f:
+            raw = json.load(f)
+        _AMAX_TABLES[path] = {k: float(v["all"] if isinstance(v, dict) else v) for k, v in raw.items()}
+    return _AMAX_TABLES[path]
+
+
 class NVFP4QuantizeMethod(QuantizeMethodBase):
+
+    # Lazily resolved by _static_activation_global_sf; class defaults also cover object.__new__ test doubles.
+    _static_sf_checked: bool = False
+    _static_sf: torch.Tensor | None = None
 
     def __init__(self, layer_prefix: str = ""):
         super().__init__()
@@ -309,6 +431,11 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         self.x_global_sf = torch.tensor(1.0, device="cuda", dtype=torch.float32)
         self.layer_prefix = layer_prefix
         self._is_refine_only_layer = _is_ltx2_refine_only_prefix(layer_prefix)
+        # Set from NVFP4Config.retain_original_weights in get_quant_method:
+        # True = retain every original bf16 weight; None/False (default) =
+        # purge the purgeable set. Refine-only layers are always retained --
+        # the base stage profile runs them dense by deployment contract.
+        self._retain_original_weights: bool | None = None
 
     def create_weights(self, layer: torch.nn.Module, input_size_per_partition: int, output_partition_sizes: list[int],
                        input_size: int, output_size: int, params_dtype: torch.dtype, **extra_weight_attrs):
@@ -321,6 +448,42 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
         set_weight_attrs(weight, extra_weight_attrs)
+
+    def _static_activation_global_sf(self) -> torch.Tensor | None:
+        """FASTVIDEO_NVFP4_ACT_AMAX: JSON of calibrated input amax per layer ("b<block>.<sub>" or full prefix)."""
+        if getattr(self, "_static_sf_checked", False):
+            return self._static_sf
+        self._static_sf_checked, self._static_sf = True, None
+        path = envs.FASTVIDEO_NVFP4_ACT_AMAX.get()
+        if path:
+            table = _load_amax_table(path)
+            prefix = self.layer_prefix or ""
+            match = re.search(r"transformer_blocks\.(\d+)\.(.+)$", prefix)
+            keys = [prefix] + ([f"b{match.group(1)}.{match.group(2)}"] if match else [])
+            amax = next((table[k] for k in keys if k in table), None)
+            if amax is not None:
+                self._static_sf = torch.tensor((448.0 * 6.0) / max(amax, 1e-12), dtype=torch.float32, device="cuda")
+        return self._static_sf
+
+    def _dynamic_activation_scale(self) -> bool:
+        """FASTVIDEO_NVFP4_DYNAMIC_ACT: "all", or comma-separated layer-name suffixes (e.g. "ff.fc_out")."""
+        cached = getattr(self, "_dynamic_act_cached", None)
+        if cached is None:
+            selected = envs.FASTVIDEO_NVFP4_DYNAMIC_ACT.get()
+            suffixes = [part.strip() for part in selected.split(",") if part.strip()]
+            prefix = self.layer_prefix or ""
+            cached = "all" in suffixes or any(prefix.endswith(suffix) for suffix in suffixes)
+            self._dynamic_act_cached = cached
+        return cached
+
+    def uses_unit_activation_scale(self, layer: torch.nn.Module) -> bool:
+        """Whether ``apply`` quantizes this layer's input with the unit global scale.
+
+        False when a calibrated scale (env table or the export's ``_nvfp4_input_global_sf``) or a dynamic
+        per-call scale applies; such inputs cannot share one pre-quantized copy across layers.
+        """
+        return (self._static_activation_global_sf() is None and getattr(layer, H3_NVFP4_DIT_INPUT_SF_NAME, None) is None
+                and not self._dynamic_activation_scale())
 
     def quantize_input(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         SfLayout, _, _ = _require_flashinfer()
@@ -349,7 +512,11 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         | None = None,
     ) -> torch.Tensor:
         SfLayout, _, _ = _require_flashinfer()
-        out_dim = layer.weight.shape[0]
+        # The original bf16 weight may have been purged after FP4 conversion
+        # (see convert_model_to_nvfp4); the packed FP4 weight keeps the
+        # output dim as its first dimension (only K is packed 2-per-byte).
+        weight = getattr(layer, "weight", None)
+        out_dim = weight.shape[0] if weight is not None else layer._nvfp4_weight.shape[0]
         original_shape = x.shape
 
         # Stage-aware profile: keep refine-only FP4 layers in dense mode
@@ -357,8 +524,13 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         # quantize/dequantize tax for layers it never touches.
         stage_profile = _get_ltx2_fp4_stage_profile(default="refine")
         if self._is_refine_only_layer and stage_profile == "base":
-            out = (F.linear(x, layer.weight, bias) if torch.cuda.is_available() or bias is None else F.linear(
-                x, layer.weight, bias.to(x.dtype)))
+            if weight is None:
+                raise RuntimeError(f"NVFP4 layer {self.layer_prefix!r} hit the stage-profile dense path, "
+                                   "but its original weights were purged "
+                                   "(NVFP4Config(retain_original_weights=False)). Streaming/two-stage "
+                                   "deploys must load with retain_original_weights left unset (auto) or True.")
+            out = (F.linear(x, weight, bias) if torch.cuda.is_available() or bias is None else F.linear(
+                x, weight, bias.to(x.dtype)))
             return out.view(*original_shape[:-1], out_dim)
         if pre_quantized is not None:
             x_fp4, x_scale, x_global_sf = pre_quantized
@@ -372,7 +544,17 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
         else:
             x = _coerce_fp4_input_dtype(x)
             x = x.view(-1, x.shape[-1])
-            x_global_sf = self.x_global_sf
+            static_sf = self._static_activation_global_sf()
+            if static_sf is None:
+                static_sf = getattr(layer, H3_NVFP4_DIT_INPUT_SF_NAME, None)
+            if static_sf is not None:
+                x_global_sf = static_sf
+            elif self._dynamic_activation_scale():
+                # A unit global scale caps FP8 block scales at |x| = 6 * 448; inputs such as H3's ff.fc_out
+                # (post-SwiGLU) exceed that, so derive the global scale from this call's amax.
+                x_global_sf = (448.0 * 6.0) / x.abs().amax().float().clamp(min=1e-12)
+            else:
+                x_global_sf = self.x_global_sf
             x_fp4, x_scale = _nvfp4_quantize(
                 x,
                 x_global_sf,
@@ -397,7 +579,7 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
             alpha,
             torch.bfloat16,
             None,
-            backend='auto',
+            backend=_mm_fp4_backend(),
         )
 
         if bias is not None:
@@ -407,20 +589,35 @@ class NVFP4QuantizeMethod(QuantizeMethodBase):
 
 
 class NVFP4Config(QuantizationConfig):
-    """LTX-2-specific NVFP4 quantization configuration.
+    """Select NVFP4 for the supported LTX-2 and MiniMax-H3 linear sets.
 
     NVFP4 is NVIDIA's block-scaled FP4 (e2m1 mantissa, fp32 alpha,
-    ``layout_128x4`` scale layout, group size 16). Today this class
-    hardcodes the LTX-2 layer paths it covers. When a second model
-    wants NVFP4, lift the layer-path list into a config field
-    instead of hardcoding it here.
+    ``layout_128x4`` scale layout, group size 16). LTX-2 uses its curated
+    attention and FFN deployment set. MiniMax-H3's default profile uses only
+    ``fc_in`` and ``fc_out`` in each main transformer-block FFN.
+    ``layer_profile="h3_dit"`` expands that to the packed NVFP4H3 DiT set
+    (attention ``to_{q,k,v,out}`` plus those FFN linears).
+    ``layer_profile="h3_dit_ffn"`` loads a packed export of the FFN linears
+    only, keeping attention projections dense (e.g. calibrated FFN-only
+    checkpoints such as FastH3 V2 NVFP4).
+    ``layer_profile="h3_dit_vsa"`` is ``h3_dit`` plus each block's VSA
+    compression gate ``attn.to_gate_compress`` (VSA-distilled students).
     """
 
-    def __init__(self, layer_profile: str = "refine"):
+    def __init__(self, layer_profile: str = "refine", retain_original_weights: bool | None = None):
         super().__init__()
-        # ``base``: stage-1 set (no attn2.to_out, no cross-modal AV
-        # projections). ``refine``: full stage-2 set.
+        if layer_profile not in ("base", "refine", "h3_dit", "h3_dit_ffn", "h3_dit_vsa"):
+            raise ValueError("NVFP4Config.layer_profile must be one of 'base', 'refine', 'h3_dit', "
+                             f"'h3_dit_ffn', or 'h3_dit_vsa', got {layer_profile!r}")
         self.layer_profile = layer_profile
+        # Original bf16 ``layer.weight`` retention after FP4 conversion.
+        # Default (None/False): purge the purgeable originals -- every
+        # always-FP4 layer. Refine-only layers (the cross-modal AV
+        # projections) are ALWAYS retained: the ``base`` stage profile runs
+        # them dense by deployment contract, including the distilled
+        # single-stage deploy. True: retain everything (debugging /
+        # pre-purge behavior).
+        self.retain_original_weights = retain_original_weights
 
     def get_name(self):
         return "nvfp4"
@@ -438,15 +635,34 @@ class NVFP4Config(QuantizationConfig):
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> NVFP4Config:
-        return cls(layer_profile=config.get("layer_profile", "refine"))
+        return cls(
+            layer_profile=config.get("layer_profile", "refine"),
+            retain_original_weights=config.get("retain_original_weights"),
+        )
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
 
-        # Use the superset at build/load time, then switch active subset
-        # dynamically in NVFP4QuantizeMethod.apply based on stage profile.
-        if isinstance(layer, LinearBase) and is_ltx2_nvfp4_linear_prefix(prefix):
-            return NVFP4QuantizeMethod(layer_prefix=prefix)
+        if not isinstance(layer, LinearBase):
+            return None
+        if self.layer_profile == "h3_dit":
+            tagged = is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
+        elif self.layer_profile == "h3_dit_vsa":
+            tagged = (is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
+                      or _MINIMAX_H3_NVFP4_VSA_GATE_PREFIX.search(prefix) is not None)
+        elif self.layer_profile == "h3_dit_ffn":
+            tagged = is_minimax_h3_nvfp4_linear_prefix(prefix)
+        else:
+            tagged = is_ltx2_nvfp4_linear_prefix(prefix) or is_minimax_h3_nvfp4_linear_prefix(prefix)
+        if tagged:
+            method = NVFP4QuantizeMethod(layer_prefix=prefix)
+            method._retain_original_weights = self.retain_original_weights
+            return method
+        if (self.layer_profile == "h3_dit_ffn" and envs.FASTVIDEO_H3_FP8_ATTENTION.get()
+                and _H3_BLOCK_ATTN_PROJ.search(prefix) is not None):
+            # Mixed precision: NVFP4 MLPs, FP8 (per-tensor weight, dynamic per-tensor activation) attention.
+            from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+            return FP8QuantizeMethod(granularity=envs.FASTVIDEO_H3_FP8_GRANULARITY.get())
         return None
 
 
@@ -454,6 +670,9 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
     SfLayout, _, _ = _require_flashinfer()
     from torch.distributed.tensor import DTensor  # type: ignore
 
+    purged = 0
+    retained = 0
+    purged_bytes = 0
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
         if isinstance(qm, NVFP4QuantizeMethod):
@@ -486,10 +705,125 @@ def convert_model_to_nvfp4(model: torch.nn.Module) -> None:
                 persistent=False,
             )
 
+            retain_flag = getattr(qm, "_retain_original_weights", None)
+            # Refine-only layers are NEVER purgeable: the "base" stage profile
+            # runs them dense by deployment contract (the distilled
+            # single-stage deploy included — its forward context is the base
+            # profile, so e.g. audio_to_video_attn routes dense every step).
+            # retain_original_weights therefore only widens retention
+            # (True = keep everything); it cannot narrow it below the
+            # dense-capable set.
+            retain = qm._is_refine_only_layer or retain_flag is True
+            if retain:
+                retained += 1
+            elif isinstance(weight, DTensor):
+                raise RuntimeError("NVFP4 cannot purge FSDP-sharded bf16 weights. Use a packed NVFP4 "
+                                   "export, or convert without FSDP sharding.")
+            else:
+                purged_bytes += weight.numel() * weight.element_size()
+                purged += 1
+                mod.register_parameter("weight", None)
+
+    if purged or retained:
+        logger.info(
+            "NVFP4 weight purge receipt: purged %d original bf16 weight tensors "
+            "(%.2f GiB freed); retained %d (refine-only dense fallback or "
+            "retain_original_weights).",
+            purged,
+            purged_bytes / (1 << 30),
+            retained,
+        )
+
+
+def nvfp4_linear_weight_param_names(model: torch.nn.Module) -> set[str]:
+    """State-dict names of ``weight`` on layers tagged with ``NVFP4QuantizeMethod``."""
+    names: set[str] = set()
+    for module_name, module in model.named_modules():
+        if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod):
+            names.add(f"{module_name}.weight" if module_name else "weight")
+    return names
+
+
+def _module_by_nvfp4_export_prefix(modules: dict[str, torch.nn.Module], prefix: str) -> torch.nn.Module | None:
+    module = modules.get(prefix)
+    if module is not None:
+        return module
+    if prefix.startswith("minimax_h3."):
+        return modules.get(prefix[len("minimax_h3."):])
+    return modules.get(f"minimax_h3.{prefix}")
+
+
+def load_minimax_h3_nvfp4_dit_export(
+    model: torch.nn.Module,
+    path: str,
+    device: torch.device | str,
+) -> int:
+    """Load a packed NVFP4H3 DiT export onto already-tagged NVFP4 linears.
+
+    Keys are ``<module>::<buffer>`` with the four buffers
+    ``convert_model_to_nvfp4`` registers, plus an optional calibrated
+    ``_nvfp4_input_global_sf``. Every export prefix must match an
+    NVFP4 linear, and every NVFP4 linear must appear in the export.
+    """
+    from safetensors import safe_open
+
+    modules = dict(model.named_modules())
+    tagged = {
+        name
+        for name, module in modules.items() if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod)
+    }
+    groups: dict[str, dict[str, str]] = {}
+    with safe_open(path, framework="pt", device="cpu") as reader:
+        for key in reader.keys():  # noqa: SIM118
+            if H3_NVFP4_DIT_KEY_SEP not in key:
+                raise ValueError(f"MiniMax-H3 NVFP4 DiT export key {key!r} is missing {H3_NVFP4_DIT_KEY_SEP!r}")
+            prefix, buffer_name = key.split(H3_NVFP4_DIT_KEY_SEP, 1)
+            groups.setdefault(prefix, {})[buffer_name] = key
+
+        loaded_names: set[str] = set()
+        for prefix, buffers in groups.items():
+            missing_buffers = [name for name in H3_NVFP4_DIT_BUFFER_NAMES if name not in buffers]
+            if missing_buffers:
+                raise ValueError(f"MiniMax-H3 NVFP4 DiT export layer {prefix!r} is missing {missing_buffers}")
+            extra_buffers = sorted(set(buffers) - set(H3_NVFP4_DIT_BUFFER_NAMES) - {H3_NVFP4_DIT_INPUT_SF_NAME})
+            if extra_buffers:
+                raise ValueError(f"MiniMax-H3 NVFP4 DiT export layer {prefix!r} has unknown buffers {extra_buffers}")
+            module = _module_by_nvfp4_export_prefix(modules, prefix)
+            if module is None:
+                raise ValueError(f"MiniMax-H3 NVFP4 DiT export layer {prefix!r} is not in the model")
+            if not isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod):
+                raise RuntimeError("MiniMax-H3 NVFP4 DiT export layer "
+                                   f"{prefix!r} is not an NVFP4 linear; set NVFP4Config(layer_profile='h3_dit')")
+            for buffer_name in H3_NVFP4_DIT_BUFFER_NAMES + (H3_NVFP4_DIT_INPUT_SF_NAME, ):
+                if buffer_name not in buffers:
+                    continue
+                tensor = reader.get_tensor(buffers[buffer_name]).to(device=device)
+                module.register_buffer(buffer_name, tensor, persistent=False)
+            module.register_parameter("weight", None)
+            loaded_names.add(next(name for name, candidate in modules.items() if candidate is module))
+
+    missing_layers = tagged - loaded_names
+    extra_layers = loaded_names - tagged
+    if missing_layers or extra_layers:
+        raise RuntimeError("MiniMax-H3 NVFP4 DiT export does not cover the tagged linear set; "
+                           f"missing={sorted(missing_layers)[:8]} extra={sorted(extra_layers)[:8]}")
+    logger.info("Loaded MiniMax-H3 NVFP4 DiT export: %d linears from %s", len(loaded_names), path)
+    return len(loaded_names)
+
 
 __all__ = [
+    "H3_NVFP4_DIT_BUFFER_NAMES",
+    "H3_NVFP4_DIT_EXPORT_FILENAME",
+    "H3_NVFP4_DIT_INPUT_SF_NAME",
     "NVFP4Config",
     "NVFP4QuantizeMethod",
     "convert_model_to_nvfp4",
+    "dense_transformer_safetensors",
+    "find_minimax_h3_nvfp4_dit_export",
     "is_ltx2_nvfp4_linear_prefix",
+    "is_minimax_h3_nvfp4_dit_export_path",
+    "is_minimax_h3_nvfp4_dit_linear_prefix",
+    "is_minimax_h3_nvfp4_linear_prefix",
+    "load_minimax_h3_nvfp4_dit_export",
+    "nvfp4_linear_weight_param_names",
 ]

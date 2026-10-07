@@ -16,7 +16,6 @@ import torch
 
 from fastvideo.train.callbacks.ema import EMACallback
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -89,9 +88,7 @@ class TestOnTrainingStepEnd:
     def test_no_op_before_train_start(self) -> None:
         cb = EMACallback()
         # student_ema is None until on_train_start.
-        cb.on_training_step_end(
-            _Method(transformer=None), loss_dict={}, iteration=0
-        )
+        cb.on_training_step_end(_Method(transformer=None), loss_dict={}, iteration=0)
         assert not cb._ema_started
 
     def test_skipped_until_start_iter(self) -> None:
@@ -103,9 +100,7 @@ class TestOnTrainingStepEnd:
         with torch.no_grad():
             transformer.weight.fill_(7.0)
 
-        cb.on_training_step_end(
-            _Method(transformer), loss_dict={}, iteration=5
-        )
+        cb.on_training_step_end(_Method(transformer), loss_dict={}, iteration=5)
         # Below start_iter: shadow is untouched, _ema_started False.
         assert not cb._ema_started
         assert torch.allclose(
@@ -122,9 +117,7 @@ class TestOnTrainingStepEnd:
         with torch.no_grad():
             transformer.weight.fill_(5.0)
 
-        cb.on_training_step_end(
-            _Method(transformer), loss_dict={}, iteration=10
-        )
+        cb.on_training_step_end(_Method(transformer), loss_dict={}, iteration=10)
         # First active step: shadow is re-initialized from the
         # current transformer (5.0) and *then* update() applies decay
         # against the same value, so shadow stays at 5.0.
@@ -140,16 +133,12 @@ class TestOnTrainingStepEnd:
         cb.on_train_start(_Method(transformer), iteration=0)
 
         # Step 0: re-init at 2.0, then update against 2.0 → still 2.0.
-        cb.on_training_step_end(
-            _Method(transformer), loss_dict={}, iteration=0
-        )
+        cb.on_training_step_end(_Method(transformer), loss_dict={}, iteration=0)
         # Step 1: drift transformer to 12.0, expect
         # shadow = 0.9 * 2.0 + 0.1 * 12.0 = 3.0.
         with torch.no_grad():
             transformer.weight.fill_(12.0)
-        cb.on_training_step_end(
-            _Method(transformer), loss_dict={}, iteration=1
-        )
+        cb.on_training_step_end(_Method(transformer), loss_dict={}, iteration=1)
         assert torch.allclose(
             cb.student_ema.shadow["weight"],
             torch.full((2, 4), 3.0),
@@ -164,10 +153,7 @@ class TestOnTrainingStepEnd:
         cb.on_train_start(method, iteration=0)
         cb.on_training_step_end(method, loss_dict={}, iteration=0)
 
-        assert any(
-            payload.get("ema/decay") == 0.99 and step == 0
-            for payload, step in tracker.entries
-        )
+        assert any(payload.get("ema/decay") == 0.99 and step == 0 for payload, step in tracker.entries)
 
 
 # ---------------------------------------------------------------------------
@@ -183,9 +169,7 @@ class TestEmaContext:
         # No on_train_start → student_ema is None.
         with cb.ema_context(transformer) as t:
             assert t is transformer
-            assert torch.allclose(
-                t.weight, torch.full((2, 4), 3.0)
-            )
+            assert torch.allclose(t.weight, torch.full((2, 4), 3.0))
 
     def test_swaps_weights_then_restores(self) -> None:
         transformer = _tiny_transformer(fill=1.0)
@@ -203,9 +187,7 @@ class TestEmaContext:
         with cb.ema_context(transformer) as t:
             assert torch.allclose(t.weight, torch.full((2, 4), 1.0))
 
-        assert torch.allclose(
-            transformer.weight, torch.full((2, 4), 9.0)
-        )
+        assert torch.allclose(transformer.weight, torch.full((2, 4), 9.0))
 
 
 # ---------------------------------------------------------------------------
@@ -232,8 +214,7 @@ class TestStateDict:
 
         # Build a fresh callback and load.
         fresh = EMACallback(decay=0.5, start_iter=0)
-        fresh.on_train_start(_Method(_tiny_transformer(fill=0.0)),
-                             iteration=0)
+        fresh.on_train_start(_Method(_tiny_transformer(fill=0.0)), iteration=0)
         # Sanity: fresh shadow != saved shadow before load.
         assert not torch.allclose(
             fresh.student_ema.shadow["weight"],

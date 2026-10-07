@@ -7,14 +7,15 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.api.flux import FluxSamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
-    run_text_to_video_similarity_test,
-)
+    run_text_to_video_similarity_test, )
 from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
+    with_model_path,
 )
 
 logger = init_logger(__name__)
@@ -24,16 +25,12 @@ REQUIRED_GPUS = 1
 # MS-SSIM gate (see module docstring).
 FLUX_T2I_MIN_SSIM = 0.98
 
-FLUX_MODEL_PATH = os.getenv(
-    "FLUX_T2I_MODEL_DIR",
-    "black-forest-labs/FLUX.1-dev",
-)
-
 device_reference_folder = resolve_device_reference_folder(
     (
         ("A40", "A40"),
         ("L40S", "L40S"),
         ("H100", "H100"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
         ("RTX 4090", "RTX4090"),
         ("4090", "RTX4090"),
@@ -51,9 +48,9 @@ TEST_PROMPTS = [
     "a photo of a cat",
 ]
 
+# The test adds "model_path" from FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR.
 FLUX_DEFAULT_PARAMS: dict[str, object] = {
     "num_gpus": 1,
-    "model_path": FLUX_MODEL_PATH,
     "sp_size": 1,
     "tp_size": 1,
     "height": 256,
@@ -68,7 +65,6 @@ FLUX_DEFAULT_PARAMS: dict[str, object] = {
 _flux_full_defaults = FluxSamplingParam()
 FLUX_FULL_QUALITY_PARAMS: dict[str, object] = {
     "num_gpus": 1,
-    "model_path": FLUX_MODEL_PATH,
     "sp_size": 1,
     "tp_size": 1,
     "height": _flux_full_defaults.height,
@@ -100,12 +96,11 @@ def test_flux_t2i_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
-    is_hf_repo = "/" in FLUX_MODEL_PATH and not FLUX_MODEL_PATH.startswith("/")
-    if not is_hf_repo and not os.path.isdir(FLUX_MODEL_PATH):
-        pytest.skip(
-            f"FLUX weights not found at {FLUX_MODEL_PATH} "
-            f"(set FLUX_T2I_MODEL_DIR to override)"
-        )
+    flux_model_path = envs.FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR.get()
+    is_hf_repo = "/" in flux_model_path and not flux_model_path.startswith("/")
+    if not is_hf_repo and not os.path.isdir(flux_model_path):
+        pytest.skip(f"FLUX weights not found at {flux_model_path} "
+                    f"(set FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR to override)")
 
     run_text_to_video_similarity_test(
         logger=logger,
@@ -114,8 +109,8 @@ def test_flux_t2i_similarity(
         prompt=prompt,
         attention_backend_name=attention_backend_name,
         model_id=model_id,
-        default_params_map=FLUX_MODEL_TO_PARAMS,
-        full_quality_params_map=FLUX_FULL_QUALITY_MODEL_TO_PARAMS,
+        default_params_map=with_model_path(FLUX_MODEL_TO_PARAMS, flux_model_path),
+        full_quality_params_map=with_model_path(FLUX_FULL_QUALITY_MODEL_TO_PARAMS, flux_model_path),
         min_acceptable_ssim=FLUX_T2I_MIN_SSIM,
         media_extension=".png",
         init_kwargs_override={

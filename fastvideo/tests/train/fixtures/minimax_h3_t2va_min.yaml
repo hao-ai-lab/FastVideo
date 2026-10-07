@@ -1,0 +1,44 @@
+# Minimal H3 plugin and distributed-layout configuration for CPU contract tests.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3Model
+    init_from: MiniMaxAI/MiniMax-H3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: TORCH_SDPA
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    # Eight ranks form one sequence-parallel group because 56 H3 attention
+    # heads divide evenly across eight ranks.
+    num_gpus: 8
+    sp_size: 8
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+  data:
+    data_path: /tmp/minimax_h3_t2va
+    preprocessed_data_type: t2va
+    # H3 row indices describe one joint document per data-parallel replica.
+    train_batch_size: 1
+    # The H3 training plugin consumes encoded conditional text embeddings.
+    training_cfg_rate: 0.0
+    num_latent_t: 37
+    num_height: 768
+    num_width: 1344
+    num_frames: 124
+  optimizer:
+    learning_rate: 1.0e-5
+  loop:
+    max_train_steps: 1
+  model:
+    # H3 returns flow predictions for direct noise-minus-clean supervision.
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+  dit_precision: bf16
+
+callbacks: {}
+pipeline: {}

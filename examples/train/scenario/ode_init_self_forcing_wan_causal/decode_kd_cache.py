@@ -28,15 +28,12 @@ def denormalize(latents: torch.Tensor, vae: AutoencoderKLWan) -> torch.Tensor:
     inverse:             latent     = normalized * std + mean
     """
     cfg = vae.config
-    mean = torch.tensor(cfg.latents_mean, dtype=latents.dtype,
-                        device=latents.device).view(1, -1, 1, 1, 1)
-    std = torch.tensor(cfg.latents_std, dtype=latents.dtype,
-                       device=latents.device).view(1, -1, 1, 1, 1)
+    mean = torch.tensor(cfg.latents_mean, dtype=latents.dtype, device=latents.device).view(1, -1, 1, 1, 1)
+    std = torch.tensor(cfg.latents_std, dtype=latents.dtype, device=latents.device).view(1, -1, 1, 1, 1)
     return latents * std + mean
 
 
-def decode_real(pt_path: Path, vae: AutoencoderKLWan,
-                device: torch.device) -> np.ndarray:
+def decode_real(pt_path: Path, vae: AutoencoderKLWan, device: torch.device) -> np.ndarray:
     """Load one .pt cache file and decode its 'real' latent to uint8 [T,H,W,3]."""
     d = torch.load(pt_path, weights_only=True, map_location="cpu")
     real = d["real"].float()  # [T, C, H, W]  (normalized)
@@ -69,8 +66,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print(f"Loading VAE from {args.model_id} ...")
-    vae = AutoencoderKLWan.from_pretrained(
-        args.model_id, subfolder="vae", torch_dtype=torch.float32)
+    vae = AutoencoderKLWan.from_pretrained(args.model_id, subfolder="vae", torch_dtype=torch.float32)
     vae.eval().to(device)
 
     pts = sorted(samples_dir.glob("*.pt"))

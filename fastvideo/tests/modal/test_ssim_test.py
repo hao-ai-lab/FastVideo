@@ -34,12 +34,14 @@ class _FakeVolume:
 class _FakeApp:
 
     def function(self, *_args, **_kwargs):
+
         def decorator(func):
             return func
 
         return decorator
 
     def local_entrypoint(self, *_args, **_kwargs):
+
         def decorator(func):
             return func
 

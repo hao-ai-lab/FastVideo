@@ -12,6 +12,7 @@ from .utils import (
 from .test_vsa import BLOCK_M  # Import from local test_vsa
 from . import test_vsa as ref
 
+
 def pytorch_forward(
     Q: torch.Tensor,
     K: torch.Tensor,
@@ -29,7 +30,7 @@ def pytorch_forward(
     v = V.clone().float()
 
     attn = torch.matmul(q, k.transpose(-2, -1))  # [1, h, S_q, S_kv]
-    attn = attn / (q.size(-1) ** 0.5)
+    attn = attn / (q.size(-1)**0.5)
     attn = attn.masked_fill(~block_sparse_mask.unsqueeze(0), float("-inf"))
     attn = torch.nn.functional.softmax(attn, dim=-1)
     out = torch.matmul(attn, v)  # [1, h, S_q, d]
@@ -61,9 +62,7 @@ def block_sparse_forward_test(
     # Use autograd-enabled wrapper (internally dispatches SM90 C++ vs Triton)
     from fastvideo_kernel.block_sparse_attn import block_sparse_attn
     try:
-        out_padded, _aux = block_sparse_attn(
-            q_padded, k_padded, v_padded, block_sparse_mask, variable_block_sizes
-        )
+        out_padded, _aux = block_sparse_attn(q_padded, k_padded, v_padded, block_sparse_mask, variable_block_sizes)
     except RuntimeError as e:
         pytest.skip(str(e))
 
@@ -86,22 +85,16 @@ def run_forward_equal_qk(
     assert torch.cuda.is_available(), "VSA kernels require CUDA"
     device = "cuda"
 
-    variable_block_sizes = ref.generate_variable_block_sizes(
-        num_blocks, device=device
-    )
+    variable_block_sizes = ref.generate_variable_block_sizes(num_blocks, device=device)
     S = int(variable_block_sizes.sum().item())
-    non_pad_index = ref.get_non_pad_index(
-        variable_block_sizes, num_blocks, BLOCK_M
-    )
+    non_pad_index = ref.get_non_pad_index(variable_block_sizes, num_blocks, BLOCK_M)
 
-    block_mask = generate_block_sparse_mask_for_function(
-        h, num_blocks, num_blocks, k, device
-    )
-    full_mask = create_full_mask_from_block_mask(
-        block_mask, variable_block_sizes, variable_block_sizes, device
-    )
+    block_mask = generate_block_sparse_mask_for_function(h, num_blocks, num_blocks, k, device)
+    full_mask = create_full_mask_from_block_mask(block_mask, variable_block_sizes, variable_block_sizes, device)
     print(f"[qkequal] h: {h}, d: {d}, num_blocks: {num_blocks}, k: {k}")
-    print(f"[qkequal] variable_block_sizes: {variable_block_sizes}, non_pad_index: {non_pad_index.shape}, block_mask: {block_mask.shape}, full_mask: {full_mask.shape}")
+    print(
+        f"[qkequal] variable_block_sizes: {variable_block_sizes}, non_pad_index: {non_pad_index.shape}, block_mask: {block_mask.shape}, full_mask: {full_mask.shape}"
+    )
     sum_diff = 0.0
     sum_abs = 0.0
     max_rel_diff = 0.0
@@ -153,29 +146,17 @@ def run_forward_qk_diff(
 
     device = "cuda"
 
-    q_variable_block_sizes = ref.generate_variable_block_sizes(
-        num_q_blocks, device=device
-    )
-    kv_variable_block_sizes = ref.generate_variable_block_sizes(
-        num_kv_blocks, device=device
-    )
+    q_variable_block_sizes = ref.generate_variable_block_sizes(num_q_blocks, device=device)
+    kv_variable_block_sizes = ref.generate_variable_block_sizes(num_kv_blocks, device=device)
 
     S_q = int(q_variable_block_sizes.sum().item())
     S_kv = int(kv_variable_block_sizes.sum().item())
 
-    q_non_pad_index = ref.get_non_pad_index(
-        q_variable_block_sizes, num_q_blocks, BLOCK_M
-    )
-    kv_non_pad_index = ref.get_non_pad_index(
-        kv_variable_block_sizes, num_kv_blocks, BLOCK_M
-    )
+    q_non_pad_index = ref.get_non_pad_index(q_variable_block_sizes, num_q_blocks, BLOCK_M)
+    kv_non_pad_index = ref.get_non_pad_index(kv_variable_block_sizes, num_kv_blocks, BLOCK_M)
 
-    block_mask = generate_block_sparse_mask_for_function(
-        h, num_q_blocks, num_kv_blocks, k, device
-    )
-    full_mask = create_full_mask_from_block_mask(
-        block_mask, q_variable_block_sizes, kv_variable_block_sizes, device
-    )
+    block_mask = generate_block_sparse_mask_for_function(h, num_q_blocks, num_kv_blocks, k, device)
+    full_mask = create_full_mask_from_block_mask(block_mask, q_variable_block_sizes, kv_variable_block_sizes, device)
 
     sum_diff = 0.0
     sum_abs = 0.0
@@ -222,13 +203,9 @@ def test_video_sparse_attention_forward():
 
     print("\nForward Block Sparse Attention Check (QK Different)")
     print("=" * 80)
-    avg_err_diff, max_rel_diff = run_forward_qk_diff(
-        h, d, num_q_blocks=32, num_kv_blocks=48, k=2
-    )
-    print(
-        f"QK diff:  avg |ΔO| = {avg_err_diff:.6e}, max rel ΔO = {max_rel_diff:.6e}"
-    )
+    avg_err_diff, max_rel_diff = run_forward_qk_diff(h, d, num_q_blocks=32, num_kv_blocks=48, k=2)
+    print(f"QK diff:  avg |ΔO| = {avg_err_diff:.6e}, max rel ΔO = {max_rel_diff:.6e}")
+
 
 if __name__ == "__main__":
     test_video_sparse_attention_forward()
-

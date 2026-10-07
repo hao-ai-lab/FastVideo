@@ -28,9 +28,7 @@ from fastvideo.train.callbacks.callback import (
 # This helper attaches a temporary handler directly to the target
 # logger and yields the captured records.
 @contextmanager
-def _capture_logger(
-    name: str, level: int = logging.WARNING
-) -> Iterator[list[logging.LogRecord]]:
+def _capture_logger(name: str, level: int = logging.WARNING) -> Iterator[list[logging.LogRecord]]:
     logger = logging.getLogger(name)
     records: list[logging.LogRecord] = []
 
@@ -65,9 +63,7 @@ class _RecordingCallback(Callback):
     def on_train_start(self, method, iteration: int = 0) -> None:
         self._sink.append(f"{self._tag}:on_train_start:{iteration}")
 
-    def on_training_step_end(
-        self, method, loss_dict, iteration: int = 0
-    ) -> None:
+    def on_training_step_end(self, method, loss_dict, iteration: int = 0) -> None:
         self._sink.append(f"{self._tag}:on_training_step_end:{iteration}")
 
     def on_validation_begin(self, method, iteration: int = 0) -> None:
@@ -97,9 +93,7 @@ class TestCallbackBase:
     def test_default_hooks_return_none(self) -> None:
         cb = Callback()
         assert cb.on_train_start(method=None) is None
-        assert (
-            cb.on_training_step_end(method=None, loss_dict={}) is None
-        )
+        assert (cb.on_training_step_end(method=None, loss_dict={}) is None)
         assert cb.on_before_optimizer_step(method=None) is None
         assert cb.on_validation_begin(method=None) is None
         assert cb.on_validation_end(method=None) is None
@@ -131,8 +125,7 @@ class TestCallbackDictInit:
 
         assert "grad_clip" in cb_dict._callbacks
         from fastvideo.train.callbacks.grad_clip import (
-            GradNormClipCallback,
-        )
+            GradNormClipCallback, )
         cb = cb_dict._callbacks["grad_clip"]
         assert isinstance(cb, GradNormClipCallback)
         # CallbackDict wires up training_config + back-pointer.
@@ -142,10 +135,8 @@ class TestCallbackDictInit:
     def test_explicit_target_overrides_name_lookup(self) -> None:
         cfg = {
             "anything_goes": {
-                "_target_": (
-                    "fastvideo.train.callbacks.grad_clip."
-                    "GradNormClipCallback"
-                ),
+                "_target_": ("fastvideo.train.callbacks.grad_clip."
+                             "GradNormClipCallback"),
                 "max_grad_norm": 1.0,
             }
         }
@@ -154,23 +145,16 @@ class TestCallbackDictInit:
 
     def test_unknown_name_without_target_is_skipped(self) -> None:
         cfg = {"mystery": {"some_arg": 1}}
-        with _capture_logger(
-            "fastvideo.train.callbacks.callback"
-        ) as records:
+        with _capture_logger("fastvideo.train.callbacks.callback") as records:
             cb_dict = CallbackDict(cfg, training_config=object())
         assert cb_dict._callbacks == {}
-        assert any(
-            "missing" in r.getMessage() and "mystery" in r.getMessage()
-            for r in records
-        )
+        assert any("missing" in r.getMessage() and "mystery" in r.getMessage() for r in records)
 
     def test_non_callback_target_raises(self) -> None:
         cfg = {
             "bad": {
-                "_target_": (
-                    "fastvideo.tests.train.callbacks.test_callback."
-                    "_NotACallback"
-                )
+                "_target_": ("fastvideo.tests.train.callbacks.test_callback."
+                             "_NotACallback")
             }
         }
         with pytest.raises(TypeError, match="expected a Callback"):
@@ -192,16 +176,10 @@ class TestCallbackDictInit:
 
 class TestCallbackDictDispatch:
 
-    def _build(
-        self, sink: list[str]
-    ) -> CallbackDict:
+    def _build(self, sink: list[str]) -> CallbackDict:
         cb_dict = CallbackDict({}, training_config=object())
-        cb_dict._callbacks["first"] = _RecordingCallback(
-            tag="first", sink=sink
-        )
-        cb_dict._callbacks["second"] = _RecordingCallback(
-            tag="second", sink=sink
-        )
+        cb_dict._callbacks["first"] = _RecordingCallback(tag="first", sink=sink)
+        cb_dict._callbacks["second"] = _RecordingCallback(tag="second", sink=sink)
         return cb_dict
 
     def test_dispatch_calls_all_in_insertion_order(self) -> None:
@@ -217,14 +195,13 @@ class TestCallbackDictDispatch:
     def test_dispatch_to_hook_some_callbacks_skip(self) -> None:
         sink: list[str] = []
         cb_dict = self._build(sink)
+
         # The base Callback subclass below only implements one hook;
         # dispatch should still fan out without raising.
 
         class _OnlyValidation(Callback):
 
-            def on_validation_end(
-                self, method, iteration: int = 0
-            ) -> None:
+            def on_validation_end(self, method, iteration: int = 0) -> None:
                 sink.append(f"vend:{iteration}")
 
         cb_dict._callbacks["only_v"] = _OnlyValidation()
@@ -252,12 +229,8 @@ class TestCallbackDictStateDict:
     def _build(self) -> tuple[CallbackDict, list[str]]:
         sink: list[str] = []
         cb_dict = CallbackDict({}, training_config=object())
-        cb_dict._callbacks["first"] = _RecordingCallback(
-            tag="first", sink=sink
-        )
-        cb_dict._callbacks["second"] = _RecordingCallback(
-            tag="second", sink=sink
-        )
+        cb_dict._callbacks["first"] = _RecordingCallback(tag="first", sink=sink)
+        cb_dict._callbacks["second"] = _RecordingCallback(tag="second", sink=sink)
         return cb_dict, sink
 
     def test_state_dict_returns_per_callback_dict(self) -> None:
@@ -269,22 +242,19 @@ class TestCallbackDictStateDict:
 
     def test_load_state_dict_dispatches_to_each(self) -> None:
         cb_dict, sink = self._build()
-        cb_dict.load_state_dict(
-            {
-                "first": {"marker": 1},
-                "second": {"marker": 2},
-            }
-        )
+        cb_dict.load_state_dict({
+            "first": {
+                "marker": 1
+            },
+            "second": {
+                "marker": 2
+            },
+        })
         assert sink == ["first:load:1", "second:load:2"]
 
     def test_load_state_dict_missing_key_warns_no_raise(self) -> None:
         cb_dict, sink = self._build()
-        with _capture_logger(
-            "fastvideo.train.callbacks.callback"
-        ) as records:
+        with _capture_logger("fastvideo.train.callbacks.callback") as records:
             cb_dict.load_state_dict({"first": {"marker": 99}})
         assert sink == ["first:load:99"]
-        assert any(
-            "second" in r.getMessage() and "not found" in r.getMessage()
-            for r in records
-        )
+        assert any("second" in r.getMessage() and "not found" in r.getMessage() for r in records)

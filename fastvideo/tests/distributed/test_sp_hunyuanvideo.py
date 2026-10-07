@@ -91,9 +91,7 @@ def _build_inputs(
     return hidden_states, encoder_hidden_states, timestep
 
 
-def _collect_named_parameter_grads(
-    model: torch.nn.Module,
-) -> dict[str, torch.Tensor]:
+def _collect_named_parameter_grads(model: torch.nn.Module, ) -> dict[str, torch.Tensor]:
     named_grads: dict[str, torch.Tensor] = {}
     for name, param in model.named_parameters():
         grad = param.grad
@@ -124,9 +122,7 @@ def _assert_finite(name: str, tensor: torch.Tensor) -> None:
         return
     nan_count = int(torch.isnan(tensor).sum().item())
     inf_count = int(torch.isinf(tensor).sum().item())
-    raise RuntimeError(
-        f"{name} contains non-finite values (nan={nan_count}, inf={inf_count})"
-    )
+    raise RuntimeError(f"{name} contains non-finite values (nan={nan_count}, inf={inf_count})")
 
 
 def _run_worker(mode: str, output_path: Path) -> None:
@@ -158,9 +154,9 @@ def _run_worker(mode: str, output_path: Path) -> None:
 
         forward_batch = ForwardBatch(data_type="dummy")
         with set_forward_context(
-            current_timestep=0,
-            attn_metadata=None,
-            forward_batch=forward_batch,
+                current_timestep=0,
+                attn_metadata=None,
+                forward_batch=forward_batch,
         ):
             output = model(
                 hidden_states=hidden_states,
@@ -214,20 +210,16 @@ def _run_torchrun(
     env["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
     process = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if process.returncode != 0:
-        raise RuntimeError(
-            f"{mode} worker failed with code {process.returncode}\n"
-            f"STDOUT:\n{process.stdout}\n"
-            f"STDERR:\n{process.stderr}"
-        )
+        raise RuntimeError(f"{mode} worker failed with code {process.returncode}\n"
+                           f"STDOUT:\n{process.stdout}\n"
+                           f"STDERR:\n{process.stderr}")
 
 
 def test_sp_gradient_matches_single_rank(tmp_path: Path) -> None:
     if not torch.cuda.is_available():
         pytest.skip("This test requires CUDA.")
     if torch.cuda.device_count() < SP_WORLD_SIZE:
-        pytest.skip(
-            f"This test requires at least {SP_WORLD_SIZE} CUDA devices."
-        )
+        pytest.skip(f"This test requires at least {SP_WORLD_SIZE} CUDA devices.")
 
     script_path = Path(__file__).resolve()
     single_path = tmp_path / "single_rank_grads.pt"
@@ -270,17 +262,10 @@ def test_sp_gradient_matches_single_rank(tmp_path: Path) -> None:
         max_abs_diff = (single_grad - sp_grad).abs().max().item()
         different_params.append(f"{name} (max_abs_diff={max_abs_diff:.3e})")
 
-    report = (
-        f"single-only params ({len(single_only)}):\n"
-        + "\n".join(single_only)
-        + f"\n\nsp-only params ({len(sp_only)}):\n"
-        + "\n".join(sp_only)
-        + "\n\n"
-        f"same params ({len(same_params)}):\n"
-        + "\n".join(same_params)
-        + f"\n\ndifferent params ({len(different_params)}):\n"
-        + "\n".join(different_params)
-    )
+    report = (f"single-only params ({len(single_only)}):\n" + "\n".join(single_only) +
+              f"\n\nsp-only params ({len(sp_only)}):\n" + "\n".join(sp_only) + "\n\n"
+              f"same params ({len(same_params)}):\n" + "\n".join(same_params) +
+              f"\n\ndifferent params ({len(different_params)}):\n" + "\n".join(different_params))
     print(report)
     assert not single_only and not sp_only and not different_params, report
 

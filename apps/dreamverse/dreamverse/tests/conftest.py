@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
 TESTS_DIR = Path(__file__).resolve().parent
 DREAMVERSE_PACKAGE_DIR = TESTS_DIR.parent
 DREAMVERSE_APP_DIR = DREAMVERSE_PACKAGE_DIR.parent

@@ -11,7 +11,8 @@ Go to fastvideo-kernel/README.md for instructions.
 ### Download the synthetic dataset:
 
 ```bash
-bash examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/download_dataset.sh
+bash examples/datasets/wan-syn/download_dataset_480p.sh
+bash examples/datasets/wan-syn/download_dataset_720p.sh
 ```
 ### Slurm script to train the model
 ```bash

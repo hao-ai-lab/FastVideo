@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-
 """Validate local markdown links under docs/."""
 
 from __future__ import annotations
@@ -12,8 +11,7 @@ LINK_PATTERN = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
 
 def is_external(target: str) -> bool:
-    return target.startswith(
-        ("http://", "https://", "mailto:", "#", "<", "javascript:"))
+    return target.startswith(("http://", "https://", "mailto:", "#", "<", "javascript:"))
 
 
 def resolve_candidates(file_path: Path, docs_root: Path, target: str) -> list[Path]:
@@ -56,9 +54,7 @@ def check_links(docs_root: Path) -> list[str]:
                 if any(path.is_file() for path in candidates):
                     continue
 
-                errors.append(
-                    f"{md_file.relative_to(docs_root.parent)}:{line_no} -> {stripped}"
-                )
+                errors.append(f"{md_file.relative_to(docs_root.parent)}:{line_no} -> {stripped}")
 
     return errors
 

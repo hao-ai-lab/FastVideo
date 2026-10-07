@@ -10,7 +10,19 @@
 # quantized forward and STE backward, then ATTN_QAT_INFER during validation.
 # Head-dim-64 audio attention and masked text attention remain dense.
 #
-# Validation requires an sm_120 GPU with the attn_qat_infer extension.
+# Validation-time ATTN_QAT_INFER is arch-aware:
+#   * sm_120a/sm_121a: fastvideo-kernel CUTLASS extension -- the exact
+#     quantization scheme ATTN_QAT_TRAIN simulates.
+#   * sm_100a (GB200) / sm_103a (GB300): FP4 FA4 kernel
+#     (github.com/hao-ai-lab/flash-attention-fp4, branch fp4; per-16
+#     block-scaled NVFP4 Q/K, BF16 P/V; validated install set:
+#     nvidia-cutlass-dsl==4.4.2, quack-kernels==0.4.1,
+#     flashinfer-python==0.6.8, FASTVIDEO_FA4=1 — see
+#     docs/inference/optimizations.md). This scheme DIFFERS from the
+#     CUTLASS one the training simulation matches, so sm_100/sm_103
+#     validation and deployment carry a train-sim mismatch -- gate quality
+#     by MS-SSIM measurement rather than assuming parity. The resolution
+#     receipt ("ATTN_QAT_INFER resolved: ...") records arch + scheme.
 #
 # Preprocess data first (same data as the bf16 overfit):
 #   CUDA_VISIBLE_DEVICES=0 python fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py
@@ -19,8 +31,8 @@
 #   NUM_GPUS=4 \
 #     bash examples/train/run.sh examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml
 #
-# GB200 can train and validate with ATTN_QAT_TRAIN, but cannot load the
-# sm_120-only inference kernel. Disable only the validation-time swap:
+# On GB200 without flash-attention-fp4 installed (or any other arch with no
+# ATTN_QAT_INFER kernel), disable only the validation-time swap:
 #   NUM_GPUS=4 \
 #     bash examples/train/run.sh examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml \
 #       --callbacks.validation.attn_qat_infer false

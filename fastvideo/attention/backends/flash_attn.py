@@ -5,10 +5,19 @@ import torch
 import torch.nn.functional as F
 from dataclasses import dataclass
 
+import fastvideo.envs as envs
 from fastvideo.attention.utils.flash_attn_default import (
     fa_version,
     flash_attn_func_compilable,
 )
+
+if fa_version == "4":
+    # The FA4 varlen wrapper is already a compile-safe custom op. Keep the
+    # import conditional so FA2/FA3 environments do not need flash_attn.cute.
+    from fastvideo.attention.utils.flash_attn_cute import (
+        flash_attn_varlen_func as flash_attn_varlen_func_compilable, )
+else:
+    flash_attn_varlen_func_compilable = None
 
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
@@ -19,7 +28,12 @@ from fastvideo.attention.backends.abstract import (
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
-logger.info("Using FlashAttention-%s backend", fa_version)
+# Every worker records the loaded FlashAttention implementation so a
+# distributed profiling log contains one backend receipt per rank.
+logger.info("Worker %s Using FlashAttention-%s backend",
+            os.environ.get("RANK", "0"),
+            fa_version,
+            local_main_process_only=False)
 
 # FP4 FA4 support: quantize Q/K to NVFP4 E2M1 for block-scaled MMA on Blackwell.
 # Requires: flash-attention-fp4, flashinfer, cutlass-dsl. Enable via nvfp4_fa4=True kwarg.
@@ -32,8 +46,45 @@ except ImportError:
     flash_attn_fp4_func = None
     _FA4_FP4_AVAILABLE = False
 
+_FA4_QUANT_OPS: tuple | None = None
+_FA4_PACKED_VARLEN_CONFIG_LOGGED = False
 
-def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:
+
+def _log_fa4_packed_varlen_config() -> None:
+    """Emit one configuration receipt per worker process.
+
+    This intentionally does not claim that a particular forward used the
+    kernel: masks, gradients, batch size, unequal Q/K lengths, and NVFP4 are
+    runtime guards evaluated later in ``_forward_impl``.
+    """
+    global _FA4_PACKED_VARLEN_CONFIG_LOGGED
+    if not _FA4_PACKED_VARLEN_CONFIG_LOGGED:
+        logger.info("MiniMax-H3 dense attention: FA4 packed-varlen route configured (runtime guards apply)",
+                    local_main_process_only=False)
+        _FA4_PACKED_VARLEN_CONFIG_LOGGED = True
+
+
+def _import_fa4_quant_ops() -> tuple:
+    """The slow path: resolves flashinfer's FP4 quantization entry points
+    (imports + JIT-module lookup, which probes the CUDA toolchain via a
+    subprocess on first use). Kept as its own function so tests can pin
+    that it runs at most once per process."""
+    from flashinfer.quantization import SfLayout, nvfp4_quantize
+    return (nvfp4_quantize, SfLayout)
+
+
+def _resolve_fa4_quant_ops() -> tuple:
+    # Lazy (construct-anywhere/fail-at-forward stays intact) but memoized:
+    # re-resolving per forward graph-breaks dynamo every step (making
+    # fullgraph compilation impossible for the NVFP4 path) and keeps eager
+    # dispatch overhead on the hot path.
+    global _FA4_QUANT_OPS
+    if _FA4_QUANT_OPS is None:
+        _FA4_QUANT_OPS = _import_fa4_quant_ops()
+    return _FA4_QUANT_OPS
+
+
+def _nvfp4_quantize_for_fa4_impl(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Quantize a (batch, seqlen, nheads, headdim) BF16 tensor to FP4.
 
     Returns:
@@ -42,7 +93,7 @@ def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, to
             Caller should slice [:, :orig_seqlen] before passing to FA4.
         sf_tensor:  torch.uint8, shape (32, 4, rest_m, 4, rest_k, nheads, batch) with stride[3]=1
     """
-    from flashinfer.quantization import nvfp4_quantize, SfLayout
+    nvfp4_quantize, SfLayout = _resolve_fa4_quant_ops()
 
     batch, seqlen, nheads, headdim = tensor_4d.shape
     sf_vec_size = 16
@@ -82,6 +133,43 @@ def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor, ) -> tuple[torch.Tensor, to
     return fp4_tensor, sf_mma
 
 
+# Dynamo boundary for the FP4 quantize path (same pattern as the masked
+# flash-attention entry points in flash_attn_no_pad.py): tracing a python
+# body that resolves flashinfer's JIT module descends into its toolchain
+# probe (a subprocess) regardless of any runtime memoization -- a cache hit
+# is invisible at trace time. Registering the whole quantize step as a
+# custom op makes it one opaque graph node, unlocking
+# torch.compile(fullgraph=True) for the NVFP4 attention path.
+@torch.library.custom_op(
+    "fastvideo::nvfp4_quantize_fa4",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _nvfp4_quantize_fa4_op(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    return _nvfp4_quantize_for_fa4_impl(tensor_4d)
+
+
+@torch.library.register_fake("fastvideo::nvfp4_quantize_fa4")
+def _nvfp4_quantize_fa4_fake(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    batch, seqlen, nheads, headdim = tensor_4d.shape
+    seqlen_padded = (seqlen + 127) // 128 * 128
+    fp4 = tensor_4d.new_empty((batch, seqlen_padded, nheads, headdim // 2), dtype=torch.float4_e2m1fn_x2)
+    rest_m = seqlen_padded // 128
+    rest_k = (headdim // 16) // 4
+    # Must reproduce the impl's output STRIDES, not just its shape: the real
+    # sf is a permuted view of a contiguous (batch, nheads, rest_m, rest_k,
+    # 32, 4, 4) buffer, and torch.compile bakes the fake's strides into the
+    # generated code (a contiguous fake here asserts at runtime).
+    sf = tensor_4d.new_empty((batch, nheads, rest_m, rest_k, 32, 4, 4), dtype=torch.uint8).permute(4, 5, 2, 6, 3, 1, 0)
+    return fp4, sf
+
+
+def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Quantize (batch, seqlen, nheads, headdim) BF16 to FP4 via the custom
+    op boundary; see _nvfp4_quantize_for_fa4_impl for the layout contract."""
+    return torch.ops.fastvideo.nvfp4_quantize_fa4(tensor_4d)
+
+
 class FlashAttentionBackend(AttentionBackend):
     accept_output_buffer: bool = True
 
@@ -109,8 +197,12 @@ class FlashAttentionBackend(AttentionBackend):
 def _key_padding_mask_from_attn_mask(attn_mask: torch.Tensor, key_len: int) -> torch.Tensor:
     # Normalize attn_mask to [B, key_len] where True means valid token.
     if attn_mask.dim() == 4:
+        if attn_mask.shape[1] != 1 or attn_mask.shape[-2] != 1:
+            raise ValueError("FLASH_ATTN only supports 4D key-padding masks with shape [B, 1, 1, K]")
         attn_mask = attn_mask[:, 0, 0, :]
     elif attn_mask.dim() == 3:
+        if attn_mask.shape[-2] != 1:
+            raise ValueError("FLASH_ATTN only supports 3D key-padding masks with shape [B, 1, K]")
         attn_mask = attn_mask[:, 0, :]
     elif attn_mask.dim() != 2:
         raise ValueError(f"Unsupported attn_mask shape for FLASH_ATTN: {attn_mask.shape}")
@@ -160,7 +252,21 @@ class FlashAttentionImpl(AttentionImpl):
     ) -> None:
         self.causal = causal
         self.softmax_scale = softmax_scale
-        self.nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4", False) or os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
+        # MiniMax-H3's dense DiT explicitly enables this faster FA4 entry
+        # point. It remains off for every other model and for the H3 text
+        # refiner; grad-enabled calls stay on the established fixed path.
+        self.fa4_packed_varlen = bool(extra_impl_args.get("fa4_packed_varlen", False))
+        if self.fa4_packed_varlen and fa_version == "4":
+            _log_fa4_packed_varlen_config()
+        # An explicit ``nvfp4_fa4`` impl arg wins over the process-wide
+        # FASTVIDEO_NVFP4_FA4 env opt-in, so precision-sensitive layers (e.g.
+        # the FP32-pinned H3 VAE attention) can force-disable FP4 Q/K
+        # quantization while the DiT keeps it. When the arg is absent the env
+        # keeps its previous semantics.
+        nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4")
+        if nvfp4_fa4 is None:
+            nvfp4_fa4 = envs.FASTVIDEO_NVFP4_FA4.get()
+        self.nvfp4_fa4 = bool(nvfp4_fa4)
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
@@ -215,6 +321,14 @@ class FlashAttentionImpl(AttentionImpl):
             )
 
             attn_mask = attn_metadata.attn_mask
+            if getattr(attn_metadata, "is_causal", False):
+                return flash_attn_func_compilable(
+                    query,
+                    key,
+                    value,
+                    softmax_scale=self.softmax_scale,
+                    causal=True,
+                )
 
             # flash_attn_no_pad packs q/k/v as one tensor and assumes equal q/k
             # sequence lengths. Cross-attention can violate this.
@@ -243,9 +357,32 @@ class FlashAttentionImpl(AttentionImpl):
                 raise ValueError("Invalid key padding mask length for FLASH_ATTN: "
                                  f"expected at most {qkv.shape[1]}, got {key_padding_mask.shape[-1]}")
             attn_mask_padded = F.pad(key_padding_mask, (qkv.shape[1] - key_padding_mask.shape[-1], 0), value=True)
-            output = flash_attn_no_pad(qkv, attn_mask_padded, causal=False, dropout_p=0, softmax_scale=None)
+            output = flash_attn_no_pad(qkv, attn_mask_padded, causal=self.causal, dropout_p=0, softmax_scale=None)
         elif self.nvfp4_fa4:
             output = self._forward_nvfp4(query, key, value)
+
+        elif (self.fa4_packed_varlen and fa_version == "4" and not torch.is_grad_enabled() and query.shape[0] == 1
+              and query.shape[1] == key.shape[1] == value.shape[1]):
+            # FA4's packed-varlen entry point is materially faster for H3's
+            # long, single-document self-attention. Flatten only the batch
+            # dimension and describe that one sequence with CUDA int32
+            # cumulative lengths; the existing custom-op wrapper keeps this
+            # route traceable under torch.compile(fullgraph=True).
+            assert flash_attn_varlen_func_compilable is not None
+            sequence_length = query.shape[1]
+            cu_seqlens = torch.arange(2, dtype=torch.int32, device=query.device) * sequence_length
+            output = flash_attn_varlen_func_compilable(
+                query.squeeze(0),
+                key.squeeze(0),
+                value.squeeze(0),
+                cu_seqlens,
+                cu_seqlens,
+                sequence_length,
+                sequence_length,
+                dropout_p=0.0,
+                softmax_scale=self.softmax_scale,
+                causal=self.causal,
+            ).unsqueeze(0)
 
         else:
             # Route through the compilable wrapper so dynamo sees a

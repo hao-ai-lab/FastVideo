@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { downloadBlob } from '@/lib/utils';
 
 const MENU_ITEM =
-  'block w-full cursor-pointer px-4 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
+  'block min-h-11 w-full cursor-pointer px-4 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
 
 export default function DownloadCaptions({
   fileNames,

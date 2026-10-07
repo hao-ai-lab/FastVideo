@@ -73,25 +73,11 @@ def _fake_hf(monkeypatch):
 
 def test_upload_draft_reference_artifact_uses_drafts_prefix(tmp_path):
     ssim_dir = tmp_path / "ssim"
-    generated = (
-        ssim_dir
-        / "generated_videos"
-        / "default"
-        / "L40S_reference_videos"
-        / "model-a"
-        / "flash"
-        / "sample.mp4"
-    )
+    generated = (ssim_dir / "generated_videos" / "default" / "L40S_reference_videos" / "model-a" / "flash" /
+                 "sample.mp4")
     generated.parent.mkdir(parents=True)
     generated.write_text("video", encoding="utf-8")
-    reference_folder = (
-        ssim_dir
-        / "reference_videos"
-        / "default"
-        / "L40S_reference_videos"
-        / "model-a"
-        / "flash"
-    )
+    reference_folder = (ssim_dir / "reference_videos" / "default" / "L40S_reference_videos" / "model-a" / "flash")
 
     draft_path = reference_videos_cli.upload_draft_reference_artifact(
         repo_id="FastVideo/ssim-reference-videos",

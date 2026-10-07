@@ -22,7 +22,6 @@ import torch
 
 from fastvideo.models.schedulers.base import BaseScheduler
 
-
 WeightType = Literal["uniform", "gaussian", "beta08"]
 
 
@@ -112,7 +111,7 @@ class FlowMapEulerDiscreteScheduler(BaseScheduler):
         if weight_type == "uniform":
             w = torch.ones_like(t_norm)
         elif weight_type == "gaussian":
-            w = torch.exp(-0.5 * ((t_norm - 0.5) / 0.2) ** 2)
+            w = torch.exp(-0.5 * ((t_norm - 0.5) / 0.2)**2)
         elif weight_type == "beta08":
             w = t_norm.pow(1.0) * (1.0 - t_norm).clamp_min(0.0).pow(0.5)
         else:
@@ -140,24 +139,19 @@ class FlowMapEulerDiscreteScheduler(BaseScheduler):
         AnyFlow paper's hand-tuned ``[999, 937, 833, 624, 0]`` schedule.
         """
         if num_inference_steps <= 0:
-            raise ValueError(
-                "num_inference_steps must be positive, "
-                f"got {num_inference_steps}")
+            raise ValueError("num_inference_steps must be positive, "
+                             f"got {num_inference_steps}")
         device = torch.device(device)
 
         if custom_timesteps is not None:
-            ts = torch.as_tensor(
-                custom_timesteps, dtype=torch.float32, device=device)
+            ts = torch.as_tensor(custom_timesteps, dtype=torch.float32, device=device)
             if ts.ndim != 1:
-                raise ValueError(
-                    "custom_timesteps must be 1-D, got shape "
-                    f"{tuple(ts.shape)}")
+                raise ValueError("custom_timesteps must be 1-D, got shape "
+                                 f"{tuple(ts.shape)}")
             if not torch.all(ts[:-1] >= ts[1:]):
-                raise ValueError(
-                    "custom_timesteps must be descending (largest first)")
+                raise ValueError("custom_timesteps must be descending (largest first)")
         else:
-            ts_norm = torch.linspace(
-                1.0, 0.0, num_inference_steps + 1, device=device)
+            ts_norm = torch.linspace(1.0, 0.0, num_inference_steps + 1, device=device)
             ts_norm = self.apply_shift(ts_norm)
             ts = ts_norm * self.num_train_timesteps
 
@@ -194,9 +188,7 @@ class FlowMapEulerDiscreteScheduler(BaseScheduler):
         """Linear flow-matching interpolation: ``x_t = (1 - σ) * x_0 + σ * ε``,
         where ``σ = t / num_train_timesteps``.
         """
-        sigma = (timestep.to(original_samples.device,
-                             dtype=original_samples.dtype)
-                 / float(self.num_train_timesteps))
+        sigma = (timestep.to(original_samples.device, dtype=original_samples.dtype) / float(self.num_train_timesteps))
         view: list[int] = [-1] + [1] * (original_samples.ndim - 1)
         sigma = sigma.view(*view)
         return (1.0 - sigma) * original_samples + sigma * noise
