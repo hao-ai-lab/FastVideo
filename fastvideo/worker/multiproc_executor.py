@@ -15,6 +15,7 @@ from multiprocessing.queues import Queue
 import os
 import queue
 import signal
+import sys
 import time
 from collections.abc import Callable
 from multiprocessing.process import BaseProcess
@@ -34,6 +35,65 @@ from fastvideo.worker.executor import Executor
 from fastvideo.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
+_RPC_ERROR_KEY = "__fastvideo_rpc_error__"
+_WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S = 30.0
+_WORKER_TERMINATE_TIMEOUT_S = 2.0
+_WORKER_KILL_JOIN_TIMEOUT_S = 1.0
+
+
+def _shutdown_torch_compile_workers() -> None:
+    """Close an already-initialized Inductor pool before interpreter exit.
+
+    PyTorch registers the same cleanup as an ``atexit`` callback. Running it
+    while the FastVideo worker is still in its graceful shutdown phase avoids
+    having the parent send SIGTERM while that callback is waiting for the
+    compiler subprocess. Do not import Inductor here: eager workers should not
+    initialize compiler state just because they are exiting.
+    """
+    async_compile = sys.modules.get("torch._inductor.async_compile")
+    if async_compile is None:
+        return
+
+    shutdown_compile_workers = getattr(async_compile, "shutdown_compile_workers", None)
+    if not callable(shutdown_compile_workers):
+        return
+
+    try:
+        shutdown_compile_workers()
+    except Exception:
+        # Compiler cleanup must not prevent the worker process from exiting.
+        # PyTorch's atexit callback can make one final best-effort attempt.
+        logger.exception("Failed to shut down torch.compile workers cleanly")
+
+
+def _wait_for_processes_to_exit(processes: list[BaseProcess], timeout: float) -> bool:
+    """Join processes against one shared deadline and report if all exited."""
+    deadline = time.monotonic() + timeout
+    for process in processes:
+        if not process.is_alive():
+            continue
+        remaining = max(0.0, deadline - time.monotonic())
+        process.join(timeout=remaining)
+    return all(not process.is_alive() for process in processes)
+
+
+def _raise_for_rpc_errors(method: str | Callable, responses: list[Any]) -> None:
+    errors = []
+    for rank, response in enumerate(responses):
+        if isinstance(response, dict) and response.get(_RPC_ERROR_KEY):
+            errors.append(f"worker {rank}: {response.get('error', 'unknown error')}")
+    if errors:
+        raise RuntimeError(f"RPC {method!r} failed: " + "; ".join(errors))
+
+
+class _WorkerSignalExit(SystemExit):
+    """Carry the signal that requested worker shutdown through ``SystemExit``."""
+
+    def __init__(self, signum: int) -> None:
+        # Keep the original argument-less SystemExit semantics while retaining
+        # the signal identity for diagnostics.
+        super().__init__()
+        self.signum = signum
 
 
 def _make_queue_log_handler(log_queue: Queue) -> logging.Handler:
@@ -130,7 +190,7 @@ class MultiprocExecutor(Executor):
         output = responses[0]["output_batch"]
 
         logging_info = None
-        logging_info = responses[0]["logging_info"] if envs.FASTVIDEO_STAGE_LOGGING else None
+        logging_info = responses[0]["logging_info"] if envs.FASTVIDEO_STAGE_LOGGING.get() else None
 
         # Get extra dict (contains audio, peak_memory_mb, etc.)
         extra = responses[0].get("extra", {})
@@ -285,6 +345,7 @@ class MultiprocExecutor(Executor):
             for worker in self.workers:
                 response = worker.pipe.recv()
                 responses.append(response)
+            _raise_for_rpc_errors(method, responses)
             return responses
         except TimeoutError as e:
             raise TimeoutError(f"RPC call to {method} timed out.") from e
@@ -314,7 +375,9 @@ class MultiprocExecutor(Executor):
             return await loop.run_in_executor(None, worker.pipe.recv)
 
         responses = await asyncio.gather(*[recv_from_worker(worker) for worker in self.workers])
-        return list(responses)
+        result = list(responses)
+        _raise_for_rpc_errors(method, result)
+        return result
 
     def shutdown(self) -> None:
         """Properly shut down the executor and its workers"""
@@ -337,30 +400,34 @@ class MultiprocExecutor(Executor):
                 with contextlib.suppress(Exception):
                     worker.pipe.send({"method": "shutdown", "args": (), "kwargs": {}})
 
-            # Give workers some time to exit gracefully
-            start_time = time.perf_counter()
-            while time.perf_counter() - start_time < 5.0:  # 5 seconds timeout
-                if all(not worker.proc.is_alive() for worker in self.workers):
-                    break
-                time.sleep(0.1)
+            worker_processes = [worker.proc for worker in self.workers]
+
+            # torch.compile keeps an Inductor subprocess pool alive. Let the
+            # worker close that pool before escalating to SIGTERM; five seconds
+            # is too short on low-priority or memory-constrained hosts.
+            exited_gracefully = _wait_for_processes_to_exit(
+                worker_processes,
+                _WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+            )
 
             # Force terminate any remaining workers
-            for worker in self.workers:
-                if worker.proc.is_alive():
-                    worker.proc.terminate()
+            if not exited_gracefully:
+                logger.warning(
+                    "Workers did not exit within %.1f seconds; sending SIGTERM",
+                    _WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+                )
+                for process in worker_processes:
+                    if process.is_alive():
+                        process.terminate()
 
             # Final timeout for terminate
-            start_time = time.perf_counter()
-            while time.perf_counter() - start_time < 2.0:  # 2 seconds timeout
-                if all(not worker.proc.is_alive() for worker in self.workers):
-                    break
-                time.sleep(0.1)
+            _wait_for_processes_to_exit(worker_processes, _WORKER_TERMINATE_TIMEOUT_S)
 
             # Kill if still alive
-            for worker in self.workers:
-                if worker.proc.is_alive():
-                    worker.proc.kill()
-                worker.proc.join(timeout=1.0)
+            for process in worker_processes:
+                if process.is_alive():
+                    process.kill()
+                process.join(timeout=_WORKER_KILL_JOIN_TIMEOUT_S)
 
         except Exception as e:
             logger.error("Error during shutdown: %s", e)
@@ -465,6 +532,9 @@ class WorkerMultiprocProc:
         self.streaming_input_queue = streaming_input_queue
         self.streaming_output_queue = streaming_output_queue
         self._initial_log_handler = _initial_log_handler
+        self._shutdown_started = False
+        self._shutdown_complete = False
+        self._shutdown_response: dict[str, Any] | None = None
         wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args, rpc_rank=rank)
 
         all_kwargs: list[dict] = [{} for _ in range(fastvideo_args.num_gpus)]
@@ -539,20 +609,24 @@ class WorkerMultiprocProc:
             nonlocal shutdown_requested
             if not shutdown_requested:
                 shutdown_requested = True
-                raise SystemExit()
-
-        # Either SIGTERM or SIGINT will terminate the worker
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-        kill_itself_when_parent_died()
-        faulthandler.enable()
-        parent_process = psutil.Process().parent()
+                raise _WorkerSignalExit(signum)
 
         worker = None
         ready_pipe = kwargs.pop("ready_pipe")
         rank = kwargs.get("rank")
+        parent_process = None
 
         try:
+            # Keep all setup after handler installation inside this guarded
+            # region. The parent may terminate peer workers as soon as one
+            # worker fails, including while another peer is still starting.
+            # Either SIGTERM or SIGINT will terminate the worker.
+            signal.signal(signal.SIGTERM, signal_handler)
+            signal.signal(signal.SIGINT, signal_handler)
+            kill_itself_when_parent_died()
+            faulthandler.enable()
+            parent_process = psutil.Process().parent()
+
             worker = WorkerMultiprocProc(*args, **kwargs)
 
             # Send READY once we know everything is loaded
@@ -564,6 +638,31 @@ class WorkerMultiprocProc:
             ready_pipe = None
 
             worker.worker_busy_loop()
+
+        except _WorkerSignalExit as exc:
+            # Raised by the SIGTERM/SIGINT handler installed above, so it is a
+            # BaseException and not an Exception: without this clause it walks
+            # straight past the handler below and the worker dies having reported
+            # nothing at all. The parent then sees only a closed pipe and raises
+            # "See stack trace for root cause" with no stack trace attached.
+            #
+            # Log with the traceback rather than a bare message. A signal handler
+            # runs on top of whatever the process was executing, so the frames
+            # here are the frames that were interrupted, which is the only clue
+            # to what the worker was doing when it was told to stop.
+            signal_name = signal.Signals(exc.signum).name
+            if exc.signum == signal.SIGINT:
+                logger.exception(
+                    "Worker %d received %s (%d) while running. This normally means the user interrupted "
+                    "the parent process. The stack below is where execution was interrupted, not the cause.", rank,
+                    signal_name, exc.signum)
+            else:
+                logger.exception(
+                    "Worker %d received %s (%d) while running. This can come from an external process, "
+                    "such as an out-of-memory daemon, or from the parent cleaning up workers, including "
+                    "after another worker failed. The stack below is where execution was interrupted, not "
+                    "the cause.", rank, signal_name, exc.signum)
+            raise
 
         except Exception as exc:
             if ready_pipe is not None:
@@ -656,7 +755,31 @@ class WorkerMultiprocProc:
         return cast(list[WorkerProcHandle], ready_proc_handles)
 
     def shutdown(self) -> dict[str, Any]:
-        return self.worker.shutdown()
+        if getattr(self, "_shutdown_complete", False):
+            assert self._shutdown_response is not None
+            return self._shutdown_response
+
+        if getattr(self, "_shutdown_started", False):
+            if self._shutdown_response is None:
+                self._shutdown_response = {"status": "shutdown"}
+            return self._shutdown_response
+
+        self._shutdown_started = True
+        response = {"status": "shutdown"}
+        shutdown_succeeded = False
+
+        try:
+            response = self.worker.shutdown()
+            shutdown_succeeded = True
+        except Exception:
+            logger.exception("Worker %d failed to shut down", self.rank)
+        finally:
+            _shutdown_torch_compile_workers()
+            if shutdown_succeeded:
+                self._shutdown_complete = True
+            self._shutdown_response = response
+
+        return response
 
     def worker_busy_loop(self) -> None:
         """Main busy loop for Multiprocessing Workers"""
@@ -691,7 +814,7 @@ class WorkerMultiprocProc:
                         fastvideo_args = kwargs['fastvideo_args']
                         output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
                         logging_info = None
-                        if envs.FASTVIDEO_STAGE_LOGGING:
+                        if envs.FASTVIDEO_STAGE_LOGGING.get():
                             logging_info = output_batch.logging_info
                         # result tensor shared by CUDA IPC to avoid serialization overhead
                         result = output_batch.output
@@ -710,6 +833,9 @@ class WorkerMultiprocProc:
                 else:
                     result = self.worker.execute_method(method, *args, **kwargs)
                     self.pipe.send(result)
+            except EOFError:
+                logger.info("Worker %d RPC pipe closed; exiting event loop", self.rank)
+                break
             except KeyboardInterrupt:
                 logger.error("Worker %d in loop received KeyboardInterrupt, aborting forward pass", self.rank)
                 try:
@@ -718,6 +844,17 @@ class WorkerMultiprocProc:
                 except Exception as e:
                     logger.error("Worker %d failed to send error response: %s", self.rank, str(e))
                 continue
+            except Exception as error:
+                logger.exception("Worker %d failed RPC without exiting", self.rank)
+                try:
+                    self.pipe.send({
+                        _RPC_ERROR_KEY: True,
+                        "error": f"{type(error).__name__}: {error}",
+                        "traceback": get_exception_traceback(),
+                    })
+                except Exception:
+                    logger.exception("Worker %d could not return its RPC error", self.rank)
+                    break
 
     def streaming_queue_loop(self) -> None:
         if self.streaming_input_queue is None or self.streaming_output_queue is None:

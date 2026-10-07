@@ -26,16 +26,13 @@ Usage:
 
 Input/output roots default to ``data/kandinsky5_overfit`` /
 ``data/kandinsky5_overfit_preprocessed`` and can be overridden with the
-``KANDINSKY5_OVERFIT_DATA_DIR`` / ``KANDINSKY5_OVERFIT_OUTPUT_DIR`` env
+``FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR`` / ``FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR`` env
 vars (used by the nightly e2e test to keep its disposable roots separate
 from a user's real dataset at the defaults).
 """
 
 import json
 import os
-
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29520")
 
 import cv2
 import numpy as np
@@ -44,6 +41,7 @@ import pyarrow.parquet as pq
 import torch
 from transformers import AutoTokenizer
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines.base import preprocess_text
 from fastvideo.configs.pipelines.kandinsky5 import (
     Kandinsky5T2VConfig,
@@ -70,11 +68,6 @@ MAX_WIDTH = 768
 TRAIN_FPS = 24.0
 
 MODEL_PATH = "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers"
-# Overridable so automation (e.g. the nightly e2e test) can point at its own
-# test-owned directories instead of clobbering the documented default paths
-# a user may have populated with their real dataset.
-DATA_DIR = os.environ.get("KANDINSKY5_OVERFIT_DATA_DIR", "data/kandinsky5_overfit")
-OUTPUT_DIR = os.environ.get("KANDINSKY5_OVERFIT_OUTPUT_DIR", "data/kandinsky5_overfit_preprocessed")
 
 
 def load_video(path: str, num_frames: int, height: int, width: int) -> torch.Tensor:
@@ -143,17 +136,25 @@ def main() -> None:
     # FastVideo's native text-encoder layers (e.g. CLIPAttention's
     # QKVParallelLinear) are tensor-parallel-aware and assert the TP process
     # group is initialized, even for a single-process/single-GPU run.
+    envs.setdefault_external("MASTER_ADDR", "localhost")
+    envs.setdefault_external("MASTER_PORT", "29520")
     maybe_init_distributed_environment_and_model_parallel(1, 1)
+
+    # Overridable so automation (e.g. the nightly e2e test) can point at its own
+    # test-owned directories instead of clobbering the documented default paths
+    # a user may have populated with their real dataset.
+    data_dir = envs.FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR.get()
+    output_dir = envs.FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR.get()
 
     device = torch.device("cuda:0")
     model_path = maybe_download_model(MODEL_PATH)
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # Load captions. Validate up front (before spending minutes loading the
     # VAE + two text encoders): an empty/malformed manifest would otherwise
     # only surface as an IndexError on records[0] at parquet-write time.
-    manifest_path = os.path.join(DATA_DIR, "videos2caption.json")
+    manifest_path = os.path.join(data_dir, "videos2caption.json")
     with open(manifest_path) as f:
         caption_data = json.load(f)
     if not isinstance(caption_data, list) or not caption_data:
@@ -212,7 +213,7 @@ def main() -> None:
     for item in caption_data:
         video_name = item["path"]
         caption = get_caption(item)
-        video_path = os.path.join(DATA_DIR, "videos", video_name)
+        video_path = os.path.join(data_dir, "videos", video_name)
 
         print(f"\nProcessing: {video_name}")
         print(f"  Caption: {caption[:80]}...")
@@ -289,7 +290,7 @@ def main() -> None:
          for k in records[0]},
         schema=pyarrow_schema_t2v,
     )
-    output_path = os.path.join(OUTPUT_DIR, "data_00000.parquet")
+    output_path = os.path.join(output_dir, "data_00000.parquet")
     pq.write_table(table, output_path)
     print(f"\nWrote {len(records)} records to {output_path}")
 
@@ -297,12 +298,12 @@ def main() -> None:
     # Wrap in "data" key -- ValidationDataset expects field="data".
     # Use "caption" field -- ValidationDataset aliases it to "prompt".
     val_prompts = {"data": [{"caption": get_caption(item)} for item in caption_data]}
-    val_path = os.path.join(OUTPUT_DIR, "validation_prompts.json")
+    val_path = os.path.join(output_dir, "validation_prompts.json")
     with open(val_path, "w") as f:
         json.dump(val_prompts, f, indent=2)
     print(f"Wrote validation prompts to {val_path}")
 
-    print("\nDone! Use data_path: " + OUTPUT_DIR + " in training config.")
+    print("\nDone! Use data_path: " + output_dir + " in training config.")
 
 
 if __name__ == "__main__":

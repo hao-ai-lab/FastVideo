@@ -45,7 +45,7 @@ def nvtx_range(name: str):
     ``FASTVIDEO_NVTX_PROFILE=1`` enables the marker. The context manager stays
     a no-op without CUDA so call sites can remain shared with CPU tests.
     """
-    enabled = envs.FASTVIDEO_NVTX_PROFILE and torch.cuda.is_available()
+    enabled = envs.FASTVIDEO_NVTX_PROFILE.get() and torch.cuda.is_available()
     if not enabled:
         yield
         return
@@ -201,19 +201,19 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
     logger.info("Profiling enabled. Traces will be saved to: %s", trace_dir)
     logger.info(
         "Profiler config: record_shapes=%s, profile_memory=%s, with_stack=%s, with_flops=%s",
-        envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
-        envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
-        envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
-        envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
+        envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES.get(),
+        envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY.get(),
+        envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK.get(),
+        envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS.get(),
     )
-    logger.info("FASTVIDEO_TORCH_PROFILE_REGIONS=%s", envs.FASTVIDEO_TORCH_PROFILE_REGIONS)
+    logger.info("FASTVIDEO_TORCH_PROFILE_REGIONS=%s", envs.FASTVIDEO_TORCH_PROFILE_REGIONS.get())
 
     profiler = torch.profiler.profile(
         activities=_DEFAULT_ACTIVITIES,
-        record_shapes=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
-        profile_memory=envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
-        with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
-        with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
+        record_shapes=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES.get(),
+        profile_memory=envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY.get(),
+        with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK.get(),
+        with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS.get(),
         # No schedule: nothing in the codebase calls profiler.step(), so a
         # wait/warmup schedule never advances and the profiler records nothing.
         # Region toggling gates collection; the single trace exports at stop().
@@ -249,7 +249,7 @@ class TorchProfilerConfig:
 
         requested_regions = {
             token.strip()
-            for token in (getattr(envs, "FASTVIDEO_TORCH_PROFILE_REGIONS", "") or "").split(",") if token.strip()
+            for token in envs.FASTVIDEO_TORCH_PROFILE_REGIONS.get().split(",") if token.strip()
         }
 
         if not requested_regions:
