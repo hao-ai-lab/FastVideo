@@ -234,6 +234,17 @@ def test_env_flag_does_not_override_explicit_uni_backend(env_overrides):
     assert Executor.get_class(args) is UniprocExecutor
 
 
+@pytest.mark.parametrize("backend", ["external_launcher", "mp"])
+def test_h3_encoder_split_is_rejected_for_external_launcher(env_overrides, backend):
+    # World rank 0 owns outputs here, but the MiniMax-H3 encoder split makes it
+    # an encoder rank that never decodes, so the two must not combine.
+    _clear_launcher_env(env_overrides)
+    env_overrides.enter_context(envs.FASTVIDEO_EXTERNAL_LAUNCHER.override(True))
+
+    with pytest.raises(ValueError, match="h3_encoder_split requires distributed_executor_backend='ray'"):
+        FastVideoArgs(model_path="test", num_gpus=2, distributed_executor_backend=backend, h3_encoder_split=True)
+
+
 def test_init_rejects_num_gpus_world_size_mismatch(env_overrides):
     _clear_launcher_env(env_overrides)
     _set_env(env_overrides, TORCHRUN_ENV)
