@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import fastvideo.envs as envs
 from fastvideo.performance import hf_store
 from fastvideo.performance_dashboard.service import build_latest_summary, build_trends, filter_records
 
@@ -477,11 +478,10 @@ def test_trends_include_source_metadata_with_legacy_defaults():
     assert trends[0]["points"][1]["baseline_eligible"] is True
 
 
-def test_hf_token_resolution_accepts_standard_env_names(monkeypatch):
-    for env_var in hf_store.HF_TOKEN_ENV_VARS:
-        monkeypatch.delenv(env_var, raising=False)
+def test_hf_token_resolution_accepts_standard_env_names(env_overrides):
+    env_overrides.enter_context(envs.override_external("HUGGING_FACE_HUB_TOKEN", None))
 
-    monkeypatch.setenv("HF_TOKEN", "hf_local")
+    env_overrides.enter_context(envs.override_external("HF_TOKEN", "hf_local"))
 
     assert hf_store.resolve_hf_token() == "hf_local"
 

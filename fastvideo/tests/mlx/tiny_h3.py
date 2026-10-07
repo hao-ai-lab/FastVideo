@@ -11,14 +11,13 @@ inside the head dim, as in the real config (96 <= 128).
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import torch
 
-os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29513")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29513")
 
 from fastvideo.configs.models.dits.minimax_h3 import (  # noqa: E402
     MiniMaxH3ArchConfig,
@@ -116,7 +115,9 @@ def initialize_model_parameters(model: torch.nn.Module) -> None:
 
 def build_torch_model() -> MiniMaxH3Transformer3DModel:
     config = build_tiny_h3_config()
-    model = MiniMaxH3Transformer3DModel(config=config, hf_config=build_hf_config(config))
+    # The CPU float32 reference model uses TORCH_SDPA unless FASTVIDEO_ATTENTION_BACKEND is already set.
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(envs.FASTVIDEO_ATTENTION_BACKEND.get() or "TORCH_SDPA"):
+        model = MiniMaxH3Transformer3DModel(config=config, hf_config=build_hf_config(config))
     model = model.to(device="cpu", dtype=torch.float32)
     initialize_model_parameters(model)
     model.eval()

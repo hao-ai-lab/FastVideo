@@ -12,7 +12,8 @@ from dataclasses import dataclass
 
 from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
-from fastvideo.utils import get_ip, get_distributed_init_method, get_open_port, get_loopback_ip
+from fastvideo.utils import (DEPRECATED_HF_TOKEN_ENV_VARS, HF_TOKEN_ENV_VARS, get_ip, get_distributed_init_method,
+                             get_open_port, get_loopback_ip)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.executor import Executor
@@ -85,14 +86,15 @@ class RayDistributedExecutor(Executor):
     # NCCL_* knobs present on the driver are added dynamically in
     # ``_env_vars_to_copy_from_driver``, except the per-node NIC trio above.
     ADDITIONAL_ENV_VARS = {
-        "HF_TOKEN",
-        "HUGGING_FACE_HUB_TOKEN",
+        *HF_TOKEN_ENV_VARS,
+        *DEPRECATED_HF_TOKEN_ENV_VARS,
         "NCCL_IB_DISABLE",
         "NCCL_P2P_DISABLE",
         "NCCL_CUMEM_ENABLE",
         "NCCL_NVLS_ENABLE",
         "NCCL_DEBUG",
         "NCCL_DEBUG_SUBSYS",
+        "LD_LIBRARY_PATH",
     }
 
     def _init_executor(self) -> None:
@@ -102,7 +104,7 @@ class RayDistributedExecutor(Executor):
         # Disable Ray usage stats collection.
         ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
         if ray_usage != "1":
-            os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
+            envs.set_external("RAY_USAGE_STATS_ENABLED", "0")
 
         self._init_workers_ray(placement_group)
 
@@ -113,7 +115,7 @@ class RayDistributedExecutor(Executor):
     def _init_workers_ray(self, placement_group: "PlacementGroup", **ray_remote_kwargs):
         from fastvideo.platforms import current_platform
 
-        num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS
+        num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS.get()
 
         # The remaining workers are the actual ray actors.
         self.workers: list[RayWorkerWrapper] = []
@@ -325,7 +327,7 @@ class RayDistributedExecutor(Executor):
         output = responses[0].output.cpu()
 
         logging_info = None
-        if envs.FASTVIDEO_STAGE_LOGGING:
+        if envs.FASTVIDEO_STAGE_LOGGING.get():
             logging_info = responses[0].logging_info
 
         result_batch = ForwardBatch(
