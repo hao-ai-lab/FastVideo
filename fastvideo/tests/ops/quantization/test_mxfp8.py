@@ -160,11 +160,12 @@ def _relative_l2_error(actual: torch.Tensor, expected: torch.Tensor) -> float:
 
 def _build_lora_mxfp8_round_trip(
         layerwise_offload: bool
-) -> tuple[nn.Module, nn.Module, SimpleNamespace, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[nn.Module, nn.Module, SimpleNamespace, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Build an MXFP8 FFN with a merged adapter plus its dense BF16 references.
 
     Returns the MXFP8 transformer, its feed-forward, a pipeline stand-in, the inputs and
-    the dense outputs without and with the adapter.
+    the dense BF16 references: base-only, adapter merged into the weights, and adapter
+    unmerged (applied as a runtime delta, as BaseLayerWithLoRA.forward computes it).
     """
     from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
     from fastvideo.layers.lora.linear import get_lora_layer
@@ -198,8 +199,8 @@ def _build_lora_mxfp8_round_trip(
     if layerwise_offload:
         enable_layerwise_offload(transformer)
 
-    # An adapter delta well above the 0.02 weight scale, so the unmerged state is
-    # distinguishable from the merged one by more than the MXFP8 error.
+    # An adapter delta well above the 0.02 weight scale, so the adapter-active states
+    # are distinguishable from the base-only output by more than the MXFP8 error.
     adapter = {
         "fc_in": (
             torch.randn(8, 128, generator=generator, dtype=torch.bfloat16).cuda() * 0.02,
@@ -224,7 +225,7 @@ def _build_lora_mxfp8_round_trip(
 
     hidden_states = torch.randn(2, 128, 128, generator=generator, dtype=torch.bfloat16).cuda()
     with torch.inference_mode():
-        dense_unmerged = dense(hidden_states)
+        dense_base = dense(hidden_states)
     for name in ("fc_in", "fc_out"):
         wrapped = get_lora_layer(getattr(dense, name), lora_rank=8, lora_alpha=8)
         assert wrapped is not None
@@ -232,12 +233,16 @@ def _build_lora_mxfp8_round_trip(
         wrapped.set_lora_weights(*adapter[name], lora_alpha=8)
     with torch.inference_mode():
         dense_merged = dense(hidden_states)
+    for name in ("fc_in", "fc_out"):
+        getattr(dense, name).unmerge_lora_weights()
+    with torch.inference_mode():
+        dense_unmerged = dense(hidden_states)
 
     pipeline = SimpleNamespace(
         lora_layers={"transformer": lora_layers},
         trainable_transformer_modules={"transformer": transformer},
     )
-    return transformer, quantized, pipeline, hidden_states, dense_unmerged, dense_merged
+    return transformer, quantized, pipeline, hidden_states, dense_base, dense_merged, dense_unmerged
 
 
 @pytest.mark.parametrize("layerwise_offload", [False, True])
@@ -246,8 +251,8 @@ def test_minimax_h3_mxfp8_feed_forward_lora_round_trip_matches_bf16(layerwise_of
     _require_blackwell()
     from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
-    transformer, quantized, pipeline, hidden_states, dense_unmerged, dense_merged = _build_lora_mxfp8_round_trip(
-        layerwise_offload)
+    transformer, quantized, pipeline, hidden_states, dense_base, dense_merged, dense_unmerged = (
+        _build_lora_mxfp8_round_trip(layerwise_offload))
 
     with torch.inference_mode():
         merged_output = transformer(hidden_states)
@@ -259,8 +264,10 @@ def test_minimax_h3_mxfp8_feed_forward_lora_round_trip_matches_bf16(layerwise_of
     LoRAPipeline.unmerge_lora_weights(pipeline)
     with torch.inference_mode():
         unmerged_output = transformer(hidden_states)
+    # Unmerged inference keeps the adapter active through the runtime delta, so it must
+    # match the unmerged BF16 LoRA execution and stay closer to it than to base-only.
     assert _relative_l2_error(unmerged_output, dense_unmerged) < 0.10
-    assert _relative_l2_error(unmerged_output, dense_unmerged) < _relative_l2_error(unmerged_output, dense_merged)
+    assert _relative_l2_error(unmerged_output, dense_unmerged) < _relative_l2_error(unmerged_output, dense_base)
 
     LoRAPipeline.merge_lora_weights(pipeline)
     with torch.inference_mode():
