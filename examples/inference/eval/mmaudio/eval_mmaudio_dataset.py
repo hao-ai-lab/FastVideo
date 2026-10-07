@@ -88,11 +88,24 @@ def _feature_shapes(transformer: torch.nn.Module) -> dict[str, int]:
     }
 
 
+class _IgnoredComponent:
+    """Placeholder for a required module the direct-feature path never touches.
+
+    ``MMAudioPipeline`` requires the CLIP text/vision and Synchformer encoders,
+    but its direct-feature conditioning path returns before dereferencing them.
+    Callers that pass ``video_path`` (or omit the cached features) must supply
+    the real modules instead.
+    """
+
+    def __repr__(self) -> str:
+        return "<ignored component>"
+
+
 def _build_pipeline(args: argparse.Namespace, world_size: int) -> MMAudioPipeline:
     # Cached features make the three conditioning encoders unnecessary. The
     # stages still exist, but consume direct tensors and never dereference
     # these sentinels.
-    ignored_component = object()
+    ignored_component = _IgnoredComponent()
     return MMAudioPipeline.from_pretrained(
         str(args.model_path),
         inference_mode=True,

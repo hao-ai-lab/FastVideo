@@ -329,8 +329,9 @@ to use the full split, or a positive value for a faster subset.
 
 Every 20,000 steps the same callback runs the native FastVideo MMAudio pipeline
 with the live training transformer and cached CLIP, Synchformer, and text
-features. It selects a fixed global set of 16 validation samples (four per rank
-on a four-GPU job), not the complete validation split. The validation seed,
+features. It generates a fixed global set of 16 validation outputs (four per
+rank on a four-GPU job) spanning the validation batch's source rows, not the
+complete validation split. The validation seed,
 sampler, and per-sample noise seeds stay fixed across training steps.
 `INFERENCE_MODEL_PATH` supplies only the frozen scheduler, audio VAE, and
 vocoder needed to decode a waveform; its transformer weights and feature
