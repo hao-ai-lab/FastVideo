@@ -164,6 +164,16 @@ class WanModel(ModelBase):
         """
         return None
 
+    def _t2v_parquet_schema(self) -> Any:
+        """Parquet schema for the t2v rows this model trains on.
+
+        Models whose rows carry extra tensor fields (e.g. HunyuanVideo
+        1.5's second text stream) override this.
+        """
+        from fastvideo.dataset.dataloader.schema import (
+            pyarrow_schema_t2v, )
+        return pyarrow_schema_t2v
+
     def init_preprocessors(self, training_config: TrainingConfig) -> None:
         self.vae = load_module_from_path(
             model_path=str(training_config.model_path),
@@ -177,9 +187,7 @@ class WanModel(ModelBase):
         self._init_timestep_mechanics()
 
         from fastvideo.dataset.dataloader.schema import (
-            pyarrow_schema_t2v,
-            pyarrow_schema_text_only,
-        )
+            pyarrow_schema_text_only, )
         from fastvideo.train.utils.dataloader import (
             build_parquet_t2v_train_dataloader, )
 
@@ -188,7 +196,7 @@ class WanModel(ModelBase):
             "preprocessed_data_type",
             "t2v",
         )).strip().lower()
-        parquet_schema = pyarrow_schema_t2v
+        parquet_schema = self._t2v_parquet_schema()
         if preprocessed_data_type == "text_only":
             parquet_schema = pyarrow_schema_text_only
         elif preprocessed_data_type != "t2v":

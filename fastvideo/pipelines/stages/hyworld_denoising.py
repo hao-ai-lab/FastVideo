@@ -215,6 +215,9 @@ class HYWorldDenoisingStage(DenoisingStage):
             # Denoising loop for this chunk
             with self.progress_bar(total=num_inference_steps) as progress_bar:
                 for i, t in enumerate(timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
 
                     if chunk_i == 0:
                         # First chunk: standard processing
