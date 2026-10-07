@@ -77,6 +77,20 @@ def test_set_timesteps_invalidates_cache():
     assert torch.equal(timesteps_after, timesteps_reference)
 
 
+def test_in_place_mutation_invalidates_cache():
+    """Writing into the tables in place rebuilds them instead of serving stale ones."""
+    scheduler = FakeScheduler(num_steps=4)
+    device = torch.device("cpu")
+    sigmas_before, _ = get_float64_schedule(scheduler, device)
+
+    scheduler.sigmas[-1] = scheduler.sigmas[-2]  # same tensor object, new values
+    sigmas_after, _ = get_float64_schedule(scheduler, device)
+
+    assert sigmas_after is not sigmas_before
+    sigmas_reference, _ = _reference_schedule(scheduler, device)
+    assert torch.equal(sigmas_after, sigmas_reference)
+
+
 def test_cache_is_stored_on_the_scheduler():
     """The memo lives on the scheduler, so separate schedulers stay independent."""
     first, second = FakeScheduler(), FakeScheduler()

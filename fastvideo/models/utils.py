@@ -144,7 +144,9 @@ def get_float64_schedule(scheduler: Any,
     Return the scheduler's sigma and timestep tables as float64 on ``device``.
 
     The result is memoized on the scheduler and reused until it swaps the
-    tables out, which ``set_timesteps`` does. Callers run once per denoising
+    tables out (``set_timesteps``) or writes into them in place -- the cache
+    key carries each table's version counter, so an in-place
+    ``sigmas[i] = ...`` rebuilds the copy. Callers run once per denoising
     step, so converting on every call would recast and re-upload the whole
     schedule for values that do not change within a schedule.
     """
@@ -152,15 +154,16 @@ def get_float64_schedule(scheduler: Any,
     timesteps = scheduler.timesteps
     cached = getattr(scheduler, _FLOAT64_SCHEDULE_ATTR, None)
     if cached is not None:
-        cached_sigmas, cached_timesteps, sigmas_f64, timesteps_f64 = cached
+        cached_sigmas, cached_timesteps, versions, sigmas_f64, timesteps_f64 = cached
         if (cached_sigmas is sigmas and cached_timesteps is timesteps
+                and versions == (sigmas._version, timesteps._version)
                 and sigmas_f64.device == device):
             return sigmas_f64, timesteps_f64
 
     sigmas_f64 = sigmas.to(device=device, dtype=torch.float64)
     timesteps_f64 = timesteps.to(device=device, dtype=torch.float64)
     setattr(scheduler, _FLOAT64_SCHEDULE_ATTR,
-            (sigmas, timesteps, sigmas_f64, timesteps_f64))
+            (sigmas, timesteps, (sigmas._version, timesteps._version), sigmas_f64, timesteps_f64))
     return sigmas_f64, timesteps_f64
 
 
