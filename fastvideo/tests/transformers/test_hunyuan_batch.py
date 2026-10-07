@@ -6,6 +6,7 @@ Requires one CUDA GPU; tiny random weights avoid checkpoint downloads.
 Run with: python -m pytest fastvideo/tests/transformers/test_hunyuan_batch.py -q
 The existing transformer CI lane collects this directory.
 """
+import contextlib
 import os
 import socket
 
@@ -13,6 +14,7 @@ import pytest
 import torch
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
+import fastvideo.envs as envs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.configs.models.dits.hunyuanvideo import HunyuanVideoArchConfig, HunyuanVideoConfig
 from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15ArchConfig, HunyuanVideo15Config
@@ -24,17 +26,21 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires 
 
 @pytest.fixture
 def hunyuan_setup(monkeypatch, request):
-    # Respect the port reserved by the CI runner when sharing a GPU host.
-    if "MASTER_PORT" not in os.environ:
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            monkeypatch.setenv("MASTER_PORT", str(sock.getsockname()[1]))
-    if "MASTER_ADDR" not in os.environ:
-        monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-    monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", False)
-    monkeypatch.setattr(torch.backends.cudnn, "allow_tf32", False)
-    request.getfixturevalue("distributed_setup")
+    # Environment writes go through the registry helpers (docs/contributing/env_vars.md).
+    with contextlib.ExitStack() as stack:
+        # Respect the port reserved by the CI runner when sharing a GPU host.
+        if "MASTER_PORT" not in os.environ:
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.1", 0))
+                port = str(sock.getsockname()[1])
+            stack.enter_context(envs.override_external("MASTER_PORT", port))
+        if "MASTER_ADDR" not in os.environ:
+            stack.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
+        stack.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
+        monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", False)
+        monkeypatch.setattr(torch.backends.cudnn, "allow_tf32", False)
+        request.getfixturevalue("distributed_setup")
+        yield
 
 
 def _initialize(module):
