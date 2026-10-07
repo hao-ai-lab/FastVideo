@@ -268,9 +268,11 @@ class VideoSparseAttentionImpl(AttentionImpl):
         valid until the next ``tile()`` / ``preprocess_qkv`` call on the
         same ``attn_metadata``.  Callers must consume (or copy) the
         result before invoking another VSA layer with the same metadata.
-        Today both call sites materialize copies via
-        ``.transpose(...).contiguous()`` inside ``forward()``, so the
-        contract holds; future callers must preserve it.
+        Today ``forward()`` materializes copies of q/k/v via
+        ``.transpose(...).contiguous()`` and consumes the gate view
+        synchronously inside the same call (the coarse/sparse combine
+        reads it before returning), so the contract holds; future
+        callers must preserve it.
         """
         num_tiles = attn_metadata.num_tiles
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
@@ -337,11 +339,14 @@ class VideoSparseAttentionImpl(AttentionImpl):
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
-        # Default 64-element-tile path (unchanged): BHSD round-trip.
+        # Default 64-element-tile path (unchanged): BHSD round-trip. The gate is
+        # only read elementwise by the coarse/sparse combine, which views it at
+        # block resolution without requiring contiguity, so the transposed view
+        # is handed over as is (no full-sequence copy).
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()
         value = value.transpose(1, 2).contiguous()
-        gate_compress = gate_compress.transpose(1, 2).contiguous()
+        gate_compress = gate_compress.transpose(1, 2)
         return video_sparse_attn(query,
                                  key,
                                  value,
