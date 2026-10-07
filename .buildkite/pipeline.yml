@@ -23,7 +23,100 @@ notify:
 # dispatcher, and every test payload executes inside the Slinky Slurm tray.
 # fastvideo/tests/modal remains available only for an explicit manual rollback;
 # no active pipeline or slash-command route invokes it.
+# Buildkite hands jobs to free agents in the order they appear here. Golden-gate comes first
+# because every later merge lane waits for it; the fastcheck lanes follow from longest to
+# shortest measured runtime, so the longest lane never starts last and stretches the build.
 steps:
+  - label: ":test_tube: Golden-Gate Tests"
+    key: "golden-gate"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,golden-gate,/) ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "golden_gate" || build.env("TEST_TYPE") == "golden_gate_ci"))
+    command: "/opt/fastvideo-ci-runner/run-ci"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "golden_gate_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+
+  - label: ":microscope: Unit Tests"
+    key: "unit"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,unit,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "unit_test" || build.env("TEST_TYPE") == "unit_test_ci"))
+    command: "/opt/fastvideo-ci-runner/run-unit"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "unit_test_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+
+  - label: ":microscope: Kernel Tests"
+    key: "kernel-tests"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,kernel-tests,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "kernel_tests" || build.env("TEST_TYPE") == "kernel_tests_ci"))
+    command: "/opt/fastvideo-ci-runner/run-ci"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "kernel_tests_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+
+  - label: ":microscope: DreamVerse App Tests"
+    key: "dreamverse"
+    if: |
+      build.env("TEST_SCOPE") == "full" ||
+      (build.env("TEST_SCOPE") == "merge" &&
+       build.env("MERGE_TEST_PLAN") =~ /,dreamverse,/) ||
+      build.env("TEST_SCOPE") == "fastcheck" ||
+      build.env("TEST_SCOPE") == null ||
+      (build.env("TEST_SCOPE") == "direct" &&
+       (build.env("TEST_TYPE") == "dreamverse_app" || build.env("TEST_TYPE") == "dreamverse_app_ci"))
+    command: "/opt/fastvideo-ci-runner/run-ci"
+    timeout_in_minutes: 90
+    env:
+      TEST_TYPE: "dreamverse_app_ci"
+    retry:
+      automatic:
+        - exit_status: 128
+          limit: 3
+        - exit_status: -1
+          limit: 2
+    agents:
+      queue: "ci-runner"
+
   - label: ":microscope: Encoder Tests"
     key: "encoder"
     if: |
@@ -84,96 +177,6 @@ steps:
     timeout_in_minutes: 90
     env:
       TEST_TYPE: "transformer_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
-
-  - label: ":microscope: Kernel Tests"
-    key: "kernel-tests"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,kernel-tests,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "kernel_tests" || build.env("TEST_TYPE") == "kernel_tests_ci"))
-    command: "/opt/fastvideo-ci-runner/run-ci"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "kernel_tests_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
-
-  - label: ":microscope: Unit Tests"
-    key: "unit"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,unit,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "unit_test" || build.env("TEST_TYPE") == "unit_test_ci"))
-    command: "/opt/fastvideo-ci-runner/run-unit"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "unit_test_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
-
-  - label: ":microscope: DreamVerse App Tests"
-    key: "dreamverse"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,dreamverse,/) ||
-      build.env("TEST_SCOPE") == "fastcheck" ||
-      build.env("TEST_SCOPE") == null ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "dreamverse_app" || build.env("TEST_TYPE") == "dreamverse_app_ci"))
-    command: "/opt/fastvideo-ci-runner/run-ci"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "dreamverse_app_ci"
-    retry:
-      automatic:
-        - exit_status: 128
-          limit: 3
-        - exit_status: -1
-          limit: 2
-    agents:
-      queue: "ci-runner"
-
-  - label: ":test_tube: Golden-Gate Tests"
-    key: "golden-gate"
-    if: |
-      build.env("TEST_SCOPE") == "full" ||
-      (build.env("TEST_SCOPE") == "merge" &&
-       build.env("MERGE_TEST_PLAN") =~ /,golden-gate,/) ||
-      (build.env("TEST_SCOPE") == "direct" &&
-       (build.env("TEST_TYPE") == "golden_gate" || build.env("TEST_TYPE") == "golden_gate_ci"))
-    command: "/opt/fastvideo-ci-runner/run-ci"
-    timeout_in_minutes: 90
-    env:
-      TEST_TYPE: "golden_gate_ci"
     retry:
       automatic:
         - exit_status: 128

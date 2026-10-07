@@ -42,6 +42,12 @@ explicit compatibility exports.
   `__init__.py` are pre-commit checked;
   `transformer.py` and `vae.py` retain the existing model-code exclusion.
   Avoid unrelated reformatting.
+- `WanTransformer3DModel.forward` shards the flattened spatiotemporal token
+  sequence after patch embedding (`sequence_model_parallel_shard`, with
+  padding). Callers pass full-length latents and conditioning; a pipeline must
+  not pre-shard along the temporal axis. Pre-sharding only part of the model
+  input (for example I2V image conditioning) cannot match the full-length noise
+  and double-shards the rest.
 
 ## Focused checks
 

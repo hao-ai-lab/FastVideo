@@ -3,13 +3,13 @@
 Latent preparation stage for diffusion pipelines.
 """
 
-import os
 from typing import Any
 
 import numpy as np
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
+import fastvideo.envs as envs
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.image_processor import ImageProcessor
@@ -475,7 +475,7 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
                     )
                 video = torch.cat([cond_video, padding], dim=2)
 
-            if os.environ.get("FASTVIDEO_COSMOS25_LOG_KNOBS", "0") in ("1", "true", "True"):
+            if envs.FASTVIDEO_COSMOS25_LOG_KNOBS.get():
                 logger.info(
                     "[Cosmos2.5 latent_prep] using conditioning input: image=%s video_latent=%s video_path=%s | "
                     "num_video_frames=%s num_cond_frames=%s num_frames=%s",

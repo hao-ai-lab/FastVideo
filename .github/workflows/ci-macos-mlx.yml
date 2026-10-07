@@ -33,15 +33,15 @@ jobs:
     env:
       FASTVIDEO_ATTENTION_BACKEND: TORCH_SDPA
       TOKENIZERS_PARALLELISM: "false"
-      MASTER_ADDR: localhost
+      MASTER_ADDR: "127.0.0.1"
       MASTER_PORT: "29513"
+      GLOO_SOCKET_IFNAME: lo0
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
 
       - uses: astral-sh/setup-uv@v3
 
@@ -49,9 +49,9 @@ jobs:
         run: |
           uv pip install --system \
             --index-url https://download.pytorch.org/whl/cpu \
-            torch==2.11.0 torchvision torchaudio
+            torch==2.12.0 torchvision torchaudio
           uv pip install --system \
-            pytest numpy scipy pillow imageio einops cloudpickle filelock \
+            pytest pytest-timeout numpy scipy pillow imageio einops cloudpickle filelock \
             PyYAML diffusers huggingface_hub remote-pdb safetensors loguru mlx \
             "ftfy>=6.3.1" "opencv-python>=4.10.0.84" psutil "transformers>=5.0.0"
 
@@ -65,8 +65,8 @@ jobs:
           print("machine:", platform.machine())
           print("processor:", platform.processor())
           print("mlx default device:", mx.default_device())
-          memory_size = mx.metal.device_info().get("memory_size") if mx.metal.is_available() else "metal unavailable"
-          print("mlx memory_size:", memory_size)
+          device_info = mx.metal.device_info() if mx.metal.is_available() else "metal unavailable"
+          print("mlx device_info:", device_info)
           print("torch:", torch.__version__)
           print("torch mps available:", torch.backends.mps.is_available())
           PY
@@ -74,6 +74,7 @@ jobs:
       - name: Run MLX smoke tests
         run: |
           python -m pytest \
+            fastvideo/mlx_runtime/tests/ \
             fastvideo/tests/mlx/test_dmd_sampling.py \
             fastvideo/tests/mlx/test_memory_limits.py \
             fastvideo/tests/mlx/test_quant_capability.py \
@@ -92,6 +93,7 @@ jobs:
             fastvideo/tests/mlx/test_frame_upsample.py \
             fastvideo/tests/mlx/test_mlx_fast_spatial.py \
             fastvideo/tests/mlx/test_mlx_refine.py \
+            fastvideo/tests/mlx/test_mlx_prompt_enhance.py \
             fastvideo/tests/mlx/test_mlx_prompt_to_video_decode.py \
             fastvideo/tests/mlx/test_mlx_wan22_prompt_cache_fingerprint.py \
             fastvideo/tests/mlx/test_wan22_sample.py \
@@ -100,7 +102,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_backend_regression_is_not_skip_eligible \
             fastvideo/tests/platforms/test_mps_vsa_error.py \
             fastvideo/tests/platforms/test_cpu_sdpa.py \
-            -v -s -o faulthandler_timeout=120
+            -v -s --timeout=120 -o faulthandler_timeout=120
 
   # Same tests on MLX's CPU backend. Hosted macOS runners are scarce and
   # slower to schedule; this Linux job gives fast PR signal on the identical
@@ -121,7 +123,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
 
       - uses: astral-sh/setup-uv@v3
 
@@ -129,15 +130,16 @@ jobs:
         run: |
           uv pip install --system \
             --index-url https://download.pytorch.org/whl/cpu \
-            torch==2.11.0 torchvision torchaudio
+            torch==2.12.0 torchvision torchaudio
           uv pip install --system \
-            pytest numpy scipy pillow imageio einops cloudpickle filelock \
+            pytest pytest-timeout numpy scipy pillow imageio einops cloudpickle filelock \
             PyYAML diffusers huggingface_hub remote-pdb safetensors loguru "mlx[cpu]" \
             "ftfy>=6.3.1" "opencv-python>=4.10.0.84" psutil "transformers>=5.0.0"
 
       - name: Run MLX smoke tests (CPU backend)
         run: |
           python -m pytest \
+            fastvideo/mlx_runtime/tests/ \
             fastvideo/tests/mlx/test_dmd_sampling.py \
             fastvideo/tests/mlx/test_memory_limits.py \
             fastvideo/tests/mlx/test_quant_capability.py \
@@ -156,6 +158,7 @@ jobs:
             fastvideo/tests/mlx/test_frame_upsample.py \
             fastvideo/tests/mlx/test_mlx_fast_spatial.py \
             fastvideo/tests/mlx/test_mlx_refine.py \
+            fastvideo/tests/mlx/test_mlx_prompt_enhance.py \
             fastvideo/tests/mlx/test_mlx_prompt_to_video_decode.py \
             fastvideo/tests/mlx/test_mlx_wan22_prompt_cache_fingerprint.py \
             fastvideo/tests/mlx/test_wan22_sample.py \
@@ -164,4 +167,4 @@ jobs:
             fastvideo/tests/mlx/test_mlx_rife_interpolation.py::test_rife_backend_regression_is_not_skip_eligible \
             fastvideo/tests/platforms/test_mps_vsa_error.py \
             fastvideo/tests/platforms/test_cpu_sdpa.py \
-            -v -s -o faulthandler_timeout=120
+            -v -s --timeout=120 -o faulthandler_timeout=120

@@ -97,6 +97,8 @@ MINIMAX_H3_AUDIO_TAG = 2
 MINIMAX_H3_MODALITY_NUM = 3
 
 MINIMAX_H3_FPS = 24
+MINIMAX_H3_MIN_DURATION = 5.0
+MINIMAX_H3_MAX_DURATION = 15.0
 MINIMAX_H3_FRAMES_PER_CHUNK = 17
 MINIMAX_H3_LATENTS_PER_CHUNK = 5
 MINIMAX_H3_AUDIO_LATENTS_PER_SECOND = 40
@@ -105,6 +107,8 @@ MINIMAX_H3_KEYFRAME_NOISE_AUG = 0.999
 
 MINIMAX_H3_VIDEO_SHIFT = 12.0
 MINIMAX_H3_AUDIO_SHIFT = 3.0
+FASTH3_INFERENCE_CONTRACT = "fastvideo_inference.json"
+FASTH3_INFERENCE_CONTRACT_SCHEMA = "fasth3-inference-contract-v1"
 
 MINIMAX_H3_ROPE_FRAME_RESCALE = 5.0 / 3.0
 MINIMAX_H3_ROPE_FRAMES_PER_LATENT = (1, 4, 4, 4, 4)
@@ -159,6 +163,13 @@ def align_num_frames(num_frames: int) -> int:
     while num_frames % MINIMAX_H3_FRAMES_PER_CHUNK != MINIMAX_H3_LATENTS_PER_CHUNK:
         num_frames += 1
     return num_frames
+
+
+# Mirrors fastvideo/pipelines/basic/minimax_h3/packing.py: duration limits are
+# seconds, validated against the aligned buckets they map to. The 15-second
+# target (360 frames) pads to 362 on the causal-VAE grid.
+MINIMAX_H3_MIN_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MIN_DURATION * MINIMAX_H3_FPS))
+MINIMAX_H3_MAX_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MAX_DURATION * MINIMAX_H3_FPS))
 
 
 def video_latent_num_frames(num_frames: int) -> int:
@@ -409,6 +420,142 @@ def minimax_h3_sigmas(shift: float, num_denoise_steps: int) -> np.ndarray:
     return _unique_consecutive(sigmas).astype(np.float32)
 
 
+def validate_fasth3_dmd_rungs(dmd_steps: object) -> list[int]:
+    """Strictly decreasing integer rungs on the 1000-step training clock."""
+    if (not isinstance(dmd_steps, list) or not dmd_steps
+            or any(type(step) is not int or not 0 < step <= 1000 for step in dmd_steps)
+            or any(left <= right for left, right in zip(dmd_steps, dmd_steps[1:], strict=False))):
+        raise ValueError("FastH3 DMD rungs must be strictly decreasing integers in (0, 1000].")
+    return dmd_steps
+
+
+def _positive_shift(value: object, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive finite number, got {value!r}.")
+    return float(value)
+
+
+def find_fasth3_inference_contract(model_root: str | Path | None) -> Path | None:
+    """Return the snapshot contract, also checking the parent of a transformer dir."""
+    if model_root is None:
+        return None
+    root = Path(model_root)
+    direct = root / FASTH3_INFERENCE_CONTRACT
+    if direct.is_file():
+        return direct
+    parent = root.parent / FASTH3_INFERENCE_CONTRACT
+    if parent.is_file() and parent != direct:
+        return parent
+    return None
+
+
+def load_fasth3_inference_contract(model_root: str | Path | None) -> dict[str, Any] | None:
+    """Load a shift-declaring FastH3 contract.
+
+    Four-step exports ship a sidecar without scheduler shifts and keep the
+    uniform ladder. Only a contract that declares both shifts, such as
+    FastH3 8-Step V2, selects the explicit DMD rungs. A shifted sidecar that
+    cannot be parsed fails instead of silently baking the four-step grid.
+    """
+    path = find_fasth3_inference_contract(model_root)
+    if path is None:
+        return None
+    try:
+        contract = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed FastH3 inference contract {path}: {exc}") from exc
+    if not isinstance(contract, dict):
+        raise ValueError(f"Malformed FastH3 inference contract {path}.")
+    declares_shifts = "video_scheduler_shift" in contract or "audio_scheduler_shift" in contract
+    if not declares_shifts:
+        return None
+    if contract.get("schema_version") != FASTH3_INFERENCE_CONTRACT_SCHEMA:
+        raise ValueError(f"Unsupported FastH3 inference contract schema in {path}.")
+    if "video_scheduler_shift" not in contract or "audio_scheduler_shift" not in contract:
+        raise ValueError(f"{path} must declare both video_scheduler_shift and audio_scheduler_shift.")
+    steps = validate_fasth3_dmd_rungs(contract.get("dmd_denoising_steps"))
+    forwards = contract.get("transformer_forwards")
+    grid_points = contract.get("num_inference_steps")
+    if type(forwards) is not int or forwards != len(steps):
+        raise ValueError("FastH3 transformer_forwards must equal the DMD rung count.")
+    if type(grid_points) is not int or grid_points != len(steps) + 1:
+        raise ValueError("FastH3 num_inference_steps must equal the DMD rung count plus one.")
+    contract["video_scheduler_shift"] = _positive_shift(contract["video_scheduler_shift"], name="video_scheduler_shift")
+    contract["audio_scheduler_shift"] = _positive_shift(contract["audio_scheduler_shift"], name="audio_scheduler_shift")
+    contract["dmd_denoising_steps"] = steps
+    return contract
+
+
+def _require_cached_schedule(cached: np.ndarray | None, requested: np.ndarray, num_steps: int) -> None:
+    if cached is None:
+        return
+    cached_union = np.unique(np.asarray(cached, dtype=np.float32))
+    if np.array_equal(cached_union, requested):
+        return
+    raise ValueError(f"MLX H3 checkpoint has a fixed AdaLN ladder that does not support --steps "
+                     f"{num_steps}. Use the step count used during conversion, or re-export the checkpoint.")
+
+
+def adaln_timestep_union(video: MiniMaxH3SchedulerState, audio: MiniMaxH3SchedulerState) -> np.ndarray:
+    """Sorted unique AdaLN timesteps for one video/audio pair, plus clean time 1."""
+    return np.unique(
+        np.concatenate([
+            np.asarray(video.timesteps, dtype=np.float32),
+            np.asarray(audio.timesteps, dtype=np.float32),
+            np.array([1.0], dtype=np.float32),
+        ])).astype(np.float32)
+
+
+@dataclass(frozen=True)
+class ResolvedH3Schedule:
+    """The denoise ladder a request is allowed to run."""
+
+    video: MiniMaxH3SchedulerState
+    audio: MiniMaxH3SchedulerState
+    adaln_timesteps: np.ndarray
+    num_steps: int
+    source: str
+
+
+def resolve_h3_denoise_schedule(
+    model_root: str | Path | None,
+    num_steps: int,
+    *,
+    cached_timesteps: np.ndarray | None = None,
+) -> ResolvedH3Schedule:
+    """Keep the uniform ladder unless the snapshot declares its own shifts.
+
+    ``num_steps`` is the transformer-forward count. A shift-declaring contract
+    also accepts that count plus one, the CUDA sigma-grid convention, and then
+    runs exactly its trained rung count.
+    """
+    if type(num_steps) is not int or num_steps < 1:
+        raise ValueError(f"num_steps must be a positive integer, got {num_steps!r}.")
+    contract = load_fasth3_inference_contract(model_root)
+    if contract is None:
+        video = MiniMaxH3SchedulerState.create(MINIMAX_H3_VIDEO_SHIFT, num_steps)
+        audio = MiniMaxH3SchedulerState.create(MINIMAX_H3_AUDIO_SHIFT, num_steps)
+        union = adaln_timestep_union(video, audio)
+        if cached_timesteps is not None and not np.array_equal(np.asarray(cached_timesteps, dtype=np.float32), union):
+            raise ValueError(f"MLX H3 checkpoint has a fixed AdaLN ladder that does not support --steps "
+                             f"{num_steps}. Use the step count used during conversion (normally 4), or re-export "
+                             "the checkpoint.")
+        return ResolvedH3Schedule(video, audio, union, num_steps, "uniform")
+
+    rungs = contract["dmd_denoising_steps"]
+    forwards = len(rungs)
+    if num_steps not in (forwards, forwards + 1):
+        raise ValueError(f"Requested {num_steps} steps, but the FastH3 contract trains {forwards} transformer "
+                         f"forwards ({forwards + 1} sigma-grid points).")
+    video = MiniMaxH3SchedulerState.from_dmd_steps(contract["video_scheduler_shift"], rungs)
+    audio = MiniMaxH3SchedulerState.from_dmd_steps(contract["audio_scheduler_shift"], rungs)
+    union = adaln_timestep_union(video, audio)
+    if cached_timesteps is not None and not np.array_equal(np.unique(np.asarray(cached_timesteps, dtype=np.float32)),
+                                                           union):
+        _require_cached_schedule(cached_timesteps, union, num_steps)
+    return ResolvedH3Schedule(video, audio, union, forwards, "contract-dmd")
+
+
 @dataclass
 class MiniMaxH3SchedulerState:
     """One rectified-flow scheduler (use two: video shift 12, audio shift 3)."""
@@ -423,6 +570,19 @@ class MiniMaxH3SchedulerState:
             raise ValueError(f"`shift` must be positive, got {shift}.")
         sigmas = minimax_h3_sigmas(shift, num_denoise_steps)
         return cls(shift=shift, sigmas=sigmas, timesteps=(1.0 - sigmas[:-1]).astype(np.float32))
+
+    @classmethod
+    def from_dmd_steps(cls, shift: float, dmd_steps: list[int]) -> MiniMaxH3SchedulerState:
+        """Shift explicit DMD rungs the way the CUDA denoiser does."""
+        shift = _positive_shift(shift, name="shift")
+        rungs = validate_fasth3_dmd_rungs(dmd_steps)
+        base = np.array([step / 1000.0 for step in rungs] + [0.0], dtype=np.float64)
+        # Float64 shift, then one cast. Shipped MLX AdaLN tables are keyed by
+        # that rounding; casting the sigma before 1 - sigma misses the cache.
+        sigmas64 = shift * base / (1.0 + (shift - 1.0) * base)
+        if sigmas64.size < 2 or not bool(np.all(sigmas64[1:] < sigmas64[:-1])) or float(sigmas64[-1]) != 0.0:
+            raise ValueError("DMD sigmas must be strictly decreasing and end at 0.")
+        return cls(shift=shift, sigmas=sigmas64.astype(np.float32), timesteps=(1.0 - sigmas64[:-1]).astype(np.float32))
 
     @property
     def num_steps(self) -> int:
@@ -606,12 +766,12 @@ def _feed_forward(weights: dict[str, Any], x):
     return linear(value * silu(gate), weights["ff.net.2.weight"])
 
 
-def _adaln_tables(weights: dict[str, Any], temb):
+def _adaln_tables(weights: dict[str, Any], temb, *, apply_silu: bool = True):
     """Six (n_t * 3, hidden) modulation tables from (n_t, time_embed_dim)."""
     import mlx.core as mx
 
     projected = linear(
-        silu(temb).astype(weight_dtype(weights["adaln_proj.linear.weight"])),
+        (silu(temb) if apply_silu else temb).astype(weight_dtype(weights["adaln_proj.linear.weight"])),
         weights["adaln_proj.linear.weight"],
         weights["adaln_proj.linear.bias"],
     )
@@ -754,6 +914,7 @@ class MLXMiniMaxH3DiT:
         self.qk_norm_eps = float(config["qk_norm_eps"])
         self.final_norm_eps = float(config["final_norm_eps"])
         self.patch_dim = self.in_channels * math.prod(self.patch_size)
+        self.adaln_rank = config.get("adaln_rank")
         self._adaln_cache: MiniMaxH3StepCache | None = None
         self.vsa_config = MiniMaxH3VSAConfig()
         self._vsa_geometry: MiniMaxH3VSAGeometry | None = None
@@ -772,11 +933,15 @@ class MLXMiniMaxH3DiT:
             self.weights["time_embedder.linear_1.weight"],
             self.weights["time_embedder.linear_1.bias"],
         )
-        return linear(
+        temb = linear(
             silu(temb),
             self.weights["time_embedder.linear_2.weight"],
             self.weights["time_embedder.linear_2.bias"],
         )
+        if self.adaln_rank is not None:
+            temb = linear(
+                silu(temb).astype(weight_dtype(self.weights["adaln_basis.weight"])), self.weights["adaln_basis.weight"])
+        return temb
 
     def refine_text(self, text_rows):
         hidden = linear(
@@ -809,9 +974,10 @@ class MLXMiniMaxH3DiT:
 
         timesteps = np.unique(np.asarray(timesteps, dtype=np.float32))
         temb = self.compute_temb(mx.array(timesteps))
-        block_tables = [_adaln_tables(block, temb) for block in self.blocks]
+        block_tables = [_adaln_tables(block, temb, apply_silu=self.adaln_rank is None) for block in self.blocks]
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(self.weights["norm_out.linear.weight"])),
+            (silu(temb) if self.adaln_rank is None else temb).astype(
+                weight_dtype(self.weights["norm_out.linear.weight"])),
             self.weights["norm_out.linear.weight"],
             self.weights["norm_out.linear.bias"],
         )
@@ -947,7 +1113,7 @@ class MLXMiniMaxH3DiT:
         adaln_indices = (timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags).astype(mx.int32)
 
         for block_index, block in enumerate(self.blocks):
-            tables = _adaln_tables(block, temb)
+            tables = _adaln_tables(block, temb, apply_silu=self.adaln_rank is None)
             packed = _transformer_block(
                 block,
                 packed,
@@ -964,7 +1130,8 @@ class MLXMiniMaxH3DiT:
             mx.eval(packed)  # per-block sync: see forward_with_cache note
 
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(self.weights["norm_out.linear.weight"])),
+            (silu(temb) if self.adaln_rank is None else temb).astype(
+                weight_dtype(self.weights["norm_out.linear.weight"])),
             self.weights["norm_out.linear.weight"],
             self.weights["norm_out.linear.bias"],
         )
@@ -1193,10 +1360,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
         for shard in _safetensors_shards(transformer_path):
             shard_arrays = mx.load(str(shard))
             for key, source in shard_arrays.items():
-                if not key.startswith("time_embedder."):
+                if not (key.startswith("time_embedder.") or key == "adaln_basis.weight"):
                     continue
                 keep_fp32 = key.split(".", 1)[0] in FP32_MODULE_PREFIXES
-                target_dtype = mx.float32 if keep_fp32 else cast_dtype
+                target_dtype = mx.float32 if keep_fp32 else (mx.float16 if key == "adaln_basis.weight" else cast_dtype)
                 assign(key, _load_array(source, target_dtype))
             del shard_arrays
         required_time_keys = {
@@ -1213,6 +1380,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
             weight_dtype(weights["time_embedder.linear_1.weight"]))
         temb = linear(t_freq, weights["time_embedder.linear_1.weight"], weights["time_embedder.linear_1.bias"])
         temb = linear(silu(temb), weights["time_embedder.linear_2.weight"], weights["time_embedder.linear_2.bias"])
+        if config.get("adaln_rank") is not None:
+            if "adaln_basis.weight" not in weights:
+                raise KeyError("Rank-reduced AdaLN checkpoint is missing adaln_basis.weight")
+            temb = linear(silu(temb).astype(weight_dtype(weights["adaln_basis.weight"])), weights["adaln_basis.weight"])
         mx.eval(temb)
         cached_block_tables = [None] * num_blocks
 
@@ -1221,7 +1392,10 @@ def mlx_h3_dit_from_diffusers_safetensors(
         for key, source in shard_arrays.items():
             if _is_ignored_dense_key(key, include_vsa=include_vsa):
                 continue
-            if temb is not None and key.startswith("time_embedder."):
+            if source.dtype == mx.uint8 and key.endswith(".weight"):
+                raise ValueError(f"Packed transformer weight {key} is not a floating-point source. "
+                                 "Convert the released BF16 transformer to MLX INT6 instead.")
+            if temb is not None and (key.startswith("time_embedder.") or key == "adaln_basis.weight"):
                 continue
             if key.startswith("transformer_blocks."):
                 index = int(key.split(".")[1])
@@ -1230,7 +1404,9 @@ def mlx_h3_dit_from_diffusers_safetensors(
             if key.startswith("rope."):
                 continue  # non-persistent analytic buffer, rebuilt on the fly
             keep_fp32 = key.split(".", 1)[0] in FP32_MODULE_PREFIXES
-            target_dtype = mx.float32 if keep_fp32 else cast_dtype
+            factorized_adaln = config.get("adaln_rank") is not None and (".adaln_proj." in key or key.startswith(
+                ("norm_out.linear.", "adaln_basis.")))
+            target_dtype = mx.float32 if keep_fp32 else (mx.float16 if factorized_adaln else cast_dtype)
             array = _load_array(source, target_dtype)
             if temb is not None and ".adaln_proj.linear." in key:
                 _, index_str, sub = key.split(".", 2)
@@ -1238,7 +1414,7 @@ def mlx_h3_dit_from_diffusers_safetensors(
                 block_pending = pending_adaln.setdefault(index, {})
                 block_pending[sub] = array
                 if {"adaln_proj.linear.weight", "adaln_proj.linear.bias"} <= block_pending.keys():
-                    tables = _adaln_tables(block_pending, temb)
+                    tables = _adaln_tables(block_pending, temb, apply_silu=config.get("adaln_rank") is None)
                     mx.eval(tables)
                     assert cached_block_tables is not None
                     cached_block_tables[index] = tables
@@ -1268,7 +1444,8 @@ def mlx_h3_dit_from_diffusers_safetensors(
         if missing_cache_blocks:
             raise KeyError(f"Missing AdaLN cache tables for blocks {missing_cache_blocks}")
         shift_scale = linear(
-            silu(temb).astype(weight_dtype(weights["norm_out.linear.weight"])),
+            (silu(temb) if config.get("adaln_rank") is None else temb).astype(
+                weight_dtype(weights["norm_out.linear.weight"])),
             weights["norm_out.linear.weight"],
             weights["norm_out.linear.bias"],
         )

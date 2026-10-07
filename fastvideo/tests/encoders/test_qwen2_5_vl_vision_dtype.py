@@ -109,3 +109,30 @@ def test_vision_eager_attention_resolves_to_sdpa():
 
     assert config._attn_implementation == "sdpa"
     assert isinstance(model.blocks[0].attn, Qwen2_5_VLVisionSdpaAttention)
+
+
+def test_sliding_window_cache_check_survives_transformers_5():
+    """transformers 5.0-5.5 removed `cache_utils.SlidingWindowCache`.
+
+    The import here was unguarded and at module scope, so the whole encoder became
+    unimportable on those versions -- which `pyproject.toml` admits via `transformers>=5.0.0`
+    -- taking `Reason1TextEncoder`, and with it the Cosmos 2.5 and Kandinsky 5 pipelines,
+    with it. transformers 5.6 restored the name as an alias for `StaticCache`.
+
+    Whatever the guard bound, `isinstance()` has to accept it and answer False for a
+    `DynamicCache`: a sliding window is a property of the cache's layers now, so no cache
+    object is an instance of the old class.
+    """
+    from transformers import cache_utils
+    from transformers.cache_utils import DynamicCache
+
+    from fastvideo.models.encoders import qwen2_5_vl_custom
+
+    bound = qwen2_5_vl_custom.SlidingWindowCache
+    if hasattr(cache_utils, "SlidingWindowCache"):
+        # The guard must not shadow a name transformers still exports.
+        assert bound is cache_utils.SlidingWindowCache
+    else:
+        # The fallback arm: an empty tuple keeps isinstance() answering False.
+        assert bound == ()
+    assert isinstance(DynamicCache(), bound) is False
