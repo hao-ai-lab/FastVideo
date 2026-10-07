@@ -1,0 +1,64 @@
+# Start Ray on both Sparks and source spark_pair_env.sh first; see spark_pair.md.
+# FastH3 V2 eight-forward video+audio on two DGX Sparks over QSFP RoCE.
+# Download the complete release checkpoint as described in
+# docs/getting_started/installation/spark_performance.md.
+#
+# GB10 uses Triton VSA. The release packs attention, FFN and VSA gate weights.
+# The NVFP4 encoder and lightweight VAE ship in the same repository.
+#
+# FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass \
+# FASTVIDEO_H3_VAE_TILE_BATCH=1 \
+# FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
+# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \
+# fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair_v2_nvfp4.yaml
+generator:
+  model_path: FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer
+  engine:
+    num_gpus: 2
+    execution_backend: ray
+    use_fsdp_inference: false
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: h3_dit_vsa
+    parallelism:
+      tp_size: 1
+      sp_size: 2
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: false
+      image_encoder: false
+      vae: false
+      pin_cpu_memory: false
+      lazy_module_load: false
+    compile:
+      enabled: false
+      vae_enabled: false
+  pipeline:
+    workload_type: t2v
+    vae_tiling: true
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      VSA_sparsity: 0.8
+      VSA_tile_size: 64
+      h3_sequential_load: false
+      inference_torch_compile: false
+      vae_parallel_decode: true
+      vae_parallel_decode_strategy: gather
+      video_decode_backend: h3-vae
+request:
+  prompt: A quiet pottery studio with a potter finishing a bowl at the wheel.
+  negative_prompt: ""
+  sampling:
+    seed: 1234
+    height: 480
+    width: 832
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 9  # nine sigma points, eight DiT forwards
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    output_path: outputs/fasth3_spark_pair_v2_nvfp4/
+    save_video: true
+    return_frames: false

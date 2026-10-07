@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import os
 from functools import wraps
 
 import torch
 import torch.nn as nn
 
+import fastvideo.envs as envs
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
                                                     sequence_model_parallel_all_to_all_4D)
@@ -23,10 +23,7 @@ def _attention_compile_disabled() -> bool:
     ``torch.compiler.disable``). Set ``FASTVIDEO_DISABLE_ATTENTION_COMPILE=0``
     to let attention instances constructed under that environment be traced.
     """
-    val = os.environ.get("FASTVIDEO_DISABLE_ATTENTION_COMPILE")
-    if val is None:
-        return True
-    return val.strip().lower() not in ("0", "false", "no", "off", "")
+    return envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.get()
 
 
 def _attention_compile_explicitly_disabled() -> bool:
@@ -35,7 +32,7 @@ def _attention_compile_explicitly_disabled() -> bool:
     Regional compile can override the historical default for one loaded
     transformer, but it must still honor an explicit debugging escape hatch.
     """
-    return "FASTVIDEO_DISABLE_ATTENTION_COMPILE" in os.environ and _attention_compile_disabled()
+    return envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.is_set() and _attention_compile_disabled()
 
 
 def _maybe_compiler_disable(fn):

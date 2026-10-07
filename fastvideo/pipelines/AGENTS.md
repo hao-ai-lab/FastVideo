@@ -1,6 +1,6 @@
 # `fastvideo/pipelines/` — Pipeline Composition
 
-**Generated:** 2026-05-02
+**Generated:** 2026-09-14
 
 Diffusion pipelines are **compositions of `PipelineStage` objects**. Each stage owns one verb (validate / encode / schedule / denoise / decode). Adding a model means assembling stages, not subclassing a megapipeline.
 
@@ -25,9 +25,10 @@ pipelines/
 │   ├── gamecraft_denoising.py  #   GameCraft-specific
 │   └── matrixgame2_denoising.py #  Matrix-Game 2.0-specific
 ├── basic/                      # Per-model end-to-end pipelines
-│   ├── hunyuan/, hunyuan15/, hyworld/, gamecraft/, gen3c/, cosmos/
-│   ├── wan/, longcat/, ltx2/, lingbotworld/, magi_human/, matrixgame2/
-│   ├── sd35/, stable_audio/, turbodiffusion/
+│   ├── cosmos/, dreamx_world/, flux/, flux_2/, gamecraft/, gen3c/, glm_image/
+│   ├── hunyuan/, hunyuan15/, hyworld/, kandinsky5/, lingbot_video/, lingbotworld/
+│   ├── lingbotworld2/, longcat/, ltx2/, magi_human/, matrixgame2/, matrixgame3/
+│   ├── minimax_h3/, mmaudio/, sd35/, stable_audio/, turbodiffusion/, wan/, zimage/
 │   └── <model>/{<model>_pipeline.py, presets.py, __init__.py}
 ├── preprocess/                 # Data preprocessing pipelines (ltx2, wan, matrixgame2)
 └── training/                   # Training-time pipeline glue
@@ -63,6 +64,12 @@ Reuse `stages/text_encoding.py` if your model takes text → embeddings via a st
 - The denoising loop has structural differences (causal, refine-then-denoise, multi-stream).
 
 When forking, keep the file name model-prefixed (`longcat_*`, `gamecraft_*`) so the registry stays grep-able.
+
+Wan's family-specific stages live in `basic/wan/stages/`; see
+`basic/wan/AGENTS.md`. Shared dense scheduling/CFG stays in `stages/denoising.py`.
+Do not put Wan expert selection, first-frame VAE execution, or DMD/causal
+sampling recipes back into that shared loop. Legacy sampler imports remain
+lazy aliases to avoid family/shared import cycles.
 
 ## Per-Package `AGENTS.md` and `JOURNAL.md` (optional)
 

@@ -4,6 +4,7 @@
 import argparse
 import dataclasses
 import json
+import math
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -24,6 +25,17 @@ else:
     PlacementGroup = Any
 
 logger = init_logger(__name__)
+
+# Offload flags that trade device memory for host memory. All of them are a loss
+# on a device where the two are the same physical pool. Keeping the policy
+# centralized lets every loader and stage share one worker-local decision.
+UNIFIED_MEMORY_OFFLOAD_FLAGS = (
+    "dit_layerwise_offload",
+    "dit_cpu_offload",
+    "text_encoder_cpu_offload",
+    "image_encoder_cpu_offload",
+    "vae_cpu_offload",
+)
 
 
 class ExecutionMode(str, Enum):
@@ -119,6 +131,7 @@ class FastVideoArgs:
     # (Wenxuan) prefer to keep it here instead of in pipeline config to not make it complicated.
     lora_path: str | None = None
     lora_nickname: str = "default"  # for swapping adapters in the pipeline
+    lora_strength: float = 1.0
     # can restrict layers to adapt, e.g. ["q_proj"]
     # Will adapt only q, k, v, o by default.
     lora_target_modules: list[str] | None = None
@@ -145,6 +158,31 @@ class FastVideoArgs:
     image_encoder_cpu_offload: bool = True
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
+
+    # MiniMax-H3 inference load order. ``None`` (auto) defers DiT/VAE load until
+    # after the Qwen3-VL encoder is released, but only on unified-memory
+    # devices (GB10 / Spark). Discrete GPUs keep the encoder resident so a
+    # later ``generate()`` on the same worker can re-encode. Explicit True /
+    # False overrides the probe. Training never defers.
+    h3_sequential_load: bool | None = None
+
+    # MiniMax-H3 video reconstruction. ``h3-vae`` is the full ViT decoder.
+    # ``taeh3`` is Ollin Boer Bohan's tiny preview decoder; it changes quality
+    # and is opt-in. T2VA with TAEH3 does not need the video VAE weights.
+    video_decode_backend: str = "h3-vae"
+    taeh3_checkpoint: str | None = None
+    taeh3_chunk_size: int = 5
+
+    # Load each heavy component on first use and free it once the last stage
+    # that holds it has run, instead of keeping every component resident from
+    # load time to shutdown. Peak memory becomes the largest overlapping set
+    # rather than the sum of all components. ``None`` (auto) turns this on for
+    # unified-memory devices (GB10 / Spark) after the worker binds its device,
+    # and leaves it off on discrete GPUs. Explicit True / False overrides the
+    # probe. A released component is re-read from disk on the next generation,
+    # so this trades per-request latency for headroom. Inference only; training
+    # keeps every component resident.
+    lazy_module_load: bool | None = None
 
     # Sequence-parallel MiniMax-H3 VAE (opt-in, default off). With SP > 1 the
     # video VAE's temporal chunks (decode) and clips (reference encode) are
@@ -193,9 +231,10 @@ class FastVideoArgs:
 
     disable_autocast: bool = False
 
-    # VSA parameters
-    VSA_sparsity: float = 0.0  # inference/validation sparsity
-    VSA_tile_size: int = 256  # VSA-H3 tile size (256 or 64); 64 = native Triton path
+    # VSA parameters. None means unset: __post_init__ fills the checkpoint's
+    # trained value when the checkpoint fixes one, else 0.0 and 256.
+    VSA_sparsity: float | None = None  # inference/validation sparsity
+    VSA_tile_size: int | None = None  # VSA-H3 tokens per tile (256, 128, 64); 128 = sm_100a CUDA only
 
     # V-MoBA parameters
     moba_config_path: str | None = None
@@ -287,6 +326,8 @@ class FastVideoArgs:
         return not self.inference_mode
 
     def __post_init__(self):
+        if not math.isfinite(self.lora_strength):
+            raise ValueError(f"lora_strength must be finite, got {self.lora_strength}")
         if self.moba_config_path:
             try:
                 with open(self.moba_config_path) as f:
@@ -303,7 +344,7 @@ class FastVideoArgs:
             # environment variable is an input read once here, so the loader
             # only ever consults the typed field.
             import fastvideo.envs as envs
-            if envs.FASTVIDEO_INFERENCE_TORCH_COMPILE:
+            if envs.FASTVIDEO_INFERENCE_TORCH_COMPILE.get():
                 self.inference_torch_compile = True
         if self.attention_backend is not None:
             # Fail fast on typos instead of silently auto-selecting later.
@@ -317,10 +358,19 @@ class FastVideoArgs:
             # and falls through to automatic selection rather than raising.
             import fastvideo.envs as envs
             from fastvideo.attention.selector import backend_name_to_enum
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
         self._fold_vae_parallel_env()
+        # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
+        # so a backend chosen by that env var counts as the run's request.
+        self.pipeline_config.resolve_checkpoint_settings(self)
+        if self.VSA_sparsity is None:
+            self.VSA_sparsity = 0.0
+        if self.VSA_tile_size is None:
+            self.VSA_tile_size = 256
+        import fastvideo.envs as envs
+        envs.warn_deprecated_variables()
         self.check_fastvideo_args()
 
     def _fold_vae_parallel_env(self) -> None:
@@ -331,12 +381,12 @@ class FastVideoArgs:
         # DEFAULT_DECODE_GATHER_STRATEGY (kept literal here so constructing args
         # never imports model modules; a unit test pins the two in sync).
         strategies = ("gather", "all_gather")
-        if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE:
+        if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
             self.vae_parallel_decode = True
-        if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE:
+        if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
             self.vae_parallel_encode = True
         if self.vae_parallel_decode_strategy is None:
-            self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY or "gather"
+            self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY.get() or "gather"
         if self.vae_parallel_decode_strategy not in strategies:
             raise ValueError(f"vae_parallel_decode_strategy must be one of {strategies}, "
                              f"got {self.vae_parallel_decode_strategy!r}.")
@@ -592,6 +642,12 @@ class FastVideoArgs:
             help="Nickname to refer to the loaded LoRA adapter (useful for swapping).",
         )
         parser.add_argument(
+            "--lora-strength",
+            type=float,
+            default=FastVideoArgs.lora_strength,
+            help="Scale applied to every part of the inference LoRA adapter (default: 1.0).",
+        )
+        parser.add_argument(
             "--lora-target-modules",
             nargs="+",
             type=str,
@@ -687,11 +743,47 @@ class FastVideoArgs:
             help="Use CPU offload for VAE. Enable if run out of memory.",
         )
         parser.add_argument(
+            "--lazy-module-load",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="Load each heavy component on first use and free it after the last stage that needs it, "
+            "so peak memory is the largest overlapping set of components instead of their sum. "
+            "Omit for auto (on for unified-memory devices such as GB10; off on discrete GPUs). "
+            "Pass --no-lazy-module-load to keep every component resident.",
+        )
+        parser.add_argument(
             "--pin-cpu-memory",
             action=StoreBoolean,
             help=
             "Pin memory for CPU offload. Only added as a temp workaround if it throws \"CUDA error: invalid argument\". "
             "Should be enabled in almost all cases",
+        )
+        parser.add_argument(
+            "--h3-sequential-load",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="MiniMax-H3: encode with Qwen3-VL, release that encoder, then load DiT and VAEs. "
+            "Omit for auto (on for unified-memory devices such as GB10; off on discrete GPUs). "
+            "Pass --no-h3-sequential-load to keep the encoder resident for later generate() calls.",
+        )
+        parser.add_argument(
+            "--video-decode-backend",
+            type=str,
+            choices=("h3-vae", "taeh3"),
+            default=FastVideoArgs.video_decode_backend,
+            help="MiniMax-H3 video decoder. taeh3 is a fast approximate preview decoder; h3-vae is the full VAE.",
+        )
+        parser.add_argument(
+            "--taeh3-checkpoint",
+            type=str,
+            default=None,
+            help="Local taeh3.safetensors path. Unset downloads the pinned upstream weights into the cache.",
+        )
+        parser.add_argument(
+            "--taeh3-chunk-size",
+            type=int,
+            default=FastVideoArgs.taeh3_chunk_size,
+            help="TAEH3 latent frames per execution chunk.",
         )
         parser.add_argument(
             "--vae-parallel-decode",
@@ -716,13 +808,14 @@ class FastVideoArgs:
             "--VSA-sparsity",
             type=float,
             default=FastVideoArgs.VSA_sparsity,
-            help="Validation sparsity for VSA",
+            help="Validation sparsity for VSA (default: the checkpoint's trained value, else 0.0)",
         )
         parser.add_argument(
             "--VSA-tile-size",
             type=int,
             default=FastVideoArgs.VSA_tile_size,
-            help="VSA-H3 tile size in tokens (256 or 64); 64 runs the native Triton block-sparse path",
+            help="VSA-H3 tile size in tokens (256, 128 or 64; default: the checkpoint's trained value, else 256); "
+            "64 runs the native Triton block-sparse path, 128 requires the sm_100a/sm_103a CUDA kernel",
         )
 
         # Master port for distributed training/inference
@@ -850,20 +943,6 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
-        from fastvideo.platforms import current_platform
-
-        if current_platform.is_mps():
-            self.use_fsdp_inference = False
-            self.dit_layerwise_offload = False
-
-        if self.dit_layerwise_offload:
-            if self.use_fsdp_inference:
-                logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
-                self.use_fsdp_inference = False
-            if self.dit_cpu_offload:
-                logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
-                self.dit_cpu_offload = False
-
         # Validate mode and inference_mode consistency
         assert isinstance(self.mode, ExecutionMode), f"Mode must be an ExecutionMode enum, got {type(self.mode)}"
         assert self.mode in ExecutionMode.choices(), f"Invalid execution mode: {self.mode}"
@@ -879,6 +958,14 @@ class FastVideoArgs:
         elif self.mode in [ExecutionMode.INFERENCE, ExecutionMode.PREPROCESS] and not self.inference_mode:
             logger.warning("Mode is '%s' but inference_mode is False. Setting inference_mode to True.", self.mode)
             self.inference_mode = True
+
+        # Inference policy must wait until a worker owns and binds its device:
+        # a unified-memory device disables layerwise offload before conflicts
+        # are resolved, preserving an explicit FSDP request. Training does not
+        # pass through the inference worker boundary, so retain its historical
+        # constructor-time normalization.
+        if not self.inference_mode:
+            self._resolve_device_offload_conflicts()
 
         if not self.inference_mode:
             assert self.hsdp_replicate_dim != -1, "hsdp_replicate_dim must be set for training"
@@ -913,6 +1000,84 @@ class FastVideoArgs:
             if not self.pipeline_config.vae_config.load_encoder:
                 self.pipeline_config.vae_config.load_encoder = True
             self.preprocess_config.check_preprocess_config()
+
+    def _resolve_device_offload_conflicts(self) -> None:
+        """Resolve offload modes after device-local policy has been applied."""
+        from fastvideo.platforms import current_platform
+
+        if current_platform.is_mps():
+            self.use_fsdp_inference = False
+            self.dit_layerwise_offload = False
+
+        if self.dit_layerwise_offload:
+            if self.use_fsdp_inference:
+                logger.warning("dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference.")
+                self.use_fsdp_inference = False
+            if self.dit_cpu_offload:
+                logger.warning("dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload.")
+                self.dit_cpu_offload = False
+
+    def finalize_device_offload_policy(self, device_id: int = 0) -> bool:
+        """Apply device-local memory policy, then resolve incompatible modes."""
+        has_unified_memory = self.disable_offload_on_unified_memory(device_id)
+        if self.lazy_module_load is None:
+            self.lazy_module_load = bool(has_unified_memory) and not self.training_mode
+            if self.lazy_module_load:
+                from fastvideo.platforms import current_platform
+
+                try:
+                    device_name = current_platform.get_device_name(device_id)
+                except Exception:
+                    device_name = current_platform.device_name
+                logger.info(
+                    "Enabling lazy_module_load: %s has unified memory, so encoder, DiT, and VAEs cannot stay "
+                    "resident together. Pass --no-lazy-module-load to keep every component loaded.",
+                    device_name,
+                )
+        self._resolve_device_offload_conflicts()
+        return has_unified_memory
+
+    def disable_offload_on_unified_memory(self, device_id: int = 0, *, offload_flag: str | None = None) -> bool:
+        """Disable host offload after a worker has selected its device.
+
+        CUDA's unified-memory probe reads runtime device properties and may
+        initialize a CUDA context. Callers must therefore use this only inside
+        a device-owning process, after selecting and binding ``device_id``.
+        Returning the classification lets direct component-loader callers
+        apply the same policy to explicit per-call overrides. When
+        ``offload_flag`` is given, the return value says whether this policy
+        covers that component role.
+        """
+        from fastvideo.platforms import current_platform
+
+        cached_device_id = getattr(self, "_unified_memory_device_id", None)
+        cached_result = getattr(self, "_unified_memory_result", None)
+        if cached_device_id != device_id or cached_result is None:
+            cached_result = current_platform.has_unified_memory(device_id)
+            self._unified_memory_device_id = device_id
+            self._unified_memory_result = cached_result
+
+        if not cached_result:
+            return False
+
+        enabled_flags = [flag for flag in UNIFIED_MEMORY_OFFLOAD_FLAGS if getattr(self, flag)]
+        if enabled_flags:
+            try:
+                device_name = current_platform.get_device_name(device_id)
+            except Exception:
+                # Device naming is diagnostic only. NVML can be unavailable on
+                # an integrated GPU (for example Jetson), and its physical-
+                # ordinal lookup cannot interpret CUDA_VISIBLE_DEVICES UUID/MIG
+                # selectors. Neither case should undo an authoritative driver
+                # classification.
+                device_name = current_platform.device_name
+
+            for flag in enabled_flags:
+                logger.info(
+                    "Disabling %s: %s has unified memory, so moving weights to the host duplicates "
+                    "them rather than freeing device memory.", flag, device_name)
+                setattr(self, flag, False)
+        return offload_flag is None or offload_flag in UNIFIED_MEMORY_OFFLOAD_FLAGS
 
 
 _current_fastvideo_args = None

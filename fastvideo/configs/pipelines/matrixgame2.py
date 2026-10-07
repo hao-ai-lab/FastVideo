@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from fastvideo.configs.models import DiTConfig, EncoderConfig
 from fastvideo.configs.models.dits.matrixgame2 import MatrixGame2WanVideoConfig
 from fastvideo.configs.models.encoders import WAN2_1ControlCLIPVisionConfig
-from fastvideo.configs.pipelines.wan import WanI2V480PConfig
+from fastvideo.models.wan.pipeline_config import WanI2V480PConfig
 
 
 @dataclass

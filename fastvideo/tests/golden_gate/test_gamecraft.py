@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
 
 __all__ = ["distributed_runtime"]
@@ -76,7 +77,9 @@ SPEC = GateSpec(
     renames=(),  # checkpoint keys already match the block's state_dict 1:1
     attention_backend="FLASH_ATTN",
     postprocess=lambda out: torch.cat(out, dim=1),  # (img, txt) tuple -> one tensor
-    model_root_env="GAMECRAFT_MODEL_PATH",
+    # The registry default is the Hugging Face repo id, so only an explicitly set value names a local checkout.
+    model_root=lambda: (envs.FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH.get()
+                        if envs.FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH.is_set() else None),
 )
 
 
