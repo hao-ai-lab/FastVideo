@@ -270,10 +270,13 @@ def test_parallel_decode_skips_entire_sp_group_without_output_rank(monkeypatch) 
     monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
     monkeypatch.setattr(minimax_h3_decoding, "get_world_group",
                         lambda: SimpleNamespace(first_rank=0, is_first_rank=False))
-    args = SimpleNamespace(output_type="pil",
-                           pin_cpu_memory=False,
-                           vae_cpu_offload=False,
-                           vae_parallel_decode=True)
+    args = SimpleNamespace(
+        output_type="pil",
+        pin_cpu_memory=False,
+        vae_cpu_offload=False,
+        vae_parallel_decode=True,
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+    )
 
     for rank, is_first in ((0, True), (2, False)):
         monkeypatch.setattr(
@@ -282,5 +285,5 @@ def test_parallel_decode_skips_entire_sp_group_without_output_rank(monkeypatch) 
                                                                  world_size=4,
                                                                  rank_in_group=rank,
                                                                  ranks=[4, 5, 6, 7]))
-        result = MiniMaxH3VideoDecodingStage(VAE(), SimpleNamespace()).forward(ForwardBatch(data_type="video"), args)
+        result = MiniMaxH3VideoDecodingStage(VAE()).forward(ForwardBatch(data_type="video"), args)
         assert result.output.shape == (0, 3, 0, 0, 0)
