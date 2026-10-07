@@ -257,3 +257,37 @@ def test_h3_command_blocks_have_unique_copy_targets():
         "cookbook-client-code",
     ]
     assert len(set(parser.ids)) == len(parser.ids)
+
+
+def test_kandinsky6_cookbook_recipes_match_maintained_examples():
+    recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
+    family = [recipe for recipe in recipes if recipe["family"] == "kandinsky6"]
+    assert [recipe["id"] for recipe in family] == [
+        "kandinsky6-ti2va-base",
+        "kandinsky6-ti2va-piflow",
+        "kandinsky6-ti2va-lite",
+        "kandinsky6-ti2va-lite-piflow",
+        "kandinsky6-vsr",
+        "kandinsky6-vsr-distilled",
+    ]
+    by_id = {recipe["id"]: recipe for recipe in family}
+    assert all((ROOT / recipe["source"]).is_file() for recipe in family)
+    assert all(recipe["evidence"] == "Source-backed" for recipe in family)
+    assert all(recipe["hardware"] == {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured",
+    } for recipe in family)
+    assert all("accelerator" not in recipe["hardware"] and "peak_memory" not in recipe["hardware"]
+               for recipe in family)
+    # The distilled and Lite recipes rerun the shared example with KANDINSKY6_MODEL_PATH; the repo id selects the preset.
+    for recipe_id, suffix in [("kandinsky6-ti2va-piflow", "Pro-distill-5s-Diffusers"),
+                              ("kandinsky6-ti2va-lite", "Lite-5s-Diffusers"),
+                              ("kandinsky6-ti2va-lite-piflow", "Lite-distill-5s-Diffusers")]:
+        recipe = by_id[recipe_id]
+        assert recipe["model"].endswith(suffix)
+        assert recipe["command"].startswith("KANDINSKY6_MODEL_PATH=" + recipe["model"] + " ")
+    assert "KANDINSKY6_MODEL_PATH" in (ROOT / by_id["kandinsky6-ti2va-piflow"]["source"]).read_text()
+    assert all("INPUT_VIDEO" in by_id[recipe_id]["command"] for recipe_id in ("kandinsky6-vsr", "kandinsky6-vsr-distilled"))
+    assert "VSR-distilled2steps" in by_id["kandinsky6-vsr-distilled"]["command"]
+    validate_cookbook()

@@ -664,8 +664,10 @@ def verify_model_config_and_directory(
     # Diffusers convention: component entries start with [library, class].
     # Modular manifests may append loading metadata, which FastVideo does not
     # need because published component subfolders match their manifest keys.
-    # Non-list entries are scalar metadata
-    # (e.g. boundary_ratio); a None first element marks a disabled
+    # Non-list entries, and list entries whose first element isn't a string,
+    # are scalar/tuple pipeline metadata (e.g. boundary_ratio, or a
+    # tuple-valued field registered via register_to_config, which serializes
+    # to a JSON list just like a component entry); a None first element marks a disabled
     # component (matches composed_pipeline_base.py). Pipelines that
     # lazy-load shared components from upstream HF repos simply omit the
     # key, so we only enforce "declared, active, but missing on disk".
@@ -677,7 +679,7 @@ def verify_model_config_and_directory(
         for key, value in config.items():
             if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
                 continue
-            if not isinstance(value, list) or len(value) < 1 or value[0] is None:
+            if (not isinstance(value, list) or len(value) < 1 or value[0] is None or not isinstance(value[0], str)):
                 continue
             subdir = os.path.join(model_path, key)
             if not os.path.exists(subdir):

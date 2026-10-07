@@ -40,6 +40,18 @@ def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
         "vsa_mode",
         "vsa_dense_first_n_steps",
         "vsa_dense_layers",
+        # Kandinsky6 SR request options and inputs (Kandinsky6SROptions, read by the stages in
+        # fastvideo/pipelines/stages/kandinsky6_sr.py). validate_request_batch_extra rejects them for every other
+        # model. The raw-latent input and audio override are SR-prefixed so a bare "audio"/"audio_sample_rate"
+        # request kwarg stays a no-op for every other pipeline.
+        "sr_resolution_scale",
+        "sr_tiles_batch_size",
+        "sr_tile_min_overlap",
+        "sr_target_resolution",
+        "sr_target_resize_mode",
+        "sr_lr_latent",
+        "sr_audio",
+        "sr_audio_sample_rate",
     }
     assert set(_BATCH_EXTRA_PASSTHROUGH_KEYS) == expected
 
