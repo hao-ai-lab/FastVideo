@@ -29,6 +29,26 @@ from fastvideo.utils import maybe_download_lora
 logger = init_logger(__name__)
 
 
+def _convert_quantized_weights_after_lora_merge(transformer_modules: dict[str, nn.Module]) -> None:
+    """Re-pack deferred NVFP4 weights after all LoRA layers are merged.
+
+    The NVFP4 GEMM runs from the packed buffers ``convert_model_to_nvfp4``
+    registers at load time (``_nvfp4_weight``/``_nvfp4_weight_scale``/
+    ``_weight_global_sf``/``_nvfp4_alpha``). ``BaseLayerWithLoRA`` merges an
+    adapter into the dense ``layer.weight``, which the GEMM never reads, so
+    the buffers must be re-derived from the merged weight or the adapter is
+    silently a no-op on every quantized layer. Layers whose dense weight was
+    purged are skipped by ``convert_model_to_nvfp4`` and cannot be merged.
+    """
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod, convert_model_to_nvfp4
+
+    for transformer_module in transformer_modules.values():
+        for module in transformer_module.modules():
+            if isinstance(getattr(module, "quant_method", None), NVFP4QuantizeMethod):
+                convert_model_to_nvfp4(transformer_module)
+                break
+
+
 def _get_hook_ctx(module: nn.Module | None):
     if module is None:
         return nullcontext()
@@ -421,6 +441,7 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_path,
             adapted_count,
         )
+        _convert_quantized_weights_after_lora_merge(self.trainable_transformer_modules)
 
     def merge_lora_weights(self) -> None:
         for (
