@@ -11,6 +11,7 @@ from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5DMDConfig, Kandinsk
 from fastvideo.configs.pipelines.kandinsky6 import Kandinsky6TI2VAConfig
 from fastvideo.configs.pipelines.kandinsky6_sr import Kandinsky6SRPipelineConfig
 from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
+from fastvideo.configs.pipelines.lingbotworld_fast import LingBotWorldFastI2V480PConfig
 from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
@@ -26,6 +27,7 @@ __all__ = [
     "SelfForcingWanT2V480PConfig", "LucyEditDevConfig", "CosmosConfig", "Cosmos25Config", "LTX2T2VConfig",
     "DreamXWorld5BCamPipelineConfig", "DreamXWorld5BARPipelineConfig", "HeliosPipelineConfig", "HYWorldConfig",
     "Kandinsky5T2VConfig", "Kandinsky5I2VConfig", "Kandinsky5DMDConfig", "Kandinsky6TI2VAConfig",
-    "Kandinsky6SRPipelineConfig", "LingBotWorld2CausalFastI2V480PConfig", "LingBotVideoT2VConfig",
+    "Kandinsky6SRPipelineConfig", "LingBotWorld2CausalFastI2V480PConfig", "LingBotWorldFastI2V480PConfig",
+    "LingBotVideoT2VConfig",
     "MatrixGame2I2V480PConfig", "MatrixGame3I2V720PConfig", "MMAudioV2AConfig", "get_pipeline_config_cls_from_name"
 ]

@@ -21,6 +21,7 @@ from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
 from fastvideo.configs.models.dits.kandinsky6 import Kandinsky6ArchConfig, Kandinsky6VideoAudioConfig
 from fastvideo.configs.models.dits.kandinsky6_sr import Kandinsky6SRArchConfig, Kandinsky6SRConfig
 from fastvideo.configs.models.dits.lingbotworld2 import LingBotWorld2CausalFastVideoConfig
+from fastvideo.configs.models.dits.lingbotworld_fast import LingBotWorldFastVideoConfig
 from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "Kandinsky6ArchConfig",
     "Kandinsky6VideoAudioConfig", "Kandinsky6SRArchConfig", "Kandinsky6SRConfig", "MagiHumanVideoConfig",
     "StableAudioConfig", "GlmImageDiTConfig", "HeliosConfig", "LingBotWorld2CausalFastVideoConfig",
+    "LingBotWorldFastVideoConfig",
     "LingBotVideoConfig", "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig", "MMAudioTransformerConfig"
 ]
