@@ -101,8 +101,9 @@ ci_env_secret = modal.Secret.from_dict({
         "UV_TORCH_BACKEND": uv_torch_backend_override
     } if uv_torch_backend_override else {}),
     # FA4 is opt-in (FASTVIDEO_FA4). Keep the default enabled for
-    # inference/perf parity; model-load and training lanes that do not exercise
-    # FA4 explicitly set FASTVIDEO_FA4=0 in their command strings below.
+    # inference/perf parity; lanes that do not exercise FA4 explicitly set
+    # FASTVIDEO_FA4=0 in their command strings below or in their shared
+    # .buildkite/scripts lane script (the unit lane does the latter).
     # Caller override wins.
     "FASTVIDEO_FA4":
     os.environ.get("FASTVIDEO_FA4", "1"),
@@ -488,7 +489,7 @@ def run_performance_tests():
         "fi; "
         "(nvidia-smi --query-gpu=index,timestamp,clocks.sm,clocks.max.sm,power.draw,power.limit,temperature.gpu "
         "--format=csv -l 10 > /tmp/gpu_telemetry.csv 2>/dev/null &); "
-        "pytest ./fastvideo/tests/performance -vs; "
+        "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs; "
         "PYTEST_RC=$?; "
         "PERF_RC=0; "
         "if [ $PYTEST_RC -eq 0 ] || [ \"$PERF_UPLOAD_POLICY\" = 'always' ]; then "

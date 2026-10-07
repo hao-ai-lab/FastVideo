@@ -187,6 +187,7 @@ nav:
     - FastH3 on RTX PRO 6000: inference/fasth3_rtx_pro_6000.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
+    - LTX-2.5: inference/ltx2_5.md
     - Kandinsky 6 T2IVA: inference/kandinsky6.md
     - Kandinsky 6 Video SR: inference/kandinsky6_sr.md
     - CLI: inference/cli.md

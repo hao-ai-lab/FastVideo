@@ -4,6 +4,7 @@ from fastvideo.configs.models.dits.dreamx_world import DreamXWorldARConfig, Drea
 from fastvideo.configs.models.dits.flux import FluxDiTConfig
 from fastvideo.configs.models.dits.flux_2 import Flux2Config
 from fastvideo.configs.models.dits.glm_image import GlmImageDiTConfig
+from fastvideo.configs.models.dits.helios import HeliosConfig
 from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
 from fastvideo.configs.models.dits.hunyuanvideo import HunyuanVideoConfig
 from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
@@ -20,6 +21,7 @@ from fastvideo.configs.models.dits.kandinsky5 import Kandinsky5VideoConfig
 from fastvideo.configs.models.dits.kandinsky6 import Kandinsky6ArchConfig, Kandinsky6VideoAudioConfig
 from fastvideo.configs.models.dits.kandinsky6_sr import Kandinsky6SRArchConfig, Kandinsky6SRConfig
 from fastvideo.configs.models.dits.lingbotworld2 import LingBotWorld2CausalFastVideoConfig
+from fastvideo.configs.models.dits.lingbotworld_fast import LingBotWorldFastVideoConfig
 from fastvideo.configs.models.dits.lingbot_video import LingBotVideoConfig
 
 __all__ = [
@@ -27,6 +29,7 @@ __all__ = [
     "DreamXWorldARConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "FluxDiTConfig", "Flux2Config",
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "Kandinsky6ArchConfig",
     "Kandinsky6VideoAudioConfig", "Kandinsky6SRArchConfig", "Kandinsky6SRConfig", "MagiHumanVideoConfig",
-    "StableAudioConfig", "GlmImageDiTConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotVideoConfig",
-    "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig", "MMAudioTransformerConfig"
+    "StableAudioConfig", "GlmImageDiTConfig", "HeliosConfig", "LingBotWorld2CausalFastVideoConfig",
+    "LingBotWorldFastVideoConfig",
+    "LingBotVideoConfig", "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig", "MMAudioTransformerConfig"
 ]

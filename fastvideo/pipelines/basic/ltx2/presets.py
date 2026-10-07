@@ -141,4 +141,91 @@ LTX2_TWO_STAGE = InferencePreset(
     },
 )
 
-ALL_PRESETS = (LTX2_BASE, LTX2_3_BASE, LTX2_DISTILLED, LTX2_TWO_STAGE)
+LTX2_5_DEV = InferencePreset(
+    name="ltx2_5_dev",
+    version=1,
+    model_family="ltx2",
+    description="LTX-2.5 dev joint video/audio generation at 512x768",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 10,
+        "height": 512,
+        "width": 768,
+        "num_frames": 121,
+        "fps": 24,
+        "guidance_scale": 3.0,
+        "num_inference_steps": 30,
+        "negative_prompt": _LTX2_NEGATIVE_PROMPT,
+        "ltx2_cfg_scale_video": 3.0,
+        "ltx2_cfg_scale_audio": 7.0,
+        "ltx2_modality_scale_video": 3.0,
+        "ltx2_modality_scale_audio": 3.0,
+        "ltx2_rescale_scale": 0.7,
+        "ltx2_stg_scale_video": 1.0,
+        "ltx2_stg_scale_audio": 1.0,
+        "ltx2_stg_blocks_video": [28],
+        "ltx2_stg_blocks_audio": [28],
+        "ltx2_image_crf": 18.0,
+        "ltx2_use_ancestral_sampler": False,
+    },
+)
+
+LTX2_5_DISTILLED = InferencePreset(
+    name="ltx2_5_distilled",
+    version=1,
+    model_family="ltx2",
+    description="LTX-2.5 distilled joint video/audio generation at 1024x1536",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults={
+        "seed": 10,
+        "height": 1024,
+        "width": 1536,
+        "num_frames": 121,
+        "fps": 24,
+        "guidance_scale": 1.0,
+        "num_inference_steps": 8,
+        "negative_prompt": "",
+        "ltx2_image_crf": 18.0,
+        "ltx2_use_ancestral_sampler": True,
+    },
+)
+
+LTX2_5_DISTILLED_TWO_STAGE = InferencePreset(
+    name="ltx2_5_distilled_two_stage",
+    version=1,
+    model_family="ltx2",
+    description="LTX-2.5 distilled joint video/audio generation with 2x spatial refinement",
+    workload_type="t2v",
+    stage_schemas=(_DENOISE_STAGE, _REFINE_STAGE),
+    defaults=dict(LTX2_5_DISTILLED.defaults),
+    stage_defaults={
+        "refine": {
+            "num_inference_steps": 3,
+            "guidance_scale": 1.0,
+            "image_crf": 18,
+        },
+    },
+)
+
+ALL_PRESETS = (
+    LTX2_BASE,
+    LTX2_3_BASE,
+    LTX2_DISTILLED,
+    LTX2_TWO_STAGE,
+    LTX2_5_DEV,
+    LTX2_5_DISTILLED,
+    LTX2_5_DISTILLED_TWO_STAGE,
+)
+
+__all__ = [
+    "ALL_PRESETS",
+    "LTX2_BASE",
+    "LTX2_3_BASE",
+    "LTX2_DISTILLED",
+    "LTX2_TWO_STAGE",
+    "LTX2_5_DEV",
+    "LTX2_5_DISTILLED",
+    "LTX2_5_DISTILLED_TWO_STAGE",
+]

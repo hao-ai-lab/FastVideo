@@ -82,6 +82,8 @@ surfaces:
       inference_torch_compile: "Regional inference compile opt-in currently carried through PipelineSelection.experimental rather than CompileConfig."
       vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
       h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
+      h3_encoder_split: "MiniMax-H3 Ray-only split that runs the Qwen3-VL text encoder on dedicated nodes and the DiT/VAE on the rest; model-specific optimization not yet represented in the typed public schema."
+      h3_encoder_nodes: "Leading node count that h3_encoder_split reserves for the MiniMax-H3 text encoder; model-specific optimization not yet represented in the typed public schema."
       video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
       taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
@@ -107,6 +109,7 @@ surfaces:
       moba_config: "Derived runtime config loaded from moba_config_path."
       model_paths: "Runtime bookkeeping."
       model_loaded: "Runtime bookkeeping."
+      h3_encoder_workers: "Runtime bookkeeping: MiniMax-H3 encoder-group worker count that the Ray executor derives from h3_encoder_nodes and placement."
       regional_compile: "Training-loader switch the modular fastvideo/train moduleloader sets to compile repeated DiT blocks regionally; no CLI flag, and inference regional compile is inference_torch_compile."
 
   pipeline_config_base:
@@ -509,6 +512,11 @@ surfaces:
       last_image: request.inputs.last_image
       references: request.inputs.references
       video_path: request.inputs.video_path
+      pose_video_path: request.inputs.pose_video_path
+      face_video_path: request.inputs.face_video_path
+      background_video_path: request.inputs.background_video_path
+      mask_video_path: request.inputs.mask_video_path
+      animate_mode: request.inputs.animate_mode
       latents: request.inputs.latents
       audio_latents: request.inputs.audio_latents
       audio_path: request.inputs.audio_path
@@ -546,6 +554,14 @@ surfaces:
       true_cfg_scale: request.sampling.true_cfg_scale
       boundary_ratio: request.sampling.boundary_ratio
       sigmas: request.sampling.sigmas
+      pyramid_num_inference_steps_list: request.sampling.pyramid_num_inference_steps_list
+      history_sizes: request.sampling.history_sizes
+      num_latent_frames_per_chunk: request.sampling.num_latent_frames_per_chunk
+      keep_first_frame: request.sampling.keep_first_frame
+      is_skip_first_chunk: request.sampling.is_skip_first_chunk
+      use_zero_init: request.sampling.use_zero_init
+      zero_steps: request.sampling.zero_steps
+      is_amplify_first_chunk: request.sampling.is_amplify_first_chunk
       enable_teacache: request.runtime.enable_teacache
       save_video: request.output.save_video
       return_frames: request.output.return_frames
@@ -577,6 +593,7 @@ surfaces:
       ltx2_stg_scale_audio: request.extensions.ltx2.stg_scale_audio
       ltx2_stg_blocks_video: request.extensions.ltx2.stg_blocks_video
       ltx2_stg_blocks_audio: request.extensions.ltx2.stg_blocks_audio
+      ltx2_use_ancestral_sampler: request.extensions.ltx2.use_ancestral_sampler
       ltx2_images: request.extensions.ltx2.images
       ltx2_image_crf: request.stage_overrides.refine.image_crf
       ltx2_conditioning_latent_stage1: request.extensions.ltx2.conditioning_latent_stage1
