@@ -13,16 +13,21 @@ Covered:
   - every required forward parameter is provided
   - the kwargs that crash HY1.5 stay absent
   - encoder_hidden_states is [qwen, byt5], including the zero-token case
+  - a text_dict without the ByT5 stream falls back to zero tokens
+  - clean_x / aug_t are rejected, since the forward takes neither
   - encoder_hidden_states_image is a one-element all-zero list (T2V branch)
 """
 
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
 import torch
 
+from fastvideo.configs.models.dits.hunyuanvideo15 import (
+    HunyuanVideo15ArchConfig, )
 from fastvideo.models.dits.hunyuanvideo15 import (
     HunyuanVideo15Transformer3DModel, )
 from fastvideo.train.models.hunyuan15 import Hunyuan15Model
@@ -37,19 +42,29 @@ _IMAGE_DIM = 1152
 _FORBIDDEN = ("encoder_attention_mask", "return_dict", "timestep_r")
 
 
-def _build_kwargs(byt5_tokens: int = 12, batch_size: int = 1) -> dict:
-    """Call the plugin helper on synthetic inputs.
+def _stub_model() -> Hunyuan15Model:
+    """Uninitialised instance plus the arch config the helper reads.
 
-    ``_build_distill_input_kwargs`` reads no instance state, so an
-    uninitialised instance avoids loading an 8B checkpoint here.
+    No 8B checkpoint is loaded: ``_build_distill_input_kwargs`` only
+    needs the DiT arch config that constrains the tensors it builds.
     """
     model = object.__new__(Hunyuan15Model)
+    model.training_config = SimpleNamespace(
+        pipeline_config=SimpleNamespace(
+            dit_config=SimpleNamespace(arch_config=HunyuanVideo15ArchConfig())))
+    return model
+
+
+def _build_kwargs(byt5_tokens: int = 12, batch_size: int = 1, with_byt5: bool = True) -> dict:
+    """Call the plugin helper on synthetic inputs."""
+    model = _stub_model()
     noise_input = torch.zeros(batch_size, 32, 4, 8, 8)
     timestep = torch.full((batch_size, ), 500.0)
     text_dict = {
         "encoder_hidden_states": torch.zeros(batch_size, 20, _QWEN_DIM),
-        "encoder_hidden_states_2": torch.zeros(batch_size, byt5_tokens, _BYT5_DIM),
     }
+    if with_byt5:
+        text_dict["encoder_hidden_states_2"] = torch.zeros(batch_size, byt5_tokens, _BYT5_DIM)
     return model._build_distill_input_kwargs(noise_input, timestep, text_dict)
 
 
@@ -92,6 +107,25 @@ def test_zero_token_byt5_is_preserved():
     byt5 = _build_kwargs(byt5_tokens=0)["encoder_hidden_states"][1]
     assert byt5.shape[1] == 0, "zero tokens, not zero values"
     assert byt5.shape[-1] == _BYT5_DIM
+
+
+def test_missing_second_stream_falls_back_to_zero_tokens():
+    """cfg_uncond.text="zero" hands over a dict with only the primary stream."""
+    byt5 = _build_kwargs(with_byt5=False)["encoder_hidden_states"][1]
+    assert byt5.shape == (1, 0, _BYT5_DIM)
+
+
+def test_clean_x_and_aug_t_are_rejected():
+    """The HY1.5 forward takes neither, so they must not be dropped silently."""
+    model = _stub_model()
+    text_dict = {"encoder_hidden_states": torch.zeros(1, 20, _QWEN_DIM)}
+    with pytest.raises(NotImplementedError):
+        model._build_distill_input_kwargs(
+            torch.zeros(1, 32, 4, 8, 8),
+            torch.zeros(1),
+            text_dict,
+            clean_x=torch.zeros(1, 32, 4, 8, 8),
+        )
 
 
 def test_t2v_image_placeholder_is_all_zero():

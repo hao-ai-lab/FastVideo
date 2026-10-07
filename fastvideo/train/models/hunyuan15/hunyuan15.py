@@ -98,6 +98,18 @@ class Hunyuan15Model(WanModel):
         pipeline_config.text_encoder_configs[0].arch_config.text_len = (text_len)
         super().init_preprocessors(training_config)
 
+    def _t2v_parquet_schema(self) -> Any:
+        """HY1.5 rows carry a ByT5 triplet next to the Qwen one.
+
+        The base schema declares neither ``text_embedding_2`` nor
+        ``text_attention_mask_2``, and the collator only emits the tensor
+        fields its schema names, so inheriting it drops the glyph stream
+        before ``prepare_batch`` ever sees it.
+        """
+        from fastvideo.dataset.dataloader.schema import (
+            pyarrow_schema_t2v_dual_text, )
+        return pyarrow_schema_t2v_dual_text
+
     @torch.no_grad()
     def decode_latents(
         self,
@@ -117,8 +129,17 @@ class Hunyuan15Model(WanModel):
             denorm = latents
         else:
             denorm = latents / self.vae.scaling_factor
-        media = self.vae.to(latents.device).decode(denorm)
+        # The 480p config builds the VAE under fp16 (vae_precision="fp16"),
+        # so hand the decoder its own parameter dtype instead of fp32.
+        vae_dtype = next(self.vae.parameters()).dtype
+        media = self.vae.to(latents.device).decode(denorm.to(vae_dtype))
         return (media / 2 + 0.5).clamp(0, 1)
+
+    def _arch_config(self) -> Any:
+        """The DiT arch config that constrains this model's tensors."""
+        tc = self.training_config
+        assert tc is not None
+        return tc.pipeline_config.dit_config.arch_config  # type: ignore[union-attr]
 
     def _byt5_embed_dim(self) -> int:
         """Width of the ByT5 stream, from the config that actually constrains it.
@@ -127,10 +148,7 @@ class Hunyuan15Model(WanModel):
         ``nn.LayerNorm`` this tensor has to satisfy, so it is the authority. The
         encoder-side ``T5ArchConfig`` default of 512 is unrelated to it.
         """
-        tc = self.training_config
-        assert tc is not None
-        arch = tc.pipeline_config.dit_config.arch_config  # type: ignore[union-attr]
-        return int(arch.text_embed_2_dim)
+        return int(self._arch_config().text_embed_2_dim)
 
     def prepare_batch(
         self,
@@ -284,6 +302,8 @@ class Hunyuan15Model(WanModel):
         noise_input: torch.Tensor,
         timestep: torch.Tensor,
         text_dict: dict[str, torch.Tensor] | None,
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> dict[str, Any]:
         """Build transformer forward kwargs for HunyuanVideo 1.5.
 
@@ -298,11 +318,20 @@ class Hunyuan15Model(WanModel):
         branch (is_t2v check); passing None crashes
         - no encoder_attention_mask / return_dict / guidance kwargs;
         timestep_r must stay unset while use_meanflow=False
+
+        ``clean_x`` / ``aug_t`` are accepted for signature parity with
+        the base class but HunyuanVideo15Transformer3DModel.forward
+        takes neither, so supplying them is an error rather than a
+        silent drop.
         """
+        if clean_x is not None or aug_t is not None:
+            raise NotImplementedError("Hunyuan15Model does not support "
+                                      "clean-history teacher forcing")
         if text_dict is None:
             raise ValueError("text_dict cannot be None for "
                              "HunyuanVideo 1.5 forward pass")
 
+        arch = self._arch_config()
         batch_size = noise_input.shape[0]
         # HY1.5's img_in takes 65 channels: the 32 latent channels plus a
         # 1-channel conditioning mask and a 32-channel conditioning latent.
@@ -317,33 +346,50 @@ class Hunyuan15Model(WanModel):
         )
         cond_latent = torch.zeros_like(noise_input)
         hidden_states = torch.cat([noise_input, cond_mask, cond_latent], dim=1)
+        assert hidden_states.shape[1] == int(arch.in_channels), (
+            f"packed {hidden_states.shape[1]} conditioning channels but "
+            f"img_in expects {int(arch.in_channels)}")
 
         zero_image_embeds = torch.zeros(
             batch_size,
             729,
-            1152,
+            int(arch.image_embed_dim),
             device=noise_input.device,
             dtype=noise_input.dtype,
         )
+        # cfg_uncond.text="zero" synthesises a fresh dict carrying only the
+        # primary stream; keep the inference empty-ByT5 convention.
+        encoder_hidden_states_2 = text_dict.get("encoder_hidden_states_2")
+        if encoder_hidden_states_2 is None:
+            encoder_hidden_states_2 = torch.zeros(
+                batch_size,
+                0,
+                self._byt5_embed_dim(),
+                device=noise_input.device,
+                dtype=noise_input.dtype,
+            )
         return {
             "hidden_states": hidden_states,
             "encoder_hidden_states": [
                 text_dict["encoder_hidden_states"],
-                text_dict["encoder_hidden_states_2"],
+                encoder_hidden_states_2,
             ],
             "timestep": timestep,
             "encoder_hidden_states_image": [zero_image_embeds],
         }
 
-    def predict_noise(
+    def _forward(
         self,
         noisy_latents: torch.Tensor,
         timestep: torch.Tensor,
         batch: TrainingBatch,
         *,
         conditional: bool,
-        cfg_uncond: dict[str, Any] | None = None,
-        attn_kind: Literal["dense", "vsa"] = "dense",
+        cfg_uncond: dict[str, Any] | None,
+        attn_kind: Literal["dense", "vsa"],
+        r_timestep: torch.Tensor | None = None,
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> torch.Tensor:
         device_type = self.device.type
         dtype = self._get_training_dtype()
@@ -376,13 +422,74 @@ class Hunyuan15Model(WanModel):
                 noisy_latents,
                 timestep,
                 text_dict,
+                clean_x=clean_x,
+                aug_t=aug_t,
             )
+            if r_timestep is not None:
+                # HY1.5 spells the reference timestep ``timestep_r``.
+                input_kwargs["timestep_r"] = r_timestep
             transformer = self._get_transformer(timestep)
             model_output = transformer(**input_kwargs)
 
         # (B, C, T, H, W) → (B, T, C, H, W) back to the method layer.
-        pred = model_output.permute(0, 2, 1, 3, 4)
-        return pred
+        return model_output.permute(0, 2, 1, 3, 4)
+
+    def predict_noise(
+        self,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        return self._forward(
+            noisy_latents,
+            timestep,
+            batch,
+            conditional=conditional,
+            cfg_uncond=cfg_uncond,
+            attn_kind=attn_kind,
+            clean_x=clean_x,
+            aug_t=aug_t,
+        )
+
+    def predict_velocity_with_r(
+        self,
+        noisy_latents: torch.Tensor,
+        timestep: torch.Tensor,
+        r_timestep: torch.Tensor,
+        batch: TrainingBatch,
+        *,
+        conditional: bool,
+        cfg_uncond: dict[str, Any] | None = None,
+        attn_kind: Literal["dense", "vsa"] = "dense",
+    ) -> torch.Tensor:
+        """AnyFlow forward: average velocity from ``t`` back to ``r``.
+
+        Same plumbing as :meth:`predict_noise`, but HY1.5's dual-timestep
+        branch only exists when the arch config sets ``use_meanflow``:
+        ``HunyuanVideo15TimeEmbedding`` builds ``timestep_embedder_r``
+        conditionally, so a reference timestep would otherwise be dropped.
+        """
+        if not bool(getattr(self._arch_config(), "use_meanflow", False)):
+            raise ValueError(
+                "Hunyuan15Model.predict_velocity_with_r needs "
+                "dit_config.arch_config.use_meanflow=True: "
+                "HunyuanVideo15TimeEmbedding only builds "
+                "timestep_embedder_r when use_meanflow is set.")
+        return self._forward(
+            noisy_latents,
+            timestep,
+            batch,
+            conditional=conditional,
+            cfg_uncond=cfg_uncond,
+            attn_kind=attn_kind,
+            r_timestep=r_timestep,
+        )
 
     def ensure_negative_conditioning(self) -> None:
         """Encode the HY1.5 negative prompt with the Qwen encoder.

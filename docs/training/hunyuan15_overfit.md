@@ -143,6 +143,10 @@ a real problem — stop and investigate rather than burning GPU hours.
 full-parameter training across 8 GPUs with FSDP. Full-parameter training
 does not fit one 80GB card:
 
+It reads `data/hunyuan15_preprocessed` (and its `validation_prompts.json`),
+not the overfit directory above — either preprocess into that path or pass
+`--training.data.data_path` and `--callbacks.validation.dataset_file`.
+
 | | bf16 |
 |---|---|
 | Weights | 16.7 GB |
