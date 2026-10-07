@@ -2,7 +2,7 @@
 """Policy, rank agreement and saved backward-plan regressions without a GPU."""
 import sys
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch
 
 import pytest
 import torch
@@ -108,6 +108,19 @@ def test_rank_disagreement_on_launch_or_chunking_declines_and_recovers():
 
     with patch.object(ulysses.dist, 'all_gather_into_tensor', side_effect=unanimous):
         assert helper._agree_call(signature) == (True, False, True)
+
+
+def test_host_identity_is_namespace_independent_with_a_hostname_fallback():
+    # Ranks in separate containers share the kernel boot id but not the UTS
+    # hostname, so the single-host agreement must not be keyed on the hostname.
+    with patch('builtins.open', mock_open(read_data='boot-123\n')):
+        assert ulysses._host_identity() == 'boot-123'
+    with patch('builtins.open', mock_open(read_data='')), \
+            patch.object(ulysses.socket, 'gethostname', return_value='pod-a'):
+        assert ulysses._host_identity() == 'pod-a'
+    with patch('builtins.open', side_effect=OSError), \
+            patch.object(ulysses.socket, 'gethostname', return_value='pod-b'):
+        assert ulysses._host_identity() == 'pod-b'
 
 
 def test_backward_uses_its_own_forward_plan_after_another_call():

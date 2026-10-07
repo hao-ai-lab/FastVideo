@@ -44,6 +44,28 @@ def is_enabled() -> bool:
     return envs.FASTVIDEO_ULYSSES_A2A.get() == "auto"
 
 
+def _host_identity() -> str:
+    """Namespace-independent identity of this process's physical host.
+
+    ``socket.gethostname()`` is the UTS-namespace name - the container or pod
+    name under Docker and Kubernetes - so ranks that share one host can report
+    different names and ranks on different hosts can share one. The kernel boot
+    id is not namespaced: every container on a host sees the same value and no
+    two concurrently running hosts share one. The hostname is only a fallback
+    for images where /proc is not readable. Ranks where only some can read
+    /proc mix the two schemes and the group declines: the conservative
+    direction, matching the pre-boot_id behaviour.
+    """
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as boot_id:
+            identity = boot_id.read().strip()
+        if identity:
+            return identity
+    except OSError:
+        pass
+    return socket.gethostname()
+
+
 class _FusedUlyssesA2A(torch.autograd.Function):
     """Differentiable fused all-to-all.
 
@@ -94,6 +116,7 @@ class UlyssesA2AHelper:
         self._nbytes = 0
         self._disabled_reason: str | None = None
         self._h3_tuning_available: bool | None = None
+        self._contract_mismatch_logged = False
 
         if world_size not in SUPPORTED_WORLD_SIZES:
             self._disabled_reason = (f"world size {world_size} is not one of "
@@ -267,6 +290,19 @@ class UlyssesA2AHelper:
         use_fused = first[0] == 1 and all(contract == first for contract in contracts)
         permanently_unavailable = any(contract[0] < 0 for contract in contracts)
         lifecycle_consistent = all(contract[1] == first[1] and contract[9] == first[9] for contract in contracts)
+        if (not use_fused and not permanently_unavailable and lifecycle_consistent
+                and any(contract != first for contract in contracts) and not self._contract_mismatch_logged):
+            # A transient disagreement (a peer declined this call) recovers on a
+            # later call, but a persistent one - mixed kernel builds or launch
+            # capabilities - would silently keep every later call on NCCL.
+            self._contract_mismatch_logged = True
+            differing = [
+                index for index in range(_CONTRACT_SIZE) if any(contract[index] != first[index] for contract in contracts)
+            ]
+            details = ", ".join(
+                f"field {index}: {sorted({contract[index] for contract in contracts})}" for index in differing)
+            logger.info("Ulysses fused all-to-all declined: ranks disagree on the call contract (%s); "
+                        "this and later disagreeing calls use the NCCL path", details)
         return use_fused, permanently_unavailable, lifecycle_consistent
 
     def _build(self, nbytes: int) -> bool:
@@ -469,11 +505,11 @@ def maybe_create_helper(cpu_group: ProcessGroup | None, device_group: ProcessGro
     # Every rank reaches the same exchange, including configuration, constructor,
     # and backend failures. LSA covers addressability, not single-host locality.
     gathered: list[tuple[str, bool]] = [("", False)] * world_size
-    dist.all_gather_object(gathered, (socket.gethostname(), helper is not None), group=cpu_group)
-    hostnames = {hostname for hostname, _ in gathered}
-    if len(hostnames) != 1:
-        reason = f"ranks span multiple hosts: {sorted(hostnames)}"
-    if len(hostnames) != 1 or not all(ok for _, ok in gathered):
+    dist.all_gather_object(gathered, (_host_identity(), helper is not None), group=cpu_group)
+    host_ids = {identity for identity, _ in gathered}
+    if len(host_ids) != 1:
+        reason = f"ranks do not share one host (host identities differ: {sorted(host_ids)})"
+    if len(host_ids) != 1 or not all(ok for _, ok in gathered):
         if dist.get_rank(cpu_group) == 0:
             logger.info("Ulysses fused all-to-all unavailable: %s", reason or "a peer rank declined")
         return None

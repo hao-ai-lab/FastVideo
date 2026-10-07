@@ -171,7 +171,9 @@ def _worker() -> None:
 
         PyNcclCommunicator.__init__ = _disable_pynccl
     elif rank == fault_rank and fault_stage == "hostname":
-        socket.gethostname = lambda: "injected-other-host"
+        from fastvideo.distributed.device_communicators import ulysses_a2a
+
+        ulysses_a2a._host_identity = lambda: "injected-other-host"
 
     maybe_init_distributed_environment_and_model_parallel(1, world)
     communicator = get_sp_group().device_communicator
