@@ -19,7 +19,6 @@ FASTVIDEO_CONFIGURE_LOGGING = envs.FASTVIDEO_CONFIGURE_LOGGING
 FASTVIDEO_LOGGING_CONFIG_PATH = envs.FASTVIDEO_LOGGING_CONFIG_PATH
 FASTVIDEO_LOGGING_LEVEL = envs.FASTVIDEO_LOGGING_LEVEL
 FASTVIDEO_LOGGING_PREFIX = envs.FASTVIDEO_LOGGING_PREFIX
-FASTVIDEO_LOG_ALL_PROCESSES = envs.FASTVIDEO_LOG_ALL_PROCESSES
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -102,11 +101,13 @@ def _info(logger: Logger,
         - When both are False, the message will be logged from all processes
         - By default, only logs from processes with LOCAL_RANK=0
         - Setting the FASTVIDEO_LOG_ALL_PROCESSES env variable to 1 overrides the
-          process-aware behavior entirely and logs from every process.
+          process-aware behavior entirely and logs from every process. The variable
+          is read at call time, so it can be set after importing fastvideo.
     """
     # Override the process-aware filtering
-    if FASTVIDEO_LOG_ALL_PROCESSES:
-        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
+    if envs.FASTVIDEO_LOG_ALL_PROCESSES:
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
         return
 
     is_distributed = int(os.environ.get("WORLD_SIZE", 1)) > 1
@@ -121,7 +122,8 @@ def _info(logger: Logger,
     is_local_main_process = local_rank == 0
 
     if (main_process_only and is_main_process) or (local_main_process_only and is_local_main_process):
-        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
 
     global _warned_local_main_process, _warned_main_process
 
@@ -143,7 +145,8 @@ def _info(logger: Logger,
             _warned_main_process = True
 
     if not main_process_only and not local_main_process_only:
-        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
 
 
 class _FastvideoLogger(Logger):

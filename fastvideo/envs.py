@@ -201,7 +201,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # the local main process) and the main_process_only / local_main_process_only
     # arguments at each call site. Useful for debugging distributed runs.
     "FASTVIDEO_LOG_ALL_PROCESSES":
-    lambda: bool(int(os.getenv("FASTVIDEO_LOG_ALL_PROCESSES", "0"))),
+    lambda: os.getenv("FASTVIDEO_LOG_ALL_PROCESSES", "0") != "0",
 
     # Trace function calls
     # If set to 1, fastvideo will trace function calls
