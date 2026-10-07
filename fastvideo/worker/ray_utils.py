@@ -44,6 +44,10 @@ try:
             gpu_ids = ray.get_runtime_context().get_accelerator_ids()[device_key]
             return node_id, gpu_ids
 
+        def get_cuda_visible_devices(self) -> str | None:
+            """Return the CUDA_VISIBLE_DEVICES this actor inherited from its raylet."""
+            return os.environ.get("CUDA_VISIBLE_DEVICES")
+
         def override_env_vars(self, vars: dict[str, str]):
             os.environ.update(vars)
 
