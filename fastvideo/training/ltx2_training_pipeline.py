@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
-import sys
 from copy import deepcopy
 from pathlib import Path
 import torch
@@ -98,6 +97,13 @@ class LTX2TrainingPipeline(TrainingPipeline):
             last_epoch=self.init_steps - 1,
         )
 
+        if float(getattr(training_args, "training_cfg_rate", 0.0) or 0.0) > 0.0:
+            raise NotImplementedError("--training-cfg-rate > 0 is not implemented in LTX2TrainingPipeline: "
+                                      "this legacy pipeline never instantiates LTX2Model, so nothing would "
+                                      "perform the CFG drop and the flag would be silently ignored. Use the "
+                                      "modular trainer (fastvideo/train LTX2Model, which swaps in the "
+                                      "unconditional embedding) or set --training-cfg-rate 0.")
+
         if self._has_precomputed_pt_data(training_args.data_path):
             data_sources = self._get_ltx2_data_sources(training_args.data_path)
             self.with_audio = "audio_latents" in data_sources
@@ -114,12 +120,17 @@ class LTX2TrainingPipeline(TrainingPipeline):
         else:
             text_padding_length = (training_args.pipeline_config.text_encoder_configs[0].arch_config.text_len)
             self.with_audio = False
+            # cfg_rate stays 0 here: this pipeline performs no CFG drop
+            # (LTX2Model.prepare_batch's drop lives in the modular trainer,
+            # which this pipeline never instantiates), and the shared
+            # zeroing drop would train against an all-zero embedding.
+            # --training-cfg-rate > 0 is rejected above.
             self.train_dataset, self.train_dataloader = (build_parquet_map_style_dataloader(
                 training_args.data_path,
                 training_args.train_batch_size,
                 num_data_workers=training_args.dataloader_num_workers,
                 parquet_schema=pyarrow_schema_text_only,
-                cfg_rate=training_args.training_cfg_rate,
+                cfg_rate=0.0,
                 drop_last=True,
                 text_padding_length=text_padding_length,
                 seed=self.seed,
@@ -475,22 +486,16 @@ class LTX2TrainingPipeline(TrainingPipeline):
         return training_batch
 
 
-def main(args) -> None:
-    logger.info("Starting LTX-2 training pipeline...")
-    pipeline = LTX2TrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
-
-
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
+    logger.warning("\n"
+                   "================================================================================\n"
+                   "[DEPRECATED]: Direct execution of this pipeline is deprecated!\n"
+                   "Please use `fastvideo/training/runner.py` instead.\n"
+                   "================================================================================")
+    from fastvideo.training.runner import main
+    from fastvideo.utils import build_parser
 
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    parser = build_parser("LTX2TrainingPipeline", "fastvideo.training.ltx2_training_pipeline")
     args = parser.parse_args()
     args.dit_cpu_offload = False
     main(args)

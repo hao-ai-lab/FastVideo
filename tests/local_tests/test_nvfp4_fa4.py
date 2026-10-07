@@ -205,3 +205,29 @@ class TestAttnQatInferFA4Route:
         impl = AttnQatInferImpl(num_heads=h, head_size=d, causal=False, softmax_scale=d**-0.5)
         out = impl.forward(q, k, v, attn_metadata=None)
         assert out.shape == (b, 384, h, d)
+
+    def test_fp8_pv_mode_output_and_quality(self):
+        """fa4_pv_mode="fp8" feeds an unscaled e4m3 V to the real kernel: the
+        output must stay BF16 (the block-scaled kernel never follows V's
+        dtype) and track the bf16-PV control closely."""
+        from fastvideo.attention.backends.attn_qat_infer import AttnQatInferImpl
+        torch.manual_seed(0)
+        b, s, h, d = 1, 4096, 12, 128
+        q = torch.randn(b, s, h, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(b, s, h, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(b, s, h, d, device="cuda", dtype=torch.bfloat16)
+
+        def _impl(pv_mode):
+            return AttnQatInferImpl(num_heads=h, head_size=d, causal=False, softmax_scale=d**-0.5,
+                                    fa4_pv_mode=pv_mode)
+
+        out = _impl("fp8").forward(q, k, v, attn_metadata=None)
+        assert out.shape == (b, s, h, d)
+        assert out.dtype == torch.bfloat16, f"fp8 PV must keep the BF16 output, got {out.dtype}"
+
+        control = _impl("bf16").forward(q, k, v, attn_metadata=None)
+        cos = torch.nn.functional.cosine_similarity(out.float().flatten(), control.float().flatten(), dim=0).item()
+        # Only V differs between the two runs (e4m3 is a 3-bit-mantissa cast),
+        # so the fp8 output must track the bf16-PV control far more closely
+        # than the shared NVFP4 QK error does.
+        assert cos >= 0.99, f"cos_sim={cos:.4f} vs bf16-PV control < 0.99"

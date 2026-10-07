@@ -31,7 +31,10 @@ class BaseLayerWithLoRA(nn.Module):
         self.base_layer: nn.Module = base_layer
 
         self.merged: bool = False
-        self.cpu_weight = base_layer.weight.to("cpu")
+        # A frozen CPU snapshot is needed only to undo inference-time merging.
+        # Training never merges adapters; retaining every H3 projection here
+        # otherwise adds several GiB of host memory per HSDP rank.
+        self.cpu_weight = None if training_mode else base_layer.weight.detach().to("cpu").clone()
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
@@ -206,6 +209,8 @@ class BaseLayerWithLoRA(nn.Module):
             raise ValueError("unmerge_lora_weights called but no LoRA is currently merged")
 
         # avoid precision loss
+        if self.cpu_weight is None:
+            raise RuntimeError("Training-mode LoRA layers do not retain an inference unmerge snapshot")
         if isinstance(self.base_layer.weight, DTensor):
             device = self.base_layer.weight.data.device
             self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device, non_blocking=True))

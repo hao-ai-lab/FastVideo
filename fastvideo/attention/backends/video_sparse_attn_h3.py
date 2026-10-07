@@ -547,6 +547,9 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         self.prefix = prefix
         self.layer_idx = layer_idx_from_prefix(prefix, default=-1)
         self.head_size = head_size
+        self._sm89_kernel = envs.FASTVIDEO_H3_VSA_SM89_KERNEL.get()
+        if self._sm89_kernel not in {"original", "bf16", "int8"}:
+            raise ValueError("FASTVIDEO_H3_VSA_SM89_KERNEL must be original, bf16, or int8")
         # Generic torch.compile must not specialize the shared VSA forward on
         # the Python ``layer_idx`` value of each of H3's 50 blocks. This
         # tensor is prepared after weights load and drives only the compiled
@@ -778,9 +781,19 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # kernels' granularity. These entries take BHSD ([B, H, S_pad, D]);
             # mirror block_sparse_attn_256_bshd's Triton branch and transpose
             # around the call.
-            q_bhsd = query.transpose(1, 2).contiguous()
-            k_bhsd = key.transpose(1, 2).contiguous()
-            v_bhsd = value.transpose(1, 2).contiguous()
+            # One gate for the sm89 QK/PV route below: the kernels are
+            # inference-only, BF16, head-128, and validated for Ada (8, 9).
+            # ``sm89_strided`` marks the INT8-QK entry, the only one that reads
+            # the BSHD strided views directly.
+            sm89_route = (self._sm89_kernel != "original" and not torch.is_grad_enabled() and not compiling
+                          and query.dtype == torch.bfloat16 and query.shape[-1] == 128 and query.is_cuda
+                          and torch.cuda.get_device_capability(query.device) == (8, 9))
+            sm89_strided = sm89_route and self._sm89_kernel == "int8"
+            q_bhsd = query.transpose(1, 2)
+            k_bhsd = key.transpose(1, 2)
+            v_bhsd = value.transpose(1, 2)
+            if not sm89_strided:
+                q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
 
             sm100a_mask = mask
             sm100a_variable_block_sizes = attn_metadata.variable_block_sizes
@@ -877,19 +890,34 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     )
             else:
                 if has_sm100a_pair:
-                    q_bhsd = q_bhsd[:, :, :logical_seq_len].contiguous()
-                    k_bhsd = k_bhsd[:, :, :logical_seq_len].contiguous()
-                    v_bhsd = v_bhsd[:, :, :logical_seq_len].contiguous()
-                out_bhsd, _ = block_sparse_attn_64_bhsd(
-                    q_bhsd,
-                    k_bhsd,
-                    v_bhsd,
-                    mask,
-                    attn_metadata.variable_block_sizes,
-                )
+                    q_bhsd = q_bhsd[:, :, :logical_seq_len]
+                    k_bhsd = k_bhsd[:, :, :logical_seq_len]
+                    v_bhsd = v_bhsd[:, :, :logical_seq_len]
+                    if not sm89_strided:
+                        q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
+                if sm89_route:
+                    from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
+                    logger.info_once(f"MiniMax-H3 VSA tile-64 forward: sm89 {self._sm89_kernel} QK / BF16 PV")
+                    out_bhsd = sparse_sm89_attention(q_bhsd,
+                                                     k_bhsd,
+                                                     v_bhsd,
+                                                     mask,
+                                                     attn_metadata.variable_block_sizes,
+                                                     int8_qk=self._sm89_kernel == "int8")
+                else:
+                    out_bhsd, _ = block_sparse_attn_64_bhsd(
+                        q_bhsd,
+                        k_bhsd,
+                        v_bhsd,
+                        mask,
+                        attn_metadata.variable_block_sizes,
+                    )
             if has_sm100a_pair and use_sm100a:
                 out_bhsd = out_bhsd[:, :, :logical_seq_len]
             out = out_bhsd.transpose(1, 2).contiguous()
+            # Fine attention is complete. Release its layout copies before the
+            # gated compression merge creates full-sequence temporaries.
+            del q_bhsd, k_bhsd, v_bhsd, out_bhsd
         else:
             out, _ = block_sparse_attn_256_bshd(
                 logical_query,
@@ -908,11 +936,18 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled)  # [B, H, n_tiles, D]
             out_c = out_c.permute(0, 2, 1, 3).to(out.dtype)  # [B, n_tiles, H, D]
             batch, seq_len, heads, dim = out.shape
-            # Out-of-place: on the CuTe backend ``out`` is the tensor FA4's
-            # autograd node saved for its backward, so an in-place add here
-            # bumps its version counter and backward dies with "one of the
-            # variables needed for gradient computation has been modified".
             out_tiled = out.view(batch, n_tiles, tile_elems, heads, dim)
             gate_tiled = logical_gate.view(batch, n_tiles, tile_elems, heads, dim)
-            out = (out_tiled + out_c.unsqueeze(2) * gate_tiled).view(batch, seq_len, heads, dim)
+            out_c = out_c.unsqueeze(2)
+            if out.requires_grad or gate_tiled.dtype != out.dtype:
+                # Out-of-place: ``out`` is the tensor the attention kernel's
+                # autograd node saved for its backward, so an in-place add here
+                # bumps its version counter and backward dies with "one of the
+                # variables needed for gradient computation has been modified".
+                # Fused addcmul keeps one full-sequence temporary instead of two.
+                out = torch.addcmul(out_tiled, out_c, gate_tiled).view(batch, seq_len, heads, dim)
+            else:
+                # Inference: ``out`` is a fresh kernel output nobody else holds,
+                # so accumulate into it and allocate nothing.
+                out_tiled.addcmul_(out_c, gate_tiled)
         return out

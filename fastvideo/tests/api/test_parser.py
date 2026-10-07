@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
+from pathlib import Path
 
 import yaml
 
@@ -73,6 +74,37 @@ def test_parse_config_accepts_existing_typed_instance() -> None:
     )
 
     assert parse_config(RunConfig, typed) is typed
+
+
+def test_parse_config_accepts_external_launcher_backend() -> None:
+    config = parse_config(
+        GeneratorConfig,
+        {
+            "model_path": "/models/minimax-h3",
+            "engine": {
+                "num_gpus": 8,
+                "execution_backend": "external_launcher",
+                "parallelism": {
+                    "sp_size": 8
+                },
+            },
+        },
+    )
+
+    assert config.engine.execution_backend == "external_launcher"
+    assert config.engine.num_gpus == 8
+    assert config.engine.parallelism.sp_size == 8
+
+
+def test_external_launcher_example_is_a_valid_run_config() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    config = load_run_config(repo_root / "examples/inference/basic/minimax_h3_external_launcher.yaml")
+
+    assert config.generator.engine.execution_backend == "external_launcher"
+    assert config.generator.engine.num_gpus == 4
+    assert config.generator.engine.parallelism.sp_size == 4
+    assert config.generator.engine.parallelism.dist_timeout == 600
+    assert config.request.output.return_frames is False
 
 
 def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
@@ -166,6 +198,12 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "prompt_path": None,
                 "image_path": None,
                 "video_path": None,
+                "pose_video_path": None,
+                "face_video_path": None,
+                "background_video_path": None,
+                "mask_video_path": None,
+                "animate_mode": None,
+                "audio_path": None,
                 "pil_image": None,
                 "last_image": None,
                 "references": None,
@@ -202,6 +240,14 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "use_embedded_guidance": None,
                 "boundary_ratio": None,
                 "sigmas": None,
+                "pyramid_num_inference_steps_list": None,
+                "history_sizes": None,
+                "num_latent_frames_per_chunk": 9,
+                "keep_first_frame": True,
+                "is_skip_first_chunk": False,
+                "use_zero_init": True,
+                "zero_steps": 1,
+                "is_amplify_first_chunk": False,
             },
             "runtime": {
                 "enable_teacache": False,

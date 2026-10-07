@@ -11,7 +11,9 @@ import torch.nn.functional as F
 from fastvideo.train.methods.base import TrainingMethod, LogScalar
 from fastvideo.train.models.base import ModelBase, NoisePrediction
 from fastvideo.train.utils.optimizer import (
-    build_optimizer_and_scheduler, )
+    build_optimizer_and_scheduler,
+    seed_adamw_parameter_state,
+)
 
 
 def _compute_finetune_loss_map(
@@ -254,3 +256,16 @@ class FineTuneMethod(TrainingMethod):
             betas=student_betas,
             scheduler_name=student_sched,
         )
+        optimizer_parameters = {
+            parameter
+            for group in self._student_optimizer.param_groups
+            for parameter in group["params"]
+        }
+        for parameter in self.student.eager_optimizer_state_parameters():
+            if parameter not in optimizer_parameters:
+                raise ValueError("An eager optimizer-state parameter is not owned by the "
+                                 "student optimizer")
+            seed_adamw_parameter_state(
+                self._student_optimizer,
+                parameter,
+            )

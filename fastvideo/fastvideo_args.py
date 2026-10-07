@@ -92,6 +92,47 @@ class WorkloadType(str, Enum):
 
 
 # args for fastvideo framework
+
+
+def probe_h3_attention_heads(model_path: str) -> int | None:
+    """Read the DiT attention head count from the checkpoint's config.json.
+
+    The encoder-split SP validation needs the real head count before any model
+    is built. The released FastH3 exports keep it flat in transformer/
+    config.json (transformer_ref for Ref2VA). Returns None for Hub ids or
+    unreadable configs, which leaves the divisibility check to the DiT's own
+    __init__.
+    """
+    import os
+    for sub in ("transformer", "transformer_ref"):
+        cfg = os.path.join(model_path or "", sub, "config.json")
+        try:
+            if os.path.isfile(cfg):
+                with open(cfg, encoding="utf-8") as f:
+                    heads = json.load(f).get("num_attention_heads")
+                if isinstance(heads, int) and heads > 0:
+                    return heads
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def h3_split_sp_error(heads: int, denoise_size: int, world_size: int, unit: str = "workers") -> str:
+    """Message for an illegal encoder/denoise split.
+
+    ``world_size`` and the legal counts are expressed in ``unit``: "workers" once
+    the Ray executor has resolved placement, "nodes" for the node-count fallback.
+    """
+    legal = [n for n in range(1, world_size) if heads % (world_size - n) == 0]
+    if unit == "nodes":
+        hint = f"valid --h3-encoder-nodes values are {legal}."
+    else:
+        hint = f"valid encoder-worker counts are {legal}; --h3-encoder-nodes counts nodes."
+    return ("MiniMax-H3 encoder split: the denoise group runs sequence parallelism, so its size must divide "
+            f"the DiT attention head count ({heads}), got denoise_size={denoise_size}. With {world_size} {unit}, "
+            f"{hint}")
+
+
 @dataclasses.dataclass
 class FastVideoArgs:
     # Model and path configuration (for convenience)
@@ -122,7 +163,7 @@ class FastVideoArgs:
     sp_size: int = -1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
-    dist_timeout: int | None = None  # timeout for torch.distributed
+    dist_timeout: int | None = None  # torch.distributed timeout in seconds
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
     preprocess_config: PreprocessConfig | None = None
@@ -166,6 +207,19 @@ class FastVideoArgs:
     # False overrides the probe. Training never defers.
     h3_sequential_load: bool | None = None
 
+    # MiniMax-H3 component-level pipeline parallel: dedicate the first
+    # ``h3_encoder_nodes`` nodes to the Qwen3-VL text encoder. Those ranks run
+    # only the condition stages and NCCL-broadcast ``prompt_embeds``; the
+    # remaining ranks load only DiT + VAEs and form the sequence-parallel
+    # group of size ``num_gpus - h3_encoder_workers``. This is how 720p fits on
+    # 128 GiB GB10 boxes: denoise ranks shed the ~48 GiB encoder entirely.
+    # ``None`` (auto) folds FASTVIDEO_H3_ENCODER_SPLIT; requires the Ray
+    # backend. ``h3_encoder_workers`` is stamped by the Ray executor once
+    # placement is known.
+    h3_encoder_split: bool | None = None
+    h3_encoder_nodes: int = -1
+    h3_encoder_workers: int = 0
+
     # MiniMax-H3 video reconstruction. ``h3-vae`` is the full ViT decoder.
     # ``taeh3`` is Ollin Boer Bohan's tiny preview decoder; it changes quality
     # and is opt-in. T2VA with TAEH3 does not need the video VAE weights.
@@ -203,6 +257,10 @@ class FastVideoArgs:
     # Per-component flags below let callers compile additional submodules
     # independently; ``False`` leaves the component eager.
     enable_torch_compile: bool = False
+    # Regional fullgraph compile of repeated blocks (modular fastvideo/train
+    # stack). False preserves the legacy whole-model torch.compile semantics
+    # for fastvideo/training recipes; the modular moduleloader sets it True.
+    regional_compile: bool = False
     enable_torch_compile_text_encoder: bool = False
     enable_torch_compile_vae: bool = False
     enable_torch_compile_audio_vae: bool = False
@@ -325,6 +383,20 @@ class FastVideoArgs:
     def training_mode(self) -> bool:
         return not self.inference_mode
 
+    @property
+    def is_output_rank(self) -> bool:
+        """Whether this process may materialize user-facing outputs.
+
+        This is runtime state assigned by an SPMD executor, not a public
+        configuration field, so dataclass serialization and typed config
+        parsing deliberately ignore it.
+        """
+        return getattr(self, "_is_output_rank", True)
+
+    @is_output_rank.setter
+    def is_output_rank(self, value: bool) -> None:
+        self._is_output_rank = bool(value)
+
     def __post_init__(self):
         if not math.isfinite(self.lora_strength):
             raise ValueError(f"lora_strength must be finite, got {self.lora_strength}")
@@ -362,6 +434,7 @@ class FastVideoArgs:
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
         self._fold_vae_parallel_env()
+        self._fold_h3_encoder_split_env()
         # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
         # so a backend chosen by that env var counts as the run's request.
         self.pipeline_config.resolve_checkpoint_settings(self)
@@ -372,6 +445,21 @@ class FastVideoArgs:
         import fastvideo.envs as envs
         envs.warn_deprecated_variables()
         self.check_fastvideo_args()
+
+    def _fold_h3_encoder_split_env(self) -> None:
+        """Parse-once adapters for the MiniMax-H3 encoder-split env vars."""
+        import fastvideo.envs as envs
+
+        if self.h3_encoder_split is None:
+            self.h3_encoder_split = envs.FASTVIDEO_H3_ENCODER_SPLIT.get()
+        if self.h3_encoder_nodes < 0:
+            self.h3_encoder_nodes = max(1, envs.FASTVIDEO_H3_ENCODER_NODES.get())
+        # Single normalization point for the node count: 0 means "unset" (the env
+        # default is 1) and is only meaningful while the split is off.
+        if self.h3_encoder_split:
+            self.h3_encoder_nodes = max(1, self.h3_encoder_nodes)
+        else:
+            self.h3_encoder_nodes = max(0, self.h3_encoder_nodes)
 
     def _fold_vae_parallel_env(self) -> None:
         """Parse-once adapters for the sequence-parallel VAE env vars."""
@@ -498,9 +586,12 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp"],
+            choices=["mp", "uni", "ray", "external_launcher"],
             default=FastVideoArgs.distributed_executor_backend,
-            help="The distributed executor backend to use",
+            help=("Executor backend: mp (multiprocess; in-process when num_gpus=1), "
+                  "uni (always in-process, num_gpus=1), ray, or external_launcher "
+                  "(one SPMD worker per torchrun/srun process, offline generation only; "
+                  "FASTVIDEO_EXTERNAL_LAUNCHER=1 also selects it for mp)."),
         )
 
         parser.add_argument(
@@ -559,7 +650,7 @@ class FastVideoArgs:
             "--dist-timeout",
             type=int,
             default=FastVideoArgs.dist_timeout,
-            help="Set timeout for torch.distributed initialization.",
+            help="Set the torch.distributed process-group timeout in seconds.",
         )
 
         # Output type
@@ -698,7 +789,9 @@ class FastVideoArgs:
             type=str,
             default=None,
             help=
-            "JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'",
+            "JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'. "
+            "Note: the modular fastvideo/train stack uses regional fullgraph compile, which rejects 'mode' "
+            "(it injects inductor options); express mode effects via 'options' there.",
         )
         parser.add_argument(
             "--inference-torch-compile",
@@ -765,6 +858,20 @@ class FastVideoArgs:
             help="MiniMax-H3: encode with Qwen3-VL, release that encoder, then load DiT and VAEs. "
             "Omit for auto (on for unified-memory devices such as GB10; off on discrete GPUs). "
             "Pass --no-h3-sequential-load to keep the encoder resident for later generate() calls.",
+        )
+        parser.add_argument(
+            "--h3-encoder-split",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="MiniMax-H3: dedicate the first --h3-encoder-nodes nodes to the Qwen3-VL encoder and run the DiT "
+            "on the remaining ranks. Requires distributed_executor_backend='ray'. "
+            "Omit to fold FASTVIDEO_H3_ENCODER_SPLIT.",
+        )
+        parser.add_argument(
+            "--h3-encoder-nodes",
+            type=int,
+            default=FastVideoArgs.h3_encoder_nodes,
+            help="MiniMax-H3 encoder split: nodes (not GPUs) reserved for the text encoder; default 1.",
         )
         parser.add_argument(
             "--video-decode-backend",
@@ -943,6 +1050,9 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
+        if self.dist_timeout is not None and self.dist_timeout <= 0:
+            raise ValueError(f"dist_timeout must be greater than zero seconds, got {self.dist_timeout}")
+
         # Validate mode and inference_mode consistency
         assert isinstance(self.mode, ExecutionMode), f"Mode must be an ExecutionMode enum, got {type(self.mode)}"
         assert self.mode in ExecutionMode.choices(), f"Invalid execution mode: {self.mode}"
@@ -979,7 +1089,27 @@ class FastVideoArgs:
         if self.hsdp_shard_dim == -1:
             self.hsdp_shard_dim = self.num_gpus
 
-        assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
+        if self.h3_encoder_split:
+            # The denoise group owns SP; its size (num_gpus - encoder workers)
+            # need not divide num_gpus, so the encoder group's ranks are exempt
+            # from the divisibility contract below. The worker-side DiT init
+            # still pins the real constraint (heads % denoise size).
+            if self.distributed_executor_backend != "ray":
+                raise ValueError("MiniMax-H3 h3_encoder_split requires distributed_executor_backend='ray'.")
+            # ``h3_encoder_nodes`` counts nodes here while the executor resolves
+            # the encoder group from placement (every worker on those nodes), so
+            # the driver can only check the lower bound. The heads-divisibility
+            # check needs the worker count and lives in the executor and in the
+            # worker-side DiT init.
+            if self.num_gpus <= self.h3_encoder_nodes:
+                raise ValueError(f"MiniMax-H3 h3_encoder_split needs num_gpus ({self.num_gpus}) > "
+                                 f"h3_encoder_nodes ({self.h3_encoder_nodes}).")
+            if self.sp_size not in (-1, self.num_gpus):
+                logger.info(
+                    "MiniMax-H3 h3_encoder_split: ignoring sp_size=%d; the denoise ranks run SP with "
+                    "num_gpus - h3_encoder_workers.", self.sp_size)
+        else:
+            assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
 
@@ -1138,6 +1268,10 @@ class TrainingArgs(FastVideoArgs):
     arguments. If there are any conflicts, the training arguments will take
     precedence.
     """
+    # Generic runner entry point (fastvideo/training/runner.py)
+    pipeline_class: str = ""
+    pipeline_module: str = ""
+
     data_path: str = ""
     dataloader_num_workers: int = 0
     num_height: int = 0
