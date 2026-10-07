@@ -1,0 +1,50 @@
+# Minimum config to run a single training step of FineTuneMethod on
+# Hunyuan15Model for the per-method smoke test. Uses the real
+# HunyuanVideo-1.5 480p T2V checkpoint (~8B) with tiny synthetic
+# latents. training_cfg_rate=0 keeps the CFG-dropout path out of this
+# test (see the CFG semantics note in Hunyuan15Model), and
+# precondition_outputs=true matches the flow-matching x0 objective.
+
+models:
+  student:
+    _target_: fastvideo.train.models.hunyuan15.Hunyuan15Model
+    init_from: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
+    trainable: true
+    flow_shift: 5.0
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+
+  data:
+    seed: 42
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    num_latent_t: 4
+    num_height: 256
+    num_width: 256
+    num_frames: 13
+
+  optimizer:
+    learning_rate: 1.0e-6
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 1
+    gradient_accumulation_steps: 1
+
+  model:
+    precondition_outputs: true
+
+pipeline:
+  flow_shift: 5.0
