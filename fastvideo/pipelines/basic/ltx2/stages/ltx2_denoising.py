@@ -25,6 +25,7 @@ from fastvideo.pipelines.basic.ltx2.stages.ltx2_image_conditioning import (LTX2_
                                                                            LTX2_VIDEO_DENOISE_MASK_KEY,
                                                                            apply_ltx2_gaussian_noiser,
                                                                            post_process_ltx2_denoised)
+from fastvideo.pipelines.basic.ltx2.stages.ltx2_latent_preparation import _randn_ltx2_video_latents
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.logger import init_logger
@@ -724,23 +725,43 @@ class LTX2DenoisingStage(PipelineStage):
                 if use_ancestral_sampler:
                     assert ancestral_generator is not None
                     # Match the official joint-AV random stream: video draws
-                    # first, then audio, from one seed+10000 generator.
+                    # first, then audio, from one seed+10000 generator. The
+                    # official loop draws on the patchified latent state, so
+                    # sample in token order and unpatchify back to the native
+                    # layout (same order as the initial latent draw).
                     video_noise = None
                     audio_noise = None
                     if bool(sigma_next != 0):
-                        video_noise = torch.randn(
-                            latents.shape,
+                        video_noise = _randn_ltx2_video_latents(
+                            shape=tuple(latents.shape),
+                            transformer=self.transformer,
                             generator=ancestral_generator,
                             device=latents.device,
                             dtype=latents.dtype,
                         )
                         if pos_audio is not None and audio_latents is not None:
-                            audio_noise = torch.randn(
-                                audio_latents.shape,
-                                generator=ancestral_generator,
-                                device=audio_latents.device,
-                                dtype=audio_latents.dtype,
-                            )
+                            audio_patchifier = getattr(self.transformer, "audio_patchifier", None)
+                            if audio_patchifier is not None:
+                                audio_noise_shape = AudioLatentShape.from_torch_shape(audio_latents.shape)
+                                audio_patch_shape = (
+                                    audio_noise_shape.batch,
+                                    audio_noise_shape.frames,
+                                    audio_noise_shape.channels * audio_noise_shape.mel_bins,
+                                )
+                                audio_noise_patch = torch.randn(
+                                    audio_patch_shape,
+                                    generator=ancestral_generator,
+                                    device=audio_latents.device,
+                                    dtype=audio_latents.dtype,
+                                )
+                                audio_noise = audio_patchifier.unpatchify(audio_noise_patch, audio_noise_shape)
+                            else:
+                                audio_noise = torch.randn(
+                                    audio_latents.shape,
+                                    generator=ancestral_generator,
+                                    device=audio_latents.device,
+                                    dtype=audio_latents.dtype,
+                                )
                     latents = _ltx2_euler_ancestral_step(
                         latents,
                         pos_denoised,
@@ -757,19 +778,23 @@ class LTX2DenoisingStage(PipelineStage):
                             audio_noise,
                         )
                     # Re-apply clean conditioning after stochastic noise.
-                    if video_clean_latent is not None and video_denoise_mask is not None:
-                        latents = post_process_ltx2_denoised(
-                            denoised=latents,
-                            denoise_mask=video_denoise_mask,
-                            clean_latent=video_clean_latent,
-                        )
-                    if (audio_clean_latent is not None and audio_denoise_mask is not None
-                            and audio_latents is not None):
-                        audio_latents = post_process_ltx2_denoised(
-                            denoised=audio_latents,
-                            denoise_mask=audio_denoise_mask,
-                            clean_latent=audio_clean_latent,
-                        )
+                    # Skipped on the terminal step (sigma_next == 0): the
+                    # denoised output is already mask-corrected above and the
+                    # official loop does not re-apply the blend there.
+                    if bool(sigma_next != 0):
+                        if video_clean_latent is not None and video_denoise_mask is not None:
+                            latents = post_process_ltx2_denoised(
+                                denoised=latents,
+                                denoise_mask=video_denoise_mask,
+                                clean_latent=video_clean_latent,
+                            )
+                        if (audio_clean_latent is not None and audio_denoise_mask is not None
+                                and audio_latents is not None):
+                            audio_latents = post_process_ltx2_denoised(
+                                denoised=audio_latents,
+                                denoise_mask=audio_denoise_mask,
+                                clean_latent=audio_clean_latent,
+                            )
                 else:
                     velocity = ((latents.float() - pos_denoised.float()) / sigma_value).to(latents.dtype)
                     latents = (latents.float() + velocity.float() * dt).to(latents.dtype)

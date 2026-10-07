@@ -45,7 +45,7 @@ warm HAO AI Lab Modal L40S shell with FastVideo and the pinned official source
 installed together.
 
 ```text
-dependency_changes: transformers>=5.8.0,<5.15 for Gemma 4
+dependency_changes: transformers>=5.15.0 for Gemma 4
 official_env_status: source parity passing in one shared Modal environment
 private_dep_stubs: none planned
 gated_access_status: approved and verified at the pinned revision

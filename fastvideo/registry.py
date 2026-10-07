@@ -306,7 +306,7 @@ def _register_configs() -> None:
     )
 
     # LTX-2 (distilled) — registered before the generic base detector so its
-    # the base detector when both fire. The detector loop in
+    # detector wins over the base detector when both fire. The detector loop in
     # ``get_model_name_for_path`` ORs the path-based check with a
     # pipeline-name check (``ltx2pipeline``) which the base detector's
     # "distilled not in path" predicate matches as True (the

@@ -357,6 +357,11 @@ def _unpack_packed_gemma(
             tokenizer_assets["tokenizer.json"] = _tensor_to_bytes(tensor, key)
         elif key.startswith(PACKED_GEMMA_ASSET_PREFIX):
             asset_name = key.removeprefix(PACKED_GEMMA_ASSET_PREFIX)
+            # Untrusted safetensors keys must not escape the output tree:
+            # reject separators and dot-segments so the joined path stays a
+            # single file name inside the target tokenizer directories.
+            if not asset_name or asset_name in {".", ".."} or "/" in asset_name or "\\" in asset_name:
+                raise ValueError(f"Unsafe packed Gemma asset name {asset_name!r} from tensor key {key!r}.")
             tokenizer_assets[asset_name] = _tensor_to_bytes(tensor, key)
         else:
             gemma_weights[_map_packed_gemma_weight_key(key)] = tensor
