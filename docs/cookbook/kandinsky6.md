@@ -5,7 +5,7 @@ hide:
 
 # Kandinsky 6 recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="kandinsky6" data-recipes="../../assets/cookbook-recipes.json?v=14">
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="kandinsky6" data-recipes="../../assets/cookbook-recipes.json?v=15">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -15,7 +15,7 @@ hide:
       <div>
         <p class="cookbook-eyebrow">Maintained family · Inference</p>
         <h2>Kandinsky 6 inference recipes</h2>
-        <p>Kandinsky 6 from the Kandinsky Lab generates five-second video with synchronized audio from text or an image, with base and distilled pi-Flow checkpoints, and upscales existing clips with base or distilled video super-resolution.</p>
+        <p>Kandinsky 6 from the Kandinsky Lab generates five-second video with synchronized audio from text or an image, in Pro (30.1B) and Lite (3.2B) sizes with base and distilled pi-Flow checkpoints, and upscales existing clips with base or distilled video super-resolution.</p>
       </div>
     </div>
     <div class="cookbook-lifecycle" aria-label="Lifecycle stages">

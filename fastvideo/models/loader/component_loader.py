@@ -110,6 +110,9 @@ class ComponentLoader(ABC):
             "image_encoder": (ImageEncoderLoader, "transformers"),
             "image_encoder_2": (ImageEncoderLoader, "transformers"),
             "image_encoder_3": (ImageEncoderLoader, "transformers"),
+            # Wan-S2V speech conditioning: wav2vec2 encoder + its feature extractor.
+            "audio_encoder": (AudioEncoderLoader, "transformers"),
+            "audio_processor": (AudioProcessorLoader, "transformers"),
             "vision_language_encoder": (VisionLanguageEncoderLoader, "transformers"),
             "processor": (ProcessorLoader, "transformers"),
             "upsampler": (UpsamplerLoader, "diffusers"),
@@ -287,6 +290,32 @@ class TextEncoderLoader(ComponentLoader):
         if gemma_path and not gemma_path_from_candidate:
             if not os.path.isabs(gemma_path):
                 model_config["gemma_model_path"] = os.path.normpath(os.path.join(repo_root, gemma_path))
+        resolved_gemma_path = model_config.get("gemma_model_path", gemma_path)
+        gemma_config_path = os.path.join(resolved_gemma_path, "config.json") if resolved_gemma_path else ""
+        if os.path.isfile(gemma_config_path):
+            try:
+                with open(gemma_config_path, encoding="utf-8") as f:
+                    gemma_config = json.load(f)
+                gemma_text_config = gemma_config.get("text_config", gemma_config)
+                gemma_hidden_size = gemma_text_config.get("hidden_size")
+                gemma_num_hidden_layers = gemma_text_config.get("num_hidden_layers")
+                if gemma_hidden_size is not None and gemma_num_hidden_layers is not None:
+                    # LTX feature extraction stacks the embedding output plus
+                    # every Gemma transformer layer. Derive this from the
+                    # packed Gemma config so Gemma 4 never inherits Gemma 3's
+                    # hard-coded 3840x49 geometry.
+                    model_config["hidden_size"] = int(gemma_hidden_size)
+                    model_config["num_hidden_layers"] = int(gemma_num_hidden_layers)
+                    model_config["feature_extractor_in_features"] = (int(gemma_hidden_size) *
+                                                                       (int(gemma_num_hidden_layers) + 1))
+                for field_name in ("num_attention_heads", "pad_token_id", "eos_token_id"):
+                    value = gemma_text_config.get(field_name, gemma_config.get(field_name))
+                    if value is not None:
+                        if field_name == "eos_token_id" and isinstance(value, list):
+                            value = value[0] if value else 2
+                        model_config[field_name] = value
+            except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+                logger.warning("Unable to derive LTX Gemma geometry from %s: %s", gemma_config_path, exc)
         transformer_config_path = os.path.join(repo_root, "transformer", "config.json")
         if os.path.isfile(transformer_config_path):
             try:
@@ -624,6 +653,49 @@ class ProcessorLoader(ComponentLoader):
         )
         logger.info("Loaded processor: %s", processor.__class__.__name__)
         return processor
+
+
+class AudioEncoderLoader(ComponentLoader):
+    """Loader for the wav2vec2 speech encoder used by audio-driven pipelines.
+
+    Loaded straight from transformers rather than reimplemented: it is small
+    (~300M), runs once per generation rather than once per denoising step, and
+    is not tensor-parallel sensitive, so a native port would add risk and no
+    throughput. Wan-S2V bundles its encoder inside the model repo, so the path
+    is normally ``<model>/wav2vec2-large-xlsr-53-english``.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        from transformers import Wav2Vec2Model
+
+        logger.info("Loading audio encoder from %s", model_path)
+        encoder = Wav2Vec2Model.from_pretrained(
+            model_path,
+            torch_dtype=PRECISION_TO_TYPE[fastvideo_args.pipeline_config.audio_encoder_precision],
+        )
+        encoder = encoder.eval().to(get_local_torch_device())
+        encoder.requires_grad_(False)
+        logger.info("Loaded audio encoder: %s", encoder.__class__.__name__)
+        return encoder
+
+
+class AudioProcessorLoader(ComponentLoader):
+    """Loader for the wav2vec2 feature extractor.
+
+    Deliberately not ``AutoProcessor``: the bundled wav2vec2-large-xlsr-53-english
+    ships an ``alphabet.json`` and a ``language_model/`` folder, so AutoProcessor
+    resolves ``Wav2Vec2ProcessorWithLM`` and then requires pyctcdecode + kenlm --
+    neither of which we depend on, and neither of which we need. Only the feature
+    extractor's ``input_values`` is ever used.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        from transformers import Wav2Vec2FeatureExtractor
+
+        logger.info("Loading audio feature extractor from %s", model_path)
+        extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_path)
+        logger.info("Loaded audio feature extractor: %s", extractor.__class__.__name__)
+        return extractor
 
 
 class ImageProcessorLoader(ComponentLoader):
@@ -994,7 +1066,15 @@ class AudioDecoderLoader(ComponentLoader):
             audio_vae.load_state_dict(loaded, strict=True)
             return audio_vae.eval()
 
-        precision = getattr(fastvideo_args.pipeline_config, "audio_decoder_precision", "bf16")
+        # A preprocessing component may carry the MMAudio encoder in addition
+        # to the inference decoder. Feature extraction is defined in fp32 by
+        # the published recipe; do not quantize it to decoder inference dtype.
+        needs_encoder = bool(config.get("need_encoder", False))
+        precision_name = (
+            "audio_encoder_precision" if needs_encoder else
+            "audio_decoder_precision")
+        precision = getattr(fastvideo_args.pipeline_config, precision_name,
+                            "fp32" if needs_encoder else "bf16")
         # MMAudio normalizes its magnitude-preserving convolution weights in
         # fp32 and only then casts the whole feature utility module to bf16.
         # Constructing/loading directly in bf16 quantizes the unnormalized
@@ -1194,6 +1274,14 @@ class TransformerLoader(ComponentLoader):
                            or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25")
         attention_context = (_component_attention_backend_scope(None, component="transformer")
                              if _qat_generator_only else nullcontext())
+        # MiniMax-H3 encoder split: the DiT only exists on the denoise ranks, so
+        # FSDP has to shard over them instead of over the world group.
+        device_mesh = None
+        if (getattr(fastvideo_args, "h3_encoder_split", False)
+                and (fastvideo_args.use_fsdp_inference or fastvideo_args.training_mode)):
+            from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_denoise_device_mesh
+
+            device_mesh = h3_denoise_device_mesh(fastvideo_args)
         with attention_context:
             # dit_config is what the model is handed and keeps as `self.config`,
             # so recording here makes the decision readable from the loaded
@@ -1230,6 +1318,7 @@ class TransformerLoader(ComponentLoader):
                 cpu_offload=fastvideo_args.dit_cpu_offload,
                 pin_cpu_memory=fastvideo_args.pin_cpu_memory,
                 fsdp_inference=fastvideo_args.use_fsdp_inference,
+                device_mesh=device_mesh,
                 # TODO(will): make these configurable
                 default_dtype=default_dtype,
                 param_dtype=torch.bfloat16,
@@ -1245,6 +1334,11 @@ class TransformerLoader(ComponentLoader):
                 # once the module tree exists.
                 lora_path=getattr(fastvideo_args, "lora_path", None),
                 lora_strength=getattr(fastvideo_args, "lora_strength", 1.0),
+                regional_compile=getattr(fastvideo_args, "regional_compile", False),
+                # Training adapters must be installed before FSDP establishes the
+                # module's sharding topology.
+                pre_fsdp_model_transform=getattr(fastvideo_args, "_pre_fsdp_model_transform", None),
+                pre_fsdp_transform=getattr(fastvideo_args, "_pre_fsdp_transform", None),
             )
 
         total_params = sum(p.numel() for p in model.parameters())

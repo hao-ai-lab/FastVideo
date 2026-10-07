@@ -50,7 +50,17 @@ def test_model_family_change_selects_focused_golden_and_ssim(path, goldens):
     assert plan.encoded_lanes() == ",golden-gate,ssim,"
     assert plan.encoded_golden_tests() == goldens
     assert plan.encoded_ssim_tests() == (
-        "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
+        "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py,"
+        "test_wan_ti2v_similarity.py")
+
+
+def test_hunyuan15_change_selects_its_i2v_ssim_test():
+    plan = PLAN_MERGE_CI.classify_paths(["fastvideo/pipelines/basic/hunyuan15/hunyuan15_i2v_pipeline.py"])
+
+    assert plan.encoded_lanes() == ",golden-gate,ssim,"
+    # No HunyuanVideo 1.5 golden test exists yet, so golden coverage stays "all".
+    assert plan.encoded_golden_tests() == "all"
+    assert plan.encoded_ssim_tests() == "test_hunyuan15_i2v_similarity.py"
 
 
 @pytest.mark.parametrize("path", [
@@ -92,9 +102,11 @@ def test_wan_family_relocation_keeps_shared_registry_coverage():
 
     assert plan.encoded_lanes() == ",golden-gate,ssim,"
     assert plan.encoded_golden_tests() == "all"
+    # Every Wan-family SSIM file plus the shared-registry smoke (flux t2i).
     assert plan.encoded_ssim_tests() == (
         "test_causal_similarity.py,test_flux_t2i_similarity.py,"
-        "test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
+        "test_wan_i2v_similarity.py,test_wan_t2v_similarity.py,"
+        "test_wan_ti2v_similarity.py")
 
 
 def test_flux2_change_does_not_pull_unrelated_flux1_quality_tests():
@@ -200,6 +212,12 @@ def test_empty_or_failed_changed_file_query_fails_closed():
 
 def test_dreamverse_change_relies_on_its_existing_fastcheck_e2e_lane():
     plan = PLAN_MERGE_CI.classify_paths(["apps/dreamverse/web/src/App.tsx"])
+
+    assert plan.encoded_lanes() == ",none,"
+
+
+def test_infinite_livestream_change_relies_on_the_unit_fastcheck_lane():
+    plan = PLAN_MERGE_CI.classify_paths(["apps/infinite_livestream/infinite_livestream/sink.py"])
 
     assert plan.encoded_lanes() == ",none,"
 
