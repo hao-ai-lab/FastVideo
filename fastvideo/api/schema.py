@@ -81,6 +81,9 @@ class QuantizationConfig:
     # ``h3_dit_ffn`` selects a packed FFN-only export (attention stays dense).
     # ``h3_dit_vsa`` is ``h3_dit`` plus the VSA compression gates.
     layer_profile: str | None = None
+    # NVFP4 can purge the original dense weights after conversion. Keep them
+    # when inference will later merge a transformer LoRA adapter.
+    transformer_retain_original_weights: bool | None = None
 
 
 @dataclass
