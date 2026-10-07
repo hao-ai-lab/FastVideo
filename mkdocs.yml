@@ -78,7 +78,7 @@ plugins:
       minify_js: true
       minify_css: true
       cache_safe: true
-      js_files: [assets/copy-page.js]
+      js_files: [assets/copy-page.js, assets/cookbook.js]
       css_files: [assets/custom.css]
   - api-autonav:
       modules: ["fastvideo"]
@@ -151,20 +151,52 @@ nav:
   - Home: index.md
   - Getting Started:
     - Installation: getting_started/installation.md
+    - Apple Silicon (MLX): getting_started/installation/mlx.md
+    - NVIDIA DGX Spark: getting_started/installation/spark.md
+    - Pair two DGX Sparks: getting_started/installation/spark_pair.md
     - Quick Start: getting_started/quick_start.md
     - V1 API: getting_started/v1_api.md
+  - Cookbook:
+    - Overview: cookbook/index.md
+    - H3 server and playground: cookbook/openai-api.md
+    - Video:
+      - MiniMax H3: cookbook/minimax-h3.md
+      - Wan: cookbook/wan.md
+      - LTX: cookbook/ltx.md
+      - Hunyuan: cookbook/hunyuan.md
+      - Kandinsky 5: cookbook/kandinsky5.md
+      - Kandinsky 6: cookbook/kandinsky6.md
+      - LongCat: cookbook/longcat.md
+      - TurboDiffusion: cookbook/turbodiffusion.md
+    - Image:
+      - FLUX: cookbook/flux.md
+      - GLM-Image: cookbook/glm-image.md
+      - Z-Image: cookbook/z-image.md
+      - Stable Diffusion: cookbook/stable-diffusion.md
+    - Audio:
+      - Stable Audio: cookbook/stable-audio.md
+      - MMAudio: cookbook/mmaudio.md
+    - World:
+      - Cosmos: cookbook/cosmos.md
+      - Matrix Game: cookbook/matrix-game.md
   - Inference:
     - Quick Start: inference/inference_quick_start.md
     - Configuration: inference/configuration.md
     - Offloading: inference/offloading.md
     - Optimizations: inference/optimizations.md
+    - FastH3 on RTX PRO 6000: inference/fasth3_rtx_pro_6000.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
+    - Kandinsky 6 T2IVA: inference/kandinsky6.md
+    - Kandinsky 6 Video SR: inference/kandinsky6_sr.md
     - CLI: inference/cli.md
     - Add Pipeline: inference/add_pipeline.md
     - Examples:
+      - Examples Index: inference/examples/examples_inference_index.md
       - Basic: inference/examples/basic.md
       - Optimizations: inference/examples/optimizations.md
+      - LTX-2.3: inference/examples/ltx2_3.md
+      - LTX-2.3 Gradio Demo: inference/examples/gradio_local_demo_ltx2_3.md
       - STA Mask Search (Archived): inference/examples/sta_mask_search.md
   - Training:
     - Overview: training/overview.md
@@ -172,6 +204,7 @@ nav:
     - Experiment Tracking: training/trackers.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
+    - Attn-QAT Training: training/attn_qat.md
     - Examples:
       - Training Index: training/examples/examples_training_index.md
       - Wan T2V 1.3B: training/examples/wan_t2v_1.3B.md
@@ -208,6 +241,7 @@ nav:
     - Pull Requests: contributing/pull_requests.md
     - CI/CD Architecture: contributing/ci_architecture.md
     - Testing: contributing/testing.md
+    - Environment Variables: contributing/env_vars.md
     - Performance Benchmarks: contributing/performance_benchmarks.md
     - Profiling: contributing/profiling.md
     - Activation Trace: contributing/activation_trace.md
@@ -233,3 +267,4 @@ extra_css:
 # Custom JavaScript
 extra_javascript:
   - assets/copy-page.js
+  - assets/cookbook.js

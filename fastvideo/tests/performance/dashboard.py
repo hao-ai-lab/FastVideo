@@ -152,12 +152,14 @@ def _dashboard_frame(df: pd.DataFrame) -> pd.DataFrame:
     dashboard_df["_cohort_gpu_type"] = dashboard_df["gpu_type"].where(~uses_v2_identity, "")
     return dashboard_df
 
+
 # -----------------------------
 # 1. Grouping
 # -----------------------------
 def group_data(df: pd.DataFrame):
     # Group by the same comparison cohort used by baseline gating.
     return _dashboard_frame(df).groupby(list(GROUP_KEYS), dropna=False)
+
 
 # -----------------------------
 # 2. Plot builder
@@ -220,7 +222,10 @@ def build_plots(df: pd.DataFrame) -> tuple[list, list[dict[str, object]]]:
                     *COMPARISON_COHORT_KEYS,
                 ],
                 title=" | ".join((*title_parts, metric)),
-                labels={"timestamp": "Time", metric: metric},
+                labels={
+                    "timestamp": "Time",
+                    metric: metric
+                },
             )
             figs.append(fig)
 
@@ -239,25 +244,23 @@ def render_skipped_metrics(skipped_metrics: list[dict[str, object]]) -> str:
         "<tbody>",
     ]
     for item in skipped_metrics:
-        rows.append(
-            "<tr>"
-            f"<td>{escape(str(item['model_id']))}</td>"
-            f"<td>{escape(str(item['gpu_type']))}</td>"
-            f"<td>{escape(str(item['cohort']))}<br><code>{escape(str(item['cohort_detail']))}</code></td>"
-            f"<td>{escape(str(item['metric']))}</td>"
-            f"<td>{item['records']}</td>"
-            f"<td>{item['non_null']}</td>"
-            f"<td>{escape(str(item['reason']))}</td>"
-            "</tr>"
-        )
+        rows.append("<tr>"
+                    f"<td>{escape(str(item['model_id']))}</td>"
+                    f"<td>{escape(str(item['gpu_type']))}</td>"
+                    f"<td>{escape(str(item['cohort']))}<br><code>{escape(str(item['cohort_detail']))}</code></td>"
+                    f"<td>{escape(str(item['metric']))}</td>"
+                    f"<td>{item['records']}</td>"
+                    f"<td>{item['non_null']}</td>"
+                    f"<td>{escape(str(item['reason']))}</td>"
+                    "</tr>")
     rows.extend(["</tbody>", "</table>"])
     return "\n".join(rows)
+
 
 # -----------------------------
 # 3. Render HTML dashboard
 # -----------------------------
-def render_html(figs: list, skipped_metrics: list[dict[str, object]],
-                days: int) -> str:
+def render_html(figs: list, skipped_metrics: list[dict[str, object]], days: int) -> str:
     html_parts = [
         "<html>",
         "<head><meta charset='utf-8'>",
@@ -281,6 +284,7 @@ def render_html(figs: list, skipped_metrics: list[dict[str, object]],
 
     html_parts.append("</body></html>")
     return "\n".join(html_parts)
+
 
 # -----------------------------
 # 5. Main
@@ -324,6 +328,7 @@ def main() -> None:
         f.write(html)
 
     print(f"Dashboard generated: {output_file}")
+
 
 if __name__ == "__main__":
     main()

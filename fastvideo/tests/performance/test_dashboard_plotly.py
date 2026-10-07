@@ -64,17 +64,14 @@ def test_group_data_ignores_v2_display_name_changes():
 
 
 def test_group_data_fills_legacy_cohort_columns():
-    df = pd.DataFrame([
-        {
-            "model_id": model_id,
-            "gpu_type": "NVIDIA L40S",
-            "timestamp": "2026-01-01T00:00:00+00:00",
-            "commit_sha": "a" * 40,
-            "config_id": "aaaaaaa",
-            "latency": 10.0,
-        }
-        for model_id in ("legacy-wan", "legacy-ltx")
-    ])
+    df = pd.DataFrame([{
+        "model_id": model_id,
+        "gpu_type": "NVIDIA L40S",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "commit_sha": "a" * 40,
+        "config_id": "aaaaaaa",
+        "latency": 10.0,
+    } for model_id in ("legacy-wan", "legacy-ltx")])
 
     groups = list(dashboard.group_data(df))
     figs, _skipped_metrics = dashboard.build_plots(df)
@@ -137,10 +134,11 @@ def test_group_data_keeps_partial_v2_identity_scoped_by_display_metadata():
     figs, _skipped_metrics = dashboard.build_plots(df)
 
     assert len(groups) == 2
-    assert {(key[1], key[2]) for key, _group in groups} == {
-        ("wan", "NVIDIA L40S"),
-        ("ltx", "NVIDIA H100"),
-    }
+    assert {(key[1], key[2])
+            for key, _group in groups} == {
+                ("wan", "NVIDIA L40S"),
+                ("ltx", "NVIDIA H100"),
+            }
     assert {key[0] for key, _group in groups} == {"invalid_v2"}
     assert all("Invalid v2:" in fig.layout.title.text for fig in figs)
     assert all("Legacy v1" not in fig.layout.title.text for fig in figs)

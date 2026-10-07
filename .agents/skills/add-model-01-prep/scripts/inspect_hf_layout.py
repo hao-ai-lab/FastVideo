@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 HF_TOKEN_ENV_KEYS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
 RAW_WEIGHT_SUFFIXES = (".safetensors", ".pt", ".pth", ".ckpt", ".bin")
 KNOWN_COMPONENTS = {
@@ -34,8 +33,7 @@ KNOWN_COMPONENTS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Classify a HF repo or local directory as Diffusers, raw, custom, or unknown."
-    )
+        description="Classify a HF repo or local directory as Diffusers, raw, custom, or unknown.")
     parser.add_argument("source", help="HF repo id or local weights directory")
     parser.add_argument("--repo-type", default="model", help="HF repo type (default: model)")
     parser.add_argument("--revision", help="HF revision to inspect")
@@ -94,14 +92,12 @@ def load_remote_files(
 ) -> list[str]:
     from huggingface_hub import list_repo_files
 
-    return sorted(
-        list_repo_files(
-            repo_id,
-            repo_type=repo_type,
-            revision=revision,
-            token=token,
-        )
-    )
+    return sorted(list_repo_files(
+        repo_id,
+        repo_type=repo_type,
+        revision=revision,
+        token=token,
+    ))
 
 
 def load_remote_model_index(
@@ -215,24 +211,24 @@ def build_result(args: argparse.Namespace) -> dict[str, Any]:
         "components_seen": components,
         "file_count": len(files),
         "file_scan_truncated": truncated,
-        "files_sample": files[: args.sample_limit],
+        "files_sample": files[:args.sample_limit],
     }
 
 
 def print_human(result: dict[str, Any]) -> None:
     for key in (
-        "source",
-        "source_kind",
-        "repo_type",
-        "revision",
-        "token_env",
-        "source_layout",
-        "needs_conversion",
-        "model_index_class",
-        "model_index_diffusers_version",
-        "model_index_error",
-        "file_count",
-        "file_scan_truncated",
+            "source",
+            "source_kind",
+            "repo_type",
+            "revision",
+            "token_env",
+            "source_layout",
+            "needs_conversion",
+            "model_index_class",
+            "model_index_diffusers_version",
+            "model_index_error",
+            "file_count",
+            "file_scan_truncated",
     ):
         value = result.get(key)
         if value is not None:

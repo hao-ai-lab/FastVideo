@@ -10,6 +10,7 @@ class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8000
     output_dir: str = "outputs/"
+    served_model_name: str | None = None
 
 
 @dataclass
@@ -29,6 +30,12 @@ class OffloadConfig:
     image_encoder: bool = True
     vae: bool = True
     pin_cpu_memory: bool = True
+    # Not a CPU offload: loads each heavy component on first use and frees it
+    # after the last stage that needs it, so peak memory is the largest
+    # overlapping set rather than the sum. Grouped here because it is the same
+    # decision the offload knobs answer, which is how much of the model has to
+    # be resident at once. ``None`` auto-enables on unified-memory devices.
+    lazy_module_load: bool | None = None
 
 
 @dataclass
@@ -69,6 +76,11 @@ class CompileConfig:
 class QuantizationConfig:
     text_encoder_quant: str | None = None
     transformer_quant: str | None = None
+    # Forwarded onto ``NVFP4Config`` when ``transformer_quant`` is ``NVFP4``.
+    # ``h3_dit`` selects the packed MiniMax-H3 attention+FFN export.
+    # ``h3_dit_ffn`` selects a packed FFN-only export (attention stays dense).
+    # ``h3_dit_vsa`` is ``h3_dit`` plus the VSA compression gates.
+    layer_profile: str | None = None
 
 
 @dataclass
@@ -94,13 +106,15 @@ class ComponentConfig:
     vae_weights: str | None = None
     upsampler_weights: str | None = None
     lora_path: str | None = None
+    lora_nickname: str = "default"
+    lora_strength: float = 1.0
     override_pipeline_cls_name: str | None = None
     override_transformer_cls_name: str | None = None
 
 
 @dataclass
 class PipelineSelection:
-    workload_type: Literal["t2v", "i2v", "t2i", "i2i"] | None = None
+    workload_type: Literal["t2v", "i2v", "t2i", "i2i", "v2a", "t2a"] | None = None
     preset: str | None = None
     preset_version: int | None = None
     components: ComponentConfig = field(default_factory=ComponentConfig)
@@ -124,12 +138,18 @@ class InputConfig:
     prompt_path: str | None = None
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
+    audio_path: str | list[str] | None = None
     pil_image: Any | None = None
+    last_image: Any | None = None
+    references: list[Any] | None = None
+    latents: Any | None = None
+    audio_latents: Any | None = None
     pose: str | None = None
     mouse_cond: Any | None = None
     keyboard_cond: Any | None = None
     grid_sizes: Any | None = None
     c2ws_plucker_emb: Any | None = None
+    action_path: str | None = None
     refine_from: str | None = None
     stage1_video: Any | None = None
 
@@ -138,6 +158,7 @@ class InputConfig:
 class SamplingConfig:
     num_videos_per_prompt: int = 1
     seed: int = 1024
+    max_sequence_length: int | None = None
     num_frames: int = 125
     height: int = 720
     width: int = 1280
@@ -147,7 +168,10 @@ class SamplingConfig:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
+    batch_cfg: bool = False
     guidance_scale_2: float | None = None
+    cfg_normalization: bool = False
+    cfg_truncation: float | None = 1.0
     guidance_rescale: float = 0.0
     true_cfg_scale: float | None = None
     use_embedded_guidance: bool | None = None

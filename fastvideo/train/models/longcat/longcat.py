@@ -70,7 +70,11 @@ class LongCatModel(WanModel):
         noise_input: torch.Tensor,
         timestep: torch.Tensor,
         text_dict: dict[str, torch.Tensor] | None,
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> dict[str, Any]:
+        if clean_x is not None or aug_t is not None:
+            raise NotImplementedError("LongCatModel does not support clean-history teacher forcing")
         if text_dict is None:
             raise ValueError("text_dict cannot be None for LongCat distillation")
 
@@ -96,6 +100,8 @@ class LongCatModel(WanModel):
         conditional: bool,
         cfg_uncond: dict[str, Any] | None = None,
         attn_kind: Literal["dense", "vsa"] = "dense",
+        clean_x: torch.Tensor | None = None,
+        aug_t: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Adapt LongCat's sign convention to FineTuneMethod's target.
 
@@ -128,5 +134,7 @@ class LongCatModel(WanModel):
             conditional=conditional,
             cfg_uncond=cfg_uncond,
             attn_kind=attn_kind,
+            clean_x=clean_x,
+            aug_t=aug_t,
         )
         return -pred

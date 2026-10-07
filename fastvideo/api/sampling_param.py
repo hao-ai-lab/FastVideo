@@ -25,13 +25,21 @@ class SamplingParam:
     # Image inputs
     image_path: str | None = None
     pil_image: Any | None = None
+    last_image: Any | None = None
+    references: list[Any] | None = None
 
     # Video inputs
     video_path: str | None = None
 
+    # Audio inputs. `audio_path` drives audio-conditioned generation (Wan S2V):
+    # the waveform is encoded and cross-attended to per video frame. Distinct
+    # from the Stable Audio `init_audio` fields below, which seed audio output.
+    audio_path: str | None = None
+
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
+    audio_latents: Any | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: Any | None = None  # Shape: (B, T, 2)
@@ -51,8 +59,9 @@ class SamplingParam:
     gt_latents: Any | None = None  # Ground truth latents [B, 16, T, H, W]
     conditioning_mask: Any | None = None  # Mask [B, 1, T, H, W]
 
-    # Camera control inputs (LingBotWorld)
+    # Camera control inputs (LingBotWorld and LingBotWorld2)
     c2ws_plucker_emb: Any | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+    action_path: str | None = None  # Directory containing poses.npy and intrinsics.npy
 
     # Refine inputs (LongCat 480p->720p upscaling)
     # Path-based refine (load stage1 video from disk, e.g. MP4)
@@ -89,7 +98,13 @@ class SamplingParam:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
+    batch_cfg: bool = False
     guidance_scale_2: float | None = None
+    # Z-Image CFG controls. ``cfg_normalization=True`` caps the guided
+    # prediction norm at the positive-prediction norm; ``cfg_truncation``
+    # disables CFG above the normalized-noise threshold.
+    cfg_normalization: bool = False
+    cfg_truncation: float | None = 1.0
     # Embedded guidance (FLUX): do not treat ``guidance_scale > 1`` as classic CFG.
     use_embedded_guidance: bool = False
     # Diffusers-style true CFG for FLUX when > 1 (requires negative prompt encoding).
@@ -180,7 +195,7 @@ class SamplingParam:
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
 
-    def check_sampling_param(self):
+    def check_sampling_param(self) -> None:
         if self.prompt_path and not self.prompt_path.endswith(".txt"):
             raise ValueError("prompt_path must be a txt file")
 
@@ -324,6 +339,24 @@ class SamplingParam:
             help="Classifier-free guidance scale",
         )
         parser.add_argument(
+            "--cfg-normalization",
+            action=StoreBoolean,
+            default=SamplingParam.cfg_normalization,
+            help="Cap Z-Image CFG prediction norm to the positive-prediction norm",
+        )
+        parser.add_argument(
+            "--cfg-truncation",
+            type=float,
+            default=SamplingParam.cfg_truncation,
+            help="Disable Z-Image CFG above this normalized-noise threshold",
+        )
+        parser.add_argument(
+            "--batch-cfg",
+            action=StoreBoolean,
+            default=SamplingParam.batch_cfg,
+            help="Evaluate conditional and unconditional CFG branches in one batch",
+        )
+        parser.add_argument(
             "--guidance-rescale",
             type=float,
             default=SamplingParam.guidance_rescale,
@@ -376,6 +409,12 @@ class SamplingParam:
             type=str,
             default=SamplingParam.video_path,
             help="Path to input video for video-to-video generation",
+        )
+        parser.add_argument(
+            "--audio-path",
+            type=str,
+            default=SamplingParam.audio_path,
+            help="Path to input audio for speech-driven generation (Wan S2V)",
         )
         parser.add_argument(
             "--refine-from",

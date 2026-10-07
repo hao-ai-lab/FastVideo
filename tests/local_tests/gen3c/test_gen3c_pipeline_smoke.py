@@ -30,19 +30,17 @@ from fastvideo.models.dits.gen3c import Gen3CTransformer3DModel
 from fastvideo.pipelines.basic.gen3c.gen3c_pipeline import Gen3CCFGPolicyStage
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _log_tensor_stats(label: str, tensor: torch.Tensor) -> None:
     t = tensor.float()
-    print(
-        f"[GEN3C SMOKE] {label}: shape={tuple(tensor.shape)} "
-        f"dtype={tensor.dtype} device={tensor.device} "
-        f"min={t.min().item():.6f} max={t.max().item():.6f} "
-        f"mean={t.mean().item():.6f}"
-    )
+    print(f"[GEN3C SMOKE] {label}: shape={tuple(tensor.shape)} "
+          f"dtype={tensor.dtype} device={tensor.device} "
+          f"min={t.min().item():.6f} max={t.max().item():.6f} "
+          f"mean={t.mean().item():.6f}")
 
 
 def _create_small_config(num_layers: int = 2) -> Gen3CVideoConfig:
@@ -58,6 +56,7 @@ def _create_small_config(num_layers: int = 2) -> Gen3CVideoConfig:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestGen3CPostprocessText:
     """Validate the T5 postprocess helper used by Gen3CConfig."""
@@ -177,11 +176,8 @@ class TestGen3CModelSmoke:
             config.arch_config.in_channels  # 16
             + 1  # condition_video_input_mask
             + config.arch_config.buffer_channels  # 64
-            + (1 if config.arch_config.concat_padding_mask else 0)
-        )
-        actual = model.patch_embed.dim // (
-            model.patch_size[0] * model.patch_size[1] * model.patch_size[2]
-        )
+            + (1 if config.arch_config.concat_padding_mask else 0))
+        actual = model.patch_embed.dim // (model.patch_size[0] * model.patch_size[1] * model.patch_size[2])
         assert actual == expected
 
 

@@ -23,8 +23,8 @@ It serves three audiences:
 pytest fastvideo/tests/performance/ -vs
 
 # Optional: compare against the rolling HF baseline.
-# PERF_REPORTS_DIR defaults to /root/data/perf_reports for Modal/CI, so
-# override it when running outside the container.
+# PERF_REPORTS_DIR defaults to /root/data/perf_reports in a CI container, so
+# override it for a local run.
 PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
 python fastvideo/tests/performance/compare_baseline.py
 
@@ -57,6 +57,54 @@ For an app-style local dashboard backed by the same HF performance-tracking
 records, see `performance_dashboard/README.md`. The dashboard provides a
 FastAPI API plus a React UI and can be exposed with `ngrok` after building the
 frontend.
+
+## DGX Spark (GB10) local benchmarking
+
+The NVIDIA DGX Spark (GB10) is not available on Modal, so its coverage is
+**local/manual** rather than automated CI. The GB10 benchmark
+`wan-t2v-1.3b-1gpu-gb10` is gated to the GB10 via `run_config.gpu_types`
+(matched as substrings of the CUDA device name), so the shared H100/L40S
+performance lanes discover it and skip it, while a GB10 owner runs it locally.
+
+Run just the GB10 benchmark on a DGX Spark:
+
+```bash
+pytest 'fastvideo/tests/performance/test_inference_performance.py::test_inference_performance[wan-t2v-1.3b-1gpu-gb10]' -vs
+```
+
+To check run-to-run stability (latency, peak memory, throughput), run it a few
+times from a clean results directory, then normalize:
+
+```bash
+rm -f fastvideo/tests/performance/results/perf_*.json
+for i in 1 2 3 4 5; do
+  pytest 'fastvideo/tests/performance/test_inference_performance.py::test_inference_performance[wan-t2v-1.3b-1gpu-gb10]' -vs
+done
+PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
+  python fastvideo/tests/performance/compare_baseline.py
+```
+
+`compare_baseline.py` reports `CALIBRATION_NEEDED` until a baseline exists for
+the GB10 identity, and writes one `normalized_perf_*.json` per run. Reference
+figures on a GB10 (torch 2.12.0+cu130, transformers 5.14.0): generation ~39.3 s,
+peak ~8.4 GB, throughput ~1.15 fps, stable to ~0.4% across five runs.
+
+### Seeding the GB10 baseline (follow-up)
+
+Seeding a baseline-eligible record for the GB10 identity is intentionally **not**
+done from a local run: `seed_baseline.py` accepts only `scheduled_main`
+full-suite source artifacts, so ordinary local/manual uploads stay
+`baseline_eligible=false` (dashboard-visible, but they do not move the rolling
+baseline). Establishing the GB10 baseline requires either:
+
+* a scheduled-main performance run on a GB10 CI runner once one is available, or
+* a carefully scoped, maintainer-approved manual calibration path that preserves
+  the existing exact-identity, batch-consistency, provenance, and
+  explicit-approval safeguards — it must **not** make arbitrary local uploads
+  baseline-eligible.
+
+The reviewed five-run GB10 artifacts are the stability evidence for that first
+baseline. Tracked in #1632.
 
 ## Architecture
 
@@ -128,6 +176,11 @@ does not report one of the mapped stages, that component metric is stored as
 
 There are **two independent regression gates** — they protect against
 different failure modes and are not redundant.
+
+A config can additionally restrict which hardware it runs on via
+`run_config.gpu_types` (substring match against the CUDA device name); a
+non-matching device skips the benchmark entirely. That is a run gate, not a
+regression gate.
 
 ### Static thresholds (per-GPU)
 
@@ -251,6 +304,13 @@ added without `config_schema_version: 2`, loading also fails so partial
 migrations do not silently run as v1 configs. Optional v2 `quality_metadata`
 and the v1/v2 `regression_thresholds` policy must be JSON objects when present.
 (`recipe` is emitted by the harness and is not config-declarable.)
+
+`run_config.gpu_types` is an optional list of non-empty strings. Each entry is
+substring-matched against the CUDA device name; if no entry matches, the
+benchmark is skipped on that device, so a hardware-specific config does not run
+on shared lanes. Discovery fails when an entry has no matching `thresholds` key
+or when `thresholds` has no `default` block, which prevents a gated config from
+silently falling back to `default`.
 
 V2 records compare only within their exact identity cohort. A record that opens
 a new cohort is marked `baseline_status: "initialized_new_cohort"` and
@@ -466,16 +526,18 @@ FlashInfer, Cutlass DSL, SageAttention, Triton, and xFormers when installed.
 | `FASTVIDEO_FA4` | `0` | `test_inference_performance.py` | FlashAttention-4 toggle included in `software_profile_id`. |
 | `FASTVIDEO_PERFORMANCE_PROFILE_VERSION` | unset | `test_inference_performance.py` | Optional explicit software cohort/profile version included in `software_profile_id`. |
 | `IMAGE_VERSION` | unset | `test_inference_performance.py` | CI container image/profile version included in `software_profile_id` when available. |
-| `FASTVIDEO_CONTAINER_IMAGE_REF` | unset | `pr_test.py`, `launch_l40s_job.py`, `test_inference_performance.py` | Resolved CI container image ref or digest recorded in `environment_metadata` for audit without changing `software_profile_id`. |
+| `FASTVIDEO_CONTAINER_IMAGE_REF` | unset | Slurm runner, `test_inference_performance.py` | Pinned CI container image digest recorded in `environment_metadata` and `software_profile_id`. |
 | `FASTVIDEO_STAGE_LOGGING` | set by the pytest test | `test_inference_performance.py` | Enables pipeline stage timing capture for component metrics during benchmark runs. |
 
 ## CI integration
 
-The performance step can run on demand with `/test performance` and as part of
-the Full Suite (see [CI/CD Architecture](ci_architecture.md)). The Modal entry
-point is `fastvideo/tests/modal/pr_test.py:run_performance_tests` and the
-Buildkite artifact upload is in
-`.buildkite/scripts/pr_test.sh:upload_performance_artifacts`.
+The performance step can run on demand with `/test performance`, through a
+merge gate when performance tests or benchmark policy changed, and as part of
+an explicit `/test full` run (see [CI/CD Architecture](ci_architecture.md)).
+The weekly `fastvideo-performance-lane` schedule runs the same Slurm payload.
+The active entry point is `.buildkite/scripts/lanes/performance.sh`; the
+trusted host dispatcher relays its allowlisted reports to Buildkite after the
+isolated container exits.
 
 Each performance build runs pytest first. PR and direct runs only continue to
 `compare_baseline.py` when that fixed-threshold phase passes; if pytest fails,
@@ -520,7 +582,8 @@ When the rolling-baseline phase runs, it emits:
      "generation_kwargs": { "num_frames": 45, ... },
      "test_prompts": ["..."],
      "run_config": { "required_gpus": 1,
-                     "num_warmup_runs": 1, "num_measurement_runs": 3 },
+                     "num_warmup_runs": 1, "num_measurement_runs": 3,
+                     "gpu_types": ["<device-name-substring>"] },
      "thresholds": {
        "L40S": {
          "max_generation_time_s": 34.0,

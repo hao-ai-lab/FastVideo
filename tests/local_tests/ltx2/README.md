@@ -16,7 +16,7 @@ skip or fail. Skipped in CI; run locally on a single GPU.
 | Official commit/version | `<TODO>` |
 | HF weights | `Lightricks/LTX-2`, `FastVideo/LTX2-base`, `FastVideo/LTX2-Distilled-Diffusers` |
 | HF revision | `<TODO>` |
-| Local weights dir | `<TODO>` (env: `LTX2_DIFFUSERS_PATH`, `LTX2_FASTVIDEO_GEMMA_LOG`, etc.) |
+| Local weights dir | `<TODO>` (env: `LTX2_DIFFUSERS_PATH`, `FASTVIDEO_LTX2_GEMMA_LOG`, etc.) |
 | Source layout | `<TODO: diffusers / raw_official / mixed>` |
 | Needs conversion | `<TODO>` |
 

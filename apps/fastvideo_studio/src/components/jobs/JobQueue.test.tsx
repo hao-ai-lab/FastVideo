@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import JobQueue from '@/components/jobs/JobQueue';
@@ -37,6 +37,46 @@ beforeEach(() => {
 });
 
 describe('JobQueue', () => {
+  it('shows a loading placeholder before the initial request settles', async () => {
+    let resolveJobs: (jobs: Job[]) => void = () => {};
+    vi.mocked(getJobsList).mockReturnValue(
+      new Promise<Job[]>((resolve) => {
+        resolveJobs = resolve;
+      }),
+    );
+
+    render(<JobQueue jobType="inference" />);
+
+    expect(screen.getByLabelText('Loading jobs')).toBeInTheDocument();
+    expect(
+      screen.queryByText('No inference jobs yet. Create one above.'),
+    ).not.toBeInTheDocument();
+
+    act(() => resolveJobs([]));
+    expect(
+      await screen.findByText('No inference jobs yet. Create one above.'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows request failures separately from an empty queue and retries', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(getJobsList).mockRejectedValueOnce(new Error('network down'));
+    render(<JobQueue jobType="inference" />);
+
+    expect(
+      await screen.findByText(/Could not load jobs from the Studio API/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('No inference jobs yet. Create one above.'),
+    ).not.toBeInTheDocument();
+
+    vi.mocked(getJobsList).mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(
+      await screen.findByText('No inference jobs yet. Create one above.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows an empty placeholder and fetches for the single job type', async () => {
     render(<JobQueue jobType="inference" />);
     expect(

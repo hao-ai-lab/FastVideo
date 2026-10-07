@@ -120,3 +120,21 @@ class Kandinsky5I2VConfig(Kandinsky5T2VConfig):
         super().__post_init__()
         # I2V needs the VAE encoder to encode the conditioning image.
         self.vae_config.load_encoder = True
+
+
+@dataclass
+class Kandinsky5DMDConfig(Kandinsky5T2VConfig):
+    """Kandinsky-5.0 DMD (few-step distilled) text-to-video pipeline configuration.
+
+    Checkpoints exported by ``fastvideo.train.entrypoint.dcp_to_diffusers``
+    copy their base T2V checkpoint's ``model_index.json`` unchanged, so
+    ``_class_name`` still says the base T2V pipeline and the registry
+    (``fastvideo/registry.py``) cannot auto-detect a DMD export -- pass this
+    config together with ``override_pipeline_cls_name="Kandinsky5DMDPipeline"``
+    explicitly to ``VideoGenerator.from_pretrained``/``from_config`` (see
+    ``examples/train/configs/fine_tuning/kandinsky5/README.md``). Without it,
+    ``Kandinsky5T2VConfig``'s ``dmd_denoising_steps=None`` makes
+    ``Kandinsky5DmdDenoisingStage`` raise immediately.
+    """
+
+    dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 750, 500, 250])

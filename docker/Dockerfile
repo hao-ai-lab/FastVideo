@@ -68,7 +68,7 @@ ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-p
 # cutlass-4.4 `cute.core.ThrMma` API, which crashes on the cutlass-dsl 4.5 that
 # flashinfer/quack pull in. After the wheel install we overlay this cutlass-4.5-safe
 # upstream cute (flash-attn-4) so the image runs FA4 instead of the FA2 fallback.
-ARG FA4_CUTE_REF=82d6441eec5d4dfec120153db2c0145ae855a083
+ARG FA4_CUTE_REF=14c377950125c70b7a9dabf9c561fca53715ac7d
 
 # Provided automatically by BuildKit/buildx (e.g. "amd64" / "arm64") and used to
 # select the prebuilt flash-attn wheel. Empty under a plain `docker build` without
@@ -89,10 +89,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zsh \
     vim \
     curl \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libx11-dev \
     gcc-11 \
     g++-11 \
     clang-11 \
+    cmake \
+    pkg-config \
+    build-essential \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Rust toolchain: some dependencies only ship sdists on aarch64 and need cargo
+# to build. The dormant legacy Modal image layers the identical apt set +
+# rustup on top of this image (fastvideo/tests/modal/pr_test.py); baking both
+# here keeps its manual rollback path reproducible without changing the Slurm
+# runner's package surface.
+RUN set -o pipefail && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal && \
+    /root/.cargo/bin/cargo --version && /root/.cargo/bin/rustc --version
+ENV PATH=/root/.cargo/bin:${PATH}
 
 # Set up C++20 compilers for ThunderKittens
 RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
@@ -138,6 +156,7 @@ RUN --mount=type=cache,target=/opt/uv/cache \
     source /opt/venv/bin/activate && \
     uv pip install --upgrade pip && \
     uv pip install --excludes docker/uv-excludes ".[dev]" && \
+    python -c "import cv2; print('OpenCV', cv2.__version__)" && \
     PYTAG=cp$(echo "${PYTHON_VERSION}" | tr -d .) && \
     case "${TARGETARCH:-amd64}" in \
         amd64) \
@@ -169,32 +188,52 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 # flash_attn/__init__.py), so FA2/varlen/bert_padding stay from the install above;
 # rmtree clears the wheel's stale cute files first to avoid an install conflict.
 # Then verify both survive so a broken overlay fails the build instead of shipping
-# an FA2-less image. x86 only: the FA4 stack (quack-kernels etc.) is unvalidated on
-# arm64 / GB10 (sm_121), so there we skip the overlay; FA4 is opt-in
-# (FASTVIDEO_FA4=1) and errors if set without the overlay, so leave it unset on
-# arm64 and the image runs FA3/FA2 as usual.
+# an FA2-less image. The pinned stack is validated on ARM64 GB200 (sm_100) as well
+# as x86; FA4 remains opt-in through FASTVIDEO_FA4=1 so lanes with FA2 baselines
+# keep their existing numerics.
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    if [ "${TARGETARCH}" = "arm64" ]; then \
-        echo "Skipping FA4 cute overlay on arm64 (FA4 stack unvalidated there; do not set FASTVIDEO_FA4)"; \
-    else \
-        python -c "import glob, shutil; [shutil.rmtree(d, ignore_errors=True) for d in glob.glob('/opt/venv/lib/python*/site-packages/flash_attn/cute')]" && \
-        uv pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@${FA4_CUTE_REF}#subdirectory=flash_attn/cute" && \
-        python -c "import flash_attn; assert hasattr(flash_attn, 'flash_attn_func'), 'FA2 was clobbered by the cute overlay'; import flash_attn.cute; print('FA2 + FA4 cute OK')"; \
-    fi
+    python -c "import glob, shutil; [shutil.rmtree(d, ignore_errors=True) for d in glob.glob('/opt/venv/lib/python*/site-packages/flash_attn/cute')]" && \
+    uv pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@${FA4_CUTE_REF}#subdirectory=flash_attn/cute" && \
+    python -c "import flash_attn; assert hasattr(flash_attn, 'flash_attn_func'), 'FA2 was clobbered by the cute overlay'; import flash_attn.cute; print('FA2 + FA4 cute OK')"
 
 COPY . .
 
-# Install FastVideo Unified Kernel exactly once. build.sh initializes only its
-# CUTLASS/ThunderKittens submodules, then compiles for TORCH_CUDA_ARCH_LIST
-# (default Hopper sm_90a) without requiring a live GPU.
+# Build immutable FastVideo kernel wheels for the published image. The requested
+# architecture remains installed for normal image users; amd64 images also carry
+# an SM89 artifact for L40S users and the dormant legacy rollback path.
+ARG FASTVIDEO_KERNEL_PREBUILT_DIR=/opt/fastvideo-kernel-prebuilt
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
+    default_arch="${TORCH_CUDA_ARCH_LIST}" && \
+    default_wheel_dir="${FASTVIDEO_KERNEL_PREBUILT_DIR}/${default_arch}" && \
+    export TORCH_CUDA_ARCH_LIST="${default_arch}" && \
     cd fastvideo-kernel && \
-    CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL} \
-    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} ./build.sh
+    CMAKE_ARGS= CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL} \
+    ./build.sh --wheel-dir "${default_wheel_dir}" && \
+    cd /FastVideo && \
+    CMAKE_ARGS= python fastvideo/tests/modal/kernel_build_cache.py write-build-info \
+        --wheel-dir "${default_wheel_dir}" \
+        --output "${default_wheel_dir}/metadata.json" && \
+    if [[ "${TARGETARCH:-amd64}" == "amd64" && "${default_arch}" != "8.9" ]]; then \
+        export TORCH_CUDA_ARCH_LIST=8.9 && \
+        l40s_wheel_dir="${FASTVIDEO_KERNEL_PREBUILT_DIR}/8.9" && \
+        cd /FastVideo/fastvideo-kernel && \
+        CMAKE_ARGS= CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL} \
+        ./build.sh --wheel-dir "${l40s_wheel_dir}" && \
+        cd /FastVideo && \
+        CMAKE_ARGS= python fastvideo/tests/modal/kernel_build_cache.py write-build-info \
+            --wheel-dir "${l40s_wheel_dir}" \
+            --output "${l40s_wheel_dir}/metadata.json"; \
+    fi && \
+    export TORCH_CUDA_ARCH_LIST="${default_arch}" && \
+    default_wheel="$(find "${default_wheel_dir}" -maxdepth 1 -type f \
+        \( -name 'fastvideo_kernel-*.whl' -o -name 'fastvideo-kernel-*.whl' \) \
+        | sort | tail -n 1)" && \
+    uv pip install "${default_wheel}" \
+        --reinstall-package fastvideo-kernel --no-deps
 
 # Install FastVideo itself (editable) now that the source is present, and set up
 # shell configuration. Dependencies and the local kernel are already installed,

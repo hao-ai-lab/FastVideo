@@ -138,7 +138,7 @@ def test_euler_sampler_does_not_renoise_between_steps():
     sampler.sample(model, _batch(), generator=torch.Generator().manual_seed(0))
 
     assert model.add_noise_calls == 0
-    assert model.timestep_shapes == [(2,), (2,), (2,), (2,)]
+    assert model.timestep_shapes == [(2, ), (2, ), (2, ), (2, )]
 
 
 def test_sde_reflow_sampler_renoises_between_steps():

@@ -59,7 +59,6 @@ from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
 
-
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -167,9 +166,7 @@ class MultiModalityRMSNorm(nn.Module):
         t = self._rms(x)
         if self.num_modality == 1:
             return (t * (self.weight + 1)).to(original_dtype)
-        assert modality_dispatcher is not None, (
-            "MultiModalityRMSNorm with num_modality>1 requires a dispatcher"
-        )
+        assert modality_dispatcher is not None, ("MultiModalityRMSNorm with num_modality>1 requires a dispatcher")
         weight_chunks = self.weight.chunk(self.num_modality, dim=0)
         parts = modality_dispatcher.dispatch(t)
         for i in range(self.num_modality):
@@ -179,7 +176,7 @@ class MultiModalityRMSNorm(nn.Module):
 
 def _freq_bands(num_bands: int, temperature: float = 10000.0) -> torch.Tensor:
     exp = torch.arange(0, num_bands, 1, dtype=torch.int64).float() / num_bands
-    return 1.0 / (temperature ** exp)
+    return 1.0 / (temperature**exp)
 
 
 class ElementWiseFourierEmbed(nn.Module):
@@ -258,13 +255,9 @@ class PackedExpertLinear(nn.Module):
         self.out_features = out_features
         self.num_experts = num_experts
         self.use_bias = bias
-        self.weight = nn.Parameter(
-            torch.empty(out_features * num_experts, in_features, dtype=dtype)
-        )
+        self.weight = nn.Parameter(torch.empty(out_features * num_experts, in_features, dtype=dtype))
         if bias:
-            self.bias = nn.Parameter(
-                torch.empty(out_features * num_experts, dtype=dtype)
-            )
+            self.bias = nn.Parameter(torch.empty(out_features * num_experts, dtype=dtype))
         else:
             self.register_parameter("bias", None)
 
@@ -275,15 +268,10 @@ class PackedExpertLinear(nn.Module):
     ) -> torch.Tensor:
         if self.num_experts == 1:
             return F.linear(x, self.weight, self.bias)
-        assert modality_dispatcher is not None, (
-            "PackedExpertLinear with num_experts>1 requires a dispatcher"
-        )
+        assert modality_dispatcher is not None, ("PackedExpertLinear with num_experts>1 requires a dispatcher")
         parts = modality_dispatcher.dispatch(x)
         w_chunks = self.weight.chunk(self.num_experts, dim=0)
-        b_chunks = (
-            self.bias.chunk(self.num_experts, dim=0)
-            if self.bias is not None else [None] * self.num_experts
-        )
+        b_chunks = (self.bias.chunk(self.num_experts, dim=0) if self.bias is not None else [None] * self.num_experts)
         for i in range(self.num_experts):
             parts[i] = F.linear(parts[i], w_chunks[i], b_chunks[i])
         return modality_dispatcher.undispatch(*parts)
@@ -313,18 +301,19 @@ class MagiAttention(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.gating_size = cfg.num_heads_q if cfg.enable_attn_gating else 0
-        qkv_out = (
-            cfg.num_heads_q * cfg.head_dim
-            + 2 * cfg.num_heads_kv * cfg.head_dim
-            + self.gating_size
-        )
+        qkv_out = (cfg.num_heads_q * cfg.head_dim + 2 * cfg.num_heads_kv * cfg.head_dim + self.gating_size)
         self.pre_norm = MultiModalityRMSNorm(cfg.hidden_size, num_modality=cfg.num_modality)
         self.linear_qkv = PackedExpertLinear(
-            cfg.hidden_size, qkv_out, num_experts=cfg.num_modality, bias=False,
+            cfg.hidden_size,
+            qkv_out,
+            num_experts=cfg.num_modality,
+            bias=False,
         )
         self.linear_proj = PackedExpertLinear(
-            cfg.num_heads_q * cfg.head_dim, cfg.hidden_size,
-            num_experts=cfg.num_modality, bias=False,
+            cfg.num_heads_q * cfg.head_dim,
+            cfg.hidden_size,
+            num_experts=cfg.num_modality,
+            bias=False,
         )
         self.q_norm = MultiModalityRMSNorm(cfg.head_dim, num_modality=cfg.num_modality)
         self.k_norm = MultiModalityRMSNorm(cfg.head_dim, num_modality=cfg.num_modality)
@@ -389,10 +378,8 @@ class MagiAttention(nn.Module):
         if num_frames <= 0 or num_video_tokens <= 0:
             return self._sdpa(q, k, v)
         if num_video_tokens % num_frames != 0:
-            raise ValueError(
-                f"MagiHuman local attention expects video tokens divisible by "
-                f"frames, got {num_video_tokens=} and {num_frames=}."
-            )
+            raise ValueError(f"MagiHuman local attention expects video tokens divisible by "
+                             f"frames, got {num_video_tokens=} and {num_frames=}.")
 
         token_per_frame = num_video_tokens // num_frames
         out = torch.zeros(
@@ -447,7 +434,9 @@ class MagiAttention(nn.Module):
         h = self.pre_norm(hidden_states, modality_dispatcher=modality_dispatcher).to(orig_dtype)
         qkv = self.linear_qkv(h, modality_dispatcher=modality_dispatcher).float()
         q, k, v, g = torch.split(
-            qkv, [self.q_size, self.kv_size, self.kv_size, self.gating_size], dim=-1,
+            qkv,
+            [self.q_size, self.kv_size, self.kv_size, self.gating_size],
+            dim=-1,
         )
         q = q.view(-1, self.cfg.num_heads_q, self.cfg.head_dim)
         k = k.view(-1, self.cfg.num_heads_kv, self.cfg.head_dim)
@@ -521,23 +510,29 @@ class MagiAttention(nn.Module):
 class MLPSubConfig:
     hidden_size: int
     intermediate_size: int
-    activation: str              # "swiglu7" or "gelu7"
+    activation: str  # "swiglu7" or "gelu7"
     num_modality: int
     gated: bool
 
 
 class MagiMLP(nn.Module):
+
     def __init__(self, cfg: MLPSubConfig):
         super().__init__()
         self.cfg = cfg
         self.pre_norm = MultiModalityRMSNorm(cfg.hidden_size, num_modality=cfg.num_modality)
         up_out = cfg.intermediate_size * 2 if cfg.gated else cfg.intermediate_size
         self.up_gate_proj = PackedExpertLinear(
-            cfg.hidden_size, up_out, num_experts=cfg.num_modality, bias=False,
+            cfg.hidden_size,
+            up_out,
+            num_experts=cfg.num_modality,
+            bias=False,
         )
         self.down_proj = PackedExpertLinear(
-            cfg.intermediate_size, cfg.hidden_size,
-            num_experts=cfg.num_modality, bias=False,
+            cfg.intermediate_size,
+            cfg.hidden_size,
+            num_experts=cfg.num_modality,
+            bias=False,
         )
         self._act = swiglu7 if cfg.activation == "swiglu7" else gelu7
 
@@ -555,21 +550,23 @@ class MagiMLP(nn.Module):
 
 
 class MagiTransformerLayer(nn.Module):
+
     def __init__(self, arch: MagiHumanArchConfig, layer_idx: int):
         super().__init__()
         num_modality = 3 if layer_idx in arch.mm_layers else 1
         self.post_norm = layer_idx in arch.post_norm_layers
         self.layer_idx = layer_idx
 
-        self.attention = MagiAttention(AttentionSubConfig(
-            hidden_size=arch.hidden_size,
-            num_heads_q=arch.num_attention_heads,
-            num_heads_kv=arch.num_heads_kv,
-            head_dim=arch.head_dim,
-            num_modality=num_modality,
-            enable_attn_gating=arch.enable_attn_gating,
-            use_local_attn=layer_idx in arch.local_attn_layers,
-        ))
+        self.attention = MagiAttention(
+            AttentionSubConfig(
+                hidden_size=arch.hidden_size,
+                num_heads_q=arch.num_attention_heads,
+                num_heads_kv=arch.num_heads_kv,
+                head_dim=arch.head_dim,
+                num_modality=num_modality,
+                enable_attn_gating=arch.enable_attn_gating,
+                use_local_attn=layer_idx in arch.local_attn_layers,
+            ))
 
         is_gelu7 = layer_idx in arch.gelu7_layers
         if is_gelu7:
@@ -581,13 +578,14 @@ class MagiTransformerLayer(nn.Module):
             gated = True
             activation = "swiglu7"
 
-        self.mlp = MagiMLP(MLPSubConfig(
-            hidden_size=arch.hidden_size,
-            intermediate_size=intermediate,
-            activation=activation,
-            num_modality=num_modality,
-            gated=gated,
-        ))
+        self.mlp = MagiMLP(
+            MLPSubConfig(
+                hidden_size=arch.hidden_size,
+                intermediate_size=intermediate,
+                activation=activation,
+                num_modality=num_modality,
+                gated=gated,
+            ))
 
         if self.post_norm:
             self.attn_post_norm = MultiModalityRMSNorm(arch.hidden_size, num_modality=num_modality)
@@ -604,7 +602,11 @@ class MagiTransformerLayer(nn.Module):
         num_frames: int | None = None,
     ) -> torch.Tensor:
         attn_out = self.attention(
-            hidden_states, rope, permute_mapping, inv_permute_mapping, modality_dispatcher,
+            hidden_states,
+            rope,
+            permute_mapping,
+            inv_permute_mapping,
+            modality_dispatcher,
             num_video_tokens=num_video_tokens,
             num_frames=num_frames,
         )
@@ -624,17 +626,27 @@ class MagiTransformerLayer(nn.Module):
 
 
 class MagiAdapter(nn.Module):
+
     def __init__(self, arch: MagiHumanArchConfig):
         super().__init__()
         # Embedders stay in fp32 to match the reference dtype exactly.
         self.video_embedder = nn.Linear(
-            arch.video_in_channels, arch.hidden_size, bias=True, dtype=torch.float32,
+            arch.video_in_channels,
+            arch.hidden_size,
+            bias=True,
+            dtype=torch.float32,
         )
         self.text_embedder = nn.Linear(
-            arch.text_in_channels, arch.hidden_size, bias=True, dtype=torch.float32,
+            arch.text_in_channels,
+            arch.hidden_size,
+            bias=True,
+            dtype=torch.float32,
         )
         self.audio_embedder = nn.Linear(
-            arch.audio_in_channels, arch.hidden_size, bias=True, dtype=torch.float32,
+            arch.audio_in_channels,
+            arch.hidden_size,
+            bias=True,
+            dtype=torch.float32,
         )
         self.rope = ElementWiseFourierEmbed(arch.head_dim)
         # RoPE cache: coords_mapping is the same tensor object across timesteps
@@ -666,18 +678,16 @@ class MagiAdapter(nn.Module):
         a_w = self.audio_embedder.weight
         t_w = self.text_embedder.weight
         out = torch.zeros(
-            x.shape[0], self.video_embedder.out_features,
-            device=x.device, dtype=v_w.dtype,
+            x.shape[0],
+            self.video_embedder.out_features,
+            device=x.device,
+            dtype=v_w.dtype,
         )
-        out[text_mask] = self.text_embedder(
-            x[text_mask, : self.text_embedder.in_features].to(t_w.dtype)
-        ).to(out.dtype)
-        out[audio_mask] = self.audio_embedder(
-            x[audio_mask, : self.audio_embedder.in_features].to(a_w.dtype)
-        ).to(out.dtype)
-        out[video_mask] = self.video_embedder(
-            x[video_mask, : self.video_embedder.in_features].to(v_w.dtype)
-        ).to(out.dtype)
+        out[text_mask] = self.text_embedder(x[text_mask, :self.text_embedder.in_features].to(t_w.dtype)).to(out.dtype)
+        out[audio_mask] = self.audio_embedder(x[audio_mask, :self.audio_embedder.in_features].to(a_w.dtype)).to(
+            out.dtype)
+        out[video_mask] = self.video_embedder(x[video_mask, :self.video_embedder.in_features].to(v_w.dtype)).to(
+            out.dtype)
         return out, rope
 
 
@@ -693,9 +703,7 @@ class _TransformerBlock(nn.Module):
 
     def __init__(self, arch: MagiHumanArchConfig):
         super().__init__()
-        self.layers = nn.ModuleList([
-            MagiTransformerLayer(arch, i) for i in range(arch.num_layers)
-        ])
+        self.layers = nn.ModuleList([MagiTransformerLayer(arch, i) for i in range(arch.num_layers)])
 
     def configure_local_attention(
         self,
@@ -770,10 +778,16 @@ class MagiHumanDiT(BaseDiT):
         self.final_norm_video = MultiModalityRMSNorm(arch.hidden_size)
         self.final_norm_audio = MultiModalityRMSNorm(arch.hidden_size)
         self.final_linear_video = nn.Linear(
-            arch.hidden_size, arch.video_in_channels, bias=False, dtype=torch.float32,
+            arch.hidden_size,
+            arch.video_in_channels,
+            bias=False,
+            dtype=torch.float32,
         )
         self.final_linear_audio = nn.Linear(
-            arch.hidden_size, arch.audio_in_channels, bias=False, dtype=torch.float32,
+            arch.hidden_size,
+            arch.audio_in_channels,
+            bias=False,
+            dtype=torch.float32,
         )
         # Dispatcher + mask cache: modality_mapping is the same tensor object
         # across all timesteps in the denoising loop; data_ptr()+shape+dtype+device
@@ -840,7 +854,8 @@ class MagiHumanDiT(BaseDiT):
         x = ModalityDispatcher.permute(x, dispatcher.permute_mapping)
 
         x = self.block(
-            x, rope,
+            x,
+            rope,
             permute_mapping=dispatcher.permute_mapping,
             inv_permute_mapping=dispatcher.inv_permute_mapping,
             modality_dispatcher=dispatcher,
@@ -859,8 +874,8 @@ class MagiHumanDiT(BaseDiT):
 
         max_ch = max(self.arch.video_in_channels, self.arch.audio_in_channels)
         out = torch.zeros(x.shape[0], max_ch, device=x.device, dtype=x.dtype)
-        out[video_mask, : self.arch.video_in_channels] = x_video.to(out.dtype)
-        out[audio_mask, : self.arch.audio_in_channels] = x_audio.to(out.dtype)
+        out[video_mask, :self.arch.video_in_channels] = x_video.to(out.dtype)
+        out[audio_mask, :self.arch.audio_in_channels] = x_audio.to(out.dtype)
         return out
 
 

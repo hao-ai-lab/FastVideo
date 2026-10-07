@@ -10,9 +10,9 @@ Usage:
     pytest fastvideo/tests/ssim/test_gen3c_similarity.py -v
 
 Environment variables:
-    GEN3C_MODEL_PATH  - Diffusers-format GEN3C model path/repo id.
-                        Default: FastVideo/GEN3C-Cosmos-7B-Diffusers
-                        (local converted path also supported)
+    FASTVIDEO_TEST_GEN3C_MODEL_PATH  - Diffusers-format GEN3C model path/repo id.
+                                       Default: FastVideo/GEN3C-Cosmos-7B-Diffusers
+                                       (local converted path also supported)
 """
 
 import os
@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
@@ -35,10 +36,10 @@ def _resolve_gen3c_test_image_path() -> str:
     Resolve image path for GEN3C I2V SSIM tests.
 
     Priority:
-    1) GEN3C_TEST_IMAGE_PATH env var
+    1) FASTVIDEO_TEST_GEN3C_IMAGE_PATH env var
     2) Repo asset image
     """
-    env_image = os.getenv("GEN3C_TEST_IMAGE_PATH")
+    env_image = envs.FASTVIDEO_TEST_GEN3C_IMAGE_PATH.get()
     if env_image:
         return env_image
 
@@ -57,6 +58,10 @@ if "A40" in device_name:
     device_reference_folder = "A40" + device_reference_folder_suffix
 elif "L40S" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
+elif "GB200" in device_name:
+    # must be checked before any future bare-"B200" branch: these are
+    # substring tests and "B200" is a substring of "NVIDIA GB200"
+    device_reference_folder = "GB200" + device_reference_folder_suffix
 else:
     device_reference_folder = None
     logger.warning(f"Unsupported device for GEN3C SSIM tests: {device_name}")
@@ -65,10 +70,10 @@ else:
 # GEN3C generation parameters
 # ---------------------------------------------------------------------------
 
+# The test reads the model path from FASTVIDEO_TEST_GEN3C_MODEL_PATH and the input image from
+# _resolve_gen3c_test_image_path().
 GEN3C_T2V_PARAMS = {
     "num_gpus": 1,
-    "model_path": os.getenv("GEN3C_MODEL_PATH",
-                            "FastVideo/GEN3C-Cosmos-7B-Diffusers"),
     "height": 720,
     "width": 1280,
     "num_frames": 121,
@@ -77,7 +82,6 @@ GEN3C_T2V_PARAMS = {
     "embedded_cfg_scale": 6,
     "flow_shift": 1.0,
     "seed": 1024,
-    "image_path": _resolve_gen3c_test_image_path(),
     "sp_size": 1,
     "tp_size": 1,
     "fps": 24,
@@ -95,7 +99,6 @@ TEST_PROMPTS = [
 BASELINE_VIDEO_NAME = "gen3c_ssim_baseline.mp4"
 CANDIDATE_VIDEO_NAME = "gen3c_ssim_candidate.mp4"
 
-
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
@@ -108,11 +111,11 @@ CANDIDATE_VIDEO_NAME = "gen3c_ssim_candidate.mp4"
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["TORCH_SDPA"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """
     Generate a GEN3C video and compare against the reference using MS-SSIM.
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     base_output_dir = os.path.join(script_dir, "generated_videos", model_id)
@@ -122,28 +125,24 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     BASE_PARAMS = MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
-    model_path = BASE_PARAMS["model_path"]
+    model_path = envs.FASTVIDEO_TEST_GEN3C_MODEL_PATH.get()
 
     # Guard common misconfigurations to keep CI behavior explicit.
     if model_path.lower() == "nvidia/gen3c-cosmos-7b":
-        pytest.skip(
-            "nvidia/GEN3C-Cosmos-7B is the official raw checkpoint repo, not Diffusers format. "
-            "Use GEN3C_MODEL_PATH=FastVideo/GEN3C-Cosmos-7B-Diffusers or a local converted path."
-        )
+        pytest.skip("nvidia/GEN3C-Cosmos-7B is the official raw checkpoint repo, not Diffusers format. "
+                    "Use FASTVIDEO_TEST_GEN3C_MODEL_PATH=FastVideo/GEN3C-Cosmos-7B-Diffusers "
+                    "or a local converted path.")
 
     local_like = model_path.startswith(("/", "./", "../"))
     if local_like and not os.path.exists(model_path):
-        pytest.skip(
-            f"Local GEN3C model path not found: {model_path}. "
-            "Set GEN3C_MODEL_PATH to a valid local path or HF Diffusers repo id."
-        )
+        pytest.skip(f"Local GEN3C model path not found: {model_path}. "
+                    "Set FASTVIDEO_TEST_GEN3C_MODEL_PATH to a valid local path or HF Diffusers repo id.")
 
     if os.path.exists(model_path):
         model_index_path = os.path.join(model_path, "model_index.json")
         if not os.path.exists(model_index_path):
-            pytest.skip(
-                f"GEN3C_MODEL_PATH is not Diffusers-format (missing model_index.json): {model_path}"
-            )
+            pytest.skip("FASTVIDEO_TEST_GEN3C_MODEL_PATH is not Diffusers-format "
+                        f"(missing model_index.json): {model_path}")
 
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
@@ -162,15 +161,13 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         "guidance_scale": BASE_PARAMS["guidance_scale"],
         "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
         "seed": BASE_PARAMS["seed"],
-        "image_path": BASE_PARAMS["image_path"],
+        "image_path": _resolve_gen3c_test_image_path(),
         "fps": BASE_PARAMS["fps"],
     }
 
     if not os.path.exists(generation_kwargs["image_path"]):
-        pytest.skip(
-            f"GEN3C test image not found: {generation_kwargs['image_path']}. "
-            "Set GEN3C_TEST_IMAGE_PATH to a valid local image."
-        )
+        pytest.skip(f"GEN3C test image not found: {generation_kwargs['image_path']}. "
+                    "Set FASTVIDEO_TEST_GEN3C_IMAGE_PATH to a valid local image.")
 
     # Keep local reruns deterministic: remove prior candidate outputs so
     # VideoGenerator does not auto-suffix (_1, _2, ...).
@@ -178,9 +175,7 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     for stale_video in glob.glob(stale_pattern):
         os.remove(stale_video)
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=model_path, **init_kwargs
-    )
+    generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
     if isinstance(generator.executor, MultiprocExecutor):
@@ -188,26 +183,18 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     assert os.path.exists(output_dir), f"Output not generated at {output_dir}"
 
-    reference_folder = os.path.join(
-        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
-    )
+    reference_folder = os.path.join(script_dir, device_reference_folder, model_id, ATTENTION_BACKEND)
     if not os.path.exists(reference_folder):
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     reference_video_path = os.path.join(reference_folder, BASELINE_VIDEO_NAME)
     if not os.path.exists(reference_video_path):
-        raise FileNotFoundError(
-            f"Reference video not found: {reference_video_path}"
-        )
+        raise FileNotFoundError(f"Reference video not found: {reference_video_path}")
 
     generated_video_path = os.path.join(output_dir, output_video_name)
 
     logger.info(f"Computing SSIM: {reference_video_path} vs {generated_video_path}")
-    ssim_values = compute_video_ssim_torchvision(
-        reference_video_path, generated_video_path, use_ms_ssim=True
-    )
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
     mean_ssim = ssim_values[0]
     logger.info(f"GEN3C SSIM mean: {mean_ssim}")
@@ -224,5 +211,4 @@ def test_gen3c_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     # GEN3C SSIM threshold for stable L40S reference comparisons.
     min_acceptable_ssim = 0.93
     assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM {mean_ssim:.4f} < {min_acceptable_ssim} for {model_id} / {ATTENTION_BACKEND}"
-    )
+        f"SSIM {mean_ssim:.4f} < {min_acceptable_ssim} for {model_id} / {ATTENTION_BACKEND}")

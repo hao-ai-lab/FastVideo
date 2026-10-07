@@ -44,6 +44,7 @@ except ModuleNotFoundError:
     def resolve_uv_torch_backend(image_tag: str) -> str | None:
         return os.environ.get("UV_TORCH_BACKEND")
 
+
 app = modal.App("fastvideo-gpu-job")
 
 REPO_DIR = "/FastVideo"
@@ -67,11 +68,7 @@ print(f"Using image: {IMAGE_REF}")
 print(f"Using Modal volume: {MODEL_VOLUME_NAME}")
 
 model_vol = modal.Volume.from_name(MODEL_VOLUME_NAME, create_if_missing=True)
-local_secrets = modal.Secret.from_dict({
-    key: os.environ[key]
-    for key in SECRET_ENV_KEYS
-    if os.environ.get(key)
-})
+local_secrets = modal.Secret.from_dict({key: os.environ[key] for key in SECRET_ENV_KEYS if os.environ.get(key)})
 
 # Mutable tags inherit the registry image's baked backend, including custom
 # FASTVIDEO_MODAL_IMAGE overrides. Explicit CUDA tags also work with older
@@ -79,8 +76,7 @@ local_secrets = modal.Secret.from_dict({
 uv_torch_backend_override = resolve_uv_torch_backend(IMAGE_TAG)
 
 image = (
-    modal.Image.from_registry(IMAGE_REF, add_python="3.12")
-    .apt_install(
+    modal.Image.from_registry(IMAGE_REF, add_python="3.12").apt_install(
         "cmake",
         "pkg-config",
         "build-essential",
@@ -88,26 +84,32 @@ image = (
         "git",
         "libssl-dev",
         "ffmpeg",
-    )
-    .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
-    .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
-    .env({
-        "PATH": "/root/.cargo/bin:$PATH",
-        "HF_HOME": "/root/data/.cache",
-        "TOKENIZERS_PARALLELISM": "false",
-        "IMAGE_VERSION": IMAGE_VERSION,
-        "FASTVIDEO_CONTAINER_IMAGE_REF": IMAGE_REF,
-        **({"UV_TORCH_BACKEND": uv_torch_backend_override} if uv_torch_backend_override else {}),
-        "FASTVIDEO_ATTENTION_BACKEND": os.environ.get("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN"),
+    ).run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
+    .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc").env({
+        "PATH":
+        "/root/.cargo/bin:$PATH",
+        "HF_HOME":
+        "/root/data/.cache",
+        "TOKENIZERS_PARALLELISM":
+        "false",
+        "IMAGE_VERSION":
+        IMAGE_VERSION,
+        "FASTVIDEO_CONTAINER_IMAGE_REF":
+        IMAGE_REF,
+        **({
+            "UV_TORCH_BACKEND": uv_torch_backend_override
+        } if uv_torch_backend_override else {}),
+        "FASTVIDEO_ATTENTION_BACKEND":
+        os.environ.get("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN"),
         **({
             "FASTVIDEO_PERFORMANCE_PROFILE_VERSION": os.environ["FASTVIDEO_PERFORMANCE_PROFILE_VERSION"]
         } if os.environ.get("FASTVIDEO_PERFORMANCE_PROFILE_VERSION") else {}),
         # FA4 is opt-in (FASTVIDEO_FA4). Generic ad hoc jobs should follow the
         # product default unless a caller opts in through the local env or
         # --env-vars.
-        "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "0"),
-    })
-)
+        "FASTVIDEO_FA4":
+        os.environ.get("FASTVIDEO_FA4", "0"),
+    }))
 
 COMMON_FUNCTION_KWARGS = dict(
     image=image,
@@ -502,7 +504,8 @@ def _select_runner(gpu_type: str, num_gpus: int) -> Callable[..., Any]:
         return runners[(normalized_gpu_type, num_gpus)]
     except KeyError as error:
         supported = ", ".join(f"{gpu}:{count}" for gpu, count in sorted(runners))
-        raise RuntimeError(f"Unsupported GPU request {gpu_type}:{num_gpus}. Supported requests: {supported}.") from error
+        raise RuntimeError(
+            f"Unsupported GPU request {gpu_type}:{num_gpus}. Supported requests: {supported}.") from error
 
 
 @app.local_entrypoint()

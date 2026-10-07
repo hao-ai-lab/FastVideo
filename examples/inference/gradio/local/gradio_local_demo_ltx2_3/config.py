@@ -4,22 +4,13 @@ from pathlib import Path
 import torch
 import torch._inductor.config
 
-from fastvideo.configs.sample.base import SamplingParam
+from fastvideo import SamplingParam
 
 LOCAL_DEMO_DIR = Path(__file__).resolve().parent
-CLASSIFIER_DIR = Path(
-    os.path.expandvars(
-        os.path.expanduser(
-            os.getenv("LTX2_CLASSIFIER_DIR", str(LOCAL_DEMO_DIR))
-        )
-    )
-)
+CLASSIFIER_DIR = Path(os.path.expandvars(os.path.expanduser(os.getenv("LTX2_CLASSIFIER_DIR", str(LOCAL_DEMO_DIR)))))
 
 MODEL_ID = os.path.expandvars(
-    os.path.expanduser(
-        os.getenv("LTX2_3_MODEL_PATH", "FastVideo/LTX-2.3-Distilled-Diffusers")
-    )
-)
+    os.path.expanduser(os.getenv("LTX2_3_MODEL_PATH", "FastVideo/LTX-2.3-Distilled-Diffusers")))
 MODEL_PATH_MAPPING = {
     "FastLTX-2.3": MODEL_ID,
 }
@@ -44,6 +35,7 @@ config.coordinate_descent_tuning = True
 config.coordinate_descent_check_all_directions = True
 config.epilogue_fusion = False
 
+
 def apply_ltx2_defaults(params: SamplingParam) -> SamplingParam:
     params.height = DEFAULT_HEIGHT
     params.width = DEFAULT_WIDTH
@@ -55,8 +47,10 @@ def apply_ltx2_defaults(params: SamplingParam) -> SamplingParam:
     params.negative_prompt = DEFAULT_NEGATIVE_PROMPT
     return params
 
+
 def resolve_model_path(model_path: str) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(model_path)))
+
 
 def resolve_refine_upsampler_path(model_path: Path) -> Path:
     candidates = [
@@ -68,21 +62,18 @@ def resolve_refine_upsampler_path(model_path: Path) -> Path:
 
     env_path = os.getenv("LTX2_REFINE_UPSAMPLER_PATH")
     if env_path:
-        candidates.insert(
-            0, Path(os.path.expandvars(os.path.expanduser(env_path)))
-        )
+        candidates.insert(0, Path(os.path.expandvars(os.path.expanduser(env_path))))
 
     for candidate in candidates:
         if (candidate / "config.json").is_file():
             return candidate
 
     checked = "\n".join(f"  - {candidate}" for candidate in candidates)
-    raise FileNotFoundError(
-        "Could not find an LTX2 refine upsampler directory.\n"
-        "Checked:\n"
-        f"{checked}\n"
-        "Set LTX2_REFINE_UPSAMPLER_PATH or update REFINE_UPSAMPLER_PATH."
-    )
+    raise FileNotFoundError("Could not find an LTX2 refine upsampler directory.\n"
+                            "Checked:\n"
+                            f"{checked}\n"
+                            "Set LTX2_REFINE_UPSAMPLER_PATH or update REFINE_UPSAMPLER_PATH.")
+
 
 def setup_model_environment(model_path: str) -> None:
     _ = model_path

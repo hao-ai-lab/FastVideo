@@ -5,6 +5,7 @@ import pytest
 import random
 from fastvideo_kernel import moba_attn_varlen
 
+
 def generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype, device="cuda"):
     """
     Generates random data for testing the variable-length attention function.
@@ -21,7 +22,7 @@ def generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype, dev
         remaining_len = total_seqlen - sum(seqlens)
         if remaining_len > 0:
             seqlens.append(remaining_len)
-        else: # Adjust if sum exceeds total_seqlen
+        else:  # Adjust if sum exceeds total_seqlen
             seqlens.append(avg_seqlen)
             current_sum = sum(seqlens)
             seqlens[-1] -= (current_sum - total_seqlen)
@@ -52,9 +53,8 @@ def generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype, dev
 @pytest.mark.parametrize("select_mode", ["topk", "threshold"])
 @pytest.mark.parametrize("threshold_type", ["query_head", "head_global", "overall"])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_moba_attn_varlen_forward(
-    batch_size, total_seqlen, num_heads, head_dim, moba_chunk_size, moba_topk, select_mode, threshold_type, dtype
-):
+def test_moba_attn_varlen_forward(batch_size, total_seqlen, num_heads, head_dim, moba_chunk_size, moba_topk,
+                                  select_mode, threshold_type, dtype):
     """
     Tests the forward pass of moba_attn_varlen for basic correctness.
     It checks output shape, dtype, and for the presence of NaNs/Infs.
@@ -62,9 +62,7 @@ def test_moba_attn_varlen_forward(
     if dtype == torch.float32:
         pytest.skip("float32 is not supported in flash attention")
 
-    q, k, v, cu_seqlens, max_seqlen = generate_test_data(
-        batch_size, total_seqlen, num_heads, head_dim, dtype
-    )
+    q, k, v, cu_seqlens, max_seqlen = generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype)
 
     # Ensure chunk size is not larger than the smallest sequence length
     min_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).min().item()
@@ -82,7 +80,7 @@ def test_moba_attn_varlen_forward(
             moba_topk=moba_topk,
             select_mode=select_mode,
             threshold_type=threshold_type,
-            simsum_threshold=0.5, # A reasonable default for threshold mode
+            simsum_threshold=0.5,  # A reasonable default for threshold mode
         )
     except Exception as e:
         pytest.fail(f"moba_attn_varlen forward pass failed with exception: {e}")

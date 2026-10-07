@@ -6,6 +6,7 @@ This module contains implementations of prompt encoding stages for diffusion pip
 """
 
 import torch
+from collections.abc import Sequence
 from typing import Any
 
 from torch.distributed.tensor import DTensor
@@ -68,11 +69,13 @@ class TextEncodingStage(PipelineStage):
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
         all_indices: list[int] = list(range(len(self.text_encoders)))
+        max_length = self._resolve_max_length(batch, fastvideo_args)
         prompt_embeds_list, prompt_masks_list = self.encode_text(
             prompt_text,
             fastvideo_args,
             encoder_index=all_indices,
             return_attention_mask=True,
+            max_length=max_length,
         )
         if self._last_audio_embeds is not None:
             batch.extra["ltx2_audio_prompt_embeds"] = self._last_audio_embeds
@@ -91,6 +94,7 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args,
                 encoder_index=all_indices,
                 return_attention_mask=True,
+                max_length=max_length,
             )
             if self._last_audio_embeds is not None:
                 batch.extra["ltx2_audio_negative_embeds"] = self._last_audio_embeds
@@ -103,6 +107,18 @@ class TextEncodingStage(PipelineStage):
                     batch.negative_attention_mask.append(nm)
 
         return batch
+
+    def _resolve_max_length(self, batch: ForwardBatch,
+                            fastvideo_args: FastVideoArgs) -> int | Sequence[int | None] | None:
+        """The per-call ``max_length`` passed to :meth:`encode_text`.
+
+        Default: the request's ``max_sequence_length`` applied uniformly to every text encoder
+        (unchanged behavior). A subclass whose encoders need different per-request semantics (e.g.
+        Kandinsky6's Qwen-vs-CLIP split, see ``Kandinsky6TextEncodingStage``) overrides this to
+        return a sequence instead, one entry per encoder in call order (``None`` for "use this
+        encoder's own configured default").
+        """
+        return batch.max_sequence_length
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify text encoding stage inputs."""
@@ -126,7 +142,7 @@ class TextEncodingStage(PipelineStage):
         return_type: str = "list",  # one of: "list", "dict", "stack"
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-        max_length: int | None = None,
+        max_length: int | Sequence[int | None] | None = None,
         truncation: bool | None = None,
         padding: bool | str | None = None,
     ):
@@ -146,7 +162,10 @@ class TextEncodingStage(PipelineStage):
                 new first dimension (requires matching shapes).
             device: Optional device override for inputs; defaults to local torch device.
             dtype: Optional dtype to cast returned embeddings to.
-            max_length: Optional per-call tokenizer override.
+            max_length: Optional per-call tokenizer override. Either one value applied to every
+                selected encoder (existing behavior), or a sequence with one entry per encoder in
+                ``encoder_index`` order -- ``None`` at a position falls back to that encoder's own
+                configured default instead of the override.
             truncation: Optional per-call tokenizer override.
             padding: Optional per-call tokenizer override.
 
@@ -199,7 +218,7 @@ class TextEncodingStage(PipelineStage):
 
         target_device = device if device is not None else get_local_torch_device()
 
-        for i in indices:
+        for pos, i in enumerate(indices):
             tokenizer = self.tokenizers[i]
             text_encoder = self.text_encoders[i]
             encoder_config = encoder_cfgs[i]
@@ -221,9 +240,28 @@ class TextEncodingStage(PipelineStage):
                 encoder_device = torch.device(target_device)
                 moved_for_forward = True
 
+            # An explicit `device=` wins. Otherwise follow the encoder's real
+            # param device. Once it has been moved for the forward that is the
+            # target device, and an HF-passthrough encoder's
+            # _fastvideo_input_device (stamped at load, e.g. "cpu" under
+            # text_encoder_cpu_offload) is stale -- honouring it would feed cpu
+            # token ids to cuda weights. The marker only speaks when nothing
+            # moved and the module has no parameters to speak for it.
+            if device is not None:
+                input_device = torch.device(target_device)
+            elif moved_for_forward:
+                input_device = encoder_device
+            else:
+                input_device = getattr(text_encoder, "_fastvideo_input_device", encoder_device)
+
+            if isinstance(max_length, Sequence) and not isinstance(max_length, str):
+                per_encoder_max_length = max_length[pos] if pos < len(max_length) else None
+            else:
+                per_encoder_max_length = max_length
+
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
-            if max_length is not None:
-                tok_kwargs["max_length"] = max_length
+            if per_encoder_max_length is not None:
+                tok_kwargs["max_length"] = per_encoder_max_length
             elif hasattr(fastvideo_args.pipeline_config, "text_encoder_max_lengths"):
                 tok_kwargs["max_length"] = fastvideo_args.pipeline_config.text_encoder_max_lengths[i]
 
@@ -264,7 +302,7 @@ class TextEncodingStage(PipelineStage):
                     # pre-format prompts into message lists upstream and rely on
                     # the inner tokenizer + full tokenizer_kwargs (which include
                     # add_generation_prompt). Preserve that original path exactly.
-                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(encoder_device)
+                    text_inputs = tok.apply_chat_template(processed_texts, **tok_kwargs).to(input_device)
                 else:
                     # Two-step approach matching Diffusers: format with chat
                     # template first, then tokenize the resulting strings.
@@ -275,12 +313,12 @@ class TextEncodingStage(PipelineStage):
                             messages,
                             tokenize=False,
                             add_generation_prompt=True,
-                            enable_thinking=False,
+                            enable_thinking=encoder_config.chat_template_enable_thinking,
                         )
                         formatted_texts.append(formatted)
-                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(encoder_device)
+                    text_inputs = tokenizer(formatted_texts, **tok_kwargs).to(input_device)
             else:
-                text_inputs = tok(processed_texts, **tok_kwargs).to(encoder_device)
+                text_inputs = tok(processed_texts, **tok_kwargs).to(input_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
@@ -299,14 +337,19 @@ class TextEncodingStage(PipelineStage):
                 prompt_embeds = postprocess_func(outputs)
             except Exception:
                 prompt_embeds, attention_mask = postprocess_func(outputs, attention_mask)
+            # copy=True: when the text encoder is torch.compile'd with
+            # mode="reduce-overhead"/"max-autotune" (CUDAGraphs), its output
+            # tensors are backed by the graph's static buffer pool and are
+            # overwritten by the next encode call (e.g. the negative prompt).
+            # Retaining them past this call (batch.prompt_embeds is consumed
+            # at denoising time) then raises "accessing tensor output of
+            # CUDAGraphs that has been overwritten by a subsequent run", so
+            # copy them out of graph-owned storage here, at the single point
+            # where encoder outputs escape the compiled region.
             if is_ltx2 and getattr(outputs, "hidden_states", None):
-                audio_embed = outputs.hidden_states[0].to(device=target_device)
-                if dtype is not None:
-                    audio_embed = audio_embed.to(dtype=dtype)
+                audio_embed = outputs.hidden_states[0].to(device=target_device, dtype=dtype, copy=True)
                 audio_embeds_list.append(audio_embed)
-            prompt_embeds = prompt_embeds.to(device=target_device)
-            if dtype is not None:
-                prompt_embeds = prompt_embeds.to(dtype=dtype)
+            prompt_embeds = prompt_embeds.to(device=target_device, dtype=dtype, copy=True)
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask.to(device=target_device))

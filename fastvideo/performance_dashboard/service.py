@@ -107,7 +107,9 @@ def _record_has_complete_v2_identity(record: Record) -> bool:
 
 
 def _record_uses_v2_identity(record: Record) -> bool:
-    return str(record.get("result_schema_version") or "") in ("2", "2.0") or any(key in record for key in COMPARISON_COHORT_KEYS)
+    if str(record.get("result_schema_version") or "") in ("2", "2.0"):
+        return True
+    return any(key in record for key in COMPARISON_COHORT_KEYS)
 
 
 def comparison_cohort_kind(record: Record) -> str:

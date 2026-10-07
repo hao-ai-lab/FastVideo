@@ -125,8 +125,7 @@ class TestAutoExtendAndRewrite:
             name = "cap"
 
             async def complete(self, request: LLMRequest) -> LLMResponse:
-                user = next(m.content for m in request.messages
-                            if m.role == "user")
+                user = next(m.content for m in request.messages if m.role == "user")
                 captured.append(user)
                 return LLMResponse(
                     content="next",
@@ -146,8 +145,7 @@ class TestAutoExtendAndRewrite:
             name = "cap"
 
             async def complete(self, request: LLMRequest) -> LLMResponse:
-                user = next(m.content for m in request.messages
-                            if m.role == "user")
+                user = next(m.content for m in request.messages if m.role == "user")
                 captured.append(user)
                 return LLMResponse(
                     content="one\ntwo\nthree",
@@ -177,8 +175,7 @@ class TestRegisterProvider:
             providers=[_StaticProvider("old", "a")],
             model="m",
         )
-        enh.register_provider(
-            _StaticProvider("new-primary", "b"), priority=0)
+        enh.register_provider(_StaticProvider("new-primary", "b"), priority=0)
         assert enh.providers[0].name == "new-primary"
 
     def test_registered_provider_is_used_in_enhance(self):

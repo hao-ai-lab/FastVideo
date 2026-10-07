@@ -23,19 +23,16 @@ from fastvideo.models.loader.component_loader import PipelineComponentLoader
 
 def _log_tensor_stats(label: str, tensor: torch.Tensor) -> None:
     tensor_f32 = tensor.float()
-    print(
-        f"[LTX2 SMOKE] {label}: shape={tuple(tensor.shape)} "
-        f"dtype={tensor.dtype} device={tensor.device} "
-        f"min={tensor_f32.min().item():.6f} max={tensor_f32.max().item():.6f} "
-        f"mean={tensor_f32.mean().item():.6f} sum={tensor_f32.sum().item():.6f}"
-    )
+    print(f"[LTX2 SMOKE] {label}: shape={tuple(tensor.shape)} "
+          f"dtype={tensor.dtype} device={tensor.device} "
+          f"min={tensor_f32.min().item():.6f} max={tensor_f32.max().item():.6f} "
+          f"mean={tensor_f32.mean().item():.6f} sum={tensor_f32.sum().item():.6f}")
+
 
 def _truncate_debug_logs() -> None:
     for env_var in (
-        "LTX2_PIPELINE_DEBUG_PATH",
-        "LTX2_REFERENCE_DEBUG_PATH",
-        "LTX2_PIPELINE_DEBUG_DETAIL_PATH",
-        "LTX2_REFERENCE_DEBUG_DETAIL_PATH",
+            "LTX2_REFERENCE_DEBUG_PATH",
+            "LTX2_REFERENCE_DEBUG_DETAIL_PATH",
     ):
         log_path = os.getenv(env_var, "")
         if not log_path:
@@ -106,16 +103,8 @@ def test_ltx2_pipeline_smoke():
     repo_root = Path(__file__).resolve().parents[3]
     debug_dir = repo_root / "ltx2_debug"
     os.environ.setdefault(
-        "LTX2_PIPELINE_DEBUG_PATH",
-        str(debug_dir / "fastvideo_pipeline.log"),
-    )
-    os.environ.setdefault(
         "LTX2_REFERENCE_DEBUG_PATH",
         str(debug_dir / "reference_pipeline.log"),
-    )
-    os.environ.setdefault(
-        "LTX2_PIPELINE_DEBUG_DETAIL_PATH",
-        str(debug_dir / "fastvideo_pipeline_detail.log"),
     )
     os.environ.setdefault(
         "LTX2_REFERENCE_DEBUG_DETAIL_PATH",
@@ -227,8 +216,7 @@ def test_ltx2_pipeline_smoke():
             encoder = original_text_encoder()
             try:
                 from ltx_core.model.transformer.attention import (  # type: ignore
-                    Attention,
-                    AttentionFunction,
+                    Attention, AttentionFunction,
                 )
             except ImportError:
                 return encoder
@@ -244,6 +232,7 @@ def test_ltx2_pipeline_smoke():
 
         ref_pipeline.model_ledger.text_encoder = _patched_text_encoder
         if os.getenv("LTX2_DISABLE_VAE_NOISE", "1") == "1":
+
             def _patched_video_decoder():
                 decoder = original_video_decoder()
                 if hasattr(decoder, "decode_noise_scale"):
@@ -253,8 +242,7 @@ def test_ltx2_pipeline_smoke():
             ref_pipeline.model_ledger.video_decoder = _patched_video_decoder
         if os.getenv("LTX2_DEBUG_DETAIL", "0") == "1":
             from ..transformers.test_ltx2 import (
-                _attach_block_detail_logging,
-            )
+                _attach_block_detail_logging, )
 
             def _patched_transformer():
                 model = original_transformer()
@@ -315,15 +303,12 @@ def test_ltx2_typed_surface_preflight() -> None:
         refine_stage_override_fields,
     )
     from fastvideo.pipelines.basic.ltx2.stages import (  # noqa: F401
-        LTX2AudioDecodingStage,
-        LTX2DenoisingStage,
-        LTX2LatentPreparationStage,
-        LTX2TextEncodingStage,
+        LTX2AudioDecodingStage, LTX2DenoisingStage, LTX2LatentPreparationStage, LTX2TextEncodingStage,
     )
 
-    # All three LTX-2 presets registered.
+    # All four LTX-2 presets registered.
     names = {p.name for p in get_presets_for_family("ltx2")}
-    assert names == {"ltx2_base", "ltx2_distilled", "ltx2_two_stage"}
+    assert names == {"ltx2_base", "ltx2_3_base", "ltx2_distilled", "ltx2_two_stage"}
 
     # Two-stage preset has the denoise + refine topology and pulls its
     # refine allowed_overrides from the typed dataclass.
