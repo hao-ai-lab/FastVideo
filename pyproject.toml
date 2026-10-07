@@ -25,6 +25,8 @@ dependencies = [
     # transformers 5.0.0. Floor raised from >=5.0.0 to >=5.15.0 for the public
     # vision interpolation helper (get_vision_interpolation_indices_and_weights)
     # that the MiniMax-H3 Qwen3-VL encoder cross-checks against.
+    # LTX-2.5's packed Gemma 4 unified encoder also requires transformers 5.15.0+
+    # for correct mapping and loading of the Gemma 4 architecture.
     "transformers>=5.15.0",
     # <0.23: tokenizers 0.23 renamed RobertaProcessing's binding args, so
     # transformers' CLIP-style tokenizer loading dies with

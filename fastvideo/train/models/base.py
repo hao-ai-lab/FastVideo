@@ -36,6 +36,7 @@ class ModelBase(ABC):
     transformer: torch.nn.Module
     noise_scheduler: Any
     _trainable: bool
+    _transformer_module_type = "transformer"
 
     def __init__(
         self,
@@ -59,6 +60,11 @@ class ModelBase(ABC):
         return self.attention_backend.name
 
     @property
+    def transformer_module_type(self) -> str:
+        """Physical checkpoint component that owns this role's transformer."""
+        return str(self._transformer_module_type)
+
+    @property
     def device(self) -> torch.device:
         """The local CUDA device for this rank."""
         return get_local_torch_device()
@@ -66,6 +72,9 @@ class ModelBase(ABC):
     def _enable_lora_if_configured(
         self,
         transformer: torch.nn.Module,
+        *,
+        prepare_for_fsdp: bool = False,
+        initialization_seed: int = 0,
     ) -> bool:
         """Enable LoRA training for model plugins that request it.
 
@@ -86,6 +95,8 @@ class ModelBase(ABC):
             lora_rank=cfg.rank,
             lora_alpha=cfg.alpha,
             lora_target_modules=cfg.target_modules,
+            prepare_for_fsdp=prepare_for_fsdp,
+            initialization_seed=initialization_seed,
         )
         return True
 

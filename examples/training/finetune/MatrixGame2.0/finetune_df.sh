@@ -84,7 +84,9 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/matrixgame2_ar_diffusion_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class MatrixGame2ARDiffusionPipeline \
+    --pipeline-module fastvideo.training.matrixgame2_ar_diffusion_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

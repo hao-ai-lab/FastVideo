@@ -156,7 +156,9 @@ srun python -m torch.distributed.run \
   --node_rank "${SLURM_PROCID}" \
   --rdzv_backend=c10d \
   --rdzv_endpoint="${MASTER_ADDR}:${MASTER_PORT}" \
-  fastvideo/training/matrixgame2_self_forcing_distillation_pipeline.py \
+  fastvideo/training/runner.py \
+  --pipeline-class MatrixGame2SelfForcingDistillationPipeline \
+  --pipeline-module fastvideo.training.matrixgame2_self_forcing_distillation_pipeline \
   "${parallel_args[@]}" \
   "${model_args[@]}" \
   "${dataset_args[@]}" \
