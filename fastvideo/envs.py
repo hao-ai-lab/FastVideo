@@ -378,6 +378,11 @@ FASTVIDEO_MLX_WINDOW = EnvInt(0,
 FASTVIDEO_MLX_WINDOW_SINK = EnvInt(0,
                                    category="attention",
                                    doc="Number of sink tokens that MLX windowed attention always attends to.")
+FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT = EnvBool(
+    False,
+    category="attention",
+    doc="VIDEO_SPARSE_ATTN keeps the original tile scatter and BSHD->BHSD transposes instead of the fused Triton "
+    "layout kernel that no-grad SM100 BF16 head_dim-128 forwards with 64-token tiles use by default.")
 
 # ================== Performance ==================
 
@@ -421,6 +426,12 @@ FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     category="performance",
     doc="MiniMax-H3 inference-only Triton fusions: all, 1, or a comma-separated subset of "
     "modulate,qknorm_rope,swiglu. Empty, 0, or none keeps the eager implementation.")
+FASTVIDEO_MINIMAX_H3_EXACT_KERNELS = EnvStr(
+    "",
+    category="performance",
+    doc="MiniMax-H3 inference-only Triton kernels that reproduce the eager output bit for bit: all, 1, or a "
+    "comma-separated subset of rope,modulate,swiglu. An op whose FASTVIDEO_MINIMAX_H3_FUSIONS fusion is on keeps "
+    "the fusion. Empty, 0, or none keeps the eager implementation.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "
@@ -571,6 +582,11 @@ FASTVIDEO_H3_VSA_FP4 = EnvBool(False,
                                category="attention",
                                doc="Run MiniMax-H3 VSA attention on the block-sparse SageAttention3 FP4 kernel "
                                "(sm_120, no-grad, single sequence-parallel rank).")
+FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
+                                            category="performance",
+                                            doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
+                                            "layout the sparse kernels read, removing their per-call transpose copy "
+                                            "of query, key and value. Bit-identical; no-grad, uncompiled CUDA only.")
 FASTVIDEO_H3_VSA_TILE_FIRST = EnvBool(False,
                                       category="attention",
                                       doc="Single-rank MiniMax-H3 VSA with one tile gather of the block input "
@@ -637,6 +653,16 @@ FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
                                      category="performance",
                                      doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
                                      "tile.")
+FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,
+                                          category="performance",
+                                          doc="Entries in each content-keyed MiniMax-H3 memo of reference encodes "
+                                          "(Qwen3-VL Ref2VA presentation, VAE keyframe latents); repeat "
+                                          "references are reused exactly. 0 disables.")
+FASTVIDEO_H3_VAE_TILE_PARALLEL = EnvBool(False,
+                                         category="performance",
+                                         doc="Split MiniMax-H3 VAE spatial tiles (not only temporal chunks) across "
+                                         "the sequence-parallel ranks in the parallel decode and keyframe encode; "
+                                         "bitwise equal to the serial path.")
 FASTVIDEO_H3_VAE_INT8_SHARED_QKV = EnvBool(False,
                                            category="performance",
                                            doc="Share the INT8 activation rotation and quantization across the "

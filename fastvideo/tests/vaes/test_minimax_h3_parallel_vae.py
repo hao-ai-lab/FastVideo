@@ -14,10 +14,12 @@ import pytest
 import torch
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.vaes.minimax_h3_video import (
     MiniMaxH3VideoVAEArchConfig,
     MiniMaxH3VideoVAEConfig,
 )
+from fastvideo.models.vaes import minimax_h3_parallel
 from fastvideo.models.vaes.minimax_h3_parallel import (
     DECODE_GATHER_STRATEGIES,
     DEFAULT_DECODE_GATHER_STRATEGY,
@@ -312,3 +314,132 @@ def test_fastvideo_args_strategy_literals_match_module() -> None:
                              vae_parallel_decode_strategy=strategy).vae_parallel_decode_strategy == strategy
     with pytest.raises(ValueError, match="vae_parallel_decode_strategy"):
         FastVideoArgs(model_path="test/parallel-vae", vae_parallel_decode_strategy="scatter")
+
+
+@pytest.fixture
+def tile_parallel():
+    with envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.override(True):
+        yield
+
+
+def _chunk_split_must_not_run(*args, **kwargs):
+    raise AssertionError("the tile split fell back to the chunk split")
+
+
+def _tiled_vae(token_drop: int = 3) -> AutoencoderKLMiniMaxH3:
+    vae = _tiny_vae(token_drop=token_drop)
+    # 32x48 pixels split into a 3x5 grid of 16x16 tiles with 8-pixel overlaps.
+    vae.enable_tiling(tile_sample_min_height=16,
+                      tile_sample_min_width=16,
+                      tile_sample_min_overlap_height=8,
+                      tile_sample_min_overlap_width=8)
+    return vae
+
+
+# 3 latent frames is one chunk (fewer chunks than ranks: only the tile split
+# keeps every rank busy); 13 is three chunks with pad trim and blending.
+@pytest.mark.parametrize("world_size", (2, 4, 7))
+@pytest.mark.parametrize("latent_frames", (3, 13))
+@pytest.mark.parametrize("strategy", DECODE_GATHER_STRATEGIES)
+@torch.inference_mode()
+def test_tile_parallel_decode_matches_serial(monkeypatch, tile_parallel, world_size: int, latent_frames: int,
+                                             strategy: str) -> None:
+    torch.manual_seed(20261002 + latent_frames)
+    vae = _tiled_vae()
+    latents = torch.randn(1, 4, latent_frames, 8, 12)
+    expected = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
+    vae.decode_to_pixels(latents, expected)
+
+    monkeypatch.setattr(minimax_h3_parallel, "_decode_segment", _chunk_split_must_not_run)
+    group = _ThreadedFakeGroup(world_size)
+
+    def _rank_main(rank: int):
+        output = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32) if rank == 0 else None
+        return decode_to_pixels_parallel(vae, latents.clone(), output, group, strategy=strategy)
+
+    results = group.run(_rank_main)
+    assert all(result is None for result in results[1:])
+    assert_close(results[0], expected, atol=0.0, rtol=0.0)
+
+
+@torch.inference_mode()
+def test_tile_parallel_decode_falls_back_with_fewer_tiles_than_ranks(monkeypatch, tile_parallel) -> None:
+    """One chunk of a 1x1 tile grid on 3 ranks: the chunk split serves it unchanged."""
+    torch.manual_seed(20261003)
+    vae = _tiny_vae()
+    vae.enable_tiling(tile_sample_min_height=16, tile_sample_min_width=16)
+    latents = torch.randn(1, 4, 3, 4, 4)
+    expected = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32)
+    vae.decode_to_pixels(latents, expected)
+
+    group = _ThreadedFakeGroup(3)
+
+    def _rank_main(rank: int):
+        output = torch.empty(vae.decoded_pixel_shape(latents.shape), dtype=torch.float32) if rank == 0 else None
+        return decode_to_pixels_parallel(vae, latents.clone(), output, group)
+
+    assert_close(group.run(_rank_main)[0], expected, atol=0.0, rtol=0.0)
+
+
+@pytest.mark.parametrize("world_size", (2, 4, 15, 16))
+@torch.inference_mode()
+def test_tile_parallel_keyframe_encode_matches_serial(monkeypatch, tile_parallel, world_size: int) -> None:
+    """Every rank gets the serial keyframe moments; a grid smaller than the group refuses (None)."""
+    from fastvideo.models.vaes.minimax_h3_parallel import encode_keyframe_tile_parallel
+
+    torch.manual_seed(20261004 + world_size)
+    vae = _tiled_vae()
+    keyframe = torch.rand(1, 3, 1, 32, 48) * 2 - 1
+    expected = vae._encode_clip(keyframe)
+
+    group = _ThreadedFakeGroup(world_size)
+    results = group.run(lambda rank: encode_keyframe_tile_parallel(vae, keyframe, group))
+    if world_size > 15:
+        assert all(result is None for result in results)
+        return
+    for moments in results:
+        assert_close(moments, expected, atol=0.0, rtol=0.0)
+
+
+@torch.inference_mode()
+def test_tile_parallel_is_off_by_default() -> None:
+    from fastvideo.models.vaes.minimax_h3_parallel import encode_keyframe_tile_parallel
+
+    with envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.override(None):
+        vae = _tiled_vae()
+        group = _ThreadedFakeGroup(2)
+        group._local.rank = 0
+        assert encode_keyframe_tile_parallel(vae, torch.zeros(1, 3, 1, 32, 48), group) is None
+        assert vae._encode_keyframe_tile_parallel(torch.zeros(1, 3, 1, 32, 48)) is None
+
+
+@torch.inference_mode()
+def test_tile_parallel_stands_down_on_a_clamped_grid(tile_parallel) -> None:
+    """A grid whose last tile clamps cannot be gathered; the serial encode serves it."""
+    from fastvideo.models.vaes.minimax_h3_parallel import encode_keyframe_tile_parallel
+
+    vae = _tiny_vae()
+    vae.enable_tiling(tile_sample_min_height=16, tile_sample_min_width=16, tile_sample_min_overlap_height=8,
+                      tile_sample_min_overlap_width=8)
+    group = _ThreadedFakeGroup(2)
+    group._local.rank = 0
+    # 31 px split into 16/16/15: the clamped tile breaks the equal-shape gather.
+    assert encode_keyframe_tile_parallel(vae, torch.zeros(1, 3, 1, 31, 48), group) is None
+
+
+@torch.inference_mode()
+def test_encode_keyframe_routes_through_the_tile_split(monkeypatch, tile_parallel) -> None:
+    import fastvideo.distributed as distributed
+
+    torch.manual_seed(20261005)
+    vae = _tiled_vae()
+    keyframe = torch.rand(1, 3, 1, 32, 48) * 2 - 1
+    expected = vae.encode_keyframe(keyframe).latent_dist.parameters
+
+    group = _ThreadedFakeGroup(4)
+    monkeypatch.setattr(distributed, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(distributed, "get_sp_group", lambda: group)
+    monkeypatch.setattr(vae, "_encode_clip", _chunk_split_must_not_run)
+    results = group.run(lambda rank: vae.encode_keyframe(keyframe).latent_dist.parameters)
+    for moments in results:
+        assert_close(moments, expected, atol=0.0, rtol=0.0)

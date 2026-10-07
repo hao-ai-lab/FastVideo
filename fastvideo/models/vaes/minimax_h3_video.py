@@ -1100,14 +1100,31 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         """Encode one-frame conditioning inputs without video chunk padding."""
         if x.ndim != 5 or x.shape[2] != 1:
             raise ValueError(f"`x` must contain exactly one video frame, got shape {tuple(x.shape)}.")
-        if self.use_slicing and x.shape[0] > 1:
-            moments = torch.cat([self._encode_clip(x_slice) for x_slice in x.split(1)])
-        else:
-            moments = self._encode_clip(x)
+        moments = self._encode_keyframe_tile_parallel(x)
+        if moments is None:
+            if self.use_slicing and x.shape[0] > 1:
+                moments = torch.cat([self._encode_clip(x_slice) for x_slice in x.split(1)])
+            else:
+                moments = self._encode_clip(x)
         posterior = DiagonalGaussianDistribution(moments)
         if not return_dict:
             return (posterior, )
         return AutoencoderKLOutput(latent_dist=posterior)
+
+    def _encode_keyframe_tile_parallel(self, x: torch.Tensor) -> torch.Tensor | None:
+        """FASTVIDEO_H3_VAE_TILE_PARALLEL: split a keyframe's tiles across the sequence-parallel group.
+
+        Every sequence-parallel rank encodes the same keyframes in the same
+        order (the pipeline prepares references identically on all ranks), so
+        the collective inside is entered uniformly.
+        """
+        if not envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.get():
+            return None
+        from fastvideo.distributed import get_sp_group, model_parallel_is_initialized
+        if not model_parallel_is_initialized():
+            return None
+        from fastvideo.models.vaes.minimax_h3_parallel import encode_keyframe_tile_parallel
+        return encode_keyframe_tile_parallel(self, x, get_sp_group())
 
     def decode(self, z: torch.Tensor, return_dict: bool = True) -> DecoderOutput | tuple[torch.Tensor]:
         if self.use_slicing and z.shape[0] > 1:
