@@ -16,7 +16,12 @@ exec pytest \
   ./fastvideo/tests/worker/ \
   ./fastvideo/tests/training/test_runner.py \
   ./fastvideo/tests/training/test_trackers.py \
+  ./fastvideo/tests/inference/test_basic_fasth3_omniref_pdd.py \
   ./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py \
+  ./fastvideo/tests/attention/test_vsa_h3_tile_grad_safety.py \
+  ./fastvideo/tests/attention/test_vsa_h3_metadata.py \
+  ./fastvideo/tests/attention/test_vsa_h3_ref2va_regions.py \
+  ./fastvideo/tests/layers/test_pdd_linear.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \
   ./fastvideo/tests/modal/test_ssim_test.py \

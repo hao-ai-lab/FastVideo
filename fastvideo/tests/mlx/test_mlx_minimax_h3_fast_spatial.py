@@ -93,9 +93,10 @@ def _generate_with_mocked_phases(monkeypatch, tmp_path, **generate_kwargs):
     pipeline = MiniMaxH3MLXPipeline.__new__(MiniMaxH3MLXPipeline)
     pipeline.video_decode_backend = "h3-vae"
     pipeline.dit_checkpoint = tmp_path
+    pipeline.model_root = tmp_path
 
     monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline._validate_checkpoint_step_ladder",
-                        lambda _checkpoint, _steps: None)
+                        lambda _checkpoint, _steps, **_kwargs: None)
     monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline._preflight_media_dependencies",
                         lambda **_kwargs: None)
     monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline.mlx_h3_checkpoint_vsa_capable",
@@ -109,7 +110,7 @@ def _generate_with_mocked_phases(monkeypatch, tmp_path, **generate_kwargs):
         calls["denoise"] = kwargs
         return np.zeros((4, 4), dtype=np.float32), np.zeros((4, 4), dtype=np.float32)
 
-    def fake_decode_video(_rows, *, height, width, num_frames, tiled):
+    def fake_decode_video(_rows, *, height, width, num_frames, tiled, **_kwargs):
         events.append("decode_video")
         calls["decode_video"] = {"height": height, "width": width, "num_frames": num_frames}
         return np.zeros((num_frames, height, width, 3), dtype=np.uint8)

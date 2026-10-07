@@ -17,6 +17,7 @@ from typing import Any
 import torch
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.tests.performance.identity import (
@@ -383,8 +384,8 @@ def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
     hw_profile = hardware_profile(num_gpus=num_gpus)
     sw_profile = software_profile()
     sw_profile.update({
-        "attention_backend": os.environ.get("FASTVIDEO_ATTENTION_BACKEND") or "auto",
-        "flash_attention_4_enabled": os.environ.get("FASTVIDEO_FA4", "0") != "0",
+        "attention_backend": envs.FASTVIDEO_ATTENTION_BACKEND.get() or "auto",
+        "flash_attention_4_enabled": envs.FASTVIDEO_FA4.get(),
     })
     performance_profile_version = os.environ.get("FASTVIDEO_PERFORMANCE_PROFILE_VERSION")
     if performance_profile_version:
@@ -633,12 +634,5 @@ def test_inference_performance(cfg):
     (text encoder, DiT, VAE decode). Assert each against device-aware thresholds.
     """
 
-    original_env = os.environ.get("FASTVIDEO_STAGE_LOGGING")
-    os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
-    try:
+    with envs.FASTVIDEO_STAGE_LOGGING.override(True):
         _run_benchmark(cfg)
-    finally:
-        if original_env is None:
-            os.environ.pop("FASTVIDEO_STAGE_LOGGING", None)
-        else:
-            os.environ["FASTVIDEO_STAGE_LOGGING"] = original_env

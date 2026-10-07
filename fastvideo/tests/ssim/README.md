@@ -12,7 +12,7 @@ reference layout:
 `<ssim_dir>/<GPU>_reference_videos/...` is still read as fallback.)
 
 Before SSIM tests run, missing reference videos are auto-downloaded from a
-public HF repo (configured by `FASTVIDEO_SSIM_REFERENCE_HF_REPO`, default:
+public HF repo (configured by `FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO`, default:
 `FastVideo/ssim-reference-videos`).
 
 Use the CLI:

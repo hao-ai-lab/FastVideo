@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+import fastvideo.envs as envs
+
 
 class _FakeImage:
 
@@ -247,14 +249,14 @@ def test_checkout_repository_rejects_invalid_buildkite_values(monkeypatch, git_r
         (False, ""),
     ],
 )
-def test_run_test_command_composes_valid_post_checkout_shell(monkeypatch, build_kernel, install_command):
+def test_run_test_command_composes_valid_post_checkout_shell(monkeypatch, env_overrides, build_kernel, install_command):
     module = _load_pr_test_module(monkeypatch)
     real_run = subprocess.run
     events = []
 
-    monkeypatch.setenv("BUILDKITE_REPO", "https://github.com/hao-ai-lab/FastVideo.git")
-    monkeypatch.setenv("BUILDKITE_COMMIT", "0123456789abcdef0123456789abcdef01234567")
-    monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
+    env_overrides.enter_context(envs.override_external("BUILDKITE_REPO", "https://github.com/hao-ai-lab/FastVideo.git"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_COMMIT", "0123456789abcdef0123456789abcdef01234567"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_PULL_REQUEST", "false"))
     monkeypatch.setattr(
         module,
         "_checkout_repository",
@@ -290,7 +292,7 @@ def test_run_test_command_composes_valid_post_checkout_shell(monkeypatch, build_
         real_run(["/bin/bash", "-n"], input=shell_command, text=True, check=True)
 
 
-def test_run_test_command_uses_nonshared_kernel_install_before_tests(monkeypatch):
+def test_run_test_command_uses_nonshared_kernel_install_before_tests(monkeypatch, env_overrides):
     module = _load_pr_test_module(monkeypatch)
     commands = []
 
@@ -298,9 +300,9 @@ def test_run_test_command_uses_nonshared_kernel_install_before_tests(monkeypatch
         commands.append(args[-1])
         return types.SimpleNamespace(returncode=0)
 
-    monkeypatch.setenv("BUILDKITE_REPO", "https://example.com/FastVideo.git")
-    monkeypatch.setenv("BUILDKITE_COMMIT", "0123456789abcdef")
-    monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
+    env_overrides.enter_context(envs.override_external("BUILDKITE_REPO", "https://example.com/FastVideo.git"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_COMMIT", "0123456789abcdef"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_PULL_REQUEST", "false"))
     monkeypatch.setattr(module, "_checkout_repository", lambda *_args: None)
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -367,7 +369,7 @@ def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
     for script, payload in {
             "kernel_tests.sh": "pytest fastvideo-kernel/tests/ -vs",
             "inference_vmoba.sh": "python fastvideo/tests/inference/vmoba/test_vmoba_inference.py",
-            "golden_gate.sh": 'exec pytest "$golden_root" -vs',
+            "golden_gate.sh": 'exec pytest "$golden_root" -xvs',
             "encoder.sh": "pytest ./fastvideo/tests/encoders -vs",
             "vae.sh": "pytest ./fastvideo/tests/vaes -vs",
             "transformer.sh": "pytest ./fastvideo/tests/transformers -vs",

@@ -267,3 +267,49 @@ def test_taeh3_backend_is_opt_in_experimental():
 
     assert "video_decode_backend" not in default.pipeline.experimental
     assert taeh3.pipeline.experimental["video_decode_backend"] == "taeh3"
+
+
+EIGHT_STEP_EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_fasth3_8step.py"
+
+
+def _load_eight_step_example():
+    import sys
+    sys.path.insert(0, str(EXAMPLE_PATH.parent))
+    try:
+        spec = importlib.util.spec_from_file_location("basic_fasth3_8step_contract", EIGHT_STEP_EXAMPLE_PATH)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.path.remove(str(EXAMPLE_PATH.parent))
+
+
+def test_eight_step_example_pins_public_checkpoint_contract(tmp_path):
+    """The 8-step example selects the public V2 checkpoint and its trained recipe by default
+    without touching the four-forward preview example's defaults."""
+    eight = _load_eight_step_example()
+    args = eight.parse_args(["--prompt", "a test prompt"])
+    assert args.model_path == "FastVideo/FastVideo-FastH3-8-Step-V2"
+    assert args.steps == 9
+    assert args.vsa_sparsity == 0.8
+    assert args.vsa_tile_size == 64
+    assert args.output == "outputs/fasth3_8step"
+    request = fasth3.build_request(args, tmp_path / "result.mp4", args.seed)
+    assert request.sampling.num_inference_steps == 9
+    config = fasth3.build_generator_config(args)
+    assert config.model_path == "FastVideo/FastVideo-FastH3-8-Step-V2"
+    # Other flags still flow through the shared parser.
+    args = eight.parse_args(["--prompt", "p", "--height", "480", "--width", "832", "--model-path", "/local/snap"])
+    assert (args.height, args.width, args.model_path) == (480, 832, "/local/snap")
+    # The preview example is unchanged.
+    preview = _args()
+    assert preview.model_path == fasth3.DEFAULT_MODEL and preview.steps == 5 and preview.vsa_sparsity == 0.9
+
+
+def test_eight_step_example_rejects_other_grids():
+    eight = _load_eight_step_example()
+    with pytest.raises(SystemExit):
+        eight.parse_args(["--prompt", "p", "--steps", "5"])
+    with pytest.raises(SystemExit):
+        eight.parse_args(["--prompt", "p", "--steps", "8"])

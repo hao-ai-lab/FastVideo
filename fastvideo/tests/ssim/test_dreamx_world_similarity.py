@@ -7,31 +7,26 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     resolve_inference_device_reference_folder,
     run_image_to_video_similarity_test,
     run_text_to_video_similarity_test,
 )
+from fastvideo.tests.ssim.reference_utils import with_model_path
 
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of DreamX World support.")
 
 device_reference_folder = resolve_inference_device_reference_folder(logger)
 
-_MODEL_PATH = os.getenv(
-    "DREAMX_WORLD_SSIM_MODEL_PATH",
-    "FastVideo/DreamX-World-5B-Cam-Diffusers",
-)
-_AR_MODEL_PATH = os.getenv(
-    "DREAMX_WORLD_AR_SSIM_MODEL_PATH",
-    "FastVideo/DreamX-World-5B-Diffusers",
-)
-
+# The tests add "model_path" from FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH and
+# FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH.
 DREAMX_WORLD_PARAMS = {
     "num_gpus": 1,
-    "model_path": _MODEL_PATH,
     "height": 64,
     "width": 64,
     "num_frames": 9,
@@ -52,7 +47,6 @@ DREAMX_WORLD_FULL_QUALITY_PARAMS = {
 
 DREAMX_WORLD_AR_PARAMS = {
     "num_gpus": 1,
-    "model_path": _AR_MODEL_PATH,
     "height": 192,
     "width": 192,
     "num_frames": 81,
@@ -128,6 +122,7 @@ def test_dreamx_world_inference_similarity(
 ) -> None:
     image_path = tmp_path / "dreamx_world_ssim_input.png"
     _write_deterministic_reference_image(image_path)
+    model_path = envs.FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH.get()
 
     run_image_to_video_similarity_test(
         logger=logger,
@@ -137,8 +132,8 @@ def test_dreamx_world_inference_similarity(
         image_path=str(image_path),
         attention_backend_name=attention_backend_name,
         model_id=model_id,
-        default_params_map=DREAMX_WORLD_MODEL_TO_PARAMS,
-        full_quality_params_map=FULL_QUALITY_DREAMX_WORLD_MODEL_TO_PARAMS,
+        default_params_map=with_model_path(DREAMX_WORLD_MODEL_TO_PARAMS, model_path),
+        full_quality_params_map=with_model_path(FULL_QUALITY_DREAMX_WORLD_MODEL_TO_PARAMS, model_path),
         min_acceptable_ssim=0.98,
         init_kwargs_override={
             "use_fsdp_inference": False,
@@ -165,6 +160,7 @@ def test_dreamx_world_ar_inference_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
+    model_path = envs.FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH.get()
     run_text_to_video_similarity_test(
         logger=logger,
         script_dir=os.path.dirname(os.path.abspath(__file__)),
@@ -172,8 +168,8 @@ def test_dreamx_world_ar_inference_similarity(
         prompt=prompt,
         attention_backend_name=attention_backend_name,
         model_id=model_id,
-        default_params_map=DREAMX_WORLD_AR_MODEL_TO_PARAMS,
-        full_quality_params_map=FULL_QUALITY_DREAMX_WORLD_AR_MODEL_TO_PARAMS,
+        default_params_map=with_model_path(DREAMX_WORLD_AR_MODEL_TO_PARAMS, model_path),
+        full_quality_params_map=with_model_path(FULL_QUALITY_DREAMX_WORLD_AR_MODEL_TO_PARAMS, model_path),
         min_acceptable_ssim=0.98,
         init_kwargs_override={
             "use_fsdp_inference": False,
