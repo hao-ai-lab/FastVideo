@@ -17,6 +17,7 @@ import os
 import torch
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -26,6 +27,7 @@ from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
     select_ssim_params,
+    with_model_path,
 )
 from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
@@ -71,15 +73,10 @@ def _shutdown_executor(generator: VideoGenerator | None) -> None:
 # ---------------------------------------------------------------------------
 # Model parameters
 # ---------------------------------------------------------------------------
-# Same as basic_gamecraft.py: default HF path; set GAMECRAFT_MODEL_PATH for local weights.
-_GAMECRAFT_MODEL_PATH = os.environ.get(
-    "GAMECRAFT_MODEL_PATH",
-    "FastVideo/HunyuanGameCraft-Diffusers",
-)
-
+# Same as basic_gamecraft.py: default HF path; set FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH for local weights.
+# The tests add "model_path" from FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH.
 GAMECRAFT_T2V_PARAMS = {
     "num_gpus": 1,
-    "model_path": _GAMECRAFT_MODEL_PATH,
     "height": 480,
     "width": 832,
     "num_frames": 33,
@@ -91,43 +88,45 @@ GAMECRAFT_T2V_PARAMS = {
     "negative_prompt": "",
 }
 
-_GAMECRAFT_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(_GAMECRAFT_MODEL_PATH)
-GAMECRAFT_T2V_FULL_QUALITY_PARAMS = {
-    "num_gpus": GAMECRAFT_T2V_PARAMS["num_gpus"],
-    "model_path": GAMECRAFT_T2V_PARAMS["model_path"],
-    "height": _GAMECRAFT_FULL_QUALITY_DEFAULTS.height,
-    "width": _GAMECRAFT_FULL_QUALITY_DEFAULTS.width,
-    "num_frames": GAMECRAFT_T2V_PARAMS["num_frames"],  # default num_frames: 33
-    "num_inference_steps": _GAMECRAFT_FULL_QUALITY_DEFAULTS.num_inference_steps,
-    "guidance_scale": _GAMECRAFT_FULL_QUALITY_DEFAULTS.guidance_scale,
-    "seed": _GAMECRAFT_FULL_QUALITY_DEFAULTS.seed,
-    "action": GAMECRAFT_T2V_PARAMS["action"],
-    "action_speed": GAMECRAFT_T2V_PARAMS["action_speed"],
-    "negative_prompt": _GAMECRAFT_FULL_QUALITY_DEFAULTS.negative_prompt,
-}
+
+def _gamecraft_t2v_full_quality_params(model_path: str) -> dict[str, object]:
+    """Return the full-quality T2V params, taken from the default sampling params of ``model_path``."""
+    full_quality_defaults = SamplingParam.from_pretrained(model_path)
+    return {
+        "num_gpus": GAMECRAFT_T2V_PARAMS["num_gpus"],
+        "model_path": model_path,
+        "height": full_quality_defaults.height,
+        "width": full_quality_defaults.width,
+        "num_frames": GAMECRAFT_T2V_PARAMS["num_frames"],  # default num_frames: 33
+        "num_inference_steps": full_quality_defaults.num_inference_steps,
+        "guidance_scale": full_quality_defaults.guidance_scale,
+        "seed": full_quality_defaults.seed,
+        "action": GAMECRAFT_T2V_PARAMS["action"],
+        "action_speed": GAMECRAFT_T2V_PARAMS["action_speed"],
+        "negative_prompt": full_quality_defaults.negative_prompt,
+    }
+
 
 GAMECRAFT_I2V_PARAMS = {
     **GAMECRAFT_T2V_PARAMS,
     "image_path": ("https://huggingface.co/datasets/huggingface/documentation-images/"
                    "resolve/main/diffusers/astronaut.jpg"),
 }
-GAMECRAFT_I2V_FULL_QUALITY_PARAMS = {
-    **GAMECRAFT_T2V_FULL_QUALITY_PARAMS,
-    "image_path": GAMECRAFT_I2V_PARAMS["image_path"],
-}
+
+
+def _gamecraft_i2v_full_quality_params(model_path: str) -> dict[str, object]:
+    return {
+        **_gamecraft_t2v_full_quality_params(model_path),
+        "image_path": GAMECRAFT_I2V_PARAMS["image_path"],
+    }
+
 
 MODEL_TO_PARAMS = {
     "HunyuanGameCraft-T2V": GAMECRAFT_T2V_PARAMS,
 }
-FULL_QUALITY_MODEL_TO_PARAMS = {
-    "HunyuanGameCraft-T2V": GAMECRAFT_T2V_FULL_QUALITY_PARAMS,
-}
 
 I2V_MODEL_TO_PARAMS = {
     "HunyuanGameCraft-I2V": GAMECRAFT_I2V_PARAMS,
-}
-FULL_QUALITY_I2V_MODEL_TO_PARAMS = {
-    "HunyuanGameCraft-I2V": GAMECRAFT_I2V_FULL_QUALITY_PARAMS,
 }
 
 TEST_PROMPTS = [
@@ -146,9 +145,9 @@ I2V_TEST_PROMPTS = [
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """Generate a T2V video with GameCraft and compare to reference via SSIM."""
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = build_generated_output_dir(
@@ -161,9 +160,10 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     os.makedirs(output_dir, exist_ok=True)
 
+    model_path = envs.FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH.get()
     params_map = select_ssim_params(
-        MODEL_TO_PARAMS,
-        FULL_QUALITY_MODEL_TO_PARAMS,
+        with_model_path(MODEL_TO_PARAMS, model_path),
+        {model_id: _gamecraft_t2v_full_quality_params(model_path)},
     )
     BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
@@ -268,9 +268,9 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 @pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(I2V_MODEL_TO_PARAMS.keys()))
-def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """Generate an I2V video with GameCraft and compare to reference via SSIM."""
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = build_generated_output_dir(
@@ -283,9 +283,10 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     os.makedirs(output_dir, exist_ok=True)
 
+    model_path = envs.FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH.get()
     params_map = select_ssim_params(
-        I2V_MODEL_TO_PARAMS,
-        FULL_QUALITY_I2V_MODEL_TO_PARAMS,
+        with_model_path(I2V_MODEL_TO_PARAMS, model_path),
+        {model_id: _gamecraft_i2v_full_quality_params(model_path)},
     )
     BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]

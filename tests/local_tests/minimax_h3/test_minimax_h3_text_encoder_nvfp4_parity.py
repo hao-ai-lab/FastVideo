@@ -11,7 +11,7 @@ noise stays above the thresholds.
 Run on a Blackwell GPU::
 
     MINIMAX_H3_RUN_NVFP4_PARITY=1 \
-    MINIMAX_H3_MODEL_ROOT=/path/to/FastH3 \
+    FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT=/path/to/FastH3 \
     MINIMAX_H3_NVFP4_TEXT_ENCODER=/path/to/FastH3-nvfp4/text_encoder \
     pytest tests/local_tests/minimax_h3/test_minimax_h3_text_encoder_nvfp4_parity.py -s
 """
@@ -26,6 +26,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConfig
 from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
 from fastvideo.models.encoders.minimax_h3_checkpoint_nvfp4 import MiniMaxH3SerializedNVFP4LinearMethod
@@ -60,10 +61,10 @@ def _require_assets() -> tuple[torch.device, Path, Path]:
         pytest.skip("set MINIMAX_H3_RUN_NVFP4_PARITY=1 on a Blackwell GPU node")
     if not torch.cuda.is_available():
         pytest.fail("MiniMax-H3 NVFP4 parity requires a CUDA GPU", pytrace=False)
-    root = os.environ.get("MINIMAX_H3_MODEL_ROOT")
+    root = envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get()
     converted = os.environ.get("MINIMAX_H3_NVFP4_TEXT_ENCODER")
     if not root or not converted:
-        pytest.fail("set MINIMAX_H3_MODEL_ROOT and MINIMAX_H3_NVFP4_TEXT_ENCODER", pytrace=False)
+        pytest.fail("set FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT and MINIMAX_H3_NVFP4_TEXT_ENCODER", pytrace=False)
     root_path, converted_path = Path(root), Path(converted)
     missing = [str(p) for p in (root_path / "text_encoder", root_path / "tokenizer", converted_path) if not p.is_dir()]
     if missing:

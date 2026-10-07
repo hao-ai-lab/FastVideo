@@ -11,7 +11,6 @@ two finite embeddings.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +18,7 @@ import numpy as np
 import torch
 from scipy import linalg
 
+import fastvideo.envs as envs
 from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
@@ -94,7 +94,7 @@ class FrechetAudioDistanceMetric(BaseMetric):
         self._model: Any = None
         self._gen_buf: list[np.ndarray] = []
         self._ref_buf: list[np.ndarray] = []
-        self._cached_ref_path: str | None = os.environ.get(REF_FEATURES_ENV)
+        self._cached_ref_path: str | None = envs.FASTVIDEO_FAD_REF_FEATURES.get()
         self._cached_ref_mu: np.ndarray | None = None
         self._cached_ref_sigma: np.ndarray | None = None
         self._n_cached_ref: int = 0
