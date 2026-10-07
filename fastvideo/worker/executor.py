@@ -32,14 +32,18 @@ class Executor(ABC):
 
     @staticmethod
     def get_class(fastvideo_args: FastVideoArgs) -> type["Executor"]:
-        if fastvideo_args.distributed_executor_backend == "mp":
+        backend = fastvideo_args.distributed_executor_backend
+        # Single-GPU default mp path stays in-process so weights load once.
+        if backend == "uni" or (backend == "mp" and fastvideo_args.num_gpus == 1):
+            from fastvideo.worker.uniproc_executor import UniprocExecutor
+            return cast(type["Executor"], UniprocExecutor)
+        if backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
-        elif fastvideo_args.distributed_executor_backend == "ray":
+        if backend == "ray":
             from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
             return cast(type["Executor"], RayDistributedExecutor)
-        else:
-            raise ValueError(f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}")
+        raise ValueError(f"Unsupported distributed executor backend: {backend}")
 
     def execute_forward(
         self,
