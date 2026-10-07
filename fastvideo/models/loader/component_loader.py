@@ -1266,6 +1266,14 @@ class TransformerLoader(ComponentLoader):
                            or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25")
         attention_context = (_component_attention_backend_scope(None, component="transformer")
                              if _qat_generator_only else nullcontext())
+        # MiniMax-H3 encoder split: the DiT only exists on the denoise ranks, so
+        # FSDP has to shard over them instead of over the world group.
+        device_mesh = None
+        if (getattr(fastvideo_args, "h3_encoder_split", False)
+                and (fastvideo_args.use_fsdp_inference or fastvideo_args.training_mode)):
+            from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_denoise_device_mesh
+
+            device_mesh = h3_denoise_device_mesh(fastvideo_args)
         with attention_context:
             # dit_config is what the model is handed and keeps as `self.config`,
             # so recording here makes the decision readable from the loaded
@@ -1302,6 +1310,7 @@ class TransformerLoader(ComponentLoader):
                 cpu_offload=fastvideo_args.dit_cpu_offload,
                 pin_cpu_memory=fastvideo_args.pin_cpu_memory,
                 fsdp_inference=fastvideo_args.use_fsdp_inference,
+                device_mesh=device_mesh,
                 # TODO(will): make these configurable
                 default_dtype=default_dtype,
                 param_dtype=torch.bfloat16,

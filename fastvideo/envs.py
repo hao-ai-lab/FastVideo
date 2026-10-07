@@ -383,6 +383,18 @@ FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY = EnvStr(
     None,
     category="performance",
     doc="Collective that moves chunks in parallel VAE decode: gather (used when unset) or all_gather.")
+# MiniMax-H3 component-level pipeline parallel: dedicate the first
+# FASTVIDEO_H3_ENCODER_NODES nodes to the Qwen3-VL text encoder so the
+# denoising ranks never load it (720p needs the ~48 GiB headroom on GB10).
+FASTVIDEO_H3_ENCODER_SPLIT = EnvBool(
+    False,
+    category="distributed",
+    doc="MiniMax-H3 runs the Qwen3-VL text encoder on a dedicated group of nodes, so the denoising ranks never "
+    "load it. Same as FastVideoArgs.h3_encoder_split=True.")
+FASTVIDEO_H3_ENCODER_NODES = EnvInt(1,
+                                    category="distributed",
+                                    doc="Number of leading nodes that FASTVIDEO_H3_ENCODER_SPLIT dedicates to the "
+                                    "MiniMax-H3 text encoder. Values below 1 count as 1.")
 # Adapted from the NVlabs/Sana Sol-Engine implementation.
 FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     "",
