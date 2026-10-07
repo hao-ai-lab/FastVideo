@@ -19,6 +19,7 @@ exec pytest \
   ./fastvideo/tests/loader/ \
   ./fastvideo/tests/pipelines/ \
   ./fastvideo/tests/platforms/ \
+  ./fastvideo/tests/schedulers/ \
   ./fastvideo/tests/train/ \
   ./fastvideo/tests/stages/ \
   ./fastvideo/tests/ops/ \
