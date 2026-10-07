@@ -267,6 +267,22 @@ def _as_grid(tiles: list[torch.Tensor], num_columns: int) -> list[list[torch.Ten
     return [tiles[start:start + num_columns] for start in range(0, len(tiles), num_columns)]
 
 
+def _tile_grid_is_exact(rows, columns, height: int, width: int, ratio: int) -> bool:
+    """True when the grid tiles the canvas into equal shapes with ratio-aligned tile sizes.
+
+    The gathers need equal tile shapes across ranks, and the decode slice must
+    replay the serial ``y // ratio:y // ratio + h // ratio`` exactly. Grids whose
+    last tile clamps (an unabsorbed ``_split_tiles`` residual) or whose tile size
+    is not a multiple of the spatial ratio stand down to the serial path.
+    """
+    for starts, lengths, axis in ((rows[0], rows[1], height), (columns[0], columns[1], width)):
+        if starts[-1] + lengths[-1] != axis:
+            return False
+        if len(lengths) > 1 and lengths[0] % ratio != 0:
+            return False
+    return True
+
+
 def encode_keyframe_tile_parallel(vae: AutoencoderKLMiniMaxH3, x: torch.Tensor,
                                   group: "GroupCoordinator") -> torch.Tensor | None:
     """``vae._encode_clip(x)`` for a one-frame keyframe with its tiles split across ``group``.
@@ -278,7 +294,8 @@ def encode_keyframe_tile_parallel(vae: AutoencoderKLMiniMaxH3, x: torch.Tensor,
     if group.world_size == 1 or not _tile_split_applies(vae, x):
         return None
     rows, columns, boxes = _tile_grid(vae, *x.shape[-2:])
-    if len(boxes) < group.world_size:
+    if (len(boxes) < group.world_size
+            or not _tile_grid_is_exact(rows, columns, *x.shape[-2:], vae.spatial_compression_ratio)):
         return None
     world_size, rank = group.world_size, group.rank_in_group
     tiles: list[torch.Tensor] = []
@@ -316,7 +333,8 @@ def _decode_single_tile_parallel(
     rows, columns, boxes = _tile_grid(vae, z.shape[-2] * ratio, z.shape[-1] * ratio)
     jobs = [(chunk, box) for chunk in range(num_chunks) for box in range(len(boxes))]
     world_size, rank = group.world_size, group.rank_in_group
-    if len(jobs) < world_size:
+    if (len(jobs) < world_size
+            or not _tile_grid_is_exact(rows, columns, z.shape[-2] * ratio, z.shape[-1] * ratio, ratio)):
         return False
     if pad_tokens > 0:
         z = torch.cat([z, z[:, :, -1:].repeat(1, 1, pad_tokens, 1, 1)], dim=2)

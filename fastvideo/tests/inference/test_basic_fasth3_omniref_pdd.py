@@ -2,6 +2,7 @@
 """CPU checks of examples/inference/basic/basic_fasth3_omniref_pdd.py (no weights, no GPU)."""
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 from pathlib import Path
@@ -138,19 +139,20 @@ def test_lossless_accel_config(tmp_path, num_gpus):
     }
 
 
-def test_lossless_accel_env_names_registered_flags_and_keeps_user_values(monkeypatch):
+def test_lossless_accel_env_names_registered_flags_and_keeps_user_values() -> None:
     from fastvideo import envs
 
-    for name, value in example.LOSSLESS_ACCEL_ENV.items():
-        assert name in envs.environment_variables
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("FASTVIDEO_ULYSSES_A2A", "off")
-    example.apply_lossless_accel_env()
-    assert envs.FASTVIDEO_ULYSSES_A2A.get() == "off"
-    assert envs.FASTVIDEO_MINIMAX_H3_EXACT_KERNELS.get() == "all"
-    assert envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.get() is True
-    assert envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.get() is True
-    assert envs.FASTVIDEO_H3_REF2VA_MEMO_ENTRIES.get() == 16
+    with contextlib.ExitStack() as stack:
+        for name in example.LOSSLESS_ACCEL_ENV:
+            assert name in envs.environment_variables
+            stack.enter_context(envs.environment_variables[name].override(None))
+        stack.enter_context(envs.FASTVIDEO_ULYSSES_A2A.override("off"))
+        example.apply_lossless_accel_env()
+        assert envs.FASTVIDEO_ULYSSES_A2A.get() == "off"
+        assert envs.FASTVIDEO_MINIMAX_H3_EXACT_KERNELS.get() == "all"
+        assert envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.get() is True
+        assert envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.get() is True
+        assert envs.FASTVIDEO_H3_REF2VA_MEMO_ENTRIES.get() == 16
 
 
 def test_lossless_accel_flag_parses():

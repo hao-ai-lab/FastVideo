@@ -114,6 +114,9 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
     def _encode_keyframe_latents(self, image, device: torch.device) -> torch.Tensor:
         """Encode one keyframe image to normalized latents (fp16 round-trip
         preserved for parity with the seeded references)."""
+        if not self._keyframe_memo.enabled:
+            # The key hashes pixels, so a disabled memo must not pay for building it.
+            return self._encode_keyframe_latents_uncached(image, device)
         return self._keyframe_memo.get_or_compute((str(device), image_key(image)),
                                                   lambda: self._encode_keyframe_latents_uncached(image, device))
 

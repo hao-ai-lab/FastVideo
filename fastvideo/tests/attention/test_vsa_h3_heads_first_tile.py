@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.attention.backends import video_sparse_attn_h3 as vsa
 from fastvideo.attention.backends.video_sparse_attn_h3_scatter import (HAVE_TRITON, scatter_rows_heads_first,
                                                                        supports_heads_first_scatter)
@@ -40,6 +41,12 @@ def _impl() -> vsa.MiniMaxH3VSAImpl:
     return impl
 
 
+@pytest.fixture
+def sm100a():
+    with envs.FASTVIDEO_VSA_SM100A.override(True):
+        yield
+
+
 @pytest.mark.gpu
 def test_scatter_rows_heads_first_matches_indexed_assignment() -> None:
     _require_cuda_triton()
@@ -57,19 +64,17 @@ def test_scatter_rows_heads_first_matches_indexed_assignment() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(("tile_elems", "n_tiles"), [(128, 37), (128, 40), (64, 41)])
-def test_heads_first_tile_equals_the_default_tile(monkeypatch: pytest.MonkeyPatch, tile_elems: int,
-                                                  n_tiles: int) -> None:
+def test_heads_first_tile_equals_the_default_tile(sm100a, tile_elems: int, n_tiles: int) -> None:
     _require_cuda_triton()
     torch.manual_seed(1)
-    monkeypatch.setenv("FASTVIDEO_VSA_SM100A", "1")
     meta = _metadata(seq=n_tiles * tile_elems - 300, n_tiles=n_tiles, tile_elems=tile_elems)
     x = torch.randn(1, meta.total_seq_length, 8, 128, device="cuda").to(torch.bfloat16)
     impl = _impl()
     with torch.inference_mode():
-        monkeypatch.setenv("FASTVIDEO_H3_VSA_HEADS_FIRST_TILE", "0")
-        default = impl.tile(x, meta).clone()
-        monkeypatch.setenv("FASTVIDEO_H3_VSA_HEADS_FIRST_TILE", "1")
-        heads_first = impl.tile(x, meta)
+        with envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.override(False):
+            default = impl.tile(x, meta).clone()
+        with envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.override(True):
+            heads_first = impl.tile(x, meta)
         assert meta.tile_buf_holder.heads_first_buffer is not None
         assert heads_first.transpose(1, 2).is_contiguous()
         assert _same_bits(default, heads_first)
@@ -81,7 +86,7 @@ def test_heads_first_tile_equals_the_default_tile(monkeypatch: pytest.MonkeyPatc
         # A new geometry on the reused buffer leaves no stale row behind.
         other = _metadata(seq=meta.total_seq_length, n_tiles=n_tiles, tile_elems=tile_elems)
         other.tile_buf_holder = meta.tile_buf_holder
-        monkeypatch.setenv("FASTVIDEO_H3_VSA_HEADS_FIRST_TILE", "0")
-        default = impl.tile(x, other).clone()
-        monkeypatch.setenv("FASTVIDEO_H3_VSA_HEADS_FIRST_TILE", "1")
-        assert _same_bits(default, impl.tile(x, other))
+        with envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.override(False):
+            default = impl.tile(x, other).clone()
+        with envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.override(True):
+            assert _same_bits(default, impl.tile(x, other))

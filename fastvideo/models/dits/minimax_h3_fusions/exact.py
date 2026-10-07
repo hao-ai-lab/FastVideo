@@ -72,7 +72,7 @@ if HAVE_TRITON:
 
     @triton.jit
     def _rope_prefix_kernel(x, cos, sin, out, heads, x_ss, x_sh, c_ss, D: tl.constexpr, R: tl.constexpr,
-                            RP: tl.constexpr, BLOCK_H: tl.constexpr):
+                            RP: tl.constexpr, TAIL: tl.constexpr, BLOCK_H: tl.constexpr):
         # out[..., :R] = x * cos + rotate_half(x) * sin; out[..., R:] = x[..., R:].
         s = tl.program_id(0).to(tl.int64)
         hs = tl.program_id(1) * BLOCK_H + tl.arange(0, BLOCK_H)
@@ -93,12 +93,12 @@ if HAVE_TRITON:
         b = _bf16(_mul_rn(pv, sv[None, :])).to(tl.float32)
         tl.store(out + base + d[None, :], _bf16(_add_rn(a, b)), mask=m)
         if D - R > 0:
-            tail = R + tl.arange(0, D - R if D - R > 0 else 1)
+            tail = R + tl.arange(0, TAIL)
             tmask = hmask[:, None] & (tail < D)[None, :]
             tl.store(out + base + tail[None, :], tl.load(x + base + tail[None, :], mask=tmask), mask=tmask)
 
     @triton.jit
-    def _modulate_kernel(n, scale, shift, idx, out, cols, n_rs, sc_rs, sh_rs, BLOCK_C: tl.constexpr):
+    def _modulate_kernel(n, scale, shift, idx, out, cols, n_rs, sc_rs, sh_rs, o_rs, BLOCK_C: tl.constexpr):
         # out = n * (1 + scale[idx]) + shift[idx], each op rounded to BF16 as eager does.
         row = tl.program_id(0).to(tl.int64)
         c = tl.program_id(1) * BLOCK_C + tl.arange(0, BLOCK_C)
@@ -109,10 +109,10 @@ if HAVE_TRITON:
         sh = tl.load(shift + r * sh_rs + c, mask=m).to(tl.float32)
         one_plus = _bf16(_add_rn(sc, tl.full([BLOCK_C], 1.0, tl.float32))).to(tl.float32)
         y = _bf16(_mul_rn(nv, one_plus)).to(tl.float32)
-        tl.store(out + row * n_rs + c, _bf16(_add_rn(y, sh)), mask=m)
+        tl.store(out + row * o_rs + c, _bf16(_add_rn(y, sh)), mask=m)
 
     @triton.jit
-    def _gate_residual_kernel(h, gate, y, idx, out, cols, h_rs, y_rs, g_rs, BLOCK_C: tl.constexpr):
+    def _gate_residual_kernel(h, gate, y, idx, out, cols, h_rs, y_rs, g_rs, o_rs, BLOCK_C: tl.constexpr):
         # out = h + gate[idx] * y, each op rounded to BF16 as eager does.
         row = tl.program_id(0).to(tl.int64)
         c = tl.program_id(1) * BLOCK_C + tl.arange(0, BLOCK_C)
@@ -122,7 +122,7 @@ if HAVE_TRITON:
         gv = tl.load(gate + r * g_rs + c, mask=m).to(tl.float32)
         yv = tl.load(y + row * y_rs + c, mask=m).to(tl.float32)
         prod = _bf16(_mul_rn(gv, yv)).to(tl.float32)
-        tl.store(out + row * h_rs + c, _bf16(_add_rn(hv, prod)), mask=m)
+        tl.store(out + row * o_rs + c, _bf16(_add_rn(hv, prod)), mask=m)
 
     @triton.jit
     def _swiglu_kernel(x, out, cols, x_rs, o_rs, BLOCK_C: tl.constexpr):
@@ -192,6 +192,7 @@ def rope_prefix(hidden_states: torch.Tensor, rotary_emb: tuple[torch.Tensor, tor
         D=dim,
         R=rotary,
         RP=triton.next_power_of_2(rotary),
+        TAIL=triton.next_power_of_2(max(dim - rotary, 1)),
         BLOCK_H=block_h,
     )
     return out
@@ -200,6 +201,7 @@ def rope_prefix(hidden_states: torch.Tensor, rotary_emb: tuple[torch.Tensor, tor
 def modulate(normed: torch.Tensor, scale: torch.Tensor, shift: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
     """``normed * (1.0 + scale.index_select(0, indices)) + shift.index_select(0, indices)``."""
     n = _rows(normed)
+    indices = indices.contiguous()
     out = torch.empty_like(n)
     cols = n.shape[1]
     _modulate_kernel[(n.shape[0], triton.cdiv(cols, _BLOCK_C))](n,
@@ -211,6 +213,7 @@ def modulate(normed: torch.Tensor, scale: torch.Tensor, shift: torch.Tensor, ind
                                                                n.stride(0),
                                                                scale.stride(0),
                                                                shift.stride(0),
+                                                               out.stride(0),
                                                                BLOCK_C=_BLOCK_C)
     return out.view(normed.shape)
 
@@ -219,6 +222,7 @@ def gate_residual(hidden: torch.Tensor, gate: torch.Tensor, update: torch.Tensor
                   indices: torch.Tensor) -> torch.Tensor:
     """``hidden + gate.index_select(0, indices) * update``."""
     h, y = _rows(hidden), _rows(update)
+    indices = indices.contiguous()
     out = torch.empty_like(h)
     cols = h.shape[1]
     _gate_residual_kernel[(h.shape[0], triton.cdiv(cols, _BLOCK_C))](h,
@@ -230,6 +234,7 @@ def gate_residual(hidden: torch.Tensor, gate: torch.Tensor, update: torch.Tensor
                                                                     h.stride(0),
                                                                     y.stride(0),
                                                                     gate.stride(0),
+                                                                    out.stride(0),
                                                                     BLOCK_C=_BLOCK_C)
     return out.view(hidden.shape)
 

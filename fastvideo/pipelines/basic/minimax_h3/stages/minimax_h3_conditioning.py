@@ -204,10 +204,11 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         if not references or not all(isinstance(item, MiniMaxH3PreparedReference) for item in references):
             raise TypeError("MiniMax-H3 Ref2VA conditioning requires prepared references.")
         # Video references get their block timestamps assigned while presenting,
-        # so only presentations without a video reference are memoized.
-        if all(reference.media_type != "video"
-               for reference in references) and all(reference.image is not None
-                                                    for reference in references if reference.media_type == "image"):
+        # so only presentations without a video reference are memoized. The key
+        # hashes pixels, so a disabled memo must not pay for building it.
+        has_video = any(reference.media_type == "video" for reference in references)
+        images_ready = all(reference.image is not None for reference in references if reference.media_type == "image")
+        if self._ref2va_memo.enabled and not has_video and images_ready:
             key = (str(device), batch.prompt,
                    tuple((reference.media_type, bool(reference.has_audio),
                           image_key(reference.image) if reference.media_type == "image" else None)
