@@ -166,6 +166,24 @@ class FastVideoArgs:
     # False overrides the probe. Training never defers.
     h3_sequential_load: bool | None = None
 
+    # MiniMax-H3 video reconstruction. ``h3-vae`` is the full ViT decoder.
+    # ``taeh3`` is Ollin Boer Bohan's tiny preview decoder; it changes quality
+    # and is opt-in. T2VA with TAEH3 does not need the video VAE weights.
+    video_decode_backend: str = "h3-vae"
+    taeh3_checkpoint: str | None = None
+    taeh3_chunk_size: int = 5
+
+    # Load each heavy component on first use and free it once the last stage
+    # that holds it has run, instead of keeping every component resident from
+    # load time to shutdown. Peak memory becomes the largest overlapping set
+    # rather than the sum of all components. ``None`` (auto) turns this on for
+    # unified-memory devices (GB10 / Spark) after the worker binds its device,
+    # and leaves it off on discrete GPUs. Explicit True / False overrides the
+    # probe. A released component is re-read from disk on the next generation,
+    # so this trades per-request latency for headroom. Inference only; training
+    # keeps every component resident.
+    lazy_module_load: bool | None = None
+
     # Sequence-parallel MiniMax-H3 VAE (opt-in, default off). With SP > 1 the
     # video VAE's temporal chunks (decode) and clips (reference encode) are
     # round-robined across the sequence-parallel ranks and reassembled
@@ -213,9 +231,10 @@ class FastVideoArgs:
 
     disable_autocast: bool = False
 
-    # VSA parameters
-    VSA_sparsity: float = 0.0  # inference/validation sparsity
-    VSA_tile_size: int = 256  # VSA-H3 tile size (256 or 64); 64 = native Triton path
+    # VSA parameters. None means unset: __post_init__ fills the checkpoint's
+    # trained value when the checkpoint fixes one, else 0.0 and 256.
+    VSA_sparsity: float | None = None  # inference/validation sparsity
+    VSA_tile_size: int | None = None  # VSA-H3 tokens per tile (256, 128, 64); 128 = sm_100a CUDA only
 
     # V-MoBA parameters
     moba_config_path: str | None = None
@@ -325,7 +344,7 @@ class FastVideoArgs:
             # environment variable is an input read once here, so the loader
             # only ever consults the typed field.
             import fastvideo.envs as envs
-            if envs.FASTVIDEO_INFERENCE_TORCH_COMPILE:
+            if envs.FASTVIDEO_INFERENCE_TORCH_COMPILE.get():
                 self.inference_torch_compile = True
         if self.attention_backend is not None:
             # Fail fast on typos instead of silently auto-selecting later.
@@ -339,10 +358,19 @@ class FastVideoArgs:
             # and falls through to automatic selection rather than raising.
             import fastvideo.envs as envs
             from fastvideo.attention.selector import backend_name_to_enum
-            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+            env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
         self._fold_vae_parallel_env()
+        # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,
+        # so a backend chosen by that env var counts as the run's request.
+        self.pipeline_config.resolve_checkpoint_settings(self)
+        if self.VSA_sparsity is None:
+            self.VSA_sparsity = 0.0
+        if self.VSA_tile_size is None:
+            self.VSA_tile_size = 256
+        import fastvideo.envs as envs
+        envs.warn_deprecated_variables()
         self.check_fastvideo_args()
 
     def _fold_vae_parallel_env(self) -> None:
@@ -353,12 +381,12 @@ class FastVideoArgs:
         # DEFAULT_DECODE_GATHER_STRATEGY (kept literal here so constructing args
         # never imports model modules; a unit test pins the two in sync).
         strategies = ("gather", "all_gather")
-        if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE:
+        if not self.vae_parallel_decode and envs.FASTVIDEO_VAE_PARALLEL_DECODE.get():
             self.vae_parallel_decode = True
-        if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE:
+        if not self.vae_parallel_encode and envs.FASTVIDEO_VAE_PARALLEL_ENCODE.get():
             self.vae_parallel_encode = True
         if self.vae_parallel_decode_strategy is None:
-            self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY or "gather"
+            self.vae_parallel_decode_strategy = envs.FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY.get() or "gather"
         if self.vae_parallel_decode_strategy not in strategies:
             raise ValueError(f"vae_parallel_decode_strategy must be one of {strategies}, "
                              f"got {self.vae_parallel_decode_strategy!r}.")
@@ -715,6 +743,15 @@ class FastVideoArgs:
             help="Use CPU offload for VAE. Enable if run out of memory.",
         )
         parser.add_argument(
+            "--lazy-module-load",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="Load each heavy component on first use and free it after the last stage that needs it, "
+            "so peak memory is the largest overlapping set of components instead of their sum. "
+            "Omit for auto (on for unified-memory devices such as GB10; off on discrete GPUs). "
+            "Pass --no-lazy-module-load to keep every component resident.",
+        )
+        parser.add_argument(
             "--pin-cpu-memory",
             action=StoreBoolean,
             help=
@@ -728,6 +765,25 @@ class FastVideoArgs:
             help="MiniMax-H3: encode with Qwen3-VL, release that encoder, then load DiT and VAEs. "
             "Omit for auto (on for unified-memory devices such as GB10; off on discrete GPUs). "
             "Pass --no-h3-sequential-load to keep the encoder resident for later generate() calls.",
+        )
+        parser.add_argument(
+            "--video-decode-backend",
+            type=str,
+            choices=("h3-vae", "taeh3"),
+            default=FastVideoArgs.video_decode_backend,
+            help="MiniMax-H3 video decoder. taeh3 is a fast approximate preview decoder; h3-vae is the full VAE.",
+        )
+        parser.add_argument(
+            "--taeh3-checkpoint",
+            type=str,
+            default=None,
+            help="Local taeh3.safetensors path. Unset downloads the pinned upstream weights into the cache.",
+        )
+        parser.add_argument(
+            "--taeh3-chunk-size",
+            type=int,
+            default=FastVideoArgs.taeh3_chunk_size,
+            help="TAEH3 latent frames per execution chunk.",
         )
         parser.add_argument(
             "--vae-parallel-decode",
@@ -752,13 +808,14 @@ class FastVideoArgs:
             "--VSA-sparsity",
             type=float,
             default=FastVideoArgs.VSA_sparsity,
-            help="Validation sparsity for VSA",
+            help="Validation sparsity for VSA (default: the checkpoint's trained value, else 0.0)",
         )
         parser.add_argument(
             "--VSA-tile-size",
             type=int,
             default=FastVideoArgs.VSA_tile_size,
-            help="VSA-H3 tile size in tokens (256 or 64); 64 runs the native Triton block-sparse path",
+            help="VSA-H3 tile size in tokens (256, 128 or 64; default: the checkpoint's trained value, else 256); "
+            "64 runs the native Triton block-sparse path, 128 requires the sm_100a/sm_103a CUDA kernel",
         )
 
         # Master port for distributed training/inference
@@ -963,6 +1020,20 @@ class FastVideoArgs:
     def finalize_device_offload_policy(self, device_id: int = 0) -> bool:
         """Apply device-local memory policy, then resolve incompatible modes."""
         has_unified_memory = self.disable_offload_on_unified_memory(device_id)
+        if self.lazy_module_load is None:
+            self.lazy_module_load = bool(has_unified_memory) and not self.training_mode
+            if self.lazy_module_load:
+                from fastvideo.platforms import current_platform
+
+                try:
+                    device_name = current_platform.get_device_name(device_id)
+                except Exception:
+                    device_name = current_platform.device_name
+                logger.info(
+                    "Enabling lazy_module_load: %s has unified memory, so encoder, DiT, and VAEs cannot stay "
+                    "resident together. Pass --no-lazy-module-load to keep every component loaded.",
+                    device_name,
+                )
         self._resolve_device_offload_conflicts()
         return has_unified_memory
 

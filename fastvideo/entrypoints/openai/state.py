@@ -11,13 +11,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastvideo.api.schema import GenerationRequest
-    from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine
-    from fastvideo.entrypoints.video_generator import VideoGenerator
+    from fastvideo.entrypoints.openai.serving_engine import OpenAIServingEngine, ServingGenerator
     from fastvideo.fastvideo_args import FastVideoArgs
 
 DEFAULT_OUTPUT_DIR = "outputs"
 
-_generator: VideoGenerator | None = None
+_generator: ServingGenerator | None = None
 _serving_engine: OpenAIServingEngine | None = None
 _fastvideo_args: FastVideoArgs | None = None
 _output_dir: str = DEFAULT_OUTPUT_DIR
@@ -25,7 +24,7 @@ _served_model_name: str | None = None
 _default_request: GenerationRequest | None = None
 
 
-def get_generator() -> VideoGenerator:
+def get_generator() -> ServingGenerator:
     """Return the global VideoGenerator instance (set during startup)."""
     assert _generator is not None, "Server not initialized — generator is None"
     return _generator
@@ -62,7 +61,7 @@ def get_default_request() -> GenerationRequest | None:
 
 
 def set_state(
-    generator: VideoGenerator,
+    generator: ServingGenerator,
     serving_engine: OpenAIServingEngine,
     fastvideo_args: FastVideoArgs,
     output_dir: str,

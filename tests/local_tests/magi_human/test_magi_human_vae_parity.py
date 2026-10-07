@@ -7,7 +7,7 @@ compared here are:
   * Upstream (SandAI port) — `inference/model/vae2_2/vae2_2_module.py::Wan2_2_VAE`
     loaded from `Wan-AI/Wan2.2-TI2V-5B/Wan2.2_VAE.pth` (the official .pth
     inside the daVinci-MagiHuman repo). This is the reference.
-  * FastVideo — `fastvideo.models.vaes.wanvae.AutoencoderKLWan` (the
+  * FastVideo — `fastvideo.models.wan.vae.AutoencoderKLWan` (the
     class registered as `EntryClass` and resolved by the VAE component
     loader at runtime; this is what `MagiHumanBaseConfig.vae_config`
     materializes when the magi pipeline runs). Weights are loaded from
@@ -105,9 +105,9 @@ def test_magi_human_vae_decode_parity():
 
     from safetensors.torch import load_file as safetensors_load_file
 
-    from fastvideo.configs.models.vaes import WanVAEConfig
     from fastvideo.models.loader.component_loader import get_diffusers_config
-    from fastvideo.models.vaes.wanvae import AutoencoderKLWan
+    from fastvideo.models.wan.vae import AutoencoderKLWan
+    from fastvideo.models.wan.vae_config import WanVAEConfig
 
     diffusers_cfg = get_diffusers_config(model=str(fv_vae_dir))
     diffusers_cfg.pop("_class_name", None)

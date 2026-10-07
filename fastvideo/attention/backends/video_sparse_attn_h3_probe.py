@@ -23,12 +23,14 @@ import os
 
 import torch
 
+import fastvideo.envs as envs
+
 _FRACS = (0.05, 0.10, 0.125, 0.25, 0.50, 0.75)
 _TRUE_ROWS = 128  # sampled query rows per layer for the token-true check
 
 
 def probe_enabled() -> str | None:
-    return os.environ.get("FASTVIDEO_H3_VSA_PROBE") or None
+    return envs.FASTVIDEO_H3_VSA_PROBE.get() or None
 
 
 @torch.no_grad()

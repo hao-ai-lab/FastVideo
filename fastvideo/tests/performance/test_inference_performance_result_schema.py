@@ -2,6 +2,7 @@
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.tests.performance import test_inference_performance as perf_test
 
 
@@ -60,15 +61,15 @@ def _identity_fields():
     }
 
 
-def test_build_result_record_emits_v2_wan_shape(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
-    monkeypatch.setenv("BUILDKITE_COMMIT", "a" * 40)
-    monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
-    monkeypatch.setenv("BUILDKITE_BRANCH", "main")
-    monkeypatch.setenv("TEST_SCOPE", "full")
-    monkeypatch.setenv("BUILDKITE_BUILD_URL", "https://buildkite.example/build")
-    monkeypatch.setenv("BUILDKITE_BUILD_ID", "build-1")
-    monkeypatch.setenv("BUILDKITE_JOB_ID", "job-1")
+def test_build_result_record_emits_v2_wan_shape(monkeypatch, env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "scheduled_main"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_COMMIT", "a" * 40))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_PULL_REQUEST", "false"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BRANCH", "main"))
+    env_overrides.enter_context(envs.override_external("TEST_SCOPE", "full"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BUILD_URL", "https://buildkite.example/build"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BUILD_ID", "build-1"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_JOB_ID", "job-1"))
     monkeypatch.setattr(perf_test, "_build_identity_fields", lambda *_args: _identity_fields())
 
     record = perf_test._build_result_record(

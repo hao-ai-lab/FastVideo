@@ -16,12 +16,12 @@ same runner).
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
 # Required by the ``distributed_setup`` fixture pulled from
-# ``fastvideo/tests/conftest.py``.  Set before any fastvideo import.
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29519")
+# ``fastvideo/tests/conftest.py``.  Set at import, before the fixture runs.
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29519")
 
 from pathlib import Path
 

@@ -418,7 +418,7 @@ def seed_grad_norm_references():
     dormant Modal rollback runtime), so this function only seeds the ``L40S`` key in
     ``fastvideo/tests/train/methods/grad_norm_refs.json``.
 
-    ``FASTVIDEO_GRADNORM_UPDATE=1`` makes ``check_grad_norm_regression`` record
+    ``FASTVIDEO_TEST_GRADNORM_UPDATE=1`` makes ``check_grad_norm_regression`` record
     the measured norm instead of asserting; ``-rs`` surfaces the recorded value
     in the log so it can be copied into the JSON.
 
@@ -428,7 +428,7 @@ def seed_grad_norm_references():
     the local command and the ``_DEVICE_MAPPINGS`` table.
     """
     run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
-             "FASTVIDEO_FA4=0 FASTVIDEO_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs")
+             "FASTVIDEO_FA4=0 FASTVIDEO_TEST_GRADNORM_UPDATE=1 pytest ./fastvideo/tests/train/methods -vs -rs")
 
 
 @app.function(gpu="L40S:1",

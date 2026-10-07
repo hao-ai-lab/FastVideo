@@ -5,13 +5,15 @@ Wan causal DMD pipeline implementation.
 This module wires the causal DMD denoising stage into the modular pipeline.
 """
 
+from fastvideo.pipelines.basic.wan.stages.conditioning import WanFirstFrameEncodingStage
+from fastvideo.pipelines.basic.wan.stages.causal_denoising import CausalDMDDenosingStage
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, CausalDMDDenosingStage, InputValidationStage,
-                                        LatentPreparationStage, TextEncodingStage)
+from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage, InputValidationStage, LatentPreparationStage,
+                                        TextEncodingStage)
 # isort: on
 
 logger = init_logger(__name__)
@@ -38,11 +40,13 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=LatentPreparationStage(scheduler=self.get_module("scheduler"),
                                                     transformer=self.get_module("transformer", None)))
 
+        self.add_stage(stage_name="first_frame_encoding_stage",
+                       stage=WanFirstFrameEncodingStage(vae=self.get_module("vae"), causal=True))
+
         self.add_stage(stage_name="denoising_stage",
                        stage=CausalDMDDenosingStage(transformer=self.get_module("transformer"),
                                                     transformer_2=self.get_module("transformer_2", None),
-                                                    scheduler=self.get_module("scheduler"),
-                                                    vae=self.get_module("vae")))
+                                                    scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="decoding_stage", stage=DecodingStage(vae=self.get_module("vae")))
 

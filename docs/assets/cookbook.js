@@ -89,9 +89,36 @@
 
   const groupIdFor = (recipe) => recipe.group || recipe.id;
 
-  const gpuCountLabel = (hardware) => {
+  const gpuCountLabel = (hardware, runtimeId) => {
     const count = hardware?.gpu_count;
+    if (count == null) return "";
+    if (runtimeId === "spark") return `${count} Spark${count === 1 ? "" : "s"}`;
     return `${count} GPU${count === 1 ? "" : "s"}`;
+  };
+
+  const knobsFor = (recipe) => recipe.knobs || [];
+
+  const knobOptions = (knob) =>
+    knob.options.map((option) =>
+      option !== null && typeof option === "object" ? option : { value: option, label: String(option) },
+    );
+
+  const knobDefaultLabel = (knob) => {
+    const match = knobOptions(knob).find((option) => option.value === knob.default);
+    return match ? match.label : String(knob.default);
+  };
+
+  // Knob flags are always shown explicitly in the displayed command, even at
+  // their default value, so the command stays copy-pasteable and precise
+  // about what it runs -- not just "trust the script's own default".
+  const appendKnobFlags = (commandText, knobs, knobValues) => {
+    const flags = knobs
+      .filter((knob) => knobValues[knob.key] !== undefined)
+      .map((knob) => `${knob.flag} ${knobValues[knob.key]}`);
+    if (!flags.length) return commandText;
+    const lines = commandText.split("\n");
+    lines[lines.length - 1] = `${lines[lines.length - 1]} ${flags.join(" ")}`;
+    return lines.join("\n");
   };
 
   const runtimeFor = (recipe) => {
@@ -109,17 +136,24 @@
     if (platform === "mps") {
       return {
         id: "mps",
-        label: "Apple Silicon · MPS",
+        label: "Apple Silicon · PyTorch MPS",
         hint: recipe.hardware?.minimum_memory || recipe.hardware?.system_memory || "Memory not recorded",
       };
     }
     const hardware = recipe.hardware || {};
+    if (hardware.device === "spark") {
+      return {
+        id: "spark",
+        label: "NVIDIA DGX Spark",
+        hint: "GB10 · 128 GB unified memory",
+      };
+    }
     return {
       id: "cuda",
       label: "NVIDIA CUDA",
       hint: hardware.accelerator
-        ? `${hardware.accelerator} · ${gpuCountLabel(hardware)}`
-        : `${gpuCountLabel(hardware)} configured · GPU model not recorded`,
+        ? `${hardware.accelerator} · ${gpuCountLabel(hardware, "cuda")}`
+        : `${gpuCountLabel(hardware, "cuda")} configured · GPU model not recorded`,
     };
   };
 
@@ -136,8 +170,11 @@
         .filter(Boolean)
         .join(" · ");
     }
-    if (hardware.accelerator) return [hardware.accelerator, gpuCountLabel(hardware)].join(" · ");
-    return `NVIDIA CUDA · ${gpuCountLabel(hardware)} configured · GPU model and VRAM not recorded`;
+    if (runtime.id === "spark") {
+      return [hardware.accelerator || "NVIDIA GB10", gpuCountLabel(hardware, "spark")].filter(Boolean).join(" · ");
+    }
+    if (hardware.accelerator) return [hardware.accelerator, gpuCountLabel(hardware, runtime.id)].join(" · ");
+    return `NVIDIA CUDA · ${gpuCountLabel(hardware, "cuda")} configured · GPU model and VRAM not recorded`;
   };
 
   const renderHardwareEvidence = (container, badge, recipe) => {
@@ -157,15 +194,17 @@
     if (isValidated) {
       const recorded = [
         hardware.accelerator,
-        runtime.id === "cuda" ? gpuCountLabel(hardware) : hardware.system_memory,
+        runtime.id === "mlx" || runtime.id === "mps" ? hardware.system_memory : gpuCountLabel(hardware, runtime.id),
       ].filter(Boolean);
       const statements = [`${recorded.join(" · ")}.`];
       if (hardware.minimum_memory) statements.push(`Documented minimum: ${hardware.minimum_memory}.`);
       if (hardware.peak_memory) statements.push(`Measured: ${hardware.peak_memory}.`);
       if (!hardware.minimum_memory) statements.push("This recorded device is not a minimum requirement.");
       details.textContent = ` ${statements.join(" ")}`;
+    } else if (runtime.id === "spark") {
+      details.textContent = ` NVIDIA DGX Spark · ${gpuCountLabel(hardware, "spark")}. GB10 has no FA4 / sm_100a VSA kernel; keep Triton VSA and FA4 off.`;
     } else if (runtime.id === "cuda") {
-      details.textContent = ` NVIDIA CUDA · ${gpuCountLabel(hardware)}. The source does not record the GPU model or VRAM.`;
+      details.textContent = ` NVIDIA CUDA · ${gpuCountLabel(hardware, "cuda")}. The source does not record the GPU model or VRAM.`;
     } else {
       details.textContent = ` ${runtime.label}. The source does not record a device or memory requirement.`;
     }
@@ -220,6 +259,13 @@
     const count = root.querySelector("[data-cookbook-count]");
     const result = root.querySelector(".cookbook-result");
     const commandBlock = root.querySelector(".cookbook-command");
+    const servingPanel = root.querySelector("[data-cookbook-serving]");
+    const usage = root.querySelector("[data-cookbook-usage]");
+    const servingAvailability = root.querySelector("[data-cookbook-serving-availability]");
+    const knobsContainer = root.querySelector("[data-cookbook-knobs]");
+    const deviceRow = root.querySelector("[data-cookbook-device-row]");
+    const deviceOptions = root.querySelector("[data-cookbook-device-options]");
+    const deviceCaption = root.querySelector("[data-cookbook-device-caption]");
 
     modelOptions.setAttribute("aria-label", "Recipe");
     hardwareOptions.setAttribute("aria-label", "Runtime");
@@ -236,6 +282,18 @@
 
     const familyRecipes = recipes.filter((recipe) => recipe.family === family);
     if (!familyRecipes.length) return;
+
+    let servingProfiles = {};
+    let servingLoadFailed = false;
+    if (servingPanel && familyRecipes.some((recipe) => recipe.serving)) {
+      try {
+        const dataUrl = new URL(root.dataset.recipes, document.baseURI);
+        servingProfiles = await loadRecipes(new URL("cookbook-serving.json", dataUrl));
+      } catch (error) {
+        servingLoadFailed = true;
+        console.error("Failed to load FastVideo serving profiles", error);
+      }
+    }
 
     const byId = new Map(familyRecipes.map((recipe) => [recipe.id, recipe]));
     const groups = new Map();
@@ -263,19 +321,107 @@
 
     const query = new URLSearchParams(window.location.search);
     const requestedRecipe = query.get("recipe");
-    const defaultRecipeId = familyRecipes[0].id;
+    const defaultRecipeId = byId.has(root.dataset.defaultRecipe) ? root.dataset.defaultRecipe : familyRecipes[0].id;
     let selectedRecipeId = requestedRecipe && byId.has(requestedRecipe) ? requestedRecipe : defaultRecipeId;
     let selectedGroupId = groupIdFor(byId.get(selectedRecipeId));
     let renderedRuntimeGroup = null;
+    // Keep previously shared local/openai links working after renaming workflows.
+    const workflow = (value) => ["local", "python"].includes(value) ? "python" : "server";
+    let usagePreference = workflow(query.get("use"));
+    let selectedClient = ["python", "javascript", "curl"].includes(query.get("client")) ? query.get("client") : "curl";
+    const clientDetails = servingPanel?.querySelector(".cookbook-serving__code");
+    if (clientDetails && query.has("client")) clientDetails.open = true;
+
+    const knobDefs = new Map();
+    familyRecipes.forEach((recipe) => knobsFor(recipe).forEach((knob) => {
+      if (!knobDefs.has(knob.key)) knobDefs.set(knob.key, knob);
+    }));
+    const knobValues = {};
+    knobDefs.forEach((knob, key) => {
+      const fromQuery = query.get(key);
+      const validValues = knobOptions(knob).map((option) => String(option.value));
+      const useQueryValue = fromQuery !== null && validValues.includes(fromQuery);
+      const raw = useQueryValue ? fromQuery : knob.default;
+      knobValues[key] = typeof knob.default === "number" ? Number(raw) : raw;
+    });
+
+    const renderKnobs = (recipe, hidden) => {
+      if (!knobsContainer) return;
+      const knobs = knobsFor(recipe);
+      const renderedKeys = [...knobsContainer.querySelectorAll("[data-knob-row]")].map((row) => row.dataset.knobRow);
+      if (renderedKeys.join(",") !== knobs.map((knob) => knob.key).join(",")) {
+        knobsContainer.replaceChildren();
+        knobs.forEach((knob) => {
+          const row = document.createElement("div");
+          row.className = "cookbook-selection-row";
+          row.dataset.knobRow = knob.key;
+          const labelWrap = document.createElement("div");
+          labelWrap.className = "cookbook-selection-row__label";
+          const strongLabel = document.createElement("strong");
+          strongLabel.textContent = knob.label;
+          const hintLabel = document.createElement("span");
+          hintLabel.textContent = knob.hint || "";
+          labelWrap.append(strongLabel, hintLabel);
+          const grid = document.createElement("div");
+          grid.className = "cookbook-option-grid cookbook-option-grid--hardware";
+          grid.setAttribute("role", "group");
+          grid.setAttribute("aria-label", knob.label);
+          knobOptions(knob).forEach((option) => {
+            const optionButton = document.createElement("button");
+            optionButton.type = "button";
+            optionButton.dataset.knobKey = knob.key;
+            optionButton.dataset.knobValue = String(option.value);
+            optionButton.setAttribute("aria-pressed", "false");
+            const optionLabel = document.createElement("strong");
+            optionLabel.textContent = option.label;
+            optionButton.append(optionLabel);
+            grid.append(optionButton);
+          });
+          row.append(labelWrap, grid);
+          knobsContainer.append(row);
+        });
+      }
+      knobsContainer.hidden = hidden || knobs.length === 0;
+      knobsContainer.querySelectorAll("button[data-knob-key]").forEach((optionButton) => {
+        const selected = String(knobValues[optionButton.dataset.knobKey]) === optionButton.dataset.knobValue;
+        optionButton.classList.toggle("cookbook-option--selected", selected);
+        optionButton.setAttribute("aria-pressed", String(selected));
+      });
+    };
+
+    const recipesForRuntime = (runtimeId, groupRecipes) =>
+      groupRecipes.filter((item) => runtimeFor(item).id === runtimeId);
+
+    const uniqueRuntimeIds = (groupRecipes) => {
+      const ids = [];
+      groupRecipes.forEach((item) => {
+        const id = runtimeFor(item).id;
+        if (!ids.includes(id)) ids.push(id);
+      });
+      return ids;
+    };
+
+    const pickRecipeForRuntime = (runtimeId, preferredCount, groupRecipes) => {
+      const siblings = recipesForRuntime(runtimeId, groupRecipes);
+      if (!siblings.length) return null;
+      if (preferredCount != null) {
+        const match = siblings.find((item) => item.hardware?.gpu_count === preferredCount);
+        if (match) return match;
+      }
+      return siblings.find((item) => item.hardware?.gpu_count === 1) || siblings[0];
+    };
 
     const renderRuntimeOptions = () => {
       const groupRecipes = groups.get(selectedGroupId) || [];
+      const runtimeIds = uniqueRuntimeIds(groupRecipes);
+      const renderedIds = [...hardwareOptions.querySelectorAll("[data-runtime-id]")].map((option) => option.dataset.runtimeId);
+      if (renderedIds.join(",") === runtimeIds.join(",")) return;
       hardwareOptions.replaceChildren();
-      groupRecipes.forEach((recipe) => {
-        const runtime = runtimeFor(recipe);
+      runtimeIds.forEach((runtimeId) => {
+        const representative = pickRecipeForRuntime(runtimeId, 1, groupRecipes);
+        const runtime = runtimeFor(representative);
         const option = document.createElement("button");
         option.type = "button";
-        option.dataset.recipeId = recipe.id;
         option.dataset.runtimeId = runtime.id;
         option.setAttribute("aria-pressed", "false");
         const optionLabel = document.createElement("strong");
@@ -284,6 +430,49 @@
         optionHint.textContent = runtime.hint;
         option.append(optionLabel, optionHint);
         hardwareOptions.append(option);
+      });
+    };
+
+    const renderDeviceOptions = (recipe) => {
+      if (!deviceRow || !deviceOptions) return;
+      const groupRecipes = groups.get(selectedGroupId) || [];
+      const runtime = runtimeFor(recipe);
+      const siblings = recipesForRuntime(runtime.id, groupRecipes)
+        .slice()
+        .sort((left, right) => (left.hardware?.gpu_count || 0) - (right.hardware?.gpu_count || 0));
+      const show = siblings.length > 1;
+      deviceRow.hidden = !show;
+      if (deviceCaption) {
+        deviceCaption.textContent = runtime.id === "spark" ? "1 Spark or a QSFP pair" : "GPU count for this runtime";
+      }
+      if (!show) {
+        deviceOptions.replaceChildren();
+        return;
+      }
+      const renderedIds = [...deviceOptions.querySelectorAll("[data-recipe-id]")].map((option) => option.dataset.recipeId);
+      if (renderedIds.join(",") !== siblings.map((item) => item.id).join(",")) {
+        deviceOptions.replaceChildren();
+        siblings.forEach((candidate) => {
+          const option = document.createElement("button");
+          option.type = "button";
+          option.dataset.recipeId = candidate.id;
+          option.setAttribute("aria-pressed", "false");
+          const optionLabel = document.createElement("strong");
+          optionLabel.textContent = gpuCountLabel(candidate.hardware, runtime.id);
+          const optionHint = document.createElement("span");
+          optionHint.textContent = runtime.id === "spark" && candidate.hardware?.gpu_count === 2
+            ? "Ray sequence parallel over QSFP"
+            : runtime.id === "spark"
+              ? "One GB10, local process"
+              : `${gpuCountLabel(candidate.hardware, runtime.id)} configured`;
+          option.append(optionLabel, optionHint);
+          deviceOptions.append(option);
+        });
+      }
+      deviceOptions.querySelectorAll("button").forEach((option) => {
+        const selected = option.dataset.recipeId === recipe.id;
+        option.classList.toggle("cookbook-option--selected", selected);
+        option.setAttribute("aria-pressed", String(selected));
       });
     };
 
@@ -302,8 +491,9 @@
       let recipe = byId.get(selectedRecipeId);
       if (groupChanged || groupIdFor(recipe) !== selectedGroupId) {
         const currentRuntime = runtimeFor(recipe).id;
+        const currentCount = recipe.hardware?.gpu_count;
         const groupRecipes = groups.get(selectedGroupId) || [];
-        recipe = groupRecipes.find((candidate) => runtimeFor(candidate).id === currentRuntime) || groupRecipes[0];
+        recipe = pickRecipeForRuntime(currentRuntime, currentCount, groupRecipes) || groupRecipes[0];
         selectedRecipeId = recipe.id;
       }
 
@@ -312,7 +502,78 @@
         renderRuntimeOptions();
         renderedRuntimeGroup = selectedGroupId;
       }
+      renderDeviceOptions(recipe);
       const runtime = runtimeFor(recipe);
+      const profile = servingPanel && servingProfiles[recipe.id];
+      const useServer = Boolean(profile && usagePreference === "server");
+      // Only some servers expose the browser playground or return audio; both come from the serving profile.
+      const hasPlayground = Boolean(profile && profile.playground_url);
+      const hasAudio = Boolean(profile && profile.audio);
+      const playgroundAny = familyRecipes.some((item) => servingProfiles[item.id] && servingProfiles[item.id].playground_url);
+      // The measured local profile and the server config have separate evidence.
+      const activeRecipe = useServer ? { ...recipe, hardware: profile.hardware, evidence: "Source-backed" } : recipe;
+      const knobs = knobsFor(recipe);
+      renderKnobs(recipe, useServer);
+
+      if (usage) {
+        usage.querySelectorAll("[data-cookbook-mode]").forEach((option) => {
+          const selected = option.dataset.cookbookMode === (useServer ? "server" : "python");
+          option.disabled = option.dataset.cookbookMode === "server" && !profile;
+          const hint = option.querySelector("[data-cookbook-server-hint]");
+          if (hint) hint.textContent = (profile ? hasPlayground : playgroundAny) ? "Playground, cURL, or an API client" : "cURL or an API client";
+          option.classList.toggle("cookbook-option--selected", selected);
+          option.setAttribute("aria-pressed", String(selected));
+        });
+        const servedNames = [...new Set(familyRecipes.filter((item) => servingProfiles[item.id]).map((item) => item.group_label || item.label))];
+        servingAvailability.textContent = profile
+          ? `${hasPlayground ? "The playground" : "cURL"} and the OpenAI Python client share one server process. Both workflows can run on your own machine.`
+          : servingLoadFailed
+            ? "Server examples could not be loaded. Use Python directly."
+            : servedNames.length
+              ? `This recipe uses Python directly. ${new Intl.ListFormat("en").format(servedNames)} can also run a local server for ${playgroundAny ? "the playground and " : "cURL and "}the OpenAI Python client.`
+              : "This recipe uses Python directly.";
+        servingPanel.hidden = !useServer;
+        commandBlock.hidden = useServer;
+        root.querySelector("[data-cookbook-python-note]").hidden = useServer;
+      }
+
+      if (useServer) {
+        const isMLX = profile.runtime === "mlx";
+        const isSpark = runtime.id === "spark";
+        const where = hasPlayground ? "in the playground or your app" : "in your app";
+        servingPanel.querySelector("[data-cookbook-server-lifetime]").textContent = isMLX
+          ? `Start once, then change prompts ${where}. MLX reuses its pipeline and prompt cache, but loads and releases model components between phases to limit unified-memory use. It does not keep all weights resident.`
+          : isSpark
+            ? `Start once, then change prompts ${where}. On a DGX Spark, lazy module load still reloads Qwen3-VL and the DiT between phases of each request, so later prompts are not a free hot cache.`
+            : `Start once, then change prompts ${where}. CUDA requests reuse the loaded model. The Python SDK can also reuse a generator within one process.`;
+        servingPanel.querySelector("[data-cookbook-install-guide]").href = isMLX
+          ? "../../getting_started/installation/mlx/"
+          : isSpark
+            ? "../../getting_started/installation/spark/"
+            : "../../getting_started/installation/gpu/";
+        servingPanel.querySelector("[data-cookbook-prepare]").hidden = !profile.prepare;
+        servingPanel.querySelector("[data-cookbook-server-prepare]").textContent = profile.prepare;
+        servingPanel.querySelector("[data-cookbook-server-install]").textContent = profile.install;
+        servingPanel.querySelector("[data-cookbook-server-command]").textContent = profile.command;
+        servingPanel.querySelector("[data-cookbook-health-command]").textContent = profile.health_command;
+        servingPanel.querySelectorAll("[data-cookbook-playground-only]").forEach((element) => {
+          element.hidden = !hasPlayground;
+        });
+        if (hasPlayground) servingPanel.querySelector("[data-cookbook-playground]").href = profile.playground_url;
+        const client = profile.clients[selectedClient];
+        const filename = client.source.split("/").pop();
+        servingPanel.querySelector("[data-cookbook-client-install]").textContent = client.install;
+        const clientCode = servingPanel.querySelector("[data-cookbook-client-code]");
+        clientCode.className = `language-${selectedClient === "curl" ? "bash" : selectedClient}`;
+        clientCode.textContent = client.code;
+        servingPanel.querySelector("[data-cookbook-client-filename]").textContent = filename;
+        servingPanel.querySelector("[data-cookbook-client-source]").href = `https://github.com/hao-ai-lab/FastVideo/blob/main/${client.source}`;
+        const runner = { python: "python", javascript: "node", curl: "bash" }[selectedClient];
+        servingPanel.querySelector("[data-cookbook-client-run]").textContent = `Save as ${filename} and run ${runner} ${filename}. The MP4 is saved with the job ID as its filename.`;
+        servingPanel.querySelectorAll("[data-cookbook-client]").forEach((option) => {
+          option.setAttribute("aria-pressed", String(option.dataset.cookbookClient === selectedClient));
+        });
+      }
 
       modelOptions.querySelectorAll("button").forEach((option) => {
         const selected = option.dataset.recipeGroup === selectedGroupId;
@@ -320,29 +581,50 @@
         option.setAttribute("aria-pressed", String(selected));
       });
       hardwareOptions.querySelectorAll("button").forEach((option) => {
-        const selected = option.dataset.recipeId === recipe.id;
+        const selected = option.dataset.runtimeId === runtime.id;
         option.classList.toggle("cookbook-option--selected", selected);
         option.setAttribute("aria-pressed", String(selected));
       });
 
-      description.textContent = recipe.summary;
-      label.textContent = recipe.label;
+      description.textContent = useServer
+        ? `${recipe.group_label || recipe.label} generates video${hasAudio ? " with audio" : ""}. Start the local server, then use ${hasPlayground ? "the playground or " : "cURL or "}the OpenAI Python client. This profile uses the checked-in ${runtime.label} configuration.`
+        : recipe.summary;
+      label.textContent = useServer ? `${recipe.group_label || recipe.label} · Server` : recipe.label;
       model.textContent = recipe.model;
-      task.textContent = recipe.task;
-      hardwareValue.textContent = runtimeSummary(recipe);
-      if (artifact) artifact.textContent = recipe.expected_artifact || "Not yet documented for this recipe.";
-      if (evidenceCell) {
-        evidenceCell.textContent = recipe.evidence || "Source-backed";
-        evidenceCell.classList.toggle("cookbook-badge--verified", recipe.evidence === "Verified");
-        evidenceCell.classList.toggle("cookbook-badge--source-backed", recipe.evidence !== "Verified");
+      task.textContent = (useServer && recipe.serving && recipe.serving.task) || recipe.task;
+      hardwareValue.textContent = runtimeSummary(activeRecipe);
+      if (artifact) {
+        artifact.textContent = useServer
+          ? (hasAudio ? "MP4 with audio" : "MP4 video")
+          : recipe.expected_artifact || "Not yet documented for this recipe.";
       }
-      source.href = `https://github.com/hao-ai-lab/FastVideo/blob/main/${recipe.source}`;
+      if (evidenceCell) {
+        evidenceCell.textContent = activeRecipe.evidence || "Source-backed";
+        evidenceCell.classList.toggle("cookbook-badge--verified", activeRecipe.evidence === "Verified");
+        evidenceCell.classList.toggle("cookbook-badge--source-backed", activeRecipe.evidence !== "Verified");
+      }
+      source.href = `https://github.com/hao-ai-lab/FastVideo/blob/main/${useServer ? profile.source : recipe.source}`;
+      source.textContent = useServer ? "View server configuration" : "Open example source";
       modelLink.href = `https://huggingface.co/${recipe.model}`;
-      command.textContent = recipe.command;
+      command.textContent = useServer ? recipe.command : appendKnobFlags(recipe.command, knobs, knobValues);
 
-      renderHardwareEvidence(hardwareState, hardwareBadge, recipe);
+      renderHardwareEvidence(hardwareState, hardwareBadge, activeRecipe);
 
-      const limitations = recipe.limitations || [];
+      const knobCaveats = useServer ? [] : knobs
+        .filter((knob) => String(knobValues[knob.key]) !== String(knob.default))
+        .map((knob) => `${knob.label} is set away from its recorded default (${knobDefaultLabel(knob)}). ` +
+          "The script accepts this value, but it has not been benchmarked here.");
+      const limitations = [...(useServer ? [
+        profile.runtime === "mlx"
+          ? "This MLX server config has no recorded hardware run. Measurements from the Python recipe are not server memory requirements. Only text-to-video/audio is wired; reference inputs and fast modes are not exposed here."
+          : runtime.id === "spark"
+            ? "This Spark server config has no recorded serving benchmark. Lazy module load reloads Qwen3-VL and the DiT between phases of each request. Compilation of the DiT is disabled."
+            : `This server config has no recorded serving benchmark.${profile.compile_enabled === false ? " Compilation is disabled, unlike the measured Python performance profile." : ""}`,
+        `${profile.sampling.width} × ${profile.sampling.height} · ${profile.sampling.num_frames} frames · ${profile.sampling.fps} fps. The server supplies these defaults; the client sends the model and prompt.`,
+        "Generation is serialized. Job metadata is held in memory and is lost when the server restarts.",
+      ] : recipe.limitations || []),
+      ...(useServer && recipe.serving && Array.isArray(recipe.serving.limitations) ? recipe.serving.limitations : []),
+      ...knobCaveats];
       notes.replaceChildren();
       notes.hidden = limitations.length === 0;
       if (limitations.length) {
@@ -360,11 +642,26 @@
       const nextQuery = new URLSearchParams(window.location.search);
       nextQuery.set("recipe", recipe.id);
       nextQuery.set("runtime", runtime.id);
-      nextQuery.delete("gpus");
+      const deviceSiblings = recipesForRuntime(runtime.id, groups.get(selectedGroupId) || []);
+      if (deviceSiblings.length > 1 && recipe.hardware?.gpu_count != null) {
+        nextQuery.set("gpus", String(recipe.hardware.gpu_count));
+      } else {
+        nextQuery.delete("gpus");
+      }
+      knobDefs.forEach((knob, key) => {
+        if (knobs.some((activeKnob) => activeKnob.key === key)) nextQuery.set(key, String(knobValues[key]));
+        else nextQuery.delete(key);
+      });
+      if (usage) {
+        nextQuery.set("use", useServer ? "server" : "python");
+        if (useServer && clientDetails?.open) nextQuery.set("client", selectedClient);
+        else nextQuery.delete("client");
+      }
       const nextUrl = `${window.location.pathname}?${nextQuery.toString()}${window.location.hash}`;
       if (historyMode === "push") window.history.pushState({}, "", nextUrl);
       else if (historyMode === "replace") window.history.replaceState({}, "", nextUrl);
-      status.textContent = `${recipe.label} selected for ${runtime.label}.`;
+      const modeSummary = useServer ? " with a persistent server" : "";
+      status.textContent = `${recipe.label} selected for ${runtime.label}${modeSummary}.`;
     };
 
     modelOptions.addEventListener("click", (event) => {
@@ -374,10 +671,41 @@
       render({ groupChanged: true, historyMode: "push" });
     });
     hardwareOptions.addEventListener("click", (event) => {
+      const option = event.target.closest("button[data-runtime-id]");
+      if (!option) return;
+      const groupRecipes = groups.get(selectedGroupId) || [];
+      const currentCount = byId.get(selectedRecipeId)?.hardware?.gpu_count;
+      const nextRecipe = pickRecipeForRuntime(option.dataset.runtimeId, currentCount, groupRecipes);
+      if (!nextRecipe) return;
+      selectedRecipeId = nextRecipe.id;
+      selectedGroupId = groupIdFor(nextRecipe);
+      render({ historyMode: "push" });
+    });
+    deviceOptions?.addEventListener("click", (event) => {
       const option = event.target.closest("button[data-recipe-id]");
       if (!option) return;
       selectedRecipeId = option.dataset.recipeId;
       selectedGroupId = groupIdFor(byId.get(selectedRecipeId));
+      render({ historyMode: "push" });
+    });
+    usage?.addEventListener("click", (event) => {
+      const option = event.target.closest("button[data-cookbook-mode]");
+      if (!option || option.disabled) return;
+      usagePreference = option.dataset.cookbookMode;
+      render({ historyMode: "push" });
+    });
+    servingPanel?.addEventListener("click", (event) => {
+      const option = event.target.closest("button[data-cookbook-client]");
+      if (!option) return;
+      selectedClient = option.dataset.cookbookClient;
+      render({ historyMode: "push" });
+    });
+    knobsContainer?.addEventListener("click", (event) => {
+      const option = event.target.closest("button[data-knob-key]");
+      if (!option) return;
+      const knob = knobDefs.get(option.dataset.knobKey);
+      knobValues[option.dataset.knobKey] = typeof knob.default === "number"
+        ? Number(option.dataset.knobValue) : option.dataset.knobValue;
       render({ historyMode: "push" });
     });
 
@@ -389,6 +717,16 @@
       const nextRecipe = nextQuery.get("recipe");
       selectedRecipeId = nextRecipe && byId.has(nextRecipe) ? nextRecipe : defaultRecipeId;
       selectedGroupId = groupIdFor(byId.get(selectedRecipeId));
+      usagePreference = workflow(nextQuery.get("use"));
+      selectedClient = ["python", "javascript", "curl"].includes(nextQuery.get("client")) ? nextQuery.get("client") : "curl";
+      if (clientDetails) clientDetails.open = nextQuery.has("client");
+      knobDefs.forEach((knob, key) => {
+        const fromQuery = nextQuery.get(key);
+        const validValues = knobOptions(knob).map((option) => String(option.value));
+        if (fromQuery !== null && validValues.includes(fromQuery)) {
+          knobValues[key] = typeof knob.default === "number" ? Number(fromQuery) : fromQuery;
+        }
+      });
       render({ historyMode: "none" });
     };
     bindFamilyPopstate();

@@ -1,4 +1,4 @@
-// block_sparse_sm100a.cu -- torch binding for the sm_100a VSA block-sparse FMHA forward.
+// block_sparse_sm100a.cu -- torch binding for the sm_100a/sm_103a VSA block-sparse FMHA forward.
 //
 // Forward only: returns (out, lse) so FastVideo's existing Triton backward keeps working
 // unchanged. lse is exactly the M tensor triton_block_sparse_attn_forward writes --

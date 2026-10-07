@@ -211,8 +211,8 @@ FAMILY_COVERAGE = (
         ("test_turbodiffusion_similarity.py", ),
     ),
     FamilyCoverage(
-        re.compile(r"(^|[/_.-])wan(video)?([/_.-]|$)"),
-        ("test_wan_t2v.py", ),
+        re.compile(r"(^|[/_.-])wan(video|vae)?([/_.-]|$)"),
+        ("test_wan_t2v.py", "test_wan_vae.py", "test_wan_causal.py", "test_wan_denoising.py"),
         (
             "test_causal_similarity.py",
             "test_wan_i2v_similarity.py",
@@ -291,6 +291,18 @@ def _family_coverage(path: str) -> tuple[set[str], set[str]]:
         if family.pattern.search(normalized):
             golden.update(family.golden_tests)
             ssim.update(family.ssim_tests)
+    # Select the component actually touched, including compatibility paths.
+    # Family configs/pipeline wiring can affect all four Wan gates.
+    if re.search(r"(^|[/_.-])wan(video|vae)?([/_.-]|$)", normalized):
+        if (normalized.endswith(("/wan/vae.py", "/wan/vae_config.py", "/vaes/wanvae.py"))
+                or normalized.endswith("/wan/stages/conditioning.py")):
+            golden = {"test_wan_vae.py"}
+        elif normalized.endswith(("/wan/causal_transformer.py", "/dits/causal_wanvideo.py",
+                                  "/wan/stages/causal_denoising.py")):
+            golden = {"test_wan_causal.py"}
+        elif (normalized == "fastvideo/models/dits/wanvideo.py"
+              or normalized.endswith(("/wan/transformer.py", "/wan/stages/denoising.py", "/wan/stages/dmd.py"))):
+            golden = {"test_wan_t2v.py", "test_wan_denoising.py"}
     return golden, ssim
 
 
