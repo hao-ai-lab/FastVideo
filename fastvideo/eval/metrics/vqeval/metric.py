@@ -44,7 +44,9 @@ class VQevalCompositeMetric(BaseMetric):
     # VQeval owns its model transfers. Keep FastVideo's input tensor on CPU
     # because this adapter must first build VQeval's uint8 RGB/BGR buffers.
     needs_gpu = False
-    dependencies = ["vqeval", "cv2", "open_clip", "pyiqa", "mediapipe"]
+    # mediapipe (upstream's optional anatomical-error detector) is not
+    # required; see the eval-vqeval extra comment in pyproject.toml.
+    dependencies = ["vqeval", "cv2", "open_clip", "pyiqa"]
     backbone = "vqeval_shared"
 
     def __init__(self) -> None:
@@ -120,6 +122,7 @@ class VQevalCompositeMetric(BaseMetric):
         active_dimensions = config.get_active_dimensions()
         weights = config.get_effective_weights()
         dimension_results: dict[str, dict[str, Any]] = {}
+        errors: dict[str, str] = {}
         weighted_sum = 0.0
         total_weight = 0.0
 
@@ -127,7 +130,15 @@ class VQevalCompositeMetric(BaseMetric):
             evaluator = self._evaluator_classes[dimension](config=config, model_registry=self._registry)
             if not evaluator.is_applicable(upstream_video):
                 continue
-            result = evaluator.evaluate(upstream_video)
+            try:
+                result = evaluator.evaluate(upstream_video)
+            except Exception as e:
+                # One failing dimension must not abort the video: upstream
+                # catches Exception per dimension and renormalizes the
+                # composite over the dimensions that succeeded
+                # (vqeval/vqeval/core/pipeline.py, EvalPipeline.run).
+                errors[dimension] = f"{type(e).__name__}: {e}"
+                continue
             dimension_results[dimension] = {
                 "score": float(result.score),
                 "verdict": result.verdict,
@@ -138,6 +149,8 @@ class VQevalCompositeMetric(BaseMetric):
             total_weight += weight
 
         if not dimension_results or total_weight == 0:
+            if errors:
+                return self._skip(sample, f"all applicable VQeval dimensions failed: {errors}")
             return self._skip(sample, "no VQeval dimensions were applicable")
 
         score = weighted_sum / total_weight
@@ -146,6 +159,7 @@ class VQevalCompositeMetric(BaseMetric):
             score=score,
             details={
                 "dimensions": dimension_results,
+                "errors": errors,
                 "weights": {
                     name: float(weights[name])
                     for name in dimension_results
@@ -186,13 +200,30 @@ class VQevalCompositeMetric(BaseMetric):
         )
 
 
+# Fallback copies of vqeval.core.config's sampling constants for when the
+# submodule is not checked out. The upstream-sync test keeps these equal to
+# the pinned upstream's SAMPLE_ALL_THRESHOLD_SEC / MIN_SAMPLE_FPS.
+_FALLBACK_SAMPLE_ALL_THRESHOLD_SEC = 5.0
+_FALLBACK_MIN_SAMPLE_FPS = 2.0
+
+
+def _sampling_thresholds() -> tuple[float, float]:
+    """VQeval's (SAMPLE_ALL_THRESHOLD_SEC, MIN_SAMPLE_FPS) sampling policy."""
+    try:
+        from vqeval.core.config import MIN_SAMPLE_FPS, SAMPLE_ALL_THRESHOLD_SEC
+    except ImportError:
+        return _FALLBACK_SAMPLE_ALL_THRESHOLD_SEC, _FALLBACK_MIN_SAMPLE_FPS
+    return float(SAMPLE_ALL_THRESHOLD_SEC), float(MIN_SAMPLE_FPS)
+
+
 def _sample_indices(total_frames: int, fps: float) -> list[int]:
-    """Match VQeval's default all-frames/2-fps sampling policy."""
+    """Match VQeval's frame-sampling policy (VideoLoader._compute_sample_indices)."""
+    sample_all_threshold, min_sample_fps = _sampling_thresholds()
     duration = total_frames / fps
-    if duration <= 5.0:
+    if duration <= sample_all_threshold:
         return list(range(total_frames))
 
-    interval = max(1, int(fps / 2.0))
+    interval = max(1, int(fps / min_sample_fps))
     indices = set(range(0, total_frames, interval))
     indices.update((0, total_frames - 1, total_frames // 2))
     return sorted(indices)

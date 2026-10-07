@@ -97,6 +97,15 @@ git submodule update --init fastvideo/third_party/eval/vqeval
 uv pip install -e '.[eval-vqeval]'
 ```
 
+MediaPipe is intentionally not part of `[eval-vqeval]`: VQeval's
+anatomical-error detector wants the legacy `mp.solutions` API, which only
+exists in `mediapipe` 0.10.x, and every 0.10.x pins `protobuf<5` —
+unsatisfiable next to FastVideo's `protobuf>=5.28.3`. Upstream reports zero
+anatomical errors without MediaPipe (its import degrades gracefully), and
+`spatial_quality` falls back to pyiqa's BRISQUE when `cv2.quality`
+(opencv-contrib) is absent. An environment that can relax the protobuf pin
+can install `mediapipe<1` manually to enable the anatomical checks.
+
 Frame rate is required because VQeval scores every frame through five seconds
 and samples longer videos at approximately 2 fps. Text alignment is included
 only when `--text-prompt` is provided.

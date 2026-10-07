@@ -171,11 +171,18 @@ test = [
 # are opt-in and intentionally kept out of the default [eval] set.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
 eval-vqeval = [
-    # VQeval uses the legacy mp.solutions API removed in MediaPipe 1.x.
-    "mediapipe>=0.10.0,<1",
+    # MediaPipe is deliberately not declared. VQeval's anatomical-error
+    # detector wants the legacy mp.solutions API, which only exists in
+    # mediapipe 0.10.x, and every 0.10.x pins protobuf<5 (0.10.21:
+    # protobuf<5,>=4.25.3) -- unsatisfiable next to the base
+    # protobuf>=5.28.3 pin above. mediapipe 1.x dropped mp.solutions.
+    # Upstream's artifact_detection wraps its mediapipe import in
+    # try/except and reports zero anatomical errors without it.
+    # cv2 comes from the base opencv-python pin; declaring
+    # opencv-contrib-python here too would install two providers of the
+    # cv2 package (mixed cv2 trees on version skew). Upstream's
+    # cv2.quality BRISQUE path falls back to pyiqa when contrib is absent.
     "open_clip_torch>=2.24.0",
-    # Includes cv2 + quality.BRISQUE; MediaPipe depends on this same wheel.
-    "opencv-contrib-python>=4.8.0",
     "pyiqa>=0.1.10",
 ]
 eval-physics-iq = []

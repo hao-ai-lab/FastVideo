@@ -12,7 +12,13 @@ import numpy as np
 import pytest
 import torch
 
-from fastvideo.eval.metrics.vqeval.metric import VQevalCompositeMetric, _sample_indices
+from fastvideo.eval.metrics.vqeval.metric import (
+    VQevalCompositeMetric,
+    _FALLBACK_MIN_SAMPLE_FPS,
+    _FALLBACK_SAMPLE_ALL_THRESHOLD_SEC,
+    _UPSTREAM_COMMIT,
+    _sample_indices,
+)
 from fastvideo.eval.registry import _install_hint
 
 
@@ -152,6 +158,7 @@ def test_invalid_input_skips_cleanly(sample, reason):
 
 def test_setup_is_lazy_and_does_not_load_models():
     pytest.importorskip("cv2")
+    pytest.importorskip("vqeval")  # git submodule; skip when not checked out
     metric = VQevalCompositeMetric().to("cpu")
     metric.setup()
 
@@ -169,6 +176,7 @@ def test_setup_is_lazy_and_does_not_load_models():
 
 def test_upstream_loop_dimension_separates_repetition_without_model_downloads():
     pytest.importorskip("cv2")
+    pytest.importorskip("vqeval")  # git submodule; skip when not checked out
     metric = VQevalCompositeMetric().to("cpu")
     metric.setup()
 
@@ -203,3 +211,104 @@ def test_upstream_loop_dimension_separates_repetition_without_model_downloads():
 
     assert loop_score(static) < loop_score(unique)
     assert loop_score(periodic) < loop_score(unique)
+
+
+def _raising_evaluator():
+    class _RaisingEvaluator(_FakeEvaluator):
+
+        def __init__(self, **kwargs):
+            super().__init__(score=0.0, **kwargs)
+
+        def evaluate(self, video):
+            raise RuntimeError("simulated dimension failure")
+
+    return _RaisingEvaluator
+
+
+_REAL_DIMENSION_SCORES = {
+    "spatial_quality": 80.0,
+    "temporal_coherence": 60.0,
+    "loop_quality": 40.0,
+    "artifact_detection": 20.0,
+    "dynamic_quality": 100.0,
+    "text_alignment": 50.0,
+}
+
+
+def _real_config_metric(failing=()):
+    metric = VQevalCompositeMetric()
+    metric._registry = object()
+    metric._config_cls = pytest.importorskip("vqeval.core.config").EvalConfig
+    metric._video_data_cls = _FakeVideoData
+    metric._video_meta_cls = _FakeMeta
+    metric._evaluator_classes = {
+        name: (_raising_evaluator() if name in failing else _evaluator(score))
+        for name, score in _REAL_DIMENSION_SCORES.items()
+    }
+    return metric
+
+
+@pytest.mark.parametrize("prompt", [None, "a red field"])
+@pytest.mark.parametrize("failing", [(), ("loop_quality",)])
+def test_real_evalconfig_weights_renormalize_over_successful_dimensions(prompt, failing):
+    """Drive compute() through upstream's real EvalConfig weight wiring.
+
+    The other tests fake get_active_dimensions()/get_effective_weights();
+    this asserts the real DEFAULT_WEIGHTS redistribution (text_alignment
+    only with a prompt) and that a failed dimension's weight is
+    redistributed over the dimensions that succeeded, matching upstream's
+    EvalPipeline._compute_composite.
+    """
+    config_mod = pytest.importorskip("vqeval.core.config")
+    metric = _real_config_metric(failing)
+    video = torch.zeros(60, 3, 2, 3)
+    video[:, 0] = 1.0
+
+    result = metric.compute({
+        "video": video,
+        "video_path": "fixture.mp4",
+        "fps": 10.0,
+        "text_prompt": prompt,
+    })
+
+    config = config_mod.EvalConfig(video_path="fixture.mp4", prompt=prompt, device="cpu")
+    active = config.get_active_dimensions()
+    assert ("text_alignment" in active) == (prompt is not None)
+
+    raw = config_mod.DEFAULT_WEIGHTS
+    total = sum(raw[d] for d in active)
+    assert config.get_effective_weights() == pytest.approx({d: raw[d] / total for d in active})
+
+    assert set(result.details["dimensions"]) == set(active) - set(failing)
+    assert set(result.details["errors"]) == set(failing)
+
+    ok = [d for d in active if d not in failing]
+    weights = config.get_effective_weights()
+    expected = sum(weights[d] * _REAL_DIMENSION_SCORES[d] for d in ok) / sum(weights[d] for d in ok)
+    assert result.score == pytest.approx(expected)
+
+
+def test_fallback_sampling_thresholds_match_upstream_constants():
+    config_mod = pytest.importorskip("vqeval.core.config")
+    assert _FALLBACK_SAMPLE_ALL_THRESHOLD_SEC == config_mod.SAMPLE_ALL_THRESHOLD_SEC
+    assert _FALLBACK_MIN_SAMPLE_FPS == config_mod.MIN_SAMPLE_FPS
+
+
+def test_upstream_commit_matches_submodule_checkout():
+    import subprocess
+    from pathlib import Path
+
+    submodule = Path(__file__).resolve().parents[2] / "third_party" / "eval" / "vqeval"
+    if not (submodule / ".git").exists():
+        pytest.skip("vqeval submodule not checked out")
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(submodule), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("git unavailable to verify the submodule commit")
+    assert _UPSTREAM_COMMIT == head, (
+        "_UPSTREAM_COMMIT must match the pinned submodule checkout so "
+        "details['upstream_commit'] provenance stays truthful"
+    )
