@@ -16,7 +16,7 @@ from fastvideo.attention.backends.abstract import (
     AttentionMetadata,
     AttentionMetadataBuilder,
 )
-from fastvideo.attention.backends.attn_qat_infer import (_default_fa4_pv_mode, validate_fa4_pv_mode)
+from fastvideo.attention.backends.attn_qat_infer import _resolve_fa4_pv_mode
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -147,29 +147,9 @@ def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torc
 # headdim-contiguous layout -- no mSFV scale-factor tensor and no v_descale
 # (those belong to the block-scaled fp4/mxfp8 PV modes; absent v_descale means
 # an implicit dequant scale of 1.0). The kernel's output stays BF16 whenever
-# block-scaled Q/K are enabled. A naive in-forward `.to(torch.float8_e4m3fn)`
-# graph-breaks under torch.compile, so the cast gets the same custom-op
-# boundary treatment as the quantize step above.
-@torch.library.custom_op(
-    "fastvideo::fa4_v_to_fp8",
-    mutates_args=(),
-    device_types="cuda",
-)
-def _fa4_v_to_fp8_op(value: torch.Tensor) -> torch.Tensor:
-    return value.to(torch.float8_e4m3fn)
-
-
-@torch.library.register_fake("fastvideo::fa4_v_to_fp8")
-def _fa4_v_to_fp8_fake(value: torch.Tensor) -> torch.Tensor:
-    # `.to(dtype)` uses preserve_format, so the impl keeps the input's strides
-    # for dense tensors (and falls back to contiguous otherwise); empty_like's
-    # default preserve_format reproduces exactly that layout rule.
-    return torch.empty_like(value, dtype=torch.float8_e4m3fn)
-
-
-def _fa4_v_to_fp8(value: torch.Tensor) -> torch.Tensor:
-    """Cast V to fp8 e4m3 for FA4's fp8 PV mode via the custom-op boundary."""
-    return torch.ops.fastvideo.fa4_v_to_fp8(value)
+# block-scaled Q/K are enabled. The cast itself needs no custom-op boundary:
+# a bare `.to(torch.float8_e4m3fn)` traces fullgraph under torch.compile
+# (verified on torch 2.12, CPU/eager, for both FA4-FP4 consumers).
 
 
 class FlashAttentionBackend(AttentionBackend):
@@ -251,12 +231,13 @@ class FlashAttentionImpl(AttentionImpl):
         self.causal = causal
         self.softmax_scale = softmax_scale
         self.nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4", False) or os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
-        # PV-mode knob for the FA4-FP4 path. Validated unconditionally so a
-        # typo fails at construction, not at the first forward on a Blackwell
-        # box. The default leaves behavior identical to before the knob.
-        # kwargs win; the FASTVIDEO_FA4_PV_MODE env bridge is the user-reachable
-        # fallback (same pattern as nvfp4_fa4 above).
-        self.fa4_pv_mode = validate_fa4_pv_mode(extra_impl_args.get("fa4_pv_mode") or _default_fa4_pv_mode())
+        # PV-mode knob for the FA4-FP4 path. Resolved + validated
+        # unconditionally (shared helper) so a typo fails at construction, not
+        # at the first forward on a Blackwell box, and so the ATTN_QAT_INFER
+        # receipt records this impl's mode too. The default leaves behavior
+        # identical to before the knob; kwargs win over the
+        # FASTVIDEO_FA4_PV_MODE env bridge (same pattern as nvfp4_fa4 above).
+        self.fa4_pv_mode = _resolve_fa4_pv_mode(extra_impl_args)
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
@@ -368,7 +349,7 @@ class FlashAttentionImpl(AttentionImpl):
 
         # fp8 PV: unscaled e4m3 cast (no mSFV/v_descale); output stays BF16.
         if self.fa4_pv_mode == "fp8":
-            value = _fa4_v_to_fp8(value)
+            value = value.to(torch.float8_e4m3fn)
 
         # Pass original seqlen to FA4 — the kernel handles non-multiple-of-128
         # via boundary masking. FP4/SF data is padded to 128-multiple but FA4

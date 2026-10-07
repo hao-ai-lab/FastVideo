@@ -106,6 +106,21 @@ def validate_fa4_pv_mode(mode: str) -> str:
     return mode
 
 
+def _resolve_fa4_pv_mode(extra_impl_args: dict) -> str:
+    """Resolve + validate the fa4_pv_mode knob for an attention impl, and
+    record the result as the process-wide last-configured mode (the receipt's
+    pv_mode field derives from it). Shared by both FA4-FP4 consumers so their
+    resolution cannot drift. Explicit kwargs win; only an *unset* knob falls
+    back to the env bridge, so an explicit falsy value is validated instead of
+    being silently ignored."""
+    mode = extra_impl_args.get("fa4_pv_mode")
+    if mode is None:
+        mode = _default_fa4_pv_mode()
+    global _configured_fa4_pv_mode
+    _configured_fa4_pv_mode = validate_fa4_pv_mode(mode)
+    return _configured_fa4_pv_mode
+
+
 _fa4_fp4_import_ok: bool | None = None
 
 
@@ -154,9 +169,10 @@ def _resolved_kernel() -> str | None:
 def attn_qat_infer_receipt() -> str:
     """One-line receipt of the resolution decision (arch + kernel + quant
     knobs), for the selection log and for tooling. qk_mode=nvfp4 (per-16 E4M3
-    SFs) is the repo's tuned default passed through verbatim; pv_mode is
-    derived from the configured fa4_pv_mode knob, and the dtype actually fed
-    to the kernel is logged once on the first FA4 forward -- see
+    SFs) is the repo's tuned default passed through verbatim; pv_mode is the
+    *last configured* fa4_pv_mode (process-wide, recorded at impl
+    construction -- not a per-layer value), and the dtype actually fed to the
+    kernel is logged once on the first FA4 forward -- see
     flash_attn/cute/README.md in the kernel repo."""
     cap = _active_capability()
     arch = f"sm_{cap[0]}{cap[1]}" if cap is not None else "no-cuda"
@@ -177,14 +193,12 @@ _FA4_ROUTE_OPS: tuple | None = None
 
 def _import_fa4_route_ops() -> tuple:
     """Slow path (own function so tests pin it runs once per process):
-    resolves the FA4 quantize/V-cast helpers and kernel entry point."""
+    resolves the FA4 quantize helper and kernel entry point."""
     from fastvideo.attention.backends.flash_attn import (
-        _fa4_v_to_fp8,
-        _nvfp4_quantize_for_fa4,
-    )
+        _nvfp4_quantize_for_fa4, )
     from fastvideo.attention.utils.flash_attn_cute import (
         flash_attn_fp4_func, )
-    return (_nvfp4_quantize_for_fa4, _fa4_v_to_fp8, flash_attn_fp4_func)
+    return (_nvfp4_quantize_for_fa4, flash_attn_fp4_func)
 
 
 def _resolve_fa4_route_ops() -> tuple:
@@ -219,6 +233,15 @@ def _log_pv_dtype_once(dtype: torch.dtype) -> None:
         _pv_dtype_logged = True
         logger.info("ATTN_QAT_INFER FA4 first forward: observed V dtype=%s (configured pv_mode=%s)", dtype,
                     _configured_fa4_pv_mode)
+
+
+# Dynamo cannot trace `logging.Logger` methods (Unsupported -> graph break,
+# which fullgraph=True rejects), so an is_compiling() guard would skip this
+# line entirely on the compiled path -- the expected mode for this route.
+# Registering the helper as a reorderable logging function makes dynamo emit
+# it as a graph node instead: the line still runs (once, via the flag) and the
+# fullgraph boundary stays intact.
+torch._dynamo.config.reorderable_logging_functions.add(_log_pv_dtype_once)
 
 
 def is_attn_qat_infer_available() -> bool:
@@ -279,11 +302,7 @@ class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
         if dropout_p > 0:
             raise NotImplementedError(f"attn_qat_infer does not support dropout (got dropout_p={dropout_p}). "
                                       "The QAT inference kernel applies no stochastic dropout.")
-        self.fa4_pv_mode = validate_fa4_pv_mode(extra_impl_args.get("fa4_pv_mode") or _default_fa4_pv_mode())
-        # Record the configured mode before the once-log so the receipt line
-        # (whose pv_mode field is derived from this) carries it.
-        global _configured_fa4_pv_mode
-        _configured_fa4_pv_mode = self.fa4_pv_mode
+        self.fa4_pv_mode = _resolve_fa4_pv_mode(extra_impl_args)
         # Kernel resolution is per-forward, not per-construction: callers
         # (the validation swap, backend selection) gate on
         # is_attn_qat_infer_available() first, and constructing an impl on a
@@ -335,7 +354,7 @@ class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
         BF16 by default or fp8 e4m3 per the fa4_pv_mode knob) -- mirrors
         FlashAttentionImpl._forward_nvfp4 (#1221). Inputs/outputs are
         (batch, seqlen, nheads, headdim); no transpose."""
-        _nvfp4_quantize_for_fa4, _fa4_v_to_fp8, flash_attn_fp4_func = _resolve_fa4_route_ops()
+        _nvfp4_quantize_for_fa4, flash_attn_fp4_func = _resolve_fa4_route_ops()
 
         orig_seqlen_q = query.shape[1]
         orig_seqlen_k = key.shape[1]
@@ -345,11 +364,11 @@ class AttnQatInferImpl(AttentionImpl[AttentionMetadata]):
 
         # fp8 PV: unscaled e4m3 cast (no mSFV/v_descale); output stays BF16.
         if self.fa4_pv_mode == "fp8":
-            value = _fa4_v_to_fp8(value)
-        # Keep the once-log (and its global flag) out of compiled traces,
-        # matching the FLASH_ATTN backend's logging convention.
-        if not torch.compiler.is_compiling():
-            _log_pv_dtype_once(value.dtype)
+            value = value.to(torch.float8_e4m3fn)
+        # The once-log runs on the compiled path too: dynamo cannot trace
+        # `logging.Logger` methods, so the helper is registered as a
+        # reorderable logging function (see _log_pv_dtype_once).
+        _log_pv_dtype_once(value.dtype)
 
         # FP4/SF buffers are padded to a 128 multiple; FA4 masks to the
         # original lengths so padding never biases the softmax.

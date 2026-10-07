@@ -96,6 +96,7 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "torch_compile_kwargs",
     "output_type",
     "nvfp4_fa4",
+    "fa4_pv_mode",
 })
 
 
@@ -203,6 +204,13 @@ class VideoGenerator:
             import os
             os.environ["FASTVIDEO_NVFP4_FA4"] = "1"
             os.environ.setdefault("CUTE_DSL_ENABLE_TVM_FFI", "1")
+        fa4_pv_mode = kwargs.pop("fa4_pv_mode", None)
+        if fa4_pv_mode is not None:
+            # Same env bridge as nvfp4_fa4: model code constructs attention
+            # impls with fixed literals, so the knob has no kwarg path of its
+            # own (and FastVideoArgs would drop it).
+            import os
+            os.environ["FASTVIDEO_FA4_PV_MODE"] = str(fa4_pv_mode)
         typed_config = kwargs.pop("config", None)
         if typed_config is not None:
             if model_path is not None:
