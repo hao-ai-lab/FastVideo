@@ -1239,14 +1239,14 @@ class Cosmos25DistilledT2WDenoisingStage(Cosmos25DenoisingStage):
                         f"fps must be one shared value for the whole batch; got {fps_tensor.tolist()}")
                 fps_tensor = fps_tensor[:1]
 
-        state = latents.to(torch.float32)
+        state = latents.to(torch.float64)
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for timestep_value in timesteps:
-                # The official loop truncates the evolving FP64 state to FP32
-                # before each x0 prediction, then promotes the result back to
-                # FP64 for the fixed-noise update.
-                state_fp32 = state.float()
-                model_input = self.scheduler.scale_model_input(state_fp32, timestep_value)
+                # Truncate the evolving FP64 state to FP32 only for the network
+                # input; the x0 reconstruction and the fixed-noise update run in
+                # FP64, as in the official driver transcribed in
+                # test_cosmos25_distilled_scheduler_parity.py.
+                model_input = self.scheduler.scale_model_input(state, timestep_value).float()
                 model_timestep = torch.full(
                     (batch_size, latent_frames),
                     float(timestep_value),
@@ -1285,7 +1285,7 @@ class Cosmos25DistilledT2WDenoisingStage(Cosmos25DenoisingStage):
                 state = self.scheduler.step(
                     model_output.float(),
                     timestep_value,
-                    state_fp32,
+                    state,
                     generator=batch.generator,
                     return_dict=False,
                 )[0]
