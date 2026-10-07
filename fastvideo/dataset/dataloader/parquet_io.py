@@ -16,13 +16,17 @@ Key APIs:
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing
 import os
+import re
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+_CHUNK_FILE_RE = re.compile(r"^data_chunk_(\d+)\.parquet$")
 
 
 def records_to_table(records: list[dict[str, Any]], schema: pa.Schema) -> pa.Table:
@@ -55,10 +59,14 @@ class ParquetDatasetWriter:
       behind on failure.
     - Only full chunks of ``samples_per_file`` rows are written on each flush;
       any remainder rows are re-buffered for the next flush.
+    - Never replaces existing shards: new files are numbered after the highest
+      existing ``data_chunk_<N>.parquet`` index anywhere under ``out_dir``.
 
     Note:
     - Instances are not meant to be shared across processes. Create one writer
       per process if using multiprocessing.
+    - Use one writer per ``out_dir``; separate writers sharing a directory can
+      race for the same shard index.
     """
 
     def __init__(self, out_dir: str, samples_per_file: int, compression: str = "zstd") -> None:
@@ -131,18 +139,8 @@ class ParquetDatasetWriter:
             # Last flush: write the small remainder as a final file in worker_0
             worker_dir = os.path.join(self.out_dir, "worker_0")
             os.makedirs(worker_dir, exist_ok=True)
-            # Determine next index
-            num_parquets = 0
-            for _, _, files in os.walk(worker_dir):
-                for file in files:
-                    if file.endswith('.parquet'):
-                        num_parquets += 1
-            chunk_path = os.path.join(worker_dir, f"data_chunk_{num_parquets}.parquet")
-            temp_path = chunk_path + '.tmp'
-            pq.write_table(combined, temp_path, compression=self.compression)
-            if os.path.exists(chunk_path):
-                os.remove(chunk_path)
-            os.rename(temp_path, chunk_path)
+            chunk_path = os.path.join(worker_dir, f"data_chunk_{_next_chunk_index(self.out_dir)}.parquet")
+            _write_chunk(combined, chunk_path, self.compression)
             return num_samples
 
         # Only write full chunks; keep remainder for next flush
@@ -151,22 +149,15 @@ class ParquetDatasetWriter:
 
         table_to_write = combined.slice(0, written_rows)
         remainder_table = combined.slice(written_rows, remainder) if remainder > 0 else None
+        # Chunk i is written as data_chunk_{first_index + i}; the remainder follows the last chunk.
+        first_index = _next_chunk_index(self.out_dir)
         if remainder_table is not None and len(remainder_table) > 0:
             if write_remainder:
                 # Write the remainder as a final small file (worker_0)
                 worker_dir = os.path.join(self.out_dir, "worker_0")
                 os.makedirs(worker_dir, exist_ok=True)
-                num_parquets = 0
-                for _, _, files in os.walk(worker_dir):
-                    for file in files:
-                        if file.endswith('.parquet'):
-                            num_parquets += 1
-                remainder_path = os.path.join(worker_dir, f"data_chunk_{num_parquets}.parquet")
-                temp_path = remainder_path + '.tmp'
-                pq.write_table(remainder_table, temp_path, compression=self.compression)
-                if os.path.exists(remainder_path):
-                    os.remove(remainder_path)
-                os.rename(temp_path, remainder_path)
+                remainder_path = os.path.join(worker_dir, f"data_chunk_{first_index + total_chunks}.parquet")
+                _write_chunk(remainder_table, remainder_path, self.compression)
             else:
                 self._tables = [remainder_table]
 
@@ -176,7 +167,7 @@ class ParquetDatasetWriter:
         num_workers = max(int(num_workers), 1)
         chunks_per_worker = (total_chunks + num_workers - 1) // num_workers
 
-        work_ranges: list[tuple[int, int, pa.Table, int, str, int, str]] = []
+        work_ranges: list[tuple[int, int, pa.Table, int, str, int, str, int]] = []
         for worker_id in range(num_workers):
             start_chunk = worker_id * chunks_per_worker
             end_chunk = min((worker_id + 1) * chunks_per_worker, total_chunks)
@@ -189,9 +180,10 @@ class ParquetDatasetWriter:
                     self.out_dir,
                     self.samples_per_file,
                     self.compression,
+                    first_index,
                 ))
 
-        written_total = 0
+        written_total = len(remainder_table) if write_remainder and remainder_table is not None else 0
         if len(work_ranges) == 1:
             written_total += _process_chunk_range(work_ranges[0])
             return written_total
@@ -200,7 +192,7 @@ class ParquetDatasetWriter:
             futures = [executor.submit(_process_chunk_range, args) for args in work_ranges]
             for f in futures:
                 written_total += f.result()
-        return written_total + (len(remainder_table) if write_remainder and remainder_table is not None else 0)
+        return written_total
 
 
 def _process_chunk_range(args: Any) -> int:
@@ -215,23 +207,18 @@ def _process_chunk_range(args: Any) -> int:
             - output_dir (str): base output directory
             - samples_per_file (int): rows per chunk file
             - compression (str): compression codec for Parquet
+            - first_index (int): file index of chunk 0; chunk ``i`` is
+              written as ``data_chunk_{first_index + i}.parquet``
 
     Returns:
         int: Total number of rows written by this worker.
     """
-    start_chunk, end_chunk, table, worker_id, output_dir, samples_per_file, compression = args
+    start_chunk, end_chunk, table, worker_id, output_dir, samples_per_file, compression, first_index = args
     total_written = 0
     num_samples = len(table)
 
     worker_dir = os.path.join(output_dir, f"worker_{worker_id}")
     os.makedirs(worker_dir, exist_ok=True)
-
-    # Offset to continue numbering if files exist
-    num_parquets = 0
-    for root, _, files in os.walk(worker_dir):
-        for file in files:
-            if file.endswith('.parquet'):
-                num_parquets += 1
 
     for i in range(start_chunk, end_chunk):
         start_sample = i * samples_per_file
@@ -240,17 +227,41 @@ def _process_chunk_range(args: Any) -> int:
             continue
         chunk = table.slice(start_sample, end_sample - start_sample)
 
-        chunk_path = os.path.join(worker_dir, f"data_chunk_{i + num_parquets}.parquet")
-        temp_path = chunk_path + '.tmp'
-        try:
-            pq.write_table(chunk, temp_path, compression=compression)
-            if os.path.exists(chunk_path):
-                os.remove(chunk_path)
-            os.rename(temp_path, chunk_path)
-            total_written += len(chunk)
-        except Exception:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            raise
+        chunk_path = os.path.join(worker_dir, f"data_chunk_{first_index + i}.parquet")
+        _write_chunk(chunk, chunk_path, compression)
+        total_written += len(chunk)
 
     return total_written
+
+
+def _next_chunk_index(out_dir: str) -> int:
+    """Return one past the highest ``data_chunk_<N>.parquet`` index under ``out_dir``.
+
+    Indices are unique across all worker subdirectories, so new shards never
+    reuse an existing name regardless of how earlier flushes were partitioned.
+    """
+    next_index = 0
+    for _, _, files in os.walk(out_dir):
+        for file in files:
+            match = _CHUNK_FILE_RE.match(file)
+            if match:
+                next_index = max(next_index, int(match.group(1)) + 1)
+    return next_index
+
+
+def _write_chunk(table: pa.Table, chunk_path: str, compression: str) -> None:
+    """Write ``table`` to a temporary file and rename it to ``chunk_path``.
+
+    Raises:
+        FileExistsError: If ``chunk_path`` already exists. Existing shards are
+            never replaced.
+    """
+    if os.path.exists(chunk_path):
+        raise FileExistsError(f"Refusing to overwrite existing Parquet shard: {chunk_path}")
+    temp_path = chunk_path + '.tmp'
+    try:
+        pq.write_table(table, temp_path, compression=compression)
+        os.rename(temp_path, chunk_path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(temp_path)

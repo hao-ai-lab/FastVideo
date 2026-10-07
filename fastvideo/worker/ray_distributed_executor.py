@@ -49,6 +49,39 @@ def should_use_gloo_loopback(worker_ips: list[str]) -> bool:
     return len(set(worker_ips)) <= 1
 
 
+# Ray narrows each GPU actor's CUDA_VISIBLE_DEVICES to the actor's own GPU unless this is set.
+RAY_NOSET_CUDA_VISIBLE_DEVICES = "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES"
+
+
+def keep_raylet_cuda_devices(ray_remote_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Return actor options under which Ray leaves CUDA_VISIBLE_DEVICES as the raylet's.
+
+    Ray merges an actor's ``env_vars`` into the job's runtime environment, so
+    only this one variable is added.
+    """
+    runtime_env = dict(ray_remote_kwargs.get("runtime_env") or {})
+    runtime_env["env_vars"] = {**(runtime_env.get("env_vars") or {}), RAY_NOSET_CUDA_VISIBLE_DEVICES: "1"}
+    return {**ray_remote_kwargs, "runtime_env": runtime_env}
+
+
+def ray_worker_device_ordinal(node_gpu_ids: list[int], node_local_index: int, visible_devices: str | None) -> int:
+    """Return the CUDA ordinal of the ``node_local_index``-th worker on a node.
+
+    The worker uses ``node_gpu_ids[node_local_index]`` (the sorted Ray GPU IDs
+    of the node's workers), addressed in the device list it inherited from its
+    raylet. Ray reports GPU IDs as entries of the raylet's CUDA_VISIBLE_DEVICES,
+    or as ordinals when that variable is unset.
+    """
+    gpu_id = node_gpu_ids[node_local_index]
+    if not visible_devices:
+        return gpu_id
+    visible = [entry.strip() for entry in visible_devices.split(",")]
+    if str(gpu_id) not in visible:
+        raise RuntimeError(f"Ray assigned GPU {gpu_id}, which is not in the worker's "
+                           f"CUDA_VISIBLE_DEVICES={visible_devices!r}.")
+    return visible.index(str(gpu_id))
+
+
 @dataclass
 class RayWorkerMetaData:
     """
@@ -121,6 +154,18 @@ class RayDistributedExecutor(Executor):
         from fastvideo.platforms import current_platform
 
         num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS.get()
+
+        # On NVIDIA GPUs every actor keeps its raylet's CUDA_VISIBLE_DEVICES.
+        # Otherwise Ray narrows it to the actor's own GPU before the actor
+        # imports fastvideo, and that import initializes CUDA (diffusers and
+        # Triton query the device at import time). CUDA then keeps the one-GPU
+        # view, a later CUDA_VISIBLE_DEVICES update has no effect, and
+        # cuda:<local_rank> is an invalid ordinal for every worker but the first
+        # on a multi-GPU node. Each worker addresses its GPU by position in the
+        # inherited list instead (ray_worker_device_ordinal).
+        keep_raylet_devices = current_platform.is_cuda()
+        if keep_raylet_devices:
+            ray_remote_kwargs = keep_raylet_cuda_devices(ray_remote_kwargs)
 
         # The remaining workers are the actual ray actors.
         self.workers: list[RayWorkerWrapper] = []
@@ -234,10 +279,16 @@ class RayDistributedExecutor(Executor):
                                " each node.")
 
         # Set environment variables for the driver and workers.
-        all_args_to_update_environment_variables: list[dict[str, str]] = [{
-            current_platform.device_control_env_var:
-            ",".join(map(str, node_gpus[node_id])),
-        } for (node_id, _) in worker_node_and_gpu_ids]
+        all_args_to_update_environment_variables: list[dict[str, str]]
+        if keep_raylet_devices:
+            # The inherited device list stays; each worker gets its ordinal in it.
+            worker_visible_devices = self._run_ray_workers("get_cuda_visible_devices")
+            all_args_to_update_environment_variables = [{} for _ in worker_node_and_gpu_ids]
+        else:
+            all_args_to_update_environment_variables = [{
+                current_platform.device_control_env_var:
+                ",".join(map(str, node_gpus[node_id])),
+            } for (node_id, _) in worker_node_and_gpu_ids]
 
         # Environment variables to copy from driver to workers
         extra_nccl = {k for k in os.environ if k.startswith("NCCL_") and k not in self.WORKER_LOCAL_NIC_ENV_VARS}
@@ -267,6 +318,8 @@ class RayDistributedExecutor(Executor):
         all_kwargs = []
         for rank, (node_id, _) in enumerate(worker_node_and_gpu_ids):
             local_rank = node_workers[node_id].index(rank)
+            if keep_raylet_devices:
+                local_rank = ray_worker_device_ordinal(node_gpus[node_id], local_rank, worker_visible_devices[rank])
             kwargs = dict(
                 fastvideo_args=self.fastvideo_args,
                 local_rank=local_rank,
