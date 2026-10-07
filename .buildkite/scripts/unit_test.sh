@@ -25,6 +25,7 @@ exec pytest \
   ./fastvideo/tests/attention/test_vsa_h3_tile_grad_safety.py \
   ./fastvideo/tests/attention/test_vsa_h3_metadata.py \
   ./fastvideo/tests/attention/test_vsa_h3_ref2va_regions.py \
+  ./fastvideo/tests/attention/test_attn_qat_infer_arch_gate.py \
   ./fastvideo/tests/layers/test_pdd_linear.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \
