@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from dreamverse.generation_contracts import StepResult
+from dreamverse.generation_inputs import GenerationInputs
 
 if TYPE_CHECKING:
     from PIL.Image import Image
@@ -164,8 +165,11 @@ class Cosmos25DFDGenerationBackend:
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        generation_inputs: GenerationInputs | None = None,
     ) -> StepResult:
         """Generate a T2W start or DFD continuation and retain its last frame."""
+        if generation_inputs is not None and (generation_inputs.mode not in (None, "t2va") or generation_inputs.assets):
+            raise ValueError("Cosmos supports text generation only through the generation mode API.")
         if self.bootstrap_generator is None or self.continuation_generator is None:
             raise RuntimeError("Cosmos T2W + DFD generators are not initialized.")
 

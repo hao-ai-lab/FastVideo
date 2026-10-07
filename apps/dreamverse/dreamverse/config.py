@@ -84,6 +84,19 @@ MODEL_REGISTRY = {
         "num_inference_steps": 5,
         "seed": 1000,
     },
+    "full-h3": {
+        "name": "MiniMax H3 (Full)",
+        "generation_backend": "minimax_h3",
+        "default_sp_size": 4,
+        "model_path": "MiniMaxAI/MiniMax-H3",
+        "attention_backend": "FLASH_ATTN",
+        "height": 768,
+        "width": 1344,
+        "num_frames": 124,
+        "num_inference_steps": 50,
+        "seed": 1000,
+        "full_checkpoint": True,
+    },
     "cosmos25-dfd": {
         "name": "Cosmos Predict2.5 DFD",
         "generation_backend": "cosmos25_dfd",
@@ -112,19 +125,6 @@ if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
 
 # Active model configuration
 MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
-
-# Frame settings
-NUM_FRAMES = 121
-FRAME_HEIGHT = 1088
-FRAME_WIDTH = 1920
-NUM_INFERENCE_STEPS = 5
-JPEG_QUALITY = 100
-BATCH_SIZE = 3
-
-# Streaming mode:
-# - legacy_jpeg: send frame_batch JSON payloads with base64 JPEGs
-# - av_fmp4: send muxed fMP4 binary chunks over WebSocket
-STREAM_MODE = os.getenv("STREAM_MODE", "av_fmp4").strip().lower()
 
 
 def _env_int(name: str, default: int) -> int:
@@ -202,6 +202,38 @@ def _optional_env(*names: str) -> str | None:
     return None
 
 
+# Generation limits
+# Slower backends may own a longer default lease. A profile can set
+# ``session_timeout_seconds``; Full H3 loads and generates substantially longer
+# than the Preview adapter, which also covers a base/ref pipeline reload inside a
+# retained session. An explicit environment override remains available for
+# deployment policy: DREAMVERSE_SESSION_TIMEOUT_SECONDS, with
+# FASTVIDEO_SESSION_TIMEOUT_SECONDS accepted as an alias.
+# Values below 60 seconds are floored so a single segment cannot outlast the session.
+_DEFAULT_SESSION_TIMEOUT_SECONDS = cast(
+    int, MODEL_CONFIG.get("session_timeout_seconds", 7200 if ACTIVE_MODEL_ID == "full-h3" else 300))
+SESSION_TIMEOUT_SECONDS = max(
+    60,
+    _env_int(
+        "DREAMVERSE_SESSION_TIMEOUT_SECONDS",
+        _env_int("FASTVIDEO_SESSION_TIMEOUT_SECONDS", _DEFAULT_SESSION_TIMEOUT_SECONDS),
+    ),
+)
+
+# Frame settings
+NUM_FRAMES = 121
+FRAME_HEIGHT = 1088
+FRAME_WIDTH = 1920
+NUM_INFERENCE_STEPS = 5
+JPEG_QUALITY = 100
+BATCH_SIZE = 3
+
+# Streaming mode:
+# - legacy_jpeg: send frame_batch JSON payloads with base64 JPEGs
+# - av_fmp4: send muxed fMP4 binary chunks over WebSocket
+STREAM_MODE = os.getenv("STREAM_MODE", "av_fmp4").strip().lower()
+
+
 DEVTOOLS_ENABLED = _env_bool("FASTVIDEO_ENABLE_DEVTOOLS", False)
 PROMPT_SAFETY_ENABLED = _env_bool("FASTVIDEO_ENABLE_PROMPT_SAFETY", False)
 DREAMVERSE_MAX_AUTOTUNE = _env_bool("DREAMVERSE_MAX_AUTOTUNE", True)
@@ -221,16 +253,6 @@ if DREAMVERSE_COSMOS25_DFD_MODEL_PATH and MODEL_CONFIG.get("generation_backend")
         **MODEL_CONFIG,
         "continuation_model_path": DREAMVERSE_COSMOS25_DFD_MODEL_PATH,
     }
-
-# Generation limits. Slower backends may own a longer default lease, while an
-# explicit environment override remains available for deployment policy.
-SESSION_TIMEOUT_SECONDS = max(
-    1,
-    _env_int(
-        "FASTVIDEO_SESSION_TIMEOUT_SECONDS",
-        cast(int, MODEL_CONFIG.get("session_timeout_seconds", 300)),
-    ),
-)
 
 AVAILABLE_LORAS = {
     "pixar": {

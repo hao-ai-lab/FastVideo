@@ -140,6 +140,7 @@ def test_config_enables_prompt_safety_when_requested(monkeypatch):
 def test_config_uses_five_minute_session_timeout(monkeypatch):
     _set_required_prompt_keys(monkeypatch)
     monkeypatch.delenv("DREAMVERSE_MODEL_ID", raising=False)
+    monkeypatch.delenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", raising=False)
 
     module = _load_config_module()
@@ -150,6 +151,7 @@ def test_config_uses_five_minute_session_timeout(monkeypatch):
 def test_config_uses_thirty_minute_cosmos25_session_timeout(monkeypatch):
     _set_required_prompt_keys(monkeypatch)
     monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-dfd")
+    monkeypatch.delenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", raising=False)
 
     module = _load_config_module()
@@ -160,11 +162,23 @@ def test_config_uses_thirty_minute_cosmos25_session_timeout(monkeypatch):
 def test_config_allows_session_timeout_override(monkeypatch):
     _set_required_prompt_keys(monkeypatch)
     monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-dfd")
+    monkeypatch.delenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", raising=False)
     monkeypatch.setenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", "900")
 
     module = _load_config_module()
 
     assert module.SESSION_TIMEOUT_SECONDS == 900
+
+
+def test_config_prefers_dreamverse_session_timeout_over_alias(monkeypatch):
+    _set_required_prompt_keys(monkeypatch)
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "cosmos25-dfd")
+    monkeypatch.setenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", "1200")
+    monkeypatch.setenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", "900")
+
+    module = _load_config_module()
+
+    assert module.SESSION_TIMEOUT_SECONDS == 1200
 
 
 def test_config_rejects_invalid_prompt_provider(monkeypatch):
@@ -208,6 +222,19 @@ def test_config_uses_fasth3_sequence_parallel_default(monkeypatch):
     assert module.ACTIVE_MODEL_ID == "fast-h3"
     assert module.MODEL_CONFIG["generation_backend"] == "minimax_h3"
     assert module.DREAMVERSE_SP_SIZE == 4
+
+
+def test_full_h3_profile_has_no_preview_adapter_and_longer_session(monkeypatch):
+    monkeypatch.setenv("DREAMVERSE_MODEL_ID", "full-h3")
+    monkeypatch.delenv("DREAMVERSE_SP_SIZE", raising=False)
+    monkeypatch.delenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("FASTVIDEO_SESSION_TIMEOUT_SECONDS", raising=False)
+    module = _load_config_module()
+    assert module.MODEL_CONFIG["full_checkpoint"] is True
+    assert "adapter_repo" not in module.MODEL_CONFIG
+    assert module.MODEL_CONFIG["num_inference_steps"] == 50
+    assert module.DREAMVERSE_SP_SIZE == 4
+    assert module.SESSION_TIMEOUT_SECONDS == 7200
 
 
 def test_config_registers_cosmos25_dfd_profile(monkeypatch):

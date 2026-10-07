@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from dreamverse.cosmos25_dfd_generation import Cosmos25DFDGenerationBackend
+from dreamverse.generation_inputs import GenerationInputs
 
 COSMOS_CONFIG = {
     "name": "Cosmos Predict2.5 DFD",
@@ -162,6 +163,17 @@ def test_initial_image_uses_dfd_without_stream_trim(backend, tmp_path: Path):
     assert call["conditioning_pixels"].tolist() == np.full((2, 3, 3), 7).tolist()
     assert result.head_trim_frames == 0
     assert result.head_trim_audio_frames == 0
+
+
+def test_generation_mode_api_accepts_text_only_and_rejects_conditioning_modes(backend):
+    result = backend.generate_step("first prompt", 1, None, True, generation_inputs=GenerationInputs(mode="t2va"))
+
+    assert len(backend.bootstrap_generator.calls) == 1
+    assert result.head_trim_frames == 0
+
+    with pytest.raises(ValueError, match="text generation only"):
+        backend.generate_step("pivot right", 2, None, False, generation_inputs=GenerationInputs(mode="fl2va"))
+    assert backend.continuation_generator.calls == []
 
 
 def test_missing_later_continuation_fails_before_generation(backend):
