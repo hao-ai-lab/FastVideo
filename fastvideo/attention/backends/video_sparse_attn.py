@@ -268,9 +268,11 @@ class VideoSparseAttentionImpl(AttentionImpl):
         valid until the next ``tile()`` / ``preprocess_qkv`` call on the
         same ``attn_metadata``.  Callers must consume (or copy) the
         result before invoking another VSA layer with the same metadata.
-        Today both call sites materialize copies via
-        ``.transpose(...).contiguous()`` inside ``forward()``, so the
-        contract holds; future callers must preserve it.
+        Today ``forward()`` materializes copies of q/k/v via
+        ``.transpose(...).contiguous()`` and consumes the gate view
+        synchronously inside the same call (the coarse/sparse combine
+        reads it before returning), so the contract holds; future
+        callers must preserve it.
         """
         num_tiles = attn_metadata.num_tiles
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
