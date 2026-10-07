@@ -233,13 +233,12 @@ def mxfp8_scaled_mm(
 
 
 def _resolve_merged_linear(linear: torch.nn.Module) -> torch.nn.Module:
-    """Return a linear whose weight includes every active inference adapter."""
-    base_layer = getattr(linear, "base_layer", linear)
-    if base_layer is linear:
-        return base_layer
-    if not getattr(linear, "merged", False) and not getattr(linear, "disable_lora", False):
-        raise RuntimeError("MXFP8 feed-forward requires active LoRA weights to be merged before inference.")
-    return base_layer
+    """Return the base linear that owns the packed weight for the active LoRA state.
+
+    The packed MXFP8 buffers are rebuilt after every LoRA merge and unmerge, so a
+    wrapped linear is inference-ready whether or not its adapter is merged.
+    """
+    return getattr(linear, "base_layer", linear)
 
 
 def mxfp8_swiglu_feed_forward(
