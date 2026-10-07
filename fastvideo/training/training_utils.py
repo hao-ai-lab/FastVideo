@@ -1012,7 +1012,8 @@ def _get_total_norm(
             key = (id(tensor.device_mesh), mesh_dim)
             replicate = isinstance(placement, torch.distributed.tensor.Replicate)
             previous = mesh_dims.get(key)
-            mesh_dims[key] = (tensor.device_mesh, mesh_dim, replicate if previous is None else previous[2] and replicate)
+            mesh_dims[key] = (tensor.device_mesh, mesh_dim,
+                              replicate if previous is None else previous[2] and replicate)
 
     if mesh_dims and dist.is_available() and dist.is_initialized():
         if norm_type == math.inf:

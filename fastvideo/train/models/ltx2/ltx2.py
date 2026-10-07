@@ -234,8 +234,7 @@ class LTX2Model(WanModel):
         assert self.training_config is not None
         embeds, mask = encode_negative_prompt(
             self.training_config,
-            prompt=_resolve_unconditional_prompt(
-                self.training_config.model_path),
+            prompt=_resolve_unconditional_prompt(self.training_config.model_path),
             device=self.device,
             dtype=self._get_training_dtype(),
         )
@@ -305,14 +304,12 @@ class LTX2Model(WanModel):
         mask = encoder_attention_mask.clone()
         neg_embeds = neg_embeds.to(device=embeds.device, dtype=embeds.dtype)
         neg_mask = neg_mask.to(device=mask.device, dtype=mask.dtype)
-        if (neg_embeds.shape[1] != embeds.shape[1]
-                or neg_mask.shape[1] != mask.shape[1]):
-            raise ValueError(
-                "LTX-2 unconditional embedding length does not match the batch "
-                f"text length: unconditional {tuple(neg_embeds.shape)} / "
-                f"{tuple(neg_mask.shape)} vs batch {tuple(embeds.shape)} / "
-                f"{tuple(mask.shape)}. The dataset was likely preprocessed with a "
-                "different text_len than the checkpoint config used for training.")
+        if (neg_embeds.shape[1] != embeds.shape[1] or neg_mask.shape[1] != mask.shape[1]):
+            raise ValueError("LTX-2 unconditional embedding length does not match the batch "
+                             f"text length: unconditional {tuple(neg_embeds.shape)} / "
+                             f"{tuple(neg_mask.shape)} vs batch {tuple(embeds.shape)} / "
+                             f"{tuple(mask.shape)}. The dataset was likely preprocessed with a "
+                             "different text_len than the checkpoint config used for training.")
         for idx in torch.nonzero(drop, as_tuple=False).flatten().tolist():
             embeds[idx] = neg_embeds[0]
             mask[idx] = neg_mask[0]

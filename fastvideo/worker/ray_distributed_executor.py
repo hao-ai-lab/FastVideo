@@ -441,9 +441,8 @@ class RayDistributedExecutor(Executor):
                        args: tuple = (),
                        kwargs: dict | None = None) -> list[Any]:
         if timeout is not None:
-            raise NotImplementedError(
-                "RayDistributedExecutor.collective_rpc does not support per-call timeouts; "
-                "omit the timeout and rely on Ray's own task failure handling instead.")
+            raise NotImplementedError("RayDistributedExecutor.collective_rpc does not support per-call timeouts; "
+                                      "omit the timeout and rely on Ray's own task failure handling instead.")
         return self._run_ray_workers(method, *args, **(kwargs or {}))
 
     def _run_ray_workers(

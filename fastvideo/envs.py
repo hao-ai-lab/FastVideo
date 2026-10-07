@@ -844,10 +844,11 @@ FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
                                             category="test",
                                             doc="Upstream taehv checkout for the MLX TAEH3 parity test.",
                                             deprecated_names=("TAEH3_REFERENCE_DIR", ))
-FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR = EnvStr(None,
-                                              category="test",
-                                              doc="Local Wan2.2-Animate-14B checkpoint for the Wan-Animate weight tests.",
-                                              deprecated_names=("WAN_ANIMATE_MODEL_PATH", ))
+FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR = EnvStr(
+    None,
+    category="test",
+    doc="Local Wan2.2-Animate-14B checkpoint for the Wan-Animate weight tests.",
+    deprecated_names=("WAN_ANIMATE_MODEL_PATH", ))
 FASTVIDEO_TEST_ZIMAGE_MODEL_DIR = EnvStr("Tongyi-MAI/Z-Image-Turbo",
                                          category="test",
                                          doc="Model for the Z-Image SSIM test.",

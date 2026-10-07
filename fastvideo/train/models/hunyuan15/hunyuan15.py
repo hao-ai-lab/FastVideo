@@ -346,9 +346,9 @@ class Hunyuan15Model(WanModel):
         )
         cond_latent = torch.zeros_like(noise_input)
         hidden_states = torch.cat([noise_input, cond_mask, cond_latent], dim=1)
-        assert hidden_states.shape[1] == int(arch.in_channels), (
-            f"packed {hidden_states.shape[1]} conditioning channels but "
-            f"img_in expects {int(arch.in_channels)}")
+        assert hidden_states.shape[1] == int(
+            arch.in_channels), (f"packed {hidden_states.shape[1]} conditioning channels but "
+                                f"img_in expects {int(arch.in_channels)}")
 
         zero_image_embeds = torch.zeros(
             batch_size,
@@ -476,11 +476,10 @@ class Hunyuan15Model(WanModel):
         conditionally, so a reference timestep would otherwise be dropped.
         """
         if not bool(getattr(self._arch_config(), "use_meanflow", False)):
-            raise ValueError(
-                "Hunyuan15Model.predict_velocity_with_r needs "
-                "dit_config.arch_config.use_meanflow=True: "
-                "HunyuanVideo15TimeEmbedding only builds "
-                "timestep_embedder_r when use_meanflow is set.")
+            raise ValueError("Hunyuan15Model.predict_velocity_with_r needs "
+                             "dit_config.arch_config.use_meanflow=True: "
+                             "HunyuanVideo15TimeEmbedding only builds "
+                             "timestep_embedder_r when use_meanflow is set.")
         return self._forward(
             noisy_latents,
             timestep,
