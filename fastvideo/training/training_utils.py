@@ -1004,12 +1004,23 @@ def _get_total_norm(
             mesh_dims[key] = (tensor.device_mesh, mesh_dim, replicate if previous is None else previous[2] and replicate)
 
     if mesh_dims and dist.is_available() and dist.is_initialized():
-        accumulated = total_norm.pow(norm_type)
-        for mesh, mesh_dim, replicate in mesh_dims.values():
-            dist.all_reduce(accumulated, group=mesh.get_group(mesh_dim))
-            if replicate:
-                accumulated.div_(mesh.size(mesh_dim))
-        total_norm = accumulated.pow(1.0 / norm_type)
+        if norm_type == math.inf:
+            # Max commutes with both reductions: exact across sharded dims
+            # (disjoint slices) and idempotent across replicated dims. The
+            # sum-of-powers reduction below is only valid for finite norms.
+            for mesh, mesh_dim, _replicate in mesh_dims.values():
+                dist.all_reduce(
+                    total_norm,
+                    op=dist.ReduceOp.MAX,
+                    group=mesh.get_group(mesh_dim),
+                )
+        else:
+            accumulated = total_norm.pow(norm_type)
+            for mesh, mesh_dim, replicate in mesh_dims.values():
+                dist.all_reduce(accumulated, group=mesh.get_group(mesh_dim))
+                if replicate:
+                    accumulated.div_(mesh.size(mesh_dim))
+            total_norm = accumulated.pow(1.0 / norm_type)
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(f"The total norm of order {norm_type} for gradients from "
