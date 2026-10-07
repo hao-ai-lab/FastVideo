@@ -9,13 +9,14 @@ are float64 [S, 128]. temb is [B, 3072] (SD3AdaLayerNormZero 6-way chunk,
 sd3.py:394-395). Forward returns the TUPLE (encoder_hidden_states,
 hidden_states) (flux.py:329) — postprocess cats both streams along seq into
 one golden. The flux SSIM test pins TORCH_SDPA. black-forest-labs/FLUX.1-dev
-is a GATED HF repo; FLUX_T2I_MODEL_DIR can point at a local checkout.
+is a GATED HF repo; FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR can point at a local checkout.
 """
 
 from __future__ import annotations
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
 
 __all__ = ["distributed_runtime"]
@@ -75,7 +76,9 @@ SPEC = GateSpec(
     attention_backend="TORCH_SDPA",
     # forward returns (encoder_hidden_states, hidden_states) — both [1, S, 3072]
     postprocess=lambda out: torch.cat(out, dim=1),
-    model_root_env="FLUX_T2I_MODEL_DIR",
+    # The registry default is the Hugging Face repo id, so only an explicitly set value names a local checkout.
+    model_root=lambda: (envs.FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR.get()
+                        if envs.FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR.is_set() else None),
 )
 
 

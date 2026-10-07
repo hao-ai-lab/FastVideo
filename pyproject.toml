@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "0.2.0"
+version = "0.2.1"
 description = "FastVideo"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,8 +22,10 @@ dependencies = [
 
     # Machine Learning & Transformers
     # GLM-Image's AR encoder (GlmImageForConditionalGeneration) first ships in
-    # transformers 5.0.0; floor bumped from >=4.57.3 to >=5.0.0 (stable, not rc).
-    "transformers>=5.0.0",
+    # transformers 5.0.0. Floor raised from >=5.0.0 to >=5.15.0 for the public
+    # vision interpolation helper (get_vision_interpolation_indices_and_weights)
+    # that the MiniMax-H3 Qwen3-VL encoder cross-checks against.
+    "transformers>=5.15.0",
     # <0.23: tokenizers 0.23 renamed RobertaProcessing's binding args, so
     # transformers' CLIP-style tokenizer loading dies with
     # "RobertaProcessing.__new__() got an unexpected keyword argument 'cls'".
@@ -81,7 +83,11 @@ dependencies = [
     # (MPS) and other non-Linux platforms don't try to build it from source;
     # every fastvideo_kernel import elsewhere is already guarded to degrade
     # gracefully when the package is absent.
-    "fastvideo-kernel==0.3.2; sys_platform == 'linux'",
+    # Pin the exact published kernel so every install resolves the same
+    # tested wheel; the in-repo FastH3 extra still selects this checkout's
+    # kernel source via the uv sources mapping. Bump this pin in the
+    # companion PR of each kernel release.
+    "fastvideo-kernel==0.3.5; sys_platform == 'linux'",
     "wheel",
 
     # Training Dependencies
@@ -108,12 +114,15 @@ members = ["apps/dreamverse"]
 
 [tool.uv.sources]
 # PyPI's aarch64 fastvideo-kernel wheels do not cover the NVIDIA DGX Spark /
-# GB10 (sm_121), so on ARM build from the in-tree source instead; x86_64 keeps
-# the published PyPI wheel. This table is uv-only: plain pip ignores it. Pass
-# --no-sources to bypass it (e.g. when the kernel is already installed, as in
-# the Spark install guide).
+# GB10 (sm_121), so on ARM build from the in-tree source instead. The FastH3
+# extra also selects the in-tree source on x86_64 so a PR checkout can build
+# its matching sm_100a route before that version reaches PyPI. Other x86_64
+# installs keep the published wheel. This table is uv-only: plain pip ignores
+# it. Pass --no-sources to bypass it (e.g. when the kernel is already
+# installed, as in the Spark install guide).
 fastvideo-kernel = [
   { path = "fastvideo-kernel", marker = "platform_machine == 'aarch64'" },
+  { path = "fastvideo-kernel", marker = "platform_machine == 'x86_64'", extra = "fasth3" },
 ]
 # torch / torchvision / torchaudio are intentionally NOT pinned to a PyTorch
 # index here. Pick the supported build explicitly at install time:
@@ -122,9 +131,11 @@ fastvideo-kernel = [
 # uv reads UV_TORCH_BACKEND / --torch-backend (not a pyproject setting). The
 # supported backends (cu126, cu130) both provide torch 2.12.0.
 imagebind = { git = "https://github.com/facebookresearch/ImageBind.git", rev = "53680b02d7e37b19b124fa37bae4b6c98c38f5be" }
-# FA4 cute, pinned to a cutlass-4.5-compatible revision. torch.compile support
-# comes from FastVideo's own custom_op wrappers.
-flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "82d6441eec5d4dfec120153db2c0145ae855a083", subdirectory = "flash_attn/cute" }
+# FA4 cute. This revision pins nvidia-cutlass-dsl==4.6.0.dev0; holding cutlass-dsl
+# back at 4.5.x breaks the CuTe kernels at JIT time, not at import
+# (see fastvideo-kernel/README.md).
+# torch.compile support comes from FastVideo's own custom_op wrappers.
+flash-attn-4 = { git = "https://github.com/Dao-AILab/flash-attention.git", rev = "14c377950125c70b7a9dabf9c561fca53715ac7d", subdirectory = "flash_attn/cute" }
 
 [project.optional-dependencies]
 
@@ -142,6 +153,7 @@ lint = [
 
 test = [
     "av",
+    "openai==3.6.0",  # OpenAI video-client compatibility tests; no cloud requests.
     "pytorch-msssim>=1.0.0",
     "pytest",
     "pandas",
@@ -158,6 +170,21 @@ test = [
 # judge.* metrics (eval-judge) call a remote API and need a key, so they
 # are opt-in and intentionally kept out of the default [eval] set.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
+eval-vqeval = [
+    # MediaPipe is deliberately not declared. VQeval's anatomical-error
+    # detector wants the legacy mp.solutions API, which only exists in
+    # mediapipe 0.10.x, and every 0.10.x pins protobuf<5 (0.10.21:
+    # protobuf<5,>=4.25.3) -- unsatisfiable next to the base
+    # protobuf>=5.28.3 pin above. mediapipe 1.x dropped mp.solutions.
+    # Upstream's artifact_detection wraps its mediapipe import in
+    # try/except and reports zero anatomical errors without it.
+    # cv2 comes from the base opencv-python pin; declaring
+    # opencv-contrib-python here too would install two providers of the
+    # cv2 package (mixed cv2 trees on version skew). Upstream's
+    # cv2.quality BRISQUE path falls back to pyiqa when contrib is absent.
+    "open_clip_torch>=2.24.0",
+    "pyiqa>=0.1.10",
+]
 eval-physics-iq = []
 eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
 eval-judge = ["google-genai"]
@@ -168,9 +195,18 @@ eval = [
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
 eval-fast-decode = ["decord"]
-eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
+eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "fastvideo[eval-vqeval]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
+
+# Dependencies required by the measured FastH3 Preview profile. The pinned
+# flash-attn-4 source above keeps the CuTe DSL stack reproducible for uv
+# installs without putting a direct URL in published package metadata.
+fasth3 = [
+    "flash-attn-4",
+    "fastvideo-kernel==0.3.5; sys_platform == 'linux'",
+    "quack-kernels==0.5.3",
+]
 
 prompt-safety = [
     "fasttext",
@@ -201,6 +237,12 @@ rocm = [
     "amdsmi",
 ]
 
+# Apple Silicon FastWan release runtime. The range is intentionally pinned to
+# the MLX version used for the checked-in parity and checkpoint tests.
+mlx = [
+    "mlx>=0.31.2,<0.33; platform_system == 'Darwin' and platform_machine == 'arm64'",
+]
+
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
 dreamverse-server = "dreamverse.server_entry:cli"
@@ -211,7 +253,10 @@ where = [".", "apps/dreamverse"]
 exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
 
 [tool.setuptools.package-data]
+"fastvideo.entrypoints.openai" = ["static/*.html", "static/*.css", "static/*.js"]
 dreamverse = ["prompts/*.md"]
+"fastvideo.third_party.rife_mlx" = ["LICENSE"]
+"fastvideo.third_party.taehv" = ["LICENSE"]
 
 [tool.wheel]
 exclude = ["assets*", "docker*", "docs", "scripts*", "apps*"]
@@ -237,7 +282,9 @@ skip = "./data,./wandb,apps/fastvideo_studio/package-lock.json,apps/performance_
 # "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
 # Early Drop). codespell lowercases ignore-words entries, so the single
 # lowercase form silences all case variants.
-ignore-words-list = "tread,passt,dout"
+# "padd" is the literal value of Wan2.2-S2V's ``framepack_drop_mode`` in the
+# published checkpoint config; it must be spelled exactly to match.
+ignore-words-list = "tread,passt,dout,padd"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

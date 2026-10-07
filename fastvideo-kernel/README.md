@@ -10,6 +10,8 @@ Compiled CUDA extensions (CMake, see the build summary printed at the end of eve
 |---|---|---|---|---|
 | `fastvideo_kernel._C.fastvideo_kernel_ops` | TurboDiffusion INT8 GEMM, quant, RMSNorm, LayerNorm | `csrc/turbodiffusion/` | every arch in `TORCH_CUDA_ARCH_LIST` | always built |
 | same extension, optional part | ThunderKittens sliding-tile attention (`sta_fwd`) and VSA block-sparse (`block_sparse_fwd/bwd`) | `csrc/attention/*_h100.cu` | Hopper `sm_90a` only | `FASTVIDEO_KERNEL_BUILD_TK` (AUTO = ON iff `9.0a` is in the arch list; always OFF on aarch64 hosts — TK headers don't compile there) |
+| same extension, optional part | MiniMax-H3 block-sparse VSA forward (64- and 128-token blocks) | `csrc/attention/block_sparse*_sm100a.cu` | Data-center Blackwell `sm_100a`/`sm_103a` | ON iff `10.0a` or `10.3a` is in `TORCH_CUDA_ARCH_LIST` |
+| same extension, optional part | fused NVLink Ulysses all-to-all | `csrc/comm/ulysses_all_to_all.cu` | CUDA | `FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A` (AUTO = ON with NCCL 2.29+ device headers and library; always OFF on ROCm) |
 | `fp4attn_cuda`, `fp4quant_cuda` | FP4 attention + quantization ("attn_qat_infer", modified SageAttention3) | `attn_qat_infer/` | consumer Blackwell `sm_120a` only, CUDA ≥ 12.8 | `FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER` (AUTO = ON iff `12.0a` is in the arch list) |
 
 Runtime-JIT kernels (no build step, ship in every wheel/image):
@@ -17,25 +19,28 @@ Runtime-JIT kernels (no build step, ship in every wheel/image):
 | Kernels | Where | Used when |
 |---|---|---|
 | Triton: STA, VSA block-sparse, SLA, fused compress+topk, FP4 QAT training, quant/norm utils | `python/fastvideo_kernel/triton_kernels/` | automatic fallback when the matching C++ op is absent (`ops.py`, `turbodiffusion_ops.py`) |
-| FA4 CuTe-DSL block-sparse (VSA-256 fastpath on `sm_100`) | `block_sparse_attn_cute_fwd.py` | optional `flash_attn.cute` dependency, see below |
+| FA4 CuTe-DSL block-sparse forward/backward (VSA-128/256 fastpath on `sm_100`) | `block_sparse_attn_cute_fwd.py` | optional `flash_attn.cute` dependency, see below |
 | VMoBA `moba_attn_varlen` | `vmoba.py` | wraps flash-attn varlen |
 
 ## What gets built where, and when
 
-| Surface | Trigger | Leg | `TORCH_CUDA_ARCH_LIST` | TK | FP4 |
-|---|---|---|---|---|---|
-| PyPI wheels (`.github/workflows/publish-kernel.yml`) | version bump in `fastvideo-kernel/pyproject.toml` on main, or manual dispatch | x86_64 cu126 | `9.0a` | ON | — (CUDA < 12.8) |
-| | | x86_64 cu130 | `9.0a;12.0a` | ON | ON |
-| | | aarch64 cu130 | `10.0a;12.0a` | — | ON |
-| Docker images `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev` (`.github/workflows/infra-build-image.yml`) | `docker/Dockerfile` changes on main, or manual dispatch | amd64 cuda12.6.3 + cuda13.0.0 | `9.0a` | ON | — |
-| | | arm64 cuda12.6.3 (GH200) | `9.0a` | — (aarch64) | — |
-| | | arm64 cuda13.0.0 (GB10 / DGX Spark) | `12.1` | — | — |
-| Local `./build.sh` | manual | probes the visible GPU via torch | detected | ON iff sm_90 (non-aarch64 host) | ON iff sm_120 |
+| Surface | Trigger | Leg | `TORCH_CUDA_ARCH_LIST` | TK | Ulysses | FP4 |
+|---|---|---|---|---|---|---|
+| PyPI wheels (`.github/workflows/publish-kernel.yml`) | version bump in `fastvideo-kernel/pyproject.toml` on main, or manual dispatch | x86_64 cu126 | `9.0a` | ON | AUTO | — (CUDA < 12.8) |
+| | | x86_64 cu130 | `9.0a;10.0a;12.0a` | ON | AUTO | ON |
+| | | aarch64 cu130 | `10.0a;12.0a` | — | AUTO | ON |
+| Docker images `ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev` (`.github/workflows/infra-build-image.yml`) | `docker/Dockerfile` changes on main, or manual dispatch | amd64 cuda12.6.3 + cuda13.0.0 | `9.0a` | ON | AUTO | — |
+| | | arm64 cuda12.6.3 (GH200) | `9.0a` | — (aarch64) | AUTO | — |
+| | | arm64 cuda13.0.0 (GB10 / DGX Spark) | `12.1` | — | AUTO | — |
+| Local `./build.sh` | manual | probes the visible GPU via torch | detected | ON iff sm_90 (non-aarch64 host) | AUTO | ON iff sm_120 |
 
 Notes:
 
 - No Docker image ships the FP4 kernels; only the x86_64/aarch64 cu130 wheels do.
+- Both cu130 PyPI wheels ship native sm_100a and sm_103a images for the MiniMax-H3 VSA forward.
 - On arm64 images (GH200 included) STA/VSA run on the Triton fallbacks, since TK never builds on aarch64.
+- Ulysses AUTO builds only when CMake finds a NCCL library and device-API headers with the 2.29 initializers. Use
+  `-DFASTVIDEO_KERNEL_BUILD_ULYSSES_A2A=ON` to require it or `OFF` to test the portable build.
 - Kernel tests run on Buildkite GPU CI for PRs touching `fastvideo-kernel/**` (see `.buildkite/pipeline.yml`).
 
 ## Installation
@@ -64,28 +69,63 @@ cd fastvideo-kernel
 ./build.sh --rocm
 ```
 
-### Optional: FA4 CuTe block-sparse backend (VSA-256 fastpath)
+The compiled extension needs the HIP CMake toolchain (`hip-lang`). Images that install
+ROCm as a pip SDK, such as the `rocm/pytorch` 7.14 images, ship `hipcc` but not that
+package, so `build.sh --rocm` falls back to the Python + Triton package there and says so
+in the configure summary. That package is all the video sparse attention path needs on
+ROCm. To ask for it explicitly, or to fail instead of falling back:
 
-The VSA-256 fastpath (tile volume 256, on NVIDIA Blackwell / sm_100) routes to the
+```bash
+./build.sh --rocm --python-only                                    # Python + Triton only
+CMAKE_ARGS="-DFASTVIDEO_KERNEL_BUILD_EXTENSION=ON" ./build.sh --rocm  # error if HIP cannot be configured
+```
+
+`FASTVIDEO_KERNEL_BUILD_EXTENSION` (AUTO/ON/OFF) is also read from the environment by a
+plain `pip install --no-build-isolation .`.
+
+### Optional: FA4 CuTe block-sparse backend (VSA-128/256 fastpath)
+
+The VSA-128/256 fastpaths (tile volume 128 or 256, on NVIDIA Blackwell / sm_100) route to the
 FlashAttention-4 CuTe-DSL block-sparse kernel exposed as `flash_attn.cute`. This is
 an **optional** dependency: it is imported lazily, and `video_sparse_attn`
 transparently falls back to the Triton backend when it is absent (so the package is
 fully usable without it).
 
-The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`,
-`flash_attn.cute.interface._flash_attn_fwd`) are provided upstream by
+The symbols the fastpath needs (`flash_attn.cute.block_sparsity.BlockSparseTensorsTorch`
+and the public/private forward-backward bridges in `flash_attn.cute.interface`) are provided upstream by
 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention). Pin to
-commit `940cd9680f3315f2f06b43ab5bea2c2cf2d96806`, the revision FastVideo pins as
+commit `14c377950125c70b7a9dabf9c561fca53715ac7d`, the revision FastVideo pins as
 the `flash-attn-4` source in the repo-root `pyproject.toml`; other revisions may
-have an incompatible `_flash_attn_fwd` signature.
+have incompatible block-sparse forward/backward interfaces.
+
+Install it under its distribution name so its own runtime stack resolves with it.
+Do **not** pre-install `nvidia-cutlass-dsl` by hand: this revision pins
+`nvidia-cutlass-dsl==4.6.0.dev0` exactly, and a hand-installed 4.5.x floor either
+gets silently upgraded or, if something else holds it back, leaves the CuTe
+kernels broken.
 
 ```bash
-pip install "nvidia-cutlass-dsl>=4.5.0" torchvision
-pip install "git+https://github.com/Dao-AILab/flash-attention.git@940cd9680f3315f2f06b43ab5bea2c2cf2d96806#subdirectory=flash_attn/cute"
+pip install torchvision
+pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@14c377950125c70b7a9dabf9c561fca53715ac7d#subdirectory=flash_attn/cute"
 ```
 
-The CuTe kernel JIT-compiles on first use. Verified on Blackwell (sm_100) against
-`tests/test_vsa256_forward*.py`.
+That resolves `nvidia-cutlass-dsl` to 4.6.0.dev0 and `quack-kernels` to 0.5.3, a
+combination this revision works with. A mismatched CuTe DSL only surfaces when the
+kernel JIT-compiles, so the error points at CuTe internals rather than at the
+install:
+
+| Error on first VSA-128/256 CuTe call | Cause |
+|---|---|
+| `TypeError: fmax() missing 1 required positional argument: 'b'` | `nvidia-cutlass-dsl` 4.5.x |
+| `AttributeError: module 'cutlass.cute.core' has no attribute 'ThrMma'` | `quack-kernels` older than 0.5.1 |
+| `ImportError: cannot import name 'alloc_reserved_mbarrier'` | `quack-kernels` 0.6.2 or newer |
+
+An environment whose `flash_attn.cute` came from a prebuilt flash-attn wheel rather
+than from this pin hits the first row; that is what the overlay step in
+`docker/Dockerfile` works around.
+
+The CuTe kernels JIT-compile on first use. Forward and backward are verified on
+Blackwell (sm_100) against `tests/test_vsa128_*.py` and `tests/test_vsa256_*.py`.
 
 ## Usage
 
@@ -119,8 +159,11 @@ python benchmarks/benchmark_attn_qat_train.py
 ```
 
 The benchmark reports both conventional attention FLOPs and the extra matrix
-multiplications executed by the QAT straight-through path. Override
-`--peak-tflops` when running on a GPU other than RTX 5090.
+multiplications executed by the QAT straight-through path. It resolves dense
+BF16 peak throughput for the full-GPU variants listed in
+`benchmarks/device_specs.py`. Unknown or partitioned devices still report
+timing and achieved TFLOPS, with MFU shown as `N/A`; pass a positive, finite
+`--peak-tflops` value to report MFU for those devices.
 
 The QAT kernel is entirely Triton and routes by architecture at runtime. SM100
 uses a large-tile forward and split 64x64 backward for the production
@@ -142,6 +185,14 @@ After building/installing `fastvideo-kernel`, run:
 ```bash
 cd fastvideo-kernel
 python benchmarks/bench_vsa.py --batch_size 1 --num_heads 16 --head_dim 128 --q_seq_lens 49152 --topk 64
+
+# VSA-256 FA4 CuTe forward/backward on Blackwell
+python benchmarks/bench_vsa.py --block_size 256 --use_cute \
+  --batch_size 1 --num_heads 12 --head_dim 128 --q_seq_lens 39936 --topk 20
+
+# VSA-128 FA4 CuTe forward/backward on Blackwell
+python benchmarks/bench_vsa.py --block_size 128 --use_cute \
+  --batch_size 1 --num_heads 12 --head_dim 128 --q_seq_lens 39936 --topk 40
 ```
 
 ### TurboDiffusion Kernels

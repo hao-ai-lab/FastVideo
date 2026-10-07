@@ -1,81 +1,232 @@
-name: Trigger Full Suite
+name: Trigger Merge Gate
 
 on:
   pull_request_target:
     types: [labeled, synchronize]
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request number to enter into the merge gate
+        required: true
+        type: number
+    secrets:
+      BUILDKITE_API_TOKEN:
+        required: true
 
 permissions:
   contents: read
   pull-requests: read
   actions: read
 
-concurrency:
-  group: full-suite-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   trigger:
     if: >-
-      (github.event.action == 'labeled' && github.event.label.name == 'ready')
+      inputs.pr_number > 0
+      || (github.event.action == 'labeled' && github.event.label.name == 'ready')
       || github.event.action == 'synchronize'
     runs-on: ubuntu-latest
+    # Job-level concurrency: only this guarded job acquires the group, so an
+    # unrelated `labeled` event (which skips the job) cannot cancel an in-flight
+    # gate and then skip its replacement. The newest real trigger (`ready`,
+    # push, or `/merge`) supersedes the in-flight run, whose Buildkite build the
+    # cancel step below replaces.
+    concurrency:
+      group: merge-gate-${{ inputs.pr_number || github.event.pull_request.number }}
+      cancel-in-progress: true
     # Gate below may wait for cheap checks (up to MAX_WAIT_SECS = 25 min).
     timeout-minutes: 35
     steps:
       - name: Check ready label
         id: check
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          CALLED_PR_NUMBER: ${{ inputs.pr_number }}
         with:
           script: |
+            const eventPrNumber = context.payload.pull_request?.number;
+            const calledPrNumber = Number(process.env.CALLED_PR_NUMBER);
+            const prNumber = eventPrNumber ?? calledPrNumber;
+            if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid pull request number: ${process.env.CALLED_PR_NUMBER}`);
+              return;
+            }
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
+              pull_number: prNumber,
             });
+            if (pr.state !== 'open') {
+              core.setFailed(`PR #${prNumber} is not open.`);
+              return;
+            }
+            if (pr.base.repo.full_name !== context.payload.repository.full_name
+                || pr.base.ref !== context.payload.repository.default_branch) {
+              core.setFailed(`PR #${prNumber} does not target this repository's default branch.`);
+              return;
+            }
             const hasReady = pr.labels.some(l => l.name === 'ready');
             core.setOutput('has_ready', String(hasReady));
-            if (!hasReady) core.info('No ready label — skipping Full Suite trigger.');
+            core.setOutput('changed_files', String(pr.changed_files));
+            core.setOutput('pr_number', String(pr.number));
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('head_ref', pr.head.ref);
+            core.setOutput('base_sha', pr.base.sha);
+            core.setOutput('title', pr.title);
+            if (!hasReady) core.info('No ready label — skipping merge-gate trigger.');
 
       - name: Cancel previous Buildkite builds
+        # Cancelling stale builds only saves agent time. If it cannot run, the
+        # merge gate must still be triggered by the steps below, so a failure
+        # here is reported and stepped over rather than ending the job.
+        continue-on-error: true
+        timeout-minutes: 3
         if: steps.check.outputs.has_ready == 'true'
         env:
+          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
+          BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
           BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
-          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_BRANCH: ${{ steps.check.outputs.head_ref }}
+          PR_NUMBER: ${{ steps.check.outputs.pr_number }}
         run: |
-          # Find running builds for this branch with TEST_SCOPE=full and cancel them
-          builds=$(curl -sS -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
-            "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds?branch=${PR_BRANCH}&state=running,scheduled" \
-            | jq -r '.[] | select(try (.env.TEST_SCOPE == "full") catch false) | .number')
-          for build_num in $builds; do
-            echo "Cancelling Buildkite build #$build_num"
-            curl -sS -X PUT -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
-              "https://api.buildkite.com/v2/organizations/${{ vars.BUILDKITE_ORG_SLUG }}/pipelines/${{ vars.BUILDKITE_PIPELINE_SLUG }}/builds/${build_num}/cancel"
-          done
+          set -euo pipefail
+          response_file=$(mktemp)
+          builds_file=$(mktemp)
+          trap 'rm -f "$response_file" "$builds_file"' EXIT
 
-      # Checks out the BASE branch (default for pull_request_target), so PR
-      # authors cannot tamper with the gate script.
-      - name: Checkout gate script
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::warning::Invalid pull request number; stale Buildkite builds may continue."
+            exit 1
+          fi
+
+          if ! curl -sS --fail-with-body --connect-timeout 5 --max-time 20 --get \
+            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            --data-urlencode "branch=$PR_BRANCH" \
+            --data-urlencode "state[]=running" \
+            --data-urlencode "state[]=scheduled" \
+            --data-urlencode "state[]=failing" \
+            --data-urlencode "exclude_jobs=true" \
+            --data-urlencode "exclude_pipeline=true" \
+            --output "$response_file" \
+            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds"; then
+            echo "::warning::Could not list Buildkite builds; stale merge-gate builds may continue."
+            exit 1
+          fi
+
+          if ! jq -e '
+            if type != "array" then false
+            else all(.[];
+              if type != "object" then false
+              else
+                (.number | if type == "number" then . > 0 and floor == . else false end)
+                and (
+                  (.env? | if . == null then {} else . end) as $env
+                  | if ($env | type) != "object" then false
+                    else
+                      ($env.TEST_SCOPE? | . == null or type == "string")
+                      and ($env.PR_NUMBER? | . == null or type == "string")
+                    end
+                )
+              end
+            )
+            end
+          ' "$response_file" >/dev/null 2>&1; then
+            # Do not print the response body: it is remote data and may contain
+            # multiline values that would be interpreted as workflow commands.
+            echo "::warning::Buildkite returned an invalid build list; stale merge-gate builds may continue."
+            exit 1
+          fi
+
+          # Match both branch and PR number: forks can reuse the same branch name.
+          if ! jq -r --arg pr_number "$PR_NUMBER" '
+            .[]
+            | select((.env.TEST_SCOPE? == "merge") and (.env.PR_NUMBER? == $pr_number))
+            | .number
+          ' "$response_file" > "$builds_file"; then
+            echo "::warning::Could not select stale Buildkite builds; stale merge-gate builds may continue."
+            exit 1
+          fi
+
+          cancellation_failed=0
+          while IFS= read -r build_num; do
+            echo "Cancelling Buildkite build #$build_num"
+            if ! curl -sS --fail-with-body --connect-timeout 5 --max-time 20 -o /dev/null -X PUT \
+              -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+              "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds/${build_num}/cancel"; then
+              echo "::warning::Could not cancel Buildkite build #$build_num; trying remaining builds."
+              cancellation_failed=1
+            fi
+          done < "$builds_file"
+
+          if (( cancellation_failed != 0 )); then
+            exit 1
+          fi
+
+      # Check out the immutable BASE SHA: neither pull_request_target nor the
+      # privileged slash-command call may run code from the untrusted PR head.
+      - name: Checkout trusted merge planner
         if: steps.check.outputs.has_ready == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ steps.check.outputs.base_sha }}
+          persist-credentials: false
+
+      - name: Collect changed paths
+        if: steps.check.outputs.has_ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.check.outputs.pr_number }}
+          EXPECTED_CHANGED_FILES: ${{ steps.check.outputs.changed_files }}
+        run: |
+          set -euo pipefail
+          changed_json="$RUNNER_TEMP/merge-changed-files.json"
+          changed_paths="$RUNNER_TEMP/merge-changed-paths.txt"
+          if gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
+              > "$changed_json"; then
+            observed=$(jq '[.[][] | .filename] | unique | length' "$changed_json")
+            if [ "$observed" = "$EXPECTED_CHANGED_FILES" ]; then
+              jq -r '.[][] | .filename, (.previous_filename // empty)' "$changed_json" \
+                | sort -u > "$changed_paths"
+            else
+              echo "::warning::Changed-file API returned $observed of $EXPECTED_CHANGED_FILES paths; selecting all merge lanes."
+              echo '__FASTVIDEO_CI_PLAN_ALL__' > "$changed_paths"
+            fi
+          else
+            echo "::warning::Changed-file API failed; selecting all merge lanes."
+            echo '__FASTVIDEO_CI_PLAN_ALL__' > "$changed_paths"
+          fi
+
+      - name: Select minimal merge tests
+        id: plan
+        if: steps.check.outputs.has_ready == 'true'
+        run: |
+          python3 .github/scripts/plan_merge_ci.py \
+            --paths-file "$RUNNER_TEMP/merge-changed-paths.txt" \
+            --github-output "$GITHUB_OUTPUT" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Wait for pre-commit and docs build
         if: steps.check.outputs.has_ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ steps.check.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.check.outputs.pr_number }}
         run: bash .github/scripts/gate_full_suite.sh
 
-      - name: Trigger Buildkite Full Suite
+      - name: Trigger Buildkite merge gate
         if: steps.check.outputs.has_ready == 'true'
         env:
           BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
-          PR_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_SHA: ${{ steps.check.outputs.head_sha }}
+          PR_BRANCH: ${{ steps.check.outputs.head_ref }}
+          PR_NUMBER: ${{ steps.check.outputs.pr_number }}
+          PR_TITLE: ${{ steps.check.outputs.title }}
           BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
           BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
+          MERGE_TEST_PLAN: ${{ steps.plan.outputs.merge_test_plan }}
+          MERGE_GOLDEN_TESTS: ${{ steps.plan.outputs.merge_golden_tests }}
+          MERGE_SSIM_TESTS: ${{ steps.plan.outputs.merge_ssim_tests }}
+          MERGE_PLAN_LABEL: ${{ steps.plan.outputs.merge_plan_label }}
         run: |
           curl -sS --fail-with-body -X POST \
             "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
@@ -84,8 +235,11 @@ jobs:
             --data-raw "$(jq -n \
               --arg commit "$PR_SHA" \
               --arg branch "$PR_BRANCH" \
-              --arg message "Full Suite for PR #${PR_NUMBER}" \
+              --arg message "Merge gate [${MERGE_PLAN_LABEL}] for PR #${PR_NUMBER}" \
               --arg pr_title "$PR_TITLE" \
+              --arg merge_test_plan "$MERGE_TEST_PLAN" \
+              --arg merge_golden_tests "$MERGE_GOLDEN_TESTS" \
+              --arg merge_ssim_tests "$MERGE_SSIM_TESTS" \
               --argjson pr_id "$PR_NUMBER" \
               '{
                 commit: $commit,
@@ -95,8 +249,11 @@ jobs:
                 pull_request_id: $pr_id,
                 pull_request_base_branch: "main",
                 env: {
-                  TEST_SCOPE: "full",
+                  TEST_SCOPE: "merge",
                   FULL_SUITE: "true",
+                  MERGE_TEST_PLAN: $merge_test_plan,
+                  MERGE_GOLDEN_TESTS: $merge_golden_tests,
+                  MERGE_SSIM_TESTS: $merge_ssim_tests,
                   PR_NUMBER: ($pr_id | tostring),
                   PR_TITLE: $pr_title
                 }

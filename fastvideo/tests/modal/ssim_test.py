@@ -1,3 +1,9 @@
+"""Dormant manual Modal SSIM launcher.
+
+Production PR SSIM runs through ``fastvideo/tests/ssim/ci_runner.py`` on the
+Slinky Slurm tray. This module remains only for an explicit manual rollback.
+"""
+
 import ast
 import datetime
 import glob

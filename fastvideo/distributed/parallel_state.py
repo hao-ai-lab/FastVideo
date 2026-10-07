@@ -40,7 +40,6 @@ import torch.distributed
 import torch.distributed as dist
 from torch.distributed import Backend, ProcessGroup, ReduceOp
 
-import fastvideo.envs as envs
 from fastvideo.distributed.device_communicators.base_device_communicator import (DeviceCommunicatorBase)
 from fastvideo.distributed.device_communicators.cpu_communicator import (CpuCommunicator)
 from fastvideo.distributed.utils import StatelessProcessGroup
@@ -635,14 +634,16 @@ class GroupCoordinator:
         return self.device_communicator.recv(size, dtype, src)
 
     def destroy(self) -> None:
+        # First: communicator teardown can be collective, so it needs the
+        # process groups alive.
+        if self.device_communicator is not None:
+            self.device_communicator.destroy()
         if self.device_group is not None:
             torch.distributed.destroy_process_group(self.device_group)
             self.device_group = None
         if self.cpu_group is not None:
             torch.distributed.destroy_process_group(self.cpu_group)
             self.cpu_group = None
-        if self.device_communicator is not None:
-            self.device_communicator.destroy()
         if self.mq_broadcaster is not None:
             self.mq_broadcaster = None
 
@@ -757,7 +758,7 @@ def init_distributed_environment(
     if local_rank == -1:
         # local rank not set, this usually happens in single-node
         # setting, where we can use rank as local rank
-        local_rank = envs.LOCAL_RANK if distributed_init_method == "env://" else rank
+        local_rank = int(os.environ.get("LOCAL_RANK", "0")) if distributed_init_method == "env://" else rank
     global _WORLD
     if _WORLD is None:
         ranks = list(range(torch.distributed.get_world_size()))
@@ -882,9 +883,9 @@ def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
     from fastvideo.platforms import current_platform
     if current_platform.is_npu():
-        device = torch.device(f"npu:{envs.LOCAL_RANK}")
+        device = torch.device(f"npu:{int(os.environ.get('LOCAL_RANK', '0'))}")
     elif current_platform.is_cuda_alike() or current_platform.is_cuda():
-        device = torch.device(f"cuda:{envs.LOCAL_RANK}")
+        device = torch.device(f"cuda:{int(os.environ.get('LOCAL_RANK', '0'))}")
     else:
         device = torch.device("mps")
     return device

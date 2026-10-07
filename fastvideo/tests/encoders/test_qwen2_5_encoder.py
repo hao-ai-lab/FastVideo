@@ -6,6 +6,7 @@ from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, Qwen2_5_VLTextModel
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines import Hunyuan15T2V480PConfig, PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -16,8 +17,8 @@ from fastvideo.configs.models.encoders import Qwen2_5_VLConfig
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29505"
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29505")
 
 
 @pytest.fixture

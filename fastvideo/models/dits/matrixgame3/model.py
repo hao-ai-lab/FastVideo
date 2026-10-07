@@ -25,7 +25,7 @@ from fastvideo.layers.visual_embedding import (
 )
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.wanvideo import WanSelfAttention
+from fastvideo.models.wan.transformer import WanSelfAttention
 from fastvideo.platforms import AttentionBackendEnum
 
 # Import ActionModule

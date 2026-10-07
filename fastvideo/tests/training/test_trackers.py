@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 from io import BytesIO
+import json
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -86,6 +87,37 @@ def test_wandb_video_uses_shared_default_fps(
     tracker.video(np.zeros((2, 3, 2, 2), dtype=np.uint8))
 
     assert video_calls == [{"fps": 16, "format": "mp4"}]
+
+
+def test_wandb_finish_writes_local_offline_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class FakeRun:
+
+        def __init__(self) -> None:
+            self.dir = str(tmp_path / "wandb" / "offline-run" / "files")
+            Path(self.dir).mkdir(parents=True)
+            self.finished = False
+
+        def log(self, metrics: dict[str, Any], step: int) -> None:
+            pass
+
+        def finish(self) -> None:
+            self.finished = True
+
+    run = FakeRun()
+    wandb = ModuleType("wandb")
+    wandb.init = lambda **_: run
+    monkeypatch.setitem(sys.modules, "wandb", wandb)
+    tracker = WandbTracker("project", str(tmp_path))
+
+    tracker.log({"train_loss": 0.25, "grad_norm": np.float32(1.5), "video": object()}, step=4)
+    tracker.finish()
+
+    summary_path = Path(run.dir) / "wandb-summary.json"
+    assert json.loads(summary_path.read_text()) == {"grad_norm": 1.5, "train_loss": 0.25}
+    assert run.finished
 
 
 def test_prepare_video_array_tiles_and_pads_batches() -> None:

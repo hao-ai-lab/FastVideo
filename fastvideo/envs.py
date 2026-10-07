@@ -1,48 +1,191 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/envs.py
+"""Registry of the environment variables that FastVideo reads.
 
+Every FastVideo-owned environment variable is declared here once, as a typed
+field with a default, a category, and a description. Code reads a variable
+with ``envs.NAME.get()`` inside a function, writes it with ``envs.NAME.set()``,
+and tests change it temporarily with ``envs.NAME.override()``. Each field type
+has one parsing rule, and a value that the rule rejects raises ``EnvVarError``.
+
+The policy for environment variables is in ``docs/contributing/env_vars.md``,
+and ``fastvideo/tests/contract/test_env_policy.py`` enforces it.
+"""
+
+import logging
 import os
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from typing import Generic, TypeVar
 
-if TYPE_CHECKING:
-    FASTVIDEO_RINGBUFFER_WARNING_INTERVAL: int = 60
-    FASTVIDEO_NCCL_SO_PATH: str | None = None
-    LD_LIBRARY_PATH: str | None = None
-    LOCAL_RANK: int = 0
-    CUDA_VISIBLE_DEVICES: str | None = None
-    FASTVIDEO_CACHE_ROOT: str = os.path.expanduser("~/.cache/fastvideo")
-    FASTVIDEO_CONFIG_ROOT: str = os.path.expanduser("~/.config/fastvideo")
-    FASTVIDEO_CONFIGURE_LOGGING: int = 1
-    FASTVIDEO_RAY_PER_WORKER_GPUS: float = 1.0
-    FASTVIDEO_LOGGING_LEVEL: str = "INFO"
-    FASTVIDEO_LOGGING_PREFIX: str = ""
-    FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
-    FASTVIDEO_TRACE_FUNCTION: int = 0
-    FASTVIDEO_ATTENTION_BACKEND: str | None = None
-    FASTVIDEO_FA4: bool = False
-    FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
-    FASTVIDEO_TARGET_DEVICE: str = "cuda"
-    MAX_JOBS: str | None = None
-    NVCC_THREADS: str | None = None
-    CMAKE_BUILD_TYPE: str | None = None
-    VERBOSE: bool = False
-    FASTVIDEO_TORCH_PROFILER_DIR: str | None = None
-    FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES: bool = False
-    FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY: bool = False
-    FASTVIDEO_TORCH_PROFILER_WITH_STACK: bool = False
-    FASTVIDEO_TORCH_PROFILER_WITH_FLOPS: bool = False
-    FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
-    FASTVIDEO_TRACE_ACTIVATIONS: bool = False
-    FASTVIDEO_TRACE_LAYERS: str = ""
-    FASTVIDEO_TRACE_STATS: str = "abs_mean,sum"
-    FASTVIDEO_TRACE_OUTPUT: str = "/tmp/fv_trace_<pid>.jsonl"
-    FASTVIDEO_TRACE_STEPS: str = ""
-    FASTVIDEO_SERVER_DEV_MODE: bool = False
-    FASTVIDEO_STAGE_LOGGING: bool = False
-    FASTVIDEO_CFG_GATE_STEP: float = 1.0
-    FASTVIDEO_HOST_IP: str = ""
-    FASTVIDEO_LOOPBACK_IP: str = ""
+T = TypeVar("T")
+# String fields accept a string default or None (unset).
+S = TypeVar("S", str, str | None)
+
+POLICY_DOC = "docs/contributing/env_vars.md"
+
+# Allowed values of EnvField.category.
+CATEGORIES = ("path", "distributed", "logging", "attention", "performance", "output", "profiling", "debug", "sampling",
+              "eval", "test")
+
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
+
+# fastvideo.logger imports this module, so warnings go through the standard
+# logging module; the "fastvideo" logger configuration still applies.
+_logger = logging.getLogger(__name__)
+_warned_messages: set[str] = set()
+
+
+def _warn_once(message: str) -> None:
+    if message not in _warned_messages:
+        _warned_messages.add(message)
+        _logger.warning(message)
+
+
+class EnvVarError(ValueError):
+    """An environment variable holds a value that its registered type rejects."""
+
+
+class EnvField(Generic[T]):
+    """One registered environment variable: its type, default, category, and description.
+
+    ``default`` is either the value itself or a zero-argument function that
+    computes it on each read while the variable is unset. ``deprecated_names``
+    lists earlier names of a renamed variable; they are read, with a warning,
+    only when the variable itself is unset.
+    """
+
+    type_name = ""
+
+    def __init__(self, default: T | Callable[[], T], *, category: str, doc: str,
+                 deprecated_names: tuple[str, ...] = ()) -> None:
+        self.name = ""  # Set by _register_fields() from the module attribute name.
+        self.default = default
+        self.category = category
+        self.doc = doc
+        self.deprecated_names = deprecated_names
+
+    def parse(self, raw: str) -> T:
+        raise NotImplementedError
+
+    def format(self, value: T) -> str:
+        return str(value)
+
+    def _read_raw(self) -> tuple[str, str] | None:
+        """Return (name, raw value) from the variable or its first set deprecated name."""
+        raw = os.environ.get(self.name)
+        if raw is not None:
+            return self.name, raw
+        for old_name in self.deprecated_names:
+            raw = os.environ.get(old_name)
+            if raw is not None:
+                _warn_once(f"{old_name} is deprecated and will be removed in the next minor release; "
+                           f"set {self.name} instead.")
+                return old_name, raw
+        return None
+
+    def get(self) -> T:
+        """Return the parsed value, or the default when the variable is unset."""
+        found = self._read_raw()
+        if found is None:
+            return self.default() if callable(self.default) else self.default
+        name, raw = found
+        try:
+            return self.parse(raw)
+        except ValueError as exc:
+            raise EnvVarError(f"Invalid value {raw!r} for {name}: {exc}. See {POLICY_DOC}.") from None
+
+    def is_set(self) -> bool:
+        return any(name in os.environ for name in (self.name, *self.deprecated_names))
+
+    def set(self, value: T) -> None:
+        os.environ[self.name] = self.format(value)
+
+    def clear(self) -> None:
+        for name in (self.name, *self.deprecated_names):
+            os.environ.pop(name, None)
+
+    @contextmanager
+    def override(self, value: T | None) -> Iterator[None]:
+        """Set the variable, or unset it when ``value`` is None, and restore the previous values on exit."""
+        previous = {name: os.environ.get(name) for name in (self.name, *self.deprecated_names)}
+        self.clear()
+        if value is not None:
+            self.set(value)
+        try:
+            yield
+        finally:
+            for name, old_value in previous.items():
+                if old_value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = old_value
+
+    def __bool__(self) -> bool:
+        raise TypeError(f"Use envs.{self.name}.get() to read {self.name}.")
+
+
+class EnvBool(EnvField[bool]):
+    """True for 1, true, yes, on; false for 0, false, no, off, and the empty string; case-insensitive."""
+
+    type_name = "bool"
+
+    def parse(self, raw: str) -> bool:
+        value = raw.strip().lower()
+        if value in _TRUE_VALUES:
+            return True
+        if value in _FALSE_VALUES:
+            return False
+        raise ValueError("expected 1, true, yes, on, 0, false, no, off, or an empty string")
+
+    def format(self, value: bool) -> str:
+        return "1" if value else "0"
+
+
+class EnvInt(EnvField[int]):
+    type_name = "int"
+
+    def parse(self, raw: str) -> int:
+        return int(raw)
+
+
+class EnvFloat(EnvField[float]):
+    type_name = "float"
+
+    def parse(self, raw: str) -> float:
+        return float(raw)
+
+
+class EnvStr(EnvField[S]):
+    type_name = "str"
+
+    def parse(self, raw: str) -> S:
+        return raw
+
+
+class EnvPath(EnvField[S]):
+    """A filesystem path; a leading ``~`` is expanded."""
+
+    type_name = "path"
+
+    def parse(self, raw: str) -> S:
+        return os.path.expanduser(raw)
+
+
+class EnvChoice(EnvField[str]):
+    """One of ``choices``; the value is stripped and lower-cased before the check."""
+
+    def __init__(self, default: str, *, choices: tuple[str, ...], category: str, doc: str) -> None:
+        super().__init__(default, category=category, doc=doc)
+        self.choices = choices
+        self.type_name = "one of " + ", ".join(choices)
+
+    def parse(self, raw: str) -> str:
+        value = raw.strip().lower()
+        if value not in self.choices:
+            raise ValueError(f"expected one of {', '.join(self.choices)}")
+        return value
 
 
 def get_default_cache_root() -> str:
@@ -59,269 +202,633 @@ def get_default_config_root() -> str:
     )
 
 
-def maybe_convert_int(value: str | None) -> int | None:
+# Variables that other tools read (CUDA, NCCL, PyTorch, launchers) are written
+# only through these helpers. The contract test checks each name against its
+# write allowlist.
+
+
+def set_external(name: str, value: str) -> None:
+    """Set an environment variable that another tool reads."""
+    os.environ[name] = value
+
+
+def setdefault_external(name: str, value: str) -> None:
+    """Set an environment variable that another tool reads, unless it is already set."""
+    os.environ.setdefault(name, value)
+
+
+def unset_external(name: str) -> None:
+    """Remove an environment variable that another tool reads."""
+    os.environ.pop(name, None)
+
+
+@contextmanager
+def override_external(name: str, value: str | None) -> Iterator[None]:
+    """Set, or unset when ``value`` is None, a variable outside the registry, and restore it on exit.
+
+    Tests use it instead of ``monkeypatch.setenv`` for variables that other
+    tools or the CI read.
+    """
+    previous = os.environ.get(name)
     if value is None:
-        return None
-    return int(value)
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = previous
 
 
-# The begin-* and end* here are used by the documentation generator
-# to extract the used env vars.
+# ================== Paths ==================
 
-# begin-env-vars-definition
+FASTVIDEO_CONFIG_ROOT = EnvPath(
+    lambda: os.path.expanduser(os.path.join(get_default_config_root(), "fastvideo")),
+    category="path",
+    doc="Root directory for FastVideo configuration files, at runtime and at installation. "
+    "Defaults to ~/.config/fastvideo, or $XDG_CONFIG_HOME/fastvideo when XDG_CONFIG_HOME is set.")
+FASTVIDEO_CACHE_ROOT = EnvPath(
+    lambda: os.path.expanduser(os.path.join(get_default_cache_root(), "fastvideo")),
+    category="path",
+    doc="Root directory for FastVideo cache files. "
+    "Defaults to ~/.cache/fastvideo, or $XDG_CACHE_HOME/fastvideo when XDG_CACHE_HOME is set.")
+FASTVIDEO_REASON1_WEIGHTS_PATH = EnvStr(None,
+                                        category="path",
+                                        doc="Local path or Hugging Face id of Reason1 weights to load instead of the "
+                                        "checkpoint's own.")
 
-environment_variables: dict[str, Callable[[], Any]] = {
+# ================== Distributed ==================
 
-    # ================== Installation Time Env Vars ==================
+FASTVIDEO_HOST_IP = EnvStr(
+    "",
+    category="distributed",
+    doc="IP address of this node when the node has several network interfaces. Set it on each node for multi-node "
+    "inference.")
+FASTVIDEO_LOOPBACK_IP = EnvStr("",
+                               category="distributed",
+                               doc="Loopback IP address to use instead of the detected one.")
+FASTVIDEO_RAY_PER_WORKER_GPUS = EnvFloat(
+    1.0,
+    category="distributed",
+    doc="GPUs per Ray worker. A fraction lets Ray schedule several actors on one GPU, so other actors can share "
+    "the GPUs with FastVideo.")
+FASTVIDEO_NCCL_SO_PATH = EnvStr(
+    None,
+    category="distributed",
+    doc="Path to the NCCL library file. Needed because the nccl>=2.19 that PyTorch ships has a bug "
+    "(https://github.com/NVIDIA/nccl/issues/1234).")
+FASTVIDEO_HCCL_SO_PATH = EnvStr(None,
+                                category="distributed",
+                                doc="Path to the HCCL library file on Ascend NPUs.",
+                                deprecated_names=("HCCL_SO_PATH", ))
+FASTVIDEO_WORKER_MULTIPROC_METHOD = EnvChoice("spawn",
+                                              choices=("spawn", "fork", "forkserver"),
+                                              category="distributed",
+                                              doc="Multiprocessing start method for worker processes.")
+FASTVIDEO_ULYSSES_A2A = EnvChoice(
+    "off",
+    choices=("off", "auto"),
+    category="distributed",
+    doc="Sequence-parallel all-to-all backend. off uses the NCCL path in DistributedAutograd.AllToAll4D. auto uses "
+    "the fused NVLink kernel when the group is a load-store accessible mesh of 2, 4, 6, or 8 ranks in eager "
+    "execution, and the NCCL path otherwise.")
 
-    # Target device of FastVideo, supporting [cuda (by default),
-    # rocm, neuron, cpu, openvino]
-    "FASTVIDEO_TARGET_DEVICE":
-    lambda: os.getenv("FASTVIDEO_TARGET_DEVICE", "cuda"),
+# ================== Logging ==================
 
-    # Maximum number of compilation jobs to run in parallel.
-    # By default this is the number of CPUs
-    "MAX_JOBS":
-    lambda: os.getenv("MAX_JOBS", None),
+FASTVIDEO_CONFIGURE_LOGGING = EnvBool(
+    True,
+    category="logging",
+    doc="Configure logging at import. When true, FastVideo uses its default logging configuration or the file in "
+    "FASTVIDEO_LOGGING_CONFIG_PATH.")
+FASTVIDEO_LOGGING_CONFIG_PATH = EnvStr(None, category="logging", doc="Path to a JSON logging configuration file.")
+FASTVIDEO_LOGGING_LEVEL = EnvStr("INFO", category="logging", doc="Default logging level.")
+FASTVIDEO_LOGGING_PREFIX = EnvStr("", category="logging", doc="Prefix prepended to every log message.")
+FASTVIDEO_STAGE_LOGGING = EnvBool(False, category="logging", doc="Log the time that each pipeline stage takes.")
 
-    # Number of threads to use for nvcc
-    # By default this is 1.
-    # If set, `MAX_JOBS` will be reduced to avoid oversubscribing the CPU.
-    "NVCC_THREADS":
-    lambda: os.getenv("NVCC_THREADS", None),
+# ================== Attention ==================
 
-    # If set, fastvideo will use precompiled binaries (*.so)
-    "FASTVIDEO_USE_PRECOMPILED":
-    lambda: bool(os.environ.get("FASTVIDEO_USE_PRECOMPILED")) or bool(
-        os.environ.get("FASTVIDEO_PRECOMPILED_WHEEL_LOCATION")),
+FASTVIDEO_ATTENTION_BACKEND = EnvStr(
+    None,
+    category="attention",
+    doc="Attention backend, as an AttentionBackendEnum name such as TORCH_SDPA, FLASH_ATTN, VIDEO_SPARSE_ATTN, "
+    "SAGE_ATTN, or SAGE_ATTN_THREE. FastVideoArgs uses it when FastVideoArgs.attention_backend is unset.")
+# FA4 is opt-in and never auto-selected just because it is installed. Below
+# sm90, grad-enabled and GQA calls are routed to FA2 (FA4's backward asserts
+# sm90+ and its pack_gqa fails to JIT there).
+FASTVIDEO_FA4 = EnvBool(False,
+                        category="attention",
+                        doc="The FLASH_ATTN backend uses FlashAttention-4 (flash_attn.cute) instead of FA3 or FA2.")
+FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN = EnvBool(
+    False,
+    category="attention",
+    doc="MiniMax-H3 dense DiT self-attention uses the FlashAttention-4 packed-varlen entry point. This changes the "
+    "floating-point reduction order, so it is an inference-only opt-in.")
+FASTVIDEO_VSA_SM100A = EnvBool(
+    False,
+    category="attention",
+    doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a) kernel. "
+    "fastvideo-kernel reads the same variable with the same rule.")
+FASTVIDEO_VSA_TRITON = EnvBool(
+    False,
+    category="attention",
+    doc="Force the Triton MiniMax-H3 sparse attention kernel. fastvideo-kernel reads the same variable.")
+FASTVIDEO_NVFP4_FA4 = EnvBool(
+    False,
+    category="attention",
+    doc="FlashAttention-4 quantizes Q and K to NVFP4. An explicit nvfp4_fa4 attention implementation argument "
+    "takes precedence.")
+FASTVIDEO_DISABLE_ATTENTION_COMPILE = EnvBool(
+    True,
+    category="attention",
+    doc="Keep attention forward out of torch.compile graphs (torch.compiler.disable). Set it to 0 to let attention "
+    "constructed under that setting be traced. Setting it explicitly to true also blocks regional compile.")
+FASTVIDEO_MLX_WINDOW = EnvInt(0,
+                              category="attention",
+                              doc="MLX FastWan windowed attention size in tokens. 0 uses full attention.")
+FASTVIDEO_MLX_WINDOW_SINK = EnvInt(0,
+                                   category="attention",
+                                   doc="Number of sink tokens that MLX windowed attention always attends to.")
 
-    # CMake build type
-    # If not set, defaults to "Debug" or "RelWithDebInfo"
-    # Available options: "Debug", "Release", "RelWithDebInfo"
-    "CMAKE_BUILD_TYPE":
-    lambda: os.getenv("CMAKE_BUILD_TYPE"),
+# ================== Performance ==================
 
-    # If set, fastvideo will print verbose logs during installation
-    "VERBOSE":
-    lambda: bool(int(os.getenv('VERBOSE', '0'))),
+# Non-fullgraph-traceable attention backends such as VSA degrade to eager with
+# one warning; see _regional_compile_unsupported_reason in
+# fastvideo/models/loader/fsdp_load.py.
+FASTVIDEO_INFERENCE_TORCH_COMPILE = EnvBool(
+    False,
+    category="performance",
+    doc="Compile each DiT transformer block with fullgraph torch.compile at inference. Same as "
+    "FastVideoArgs.inference_torch_compile=True.")
+FASTVIDEO_VAE_PARALLEL_DECODE = EnvBool(
+    False,
+    category="performance",
+    doc="MiniMax-H3 VAE decode splits its temporal chunks across the sequence-parallel ranks instead of running "
+    "serially on the output rank. Same as FastVideoArgs.vae_parallel_decode=True.")
+FASTVIDEO_VAE_PARALLEL_ENCODE = EnvBool(
+    False,
+    category="performance",
+    doc="MiniMax-H3 reference-video VAE encode splits its temporal chunks across the sequence-parallel ranks. "
+    "Same as FastVideoArgs.vae_parallel_encode=True.")
+FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY = EnvStr(
+    None,
+    category="performance",
+    doc="Collective that moves chunks in parallel VAE decode: gather (used when unset) or all_gather.")
+# Adapted from the NVlabs/Sana Sol-Engine implementation.
+FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
+    "",
+    category="performance",
+    doc="MiniMax-H3 inference-only Triton fusions: all, 1, or a comma-separated subset of "
+    "modulate,qknorm_rope,swiglu. Empty, 0, or none keeps the eager implementation.")
+FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
+                                   category="performance",
+                                   doc="FSDP2 shards modules by parameter count instead of the model's shard "
+                                   "conditions. Not supported by self-forcing distillation.")
+FASTVIDEO_FSDP2_MIN_PARAMS = EnvInt(10000000,
+                                    category="performance",
+                                    doc="Minimum parameter count of a module that FASTVIDEO_FSDP2_AUTOWRAP shards.")
+FASTVIDEO_MLX_COMPILE = EnvBool(False, category="performance", doc="Compile the MLX DiT forward with mx.compile.")
+FASTVIDEO_MLX_FAST_NORM = EnvBool(False, category="performance", doc="Use MLX fast normalization kernels.")
+FASTVIDEO_MLX_DQ_GEMM = EnvStr(
+    "1",
+    category="performance",
+    doc="MLX dequantized GEMM for affine-quantized weights: 0 turns it off, 1 uses the measured minimum row count, "
+    "and an integer sets the minimum row count.")
+FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D = EnvBool(True,
+                                              category="performance",
+                                              doc="LTX-2 VAE uses the channels_last_3d memory format.")
+FASTVIDEO_LTX2_DISABLE_AUDIO_AUTOCAST = EnvBool(True,
+                                                category="performance",
+                                                doc="LTX-2 audio decoding runs without CUDA autocast.",
+                                                deprecated_names=("LTX2_DISABLE_AUDIO_AUTOCAST", ))
+FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
+    False,
+    category="performance",
+    doc="Flux denoising disables reduced-precision reductions in bf16 matmuls, which tightens accumulation for "
+    "the 4-step Klein model.")
 
-    # Root directory for FASTVIDEO configuration files
-    # Defaults to `~/.config/fastvideo` unless `XDG_CONFIG_HOME` is set
-    # Note that this not only affects how fastvideo finds its configuration files
-    # during runtime, but also affects how fastvideo installs its configuration
-    # files during **installation**.
-    "FASTVIDEO_CONFIG_ROOT":
-    lambda: os.path.expanduser(
-        os.getenv(
-            "FASTVIDEO_CONFIG_ROOT",
-            os.path.join(get_default_config_root(), "fastvideo"),
-        )),
+# ================== Output encoding ==================
 
-    # ================== Runtime Env Vars ==================
+FASTVIDEO_FFMPEG_BIN = EnvStr("ffmpeg", category="output", doc="ffmpeg executable used to save video with audio.")
+FASTVIDEO_VIDEO_CODEC = EnvStr("libx264", category="output", doc="ffmpeg video codec for saved videos.")
+FASTVIDEO_NVENC_PRESET = EnvStr("p1", category="output", doc="NVENC preset when the codec is an *_nvenc codec.")
+FASTVIDEO_NVENC_TUNE = EnvStr("ull", category="output", doc="NVENC tune option.")
+FASTVIDEO_NVENC_RC = EnvStr("constqp", category="output", doc="NVENC rate-control mode.")
+FASTVIDEO_NVENC_QP = EnvStr("28", category="output", doc="NVENC quantization parameter.")
+FASTVIDEO_NVENC_BF = EnvStr("0", category="output", doc="NVENC number of B-frames.")
+FASTVIDEO_X264_PRESET = EnvStr("ultrafast", category="output", doc="x264 preset for non-NVENC codecs.")
+FASTVIDEO_OUTPUT_PIX_FMT = EnvStr("yuv420p", category="output", doc="ffmpeg pixel format for saved videos.")
 
-    # Root directory for FASTVIDEO cache files
-    # Defaults to `~/.cache/fastvideo` unless `XDG_CACHE_HOME` is set
-    "FASTVIDEO_CACHE_ROOT":
-    lambda: os.path.expanduser(os.getenv(
-        "FASTVIDEO_CACHE_ROOT",
-        os.path.join(get_default_cache_root(), "fastvideo"),
-    )),
+# ================== Profiling ==================
 
-    # used in distributed environment to determine the ip address
-    # of the current node, when the node has multiple network interfaces.
-    # If you are using multi-node inference, you should set this differently
-    # on each node.
-    "FASTVIDEO_HOST_IP":
-    lambda: os.getenv("FASTVIDEO_HOST_IP", ""),
+FASTVIDEO_NVTX_PROFILE = EnvBool(False,
+                                 category="profiling",
+                                 doc="Emit NVTX ranges for external profilers such as Nsight Systems.")
+FASTVIDEO_TORCH_PROFILER_DIR = EnvPath(
+    None,
+    category="profiling",
+    doc="Enables the torch profiler and sets the directory for its traces. Must be an absolute path.")
+FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES = EnvBool(False, category="profiling", doc="Torch profiler records shapes.")
+FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY = EnvBool(False,
+                                                       category="profiling",
+                                                       doc="Torch profiler profiles memory.")
+FASTVIDEO_TORCH_PROFILER_WITH_STACK = EnvBool(
+    False, category="profiling", doc="Torch profiler captures stacks. Costs about 1.5x runtime and 1.4x trace size.")
+FASTVIDEO_TORCH_PROFILER_WITH_FLOPS = EnvBool(False, category="profiling", doc="Torch profiler profiles FLOPs.")
+FASTVIDEO_TORCH_PROFILE_REGIONS = EnvStr(
+    "",
+    category="profiling",
+    doc="Comma-separated profiler regions to record. The torch profiler requires at least one region.")
 
-    # Used to force set up loopback IP
-    "FASTVIDEO_LOOPBACK_IP":
-    lambda: os.getenv("FASTVIDEO_LOOPBACK_IP", ""),
+# ================== Debug ==================
 
-    # Number of GPUs per worker in Ray, if it is set to be a fraction,
-    # it allows ray to schedule multiple actors on a single GPU,
-    # so that users can colocate other actors on the same GPUs as FastVideo.
-    "FASTVIDEO_RAY_PER_WORKER_GPUS":
-    lambda: float(os.getenv("FASTVIDEO_RAY_PER_WORKER_GPUS", "1.0")),
+FASTVIDEO_TRACE_ACTIVATIONS = EnvBool(False, category="debug", doc="Enable activation trace hooks.")
+FASTVIDEO_TRACE_LAYERS = EnvStr("", category="debug", doc="Regex filter for traced module names. Empty means all.")
+FASTVIDEO_TRACE_STATS = EnvStr("abs_mean,sum",
+                               category="debug",
+                               doc="Comma-separated activation statistics dumped for each output tensor.")
+FASTVIDEO_TRACE_OUTPUT = EnvStr("/tmp/fv_trace_<pid>.jsonl",
+                                category="debug",
+                                doc="JSONL path for activation traces. The literal <pid> is replaced at runtime.")
+FASTVIDEO_TRACE_STEPS = EnvStr("", category="debug", doc="Comma-separated denoising step indices. Empty means all.")
+FASTVIDEO_H3_VSA_PROBE = EnvStr(
+    None,
+    category="debug",
+    doc="Output directory for the VSA-H3 attention-mass probe, which writes one .pt file per step, layer, and rank. "
+    "Keeps the model out of regional compile.")
+FASTVIDEO_LTX2_GEMMA_LOG = EnvStr("",
+                                  category="debug",
+                                  doc="Log file for LTX-2 Gemma text-encoder hidden states, used by parity tests.",
+                                  deprecated_names=("LTX2_FASTVIDEO_GEMMA_LOG", ))
+FASTVIDEO_COSMOS25_LOG_KNOBS = EnvBool(False,
+                                       category="debug",
+                                       doc="Log the Cosmos 2.5 latent-preparation conditioning inputs.")
 
-    # Interval in seconds to log a warning message when the ring buffer is full
-    "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL":
-    lambda: int(os.environ.get("FASTVIDEO_RINGBUFFER_WARNING_INTERVAL", "60")),
+# ================== Sampling ==================
 
-    # Path to the NCCL library file. It is needed because nccl>=2.19 brought
-    # by PyTorch contains a bug: https://github.com/NVIDIA/nccl/issues/1234
-    "FASTVIDEO_NCCL_SO_PATH":
-    lambda: os.environ.get("FASTVIDEO_NCCL_SO_PATH", None),
+# CFG gating fraction for stale-uncond reuse (Adaptive Guidance / LinearAG
+# variant — Castillo et al. 2023, arXiv:2312.12487).  Float in [0, 1].
+# Interpretation: for step index `i < len(timesteps) * X`, run both
+# cond and uncond forwards and refresh delta_cached = cond - uncond.
+# Once `i >= len(timesteps) * X`, skip the uncond forward and reuse
+# the cached delta:  noise_pred = cond + (guidance_scale - 1) * delta.
+#
+# Edge cases:
+#   1.0 (default) : disables gating; identical to baseline two-pass CFG.
+#   0.5           : run uncond for the first half of steps, reuse delta
+#                    for the second half (~25% inference time saved on
+#                    bandwidth-bound SP setups).
+#   0.0           : step 0 still computes uncond fresh (cache is empty
+#                    at start) — all subsequent steps reuse the step-0
+#                    delta.  This is the most aggressive setting; does
+#                    NOT mean "no uncond forward ever."
+#
+# Caveats:
+#   - Algorithmically approximate; not bit-exact vs baseline CFG.
+#     Validate per-pipeline with SSIM / VBench before lowering below 1.0.
+#   - Interaction with `guidance_rescale > 0` is unvalidated; the
+#     denoising stage logs a warning when both are active.
+#   - Wan2.2 high/low-noise expert switch invalidates the cache.
+FASTVIDEO_CFG_GATE_STEP = EnvFloat(
+    1.0,
+    category="sampling",
+    doc="CFG gating fraction in [0, 1]. Steps before len(timesteps) * X run the conditional and unconditional "
+    "forwards; later steps reuse the cached difference. 1.0 disables gating.")
+FASTVIDEO_LTX2_USE_DISTILLED_SIGMAS = EnvBool(
+    True,
+    category="sampling",
+    doc="LTX-2 uses the distilled sigma schedule when FastVideoArgs.ltx2_use_distilled_sigmas is also true.",
+    deprecated_names=("LTX2_USE_DISTILLED_SIGMAS", ))
 
-    # when `FASTVIDEO_NCCL_SO_PATH` is not set, fastvideo will try to find the nccl
-    # library file in the locations specified by `LD_LIBRARY_PATH`
-    "LD_LIBRARY_PATH":
-    lambda: os.environ.get("LD_LIBRARY_PATH", None),
+# ================== Evaluation ==================
 
-    # Internal flag to enable Dynamo fullgraph capture
-    "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE":
-    lambda: bool(os.environ.get("FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
+FASTVIDEO_EVAL_CACHE = EnvPath(lambda: os.path.join(FASTVIDEO_CACHE_ROOT.get(), "eval"),
+                               category="eval",
+                               doc="Cache directory for evaluation models and datasets. Defaults to "
+                               "$FASTVIDEO_CACHE_ROOT/eval.")
+FASTVIDEO_PHYSICS_IQ_BUCKET_URL = EnvStr("https://storage.googleapis.com/physics-iq-benchmark",
+                                         category="eval",
+                                         doc="Base URL of the Physics-IQ benchmark bucket.")
+FASTVIDEO_VBENCH_FULL_INFO_JSON = EnvStr(None,
+                                         category="eval",
+                                         doc="Path to VBench_full_info.json, used instead of the vendored copy.",
+                                         deprecated_names=("VBENCH_FULL_INFO_JSON", ))
+FASTVIDEO_FVD_REF_FEATURES = EnvStr(None, category="eval", doc="Cached reference-feature file for the FVD metric.")
+FASTVIDEO_FAD_REF_FEATURES = EnvStr(None,
+                                    category="eval",
+                                    doc="Cached reference-feature file for the audio Frechet distance metric.")
 
-    # local rank of the process in the distributed setting, used to determine
-    # the GPU device id
-    "LOCAL_RANK":
-    lambda: int(os.environ.get("LOCAL_RANK", "0")),
+# ================== MiniMax-H3 single-GPU switches ==================
 
-    # used to control the visible devices in the distributed setting
-    "CUDA_VISIBLE_DEVICES":
-    lambda: os.environ.get("CUDA_VISIBLE_DEVICES", None),
+FASTVIDEO_H3_VSA_FP4 = EnvBool(False,
+                               category="attention",
+                               doc="Run MiniMax-H3 VSA attention on the block-sparse SageAttention3 FP4 kernel "
+                               "(sm_120, no-grad, single sequence-parallel rank).")
+FASTVIDEO_H3_VSA_TILE_FIRST = EnvBool(False,
+                                      category="attention",
+                                      doc="Single-rank MiniMax-H3 VSA with one tile gather of the block input "
+                                      "instead of separate Q/K/V/gate scatters.")
+FASTVIDEO_H3_VSA_SM89_KERNEL = EnvChoice("original",
+                                         choices=("original", "bf16", "int8"),
+                                         category="attention",
+                                         doc="Fine-attention kernel for MiniMax-H3 VSA on sm_89: original, bf16, "
+                                         "or int8 (INT8 QK, BF16 PV).")
+FASTVIDEO_H3_SIM_SP_FP8 = EnvBool(False,
+                                  category="debug",
+                                  doc="Simulate the FP8 sequence-parallel exchange of the MiniMax-H3 FP4 VSA "
+                                  "path on one rank.")
+FASTVIDEO_H3_FFN_CHUNK_TOKENS = EnvInt(0,
+                                       category="performance",
+                                       doc="Inference-only MiniMax-H3 FFN token chunk size; 0 runs the FFN "
+                                       "unchunked.")
+FASTVIDEO_H3_FP8_ATTENTION = EnvBool(False,
+                                     category="performance",
+                                     doc="With NVFP4 layer_profile h3_dit_ffn, run MiniMax-H3 attention "
+                                     "projections in FP8.")
+FASTVIDEO_H3_FP8_GRANULARITY = EnvChoice("tensor",
+                                         choices=("tensor", "channel"),
+                                         category="performance",
+                                         doc="FP8 scaling granularity for FASTVIDEO_H3_FP8_ATTENTION.")
+FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
+                                    category="performance",
+                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
+FASTVIDEO_NVFP4_ACT_AMAX = EnvPath(None,
+                                   category="performance",
+                                   doc="JSON of calibrated NVFP4 input amax per linear, keyed b<block>.<sub> or "
+                                   "full prefix; sets a static activation scale.")
+FASTVIDEO_NVFP4_DYNAMIC_ACT = EnvStr("",
+                                     category="performance",
+                                     doc="NVFP4 linears that derive the activation scale per call: all, or "
+                                     "comma-separated layer-name suffixes such as ff.fc_out.")
+FASTVIDEO_H3_ADALN_CACHE = EnvBool(False,
+                                   category="performance",
+                                   doc="Cache MiniMax-H3 AdaLN modulation per timestep instead of keeping the "
+                                   "projection weights resident.")
+FASTVIDEO_H3_ADALN_TABLE = EnvPath(None,
+                                   category="performance",
+                                   doc="Precomputed MiniMax-H3 AdaLN modulation table; enables the cache and "
+                                   "skips loading the AdaLN projection weights.")
+FASTVIDEO_H3_ADALN_DUMP = EnvPath(None,
+                                  category="debug",
+                                  doc="Write the MiniMax-H3 AdaLN modulation table to this path while sampling.")
+FASTVIDEO_H3_SPLICE_TRANSFORMER = EnvPath(None,
+                                          category="eval",
+                                          doc="Second MiniMax-H3 transformer that runs the late DMD steps "
+                                          "(checkpoint step-splice evaluation).")
+FASTVIDEO_H3_SPLICE_FROM_STEP = EnvInt(4,
+                                       category="eval",
+                                       doc="First denoising step run by FASTVIDEO_H3_SPLICE_TRANSFORMER.")
+FASTVIDEO_H3_ENCODER_LAYERWISE = EnvBool(False,
+                                         category="performance",
+                                         doc="Stream MiniMax-H3 text-encoder language layers through exact-size "
+                                         "pinned host memory (text-only prompts).")
+FASTVIDEO_H3_ENCODER_FUSED_DEQUANT = EnvBool(False,
+                                             category="performance",
+                                             doc="Expand the serialized NVFP4 MiniMax-H3 text encoder with one "
+                                             "fused Triton pass on GPUs without FP4 GEMM.")
+FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
+                                     category="performance",
+                                     doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
+                                     "tile.")
+FASTVIDEO_H3_VAE_INT8_SHARED_QKV = EnvBool(False,
+                                           category="performance",
+                                           doc="Share the INT8 activation rotation and quantization across the "
+                                           "MiniMax-H3 VAE Q/K/V projections.")
+FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW = EnvBool(False,
+                                               category="performance",
+                                               doc="Use transposed weight views in the MiniMax-H3 VAE INT8 "
+                                               "projections.")
+FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
+                                              category="performance",
+                                              doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "
+                                              "projections.")
+FASTVIDEO_H3_PINNED_SWAP = EnvBool(True,
+                                   category="performance",
+                                   doc="Swap offloaded MiniMax-H3 modules through exact-size pinned host "
+                                   "arenas.")
+FASTVIDEO_H3_PARK_MODULES = EnvStr(None,
+                                   category="performance",
+                                   doc="Comma-separated MiniMax-H3 denoise modules parked on the host while the "
+                                   "text encoder runs, e.g. vae,audio_vae.")
+FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS = EnvBool(False,
+                                              category="performance",
+                                              doc="Layerwise offload also streams large buffers such as packed "
+                                              "FP4/FP8 weights.")
+FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS = EnvInt(0,
+                                             category="performance",
+                                             doc="Keep the first N layerwise-offloaded blocks resident on the "
+                                             "GPU.")
+FASTVIDEO_H3_SP_PROFILE = EnvBool(False,
+                                  category="profiling",
+                                  doc="CUDA-event spans per stage over one MiniMax-H3 FP4 VSA DiT forward.")
+FASTVIDEO_H3_CAPTURE_QKV = EnvPath(None,
+                                   category="debug",
+                                   doc="Directory for captured real MiniMax-H3 Q/K/V attention inputs.")
+FASTVIDEO_CUDA_MEMORY_CAP_GIB = EnvFloat(0.0,
+                                         category="debug",
+                                         doc="Cap this process's CUDA allocator at this many GiB to emulate a "
+                                         "smaller GPU; 0 leaves it uncapped.")
+FASTVIDEO_MEMORY_REPORT = EnvBool(False,
+                                  category="debug",
+                                  doc="Log bytes held per pipeline component by device and dtype after "
+                                  "loading.")
 
-    # timeout for each iteration in the engine
-    "FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S":
-    lambda: int(os.environ.get("FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S", "60")),
+# ================== Tests ==================
 
-    # Logging configuration
-    # If set to 0, fastvideo will not configure logging
-    # If set to 1, fastvideo will configure logging using the default configuration
-    #    or the configuration file specified by FASTVIDEO_LOGGING_CONFIG_PATH
-    "FASTVIDEO_CONFIGURE_LOGGING":
-    lambda: int(os.getenv("FASTVIDEO_CONFIGURE_LOGGING", "1")),
-    "FASTVIDEO_LOGGING_CONFIG_PATH":
-    lambda: os.getenv("FASTVIDEO_LOGGING_CONFIG_PATH"),
+FASTVIDEO_TEST_WAN_S2V_MODEL_PATH = EnvPath(None,
+                                            category="test",
+                                            doc="Wan2.2-S2V-14B weights for test_wan_s2v.py; unset means "
+                                            "official_weights/Wan2.2-S2V-14B in the repository.",
+                                            deprecated_names=("WAN_S2V_MODEL_PATH", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR = EnvStr("data/cats",
+                                              category="test",
+                                              doc="Raw data directory for preprocess_ltx2_overfit.py.",
+                                              deprecated_names=("LTX2_OVERFIT_DATA_DIR", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_CAPTION_JSON = EnvStr("videos2caption_1_sample.json",
+                                                  category="test",
+                                                  doc="Caption file, relative to the raw data directory.",
+                                                  deprecated_names=("LTX2_OVERFIT_CAPTION_JSON", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_VIDEO_SUBDIR = EnvStr("video",
+                                                  category="test",
+                                                  doc="Video subdirectory, relative to the raw data directory.",
+                                                  deprecated_names=("LTX2_OVERFIT_VIDEO_SUBDIR", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_OUTPUT_DIR = EnvStr("data/ltx2_overfit_preprocessed",
+                                                category="test",
+                                                doc="Output directory for preprocess_ltx2_overfit.py.",
+                                                deprecated_names=("LTX2_OVERFIT_OUTPUT_DIR", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_MODEL = EnvStr("FastVideo/LTX2-Distilled-Diffusers",
+                                           category="test",
+                                           doc="Model repository whose encoders preprocess_ltx2_overfit.py uses.",
+                                           deprecated_names=("LTX2_OVERFIT_MODEL", ))
+FASTVIDEO_TEST_LTX2_OVERFIT_NUM_COPIES = EnvInt(4,
+                                                category="test",
+                                                doc="Number of copies of the overfit sample in the parquet file.",
+                                                deprecated_names=("LTX2_OVERFIT_NUM_COPIES", ))
+FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR = EnvStr("data/kandinsky5_overfit",
+                                                    category="test",
+                                                    doc="Raw data directory for preprocess_kandinsky5_overfit.py.",
+                                                    deprecated_names=("KANDINSKY5_OVERFIT_DATA_DIR", ))
+FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR = EnvStr("data/kandinsky5_overfit_preprocessed",
+                                                      category="test",
+                                                      doc="Output directory for preprocess_kandinsky5_overfit.py.",
+                                                      deprecated_names=("KANDINSKY5_OVERFIT_OUTPUT_DIR", ))
 
-    # this is used for configuring the default logging level
-    "FASTVIDEO_LOGGING_LEVEL":
-    lambda: os.getenv("FASTVIDEO_LOGGING_LEVEL", "INFO"),
+# Switches and paths that only tests read. Each old name stays readable, with a
+# warning, until the next minor release.
+FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO = EnvStr("FastVideo/ssim-reference-videos",
+                                               category="test",
+                                               doc="Hugging Face repository that holds the SSIM reference videos.",
+                                               deprecated_names=("FASTVIDEO_SSIM_REFERENCE_HF_REPO", ))
+FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO_TYPE = EnvStr("dataset",
+                                                    category="test",
+                                                    doc="Repository type of FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO.",
+                                                    deprecated_names=("FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE", ))
+FASTVIDEO_TEST_SSIM_SKIP_REFERENCE_DOWNLOAD = EnvBool(False,
+                                                      category="test",
+                                                      doc="SSIM tests use local reference videos without downloading.",
+                                                      deprecated_names=("FASTVIDEO_SSIM_SKIP_REFERENCE_DOWNLOAD", ))
+FASTVIDEO_TEST_SSIM_FULL_QUALITY = EnvBool(False,
+                                           category="test",
+                                           doc="SSIM tests use the full-quality sampling configurations.",
+                                           deprecated_names=("FASTVIDEO_SSIM_FULL_QUALITY", ))
+FASTVIDEO_TEST_NIGHTLY = EnvBool(False,
+                                 category="test",
+                                 doc="Run the nightly end-to-end overfit tests.",
+                                 deprecated_names=("FASTVIDEO_NIGHTLY", ))
+FASTVIDEO_TEST_ULYSSES_FAULT_RANK = EnvStr(
+    None,
+    category="test",
+    doc="Rank that fails in the Ulysses fault-injection test. The test sets it for its worker processes.",
+    deprecated_names=("FASTVIDEO_ULYSSES_FAULT_RANK", ))
+FASTVIDEO_TEST_ULYSSES_FAULT_STAGE = EnvStr(
+    None,
+    category="test",
+    doc="Stage that fails in the Ulysses fault-injection test. The test sets it for its worker processes.",
+    deprecated_names=("FASTVIDEO_ULYSSES_FAULT_STAGE", ))
+FASTVIDEO_TEST_GOLDEN_GATE_DIR = EnvStr(None,
+                                        category="test",
+                                        doc="Local directory of golden-gate reference tensors.",
+                                        deprecated_names=("FASTVIDEO_GOLDEN_GATE_DIR", ))
+FASTVIDEO_TEST_WAN22_5B_ALLOW_LOW_MEMORY = EnvBool(
+    False,
+    category="test",
+    doc="Run the MLX Wan2.2 5B real-weights parity test on hosts with little memory.",
+    deprecated_names=("FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY", ))
+FASTVIDEO_TEST_WAN22_5B_ROOT = EnvStr(None,
+                                      category="test",
+                                      doc="Local Wan2.2 5B checkpoint for the MLX real-weights parity test.",
+                                      deprecated_names=("FASTVIDEO_WAN22_5B_ROOT", ))
+FASTVIDEO_TEST_GRADNORM_UPDATE = EnvBool(False,
+                                         category="test",
+                                         doc="Gradient-norm regression tests update their references.",
+                                         deprecated_names=("FASTVIDEO_GRADNORM_UPDATE", ))
+FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH = EnvStr("FastVideo/DreamX-World-5B-Cam-Diffusers",
+                                                     category="test",
+                                                     doc="Model for the DreamX-World camera SSIM test.",
+                                                     deprecated_names=("DREAMX_WORLD_SSIM_MODEL_PATH", ))
+FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH = EnvStr("FastVideo/DreamX-World-5B-Diffusers",
+                                                        category="test",
+                                                        doc="Model for the DreamX-World autoregressive SSIM test.",
+                                                        deprecated_names=("DREAMX_WORLD_AR_SSIM_MODEL_PATH", ))
+FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR = EnvStr("black-forest-labs/FLUX.1-dev",
+                                           category="test",
+                                           doc="Model for the Flux text-to-image SSIM test.",
+                                           deprecated_names=("FLUX_T2I_MODEL_DIR", ))
+FASTVIDEO_TEST_FLUX_TRANSFORMER_PATH = EnvStr(None,
+                                              category="test",
+                                              doc="Local Flux transformer for the Flux transformer test.",
+                                              deprecated_names=("FLUX_TRANSFORMER_PATH", ))
+FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH = EnvStr("FastVideo/HunyuanGameCraft-Diffusers",
+                                             category="test",
+                                             doc="Model for the HunyuanGameCraft SSIM test.",
+                                             deprecated_names=("GAMECRAFT_MODEL_PATH", ))
+FASTVIDEO_TEST_GEN3C_MODEL_PATH = EnvStr("FastVideo/GEN3C-Cosmos-7B-Diffusers",
+                                         category="test",
+                                         doc="Model for the GEN3C SSIM test.",
+                                         deprecated_names=("GEN3C_MODEL_PATH", ))
+FASTVIDEO_TEST_GEN3C_IMAGE_PATH = EnvStr(None,
+                                         category="test",
+                                         doc="Input image for the GEN3C SSIM test.",
+                                         deprecated_names=("GEN3C_TEST_IMAGE_PATH", ))
+FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR = EnvStr(None,
+                                                    category="test",
+                                                    doc="Local official GLM-Image weights for the GLM-Image SSIM test.",
+                                                    deprecated_names=("GLM_IMAGE_LOCAL_WEIGHTS_DIR", ))
+FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR = EnvStr(None,
+                                            category="test",
+                                            doc="Model for the GLM-Image SSIM test.",
+                                            deprecated_names=("GLM_IMAGE_MODEL_DIR", ))
+FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS = EnvInt(1,
+                                                category="test",
+                                                doc="GPUs for the Kandinsky5 nightly end-to-end overfit test.",
+                                                deprecated_names=("KANDINSKY5_E2E_NUM_GPUS", ))
+FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE = EnvBool(
+    False,
+    category="test",
+    doc="The Kandinsky5 nightly end-to-end test writes a missing reference video.",
+    deprecated_names=("KANDINSKY5_E2E_WRITE_REFERENCE", ))
+FASTVIDEO_TEST_LONGCAT_MODEL_ROOT = EnvStr(None,
+                                           category="test",
+                                           doc="Local LongCat-Video checkpoint for the golden-gate test.",
+                                           deprecated_names=("LONGCAT_MODEL_ROOT", ))
+FASTVIDEO_TEST_MINIMAX_H3_GATE_GOLDEN_DIR = EnvStr(None,
+                                                   category="test",
+                                                   doc="Local directory of MiniMax-H3 golden-gate tensors.",
+                                                   deprecated_names=("MINIMAX_H3_GATE_GOLDEN_DIR", ))
+FASTVIDEO_TEST_MINIMAX_H3_GATE_LAYER = EnvInt(0,
+                                              category="test",
+                                              doc="Transformer layer that the MiniMax-H3 golden-gate test checks.",
+                                              deprecated_names=("MINIMAX_H3_GATE_LAYER", ))
+FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT = EnvStr(None,
+                                              category="test",
+                                              doc="Local MiniMax-H3 checkpoint for the golden-gate test.",
+                                              deprecated_names=("MINIMAX_H3_MODEL_ROOT", ))
+FASTVIDEO_TEST_SD35_MODEL_DIR = EnvStr("stabilityai/stable-diffusion-3.5-medium",
+                                       category="test",
+                                       doc="Model for the Stable Diffusion 3.5 SSIM test.",
+                                       deprecated_names=("SD35_MODEL_DIR", ))
+FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
+                                            category="test",
+                                            doc="Upstream taehv checkout for the MLX TAEH3 parity test.",
+                                            deprecated_names=("TAEH3_REFERENCE_DIR", ))
+FASTVIDEO_TEST_ZIMAGE_MODEL_DIR = EnvStr("Tongyi-MAI/Z-Image-Turbo",
+                                         category="test",
+                                         doc="Model for the Z-Image SSIM test.",
+                                         deprecated_names=("ZIMAGE_MODEL_DIR", ))
+FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION = EnvStr("f332072aa78be7aecdf3ee76d5c247082da564a6",
+                                              category="test",
+                                              doc="Hugging Face revision of the Z-Image model for its SSIM test.",
+                                              deprecated_names=("ZIMAGE_MODEL_REVISION", ))
 
-    # if set, FASTVIDEO_LOGGING_PREFIX will be prepended to all log messages
-    "FASTVIDEO_LOGGING_PREFIX":
-    lambda: os.getenv("FASTVIDEO_LOGGING_PREFIX", ""),
-
-    # Trace function calls
-    # If set to 1, fastvideo will trace function calls
-    # Useful for debugging
-    "FASTVIDEO_TRACE_FUNCTION":
-    lambda: int(os.getenv("FASTVIDEO_TRACE_FUNCTION", "0")),
-
-    # Backend for attention computation
-    # Available options:
-    # - "TORCH_SDPA": use torch.nn.MultiheadAttention
-    # - "FLASH_ATTN": use FlashAttention
-    # - "VIDEO_SPARSE_ATTN": use Video Sparse Attention
-    # - "SAGE_ATTN": use Sage Attention
-    # - "SAGE_ATTN_THREE": use Sage Attention 3
-    # FLASH_ATTN uses FlashAttention-3/2; to run FlashAttention-4 set
-    # FASTVIDEO_FA4=1 as well (see below).
-    "FASTVIDEO_ATTENTION_BACKEND":
-    lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
-
-    # If set (=1), the FLASH_ATTN backend uses FlashAttention-4
-    # (flash_attn.cute). FA4 is opt-in and never auto-selected just because it
-    # is installed. Below sm90, grad-enabled and GQA calls are routed to FA2
-    # (FA4's backward asserts sm90+ and its pack_gqa fails to JIT there).
-    "FASTVIDEO_FA4":
-    lambda: os.getenv("FASTVIDEO_FA4", "0") != "0",
-
-    # Use dedicated multiprocess context for workers.
-    "FASTVIDEO_WORKER_MULTIPROC_METHOD":
-    lambda: os.getenv("FASTVIDEO_WORKER_MULTIPROC_METHOD", "spawn"),
-
-    # Enables torch profiler if set. Path to the directory where torch profiler
-    # traces are saved. Note that it must be an absolute path.
-    "FASTVIDEO_TORCH_PROFILER_DIR":
-    lambda: (None if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os.path.expanduser(
-        os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
-
-    # Enable torch profiler to record shapes if set
-    # FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES=1. If not set, torch profiler will
-    # not record shapes.
-    "FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES":
-    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES", "0") != "0"),
-
-    # Enable torch profiler to profile memory if set
-    # FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY=1. If not set, torch profiler
-    # will not profile memory.
-    "FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY":
-    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY", "0") != "0"),
-
-    # Enable torch profiler stack capture with
-    # FASTVIDEO_TORCH_PROFILER_WITH_STACK=1. Off by default: stack capture
-    # costs ~1.5x runtime overhead and ~1.4x trace size.
-    "FASTVIDEO_TORCH_PROFILER_WITH_STACK":
-    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_STACK", "0") != "0"),
-
-    # Enable torch profiler to profile flops if set
-    # FASTVIDEO_TORCH_PROFILER_WITH_FLOPS=1. If not set, torch profiler will
-    # not profile flops.
-    "FASTVIDEO_TORCH_PROFILER_WITH_FLOPS":
-    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_FLOPS", "0") != "0"),
-    # Wait steps per profiling cycle (torch.profiler.schedule wait parameter)
-    # Defaults to 2 if not set.
-    # Warmup steps per profiling cycle (torch.profiler.schedule warmup parameter)
-    # Defaults to 1 if not set.
-    # Active steps per profiling cycle (torch.profiler.schedule active parameter)
-    # Defaults to 2 if not set.
-    "FASTVIDEO_TORCH_PROFILE_REGIONS":
-    lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
-
-    # Enable activation trace hooks if set.
-    "FASTVIDEO_TRACE_ACTIVATIONS":
-    lambda: bool(os.getenv("FASTVIDEO_TRACE_ACTIVATIONS", "0") != "0"),
-    # Regex filter for traced module names. Empty means all modules.
-    "FASTVIDEO_TRACE_LAYERS":
-    lambda: os.getenv("FASTVIDEO_TRACE_LAYERS", ""),
-    # Comma-separated activation stats to dump for each output tensor.
-    "FASTVIDEO_TRACE_STATS":
-    lambda: os.getenv("FASTVIDEO_TRACE_STATS", "abs_mean,sum"),
-    # JSONL sink path. The literal <pid> is replaced at runtime.
-    "FASTVIDEO_TRACE_OUTPUT":
-    lambda: os.getenv("FASTVIDEO_TRACE_OUTPUT", "/tmp/fv_trace_<pid>.jsonl"),
-    # Comma-separated denoise step indices. Empty means all steps.
-    "FASTVIDEO_TRACE_STEPS":
-    lambda: os.getenv("FASTVIDEO_TRACE_STEPS", ""),
-
-    # If set, fastvideo will run in development mode, which will enable
-    # some additional endpoints for developing and debugging,
-    # e.g. `/reset_prefix_cache`
-    "FASTVIDEO_SERVER_DEV_MODE":
-    lambda: bool(int(os.getenv("FASTVIDEO_SERVER_DEV_MODE", "0"))),
-
-    # If set, fastvideo will enable stage logging, which will print the time
-    # taken for each stage
-    "FASTVIDEO_STAGE_LOGGING":
-    lambda: bool(int(os.getenv("FASTVIDEO_STAGE_LOGGING", "0"))),
-
-    # CFG gating fraction for stale-uncond reuse (Adaptive Guidance / LinearAG
-    # variant — Castillo et al. 2023, arXiv:2312.12487).  Float in [0, 1].
-    # Interpretation: for step index `i < len(timesteps) * X`, run both
-    # cond and uncond forwards and refresh delta_cached = cond - uncond.
-    # Once `i >= len(timesteps) * X`, skip the uncond forward and reuse
-    # the cached delta:  noise_pred = cond + (guidance_scale - 1) * delta.
-    #
-    # Edge cases:
-    #   1.0 (default) : disables gating; identical to baseline two-pass CFG.
-    #   0.5           : run uncond for the first half of steps, reuse delta
-    #                    for the second half (~25% inference time saved on
-    #                    bandwidth-bound SP setups).
-    #   0.0           : step 0 still computes uncond fresh (cache is empty
-    #                    at start) — all subsequent steps reuse the step-0
-    #                    delta.  This is the most aggressive setting; does
-    #                    NOT mean "no uncond forward ever."
-    #
-    # Caveats:
-    #   - Algorithmically approximate; not bit-exact vs baseline CFG.
-    #     Validate per-pipeline with SSIM / VBench before lowering below 1.0.
-    #   - Interaction with `guidance_rescale > 0` is unvalidated; the
-    #     denoising stage logs a warning when both are active.
-    #   - Wan2.2 high/low-noise expert switch invalidates the cache.
-    "FASTVIDEO_CFG_GATE_STEP":
-    lambda: float(os.getenv("FASTVIDEO_CFG_GATE_STEP", "1.0")),
+# Variables that FastVideo no longer reads. Setting one logs a warning; delete
+# the entries in the next minor release.
+DEPRECATED_VARIABLES = {
+    "FASTVIDEO_TARGET_DEVICE": "no code reads it",
+    "FASTVIDEO_USE_PRECOMPILED": "no code reads it",
+    "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL": "no code reads it",
+    "FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S": "no code reads it",
+    "FASTVIDEO_SERVER_DEV_MODE": "no code reads it",
+    "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE": "no code reads it",
+    "FASTVIDEO_TRACE_FUNCTION": "no code reads it",
 }
 
-# end-env-vars-definition
+
+def warn_deprecated_variables() -> None:
+    """Log a warning for each variable in DEPRECATED_VARIABLES that is set."""
+    for name, reason in DEPRECATED_VARIABLES.items():
+        if name in os.environ:
+            _warn_once(f"{name} is deprecated and has no effect ({reason}); it will be removed in the next minor "
+                       "release.")
 
 
-def __getattr__(name: str):
-    # lazy evaluation of environment variables
-    if name in environment_variables:
-        return environment_variables[name]()
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+def _register_fields() -> dict[str, EnvField]:
+    """Name each module-level EnvField after its attribute and return the fields by name."""
+    fields = {name: value for name, value in globals().items() if isinstance(value, EnvField)}
+    for name, field in fields.items():
+        field.name = name
+    return fields
 
 
-def __dir__():
-    return list(environment_variables.keys())
+environment_variables: dict[str, EnvField] = _register_fields()

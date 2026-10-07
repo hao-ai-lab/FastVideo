@@ -19,12 +19,12 @@ device-keyed grad-norm regression on top of this same harness.
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
 # Required by the ``distributed_setup`` fixture pulled from
-# ``fastvideo/tests/conftest.py``.  Set before any fastvideo import.
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29516")
+# ``fastvideo/tests/conftest.py``.  Set at import, before the fixture runs.
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29516")
 
 from pathlib import Path
 
@@ -78,7 +78,7 @@ def test_wan_finetune_single_train_step(monkeypatch: pytest.MonkeyPatch) -> None
     # ``single_train_step``, so the parquet train dataloader that
     # ``init_preprocessors`` builds is never iterated.  Stub it out so
     # construction does not require a real ``training.data.data_path``:
-    # the minimal fixture deliberately omits one, and the Modal CI job
+    # the minimal fixture deliberately omits one, and the Slurm CI worker
     # mounts model weights rather than a parquet dataset.
     monkeypatch.setattr(
         "fastvideo.train.utils.dataloader."
