@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fastvideo.attention.selector import get_attn_backend
+from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.configs.models.dits.lingbotworld2 import (
     LingBotWorld2CausalFastVideoConfig, )
 from fastvideo.distributed.communication_op import (
@@ -271,7 +271,9 @@ class CausalWanSelfAttention(nn.Module):
             get_compute_dtype(),
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
         )
-        self.backend = AttentionBackendEnum[attn_backend.get_name()]
+        backend_name = attn_backend.get_name()
+        self.backend = backend_name_to_enum(backend_name)
+        assert self.backend is not None, f"Unsupported attention backend: {backend_name}"
         self.local_attn_size = local_attn_size
         self.sink_size = sink_size
         self.qk_norm = qk_norm

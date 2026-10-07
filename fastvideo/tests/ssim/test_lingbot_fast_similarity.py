@@ -15,6 +15,8 @@ import torch
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.bootstrap_references import (
+    xfail_missing_reference_in_bootstrap_mode, )
 from fastvideo.tests.ssim.reference_utils import (
     build_generated_output_dir,
     build_reference_folder_path,
@@ -152,6 +154,11 @@ def test_lingbot_fast_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
         ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
+        xfail_missing_reference_in_bootstrap_mode(
+            generated_artifact_path=generated_video_path,
+            reference_folder=reference_folder,
+            artifact_kind="video",
+        )
         raise FileNotFoundError(
             f"Reference video folder does not exist: {reference_folder}")
 
@@ -161,6 +168,11 @@ def test_lingbot_fast_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
             reference_video_name = filename
             break
     if not reference_video_name:
+        xfail_missing_reference_in_bootstrap_mode(
+            generated_artifact_path=generated_video_path,
+            reference_folder=reference_folder,
+            artifact_kind="video",
+        )
         raise FileNotFoundError(
             f"Reference video missing for prompt/backend under {reference_folder}"
         )

@@ -58,6 +58,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | lingbot_video | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbotworld | `FastVideo/LingBot-World-Base-Cam-Diffusers` | I2V | [basic_lingbotworld_base_cam.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_base_cam.py) |
 | lingbotworld2 | `robbyant/lingbot-world-v2-14b-causal-fast` | I2V | [basic_lingbotworld2_causal_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld2_causal_fast.py) |
+| lingbotworld_fast | `FastVideo/LingBot-World-Fast-Diffusers` | I2V | [basic_lingbotworld_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_fast.py) |
 | longcat | `FastVideo/LongCat-Video-T2V-Diffusers` | T2V | [basic_longcat_t2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_t2v.py) |
 | longcat | `FastVideo/LongCat-Video-I2V-Diffusers` | I2V | [basic_longcat_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_i2v.py) |
 | longcat | `FastVideo/LongCat-Video-VC-Diffusers` | — | [basic_longcat_vc.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_vc.py) |

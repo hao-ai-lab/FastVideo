@@ -16,10 +16,11 @@ class LingBotWorldFastArchConfig(LingBotWorld2CausalFastArchConfig):
     """
 
     # The released `generate_fast.py` leaves `--local_attn_size` at -1, so
-    # self-attention stays global and the KV cache never evicts. That also makes
-    # `sink_size` unreachable, so it is deliberately not pinned here (the loader
-    # overwrites it from the checkpoint config either way).
+    # self-attention stays global and the KV cache never evicts. `sink_size` is
+    # therefore unreachable, but it is pinned to the official constructor's
+    # value so the two implementations stay identical if the window is enabled.
     local_attn_size: int = -1
+    sink_size: int = 9
     # `chunk_size` and `timesteps_index` are absent from the checkpoint config,
     # so these values are what the sampling loop actually runs with.
     chunk_size: int = 3
