@@ -2,7 +2,8 @@
 """Preprocess HunyuanVideo 1.5 overfit data into parquet format.
 
 This script writes both the Qwen (``text_embedding_*``) and the ByT5
-(``text_embedding_2_*``) embeddings. The generic CLI preprocess workflow
+(``text_embedding_2_*``) embeddings, laid out in ``pyarrow_schema_t2v_dual_text``
+-- the schema ``Hunyuan15Model`` trains on. The generic CLI preprocess workflow
 (``PreprocessPipeline_T2V``) only runs the primary text encoder, so
 HunyuanVideo 1.5 data must come from this script to keep glyph conditioning.
 """
@@ -32,7 +33,7 @@ from fastvideo.configs.pipelines.hunyuan15 import (
     qwen_postprocess_text,
     qwen_preprocess_text,
 )
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v_dual_text
 from fastvideo.models.vaes.hunyuan15vae import AutoencoderKLHunyuanVideo15
 from fastvideo.utils import maybe_download_model
 
@@ -63,6 +64,16 @@ def tensor_to_record(
         f"{prefix}_shape": list(array.shape),
         f"{prefix}_dtype": str(array.dtype),
     }
+
+
+def build_parquet_table(records: list[dict[str, Any]]) -> pa.Table:
+    """Lay the records out in the dual-text schema ``Hunyuan15Model`` reads.
+
+    The base ``pyarrow_schema_t2v`` has no ByT5 columns, so writing these
+    records with it would drop the glyph stream without an error.
+    """
+    columns = {field.name: [record.get(field.name) for record in records] for field in pyarrow_schema_t2v_dual_text}
+    return pa.Table.from_pydict(columns, schema=pyarrow_schema_t2v_dual_text)
 
 
 def load_caption_data(data_dir: str) -> list[dict[str, Any]]:
@@ -415,12 +426,7 @@ def main() -> None:
     del vae
     clear_cuda()
 
-    columns = {field.name: [record.get(field.name) for record in records] for field in pyarrow_schema_t2v}
-
-    table = pa.Table.from_pydict(
-        columns,
-        schema=pyarrow_schema_t2v,
-    )
+    table = build_parquet_table(records)
 
     output_path = os.path.join(
         output_dir,

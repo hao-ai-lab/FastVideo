@@ -36,6 +36,7 @@ import os
 
 import cv2
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from transformers import AutoTokenizer
@@ -49,7 +50,6 @@ from fastvideo.configs.pipelines.kandinsky5 import (
     kandinsky5_qwen_preprocess_text,
 )
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
-from fastvideo.dataset.dataloader.parquet_io import records_to_table
 from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -285,7 +285,11 @@ def main() -> None:
     del qwen_enc, qwen_tok, clip_enc, clip_tok, vae
 
     # Write parquet
-    table = records_to_table(records, pyarrow_schema_t2v)
+    table = pa.table(
+        {k: [r[k] for r in records]
+         for k in records[0]},
+        schema=pyarrow_schema_t2v,
+    )
     output_path = os.path.join(output_dir, "data_00000.parquet")
     pq.write_table(table, output_path)
     print(f"\nWrote {len(records)} records to {output_path}")

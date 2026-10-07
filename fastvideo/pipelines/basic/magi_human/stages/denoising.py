@@ -152,6 +152,9 @@ class MagiHumanDenoisingStage(PipelineStage):
 
         disable_tqdm = not getattr(fastvideo_args, "log_level_progress", True)
         for idx, t in enumerate(tqdm(timesteps, disable=disable_tqdm)):
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             video_latent = _overwrite_first_frame(video_latent, image_latent)
             # Precompute packed video+audio tokens after any TI2V first-frame
             # overwrite. Text varies per cond/uncond call and is attached in

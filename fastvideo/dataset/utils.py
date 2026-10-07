@@ -152,6 +152,15 @@ def collate_latents_embs_masks(batch_to_process,
     return all_latents, all_embs, all_masks, caption_text
 
 
+# Text streams are padded to a fixed length and paired with the attention mask
+# the trainer trims against. The second entry is HunyuanVideo 1.5's ByT5 glyph
+# stream, which rides alongside the primary Qwen one.
+_TEXT_STREAM_MASKS = {
+    "text_embedding": "text_attention_mask",
+    "text_embedding_2": "text_attention_mask_2",
+}
+
+
 def collate_rows_from_parquet_schema(rows,
                                      parquet_schema,
                                      text_padding_length,
@@ -190,21 +199,22 @@ def collate_rows_from_parquet_schema(rows,
             # Only add actual metadata fields, not the shape/dtype helper fields
             metadata_fields.append(field)
 
-    # Precompute one CFG dropout decision per row (not per tensor field) so
-    # that text_embedding (Qwen) and text_embedding_2 (ByT5) always drop
-    # together for the same sample.
-    cfg_drop_flags = []
-    for row in rows:
-        drop = False
-        if cfg_rate > 0:
+    # One CFG dropout decision per row, shared by all of its text streams, so
+    # a sample's Qwen and ByT5 embeddings always drop together. With a
+    # ``_sample_index`` it is a pure function of seed ^ index (resume-safe);
+    # without one it is a single ``rng`` draw per row, taken the first time a
+    # stream of that row needs it, so single-stream batches consume ``rng``
+    # exactly as before while a second stream can no longer draw its own.
+    row_drops: dict[int, bool] = {}
+
+    def _cfg_drop(row_idx: int, row: dict[str, Any]) -> bool:
+        if row_idx not in row_drops:
             sample_idx = row.get("_sample_index")
             if sample_idx is not None:
-                # Deterministic per-sample CFG dropout using sample index
-                # (resume-safe).
-                drop = random.Random(seed ^ int(sample_idx)).random() < cfg_rate
+                row_drops[row_idx] = (random.Random(seed ^ int(sample_idx)).random() < cfg_rate)
             else:
-                drop = (rng.random() if rng else random.random()) < cfg_rate
-        cfg_drop_flags.append(drop)
+                row_drops[row_idx] = ((rng.random() if rng else random.random()) < cfg_rate)
+        return row_drops[row_idx]
 
     # Process each tensor field
     for tensor_name in tensor_fields:
@@ -213,24 +223,39 @@ def collate_rows_from_parquet_schema(rows,
         bytes_key = f"{tensor_name}_bytes"
         dtype_key = f"{tensor_name}_dtype"
 
+        # A secondary text stream that this parquet predates: leave the key out
+        # so the trainer's own zero-token fallback (and its warning) applies,
+        # rather than a placeholder of the wrong width.
+        if (tensor_name == "text_embedding_2" and not any(row.get(bytes_key) is not None for row in rows)):
+            continue
+
+        # The primary stream has no such fallback: a row without it would be
+        # collated as zeros and train unconditioned without a word, so name
+        # the rows instead.
+        if tensor_name == "text_embedding":
+            missing = [i for i, row in enumerate(rows) if row.get(bytes_key) is None or row.get(shape_key) is None]
+            if missing:
+                where = ("every row" if len(missing) == len(rows) else f"rows {missing} of {len(rows)}")
+                raise ValueError(f"text_embedding is missing from {where} in this batch; "
+                                 "the schema declares it, so each parquet row must carry "
+                                 "text_embedding_bytes and text_embedding_shape.")
+
         for row_idx, row in enumerate(rows):
             # Get tensor data from row using the existing helper function pattern
-            if (shape_key in row and bytes_key in row and row[shape_key] is not None and row[bytes_key] is not None):
+            if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
                 bytes_data = row[bytes_key]
 
-                if len(bytes_data) == 0:
-                    # Preserve the full shape (e.g. [0, D]) so downstream
-                    # padding knows the embedding dimension even when there
-                    # are zero tokens (e.g. ByT5 embedding with no glyph text).
-                    # zeros, not empty: a truncated row can declare a non-empty
-                    # shape with no payload, and uninitialized memory would be
-                    # stacked silently instead of failing.
-                    tensor = torch.zeros(tuple(shape), dtype=torch.float32)
+                if bytes_data is None or len(bytes_data) == 0:
+                    # Keep the declared shape: a zero-token stream (e.g. a
+                    # caption with no glyph text) still carries its width.
+                    if shape:
+                        tensor = torch.zeros(*shape, dtype=torch.bfloat16)
+                    else:
+                        tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
-                    # One CFG dropout decision per row (precomputed above) so
-                    # text_embedding and text_embedding_2 drop together.
-                    drop = (tensor_name in ("text_embedding", "text_embedding_2") and cfg_drop_flags[row_idx])
+                    # Per-row CFG dropout, shared across text streams.
+                    drop = (tensor_name in _TEXT_STREAM_MASKS and cfg_rate > 0 and _cfg_drop(row_idx, row))
                     tensor = _decode_tensor_bytes(
                         bytes_data,
                         shape,
@@ -244,103 +269,47 @@ def collate_rows_from_parquet_schema(rows,
 
                 tensor_list.append(tensor)
             else:
-                # Handle missing tensor data. Text embeddings stay None so the
-                # branch below raises a precise "missing" error instead of
-                # tripping the generic shape check.
-                if tensor_name in ("text_embedding", "text_embedding_2"):
-                    tensor_list.append(None)
-                else:
-                    tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
+                # Handle missing tensor data
+                tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
 
         # Stack tensors with special handling for text embeddings
-        if tensor_name in (
-            "text_embedding",
-            "text_embedding_2",
-        ):
+        if tensor_name in _TEXT_STREAM_MASKS:
             # Handle text embeddings with padding
-
-            valid_tensors = [t for t in tensor_list if t is not None]
-
-            if len(valid_tensors) == 0:
-                if tensor_name == "text_embedding_2":
-                    # Legacy Wan/Cosmos data does not contain the secondary
-                    # (ByT5) text embedding at all - skip this field entirely.
-                    continue
-                raise ValueError("text_embedding is missing from all rows.")
-
-            reference_tensor = valid_tensors[0]
-            if reference_tensor.ndim == 3:
-                if reference_tensor.shape[0] != 1:
-                    raise ValueError(
-                        f"Expected '{tensor_name}' batch dimension "
-                        f"to be 1, got {tuple(reference_tensor.shape)}"
-                    )
-                reference_tensor = reference_tensor.squeeze(0)
-            if reference_tensor.ndim != 2:
-                raise ValueError(
-                    f"Expected '{tensor_name}' shape [L, D], "
-                    f"got {tuple(reference_tensor.shape)}"
-                )
-            embedding_dim = reference_tensor.shape[-1]
-            embedding_dtype = reference_tensor.dtype
-
             padded_tensors = []
             attention_masks = []
+            # Empty entries have to stack against the real ones, so follow
+            # their dtype instead of the bfloat16 placeholder default.
+            empty_dtype = next((t.dtype for t in tensor_list if t.numel() > 0), torch.bfloat16)
+            # ...and their width: a row whose stream is missing entirely (a
+            # legacy shard mixed into the same batch) carries only a 1-D
+            # placeholder, and must not inject a 768-wide stub that cannot
+            # stack against the real rows.
+            empty_width = next((int(t.shape[1]) for t in tensor_list if t.dim() > 1), 768)
+
             for tensor in tensor_list:
-                if tensor is None:
-                    if tensor_name == "text_embedding":
-                        raise ValueError(
-                            "text_embedding is missing from one or more rows.")
-                    # No ByT5 embedding field for this row (legacy row mixed
-                    # into a Hunyuan batch) - treat as zero tokens.
-                    tensor = torch.empty((0, embedding_dim), dtype=embedding_dtype)
-
-                if tensor.ndim == 3:
-                    if tensor.shape[0] != 1:
-                        raise ValueError(
-                            f"Expected '{tensor_name}' batch dimension "
-                            f"to be 1, got {tuple(tensor.shape)}"
-                        )
-                    tensor = tensor.squeeze(0)
-
-                if tensor.ndim != 2:
-                    raise ValueError(
-                        f"Expected '{tensor_name}' shape [L, D], "
-                        f"got {tuple(tensor.shape)}"
-                    )
-
-                if tensor.shape[-1] != embedding_dim:
-                    raise ValueError(
-                        f"Inconsistent hidden dimension for "
-                        f"'{tensor_name}': expected {embedding_dim}, "
-                        f"got {tensor.shape[-1]}"
-                    )
-
-                padded_tensor, mask = pad(tensor, text_padding_length)
-                padded_tensors.append(padded_tensor)
-                attention_masks.append(mask)
+                if tensor.numel() > 0:
+                    padded_tensor, mask = pad(tensor, text_padding_length)
+                    padded_tensors.append(padded_tensor)
+                    attention_masks.append(mask)
+                else:
+                    # Handle empty embeddings - assume default embedding dimension
+                    width = (int(tensor.shape[1]) if tensor.dim() > 1 else empty_width)
+                    padded_tensors.append(torch.zeros(text_padding_length, width, dtype=empty_dtype))
+                    attention_masks.append(torch.zeros(text_padding_length))
 
             batch_data[tensor_name] = torch.stack(padded_tensors)
-            if tensor_name == "text_embedding":
-                batch_data["text_attention_mask"] = torch.stack(attention_masks)
-            else:
-                batch_data["text_attention_mask_2"] = torch.stack(attention_masks)
+            batch_data[_TEXT_STREAM_MASKS[tensor_name]] = torch.stack(attention_masks)
         else:
             # Stack all tensors to preserve batch consistency
             # Don't filter out None or empty tensors as this breaks batch sizing
             try:
                 batch_data[tensor_name] = torch.stack(tensor_list)
             except (ValueError, RuntimeError) as e:
-                shapes = [
-                    t.shape
-                    if t is not None and hasattr(t, 'shape') else 'None/Invalid'
-                    for t in tensor_list
-                ]
-                raise ValueError(
-                    f"Failed to stack tensors for field '{tensor_name}'. "
-                    f"Tensor shapes: {shapes}. "
-                    f"All tensors in a batch must have compatible shapes. "
-                    f"Original error: {e}") from e
+                shapes = [t.shape if t is not None and hasattr(t, 'shape') else 'None/Invalid' for t in tensor_list]
+                raise ValueError(f"Failed to stack tensors for field '{tensor_name}'. "
+                                 f"Tensor shapes: {shapes}. "
+                                 f"All tensors in a batch must have compatible shapes. "
+                                 f"Original error: {e}") from e
 
     # Process metadata fields into info_list
     info_list = []

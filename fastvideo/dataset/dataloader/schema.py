@@ -66,16 +66,6 @@ pyarrow_schema_t2v = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    # Secondary text embedding: ByT5. Compatibility with writers that predate
-    # these columns comes from records_to_table (from_pylist fills absent keys
-    # with null); nullable=True only permits those nulls.
-    pa.field("text_embedding_2_bytes", pa.binary(), nullable=True),
-    pa.field(
-        "text_embedding_2_shape",
-        pa.list_(pa.int64()),
-        nullable=True,
-    ),
-    pa.field("text_embedding_2_dtype", pa.string(), nullable=True),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
@@ -88,6 +78,17 @@ pyarrow_schema_t2v = pa.schema([
     pa.field("duration_sec", pa.float64()),
     pa.field("fps", pa.float64()),
 ])
+
+# HunyuanVideo 1.5 conditions on two text streams (Qwen2.5-VL plus a ByT5 glyph
+# stream), so its rows carry a second text-embedding triplet. The paired
+# text_attention_mask_2 is synthesised by collate_rows_from_parquet_schema from
+# the padding, exactly as text_attention_mask is for the primary stream.
+pyarrow_schema_t2v_dual_text = pa.schema(
+    list(pyarrow_schema_t2v) + [
+        pa.field("text_embedding_2_bytes", pa.binary()),
+        pa.field("text_embedding_2_shape", pa.list_(pa.int64())),
+        pa.field("text_embedding_2_dtype", pa.string()),
+    ])
 
 # One text-to-video-and-audio (T2VA) row owns synchronized video, audio, and text tensors so
 # collate_rows_from_parquet_schema cannot pair targets from different samples.

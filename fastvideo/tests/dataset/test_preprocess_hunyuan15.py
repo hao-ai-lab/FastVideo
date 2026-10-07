@@ -6,10 +6,13 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 import torch
 
 import fastvideo.pipelines.preprocess.preprocess_hunyuan15_overfit as preprocess
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v_dual_text
+from fastvideo.dataset.utils import collate_rows_from_parquet_schema
 
 
 QWEN_DIM = 3584
@@ -397,3 +400,36 @@ def test_encode_video_latent_does_not_apply_scaling_factor() -> None:
     )
 
     assert torch.all(result == 2.0)
+
+
+def test_written_table_carries_both_text_streams_to_the_collator(tmp_path) -> None:
+    """The script's parquet must use the schema Hunyuan15Model trains on.
+
+    Written with the base t2v schema, the ByT5 columns would vanish and the
+    trainer would fall back to no glyph conditioning.
+    """
+    record = {
+        "id": "000000_clip.mp4",
+        "file_name": "clip.mp4",
+        "caption": 'A storefront sign reads "OPEN".',
+        "media_type": "video",
+        "width": 832,
+        "height": 480,
+        "num_frames": 81,
+        "duration_sec": 81 / 16.0,
+        "fps": 16.0,
+    }
+    record.update(preprocess.tensor_to_record(torch.zeros(32, 2, 4, 4), "vae_latent"))
+    record.update(preprocess.tensor_to_record(torch.ones(3, QWEN_DIM), "text_embedding"))
+    record.update(preprocess.tensor_to_record(torch.full((2, BYT5_DIM), 2.0), "text_embedding_2"))
+
+    table = preprocess.build_parquet_table([record])
+    assert table.schema.equals(pyarrow_schema_t2v_dual_text)
+
+    pq.write_table(table, tmp_path / "data_00000.parquet")
+    row = pq.read_table(tmp_path / "data_00000.parquet").to_pylist()[0]
+    batch = collate_rows_from_parquet_schema([row], pyarrow_schema_t2v_dual_text, text_padding_length=8)
+
+    assert batch["text_attention_mask"].sum().item() == 3
+    assert batch["text_attention_mask_2"].sum().item() == 2
+    torch.testing.assert_close(batch["text_embedding_2"][0, :2], torch.full((2, BYT5_DIM), 2.0))

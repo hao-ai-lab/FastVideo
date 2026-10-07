@@ -86,6 +86,12 @@ class StreamingVideoGenerator(VideoGenerator):
         self.sampling_param: SamplingParam | None = None
         self.batch: ForwardBatch | None = None
         self._use_queue_mode = use_queue_mode and isinstance(self.executor, MultiprocExecutor)
+        if use_queue_mode and not self._use_queue_mode:
+            logger.warning(
+                "use_queue_mode=True needs a MultiprocExecutor; %s falls back to per-step "
+                "in-process calls instead.",
+                type(self.executor).__name__,
+            )
         self.writer: IncrementalVideoWriter | None = None
         self.block_dir: str | None = None
         self.block_idx: int = 0
