@@ -23,6 +23,16 @@ logger = init_logger(__name__)
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
 
+def canonical_param_name(name: str) -> str:
+    """Drop activation-checkpoint wrapper segments so names match ``state_dict()`` keys.
+
+    ``named_parameters()`` keeps the ``_checkpoint_wrapped_module`` segment of every
+    wrapped submodule, so the same weight gets a different name under each
+    checkpointing policy.
+    """
+    return name.replace("._checkpoint_wrapped_module.", ".")
+
+
 def gather_state_dict_on_cpu_rank0(
     model,
     device: torch.device | None = None,
@@ -30,10 +40,7 @@ def gather_state_dict_on_cpu_rank0(
     rank = dist.get_rank()
     cpu_state_dict = {}
     sharded_sd = model.state_dict()
-    param_requires_grad = set([
-        k.replace("._checkpoint_wrapped_module.", ".") for k, v in dict(model.named_parameters()).items()
-        if v.requires_grad
-    ])
+    param_requires_grad = set([canonical_param_name(k) for k, v in model.named_parameters() if v.requires_grad])
     for param_name, param in sharded_sd.items():
         if param_name not in param_requires_grad:
             continue
@@ -1659,13 +1666,15 @@ class EMA_FSDP:
                 self.shadow = {}
             return
 
-        # local_shard: maintain EMA of local shards for requires_grad params
+        # local_shard: maintain EMA of local shards for requires_grad params.
+        # Shadow keys use canonical names so EMA state stays loadable when the
+        # activation checkpointing policy changes between runs.
         self.shadow = {}
         for name, p in module.named_parameters():
             if not p.requires_grad:
                 continue
             local = self._to_local_tensor(p.detach())
-            self.shadow[name] = local.clone().float().cpu()
+            self.shadow[canonical_param_name(name)] = local.clone().float().cpu()
 
     @torch.no_grad()
     def update(self, module):
@@ -1686,6 +1695,7 @@ class EMA_FSDP:
         for name, p in module.named_parameters():
             if not p.requires_grad:
                 continue
+            name = canonical_param_name(name)
             local = self._to_local_tensor(p.detach())
             v_cpu = local.float().cpu()
             if name not in self.shadow:
@@ -1699,7 +1709,8 @@ class EMA_FSDP:
         return {k: v.clone() for k, v in self.shadow.items()}
 
     def load_state_dict(self, sd: dict[str, torch.Tensor]):
-        self.shadow = {k: v.clone() for k, v in sd.items()}
+        # Checkpoints saved before keys were canonical carry wrapper segments.
+        self.shadow = {canonical_param_name(k): v.clone() for k, v in sd.items()}
 
     @torch.no_grad()
     def copy_to_unwrapped(self, module) -> None:
@@ -1709,7 +1720,7 @@ class EMA_FSDP:
         """
         if self.mode == "rank0_full" and self.rank != 0:
             return
-        name_to_param = dict(module.named_parameters())
+        name_to_param = {canonical_param_name(n): p for n, p in module.named_parameters()}
         for n, w in self.shadow.items():
             if n in name_to_param:
                 p = name_to_param[n]
@@ -1735,8 +1746,8 @@ class EMA_FSDP:
                         # Nothing to swap on this rank for this param
                         continue
                     self.saved[name] = p_local.clone().to("cpu")
-                    if name in self.ema.shadow:
-                        ema_cpu = self.ema.shadow[name]
+                    ema_cpu = self.ema.shadow.get(canonical_param_name(name))
+                    if ema_cpu is not None:
                         if ema_cpu.numel() != p_local.numel():
                             # Shard shape mismatch (e.g., empty shard here), skip
                             continue

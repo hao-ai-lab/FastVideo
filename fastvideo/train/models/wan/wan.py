@@ -19,8 +19,6 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.training.activation_checkpoint import (
-    apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling,
     get_sigmas,
@@ -33,6 +31,11 @@ from fastvideo.utils import (
 )
 
 from fastvideo.train.models.base import ModelBase
+from fastvideo.train.utils.activation_checkpoint import (
+    apply_activation_checkpointing,
+    is_activation_checkpointed,
+    resolve_checkpointing_type,
+)
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
@@ -81,15 +84,23 @@ class WanModel(ModelBase):
         )
         self._init_from = str(init_from)
 
+        # _load_transformer implementations receive the resolved type and do
+        # not fall back to training.model themselves.
         self.transformer = self._load_transformer(
             init_from=self._init_from,
             trainable=self._trainable,
             disable_custom_init_weights=(disable_custom_init_weights),
-            enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            enable_gradient_checkpointing_type=resolve_checkpointing_type(
+                enable_gradient_checkpointing_type,
+                training_config,
+            ),
             training_config=training_config,
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=self.attention_backend,
         )
+        # Subclasses override _load_transformer and may wrap a nested module
+        # or skip wrapping, so record what was actually wrapped.
+        self._activation_checkpointing_applied = is_activation_checkpointed(self.transformer)
 
         self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
 
@@ -133,17 +144,10 @@ class WanModel(ModelBase):
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=attention_backend,
         )
-        # Fall back to training_config.model if not set on the
-        # model YAML section directly.
-        ckpt_type = (enable_gradient_checkpointing_type or getattr(
-            getattr(training_config, "model", None),
-            "enable_gradient_checkpointing_type",
-            None,
-        ))
-        if trainable and ckpt_type:
+        if trainable and enable_gradient_checkpointing_type:
             transformer = apply_activation_checkpointing(
                 transformer,
-                checkpointing_type=ckpt_type,
+                checkpointing_type=enable_gradient_checkpointing_type,
             )
         if self._enable_lora_if_configured(transformer):
             return transformer
