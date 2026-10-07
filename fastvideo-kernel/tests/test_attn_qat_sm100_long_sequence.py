@@ -78,6 +78,9 @@ def _assert_bitwise_matches_legacy_route(monkeypatch, batch, heads, qlen, kvlen)
     (1, 1, 16384, 16384), (1, 1, 16400, 16400), (1, 6, 31200, 31200), (1, 1, 31232, 31232),
     (1, 1, 2112, 2112), (1, 1, 2112, 2080), (1, 1, 16384, 16400),
     (2, 3, 16384, 16384), (2, 3, 16400, 16400),
+    # Non-16-multiple lengths: the forward tail tile crosses a 16-column
+    # quant group (tail 17 and tail 127 over the 128-wide KV tile).
+    (1, 1, 16401, 16401), (1, 1, 16511, 16511),
 ])
 def test_long_sequence_route_bitwise_output_statistics_and_gradients(monkeypatch, batch, heads, qlen, kvlen):
     _assert_bitwise_matches_legacy_route(monkeypatch, batch, heads, qlen, kvlen)

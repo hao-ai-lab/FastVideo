@@ -422,6 +422,9 @@ def _attn_fwd(
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
     if STAGE & 1:
         if SM100_SPLIT_FULL_TILES:
+            # The unmasked full-KV loop covers the whole KV range, so it is only
+            # valid on the non-causal single-stage path (STAGE == 1).
+            tl.static_assert(STAGE == 1)
             acc, high_prec_acc, l_i, m_i = _sm100_qat_fwd_inner(
                 acc, high_prec_acc, l_i, m_i, q, desc_k, desc_v, offset_y_kv, offs_n, qk_scale,
                 N_CTX_KV, BLOCK_M, BLOCK_N)
