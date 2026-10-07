@@ -21,7 +21,9 @@ dependencies = [
     "requests>=2.32.2",
 
     # Machine Learning & Transformers
-    # Floor bumped from >=4.57.3 to >=5.0.0 (stable, not rc).
+    # Floor bumped from >=4.57.3 to >=5.0.0 (stable, not rc) for GLM-Image (#1030).
+    # GLM-Image was removed in #1926, but nothing merged since has been tested
+    # against transformers 4.x, so keep the floor until that is verified.
     "transformers>=5.0.0",
     "tokenizers>=0.20.1",
     "sentencepiece>=0.2.0",

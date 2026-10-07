@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
@@ -289,16 +290,22 @@ def _select_output_coverage(plan: MergePlan, path: str) -> None:
         plan.add_ssim(SSIM_SMOKE_TESTS, reason=f"shared output SSIM smoke coverage: {path}")
 
 
-def classify_paths(paths: list[str]) -> MergePlan:
+def _normalize_path(raw_path: str) -> str:
+    path = raw_path.strip()
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
+def classify_paths(paths: list[str], removed_paths: Iterable[str] = ()) -> MergePlan:
+    """Plan merge lanes for ``paths``.
+
+    ``removed_paths`` lists changed paths that no longer exist at the PR head
+    (deleted files and rename sources); removed golden/SSIM tests are not run.
+    """
     plan = MergePlan()
-    normalized_paths: list[str] = []
-    for raw_path in paths:
-        path = raw_path.strip()
-        while path.startswith("./"):
-            path = path[2:]
-        if path:
-            normalized_paths.append(path)
-    normalized_paths = sorted(set(normalized_paths))
+    normalized_paths = sorted({path for path in map(_normalize_path, paths) if path})
+    removed = {path for path in map(_normalize_path, removed_paths) if path}
     if not normalized_paths:
         plan.require_all("changed-file list was empty; failing closed")
         return plan
@@ -338,7 +345,10 @@ def classify_paths(paths: list[str]) -> MergePlan:
         if path.startswith("fastvideo/tests/golden_gate/"):
             name = Path(path).name
             if name.startswith("test_") and name.endswith(".py"):
-                plan.add_golden((name, ), reason=f"changed golden test: {path}")
+                if path in removed:
+                    plan.reasons.append(f"removed golden test has nothing to run: {path}")
+                else:
+                    plan.add_golden((name, ), reason=f"changed golden test: {path}")
             elif name in {"AGENTS.md", "README.md"}:
                 plan.reasons.append(f"golden documentation only: {path}")
             else:
@@ -349,7 +359,10 @@ def classify_paths(paths: list[str]) -> MergePlan:
         if path.startswith("fastvideo/tests/ssim/"):
             name = Path(path).name
             if name.startswith("test_") and name.endswith(".py"):
-                plan.add_ssim((name, ), reason=f"changed SSIM test: {path}")
+                if path in removed:
+                    plan.reasons.append(f"removed SSIM test has nothing to run: {path}")
+                else:
+                    plan.add_ssim((name, ), reason=f"changed SSIM test: {path}")
             elif path.endswith((".py", ".json", ".pt", ".png", ".mp4")):
                 plan.ssim_all = True
                 plan.add_lanes("ssim", reason=f"shared SSIM harness/reference: {path}")
@@ -525,6 +538,7 @@ def _write_summary(output: TextIO, plan: MergePlan) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paths-file", type=Path, required=True)
+    parser.add_argument("--removed-paths-file", type=Path)
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--summary-file", type=Path)
     return parser.parse_args()
@@ -533,7 +547,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     paths = args.paths_file.read_text(encoding="utf-8").splitlines()
-    plan = classify_paths(paths)
+    removed_paths = (args.removed_paths_file.read_text(encoding="utf-8").splitlines()
+                     if args.removed_paths_file else [])
+    plan = classify_paths(paths, removed_paths)
     print(f"MERGE_TEST_PLAN={plan.encoded_lanes()}")
     print(f"MERGE_GOLDEN_TESTS={plan.encoded_golden_tests()}")
     print(f"MERGE_SSIM_TESTS={plan.encoded_ssim_tests()}")

@@ -21,7 +21,6 @@ models/
 ├── schedulers/                 # FlowMatch / EulerDiscrete / DPM custom schedulers
 ├── upsamplers/                 # Hunyuan15 super-resolution
 ├── audio/                      # Audio-VAE/decoder modules (LTX-2 audio, Stable Audio)
-├── camera/                     # Camera-conditioning modules (Gen3C)
 └── loader/                     # component_loader.py, fsdp_load.py, weight_utils.py
 ```
 

@@ -404,6 +404,22 @@ class TestHunyuanPresets:
         p = get_preset("fast_hunyuan_t2v", "hunyuan")
         assert p.defaults["num_inference_steps"] == 6
 
+    def test_removed_gamecraft_checkpoint_is_not_detected_as_hunyuan(self, tmp_path) -> None:
+        from fastvideo.registry import get_model_family
+
+        def make_checkpoint(name: str, class_name: str) -> str:
+            model_dir = tmp_path / name
+            model_dir.mkdir()
+            (model_dir / "model_index.json").write_text(
+                json.dumps({
+                    "_class_name": class_name,
+                    "_diffusers_version": "0.33.1"
+                }))
+            return str(model_dir)
+
+        assert get_model_family(make_checkpoint("HunyuanVideo-Custom", "HunyuanVideoPipeline")) == "hunyuan"
+        assert get_model_family(make_checkpoint("Hunyuan-GameCraft-Diffusers", "HunyuanGameCraftPipeline")) is None
+
 
 # -------------------------------------------------------------------
 # Hunyuan15 preset integration (includes two-stage SR)

@@ -62,10 +62,6 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
-# Text-to-image DiT models (2D image generation)
-_TEXT_TO_IMAGE_DIT_MODELS = {
-}
-
 _TEXT_ENCODER_MODELS = {
     "MMAudioDFNCLIPTextEncoder": ("encoders", "mmaudio_clip", "MMAudioDFNCLIPTextEncoder"),
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
@@ -104,7 +100,6 @@ _VAE_MODELS = {
     "LingBotWorld2WanVAE": ("vaes", "lingbotworld2_wanvae", "LingBotWorld2WanVAE"),
     "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
     "AutoencoderKLGen3CTokenizer": ("vaes", "gen3c_tokenizer_vae", "AutoencoderKLGen3CTokenizer"),
-    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
     "AutoencoderKLFlux2": ("vaes", "flux2vae", "AutoencoderKLFlux2"),
     # `stable-audio-open-1.0/vae/config.json` ships `_class_name="AutoencoderOobleck"`
@@ -139,7 +134,6 @@ _UPSAMPLERS = {
 _LEGACY_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
-    **_TEXT_TO_IMAGE_DIT_MODELS,
     **_TEXT_ENCODER_MODELS,
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,

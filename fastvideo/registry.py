@@ -464,7 +464,7 @@ def _register_configs() -> None:
         default_preset="hunyuan15_sr_1080p",
     )
 
-    # Hunyuan (excludes hyworld and versioned models)
+    # Hunyuan (excludes hyworld, versioned models, and removed GameCraft checkpoints)
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=HunyuanConfig,
@@ -473,8 +473,8 @@ def _register_configs() -> None:
             "hunyuanvideo-community/HunyuanVideo",
         ],
         model_detectors=[
-            lambda path: "hunyuan" in path.lower() and "hyworld" not in path.lower() and "1.5" not in path.lower() and
-            "1-5" not in path.lower()
+            lambda path: "hunyuan" in path.lower() and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
+            ) and "1.5" not in path.lower() and "1-5" not in path.lower()
         ],
         model_family="hunyuan",
         default_preset="hunyuan_t2v",

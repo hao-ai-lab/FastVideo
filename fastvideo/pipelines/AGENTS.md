@@ -23,8 +23,8 @@ pipelines/
 │   ├── gen3c_stages.py         #   Gen3C-specific stages
 │   └── matrixgame2_denoising.py #  Matrix-Game 2.0-specific
 ├── basic/                      # Per-model end-to-end pipelines
-│   ├── cosmos/, flux/, flux_2/, gen3c/
-│   ├── hunyuan/, hunyuan15/, hyworld/, kandinsky5/, lingbot_video/, lingbotworld/
+│   ├── cosmos/, flux/, flux_2/, gen3c/, hunyuan/, hunyuan15/, hyworld/
+│   ├── kandinsky5/, kandinsky6/, kandinsky6_sr/, lingbot_video/, lingbotworld/
 │   ├── lingbotworld2/, ltx2/, magi_human/, matrixgame2/, matrixgame3/
 │   ├── minimax_h3/, mmaudio/, sd35/, stable_audio/, wan/
 │   └── <model>/{<model>_pipeline.py, presets.py, __init__.py}

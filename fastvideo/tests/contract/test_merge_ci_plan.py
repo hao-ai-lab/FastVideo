@@ -111,6 +111,28 @@ def test_changed_ssim_test_selects_only_that_file():
     assert plan.encoded_ssim_tests() == "test_flux_t2i_similarity.py"
 
 
+def test_removed_golden_and_ssim_tests_are_not_selected():
+    removed = [
+        "fastvideo/tests/golden_gate/test_longcat.py",
+        "fastvideo/tests/ssim/test_longcat_similarity.py",
+    ]
+    plan = PLAN_MERGE_CI.classify_paths(removed, removed_paths=removed)
+
+    assert plan.encoded_lanes() == ",none,"
+    assert plan.encoded_golden_tests() == "none"
+    assert plan.encoded_ssim_tests() == "none"
+
+
+def test_renamed_golden_test_selects_only_the_new_name():
+    plan = PLAN_MERGE_CI.classify_paths(
+        ["fastvideo/tests/golden_gate/test_old_name.py", "fastvideo/tests/golden_gate/test_new_name.py"],
+        removed_paths=["fastvideo/tests/golden_gate/test_old_name.py"],
+    )
+
+    assert plan.encoded_lanes() == ",golden-gate,"
+    assert plan.encoded_golden_tests() == "test_new_name.py"
+
+
 def test_shared_golden_harness_or_reference_requires_full_golden_lane():
     plan = PLAN_MERGE_CI.classify_paths(["fastvideo/tests/golden_gate/_harness.py"])
 

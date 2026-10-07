@@ -76,6 +76,8 @@ jobs:
           set -euo pipefail
           changed_json="$RUNNER_TEMP/merge-changed-files.json"
           changed_paths="$RUNNER_TEMP/merge-changed-paths.txt"
+          removed_paths="$RUNNER_TEMP/merge-removed-paths.txt"
+          : > "$removed_paths"
           if gh api --paginate --slurp \
               "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
               > "$changed_json"; then
@@ -83,6 +85,10 @@ jobs:
             if [ "$observed" = "$EXPECTED_CHANGED_FILES" ]; then
               jq -r '.[][] | .filename, (.previous_filename // empty)' "$changed_json" \
                 | sort -u > "$changed_paths"
+              # Paths absent from the PR head, so the planner never selects a deleted test.
+              jq -r '.[][] | if .status == "removed" then .filename
+                  elif .status == "renamed" then (.previous_filename // empty) else empty end' \
+                "$changed_json" | sort -u > "$removed_paths"
             else
               echo "::warning::Changed-file API returned $observed of $EXPECTED_CHANGED_FILES paths; selecting all merge lanes."
               echo '__FASTVIDEO_CI_PLAN_ALL__' > "$changed_paths"
@@ -98,6 +104,7 @@ jobs:
         run: |
           python3 .github/scripts/plan_merge_ci.py \
             --paths-file "$RUNNER_TEMP/merge-changed-paths.txt" \
+            --removed-paths-file "$RUNNER_TEMP/merge-removed-paths.txt" \
             --github-output "$GITHUB_OUTPUT" \
             --summary-file "$GITHUB_STEP_SUMMARY"
 
