@@ -804,8 +804,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             raise ValueError("Choose conditioning assets when starting a project; legacy initial_image "
                                              "cannot replace generation mode inputs.")
                         if "generation_mode" in data or "conditioning_assets" in data:
-                            raise ValueError(
-                                "simple_generate cannot change the mode; use project_init_v1.")
+                            raise ValueError("simple_generate cannot change the mode; use project_init_v1.")
                         replace_session_image(data.get("initial_image"))
                     except ValueError as exc:
                         await ws_send_json({

@@ -204,7 +204,6 @@ BATCH_SIZE = 3
 # - av_fmp4: send muxed fMP4 binary chunks over WebSocket
 STREAM_MODE = os.getenv("STREAM_MODE", "av_fmp4").strip().lower()
 
-
 DEVTOOLS_ENABLED = _env_bool("FASTVIDEO_ENABLE_DEVTOOLS", False)
 PROMPT_SAFETY_ENABLED = _env_bool("FASTVIDEO_ENABLE_PROMPT_SAFETY", False)
 DREAMVERSE_MAX_AUTOTUNE = _env_bool("DREAMVERSE_MAX_AUTOTUNE", True)
