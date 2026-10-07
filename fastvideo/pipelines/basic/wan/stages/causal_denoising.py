@@ -269,6 +269,9 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                 video_raw_latent_shape = noise_latents_btchw.shape
 
                 for i, t_cur in enumerate(timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     if boundary_timestep is not None and t_cur < boundary_timestep:
                         current_model = self.transformer_2
                     else:
@@ -499,6 +502,9 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                 timesteps = self.scheduler.timesteps
 
                 for i, t_cur in enumerate(timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     latent_model_input = current_latents.to(target_dtype)
                     t_expanded = t_cur * torch.ones(
                         (b, 1),

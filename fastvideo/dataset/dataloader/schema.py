@@ -79,6 +79,17 @@ pyarrow_schema_t2v = pa.schema([
     pa.field("fps", pa.float64()),
 ])
 
+# HunyuanVideo 1.5 conditions on two text streams (Qwen2.5-VL plus a ByT5 glyph
+# stream), so its rows carry a second text-embedding triplet. The paired
+# text_attention_mask_2 is synthesised by collate_rows_from_parquet_schema from
+# the padding, exactly as text_attention_mask is for the primary stream.
+pyarrow_schema_t2v_dual_text = pa.schema(
+    list(pyarrow_schema_t2v) + [
+        pa.field("text_embedding_2_bytes", pa.binary()),
+        pa.field("text_embedding_2_shape", pa.list_(pa.int64())),
+        pa.field("text_embedding_2_dtype", pa.string()),
+    ])
+
 # One text-to-video-and-audio (T2VA) row owns synchronized video, audio, and text tensors so
 # collate_rows_from_parquet_schema cannot pair targets from different samples.
 # Each tensor uses the bytes/shape/dtype triplet that the collator discovers.
