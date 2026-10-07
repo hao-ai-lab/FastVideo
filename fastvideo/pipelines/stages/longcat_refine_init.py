@@ -116,9 +116,14 @@ class LongCatRefineInitStage(PipelineStage):
         bsa_latent_granularity = 4
         scale_factor_spatial = vae_scale_factor_spatial * patch_size_spatial * bsa_latent_granularity  # 64
 
-        # Refinement SP restores global time/height/width order before BSA, so its
-        # chunks need only align to the global grid. Keep bucket selection
-        # independent of GPU count; changing SP must not change the video size.
+        # Refinement SP restores global time/height/width order before BSA, so a
+        # shard's chunks line up with the global grid. The token grid must still be
+        # divisible by the BSA chunk_3d_shape (flash_attn_bsa_3d asserts this) and by
+        # the SP split factors (LongCatSPLayout raises otherwise). The F64 buckets
+        # below satisfy that for the documented chunk [4,4,4] at sp_size<=16, but
+        # coarser bsa_chunk_q/k (e.g. wq=8, which needs width%128==0) or sp_size=32
+        # reject some buckets. Keep bucket selection independent of GPU count so
+        # changing SP does not change the video size.
 
         # Get bucket config and find closest bucket for the input aspect ratio
         bucket_config = get_bucket_config('720p', scale_factor_spatial)

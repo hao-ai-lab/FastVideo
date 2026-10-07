@@ -1110,6 +1110,10 @@ class LongCatTransformer3DModel(BaseDiT):
         sp_layout = None
         # Apply the new spatial sharding only to BSA refinement inference.
         # Other modes retain their existing full-sequence execution paths.
+        # NOTE: `not torch.is_grad_enabled()` infers inference from ambient grad mode
+        # (ComposedPipelineBase.forward is @torch.no_grad()). A caller driving this
+        # forward with grad enabled silently takes the full-sequence path (correct
+        # output, no SP speedup) instead of erroring.
         if (sp_size > 1 and not torch.is_grad_enabled() and not num_cond_latents
                 and not return_kv and not kv_cache_dict and N_t > 1
                 and all(block.self_attn.enable_bsa for block in self.blocks)):
