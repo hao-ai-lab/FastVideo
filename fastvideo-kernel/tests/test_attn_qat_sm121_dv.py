@@ -58,6 +58,13 @@ def forward_and_grads(source, do):
     return out.detach(), dq, dk, ste, m, dv
 
 
+@pytest.fixture(params=["save", "recompute"])
+def stats_mode(request, monkeypatch):
+    monkeypatch.setenv("FASTVIDEO_ATTN_QAT_SM121_FWD_DV", "1")
+    monkeypatch.setenv("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", request.param)
+    return request.param
+
+
 def assert_bitwise_equal(expected, actual, names=TENSOR_NAMES):
     for name, old, new in zip(names, expected, actual):
         assert torch.equal(old.view(torch.uint8), new.view(torch.uint8)), name
@@ -65,7 +72,7 @@ def assert_bitwise_equal(expected, actual, names=TENSOR_NAMES):
 
 @pytest.mark.parametrize("nq,nk", [(64, 64), (128, 128), (170, 170), (171, 171), (2048, 2048),
                                        (31200, 31200), (257, 241), (2113, 2081)])
-def test_uniform_dv_uses_forward_quantized_probability(nq, nk):
+def test_uniform_dv_uses_forward_quantized_probability(stats_mode, nq, nk):
     q = torch.zeros((1, 1, nq, 128), device="cuda", dtype=torch.bfloat16, requires_grad=True)
     k = torch.zeros((1, 1, nk, 128), device="cuda", dtype=torch.bfloat16, requires_grad=True)
     v = torch.ones_like(k, requires_grad=True)
@@ -81,7 +88,7 @@ def test_uniform_dv_uses_forward_quantized_probability(nq, nk):
 @pytest.mark.parametrize("nq,nk,seed", [(128, 128, 0), (128, 128, 11), (128, 128, 42),
                                            (257, 257, 0), (257, 241, 11), (257, 241, 42),
                                            (2113, 2081, 0)])
-def test_dv_matches_independent_forward_weight_ste(nq, nk, seed):
+def test_dv_matches_independent_forward_weight_ste(stats_mode, nq, nk, seed):
     torch.manual_seed(seed)
     q = torch.randn((1, 3, nq, 128), device="cuda", dtype=torch.bfloat16, requires_grad=True)
     k = torch.randn((1, 3, nk, 128), device="cuda", dtype=torch.bfloat16, requires_grad=True)
