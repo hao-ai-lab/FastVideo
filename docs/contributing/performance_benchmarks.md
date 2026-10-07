@@ -125,7 +125,8 @@ fastvideo/tests/performance/
     │       └── builds time-series Plotly HTML from HF history
 
 tests/local_tests/performance/
-    └── local-only behavior tests for config, policy, identity, and dashboards
+    └── local-only behavior tests for config, policy, identity, dashboards,
+        and worker-log capture
 
 fastvideo/performance/
     ├── hf_store.py               # shared HF I/O + DataFrame helpers

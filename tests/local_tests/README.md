@@ -40,7 +40,7 @@ Wan2.2 I2V record-schema checks live in the
 
 | Suite | Purpose | Dir |
 |---|---|---|
-| Performance CI behavior | Config, comparison policy, identity, result schema, and dashboard checks | [`performance/`](./performance/) |
+| Performance CI behavior | Config, comparison policy, identity, result schema, dashboard, and worker-log capture checks | [`performance/`](./performance/) |
 
 ## Running a family
 
