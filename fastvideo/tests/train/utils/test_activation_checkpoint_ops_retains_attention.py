@@ -313,6 +313,18 @@ def _checkpointing_type_of(transformer: nn.Module) -> str | None:
     return "ops" if context_fn is activation_checkpoint._selective_checkpointing_context_fn else "full"
 
 
+def _load_toy_transformer(**kwargs) -> nn.Module:
+    """Stand in for load_module_from_path, honoring its pre_fsdp_transform.
+
+    Wan hands activation checkpointing to the loader, which wraps the blocks
+    before FSDP. Kandinsky5 and MiniMax-H3 pass no transform and wrap the
+    returned module themselves.
+    """
+    transformer = _ToyTransformer()
+    pre_fsdp_transform = kwargs.get("pre_fsdp_transform")
+    return transformer if pre_fsdp_transform is None else pre_fsdp_transform(transformer)
+
+
 @pytest.mark.parametrize(
     ("role_checkpointing_type", "fallback_checkpointing_type", "trainable", "expected_type"),
     [
@@ -334,7 +346,7 @@ def test_wan_causal_checkpoint_safe_cache_follows_applied_checkpointing(
 
     training_config = TrainingConfig()
     training_config.model.enable_gradient_checkpointing_type = fallback_checkpointing_type
-    monkeypatch.setattr("fastvideo.train.models.wan.wan.load_module_from_path", lambda **kwargs: _ToyTransformer())
+    monkeypatch.setattr("fastvideo.train.models.wan.wan.load_module_from_path", _load_toy_transformer)
 
     model = WanCausalModel(
         init_from="unused-by-test",
@@ -414,7 +426,7 @@ def test_model_plugins_wrap_with_role_or_run_wide_checkpointing_type(
     training_config.model.enable_gradient_checkpointing_type = fallback_checkpointing_type
     if configure is not None:
         training_config = configure(training_config)
-    monkeypatch.setattr(model_module, "load_module_from_path", lambda **kwargs: _ToyTransformer())
+    monkeypatch.setattr(model_module, "load_module_from_path", _load_toy_transformer)
 
     model = getattr(model_module, class_name)(
         init_from="unused-by-test",

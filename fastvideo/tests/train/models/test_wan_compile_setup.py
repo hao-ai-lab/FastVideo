@@ -31,11 +31,13 @@ def test_wan_passes_activation_checkpointing_to_pre_fsdp_load(monkeypatch) -> No
     monkeypatch.setattr(WanModel, "_enable_lora_if_configured", lambda self, module: False)
 
     model = WanModel.__new__(WanModel)
+    # WanModel.__init__ resolves the role type against training.model and
+    # passes the result; _load_transformer does not fall back on its own.
     result = model._load_transformer(
         init_from="fake/model",
         trainable=True,
         disable_custom_init_weights=False,
-        enable_gradient_checkpointing_type=None,
+        enable_gradient_checkpointing_type="full",
         training_config=training_config,
     )
 
@@ -66,7 +68,7 @@ def test_wan_skips_activation_checkpointing_for_frozen_role(monkeypatch) -> None
         init_from="fake/model",
         trainable=False,
         disable_custom_init_weights=True,
-        enable_gradient_checkpointing_type=None,
+        enable_gradient_checkpointing_type="full",
         training_config=training_config,
     )
 
