@@ -71,9 +71,10 @@ class TestGradNormClipCallback:
         method = _Method(targets={"m": m})
         cb.on_before_optimizer_step(method=method, iteration=0)
 
-        # No clipping applied; ``get_grad_clip_targets`` not consulted.
+        # No clipping applied, but ``get_grad_clip_targets`` is consulted so
+        # replicated LoRA gradients are synchronized even when clipping is off.
         assert _grad_norm(m) == before
-        assert method.iter_seen is None
+        assert method.iter_seen == 0
 
     def test_large_grads_get_clipped(self) -> None:
         m = _make_module(grad_value=10.0)
