@@ -71,7 +71,7 @@ def _has_complete_v2_identity(record: object) -> bool:
 
 
 def _uses_v2_identity(record: object) -> bool:
-    return _cohort_value(record.get("result_schema_version")) == "2" or any(
+    return _cohort_value(record.get("result_schema_version")) in ("2", "2.0") or any(
         key in record for key in COMPARISON_COHORT_KEYS)
 
 
@@ -84,7 +84,7 @@ def _dataframe_value_is_missing(value: object) -> bool:
 
 def _dataframe_uses_v2_identity(record: object) -> bool:
     schema_version = record.get("result_schema_version")
-    if schema_version == 2 or schema_version == "2":
+    if schema_version == 2 or str(schema_version) in ("2", "2.0"):
         return True
     return any(key in record and not _dataframe_value_is_missing(record.get(key))
                for key in COMPARISON_COHORT_KEYS)
