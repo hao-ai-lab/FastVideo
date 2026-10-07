@@ -10,7 +10,7 @@ The weight-loading tests at the bottom need the real checkpoint and are gated
 the same way ``test_flux.py`` gates its parity test, so they skip locally and
 run in CI. Point them at a checkout with::
 
-    export WAN_S2V_MODEL_PATH=/path/to/Wan2.2-S2V-14B
+    export FASTVIDEO_TEST_WAN_S2V_MODEL_PATH=/path/to/Wan2.2-S2V-14B
 """
 import glob
 import os
@@ -19,11 +19,13 @@ import re
 import pytest
 import torch
 
+import fastvideo.envs as envs
+
 # The distributed_setup fixture rendezvouses via env:// even for a single
 # GPU; without these the CUDA forward-pass test errors before it starts.
 # Same convention as test_flux.py (port distinct per file to avoid clashes).
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29519")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29519")
 
 from fastvideo.configs.models.dits.wan_s2v import WanS2VArchConfig, WanS2VConfig
 from fastvideo.models.dits.wan_s2v import WanS2VTransformer3DModel
@@ -34,7 +36,7 @@ _DEFAULT_S2V_PATH = os.path.join(_REPO_ROOT, "official_weights", "Wan2.2-S2V-14B
 
 
 def _s2v_model_path() -> str:
-    return os.environ.get("WAN_S2V_MODEL_PATH", _DEFAULT_S2V_PATH)
+    return envs.FASTVIDEO_TEST_WAN_S2V_MODEL_PATH.get() or _DEFAULT_S2V_PATH
 
 
 requires_cuda = pytest.mark.skipif(not torch.cuda.is_available(),
@@ -43,7 +45,7 @@ requires_cuda = pytest.mark.skipif(not torch.cuda.is_available(),
 requires_weights = pytest.mark.skipif(
     not glob.glob(os.path.join(_s2v_model_path(), "*.safetensors")),
     reason=(f"No safetensors under {_s2v_model_path()} -- download Wan-AI/Wan2.2-S2V-14B "
-            "or set WAN_S2V_MODEL_PATH"))
+            "or set FASTVIDEO_TEST_WAN_S2V_MODEL_PATH"))
 
 
 def test_arch_config_matches_official_checkpoint_config() -> None:
