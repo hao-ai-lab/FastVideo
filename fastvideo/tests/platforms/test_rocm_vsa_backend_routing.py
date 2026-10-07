@@ -53,7 +53,10 @@ def test_rocm_routes_video_sparse_attention(kernel_stubs):
 
 
 def test_rocm_routes_h3_video_sparse_attention(kernel_stubs):
-    cls_str = RocmPlatform.get_attn_backend_cls(AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3, 128, torch.bfloat16)
+    # kernel_switches() unsets FASTVIDEO_VSA_CUTEDSL, so an ambient
+    # FASTVIDEO_VSA_CUTEDSL=1 cannot turn this happy path into the ValueError.
+    with kernel_switches():
+        cls_str = RocmPlatform.get_attn_backend_cls(AttentionBackendEnum.VIDEO_SPARSE_ATTN_H3, 128, torch.bfloat16)
     assert cls_str == H3_BACKEND
 
 
