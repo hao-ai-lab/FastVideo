@@ -41,7 +41,7 @@ _MODE_FROM_DIMS = {(2, 1): 0, (1, 2): 1}
 
 def is_enabled() -> bool:
     """Whether the fused path is opted in via FASTVIDEO_ULYSSES_A2A."""
-    return envs.FASTVIDEO_ULYSSES_A2A == "auto"
+    return envs.FASTVIDEO_ULYSSES_A2A.get() == "auto"
 
 
 class _FusedUlyssesA2A(torch.autograd.Function):
@@ -225,7 +225,7 @@ class UlyssesA2AHelper:
         window_bytes = nbytes // shape[0] if chunked else nbytes
         if (status == 1 and chunked and torch.is_grad_enabled() and x.requires_grad
                 and window_bytes > H3_TRAINING_PLANE_LIMIT_BYTES):
-            policy = getattr(envs, "FASTVIDEO_ULYSSES_A2A_LONG_TRAINING", "auto")
+            policy = envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING.get()
             if policy == "auto":
                 # Preserve the complete original long-training path, including
                 # its gather launch. Faster gathers alone did not avoid the

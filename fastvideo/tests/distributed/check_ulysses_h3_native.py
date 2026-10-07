@@ -23,12 +23,17 @@ def _check_native_shape(helper, batch, local_sequence, dtype, device, expected_p
 
 
 def main():
+    # A caller may run this from a shell configured for long training.
+    with envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING.override('auto'):
+        _run()
+
+
+def _run():
     rank = int(os.environ['RANK'])
     assert int(os.environ['WORLD_SIZE']) == 4
     torch.cuda.set_device(int(os.environ['LOCAL_RANK']))
     device = torch.device('cuda', int(os.environ['LOCAL_RANK']))
     torch.manual_seed(20260906 + rank)
-    envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = 'auto'
     maybe_init_distributed_environment_and_model_parallel(1, 4)
     comm = get_sp_group().device_communicator
     helper = comm.ulysses_a2a
@@ -42,10 +47,9 @@ def main():
         _check_native_shape(helper, 4, sequence // 4, torch.bfloat16, device,
                             [(mode, True, 144) for mode in modes])
         assert helper._nbytes <= 1024**3
-    envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = 'chunked'
-    _check_native_shape(helper, 4, 250000 // 4, torch.bfloat16, device,
-                        [(mode, True, 144) for mode in [0, 1, 0, 1, 1, 0]])
-    envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = 'auto'
+    with envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING.override('chunked'):
+        _check_native_shape(helper, 4, 250000 // 4, torch.bfloat16, device,
+                            [(mode, True, 144) for mode in [0, 1, 0, 1, 1, 0]])
     x = torch.randn(3, 8000, 56, 128, dtype=torch.bfloat16, device=device, requires_grad=True)
     first = comm.all_to_all_4D(x, 2, 1)
     saved = first.detach().clone()

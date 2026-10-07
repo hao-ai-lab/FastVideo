@@ -6,13 +6,14 @@ from unittest.mock import Mock, patch
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed.device_communicators import ulysses_a2a as ulysses
 
 
 @pytest.fixture(autouse=True)
-def _default_long_training_policy(monkeypatch):
+def _default_long_training_policy(env_overrides):
     # A caller may run these tests from a shell configured for long training.
-    monkeypatch.setattr(ulysses.envs, 'FASTVIDEO_ULYSSES_A2A_LONG_TRAINING', 'auto')
+    env_overrides.enter_context(envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING.override('auto'))
 
 
 def _helper():
@@ -52,7 +53,7 @@ def test_long_training_chunk_opt_in_keeps_a_bounded_window():
     x = _operand(4, 250000, 0, True)
     with patch.object(helper, '_execution_plan', return_value=(True, 144)), \
             patch.object(ulysses, 'is_enabled', return_value=True), \
-            patch.object(ulysses.envs, 'FASTVIDEO_ULYSSES_A2A_LONG_TRAINING', 'chunked', create=True), \
+            envs.FASTVIDEO_ULYSSES_A2A_LONG_TRAINING.override('chunked'), \
             patch('torch.cuda.is_current_stream_capturing', return_value=False), torch.enable_grad():
         signature, _ = helper._call_signature(x, 2, 1)
     assert signature[0] == 1

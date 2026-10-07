@@ -7,9 +7,12 @@ therefore poisons the graph, and the failure only appears once the VSA-256
 CuTe path has a backward at all. These tests pin the composition.
 """
 
+import contextlib
+
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn_h3 import (MiniMaxH3VSAImpl, MiniMaxH3VSAMetadataBuilder)
 
 _SPEC = dict(raw_latent_shape=(16, 16, 24), patch_size=(1, 2, 2), prefix_segments=(64, 32, 16))
@@ -20,26 +23,25 @@ _DIM = 128
 def _build_meta(device, sparsity=0.5):
     return MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
-        raw_latent_shape=_SPEC["raw_latent_shape"],
         patch_size=_SPEC["patch_size"],
         VSA_sparsity=sparsity,
-        prefix_segments=_SPEC["prefix_segments"],
+        packed_segments=(*_SPEC["prefix_segments"], _SPEC["raw_latent_shape"]),
         device=device,
     )
 
 
-def _select_backend(monkeypatch, backend):
+def _select_backend(env_overrides, backend):
     if backend == "cute":
         pytest.importorskip(
             "flash_attn.cute.block_sparsity",
             reason="optional FA4 CuTe build (flash_attn.cute) not installed",
         )
-        monkeypatch.setenv("FASTVIDEO_VSA_CUTEDSL", "1")
-        monkeypatch.delenv("FASTVIDEO_VSA_TRITON", raising=False)
-        monkeypatch.delenv("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", raising=False)
+        env_overrides.enter_context(envs.override_external("FASTVIDEO_VSA_CUTEDSL", "1"))
+        env_overrides.enter_context(envs.override_external("FASTVIDEO_VSA_TRITON", None))
+        env_overrides.enter_context(envs.override_external("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", None))
     else:
-        monkeypatch.setenv("FASTVIDEO_VSA_TRITON", "1")
-        monkeypatch.delenv("FASTVIDEO_VSA_CUTEDSL", raising=False)
+        env_overrides.enter_context(envs.override_external("FASTVIDEO_VSA_TRITON", "1"))
+        env_overrides.enter_context(envs.override_external("FASTVIDEO_VSA_CUTEDSL", None))
 
 
 def _forward_backward(impl, meta, gate_compress, device):
@@ -61,14 +63,14 @@ def _forward_backward(impl, meta, gate_compress, device):
 
 @pytest.mark.parametrize("backend", ["triton", "cute"])
 @pytest.mark.parametrize("gate_compress", [False, True])
-def test_h3_vsa_backward_runs(monkeypatch, backend: str, gate_compress: bool) -> None:
+def test_h3_vsa_backward_runs(env_overrides, backend: str, gate_compress: bool) -> None:
     """Regression: with the CuTe backend and a non-zero gate this used to die
     with "one of the variables needed for gradient computation has been
     modified by an inplace operation ... output 0 of FlashAttnFuncBackward".
     """
     if not torch.cuda.is_available():
         pytest.skip("CUDA is required")
-    _select_backend(monkeypatch, backend)
+    _select_backend(env_overrides, backend)
 
     device = torch.device("cuda")
     meta = _build_meta(device)
@@ -84,7 +86,7 @@ def test_h3_vsa_backward_runs(monkeypatch, backend: str, gate_compress: bool) ->
 
 
 @pytest.mark.parametrize("gate_compress", [False, True])
-def test_h3_vsa_backward_cute_matches_triton(monkeypatch, gate_compress: bool) -> None:
+def test_h3_vsa_backward_cute_matches_triton(gate_compress: bool) -> None:
     """CuTe and Triton take different routes to the same math; their gradients
     should agree to bf16 tolerance."""
     if not torch.cuda.is_available():
@@ -95,8 +97,8 @@ def test_h3_vsa_backward_cute_matches_triton(monkeypatch, gate_compress: bool) -
 
     grads = {}
     for backend in ("triton", "cute"):
-        with monkeypatch.context() as m:
-            _select_backend(m, backend)
+        with contextlib.ExitStack() as backend_env:
+            _select_backend(backend_env, backend)
             meta = _build_meta(device)
             _, leaves = _forward_backward(impl, meta, gate_compress, device)
             grads[backend] = [leaf.grad.detach().float() for leaf in leaves]

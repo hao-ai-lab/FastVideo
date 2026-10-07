@@ -66,14 +66,18 @@ Local guidance lives next to the code. Read the in-scope file before editing:
 | `fastvideo/AGENTS.md` | Core package map, public API, registry-driven model dispatch |
 | `fastvideo/configs/AGENTS.md` | Arch + pipeline config dataclasses, `param_names_mapping` |
 | `fastvideo/models/AGENTS.md` | DiT / VAE / encoder / scheduler / loader layout (pre-commit excluded) |
+| `fastvideo/models/wan/AGENTS.md` | Wan family-local transformers, VAE, configs, and the SP sharding invariant |
 | `fastvideo/layers/AGENTS.md` | Tensor-parallel linear/attention layer rules for ports |
 | `fastvideo/attention/AGENTS.md` | Backend registry + env-var override |
 | `fastvideo/pipelines/AGENTS.md` | Stage ABC, `basic/<model>/`, `preprocess/`, presets |
+| `fastvideo/pipelines/basic/wan/AGENTS.md` | Wan sampling stages, first-frame conditioning, DMD/causal boundaries |
+| `fastvideo/pipelines/basic/magi_human/AGENTS.md` | MagiHuman umbrella repo, lazy-loaded components, packing invariants |
 | `fastvideo/training/AGENTS.md` | Legacy monolithic pipelines (frozen for existing models) |
 | `fastvideo/train/AGENTS.md` | New modular trainer (methods × models × callbacks, YAML) |
 | `fastvideo/tests/AGENTS.md` | Test taxonomy, conftest, pre-commit-excluded path |
 | `fastvideo/tests/ssim/AGENTS.md` | GPU SSIM regression authoring + reference video sync |
 | `scripts/checkpoint_conversion/AGENTS.md` | Adding a converter for a new HF/official checkpoint |
+| `apps/dreamverse/AGENTS.md` | DreamVerse app structure and conventions |
 
 ## Critical: Two Training Stacks Coexist
 

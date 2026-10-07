@@ -50,9 +50,9 @@ def worker_main(
     ``VideoGenerator`` construction + generation happens here, not in
     the parent's event loop.
     """
-    import os
+    import fastvideo.envs as envs
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    envs.set_external("CUDA_VISIBLE_DEVICES", str(gpu_id))
     try:
         from fastvideo import VideoGenerator
 
