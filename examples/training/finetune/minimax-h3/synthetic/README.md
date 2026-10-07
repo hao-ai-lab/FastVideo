@@ -19,7 +19,7 @@ array. Every sample has this shape:
   "references": [
     {"type": "image", "image": "reference.png"},
     {"type": "video", "video": "silent-reference.mp4"},
-    {"type": "video_audio", "video": "reference-with-sound.mp4"},
+    {"type": "video_audio", "video": "reference-with-sound.mp4", "audio": "reference-with-sound.mp4"},
     {"type": "audio", "audio": "reference.wav"}
   ]
 }
@@ -27,7 +27,9 @@ array. Every sample has this shape:
 
 Relative media paths resolve from the manifest directory. `video` is always a
 silent visual reference even when its container has an audio stream;
-`video_audio` explicitly uses both streams. A sample supports at most 12 total
+`video_audio` explicitly uses both streams and requires both `video` and
+`audio` fields. When both fields name the same container, its own audio stream
+is used as the soundtrack. A sample supports at most 12 total
 references: 9 images, 3 videos, and 3 standalone audio references. A non-empty
 reference list must include at least one image or video. FL2VA training is not
 part of this workflow.

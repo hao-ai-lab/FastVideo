@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import gc
-import os
 from pathlib import Path
 import socket
 import weakref
@@ -220,14 +219,17 @@ def _assert_matches_rank_zero(value: torch.Tensor) -> None:
 
 
 def _fsdp_worker(rank: int, port: int, checkpoint_path: str) -> None:
-    os.environ.update({
-        "RANK": str(rank),
-        "WORLD_SIZE": "2",
-        "MASTER_ADDR": "127.0.0.1",
-        "MASTER_PORT": str(port),
-        "TORCHDYNAMO_DISABLE": "1",
-    })
-    dist.init_process_group("gloo")
+    # Rendezvous explicitly instead of exporting RANK/WORLD_SIZE/MASTER_*:
+    # fastvideo/tests/contract/test_env_policy.py forbids direct environment
+    # writes anywhere under fastvideo/, and explicit init arguments keep the
+    # worker independent of the ambient environment. (TORCHDYNAMO_DISABLE is
+    # dropped for the same reason; nothing in this worker invokes Dynamo.)
+    dist.init_process_group(
+        "gloo",
+        init_method=f"tcp://127.0.0.1:{port}",
+        rank=rank,
+        world_size=2,
+    )
     try:
         torch.manual_seed(7)
         model = _TinyTransformer()
