@@ -146,10 +146,13 @@ class MultiprocExecutor(Executor):
         distributed_init_method = get_distributed_init_method(get_loopback_ip(), master_port)
         logger.info("Use master port: %s", master_port)
 
-        # Create streaming queues BEFORE spawning workers
         ctx = get_mp_context()
-        self._streaming_input_queue: Queue | None = ctx.Queue()
-        self._streaming_output_queue: Queue | None = ctx.Queue()
+        if self.fastvideo_args.enable_streaming_ipc_queues:
+            self._streaming_input_queue: Queue | None = ctx.Queue()
+            self._streaming_output_queue: Queue | None = ctx.Queue()
+        else:
+            self._streaming_input_queue = None
+            self._streaming_output_queue = None
         self._streaming_enabled = False
 
         unready_workers: list[UnreadyWorkerProcHandle] = []
@@ -235,6 +238,9 @@ class MultiprocExecutor(Executor):
     def enable_streaming(self) -> None:
         if self._streaming_enabled:
             return
+        if self._streaming_input_queue is None or self._streaming_output_queue is None:
+            raise RuntimeError("Streaming IPC queues are not initialized. Set "
+                               "FastVideoArgs.enable_streaming_ipc_queues=True before starting workers.")
 
         self.collective_rpc("start_streaming_queue_loop")
         self._streaming_enabled = True
