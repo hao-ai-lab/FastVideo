@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The livestream app's tests are CPU-only; its single gpu-marked module is
+# deselected, and DreamVerse's GPU tests have their own lane.
 exec pytest \
+  ./apps/infinite_livestream/infinite_livestream/tests \
   ./fastvideo/tests/api/ \
   ./fastvideo/tests/contract/ \
   ./fastvideo/tests/dataset/ \
@@ -27,4 +30,5 @@ exec pytest \
   --ignore=./fastvideo/tests/entrypoints/test_openai_api_integration.py \
   --ignore=./fastvideo/tests/train/models \
   --ignore=./fastvideo/tests/train/methods \
+  -m "not gpu" \
   -vs
