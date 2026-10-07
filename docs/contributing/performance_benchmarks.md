@@ -177,6 +177,11 @@ does not report one of the mapped stages, that component metric is stored as
 There are **two independent regression gates** — they protect against
 different failure modes and are not redundant.
 
+A config can additionally restrict which hardware it runs on via
+`run_config.gpu_types` (substring match against the CUDA device name); a
+non-matching device skips the benchmark entirely. That is a run gate, not a
+regression gate.
+
 ### Static thresholds (per-GPU)
 
 Defined in `.buildkite/performance-benchmarks/tests/<benchmark>.json` under
@@ -299,6 +304,13 @@ added without `config_schema_version: 2`, loading also fails so partial
 migrations do not silently run as v1 configs. Optional v2 `quality_metadata`
 and the v1/v2 `regression_thresholds` policy must be JSON objects when present.
 (`recipe` is emitted by the harness and is not config-declarable.)
+
+`run_config.gpu_types` is an optional list of non-empty strings. Each entry is
+substring-matched against the CUDA device name; if no entry matches, the
+benchmark is skipped on that device, so a hardware-specific config does not run
+on shared lanes. Discovery fails when an entry has no matching `thresholds` key
+or when `thresholds` has no `default` block, which prevents a gated config from
+silently falling back to `default`.
 
 V2 records compare only within their exact identity cohort. A record that opens
 a new cohort is marked `baseline_status: "initialized_new_cohort"` and
@@ -559,7 +571,8 @@ When the rolling-baseline phase runs, it emits:
      "generation_kwargs": { "num_frames": 45, ... },
      "test_prompts": ["..."],
      "run_config": { "required_gpus": 1,
-                     "num_warmup_runs": 1, "num_measurement_runs": 3 },
+                     "num_warmup_runs": 1, "num_measurement_runs": 3,
+                     "gpu_types": ["<device-name-substring>"] },
      "thresholds": {
        "L40S": {
          "max_generation_time_s": 34.0,

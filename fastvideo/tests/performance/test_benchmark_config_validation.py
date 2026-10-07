@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+import os
+
 import pytest
 
 from fastvideo.tests.performance.test_inference_performance import (
@@ -163,8 +166,67 @@ def test_gpu_types_must_be_list_of_nonempty_strings():
             _validate_benchmark_config(cfg, "x.json")
 
     # A valid list, an absent field, and an empty list all pass.
-    _validate_benchmark_config(
-        {"benchmark_id": "x", "run_config": {"gpu_types": ["GB10"]}}, "x.json")
+    cfg = {
+        "benchmark_id": "x",
+        "run_config": {
+            "gpu_types": ["GB10"]
+        },
+        "thresholds": {
+            "GB10": {}, "default": {}
+        },
+    }
+    _validate_benchmark_config(cfg, "x.json")
     _validate_benchmark_config({"benchmark_id": "x"}, "x.json")
     _validate_benchmark_config(
         {"benchmark_id": "x", "run_config": {"gpu_types": []}}, "x.json")
+
+
+def test_gpu_types_require_matching_thresholds_and_default():
+    cfg = {
+        "benchmark_id": "x",
+        "run_config": {
+            "gpu_types": ["GB10"]
+        },
+        "thresholds": {
+            "GB10": {}, "default": {}
+        },
+    }
+    _validate_benchmark_config(cfg, "x.json")
+
+    mismatched = {
+        "benchmark_id": "x",
+        "run_config": {
+            "gpu_types": ["GB10", "DGX"]
+        },
+        "thresholds": {
+            "GB10": {}, "default": {}
+        },
+    }
+    with pytest.raises(ValueError, match="missing thresholds keys: DGX"):
+        _validate_benchmark_config(mismatched, "x.json")
+
+    no_default = {
+        "benchmark_id": "x",
+        "run_config": {
+            "gpu_types": ["GB10"]
+        },
+        "thresholds": {
+            "GB10": {}
+        },
+    }
+    with pytest.raises(ValueError, match="requires a 'default' thresholds block"):
+        _validate_benchmark_config(no_default, "x.json")
+
+
+def test_shipped_gb10_config_gates_and_has_matching_thresholds_key():
+    from fastvideo.tests.performance.test_inference_performance import (
+        _BENCHMARKS_DIR,
+        _gpu_type_skip_reason,
+    )
+
+    path = os.path.join(_BENCHMARKS_DIR, "wan-t2v-1.3b-gb10-1gpu.json")
+    with open(path) as f:
+        cfg = json.load(f)
+
+    assert _gpu_type_skip_reason(cfg, cfg["run_config"], "NVIDIA GB10") is None
+    assert "GB10" in cfg["thresholds"]
