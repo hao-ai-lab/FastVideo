@@ -445,3 +445,26 @@ def test_streaming_generator_enables_queues_only_for_queue_mode(monkeypatch, use
 
     assert seen[0].enable_streaming_ipc_queues is expected
     assert args.enable_streaming_ipc_queues is False  # the caller's args are never mutated
+
+
+def test_streaming_generator_from_fastvideo_args_forwards_log_queue(monkeypatch) -> None:
+    from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
+    from fastvideo.entrypoints.video_generator import VideoGenerator
+    from fastvideo.worker.executor import Executor
+
+    seen: list[tuple[FastVideoArgs, object]] = []
+
+    def fake_init(self, fastvideo_args, executor_class, log_stats, **kwargs):
+        seen.append((fastvideo_args, kwargs.get("log_queue")))
+        self.executor = MultiprocExecutor.__new__(MultiprocExecutor)
+
+    monkeypatch.setattr(VideoGenerator, "__init__", fake_init)
+    monkeypatch.setattr(Executor, "get_class", staticmethod(lambda fastvideo_args: MultiprocExecutor))
+    args = FastVideoArgs(model_path="test/model")
+    sentinel = object()
+
+    StreamingVideoGenerator.from_fastvideo_args(args, log_queue=sentinel)
+
+    assert seen[0][1] is sentinel  # VideoGenerator.from_config's log_queue= call site works again
+    assert seen[0][0] is not args and seen[0][0].enable_streaming_ipc_queues is True
+    assert args.enable_streaming_ipc_queues is False
