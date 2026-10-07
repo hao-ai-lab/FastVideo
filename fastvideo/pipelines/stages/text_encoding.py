@@ -6,6 +6,7 @@ This module contains implementations of prompt encoding stages for diffusion pip
 """
 
 import torch
+from collections.abc import Sequence
 from typing import Any
 
 from torch.distributed.tensor import DTensor
@@ -68,12 +69,13 @@ class TextEncodingStage(PipelineStage):
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
         all_indices: list[int] = list(range(len(self.text_encoders)))
+        max_length = self._resolve_max_length(batch, fastvideo_args)
         prompt_embeds_list, prompt_masks_list = self.encode_text(
             prompt_text,
             fastvideo_args,
             encoder_index=all_indices,
             return_attention_mask=True,
-            max_length=batch.max_sequence_length,
+            max_length=max_length,
         )
         if self._last_audio_embeds is not None:
             batch.extra["ltx2_audio_prompt_embeds"] = self._last_audio_embeds
@@ -92,7 +94,7 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args,
                 encoder_index=all_indices,
                 return_attention_mask=True,
-                max_length=batch.max_sequence_length,
+                max_length=max_length,
             )
             if self._last_audio_embeds is not None:
                 batch.extra["ltx2_audio_negative_embeds"] = self._last_audio_embeds
@@ -105,6 +107,18 @@ class TextEncodingStage(PipelineStage):
                     batch.negative_attention_mask.append(nm)
 
         return batch
+
+    def _resolve_max_length(self, batch: ForwardBatch,
+                            fastvideo_args: FastVideoArgs) -> int | Sequence[int | None] | None:
+        """The per-call ``max_length`` passed to :meth:`encode_text`.
+
+        Default: the request's ``max_sequence_length`` applied uniformly to every text encoder
+        (unchanged behavior). A subclass whose encoders need different per-request semantics (e.g.
+        Kandinsky6's Qwen-vs-CLIP split, see ``Kandinsky6TextEncodingStage``) overrides this to
+        return a sequence instead, one entry per encoder in call order (``None`` for "use this
+        encoder's own configured default").
+        """
+        return batch.max_sequence_length
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify text encoding stage inputs."""
@@ -128,7 +142,7 @@ class TextEncodingStage(PipelineStage):
         return_type: str = "list",  # one of: "list", "dict", "stack"
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-        max_length: int | None = None,
+        max_length: int | Sequence[int | None] | None = None,
         truncation: bool | None = None,
         padding: bool | str | None = None,
     ):
@@ -148,7 +162,10 @@ class TextEncodingStage(PipelineStage):
                 new first dimension (requires matching shapes).
             device: Optional device override for inputs; defaults to local torch device.
             dtype: Optional dtype to cast returned embeddings to.
-            max_length: Optional per-call tokenizer override.
+            max_length: Optional per-call tokenizer override. Either one value applied to every
+                selected encoder (existing behavior), or a sequence with one entry per encoder in
+                ``encoder_index`` order -- ``None`` at a position falls back to that encoder's own
+                configured default instead of the override.
             truncation: Optional per-call tokenizer override.
             padding: Optional per-call tokenizer override.
 
@@ -201,7 +218,7 @@ class TextEncodingStage(PipelineStage):
 
         target_device = device if device is not None else get_local_torch_device()
 
-        for i in indices:
+        for pos, i in enumerate(indices):
             tokenizer = self.tokenizers[i]
             text_encoder = self.text_encoders[i]
             encoder_config = encoder_cfgs[i]
@@ -237,9 +254,14 @@ class TextEncodingStage(PipelineStage):
             else:
                 input_device = getattr(text_encoder, "_fastvideo_input_device", encoder_device)
 
+            if isinstance(max_length, Sequence) and not isinstance(max_length, str):
+                per_encoder_max_length = max_length[pos] if pos < len(max_length) else None
+            else:
+                per_encoder_max_length = max_length
+
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
-            if max_length is not None:
-                tok_kwargs["max_length"] = max_length
+            if per_encoder_max_length is not None:
+                tok_kwargs["max_length"] = per_encoder_max_length
             elif hasattr(fastvideo_args.pipeline_config, "text_encoder_max_lengths"):
                 tok_kwargs["max_length"] = fastvideo_args.pipeline_config.text_encoder_max_lengths[i]
 

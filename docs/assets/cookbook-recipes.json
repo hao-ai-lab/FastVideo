@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 15,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -333,6 +333,102 @@
       "related": ["kandinsky5-t2v-lite-sft"]
     },
     {
+      "id": "kandinsky6-ti2va-base",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Text or image to video with audio",
+      "label": "Kandinsky 6 Pro TI2VA",
+      "summary": "Generate a five-second, 512x768 video with synchronized audio from text, or set IMAGE_PATH in the maintained example to condition on an image.",
+      "model": "kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers",
+      "source": "examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "command": "python examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video with synchronized audio under video_samples_kandinsky6_ti2va/",
+      "related": ["kandinsky6-ti2va-piflow", "kandinsky6-vsr"]
+    },
+    {
+      "id": "kandinsky6-ti2va-piflow",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Distilled text or image to video with audio",
+      "label": "Kandinsky 6 Pro pi-Flow",
+      "summary": "Generate a five-second video with synchronized audio using the distilled pi-Flow checkpoint in ten inference steps and guidance 1.0.",
+      "model": "kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers",
+      "source": "examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "command": "KANDINSKY6_MODEL_PATH=kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers python examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video with synchronized audio under video_samples_kandinsky6_ti2va/",
+      "related": ["kandinsky6-ti2va-base", "kandinsky6-vsr-distilled"]
+    },
+    {
+      "id": "kandinsky6-ti2va-lite",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Text or image to video with audio",
+      "label": "Kandinsky 6 Lite TI2VA",
+      "summary": "Generate a five-second, 512x768 video with synchronized audio from text or an image with the 3.2B Lite checkpoint in fifty inference steps and guidance 5.0.",
+      "model": "kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers",
+      "source": "examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "command": "KANDINSKY6_MODEL_PATH=kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers python examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video with synchronized audio under video_samples_kandinsky6_ti2va/",
+      "related": ["kandinsky6-ti2va-lite-piflow", "kandinsky6-ti2va-base"]
+    },
+    {
+      "id": "kandinsky6-ti2va-lite-piflow",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Distilled text or image to video with audio",
+      "label": "Kandinsky 6 Lite pi-Flow",
+      "summary": "Generate a five-second video with synchronized audio using the 3.2B Lite distilled pi-Flow checkpoint in ten inference steps and guidance 1.0.",
+      "model": "kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers",
+      "source": "examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "command": "KANDINSKY6_MODEL_PATH=kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers python examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video with synchronized audio under video_samples_kandinsky6_ti2va/",
+      "related": ["kandinsky6-ti2va-lite", "kandinsky6-ti2va-piflow"]
+    },
+    {
+      "id": "kandinsky6-vsr",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Video super-resolution",
+      "label": "Kandinsky 6 VSR",
+      "summary": "Upscale an existing clip by 2.25x with the four-step flow-matching VSR checkpoint while preserving its source audio.",
+      "model": "kandinskylab/Kandinsky-6.0-VSR-5s-Diffusers",
+      "source": "examples/inference/basic/basic_kandinsky6_sr.py",
+      "command": ": \"${INPUT_VIDEO:?Set INPUT_VIDEO to an existing video}\"\npython examples/inference/basic/basic_kandinsky6_sr.py --video-path \"$INPUT_VIDEO\" --scale 2.25",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "Upscaled MP4 under outputs_video/kandinsky6_sr/",
+      "related": ["kandinsky6-vsr-distilled", "kandinsky6-ti2va-base"]
+    },
+    {
+      "id": "kandinsky6-vsr-distilled",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Distilled video super-resolution",
+      "label": "Kandinsky 6 VSR distilled",
+      "summary": "Upscale an existing clip by 2.25x with the distilled two-step VSR checkpoint while preserving its source audio.",
+      "model": "kandinskylab/Kandinsky-6.0-VSR-distilled2steps-5s-Diffusers",
+      "source": "examples/inference/basic/basic_kandinsky6_sr.py",
+      "command": ": \"${INPUT_VIDEO:?Set INPUT_VIDEO to an existing video}\"\npython examples/inference/basic/basic_kandinsky6_sr.py --model-path kandinskylab/Kandinsky-6.0-VSR-distilled2steps-5s-Diffusers --video-path \"$INPUT_VIDEO\" --scale 2.25",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "Upscaled MP4 under outputs_video/kandinsky6_sr/",
+      "related": ["kandinsky6-vsr", "kandinsky6-ti2va-piflow"]
+    },
+    {
       "id": "flux2-klein-t2i",
       "family": "flux",
       "stage": "inference",
@@ -599,6 +695,77 @@
       "limitations": [
         "Requires a two-node Ray cluster on the QSFP interconnect. There is no cookbook server for this path; use Python / generate.",
         "Height, width, frames, and steps in the YAML are examples. Edit them or pass CLI flags. See docs/getting_started/installation/spark_pair.md."
+      ]
+    },
+    {
+      "id": "compacth3-rtx5090",
+      "group": "compacth3-rtx5090",
+      "group_label": "CompactH3 on RTX 5090",
+      "group_task": "4-step 42-block text to video + audio",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Few-step text to video (with audio)",
+      "label": "CompactH3 NVFP4 on RTX 5090",
+      "summary": "Run the 42-block CompactH3 NVFP4 DiT with the NVFP4 Qwen3-VL encoder, Comfy int8-convrot VAE, and SageAttention3 FP4 on one 32 GB RTX 5090. Sequential load parks the encoder in pinned host RAM.",
+      "model": "./CompactH3",
+      "source": "examples/inference/basic/basic_compacth3_rtx5090.yaml",
+      "serving": {
+        "source": "examples/serving/openai_compacth3_rtx5090.yaml",
+        "install": "UV_TORCH_BACKEND=cu128 uv pip install -e \".[fasth3]\"",
+        "prepare": "hf download FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree --local-dir ./CompactH3 --include model_index.json --include \"tokenizer/**\" --include \"processor/**\" --include \"scheduler/**\" --include \"audio_scheduler/**\" --include \"audio_vae/**\" --include \"vae/**\"\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-bf16 --local-dir ./CompactH3/transformer\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-nvfp4 --local-dir ./CompactH3/transformer --include nvfp4_weights.safetensors\nhf download KyleNeverGivesUp/FastH3-text-encoder-nvfp4 --local-dir ./CompactH3/text_encoder\nhf download Comfy-Org/MiniMax-H3 --local-dir ./Comfy-MiniMax-H3 --include vae/minimax_h3_video_vae_int8_convrot.safetensors\ncp ./Comfy-MiniMax-H3/vae/minimax_h3_video_vae_int8_convrot.safetensors ./CompactH3/vae/",
+        "env": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a"
+      },
+      "command": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_compacth3_rtx5090.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 under outputs/compacth3_rtx5090/",
+      "modes": ["T2VA", "CompactH3 NVFP4", "RTX 5090"],
+      "limitations": [
+        "Assemble ./CompactH3 before running. The DiT NVFP4 export and encoder snapshot are gated; run huggingface-cli login and accept each repo license.",
+        "32 GB cannot keep the NVFP4 encoder and DiT on the GPU together. Keep h3_sequential_load on and lazy_module_load off.",
+        "Blackwell sm_120 needs ATTN_QAT_INFER, FLASHINFER_CUDA_ARCH_LIST=12.0a, and a CUDA 12.8 PyTorch wheel.",
+        "Legal num_frames values are 17n+5, capped at 362 (15.08 s). Native 16:9 sizes include 832x480 and 1344x768; 1344x768 on 32 GB is unmeasured."
+      ]
+    },
+    {
+      "id": "compacth3-rtx-pro6000",
+      "group": "compacth3-rtx-pro6000",
+      "group_label": "CompactH3 on RTX PRO 6000",
+      "group_task": "4-step 42-block text to video + audio",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Few-step text to video (with audio)",
+      "label": "CompactH3 NVFP4 on RTX PRO 6000 Blackwell",
+      "summary": "Run CompactH3 NVFP4 with the encoder, DiT, and int8-convrot VAE resident on one 96 GB RTX PRO 6000 Blackwell. The checked-in example is 1344x768 and 124 frames (5.17 s) with VAE torch.compile. Use 832x480 for clip-queue playground traffic.",
+      "model": "./CompactH3",
+      "source": "examples/inference/basic/basic_compacth3_rtx_pro6000.yaml",
+      "serving": {
+        "source": "examples/serving/openai_compacth3_rtx_pro6000.yaml",
+        "install": "UV_TORCH_BACKEND=cu128 uv pip install -e \".[fasth3]\"",
+        "prepare": "hf download FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree --local-dir ./CompactH3 --include model_index.json --include \"tokenizer/**\" --include \"processor/**\" --include \"scheduler/**\" --include \"audio_scheduler/**\" --include \"audio_vae/**\" --include \"vae/**\"\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-bf16 --local-dir ./CompactH3/transformer\nhf download aryan5v/FastH3-20B-42block-dmd2-ckpt1400-nvfp4 --local-dir ./CompactH3/transformer --include nvfp4_weights.safetensors\nhf download KyleNeverGivesUp/FastH3-text-encoder-nvfp4 --local-dir ./CompactH3/text_encoder\nhf download Comfy-Org/MiniMax-H3 --local-dir ./Comfy-MiniMax-H3 --include vae/minimax_h3_video_vae_int8_convrot.safetensors\ncp ./Comfy-MiniMax-H3/vae/minimax_h3_video_vae_int8_convrot.safetensors ./CompactH3/vae/",
+        "env": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a"
+      },
+      "command": "FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_compacth3_rtx_pro6000.yaml",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 under outputs/compacth3_rtx_pro6000/",
+      "modes": ["T2VA", "CompactH3 NVFP4", "RTX PRO 6000"],
+      "limitations": [
+        "Assemble ./CompactH3 before running. The DiT NVFP4 export and encoder snapshot are gated; run huggingface-cli login and accept each repo license.",
+        "96 GB keeps the encoder, DiT, and VAE on GPU. Do not enable h3_sequential_load or lazy_module_load on this box.",
+        "Enable compile.vae_enabled. Leave inference_torch_compile off: FlashInfer and Sage3 custom ops cannot be compiled.",
+        "Blackwell sm_120 needs ATTN_QAT_INFER, FLASHINFER_CUDA_ARCH_LIST=12.0a, and a CUDA 12.8 PyTorch wheel.",
+        "Legal num_frames values are 17n+5, capped at 362 (15.08 s). Native 16:9 sizes include 832x480 and 1344x768. Dense CompactH3 has zero VSA gates; the pipeline raises if VIDEO_SPARSE_ATTN_H3 is loaded with all-zero to_gate_compress weights."
       ]
     },
     {

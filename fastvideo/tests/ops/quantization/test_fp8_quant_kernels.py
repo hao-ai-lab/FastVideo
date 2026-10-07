@@ -54,6 +54,9 @@ def test_cpu_empty_rows_keep_the_eager_path() -> None:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_gpu_without_triton_keeps_the_eager_path(monkeypatch) -> None:
     monkeypatch.setattr(fp8_quant_kernels, "_HAS_TRITON", False)
+    # On sm89 rowwise quantization would otherwise take the fp8_kernels path,
+    # which scales in FP32 and so is not bitwise equal to the eager formula.
+    monkeypatch.setattr(fp8_config, "_rowwise_scaled_mm_is_slow", lambda: False)
     _assert_eager_path(torch.randn(8, 64, device="cuda", dtype=torch.bfloat16))
 
 
