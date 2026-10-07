@@ -16,10 +16,16 @@ groups so every rank still belongs to exactly one group of every kind, keeping
 
 Constraints and semantics:
 - The denoise group runs SP, so its size must divide the DiT attention head count
-  (56 in the released FastH3 checkpoints). With 8 nodes the legal encoder-node
-  counts are therefore 1, 4, 6, 7 (SP = 7, 4, 2, 1). This is validated early — in
-  ``FastVideoArgs.check_fastvideo_args``, in the Ray executor against the
-  placement-derived worker count, and again here before any weights load.
+  (56 in the released FastH3 checkpoints). With 8 single-GPU nodes the legal
+  encoder-node counts are therefore 1, 4, 6, 7 (SP = 7, 4, 2, 1). This is
+  validated early — in the Ray executor against the placement-derived worker
+  count, and again here before any weights load; the driver-side check in
+  ``FastVideoArgs.check_fastvideo_args`` only rejects a split that leaves no
+  denoise rank, because it sees nodes where the executor sees workers.
+- With ``tp_size > 1`` the encoder group must also be a multiple of ``tp_size``:
+  TP groups are built from consecutive ranks and the Qwen3-VL conditioner is
+  TP-sharded, so a group straddling the encoder/denoise boundary would all-reduce
+  across ranks that never run the encoder.
 - One request packs a single prompt presentation, so **world rank 0 is the only
   encoder that computes**; encoder ranks ``1..n-1`` mirror the broadcast
   collectives and stay idle. Extra encoder nodes are reserved capacity (e.g. for
@@ -31,6 +37,7 @@ from __future__ import annotations
 from typing import Any
 
 import torch
+from torch.distributed.device_mesh import DeviceMesh
 
 from fastvideo.distributed import get_local_torch_device, get_world_group
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -56,20 +63,26 @@ def h3_encoder_split_enabled(fastvideo_args: FastVideoArgs | None) -> bool:
     return bool(getattr(fastvideo_args, "h3_encoder_split", False))
 
 
-def h3_encoder_worker_count(fastvideo_args: FastVideoArgs) -> int:
-    """Number of world ranks reserved for the encoder group.
+def _resolve_encoder_count(fastvideo_args: FastVideoArgs) -> tuple[int, str]:
+    """Encoder group size plus the unit it is expressed in.
 
     The Ray executor stamps the placement-derived worker count onto args; other
     entrypoints fall back to the node count (one worker per node, which is the
     DGX Spark / single-GPU-per-node topology this targets).
     """
+    workers = int(getattr(fastvideo_args, "h3_encoder_workers", 0) or 0)
+    if workers > 0:
+        return workers, "workers"
+    return int(getattr(fastvideo_args, "h3_encoder_nodes", 1)), "nodes"
+
+
+def h3_encoder_worker_count(fastvideo_args: FastVideoArgs) -> int:
+    """Number of world ranks reserved for the encoder group."""
     world_size = get_world_group().world_size
-    count = int(getattr(fastvideo_args, "h3_encoder_workers", 0) or 0)
-    if count <= 0:
-        count = max(1, int(getattr(fastvideo_args, "h3_encoder_nodes", 1) or 1))
+    count, unit = _resolve_encoder_count(fastvideo_args)
     if not 1 <= count < world_size:
-        raise ValueError(f"MiniMax-H3 encoder split needs 1 <= encoder workers < world size, got "
-                         f"encoder_workers={count}, world_size={world_size}.")
+        raise ValueError(f"MiniMax-H3 encoder split needs 1 <= encoder {unit} < world size, got "
+                         f"encoder={count}, world_size={world_size}.")
     return count
 
 
@@ -100,17 +113,21 @@ def h3_prepare_split_worker_parallelism(fastvideo_args: FastVideoArgs, rank: int
     """
     if fastvideo_args.distributed_executor_backend != "ray":
         raise ValueError("MiniMax-H3 encoder split (h3_encoder_split) requires distributed_executor_backend='ray'.")
-    count = int(getattr(fastvideo_args, "h3_encoder_workers", 0) or 0)
-    if count <= 0:
-        count = max(1, int(getattr(fastvideo_args, "h3_encoder_nodes", 1) or 1))
+    count, unit = _resolve_encoder_count(fastvideo_args)
     if not 1 <= count < world_size:
-        raise ValueError(f"MiniMax-H3 encoder split needs 1 <= encoder nodes < num_gpus, got "
+        raise ValueError(f"MiniMax-H3 encoder split needs 1 <= encoder {unit} < num_gpus, got "
                          f"encoder={count}, world={world_size}.")
+    tp_size = max(1, int(getattr(fastvideo_args, "tp_size", 1) or 1))
+    if tp_size > 1 and (count % tp_size or (world_size - count) % tp_size):
+        # TP groups are consecutive ranks, so a group straddling the boundary
+        # would all-reduce over ranks that never run the TP-sharded conditioner.
+        raise ValueError(f"MiniMax-H3 encoder split: the encoder ({count}) and denoise ({world_size - count}) "
+                         f"group sizes must both be multiples of tp_size ({tp_size}).")
     from fastvideo.fastvideo_args import h3_split_sp_error, probe_h3_attention_heads
 
     heads = probe_h3_attention_heads(fastvideo_args.model_path)
     if heads and heads % (world_size - count):
-        raise ValueError(h3_split_sp_error(heads, world_size - count, world_size))
+        raise ValueError(h3_split_sp_error(heads, world_size - count, world_size, unit))
     if rank < count:
         sp_size = 1
     else:
@@ -121,6 +138,11 @@ def h3_prepare_split_worker_parallelism(fastvideo_args: FastVideoArgs, rank: int
     dp_group_ranks = [[r] for r in range(world_size)]
     fastvideo_args.sp_size = sp_size
     fastvideo_args.h3_encoder_workers = count
+    # The denoise ranks are the FSDP group when FSDP inference is on: the encoder
+    # ranks never load the DiT, so the mesh must not span the world group.
+    # ``h3_denoise_device_mesh`` builds it from an explicit rank map.
+    fastvideo_args.hsdp_shard_dim = world_size - count
+    fastvideo_args.hsdp_replicate_dim = 1
     logger.info("MiniMax-H3 split: rank %d is an %s worker (sp_size=%d, denoise ranks %d..%d)",
                 rank,
                 "encoder" if rank < count else "denoise",
@@ -129,6 +151,24 @@ def h3_prepare_split_worker_parallelism(fastvideo_args: FastVideoArgs, rank: int
                 world_size - 1,
                 local_main_process_only=False)
     return sp_size, sp_group_ranks, dp_group_ranks
+
+
+def h3_denoise_device_mesh(fastvideo_args: FastVideoArgs) -> DeviceMesh:
+    """FSDP mesh covering exactly the denoise ranks.
+
+    ``init_device_mesh`` always lays a mesh over ranks ``0..numel-1``, but the
+    encoder group owns the leading ranks, so the mesh is built from an explicit
+    rank map. Only the denoise ranks build it: the DiT exists nowhere else, and
+    the groups it creates are local to those ranks.
+    """
+    from fastvideo.platforms import current_platform
+
+    start = h3_encoder_worker_count(fastvideo_args)
+    world_size = get_world_group().world_size
+    device_type = "npu" if current_platform.is_npu() else "cuda"
+    ranks = torch.arange(start, world_size, dtype=torch.int).view(1, -1)
+    logger.info("MiniMax-H3 encoder split: FSDP mesh over denoise ranks %d..%d", start, world_size - 1)
+    return DeviceMesh(device_type, ranks, mesh_dim_names=("replicate", "shard"))
 
 
 def _embed_specs(embeds: list[torch.Tensor]) -> list[dict[str, Any]]:
@@ -201,6 +241,7 @@ __all__ = [
     "H3_DENOISE_MODULE_NAMES",
     "H3_ENCODER_MODULE_NAMES",
     "h3_broadcast_condition",
+    "h3_denoise_device_mesh",
     "h3_encoder_split_enabled",
     "h3_encoder_worker_count",
     "h3_is_encoder_worker",

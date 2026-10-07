@@ -249,7 +249,14 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         if h3_encoder_split_enabled(fastvideo_args):
             # Component-level pipeline parallel: the role decides the module set
             # outright, so no deferral/lazy machinery is involved on either side.
-            keep = H3_ENCODER_MODULE_NAMES if h3_is_encoder_worker(fastvideo_args) else H3_DENOISE_MODULE_NAMES
+            if h3_is_encoder_worker(fastvideo_args):
+                keep = H3_ENCODER_MODULE_NAMES
+            else:
+                keep = H3_DENOISE_MODULE_NAMES
+                if _use_taeh3_t2va(fastvideo_args, ref2va=self._ref2va):
+                    # Mirrors `_denoise_module_names`: T2VA with the TAEH3 preview
+                    # decoder never touches the full video VAE.
+                    keep = keep - {"vae"}
             saved = list(self.required_config_modules)
             self._required_config_modules = [name for name in saved if name in keep]
             try:

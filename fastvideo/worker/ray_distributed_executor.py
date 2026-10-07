@@ -302,7 +302,8 @@ class RayDistributedExecutor(Executor):
         placements; multi-GPU nodes simply contribute all of their workers.
         """
         args = self.fastvideo_args
-        nodes_needed = max(1, int(args.h3_encoder_nodes or 1))
+        # ``_fold_h3_encoder_split_env`` already normalized 0/unset to 1.
+        nodes_needed = int(args.h3_encoder_nodes)
         ordered_ips: list[str] = []
         for ip in sorted_worker_ips:
             if ip not in ordered_ips:
@@ -320,7 +321,7 @@ class RayDistributedExecutor(Executor):
         denoise_workers = len(sorted_worker_ips) - encoder_workers
         heads = probe_h3_attention_heads(args.model_path)
         if heads and heads % denoise_workers:
-            raise RuntimeError(h3_split_sp_error(heads, denoise_workers, len(sorted_worker_ips)))
+            raise RuntimeError(h3_split_sp_error(heads, denoise_workers, len(sorted_worker_ips), unit="workers"))
         args.h3_encoder_nodes = nodes_needed
         args.h3_encoder_workers = encoder_workers
         logger.info(

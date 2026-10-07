@@ -39,6 +39,11 @@ export FASTVIDEO_H3_ENCODER_SPLIT=1   # or FastVideoArgs.h3_encoder_split / --h3
 export FASTVIDEO_H3_ENCODER_NODES=1   # nodes dedicated to the encoder; default 1
 ```
 
+`fastvideo generate` exposes only `--config`, so pass the same two settings as
+dotted overrides into the experimental catch-all:
+`--generator.pipeline.experimental.h3_encoder_split true` and
+`--generator.pipeline.experimental.h3_encoder_nodes 1`.
+
 Cluster-side prerequisites (all nodes): the FastVideo venv, the model path,
 and per-node fabric exports (`NCCL_SOCKET_IFNAME` / `GLOO_SOCKET_IFNAME` /
 `NCCL_IB_HCA` set before `ray start`, since the executor deliberately does not

@@ -117,11 +117,20 @@ def probe_h3_attention_heads(model_path: str) -> int | None:
     return None
 
 
-def h3_split_sp_error(heads: int, denoise_size: int, num_gpus: int) -> str:
-    legal = [n for n in range(1, num_gpus) if heads % (num_gpus - n) == 0]
+def h3_split_sp_error(heads: int, denoise_size: int, world_size: int, unit: str = "workers") -> str:
+    """Message for an illegal encoder/denoise split.
+
+    ``world_size`` and the legal counts are expressed in ``unit``: "workers" once
+    the Ray executor has resolved placement, "nodes" for the node-count fallback.
+    """
+    legal = [n for n in range(1, world_size) if heads % (world_size - n) == 0]
+    if unit == "nodes":
+        hint = f"valid --h3-encoder-nodes values are {legal}."
+    else:
+        hint = f"valid encoder-worker counts are {legal}; --h3-encoder-nodes counts nodes."
     return ("MiniMax-H3 encoder split: the denoise group runs sequence parallelism, so its size must divide "
-            f"the DiT attention head count ({heads}), got denoise_size={denoise_size}. With num_gpus={num_gpus}, "
-            f"valid --h3-encoder-nodes values are {legal}.")
+            f"the DiT attention head count ({heads}), got denoise_size={denoise_size}. With {world_size} {unit}, "
+            f"{hint}")
 
 
 @dataclasses.dataclass
@@ -417,7 +426,11 @@ class FastVideoArgs:
             self.h3_encoder_split = envs.FASTVIDEO_H3_ENCODER_SPLIT
         if self.h3_encoder_nodes < 0:
             self.h3_encoder_nodes = max(1, envs.FASTVIDEO_H3_ENCODER_NODES)
-        if not self.h3_encoder_split:
+        # Single normalization point for the node count: 0 means "unset" (the env
+        # default is 1) and is only meaningful while the split is off.
+        if self.h3_encoder_split:
+            self.h3_encoder_nodes = max(1, self.h3_encoder_nodes)
+        else:
             self.h3_encoder_nodes = max(0, self.h3_encoder_nodes)
 
     def _fold_vae_parallel_env(self) -> None:
@@ -814,6 +827,20 @@ class FastVideoArgs:
             "Pass --no-h3-sequential-load to keep the encoder resident for later generate() calls.",
         )
         parser.add_argument(
+            "--h3-encoder-split",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="MiniMax-H3: dedicate the first --h3-encoder-nodes nodes to the Qwen3-VL encoder and run the DiT "
+            "on the remaining ranks. Requires distributed_executor_backend='ray'. "
+            "Omit to fold FASTVIDEO_H3_ENCODER_SPLIT.",
+        )
+        parser.add_argument(
+            "--h3-encoder-nodes",
+            type=int,
+            default=FastVideoArgs.h3_encoder_nodes,
+            help="MiniMax-H3 encoder split: nodes (not GPUs) reserved for the text encoder; default 1.",
+        )
+        parser.add_argument(
             "--video-decode-backend",
             type=str,
             choices=("h3-vae", "taeh3"),
@@ -1032,18 +1059,14 @@ class FastVideoArgs:
             # still pins the real constraint (heads % denoise size).
             if self.distributed_executor_backend != "ray":
                 raise ValueError("MiniMax-H3 h3_encoder_split requires distributed_executor_backend='ray'.")
-            if self.num_gpus < self.h3_encoder_nodes + 1:
+            # ``h3_encoder_nodes`` counts nodes here while the executor resolves
+            # the encoder group from placement (every worker on those nodes), so
+            # the driver can only check the lower bound. The heads-divisibility
+            # check needs the worker count and lives in the executor and in the
+            # worker-side DiT init.
+            if self.num_gpus <= self.h3_encoder_nodes:
                 raise ValueError(f"MiniMax-H3 h3_encoder_split needs num_gpus ({self.num_gpus}) > "
                                  f"h3_encoder_nodes ({self.h3_encoder_nodes}).")
-            heads = probe_h3_attention_heads(self.model_path)
-            if heads:
-                # Fail at config time with the legal node counts instead of at
-                # DiT construction with the heads-divisibility ValueError.
-                # The executor repeats this against the placement-derived
-                # worker count; a missing checkpoint config defers to the DiT.
-                denoise_workers = self.num_gpus - self.h3_encoder_nodes
-                if denoise_workers > 0 and heads % denoise_workers:
-                    raise ValueError(h3_split_sp_error(heads, denoise_workers, self.num_gpus))
             if self.sp_size not in (-1, self.num_gpus):
                 logger.info(
                     "MiniMax-H3 h3_encoder_split: ignoring sp_size=%d; the denoise ranks run SP with "
