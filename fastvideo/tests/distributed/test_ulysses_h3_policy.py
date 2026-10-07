@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Policy, rank agreement and saved backward-plan regressions without a GPU."""
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -62,13 +63,25 @@ def test_long_training_chunk_opt_in_keeps_a_bounded_window():
     assert signature[10:] == (1, 144)
 
 
-def test_older_wheel_keeps_original_launch_and_capacity_policy():
+def _install_older_kernel_wheel(monkeypatch):
+    """Stand in for a fastvideo-kernel wheel built before the tuned H3 launch.
+
+    Its comm_ops has no supports_tuned_launch(). The installed wheel may predate
+    comm_ops entirely or already ship the tuned entrypoint, so it is not imported.
+    """
+    package = ModuleType('fastvideo_kernel')
+    comm_ops = ModuleType('fastvideo_kernel.comm_ops')
+    package.comm_ops = comm_ops  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, 'fastvideo_kernel', package)
+    monkeypatch.setitem(sys.modules, 'fastvideo_kernel.comm_ops', comm_ops)
+
+
+def test_older_wheel_keeps_original_launch_and_capacity_policy(monkeypatch):
     helper = _helper()
     x = _operand(3, 250000, 0, False)
-    from fastvideo_kernel import comm_ops
+    _install_older_kernel_wheel(monkeypatch)
     props = SimpleNamespace(name='NVIDIA GB200', major=10, minor=0, multi_processor_count=152)
     with patch('torch.cuda.get_device_properties', return_value=props), \
-            patch.object(comm_ops, 'supports_tuned_launch', return_value=False, create=True), \
             patch.object(ulysses, 'is_enabled', return_value=True), \
             patch('torch.cuda.is_current_stream_capturing', return_value=False):
         signature, _ = helper._call_signature(x, 2, 1)
