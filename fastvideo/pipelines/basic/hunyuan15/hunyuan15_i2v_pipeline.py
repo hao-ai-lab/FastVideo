@@ -20,8 +20,12 @@ logger = init_logger(__name__)
 
 class HunyuanVideo15ImageToVideoPipeline(ComposedPipelineBase):
 
+    # image_encoder and feature_extractor are the SigLIP pair the i2v
+    # checkpoints ship; without them the reference image has no route into the
+    # transformer and the run is text-to-video wearing an i2v label.
     _required_config_modules = [
-        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae", "transformer", "scheduler"
+        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae", "transformer", "scheduler",
+        "image_encoder", "feature_extractor"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -47,7 +51,9 @@ class HunyuanVideo15ImageToVideoPipeline(ComposedPipelineBase):
                                                     transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=Hy15ImageEncodingStage(image_encoder=None, image_processor=None))
+                       stage=Hy15ImageEncodingStage(image_encoder=self.get_module("image_encoder"),
+                                                    image_processor=self.get_module("feature_extractor"),
+                                                    vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(transformer=self.get_module("transformer"),
