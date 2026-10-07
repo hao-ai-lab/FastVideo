@@ -220,7 +220,6 @@ def _attn_fwd_inner(acc,
             qk = qk * qk_scale - m_ij[:, None]
         p = tl.math.exp2(qk)
         if SAVE_DV_STATS:
-            # One fp32 running maximum per valid row and KV tile, not a P matrix.
             stat_offsets = (start_n // BLOCK_N) * N_CTX_Q + offs_m
             tl.store(DV_MAXIMA + stat_offsets, m_ij, mask=q_valid)
         if IS_QAT:
@@ -496,7 +495,7 @@ def _attn_fwd(
                                                            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P,
                                                            two_level_quant_P, use_global_sf_P, JOIN_QAT_PV,
                                                            DV_MAXIMA, N_CTX_Q, SAVE_DV_STATS)
-    # stage 2: on-band (no dV statistics: the forward-consistent dV is non-causal only)
+    # stage 2: on-band
     if STAGE & 2:
         acc, high_prec_acc, l_i, m_i = _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, desc_k, desc_v,
                                                        offset_y_kv, dtype, start_m, qk_scale, BLOCK_M, HEAD_DIM,
@@ -638,7 +637,7 @@ def _attn_bwd_dkdv(
             qk = tl.where(mask, qk, -1.0e6)
         p = tl.math.exp2(qk - m[:, None])
         do = tl.load(do_ptrs, mask=q_valid[:, None])
-        # Compute dV. Skipped when the SM121 forward-consistent kernel overwrites dV.
+        # Compute dV.
         if COMPUTE_DV:
             p_quant = p
             if IS_QAT and fake_quant_P:
@@ -1020,7 +1019,6 @@ def _attn_bwd_dkdv_cross(Q,
             # Apply scale AFTER dot product (matches forward pass, better precision)
             qk = qk * qk_scale
             p = tl.math.exp2(qk - m[:, None])
-            # Skipped when the SM121 forward-consistent kernel overwrites dV.
             if COMPUTE_DV:
                 p_quant = p
                 if IS_QAT and fake_quant_P:
@@ -1303,9 +1301,7 @@ def _attn_bwd_dv_forward_weights(Q, K, DO, DV, MAXIMA, DENOMINATOR, sm_scale,
                                   stride_qz, stride_qh, stride_kz, stride_kh,
                                   HEADS, NQ, NK,
                                   HEAD_DIM: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
-    # dV from the forward's own quantized online probabilities. The legacy backward
-    # re-quantizes the normalized P instead, and its E4M3 group scale underflows to 0
-    # below ~2^-10, which zeroes dV for the whole 16-key group (docs/training/attn_qat.md).
+    """dV from the forward's quantized online probabilities; see docs/training/attn_qat.md."""
     kv_tile = tl.program_id(0)
     bhid = tl.program_id(1)
     off_z = bhid // HEADS
@@ -1326,7 +1322,7 @@ def _attn_bwd_dv_forward_weights(Q, K, DO, DV, MAXIMA, DENOMINATOR, sm_scale,
         q = tl.load(Q + q_base + offs_m[:, None] * HEAD_DIM + offs_k[None, :], mask=q_valid[:, None], other=0.0)
         do = tl.load(DO + bhid * NQ * HEAD_DIM + offs_m[:, None] * HEAD_DIM + offs_k[None, :],
                      mask=q_valid[:, None], other=0.0)
-        # Running maximum the forward used for this KV tile; the last tile's is the final m_i.
+        # The last KV tile's running maximum is the forward's final m_i.
         local_max = tl.load(MAXIMA + (bhid * num_kv_tiles + kv_tile) * NQ + offs_m, mask=q_valid, other=0.0)
         final_max = tl.load(MAXIMA + (bhid * num_kv_tiles + num_kv_tiles - 1) * NQ + offs_m,
                             mask=q_valid, other=0.0)
