@@ -62,6 +62,8 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     hidden_size: int = 5120
     intermediate_size: int = 25600
     num_hidden_layers: int = 64
+    output_hidden_state_index: int = 50
+    num_hidden_layers_override: int | None = 50
     num_attention_heads: int = 64
     num_key_value_heads: int = 8
     head_dim: int = 128
@@ -107,7 +109,7 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     vision_initializer_range: float = 0.02
     vision_deepstack_visual_indexes: tuple[int, ...] = (8, 16, 24)
 
-    output_hidden_states: bool = True
+    output_hidden_states: bool = False
     stacked_params_mapping: list[tuple[str, str, str | int]] = field(default_factory=list)
     _fsdp_shard_conditions: list = field(default_factory=lambda: [
         _is_language_transformer_layer,
@@ -118,6 +120,17 @@ class MiniMaxH3Qwen3VLArchConfig(TextEncoderArchConfig):
     ])
 
     def __post_init__(self) -> None:
+        if self.output_hidden_state_index <= 0 or self.output_hidden_state_index > self.num_hidden_layers:
+            raise ValueError("MiniMax H3 Qwen3-VL output_hidden_state_index must be in "
+                             f"[1, {self.num_hidden_layers}], got {self.output_hidden_state_index}.")
+        if self.num_hidden_layers_override is not None:
+            if self.num_hidden_layers_override <= 0:
+                raise ValueError("MiniMax H3 Qwen3-VL num_hidden_layers_override must be positive or None.")
+            if self.num_hidden_layers_override < self.output_hidden_state_index:
+                raise ValueError("MiniMax H3 Qwen3-VL num_hidden_layers_override must build through "
+                                 f"hidden_states[{self.output_hidden_state_index}], got "
+                                 f"{self.num_hidden_layers_override}.")
+
         rope_scaling = dict(self.rope_scaling or {})
         self.mrope_interleaved = bool(rope_scaling.get("mrope_interleaved", self.mrope_interleaved))
         if not self.mrope_interleaved:

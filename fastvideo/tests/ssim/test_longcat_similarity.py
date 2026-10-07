@@ -19,6 +19,7 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -34,6 +35,7 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of LongCat support.")
 
 # Device-specific reference folder
 device_reference_folder = resolve_device_reference_folder(
@@ -191,13 +193,13 @@ def _resolve_asset_path(asset_path: str) -> str:
 
 @pytest.mark.parametrize("prompt", T2V_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
-def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
+def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrides):
     """
     Test LongCat T2V inference and compare output to reference videos using SSIM.
     
     Parameters derived from examples/inference/basic/basic_longcat_t2v.py
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     params = select_ssim_params(LONGCAT_T2V_PARAMS, LONGCAT_T2V_FULL_QUALITY_PARAMS)
 
@@ -279,13 +281,13 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
 @pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
-def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
+def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrides):
     """
     Test LongCat I2V inference and compare output to reference videos using SSIM.
     
     Parameters derived from examples/inference/basic/basic_longcat_i2v.py
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     params = select_ssim_params(LONGCAT_I2V_PARAMS, LONGCAT_I2V_FULL_QUALITY_PARAMS)
 
@@ -372,13 +374,13 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
 @pytest.mark.parametrize("prompt", VC_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
-def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
+def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrides):
     """
     Test LongCat VC (Video Continuation) inference and compare output to reference videos using SSIM.
     
     Parameters derived from examples/inference/basic/basic_longcat_vc.py
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     params = select_ssim_params(LONGCAT_VC_PARAMS, LONGCAT_VC_FULL_QUALITY_PARAMS)
 

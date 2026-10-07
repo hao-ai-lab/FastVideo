@@ -10,6 +10,7 @@ import torch
 from diffusers import FluxTransformer2DModel as HFFluxTransformer2DModel
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.dits.flux import FluxDiTConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -17,8 +18,8 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29517")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29517")
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _DEFAULT_FLUX_TRANSFORMER = os.path.join(
@@ -30,7 +31,7 @@ _DEFAULT_FLUX_TRANSFORMER = os.path.join(
 
 
 def _flux_transformer_path() -> str:
-    return os.environ.get("FLUX_TRANSFORMER_PATH", _DEFAULT_FLUX_TRANSFORMER)
+    return envs.FASTVIDEO_TEST_FLUX_TRANSFORMER_PATH.get() or _DEFAULT_FLUX_TRANSFORMER
 
 
 def _prepare_latent_image_ids(
@@ -49,8 +50,8 @@ def _prepare_latent_image_ids(
 
 
 @pytest.fixture
-def torch_sdpa_attention_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+def torch_sdpa_attention_backend(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
 
 
 requires_cuda = pytest.mark.skipif(
@@ -58,21 +59,17 @@ requires_cuda = pytest.mark.skipif(
     reason="FLUX DiT parity test requires CUDA",
 )
 
-requires_weights = pytest.mark.skipif(
-    not glob.glob(os.path.join(_flux_transformer_path(), "*.safetensors")),
-    reason=(f"No safetensors under {_flux_transformer_path()} — download FLUX.1-dev "
-            "transformer or set FLUX_TRANSFORMER_PATH"),
-)
-
 
 @requires_cuda
-@requires_weights
 @pytest.mark.usefixtures("distributed_setup", "torch_sdpa_attention_backend")
 def test_flux_transformer_parity_vs_diffusers() -> None:
     """Single forward: FastVideo DiT vs Diffusers ``FluxTransformer2DModel``."""
+    transformer_path = _flux_transformer_path()
+    if not glob.glob(os.path.join(transformer_path, "*.safetensors")):
+        pytest.skip(f"No safetensors under {transformer_path} — download FLUX.1-dev "
+                    "transformer or set FASTVIDEO_TEST_FLUX_TRANSFORMER_PATH")
     device = torch.device("cuda:0")
     precision = torch.bfloat16
-    transformer_path = _flux_transformer_path()
 
     args = FastVideoArgs(
         model_path=transformer_path,

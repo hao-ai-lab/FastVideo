@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
-from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
+from fastvideo.models.wan.config import WanVideoArchConfig
 
 
 @dataclass

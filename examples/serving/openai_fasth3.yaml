@@ -1,0 +1,49 @@
+# OpenAI-compatible FastH3 full-checkpoint server.
+generator:
+  model_path: FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2
+  engine:
+    num_gpus: 4
+    use_fsdp_inference: false
+    parallelism:
+      tp_size: 1
+      sp_size: 4
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: true
+      image_encoder: true
+      vae: true
+      pin_cpu_memory: true
+    compile:
+      enabled: false
+      vae_enabled: false
+  pipeline:
+    workload_type: t2v
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      VSA_sparsity: 0.9
+      VSA_tile_size: 64
+      inference_torch_compile: false
+      vae_parallel_decode: true
+      vae_parallel_decode_strategy: gather
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: outputs/openai_fasth3
+  served_model_name: fasth3
+
+default_request:
+  negative_prompt: ""
+  sampling:
+    height: 768
+    width: 1344
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 5
+    guidance_scale: 1.0
+    batch_cfg: false
+    seed: 1000
+  output:
+    return_frames: false
+

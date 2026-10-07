@@ -15,6 +15,13 @@ import json
 import os
 import subprocess
 import sys
+from unittest.mock import Mock
+
+import pytest
+import torch
+
+import fastvideo.envs as envs
+from fastvideo.profiler import nvtx_range
 
 # Five-window child: ops before any region, inside a region, between regions,
 # inside a second (short-named) region, after the last region. Exits without
@@ -105,3 +112,73 @@ def test_noop_without_profiler_dir(tmp_path):
     proc = subprocess.run([sys.executable, "-c", child], env=env,
                           capture_output=True, text=True, timeout=300)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_nvtx_range_disabled_is_noop(monkeypatch, env_overrides):
+    """Keep CUDA NVTX untouched when external profiling is disabled."""
+    range_push = Mock()
+    range_pop = Mock()
+    env_overrides.enter_context(envs.FASTVIDEO_NVTX_PROFILE.override(False))
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda.nvtx, "range_push", range_push)
+    monkeypatch.setattr(torch.cuda.nvtx, "range_pop", range_pop)
+
+    with nvtx_range("disabled"):
+        body_executed = True
+
+    assert body_executed is True
+    range_push.assert_not_called()
+    range_pop.assert_not_called()
+
+
+def test_nvtx_range_without_cuda_is_noop(monkeypatch, env_overrides):
+    """Keep NVTX untouched when profiling is enabled on a CPU-only process."""
+    range_push = Mock()
+    range_pop = Mock()
+    env_overrides.enter_context(envs.FASTVIDEO_NVTX_PROFILE.override(True))
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda.nvtx, "range_push", range_push)
+    monkeypatch.setattr(torch.cuda.nvtx, "range_pop", range_pop)
+
+    with nvtx_range("cpu-only"):
+        body_executed = True
+
+    assert body_executed is True
+    range_push.assert_not_called()
+    range_pop.assert_not_called()
+
+
+def test_nvtx_range_enabled_orders_push_body_pop(monkeypatch, env_overrides):
+    """Place the profiled body between one matching NVTX push and pop."""
+    events = []
+    env_overrides.enter_context(envs.FASTVIDEO_NVTX_PROFILE.override(True))
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda.nvtx, "range_push", lambda name: events.append(("push", name)))
+    monkeypatch.setattr(torch.cuda.nvtx, "range_pop", lambda: events.append(("pop", None)))
+
+    with nvtx_range("minimax_h3.test"):
+        events.append(("body", None))
+
+    assert events == [
+        ("push", "minimax_h3.test"),
+        ("body", None),
+        ("pop", None),
+    ]
+
+
+def test_nvtx_range_body_exception_pops_and_propagates(monkeypatch, env_overrides):
+    """Balance the NVTX stack while preserving a body exception."""
+    events = []
+    env_overrides.enter_context(envs.FASTVIDEO_NVTX_PROFILE.override(True))
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda.nvtx, "range_push", lambda name: events.append(("push", name)))
+    monkeypatch.setattr(torch.cuda.nvtx, "range_pop", lambda: events.append(("pop", None)))
+
+    with pytest.raises(RuntimeError, match="profile body failed"):
+        with nvtx_range("minimax_h3.failure"):
+            raise RuntimeError("profile body failed")
+
+    assert events == [
+        ("push", "minimax_h3.failure"),
+        ("pop", None),
+    ]

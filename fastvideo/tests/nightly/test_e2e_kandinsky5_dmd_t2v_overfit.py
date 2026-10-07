@@ -38,7 +38,7 @@ and go green on stale artifacts.
 Reference bootstrap: the committed reference
 (``reference_video_kandinsky5_dmd_v0.mp4`` next to this file) is produced
 by running this test once on a sanctioned GPU box with
-``KANDINSKY5_E2E_WRITE_REFERENCE=1``, reviewing the written video by eye,
+``FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE=1``, reviewing the written video by eye,
 and committing it. Review bar: expect blurry-but-structured content
 loosely matching the prompt (4-step no-CFG sampling of near-base weights
 cannot look good) -- soft shapes, warm sunflower-ish colors, motion.
@@ -62,6 +62,7 @@ this test fully controls.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -73,10 +74,11 @@ import cv2
 import numpy as np
 import pytest
 
+import fastvideo.envs as envs
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 THIS_FILE = Path(__file__).resolve()
 
-NUM_GPUS = os.environ.get("KANDINSKY5_E2E_NUM_GPUS", "1")
 # Every artifact this test reads or writes lives under this single
 # test-owned root. It must NEVER point at (or contain) the documented
 # default dataset paths -- data/kandinsky5_overfit and
@@ -84,7 +86,7 @@ NUM_GPUS = os.environ.get("KANDINSKY5_E2E_NUM_GPUS", "1")
 # with their real videos/captions for the actual recipe:
 # _clean_previous_artifacts() deletes this root wholesale on every run,
 # and the preprocess subprocess is pointed here via the
-# KANDINSKY5_OVERFIT_DATA_DIR / KANDINSKY5_OVERFIT_OUTPUT_DIR env
+# FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR / FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR env
 # overrides instead of the script's user-facing defaults.
 E2E_ROOT = Path("data") / "kandinsky5_e2e"
 RAW_DATA_DIR = E2E_ROOT / "raw"
@@ -111,7 +113,6 @@ STAGE2_CONFIG = (REPO_ROOT / "examples" / "train" / "configs" / "distribution_ma
 # committed next to this file -- mirroring reference_video_1_sample_v0.mp4
 # in the Wan e2e test.
 REFERENCE_VIDEO = THIS_FILE.parent / "reference_video_kandinsky5_dmd_v0.mp4"
-WRITE_REFERENCE_ENV = "KANDINSKY5_E2E_WRITE_REFERENCE"
 # Deliberately semantic even though the training clip is random noise: the
 # caption's relation to the clip content is irrelevant for plumbing, but
 # the caption doubles as the generation prompt, and a semantic prompt makes
@@ -201,15 +202,15 @@ def _synthesize_single_sample() -> None:
         writer.write(frame)
     writer.release()
 
-    # One physical clip, but max(2, NUM_GPUS) manifest rows all pointing at
+    # One physical clip, but max(2, FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS) manifest rows all pointing at
     # it: DP_SP_BatchSampler (fastvideo/dataset/parquet_dataset_map_style.py)
     # floor-divides the number of batches by the number of data-parallel
     # groups with drop_last=True, so a dataset with fewer rows than GPUs
     # yields an EMPTY dataloader on every rank. Duplicate rows keep the
     # single-sample-overfit semantics (identical latents/caption) while
-    # making KANDINSKY5_E2E_NUM_GPUS=2+ a working escape hatch when one GPU
+    # making FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS=2+ a working escape hatch when one GPU
     # doesn't have the memory headroom for stage 2 (see _run_stage).
-    num_rows = max(2, int(NUM_GPUS))
+    num_rows = max(2, envs.FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS.get())
     with open(RAW_DATA_DIR / "videos2caption.json", "w") as f:
         json.dump([{
             "path": "sample_0.mp4",
@@ -223,8 +224,8 @@ def _run_preprocessing() -> None:
     # (data/kandinsky5_overfit{,_preprocessed}) -- the very directories a
     # user populates for the real recipe, which this test must never touch.
     env = dict(os.environ)
-    env["KANDINSKY5_OVERFIT_DATA_DIR"] = str(RAW_DATA_DIR)
-    env["KANDINSKY5_OVERFIT_OUTPUT_DIR"] = str(PREPROCESSED_DIR)
+    env["FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR"] = str(RAW_DATA_DIR)
+    env["FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR"] = str(PREPROCESSED_DIR)
     cmd = [
         sys.executable,
         "-m",
@@ -269,6 +270,7 @@ def _latest_checkpoint(output_dir: Path) -> Path:
 
 def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_overrides: list[str],
                env_overrides: dict[str, str]) -> None:
+    num_gpus = str(envs.FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS.get())
     cmd = [
         sys.executable,
         "-m",
@@ -276,7 +278,7 @@ def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_ov
         "--nnodes",
         "1",
         "--nproc_per_node",
-        NUM_GPUS,
+        num_gpus,
         "-m",
         "fastvideo.train.entrypoint.train",
         "--config",
@@ -284,9 +286,9 @@ def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_ov
         "--training.data.data_path",
         str(PREPROCESSED_DIR),
         "--training.distributed.num_gpus",
-        NUM_GPUS,
+        num_gpus,
         "--training.distributed.hsdp_shard_dim",
-        NUM_GPUS,
+        num_gpus,
         "--training.loop.max_train_steps",
         str(max_train_steps),
         "--training.checkpoint.output_dir",
@@ -312,7 +314,7 @@ def _run_stage(config: Path, output_dir: Path, *, max_train_steps: int, extra_ov
     # to 1 above -- a recorded run peaked at ~76 GiB and died allocating
     # the last MiBs on an 80 GiB device with ~1.9 GiB lost to
     # fragmentation). Expandable segments reclaims that headroom; if a
-    # single device still can't fit, shard with KANDINSKY5_E2E_NUM_GPUS=2+
+    # single device still can't fit, shard with FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS=2+
     # (the synthesized manifest guarantees >= one row per rank).
     env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     env.update(env_overrides)
@@ -432,7 +434,7 @@ def _assert_video_not_degenerate(video_path: Path) -> None:
 
 def _assert_matches_reference(video_path: Path) -> None:
     if not REFERENCE_VIDEO.exists():
-        if os.environ.get(WRITE_REFERENCE_ENV) == "1":
+        if envs.FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE.get():
             shutil.copy2(video_path, REFERENCE_VIDEO)
             print(f"\nWrote new reference video to {REFERENCE_VIDEO} -- "
                   "review it by eye and commit it. This bootstrap run "
@@ -440,7 +442,7 @@ def _assert_matches_reference(video_path: Path) -> None:
         else:
             pytest.fail(f"reference video missing at {REFERENCE_VIDEO}. This test "
                         "must not pass on artifact existence alone -- run once on a "
-                        f"sanctioned GPU box with {WRITE_REFERENCE_ENV}=1, review "
+                        "sanctioned GPU box with FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE=1, review "
                         "the written video, and commit it (see module docstring).")
 
     from fastvideo.tests.utils import compute_video_ssim_torchvision
@@ -461,13 +463,13 @@ def _assert_matches_reference(video_path: Path) -> None:
 
 
 @pytest.mark.nightly
-def test_e2e_kandinsky5_dmd_overfit_single_sample():
+def test_e2e_kandinsky5_dmd_overfit_single_sample(env_overrides):
     if not STAGE1_CONFIG.exists() or not STAGE2_CONFIG.exists():
         pytest.skip(
             "Kandinsky5 QAT configs not found -- see examples/train/configs/{fine_tuning,distribution_matching}/kandinsky5/"
         )
 
-    os.environ.setdefault("WANDB_MODE", "offline")
+    env_overrides.enter_context(envs.override_external("WANDB_MODE", os.environ.get("WANDB_MODE", "offline")))
 
     _clean_previous_artifacts()
     _synthesize_single_sample()
@@ -543,4 +545,5 @@ if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--generate":
         _generate_main(sys.argv[2], sys.argv[3])
     else:
-        test_e2e_kandinsky5_dmd_overfit_single_sample()
+        with contextlib.ExitStack() as env_overrides:
+            test_e2e_kandinsky5_dmd_overfit_single_sample(env_overrides)

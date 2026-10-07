@@ -12,7 +12,7 @@ import pytest
 import torch
 import torch.distributed as dist
 
-from fastvideo.configs.models.dits.wanvideo import (
+from fastvideo.models.wan.config import (
     WanVideoArchConfig,
     WanVideoConfig,
 )
@@ -21,7 +21,7 @@ from fastvideo.distributed import (
     maybe_init_distributed_environment_and_model_parallel,
 )
 from fastvideo.forward_context import set_forward_context
-from fastvideo.models.dits.wanvideo import WanTransformer3DModel
+from fastvideo.models.wan.transformer import WanTransformer3DModel
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 SP_WORLD_SIZE = 2

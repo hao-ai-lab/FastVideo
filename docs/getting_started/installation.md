@@ -4,9 +4,10 @@
 FastVideo supports the following hardware platforms:
 
 - [NVIDIA CUDA](installation/gpu.md)
-- [NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)](installation/spark.md)
-  ([performance & tuning](installation/spark_performance.md))
-- [Apple silicon](installation/mps.md)
+- **NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)** — [install](installation/spark.md),
+  [performance](installation/spark_performance.md),
+  [pair two Sparks](installation/spark_pair.md)
+- [Apple silicon (MLX)](installation/mlx.md)
 
 ## Quick Installation
 
@@ -14,7 +15,7 @@ FastVideo supports the following hardware platforms:
 
 Use uv as the default environment manager for faster and more stable installs.
 The commands below target NVIDIA CUDA 12; use `UV_TORCH_BACKEND=cu130` on
-CUDA 13. Apple silicon users should follow the [MPS guide](installation/mps.md).
+CUDA 13. Apple silicon users should follow the [MLX install guide](installation/mlx.md).
 
 ```bash
 # Create and activate a new uv environment
@@ -65,6 +66,7 @@ uv pip install flash-attn --no-build-isolation -v
 
 ## Next Steps
 
-- [Quick Start Guide](quick_start.md) - Get started with your first video generation
+- [Quick Start](quick_start.md) - Generate your first video
+- [Inference Cookbook](../cookbook/index.md) - Choose a maintained recipe
 - [Configuration](../inference/configuration.md) - Learn about configuration options
-- [Examples](../inference/examples/examples_inference_index.md) - Explore example scripts and notebooks
+- [Examples](../inference/examples/examples_inference_index.md) - Explore scripts and notebooks

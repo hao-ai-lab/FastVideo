@@ -5,6 +5,7 @@ import re
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
@@ -18,8 +19,8 @@ from fastvideo.worker import MultiprocExecutor
 import torch
 
 logger = init_logger(__name__)
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29500"
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29500")
 
 # Base parameters for LoRA inference tests
 WAN_LORA_PARAMS = {
@@ -132,12 +133,12 @@ def test_merge_lora_weights(model_id):
 
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["TORCH_SDPA"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_lora_inference_similarity(ATTENTION_BACKEND, model_id):
+def test_lora_inference_similarity(ATTENTION_BACKEND, model_id, env_overrides):
     """
     Test that runs LoRA inference with LoRA switching and compares the output
     to reference videos using SSIM.
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 

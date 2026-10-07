@@ -23,6 +23,7 @@ import torch
 from safetensors.torch import load_file as safetensors_load_file
 from transformers import AutoTokenizer, Qwen2_5_VLTextModel, T5EncoderModel
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
 from fastvideo.configs.pipelines.hunyuan15 import (
     Hunyuan15T2V480PConfig,
@@ -40,11 +41,6 @@ MAX_HEIGHT = 480
 MAX_WIDTH = 832
 TRAIN_FPS = 16.0
 
-# Overridable via environment variables so a run can point at its own
-# directories instead of the documented recipe's paths. Note that these are
-# read at import time.
-DATA_DIR = os.environ.get("HY15_OVERFIT_DATA_DIR", "data/hunyuan15_overfit")
-OUTPUT_DIR = os.environ.get("HY15_OVERFIT_OUTPUT_DIR", "data/hunyuan15_overfit_preprocessed")
 MODEL_REPO = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 
 MAX_SAMPLES: int | None = 1
@@ -69,8 +65,8 @@ def tensor_to_record(
     }
 
 
-def load_caption_data() -> list[dict[str, Any]]:
-    caption_path = os.path.join(DATA_DIR, "videos2caption.json")
+def load_caption_data(data_dir: str) -> list[dict[str, Any]]:
+    caption_path = os.path.join(data_dir, "videos2caption.json")
     with open(caption_path, encoding="utf-8") as file:
         caption_data = json.load(file)
 
@@ -311,8 +307,14 @@ def main() -> None:
     model_path = maybe_download_model(MODEL_REPO)
     pipeline_config = Hunyuan15T2V480PConfig()
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    caption_data = load_caption_data()
+    # Overridable via FASTVIDEO_TEST_HUNYUAN15_OVERFIT_DATA_DIR and
+    # FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR so a run can point at its own
+    # directories instead of the documented recipe's paths.
+    data_dir = envs.FASTVIDEO_TEST_HUNYUAN15_OVERFIT_DATA_DIR.get()
+    output_dir = envs.FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR.get()
+
+    os.makedirs(output_dir, exist_ok=True)
+    caption_data = load_caption_data(data_dir)
     captions = [item["cap"][0] for item in caption_data]
 
     records: list[dict[str, Any]] = [{
@@ -388,7 +390,7 @@ def main() -> None:
 
     for index, item in enumerate(caption_data):
         video_path = os.path.join(
-            DATA_DIR,
+            data_dir,
             "videos",
             item["path"],
         )
@@ -421,7 +423,7 @@ def main() -> None:
     )
 
     output_path = os.path.join(
-        OUTPUT_DIR,
+        output_dir,
         "data_00000.parquet",
     )
     pq.write_table(
@@ -431,7 +433,7 @@ def main() -> None:
     )
 
     validation_path = os.path.join(
-        OUTPUT_DIR,
+        output_dir,
         "validation_prompts.json",
     )
     with open(
