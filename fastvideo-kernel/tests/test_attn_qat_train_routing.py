@@ -202,11 +202,15 @@ def test_sm120_joined_pv_forward_backward_matches_split_path(monkeypatch, q_leng
     assert torch.equal(joined[3], split[3])
 
 
-def _set_join_switch(monkeypatch, value):
+def _set_env(monkeypatch, name, value):
     if value is None:
-        monkeypatch.delenv("FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV", raising=False)
+        monkeypatch.delenv(name, raising=False)
     else:
-        monkeypatch.setenv("FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV", value)
+        monkeypatch.setenv(name, value)
+
+
+def _set_join_switch(monkeypatch, value):
+    _set_env(monkeypatch, "FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV", value)
 
 
 @pytest.mark.parametrize("capability", [(12, 0), (12, 1), (12, 2), (10, 0), (9, 0)])
@@ -335,16 +339,16 @@ def test_forward_consistent_dv_kill_switch(monkeypatch):
     q = _bf16_stub(torch.device("cuda"))
     monkeypatch.setattr(kernel, "is_cuda", lambda: True)
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (12, 1))
-    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_FWD_DV", None):
-        assert kernel._use_sm121_forward_consistent_dv(q, q, q, **VALIDATED_DV_OPTIONS)
-    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_FWD_DV", "0"):
-        assert not kernel._use_sm121_forward_consistent_dv(q, q, q, **VALIDATED_DV_OPTIONS)
+    _set_env(monkeypatch, "FASTVIDEO_ATTN_QAT_SM121_FWD_DV", None)
+    assert kernel._use_sm121_forward_consistent_dv(q, q, q, **VALIDATED_DV_OPTIONS)
+    _set_env(monkeypatch, "FASTVIDEO_ATTN_QAT_SM121_FWD_DV", "0")
+    assert not kernel._use_sm121_forward_consistent_dv(q, q, q, **VALIDATED_DV_OPTIONS)
 
 
 @pytest.mark.parametrize(("value", "expected"), [(None, "save"), ("save", "save"), ("RECOMPUTE", "recompute")])
-def test_forward_consistent_dv_stats_mode_env(value, expected):
-    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", value):
-        assert kernel._sm121_dv_stats_mode() == expected
-    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", "cache"):
-        with pytest.raises(ValueError):
-            kernel._sm121_dv_stats_mode()
+def test_forward_consistent_dv_stats_mode_env(monkeypatch, value, expected):
+    _set_env(monkeypatch, "FASTVIDEO_ATTN_QAT_SM121_DV_STATS", value)
+    assert kernel._sm121_dv_stats_mode() == expected
+    _set_env(monkeypatch, "FASTVIDEO_ATTN_QAT_SM121_DV_STATS", "cache")
+    with pytest.raises(ValueError):
+        kernel._sm121_dv_stats_mode()

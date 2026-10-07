@@ -5,7 +5,6 @@ import pytest
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from fastvideo import envs
 from fastvideo_kernel.triton_kernels import attn_qat_train as kernel
 from .qat_forward_reference import forward_reference
 
@@ -34,23 +33,21 @@ def full_precision_matmul():
 
 def qat(q, k, v):
     """The validated GB10 training configuration (same flags as the ATTN_QAT_TRAIN backend)."""
-    return kernel.attention(
-        q,
-        k,
-        v,
-        False,  # causal
-        128**-0.5,  # sm_scale
-        True,  # use_qat_qkv_backward
-        False,  # smooth_k
-        False,  # warp_specialize
-        True,  # IS_QAT
-        False,  # two_level_quant_P
-        True,  # fake_quant_P
-        True,  # use_high_prec_o
-        False,  # smooth_q
-        False,  # use_global_sf_P
-        False,  # use_global_sf_QKV
+    flags = dict(
+        causal=False,
+        sm_scale=128**-0.5,
+        use_qat_qkv_backward=True,
+        smooth_k=False,
+        warp_specialize=False,
+        IS_QAT=True,
+        two_level_quant_P=False,
+        fake_quant_P=True,
+        use_high_prec_o=True,
+        smooth_q=False,
+        use_global_sf_P=False,
+        use_global_sf_QKV=False,
     )
+    return kernel.attention(q, k, v, *flags.values())
 
 
 def forward_and_grads(source, do):
@@ -105,24 +102,25 @@ def test_dv_matches_independent_forward_weight_ste(nq, nk, seed):
 
 @pytest.mark.parametrize("mode", ["save", "recompute"])
 @pytest.mark.parametrize("nq,nk,heads", [(128, 128, 3), (257, 241, 3), (2113, 2081, 3), (31200, 31200, 3)])
-def test_corrected_dv_preserves_other_forward_and_gradient_tensors(mode, nq, nk, heads):
+def test_corrected_dv_preserves_other_forward_and_gradient_tensors(monkeypatch, mode, nq, nk, heads):
     torch.manual_seed(11)
     source = [torch.randn((1, heads, n, 128), device="cuda", dtype=torch.bfloat16) for n in (nq, nk, nk)]
     do = torch.randn_like(source[0])
-    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_FWD_DV", "0"):
-        legacy = forward_and_grads(source, do)
-    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", mode):
-        actual = forward_and_grads(source, do)
-        repeated = forward_and_grads(source, do)
-    assert_bitwise_equal(legacy[:5], actual[:5])  # everything but dV is unchanged
+    monkeypatch.setenv("FASTVIDEO_ATTN_QAT_SM121_FWD_DV", "0")
+    legacy = forward_and_grads(source, do)
+    monkeypatch.delenv("FASTVIDEO_ATTN_QAT_SM121_FWD_DV")
+    monkeypatch.setenv("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", mode)
+    actual = forward_and_grads(source, do)
+    repeated = forward_and_grads(source, do)
+    assert_bitwise_equal(legacy[:5], actual[:5])
     for name, tensor in zip(TENSOR_NAMES, actual):
         assert torch.isfinite(tensor).all(), name
-    assert_bitwise_equal(actual[-1:], repeated[-1:], names=("dV",))  # deterministic
+    assert_bitwise_equal(actual[-1:], repeated[-1:], names=("dV",))
 
 
 @pytest.mark.parametrize("mode", ["save", "recompute"])
 @pytest.mark.parametrize("nq,nk", [(2048, 2048), (257, 241)])
-def test_dv_supports_non_reentrant_activation_checkpoint(mode, nq, nk):
+def test_dv_supports_non_reentrant_activation_checkpoint(monkeypatch, mode, nq, nk):
     torch.manual_seed(11)
     source = [torch.randn((1, 3, length, 128), device="cuda", dtype=torch.bfloat16)
               for length in (nq, nk, nk)]
@@ -134,9 +132,9 @@ def test_dv_supports_non_reentrant_activation_checkpoint(mode, nq, nk):
         grads = torch.autograd.grad(out, leaves, upstream)
         return out.detach(), *grads
 
-    with envs.override_external("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", mode):
-        plain = run(False)
-        checkpointed = run(True)
+    monkeypatch.setenv("FASTVIDEO_ATTN_QAT_SM121_DV_STATS", mode)
+    plain = run(False)
+    checkpointed = run(True)
     for name, tensor in zip(("output", "dQ", "dK", "dV"), checkpointed):
         assert torch.isfinite(tensor).all(), name
     assert_bitwise_equal(plain, checkpointed, names=("output", "dQ", "dK", "dV"))
