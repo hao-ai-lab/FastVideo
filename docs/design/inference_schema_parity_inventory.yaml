@@ -576,6 +576,7 @@ surfaces:
       ltx2_stg_scale_audio: request.extensions.ltx2.stg_scale_audio
       ltx2_stg_blocks_video: request.extensions.ltx2.stg_blocks_video
       ltx2_stg_blocks_audio: request.extensions.ltx2.stg_blocks_audio
+      ltx2_use_ancestral_sampler: request.extensions.ltx2.use_ancestral_sampler
       ltx2_images: request.extensions.ltx2.images
       ltx2_image_crf: request.stage_overrides.refine.image_crf
       ltx2_conditioning_latent_stage1: request.extensions.ltx2.conditioning_latent_stage1
