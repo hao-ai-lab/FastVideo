@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -12,17 +13,19 @@ from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_fasth3.py"
+MINIMAX_EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_minimax_h3_t2v.py"
 
 
-def _load_example():
-    spec = importlib.util.spec_from_file_location("basic_fasth3_contract", EXAMPLE_PATH)
+def _load_example(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-fasth3 = _load_example()
+fasth3 = _load_example("basic_fasth3_contract", EXAMPLE_PATH)
+minimax_h3_t2v = _load_example("basic_minimax_h3_t2v_contract", MINIMAX_EXAMPLE_PATH)
 
 
 def _args(*overrides: str):
@@ -188,6 +191,43 @@ def test_opt_outs_override_inherited_environment(monkeypatch):
     assert config.engine.offload.pin_cpu_memory is False
 
 
+def test_hopper_route_selects_tk_kernel_and_resident_fp8_text_encoder():
+    args = _args(
+        "--num-gpus",
+        "4",
+        "--no-replicated-dit",
+        "--vsa-kernel",
+        "tk",
+        "--no-fa4",
+        "--text-encoder-weights",
+        "./FastH3-TextEncoder-FP8",
+        "--no-offload-text-encoder",
+        "--no-offload-vae",
+    )
+    environment = fasth3.profile_environment(args)
+    config = fasth3.build_generator_config(args)
+
+    assert environment["FASTVIDEO_VSA_TK"] == "1"
+    assert environment["FASTVIDEO_VSA_SM100A"] == "0"
+    assert environment["FASTVIDEO_FA4"] == "0"
+    assert config.engine.use_fsdp_inference is True
+    assert config.engine.offload.text_encoder is False
+    assert config.engine.offload.vae is False
+    assert config.pipeline.components.text_encoder_weights == "./FastH3-TextEncoder-FP8"
+
+    default_environment = fasth3.profile_environment(_args())
+    assert default_environment["FASTVIDEO_VSA_TK"] == "0"
+
+
+def test_tk_profile_requires_the_sm90_extension(monkeypatch):
+    monkeypatch.setattr(fasth3, "_sm90_kernel_is_installed", lambda: False)
+    with pytest.raises(RuntimeError, match="ThunderKittens"):
+        fasth3.validate_profile_dependencies(_args("--no-fa4", "--vsa-kernel", "tk"))
+
+    monkeypatch.setattr(fasth3, "_sm90_kernel_is_installed", lambda: True)
+    fasth3.validate_profile_dependencies(_args("--no-fa4", "--vsa-kernel", "tk"))
+
+
 def test_selected_fast_profile_requires_its_optional_routes(monkeypatch):
     monkeypatch.setattr(fasth3, "_fa4_is_installed", lambda: False)
     monkeypatch.setattr(fasth3, "_sm100a_kernel_is_installed", lambda: False)
@@ -204,7 +244,8 @@ def test_selected_fast_profile_requires_its_optional_routes(monkeypatch):
     fasth3.validate_profile_dependencies(_args())
 
 
-def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("peak_memory_mb", (42.0, None))
+def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp_path, capsys, peak_memory_mb):
     calls = []
 
     class FakeGenerator:
@@ -216,6 +257,7 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
             return SimpleNamespace(
                 video_path=request.output.output_path,
                 generation_time=1.25,
+                peak_memory_mb=peak_memory_mb,
                 logging_info=SimpleNamespace(stages={"denoising": {"execution_time": 2.5}}),
             )
 
@@ -256,9 +298,57 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
     assert f"Warmup output written to: {tmp_path / '_fasth3_warmup.mp4'}" in output
     assert output.count("Output written to:") == 3
     assert output.count("Denoising time: 2.500s") == 3
+    if peak_memory_mb is None:
+        # The Ray backend leaves peak_memory_mb unset: stay silent, never print "None MB".
+        assert "Peak memory:" not in output
+    else:
+        assert output.count("Peak memory: 42.0 MB") == 3
     assert "Measured E2E wall times (n=3, warmup excluded): [6.0, 7.0, 8.0]" in output
     assert "Median E2E wall time: 7.000s" in output
     assert "Median denoising time: 2.500s" in output
+
+
+@pytest.mark.parametrize("peak_memory_mb", (42.0, None))
+def test_minimax_h3_t2v_reports_peak_memory_only_when_present(monkeypatch, tmp_path, capsys, peak_memory_mb):
+    generated = []
+
+    class FakeGenerator:
+
+        def generate(self, request):
+            generated.append(request)
+            return SimpleNamespace(
+                video_path=request.output.output_path,
+                generation_time=1.25,
+                peak_memory_mb=peak_memory_mb,
+            )
+
+        def shutdown(self):
+            pass
+
+    class FakeVideoGenerator:
+
+        @classmethod
+        def from_config(cls, config):
+            return FakeGenerator()
+
+    monkeypatch.setattr(minimax_h3_t2v, "VideoGenerator", FakeVideoGenerator)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["basic_minimax_h3_t2v.py", "--prompt", "a test prompt", "--output",
+         str(tmp_path), "--repeats", "2"],
+    )
+
+    minimax_h3_t2v.main()
+
+    assert len(generated) == 2
+    output = capsys.readouterr().out
+    assert output.count("Output written to:") == 1
+    assert output.count("Generation time: 1.25s") == 2
+    if peak_memory_mb is None:
+        assert "Peak memory:" not in output
+    else:
+        assert output.count("Peak memory: 42.0 MB") == 2
 
 
 def test_taeh3_backend_is_opt_in_experimental():

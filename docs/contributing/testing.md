@@ -16,6 +16,7 @@ slash-command mappings, and workflow ownership live in
 | Training tests | `fastvideo/tests/training` | Validate legacy training loops, LoRA, distillation, self-forcing, and VSA behavior. |
 | Inference tests | `fastvideo/tests/inference` | Validate specialized inference paths such as LoRA inference and V-MoBA. |
 | Performance tests | `fastvideo/tests/performance` | Gate latency, throughput, peak memory, and stage timings. See [Performance Benchmarks](performance_benchmarks.md). |
+| Local performance behavior tests | `tests/local_tests/performance` | Validate performance config, policy, identity, result schemas, dashboards, and worker-log capture outside CI. |
 | Eval tests | `fastvideo/tests/eval` | Check eval metrics against pinned reference scores and assets. |
 | DreamVerse app tests | `apps/dreamverse` | Validate the DreamVerse backend, frontend, and mock-backed browser flows. |
 

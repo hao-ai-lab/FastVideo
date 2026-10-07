@@ -211,7 +211,8 @@ The Buildkite agent and Slurm have deliberately separate responsibilities:
 
 ```text
 /merge PR comment
-  -> GitHub verifies write permission and refreshes the `ready` label
+  -> GitHub verifies write permission, adds the `ready` label, and directly
+     calls the trusted base-branch merge-gate workflow
   -> base-branch `ci-trigger-full-suite` workflow fetches the PR file list,
      computes MERGE_TEST_PLAN plus focused golden/SSIM basenames, and gates on
      cheap checks
@@ -293,8 +294,9 @@ they select the same Slurm lane and do not identify a second backend.
 
 When a direct test completes successfully, Buildkite posts
 `direct-test-completed`. `.github/workflows/ci-aggregate-status.yml` then reads
-the latest Buildkite statuses for the commit and updates `fastcheck-passed` or
-`full-suite-passed` if all jobs in that group are green.
+the latest Buildkite statuses for the commit and repairs an already-failed
+`fastcheck-passed` or `full-suite-passed` status if all jobs in that group are
+now green. A direct test never creates an aggregate for a tier that did not run.
 
 Buildkite label emojis define the status namespace used by that aggregation:
 `:microscope:` is reserved for the six Fastcheck lanes, while Full-Suite-only

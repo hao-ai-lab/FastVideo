@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Inference stages for MMAudio V2A/T2A.
+"""Inference stages and shared video preprocessing for MMAudio V2A/T2A.
 
 The video sampler intentionally mirrors ``mmaudio.data.av_utils.read_frames``:
 timestamps are sampled independently at 8 FPS and 25 FPS, and a decoded frame
 is repeated when the source FPS is lower than a requested sampling rate.
+
+Training preprocessing can instead select the FFmpeg ``fps`` filter sampler,
+matching MMAudio's original ``StreamingMediaDecoder`` training path.
 """
 
 from __future__ import annotations
@@ -68,6 +71,90 @@ def _read_frames_at_fps(
     return [np.stack(frames) for frames in outputs]
 
 
+def _read_frames_with_fps_filters(
+    video_path: str | Path,
+    frame_rates: tuple[float, ...],
+    *,
+    start_s: float,
+    end_s: float,
+) -> list[np.ndarray]:
+    """Decode RGB frames using one FFmpeg graph with an ``fps`` branch per rate.
+
+    MMAudio's original training loader configures
+    ``StreamingMediaDecoder.add_basic_video_stream(frame_rate=...)``, which
+    delegates resampling to FFmpeg's ``fps`` filter. A single split graph keeps
+    both output rates on the same decode and avoids sharing a VideoFrame between
+    multiple filter graphs.
+    """
+    import av
+
+    if not frame_rates or any(fps <= 0 for fps in frame_rates):
+        raise ValueError("MMAudio video frame rates must be positive")
+    if start_s < 0 or end_s <= start_s:
+        raise ValueError(f"Invalid MMAudio video interval [{start_s}, {end_s}] seconds")
+
+    expected_counts = [int((end_s - start_s) * fps) for fps in frame_rates]
+    if any(count <= 0 for count in expected_counts):
+        raise ValueError(f"MMAudio video interval [{start_s}, {end_s}] is too short for "
+                         f"frame rates {frame_rates}")
+    outputs: list[list[np.ndarray]] = [[] for _ in frame_rates]
+
+    with av.open(str(video_path)) as container:
+        stream = container.streams.video[0]
+        stream.thread_type = "AUTO"
+
+        graph = av.filter.Graph()
+        source = graph.add_buffer(template=stream)
+        trim = graph.add("trim", f"start={start_s}:end={end_s}")
+        source.link_to(trim)
+        setpts = graph.add("setpts", "PTS-STARTPTS")
+        trim.link_to(setpts)
+
+        if len(frame_rates) > 1:
+            split = graph.add("split", str(len(frame_rates)))
+            setpts.link_to(split)
+            branch_source = split
+        else:
+            branch_source = setpts
+
+        sinks = []
+        for index, fps in enumerate(frame_rates):
+            fps_filter = graph.add("fps", f"fps={fps}")
+            if len(frame_rates) > 1:
+                branch_source.link_to(fps_filter, index, 0)
+            else:
+                branch_source.link_to(fps_filter)
+            rgb_filter = graph.add("format", "pix_fmts=rgb24")
+            fps_filter.link_to(rgb_filter)
+            sink = graph.add("buffersink")
+            rgb_filter.link_to(sink)
+            sinks.append(sink)
+        graph.configure()
+
+        def drain_outputs() -> None:
+            for index, (sink, expected_count) in enumerate(zip(sinks, expected_counts, strict=True)):
+                while len(outputs[index]) < expected_count:
+                    try:
+                        output_frame = sink.pull()
+                    except (av.error.BlockingIOError, av.error.EOFError):
+                        break
+                    outputs[index].append(output_frame.to_ndarray(format="rgb24"))
+
+        for frame in container.decode(stream):
+            source.push(frame)
+            drain_outputs()
+            if all(len(frames) >= expected for frames, expected in zip(outputs, expected_counts, strict=True)):
+                break
+        else:
+            source.push(None)
+            drain_outputs()
+
+    if any(not frames for frames in outputs):
+        raise ValueError(f"Could not decode video frames from {video_path} in "
+                         f"[{start_s}, {end_s}] seconds.")
+    return [np.stack(frames) for frames in outputs]
+
+
 def preprocess_mmaudio_video(
     video_path: str | Path,
     *,
@@ -76,13 +163,19 @@ def preprocess_mmaudio_video(
     sync_fps: int = 25,
     clip_size: int = 384,
     sync_size: int = 224,
+    use_ffmpeg_fps_filter: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, float]:
     """Return official-format CLIP frames, sync frames, and effective duration.
 
     CLIP output is float32 ``[T,3,384,384]`` in ``[0,1]``. Synchformer
     output is float32 ``[T,3,224,224]`` in ``[-1,1]``.
+
+    The default timestamp sampler preserves inference parity. Training callers
+    should enable ``use_ffmpeg_fps_filter`` to match MMAudio's original
+    StreamingMediaDecoder/FFmpeg resampling behavior.
     """
-    clip_array, sync_array = _read_frames_at_fps(
+    frame_reader = (_read_frames_with_fps_filters if use_ffmpeg_fps_filter else _read_frames_at_fps)
+    clip_array, sync_array = frame_reader(
         video_path,
         (float(clip_fps), float(sync_fps)),
         start_s=0.0,
@@ -144,8 +237,10 @@ class MMAudioInputValidationStage(PipelineStage):
         if isinstance(batch.negative_prompt, list) and len(batch.negative_prompt) != 1:
             raise ValueError("MMAudio currently supports one negative prompt per request.")
 
-        direct_video = (batch.extra.get("mmaudio_clip_frames") is not None
-                        and batch.extra.get("mmaudio_sync_frames") is not None)
+        direct_video = ((batch.extra.get("mmaudio_clip_frames") is not None
+                         and batch.extra.get("mmaudio_sync_frames") is not None)
+                        or (batch.extra.get("mmaudio_clip_features") is not None
+                            and batch.extra.get("mmaudio_sync_features") is not None))
         if (fastvideo_args.workload_type is WorkloadType.V2A and batch.video_path is None and not direct_video):
             raise ValueError("MMAudio V2A requires `video_path` or preprocessed MMAudio frame tensors.")
 
@@ -187,6 +282,51 @@ class MMAudioVideoConditioningStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         pc = fastvideo_args.pipeline_config
         duration_s = float(batch.extra["mmaudio_duration_s"])
+        direct_clip_features = batch.extra.get("mmaudio_clip_features")
+        direct_sync_features = batch.extra.get("mmaudio_sync_features")
+        if (direct_clip_features is None) != (direct_sync_features is None):
+            raise ValueError("MMAudio direct conditioning requires both CLIP and sync features.")
+        if direct_clip_features is not None:
+            if direct_clip_features.ndim != 3 or direct_sync_features.ndim != 3:
+                raise ValueError("MMAudio direct CLIP/sync features must have shape [B,T,C].")
+            if direct_clip_features.shape[0] != 1 or direct_sync_features.shape[0] != 1:
+                raise ValueError("MMAudio direct features currently require batch size 1.")
+            latent_length, clip_length, sync_length = mmaudio_sequence_lengths(
+                duration_s,
+                pc,
+            )
+            expected_clip = (1, clip_length, pc.dit_config.arch_config.clip_dim)
+            expected_sync = (1, sync_length, pc.dit_config.arch_config.sync_dim)
+            if tuple(direct_clip_features.shape) != expected_clip:
+                raise ValueError(f"MMAudio direct CLIP features must have shape {expected_clip}, "
+                                 f"got {tuple(direct_clip_features.shape)}.")
+            if tuple(direct_sync_features.shape) != expected_sync:
+                raise ValueError(f"MMAudio direct sync features must have shape {expected_sync}, "
+                                 f"got {tuple(direct_sync_features.shape)}.")
+            self.transformer.update_seq_lengths(
+                latent_length,
+                clip_length,
+                sync_length,
+            )
+            device = get_local_torch_device()
+            dtype = next(self.transformer.parameters()).dtype
+            batch.extra["mmaudio_sequence_lengths"] = (
+                latent_length,
+                clip_length,
+                sync_length,
+            )
+            batch.extra["mmaudio_clip_features"] = direct_clip_features.to(
+                device=device,
+                dtype=dtype,
+                non_blocking=True,
+            )
+            batch.extra["mmaudio_sync_features"] = direct_sync_features.to(
+                device=device,
+                dtype=dtype,
+                non_blocking=True,
+            )
+            return batch
+
         clip_frames = batch.extra.get("mmaudio_clip_frames")
         sync_frames = batch.extra.get("mmaudio_sync_frames")
         use_video = batch.video_path is not None or (clip_frames is not None and sync_frames is not None)
@@ -291,42 +431,73 @@ class MMAudioTextConditioningStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         device = get_local_torch_device()
         model_dtype = next(self.transformer.parameters()).dtype
-        self.text_encoder = self.text_encoder.to(device)
+        direct_text_features = batch.extra.get("mmaudio_text_features")
 
-        def encode(text: str | list[str] | None) -> torch.Tensor | None:
-            if text is None:
-                return None
-            texts = [text] if isinstance(text, str) else text
-            tokens = self.tokenizer(
-                texts,
-                padding="max_length",
-                truncation=True,
-                max_length=77,
-                return_tensors="pt",
+        if direct_text_features is not None:
+            if direct_text_features.ndim != 3 or direct_text_features.shape[0] != 1:
+                raise ValueError("MMAudio direct text features must have shape [1,T,C].")
+            expected_shape = (
+                1,
+                self.transformer.config.arch_config.text_seq_len,
+                self.transformer.config.arch_config.text_dim,
             )
-            # Hugging Face CLIPTokenizer pads with EOS by default, while
-            # OpenCLIP/MMAudio pads with token id zero.
-            input_ids = tokens.input_ids.masked_fill(tokens.attention_mask == 0, 0).to(device)
-            with set_forward_context(current_timestep=0, attn_metadata=None):
-                return self.text_encoder(input_ids).last_hidden_state.to(model_dtype)
+            if tuple(direct_text_features.shape) != expected_shape:
+                raise ValueError(f"MMAudio direct text features must have shape {expected_shape}, "
+                                 f"got {tuple(direct_text_features.shape)}.")
+            text_features = direct_text_features.to(
+                device=device,
+                dtype=model_dtype,
+                non_blocking=True,
+            )
+            negative_text_features = None
+        else:
+            self.text_encoder = self.text_encoder.to(device)
 
-        text_features = encode(batch.prompt)
-        if text_features is None:
-            text_features = self.transformer.get_empty_string_sequence(1)
-        negative_text_features = encode(batch.negative_prompt)
+            def encode(text: str | list[str] | None) -> torch.Tensor | None:
+                if text is None:
+                    return None
+                texts = [text] if isinstance(text, str) else text
+                tokens = self.tokenizer(
+                    texts,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=77,
+                    return_tensors="pt",
+                )
+                # Hugging Face CLIPTokenizer pads with EOS by default, while
+                # OpenCLIP/MMAudio pads with token id zero.
+                input_ids = tokens.input_ids.masked_fill(tokens.attention_mask == 0, 0).to(device)
+                with set_forward_context(current_timestep=0, attn_metadata=None):
+                    return self.text_encoder(input_ids).last_hidden_state.to(model_dtype)
 
-        if fastvideo_args.text_encoder_cpu_offload:
-            self.text_encoder = self.text_encoder.to("cpu")
+            text_features = encode(batch.prompt)
+            if text_features is None:
+                text_features = self.transformer.get_empty_string_sequence(1)
+            negative_text_features = encode(batch.negative_prompt)
 
-        conditions = self.transformer.preprocess_conditions(
-            batch.extra["mmaudio_clip_features"],
-            batch.extra["mmaudio_sync_features"],
-            text_features,
-        )
-        empty_conditions = self.transformer.get_empty_conditions(
-            1,
-            negative_text_features=negative_text_features,
-        )
+            if fastvideo_args.text_encoder_cpu_offload:
+                self.text_encoder = self.text_encoder.to("cpu")
+
+        # A live training transformer can be FSDP2-sharded. Condition
+        # preprocessing reads positional-embedding parameters before the
+        # transformer's normal pre-forward hook would all-gather them.
+        unshard = getattr(self.transformer, "unshard", None)
+        if callable(unshard):
+            unshard()
+        with torch.autocast(
+                device_type=device.type,
+                dtype=torch.bfloat16,
+                enabled=device.type == "cuda",
+        ):
+            conditions = self.transformer.preprocess_conditions(
+                batch.extra["mmaudio_clip_features"],
+                batch.extra["mmaudio_sync_features"],
+                text_features,
+            )
+            empty_conditions = self.transformer.get_empty_conditions(
+                1,
+                negative_text_features=negative_text_features,
+            )
         batch.extra["mmaudio_conditions"] = conditions
         batch.extra["mmaudio_empty_conditions"] = empty_conditions
         return batch
@@ -387,13 +558,25 @@ class MMAudioDenoisingStage(PipelineStage):
         empty_conditions = batch.extra["mmaudio_empty_conditions"]
         latents = batch.latents
         for index, timestep in enumerate(self.scheduler.timesteps):
-            flow = self.transformer.guided_flow(
-                timestep / self.scheduler.config.num_train_timesteps,
-                latents,
-                conditions,
-                empty_conditions,
-                float(batch.guidance_scale),
-            )
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
+            # Converted inference checkpoints carry bf16 parameters directly,
+            # while a live FSDP training model keeps fp32 master parameters and
+            # runs its forward pass under bf16 autocast. Use the same forward
+            # precision here so training-time validation can reuse this stage.
+            with torch.autocast(
+                    device_type=latents.device.type,
+                    dtype=torch.bfloat16,
+                    enabled=latents.device.type == "cuda",
+            ):
+                flow = self.transformer.guided_flow(
+                    timestep / self.scheduler.config.num_train_timesteps,
+                    latents,
+                    conditions,
+                    empty_conditions,
+                    float(batch.guidance_scale),
+                )
             # The shared FlowMatch scheduler supplies the exact inverted
             # forward-time sigma schedule. Its generic ``step`` deliberately
             # upcasts samples to fp32, however, while MMAudio's published
@@ -425,6 +608,15 @@ class MMAudioDecodingStage(PipelineStage):
     @torch.inference_mode()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         assert batch.latents is not None
+        if not fastvideo_args.is_output_rank:
+            batch.extra.pop("audio", None)
+            batch.extra.pop("audio_sample_rate", None)
+            batch.extra.pop("decoded_audio", None)
+            batch.extra["audio_only"] = True
+            batch.data_type = "audio"
+            batch.output = torch.empty(0, device="cpu")
+            batch.latents = None
+            return batch
         if fastvideo_args.output_type == "latent":
             batch.output = batch.latents.detach().cpu()
             return batch

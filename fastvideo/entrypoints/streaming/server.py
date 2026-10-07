@@ -184,6 +184,12 @@ def run_server(serve_config: ServeConfig, *, generator: _GeneratorProto | None =
         raise ValueError("ServeConfig.streaming must be set to launch the streaming server; "
                          "got None. Add a `streaming:` block to your serve config.")
 
+    from fastvideo.worker.executor import reject_external_launcher
+    reject_external_launcher(
+        serve_config.generator.engine.execution_backend,
+        entrypoint="the streaming server",
+    )
+
     import uvicorn
 
     if generator is None:

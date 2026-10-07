@@ -110,3 +110,40 @@ def test_h3_vsa_backward_cute_matches_triton(gate_compress: bool) -> None:
         print(f"[h3-vsa gate={gate_compress}] {name}: avg_abs={avg_abs:.6e}, max_rel={max_rel:.6e}")
         assert avg_abs < 1e-2, f"{name}: avg_abs {avg_abs:.3e}"
         assert max_rel < 0.5, f"{name}: max_rel {max_rel:.3e}"
+
+
+@pytest.mark.parametrize("gate_compress", [False, True])
+def test_h3_vsa_no_grad_gate_combine_matches_out_of_place(monkeypatch, gate_compress: bool) -> None:
+    """The inference gated combine accumulates into the kernel output in place;
+    it must equal the out-of-place combine taken under grad.
+
+    This is the only test that executes the in-place branch: every other gated
+    H3 call runs with grad tracking and takes the out-of-place path. The sparse
+    kernel is replaced by a deterministic grad-tracking stub so the combine
+    branch is the only difference between the two runs.
+    """
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required")
+    device = torch.device("cuda")
+    meta = _build_meta(device)
+    assert meta.tile_elems == 256, "this test pins the tile-256 kernel route"
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    monkeypatch.setattr("fastvideo.attention.backends.video_sparse_attn_h3.block_sparse_attn_256_bshd",
+                        lambda q, k, v, mask, vbs: (v * 0.5, None))
+
+    seq = meta.total_seq_length
+    torch.manual_seed(0)
+    q, k, v = (torch.randn(1, seq, _HEADS, _DIM, device=device, dtype=torch.bfloat16) for _ in range(3))
+    tq, tk, tv = (impl.tile(t, meta).clone() for t in (q, k, v))
+    gate = None
+    if gate_compress:
+        torch.manual_seed(1)
+        gate = torch.randn(1, tq.shape[1], _HEADS, _DIM, device=device, dtype=torch.bfloat16) * 0.1
+
+    with torch.no_grad():
+        got = impl.forward(tq, tk, tv, gate, meta)  # in-place combine when gated
+    leaves = [t.clone().requires_grad_(True) for t in (tq, tk, tv)]
+    expected = impl.forward(*leaves, gate, meta)  # out-of-place combine when gated
+
+    assert got.requires_grad is False and expected.requires_grad is True
+    torch.testing.assert_close(got, expected.detach())

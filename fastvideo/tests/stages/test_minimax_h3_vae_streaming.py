@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
+from fastvideo.pipelines.basic.minimax_h3 import encoder_split
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MiniMaxH3PackedLayout,
     patchify_video_latents,
@@ -185,7 +186,7 @@ def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
     monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
     monkeypatch.setattr(minimax_h3_decoding, "get_sp_group",
                         lambda: SimpleNamespace(is_first_rank=True, world_size=4, rank_in_group=0))
-    monkeypatch.setattr(minimax_h3_decoding, "get_world_group", lambda: SimpleNamespace(is_first_rank=False))
+    monkeypatch.setattr(encoder_split, "get_world_group", lambda: SimpleNamespace(rank=1, first_rank=0))
     args = SimpleNamespace(output_type="pil", pin_cpu_memory=False, vae_cpu_offload=True, vae_parallel_decode=False)
 
     video = MiniMaxH3VideoDecodingStage(VAE()).forward(ForwardBatch(data_type="video"), args)
@@ -202,9 +203,8 @@ def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
 
 
 def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
-    """With vae_parallel_decode, non-leader ranks must enter the decode body
-    (the collectives inside require uniform participation) and only the
-    leader owns the CPU output buffer."""
+    """Every rank in the output rank's SP group enters the collective decode,
+    while only the global output rank owns the CPU output buffer."""
     latent_shape = (1, 4, 2, 4, 4)
     rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
     calls = []
@@ -239,11 +239,13 @@ def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
     )
 
     for rank, is_first in ((0, True), (2, False)):
+        monkeypatch.setattr(encoder_split, "get_world_group", lambda rank=rank: SimpleNamespace(rank=rank, first_rank=0))
         monkeypatch.setattr(
             minimax_h3_decoding, "get_sp_group",
             lambda rank=rank, is_first=is_first: SimpleNamespace(is_first_rank=is_first,
                                                                  world_size=4,
-                                                                 rank_in_group=rank))
+                                                                 rank_in_group=rank,
+                                                                 ranks=[0, 1, 2, 3]))
         batch = ForwardBatch(data_type="video", latents=rows.clone(), raw_latent_shape=latent_shape)
         batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
         result = MiniMaxH3VideoDecodingStage(VAE()).forward(batch, args)
@@ -257,3 +259,104 @@ def test_parallel_decode_runs_on_every_rank(monkeypatch) -> None:
 
     assert [(rank, output is not None) for rank, output, _ in calls] == [(0, True), (2, False)]
     assert all(strategy == "gather" for _, _, strategy in calls)
+
+
+def test_parallel_decode_skips_entire_sp_group_without_output_rank(monkeypatch) -> None:
+    class VAE:
+
+        def to(self, device):
+            raise AssertionError("an SP group without the output rank must not execute the VAE")
+
+    monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
+    args = SimpleNamespace(
+        output_type="pil",
+        pin_cpu_memory=False,
+        vae_cpu_offload=False,
+        vae_parallel_decode=True,
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+    )
+
+    for rank, is_first in ((0, True), (2, False)):
+        monkeypatch.setattr(encoder_split, "get_world_group",
+                            lambda rank=rank: SimpleNamespace(rank=4 + rank, first_rank=0))
+        monkeypatch.setattr(
+            minimax_h3_decoding, "get_sp_group",
+            lambda rank=rank, is_first=is_first: SimpleNamespace(is_first_rank=is_first,
+                                                                 world_size=4,
+                                                                 rank_in_group=rank,
+                                                                 ranks=[4, 5, 6, 7]))
+        result = MiniMaxH3VideoDecodingStage(VAE()).forward(ForwardBatch(data_type="video"), args)
+        assert result.output.shape == (0, 3, 0, 0, 0)
+
+
+def test_encoder_split_decodes_in_the_denoise_group_on_its_first_rank(monkeypatch) -> None:
+    """Under the MiniMax-H3 encoder split world rank 0 is an encoder rank, so the
+    denoise group decodes and its first rank owns the output."""
+    latent_shape = (1, 4, 2, 4, 4)
+    rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
+    calls = []
+
+    class VAE:
+
+        def to(self, device):
+            return self
+
+        def denormalize_latents(self, decoded_latents):
+            return decoded_latents
+
+        def decoded_pixel_shape(self, shape):
+            return (1, 3, 5, 16, 16)
+
+    class EncoderRankVAE:
+
+        def to(self, device):
+            raise AssertionError("an encoder rank must not execute the VAE")
+
+    def fake_parallel(vae, latents, output, group, strategy):
+        calls.append((group.rank_in_group, output is not None))
+        if output is not None:
+            output.fill_(0.5)
+        return output
+
+    monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(minimax_h3_decoding, "model_parallel_is_initialized", lambda: True)
+    monkeypatch.setattr(minimax_h3_decoding, "decode_to_pixels_parallel", fake_parallel)
+    args = SimpleNamespace(
+        output_type="pil",
+        pin_cpu_memory=False,
+        vae_cpu_offload=False,
+        vae_parallel_decode=True,
+        vae_parallel_decode_strategy="gather",
+        h3_encoder_split=True,
+        h3_encoder_workers=2,
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))),
+    )
+    denoise_ranks = [2, 3, 4, 5]
+
+    for rank in (2, 4):
+        monkeypatch.setattr(encoder_split, "get_world_group",
+                            lambda rank=rank: SimpleNamespace(rank=rank, first_rank=0, world_size=6))
+        monkeypatch.setattr(
+            minimax_h3_decoding, "get_sp_group",
+            lambda rank=rank: SimpleNamespace(is_first_rank=rank == 2,
+                                              world_size=len(denoise_ranks),
+                                              rank_in_group=rank - 2,
+                                              ranks=denoise_ranks))
+        batch = ForwardBatch(data_type="video", latents=rows.clone(), raw_latent_shape=latent_shape)
+        batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
+        result = MiniMaxH3VideoDecodingStage(VAE()).forward(batch, args)
+        if rank == 2:
+            assert result.output.shape == (1, 3, 5, 16, 16)
+            assert torch.all(result.output == 127)
+        else:
+            assert result.output.shape == (0, 3, 0, 0, 0)
+
+    assert calls == [(0, True), (2, False)]
+
+    # Encoder ranks hold singleton SP groups and never own the output.
+    monkeypatch.setattr(encoder_split, "get_world_group",
+                        lambda: SimpleNamespace(rank=0, first_rank=0, world_size=6))
+    monkeypatch.setattr(minimax_h3_decoding, "get_sp_group",
+                        lambda: SimpleNamespace(is_first_rank=True, world_size=1, rank_in_group=0, ranks=[0]))
+    result = MiniMaxH3VideoDecodingStage(EncoderRankVAE()).forward(ForwardBatch(data_type="video"), args)
+    assert result.output.shape == (0, 3, 0, 0, 0)

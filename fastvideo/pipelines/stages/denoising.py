@@ -25,6 +25,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.profiler import profiler_region
 from fastvideo.utils import dict_to_3d_list
 
 try:
@@ -72,8 +73,8 @@ class DenoisingStage(PipelineStage):
             dtype=torch.float16,  # TODO(will): hack
             supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.BSA_ATTN,
                                           AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE),  # hack
+                                          AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.SAGE_ATTN_THREE,
+                                          AttentionBackendEnum.ATTN_QAT_INFER),  # hack
             # Build metadata for the backend this transformer actually resolved
             # instead of re-deriving it from the environment. The two agreed
             # only when the request arrived via the env var: a request passed as
@@ -228,6 +229,8 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        animate_kwargs, animate_uncond_kwargs = self._animate_conditioning_kwargs(batch)
+
         # Get latents and embeddings
         latents = batch.latents
         cast_embeds = getattr(fastvideo_args.pipeline_config.dit_config, "cast_prompt_embeds_to_dit_dtype", False)
@@ -253,6 +256,7 @@ class DenoisingStage(PipelineStage):
 
         state = self.prepare_denoising(batch, fastvideo_args, target_dtype)
         latents = state.latents
+        model_kwargs, model_kwargs_uncond = self.prepare_model_kwargs(batch, fastvideo_args)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -318,7 +322,7 @@ class DenoisingStage(PipelineStage):
         _cfg_gate_invalidations = 0
 
         # Run denoising loop
-        with self.progress_bar(total=num_inference_steps) as progress_bar:
+        with profiler_region("inference_denoising"), self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
@@ -421,6 +425,8 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **animate_kwargs,
+                            **model_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -465,6 +471,8 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **animate_uncond_kwargs,
+                                    **model_kwargs_uncond,
                                 )
                             _cfg_gate_fresh_uncond += 1
 
@@ -557,6 +565,28 @@ class DenoisingStage(PipelineStage):
 
         return batch
 
+    def _animate_conditioning_kwargs(self, batch: ForwardBatch) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(conditional, unconditional) kwargs for pose/face-driven models (Wan-Animate).
+
+        Like the other kwarg groups, ``prepare_extra_func_kwargs`` drops every
+        key the transformer's forward does not name, so this is empty -- and a
+        no-op -- for all other models. The unconditional variant keeps the pose
+        and blanks the face crops to -1 (black in the [-1, 1] pixel range),
+        matching diffusers' WanAnimatePipeline (``face * 0 - 1``); note Animate
+        runs with guidance 1.0 by default, so the uncond pass rarely fires.
+        """
+        kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "pose_latents": batch.pose_latents,
+                "face_pixel_values": batch.face_pixel_values,
+            },
+        )
+        uncond_kwargs = dict(kwargs)
+        if uncond_kwargs.get("face_pixel_values") is not None:
+            uncond_kwargs["face_pixel_values"] = torch.full_like(uncond_kwargs["face_pixel_values"], -1.0)
+        return kwargs, uncond_kwargs
+
     def prepare_denoising(self, batch, fastvideo_args, target_dtype) -> DenoisingState:
         """Build request-local state. Family stages specialize latent conditioning."""
         latents = batch.latents
@@ -566,6 +596,14 @@ class DenoisingStage(PipelineStage):
             latents=latents,
             video_padding=torch.zeros_like(latents) if batch.video_latent is not None else None,
         )
+
+    def prepare_model_kwargs(self, batch, fastvideo_args) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Step-invariant transformer kwargs as (conditional, unconditional).
+
+        Family stages add named conditioning here (Wan-S2V's audio, reference
+        and motion latents) without the shared loop learning about it.
+        """
+        return {}, {}
 
     def activate_transformer(self, model, inactive_model, fastvideo_args) -> None:
         """Keep CPU/layerwise/FSDP offload decisions independent of the sampling recipe."""
@@ -1034,6 +1072,9 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
 
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
+                # Stop if interrupted
+                if getattr(self, "interrupt", False):
+                    break
                 t_val = float(t)
                 if is_conditioned:
                     t_frames = int(latents_4d.shape[1])
@@ -1134,6 +1175,241 @@ class Cosmos25T2WDenoisingStage(Cosmos25DenoisingStage):
             if hasattr(batch, name):
                 setattr(batch, name, None)
         return super().forward(batch, fastvideo_args)
+
+
+class Cosmos25DistilledT2WDenoisingStage(Cosmos25DenoisingStage):
+    """Four-step TrigFlow/x0 denoising for the released distilled student."""
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        pipeline = self.pipeline() if self.pipeline else None
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
+            fastvideo_args.model_loaded["transformer"] = True
+
+        latents = batch.latents
+        if latents is None:
+            raise ValueError("latents must be provided for Cosmos25DistilledT2WDenoisingStage")
+        if not batch.prompt_embeds:
+            raise ValueError("prompt_embeds must be provided for Cosmos25 distilled inference")
+
+        timesteps = batch.timesteps
+        if timesteps is None:
+            self.scheduler.set_timesteps(batch.num_inference_steps, device=latents.device)
+            timesteps = self.scheduler.timesteps
+        else:
+            timesteps = timesteps.to(latents.device)
+
+        target_dtype = torch.bfloat16
+        for parameter in self.transformer.parameters():
+            if parameter.dtype != torch.float32:
+                target_dtype = parameter.dtype
+                break
+        autocast_enabled = (latents.device.type == "cuda" and target_dtype != torch.float32
+                            and not fastvideo_args.disable_autocast)
+
+        batch_size, _, latent_frames, latent_height, latent_width = latents.shape
+        condition_mask = torch.zeros(
+            (batch_size, 1, latent_frames, latent_height, latent_width),
+            device=latents.device,
+            dtype=target_dtype,
+        )
+        padding_mask = torch.ones(
+            (batch_size, 1, latent_height, latent_width),
+            device=latents.device,
+            dtype=target_dtype,
+        )
+
+        if batch.fps is None:
+            fps_tensor = torch.full((1, ), 24, device=latents.device, dtype=target_dtype)
+        else:
+            fps_tensor = torch.as_tensor(batch.fps, device=latents.device, dtype=target_dtype).reshape(-1)
+            if fps_tensor.numel() != 1:
+                # The Cosmos25 RoPE builds one batch-independent (T*H*W, D) table
+                # (see cosmos2_5.py), so the DiT consumes a single shared fps
+                # value per forward pass, never one value per sample.
+                if not torch.equal(fps_tensor, fps_tensor[:1].expand_as(fps_tensor)):
+                    raise ValueError(f"fps must be one shared value for the whole batch; got {fps_tensor.tolist()}")
+                fps_tensor = fps_tensor[:1]
+
+        state = latents.to(torch.float64)
+        with self.progress_bar(total=len(timesteps)) as progress_bar:
+            for timestep_value in timesteps:
+                # Truncate the evolving FP64 state to FP32 only for the network
+                # input; the x0 reconstruction and the fixed-noise update run in
+                # FP64, as in the official driver transcribed in
+                # test_cosmos25_distilled_scheduler_parity.py.
+                model_input = self.scheduler.scale_model_input(state, timestep_value).float()
+                model_timestep = torch.full(
+                    (batch_size, latent_frames),
+                    float(timestep_value),
+                    device=latents.device,
+                    dtype=target_dtype,
+                )
+                context_timestep = int(round(float(timestep_value) * 1000))
+                with (
+                        set_forward_context(
+                            current_timestep=context_timestep,
+                            attn_metadata=None,
+                            forward_batch=batch,
+                        ),
+                        torch.autocast(
+                            device_type=latents.device.type,
+                            dtype=target_dtype,
+                            enabled=autocast_enabled,
+                        ),
+                ):
+                    model_output = self.transformer(
+                        hidden_states=model_input.to(target_dtype),
+                        encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
+                        timestep=model_timestep,
+                        fps=fps_tensor,
+                        condition_mask=condition_mask,
+                        padding_mask=padding_mask,
+                        return_dict=False,
+                    )
+                    if isinstance(model_output, tuple | list):
+                        model_output = model_output[0]
+
+                if model_output.shape != state.shape:
+                    raise ValueError(
+                        f"Cosmos25 distilled DiT returned shape {model_output.shape}; expected {state.shape}")
+
+                state = self.scheduler.step(
+                    model_output.float(),
+                    timestep_value,
+                    state,
+                    generator=batch.generator,
+                    return_dict=False,
+                )[0]
+                progress_bar.update()
+
+        # The official implementation returns a finite FP32 x0 for VAE decode.
+        state = state.float()
+        if not torch.isfinite(state).all():
+            raise FloatingPointError("Cosmos25 distilled rollout produced non-finite latents; refusing to "
+                                     "silently substitute NaN/Inf values into the decoded video")
+        batch.latents = state
+        return batch
+
+
+class Cosmos25DFDV2WDenoisingStage(Cosmos25DenoisingStage):
+    """Four-step DFD ODE rollout with clean first-frame preservation."""
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        pipeline = self.pipeline() if self.pipeline else None
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(fastvideo_args.model_paths["transformer"], fastvideo_args)
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
+            fastvideo_args.model_loaded["transformer"] = True
+
+        state = batch.latents
+        conditioning = getattr(batch, "conditioning_latents", None)
+        condition_mask = getattr(batch, "cond_mask", None)
+        if state is None:
+            raise ValueError("latents must be provided for Cosmos25DFDV2WDenoisingStage")
+        if conditioning is None or condition_mask is None:
+            raise ValueError("DFD V2W requires conditioning_latents and cond_mask")
+        if not batch.prompt_embeds:
+            raise ValueError("prompt_embeds must be provided for Cosmos25 DFD inference")
+
+        timesteps = batch.timesteps
+        if timesteps is None:
+            self.scheduler.set_timesteps(batch.num_inference_steps, device=state.device)
+            timesteps = self.scheduler.timesteps
+        else:
+            timesteps = timesteps.to(state.device)
+
+        target_dtype = torch.bfloat16
+        for parameter in self.transformer.parameters():
+            if parameter.dtype != torch.float32:
+                target_dtype = parameter.dtype
+                break
+        autocast_enabled = (state.device.type == "cuda" and target_dtype != torch.float32
+                            and not fastvideo_args.disable_autocast)
+
+        batch_size, channels, latent_frames, latent_height, latent_width = state.shape
+        condition_mask = condition_mask.to(device=state.device, dtype=target_dtype)
+        mask_channels = condition_mask.expand(-1, channels, -1, -1, -1)
+        conditioning_full = torch.zeros_like(state)
+        conditioning_full[:, :, :conditioning.shape[2]] = conditioning.to(state)
+
+        padding_mask = getattr(batch, "padding_mask", None)
+        if not isinstance(padding_mask, torch.Tensor):
+            padding_mask = state.new_zeros(batch_size, 1, latent_height, latent_width)
+        else:
+            padding_mask = padding_mask.to(device=state.device, dtype=target_dtype)
+
+        fps_value = 24 if batch.fps is None else batch.fps
+        fps_tensor = torch.as_tensor(fps_value, device=state.device, dtype=torch.float32).reshape(-1)
+        if fps_tensor.numel() != 1:
+            # The Cosmos25 RoPE builds one batch-independent (T*H*W, D) table
+            # (see cosmos2_5.py), so the DiT consumes a single shared fps
+            # value per forward pass, never one value per sample.
+            if not torch.equal(fps_tensor, fps_tensor[:1].expand_as(fps_tensor)):
+                raise ValueError(f"fps must be one shared value for the whole batch; got {fps_tensor.tolist()}")
+            fps_tensor = fps_tensor[:1]
+
+        state = state.to(target_dtype)
+        with self.progress_bar(total=len(timesteps)) as progress_bar:
+            for timestep_value in timesteps:
+                model_input = conditioning_full * mask_channels + state * (1 - mask_channels)
+                model_timestep = timestep_value.expand(batch_size, latent_frames).clone()
+                model_timestep[condition_mask[:, 0, :, 0, 0].bool()] = 0
+                context_timestep = int(round(float(timestep_value) * 1000))
+                with (
+                        set_forward_context(
+                            current_timestep=context_timestep,
+                            attn_metadata=None,
+                            forward_batch=batch,
+                        ),
+                        torch.autocast(
+                            device_type=state.device.type,
+                            dtype=target_dtype,
+                            enabled=autocast_enabled,
+                        ),
+                ):
+                    model_output = self.transformer(
+                        hidden_states=model_input,
+                        encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
+                        timestep=model_timestep,
+                        fps=fps_tensor,
+                        condition_mask=condition_mask,
+                        padding_mask=padding_mask,
+                        return_dict=False,
+                    )
+                    if isinstance(model_output, tuple | list):
+                        model_output = model_output[0]
+
+                step_output = self.scheduler.step(
+                    model_output,
+                    timestep_value,
+                    state,
+                    generator=batch.generator,
+                    return_dict=True,
+                )
+                prediction = conditioning_full * mask_channels + step_output.pred_original_sample * (1 - mask_channels)
+                state = conditioning_full * mask_channels + step_output.prev_sample * (1 - mask_channels)
+                progress_bar.update()
+
+        prediction = prediction.to(target_dtype)
+        if not torch.isfinite(prediction).all():
+            raise FloatingPointError("Cosmos25 DFD rollout produced non-finite latents; refusing to "
+                                     "silently substitute NaN/Inf values into the decoded video")
+        batch.latents = prediction
+        return batch
 
 
 class Cosmos25V2WDenoisingStage(Cosmos25DenoisingStage):

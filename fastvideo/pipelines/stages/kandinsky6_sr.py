@@ -97,7 +97,8 @@ class Kandinsky6SRVideoEncodingStage(PipelineStage):
 
         audio = batch.extra.pop(_AUDIO_KEY, None)
         audio_rate = batch.extra.pop(_AUDIO_RATE_KEY, sr_io.AUDIO_SAMPLE_RATE)
-        if audio is None and batch.video_path is not None:
+        # Only the output rank muxes the source audio into the saved video.
+        if audio is None and batch.video_path is not None and fastvideo_args.is_output_rank:
             audio = sr_io.read_audio(batch.video_path, int(batch.num_frames), fps)
             audio_rate = sr_io.AUDIO_SAMPLE_RATE
         if audio is not None:
@@ -262,6 +263,9 @@ class Kandinsky6SRDenoisingStage(PipelineStage):
                 state, cond = x[..., :channels], x[..., channels:]
                 self._set_timesteps(num_steps, device, use_piflow)
                 for i, t in enumerate(self.scheduler.timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     timestep = t.to(device=device, dtype=torch.float32).expand(x.shape[0])
                     autocast = (torch.autocast("cuda", dtype=target_dtype)
                                 if autocast_enabled else contextlib.nullcontext())
@@ -343,6 +347,15 @@ class Kandinsky6SRDecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if not fastvideo_args.is_output_rank:
+            # KVAE decoding has no collectives. Skip the per-tile decode, host
+            # copies and stitching on non-output SPMD ranks, whose result the
+            # executor discards.
+            batch.output = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
+            batch.latents = None
+            batch.lq_latents = None
+            return batch
+
         sr_options = Kandinsky6SROptions.from_extra(batch.extra)
         vae = _resolve(self, "vae", fastvideo_args, VAELoader())
         grid, scale = _tile_grid(batch, self.transformer, vae)

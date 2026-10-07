@@ -288,6 +288,11 @@ FASTVIDEO_WORKER_MULTIPROC_METHOD = EnvChoice("spawn",
                                               choices=("spawn", "fork", "forkserver"),
                                               category="distributed",
                                               doc="Multiprocessing start method for worker processes.")
+FASTVIDEO_EXTERNAL_LAUNCHER = EnvBool(
+    False,
+    category="distributed",
+    doc="With the default mp backend, offline inference runs SPMD under torchrun or srun: each launched process is "
+    "one worker joining the env:// rendezvous. All ranks must call generate() together; world rank 0 owns outputs.")
 FASTVIDEO_ULYSSES_A2A = EnvChoice(
     "off",
     choices=("off", "auto"),
@@ -295,6 +300,15 @@ FASTVIDEO_ULYSSES_A2A = EnvChoice(
     doc="Sequence-parallel all-to-all backend. off uses the NCCL path in DistributedAutograd.AllToAll4D. auto uses "
     "the fused NVLink kernel when the group is a load-store accessible mesh of 2, 4, 6, or 8 ranks in eager "
     "execution, and the NCCL path otherwise.")
+# Keep the original long-training transport by default. Opt into bounded
+# chunks after validating the training recipe's activation memory budget.
+FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = EnvChoice(
+    "auto",
+    choices=("auto", "chunked"),
+    category="distributed",
+    doc="Fused Ulysses all-to-all policy for grad-enabled calls whose window exceeds the long-training plane limit. "
+    "auto keeps the original unchunked transport. chunked uses bounded chunks; validate the recipe's activation "
+    "memory first.")
 
 # ================== Logging ==================
 
@@ -307,6 +321,12 @@ FASTVIDEO_LOGGING_CONFIG_PATH = EnvStr(None, category="logging", doc="Path to a 
 FASTVIDEO_LOGGING_LEVEL = EnvStr("INFO", category="logging", doc="Default logging level.")
 FASTVIDEO_LOGGING_PREFIX = EnvStr("", category="logging", doc="Prefix prepended to every log message.")
 FASTVIDEO_STAGE_LOGGING = EnvBool(False, category="logging", doc="Log the time that each pipeline stage takes.")
+FASTVIDEO_LOG_ALL_PROCESSES = EnvBool(
+    False,
+    category="logging",
+    doc="logger.info logs from every process, ignoring the default local-main-process filter and the "
+    "main_process_only and local_main_process_only arguments. Read at each call, so it can be set after "
+    "importing fastvideo. Useful for debugging distributed runs.")
 
 # ================== Attention ==================
 
@@ -340,6 +360,13 @@ FASTVIDEO_NVFP4_FA4 = EnvBool(
     category="attention",
     doc="FlashAttention-4 quantizes Q and K to NVFP4. An explicit nvfp4_fa4 attention implementation argument "
     "takes precedence.")
+FASTVIDEO_FA4_PV_MODE = EnvChoice(
+    "bf16",
+    choices=("bf16", "fp8"),
+    category="attention",
+    doc="V dtype on the NVFP4 FlashAttention-4 path (FLASH_ATTN with nvfp4_fa4, ATTN_QAT_INFER on sm_100a/sm_103a): "
+    "bf16 keeps V in BF16; fp8 casts V to float8 e4m3 without scaling. An explicit fa4_pv_mode attention "
+    "implementation argument takes precedence.")
 FASTVIDEO_DISABLE_ATTENTION_COMPILE = EnvBool(
     True,
     category="attention",
@@ -376,6 +403,18 @@ FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY = EnvStr(
     None,
     category="performance",
     doc="Collective that moves chunks in parallel VAE decode: gather (used when unset) or all_gather.")
+# MiniMax-H3 component-level pipeline parallel: dedicate the first
+# FASTVIDEO_H3_ENCODER_NODES nodes to the Qwen3-VL text encoder so the
+# denoising ranks never load it (720p needs the ~48 GiB headroom on GB10).
+FASTVIDEO_H3_ENCODER_SPLIT = EnvBool(
+    False,
+    category="distributed",
+    doc="MiniMax-H3 runs the Qwen3-VL text encoder on a dedicated group of nodes, so the denoising ranks never "
+    "load it. Same as FastVideoArgs.h3_encoder_split=True.")
+FASTVIDEO_H3_ENCODER_NODES = EnvInt(1,
+                                    category="distributed",
+                                    doc="Number of leading nodes that FASTVIDEO_H3_ENCODER_SPLIT dedicates to the "
+                                    "MiniMax-H3 text encoder. Values below 1 count as 1.")
 # Adapted from the NVlabs/Sana Sol-Engine implementation.
 FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     "",
@@ -408,6 +447,12 @@ FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
     category="performance",
     doc="Flux denoising disables reduced-precision reductions in bf16 matmuls, which tightens accumulation for "
     "the 4-step Klein model.")
+# Global kill switch for the opt-in, inference-only Triton fusion in
+# fastvideo/layers/triton_fused_norm.py, for debugging numerics or Triton issues.
+FASTVIDEO_DISABLE_FUSED_NORM = EnvBool(False,
+                                       category="performance",
+                                       doc="Turn off the Triton-fused residual + LayerNorm + modulate inference "
+                                       "path that Wan blocks opt into, and use the eager path.")
 
 # ================== Output encoding ==================
 
@@ -637,6 +682,11 @@ FASTVIDEO_MEMORY_REPORT = EnvBool(False,
 
 # ================== Tests ==================
 
+FASTVIDEO_TEST_WAN_S2V_MODEL_PATH = EnvPath(None,
+                                            category="test",
+                                            doc="Wan2.2-S2V-14B weights for test_wan_s2v.py; unset means "
+                                            "official_weights/Wan2.2-S2V-14B in the repository.",
+                                            deprecated_names=("WAN_S2V_MODEL_PATH", ))
 FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR = EnvStr("data/cats",
                                               category="test",
                                               doc="Raw data directory for preprocess_ltx2_overfit.py.",
@@ -669,6 +719,12 @@ FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR = EnvStr("data/kandinsky5_overfit_p
                                                       category="test",
                                                       doc="Output directory for preprocess_kandinsky5_overfit.py.",
                                                       deprecated_names=("KANDINSKY5_OVERFIT_OUTPUT_DIR", ))
+FASTVIDEO_TEST_HUNYUAN15_OVERFIT_DATA_DIR = EnvStr("data/hunyuan15_overfit",
+                                                   category="test",
+                                                   doc="Raw data directory for preprocess_hunyuan15_overfit.py.")
+FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR = EnvStr("data/hunyuan15_overfit_preprocessed",
+                                                     category="test",
+                                                     doc="Output directory for preprocess_hunyuan15_overfit.py.")
 
 # Switches and paths that only tests read. Each old name stays readable, with a
 # warning, until the next minor release.
@@ -788,6 +844,11 @@ FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
                                             category="test",
                                             doc="Upstream taehv checkout for the MLX TAEH3 parity test.",
                                             deprecated_names=("TAEH3_REFERENCE_DIR", ))
+FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR = EnvStr(
+    None,
+    category="test",
+    doc="Local Wan2.2-Animate-14B checkpoint for the Wan-Animate weight tests.",
+    deprecated_names=("WAN_ANIMATE_MODEL_PATH", ))
 FASTVIDEO_TEST_ZIMAGE_MODEL_DIR = EnvStr("Tongyi-MAI/Z-Image-Turbo",
                                          category="test",
                                          doc="Model for the Z-Image SSIM test.",

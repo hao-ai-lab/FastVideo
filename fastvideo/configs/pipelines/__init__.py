@@ -5,11 +5,13 @@ from fastvideo.configs.pipelines.dreamx_world import DreamXWorld5BARPipelineConf
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
 from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
+from fastvideo.configs.pipelines.helios import HeliosPipelineConfig
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.kandinsky5 import Kandinsky5DMDConfig, Kandinsky5I2VConfig, Kandinsky5T2VConfig
 from fastvideo.configs.pipelines.kandinsky6 import Kandinsky6TI2VAConfig
 from fastvideo.configs.pipelines.kandinsky6_sr import Kandinsky6SRPipelineConfig
 from fastvideo.configs.pipelines.lingbotworld2 import LingBotWorld2CausalFastI2V480PConfig
+from fastvideo.configs.pipelines.lingbotworld_fast import LingBotWorldFastI2V480PConfig
 from fastvideo.configs.pipelines.lingbot_video import LingBotVideoT2VConfig
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
@@ -23,8 +25,9 @@ __all__ = [
     "HunyuanConfig", "FastHunyuanConfig", "HunyuanGameCraftPipelineConfig", "PipelineConfig", "Hunyuan15T2V480PConfig",
     "Hunyuan15T2V720PConfig", "WanT2V480PConfig", "WanI2V480PConfig", "WanT2V720PConfig", "WanI2V720PConfig",
     "SelfForcingWanT2V480PConfig", "LucyEditDevConfig", "CosmosConfig", "Cosmos25Config", "LTX2T2VConfig",
-    "DreamXWorld5BCamPipelineConfig", "DreamXWorld5BARPipelineConfig", "HYWorldConfig", "Kandinsky5T2VConfig",
-    "Kandinsky5I2VConfig", "Kandinsky5DMDConfig", "Kandinsky6TI2VAConfig", "Kandinsky6SRPipelineConfig",
-    "LingBotWorld2CausalFastI2V480PConfig", "LingBotVideoT2VConfig", "MatrixGame2I2V480PConfig",
-    "MatrixGame3I2V720PConfig", "MMAudioV2AConfig", "get_pipeline_config_cls_from_name"
+    "DreamXWorld5BCamPipelineConfig", "DreamXWorld5BARPipelineConfig", "HeliosPipelineConfig", "HYWorldConfig",
+    "Kandinsky5T2VConfig", "Kandinsky5I2VConfig", "Kandinsky5DMDConfig", "Kandinsky6TI2VAConfig",
+    "Kandinsky6SRPipelineConfig", "LingBotWorld2CausalFastI2V480PConfig", "LingBotWorldFastI2V480PConfig",
+    "LingBotVideoT2VConfig", "MatrixGame2I2V480PConfig", "MatrixGame3I2V720PConfig", "MMAudioV2AConfig",
+    "get_pipeline_config_cls_from_name"
 ]

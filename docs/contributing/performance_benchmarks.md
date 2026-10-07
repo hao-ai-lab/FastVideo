@@ -18,9 +18,11 @@ It serves three audiences:
 ## Quick start (local)
 
 ```bash
-# Run all benchmarks; writes raw perf_*.json under
+# Run all measured benchmarks; writes raw perf_*.json under
 # fastvideo/tests/performance/results/
-pytest fastvideo/tests/performance/ -vs
+pytest fastvideo/tests/performance/test_inference_performance.py -vs
+
+pytest tests/local_tests/performance/ -vs
 
 # Optional: compare against the rolling HF baseline.
 # PERF_REPORTS_DIR defaults to /root/data/perf_reports in a CI container, so
@@ -58,6 +60,54 @@ records, see `performance_dashboard/README.md`. The dashboard provides a
 FastAPI API plus a React UI and can be exposed with `ngrok` after building the
 frontend.
 
+## DGX Spark (GB10) local benchmarking
+
+The NVIDIA DGX Spark (GB10) is not available on Modal, so its coverage is
+**local/manual** rather than automated CI. The GB10 benchmark
+`wan-t2v-1.3b-1gpu-gb10` is gated to the GB10 via `run_config.gpu_types`
+(matched as substrings of the CUDA device name), so the shared H100/L40S
+performance lanes discover it and skip it, while a GB10 owner runs it locally.
+
+Run just the GB10 benchmark on a DGX Spark:
+
+```bash
+pytest 'fastvideo/tests/performance/test_inference_performance.py::test_inference_performance[wan-t2v-1.3b-1gpu-gb10]' -vs
+```
+
+To check run-to-run stability (latency, peak memory, throughput), run it a few
+times from a clean results directory, then normalize:
+
+```bash
+rm -f fastvideo/tests/performance/results/perf_*.json
+for i in 1 2 3 4 5; do
+  pytest 'fastvideo/tests/performance/test_inference_performance.py::test_inference_performance[wan-t2v-1.3b-1gpu-gb10]' -vs
+done
+PERF_REPORTS_DIR=/tmp/fastvideo_perf_reports \
+  python fastvideo/tests/performance/compare_baseline.py
+```
+
+`compare_baseline.py` reports `CALIBRATION_NEEDED` until a baseline exists for
+the GB10 identity, and writes one `normalized_perf_*.json` per run. Reference
+figures on a GB10 (torch 2.12.0+cu130, transformers 5.14.0): generation ~39.3 s,
+peak ~8.4 GB, throughput ~1.15 fps, stable to ~0.4% across five runs.
+
+### Seeding the GB10 baseline (follow-up)
+
+Seeding a baseline-eligible record for the GB10 identity is intentionally **not**
+done from a local run: `seed_baseline.py` accepts only `scheduled_main`
+full-suite source artifacts, so ordinary local/manual uploads stay
+`baseline_eligible=false` (dashboard-visible, but they do not move the rolling
+baseline). Establishing the GB10 baseline requires either:
+
+* a scheduled-main performance run on a GB10 CI runner once one is available, or
+* a carefully scoped, maintainer-approved manual calibration path that preserves
+  the existing exact-identity, batch-consistency, provenance, and
+  explicit-approval safeguards — it must **not** make arbitrary local uploads
+  baseline-eligible.
+
+The reviewed five-run GB10 artifacts are the stability evidence for that first
+baseline. Tracked in #1632.
+
 ## Architecture
 
 ```
@@ -73,6 +123,10 @@ fastvideo/tests/performance/
     │           writes Markdown summary + (optionally) uploads new records
     ├── dashboard.py
     │       └── builds time-series Plotly HTML from HF history
+
+tests/local_tests/performance/
+    └── local-only behavior tests for config, policy, identity, dashboards,
+        and worker-log capture
 
 fastvideo/performance/
     ├── hf_store.py               # shared HF I/O + DataFrame helpers
@@ -128,6 +182,11 @@ does not report one of the mapped stages, that component metric is stored as
 
 There are **two independent regression gates** — they protect against
 different failure modes and are not redundant.
+
+A config can additionally restrict which hardware it runs on via
+`run_config.gpu_types` (substring match against the CUDA device name); a
+non-matching device skips the benchmark entirely. That is a run gate, not a
+regression gate.
 
 ### Static thresholds (per-GPU)
 
@@ -252,6 +311,13 @@ migrations do not silently run as v1 configs. Optional v2 `quality_metadata`
 and the v1/v2 `regression_thresholds` policy must be JSON objects when present.
 (`recipe` is emitted by the harness and is not config-declarable.)
 
+`run_config.gpu_types` is an optional list of non-empty strings. Each entry is
+substring-matched against the CUDA device name; if no entry matches, the
+benchmark is skipped on that device, so a hardware-specific config does not run
+on shared lanes. Discovery fails when an entry has no matching `thresholds` key
+or when `thresholds` has no `default` block, which prevents a gated config from
+silently falling back to `default`.
+
 V2 records compare only within their exact identity cohort. A record that opens
 a new cohort is marked `baseline_status: "initialized_new_cohort"` and
 `comparison_status: "CALIBRATION_NEEDED"`; it remains ineligible until a
@@ -297,6 +363,7 @@ Written by `test_inference_performance.py`. One file per benchmark run.
     "max_dit_time_s": 10.0,
     "max_vae_decode_time_s": 10.0
   },
+  "worker_log_path": "<container-local path to the captured worker log, or null>",
   "regression_thresholds": {
     "latency": {
       "threshold_percent": 0.10,
@@ -424,6 +491,13 @@ main/full-suite uploads and remain eligible for rolling baselines.
 Current `perf_*.json` artifacts that lack the v2 comparison identity are
 normalized for reporting but skip rolling-baseline comparison and are not marked
 baseline eligible.
+Dashboard reports keep historical v1 records readable by grouping them under
+the explicit `Legacy v1` label by `(model_id, gpu_type)`. Complete v2 cohorts
+remain separate and use the six-field comparison identity. Records that claim
+or partially use v2 identity without all required fields are labeled
+`Invalid v2` and remain scoped by their display metadata and available identity
+fields. Stored comparison status, comparison reason, and baseline status are
+shown when present; old records remain readable when those fields are absent.
 
 New v2 records compare only against the same `workload_id`, `variant_id`,
 `benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and
@@ -482,6 +556,22 @@ record is checked against its own static thresholds: a measured breach reports
 nonzero pytest exit with no attributable static-threshold breach reports
 `INFRA_ERROR`. Failed records have `success=false` and are excluded from future
 rolling baselines. The dashboard still runs best-effort for observability.
+
+Each benchmark run also captures worker-process logs into
+`results/worker_logs/worker_<benchmark_id>_<ts>.log` (raw records point to it
+via `worker_log_path`; the field is null/absent in older and HF-synced
+records). On a hard regression, a 200-line tail of that log is printed in the
+failure output — by the pytest assertion on PR runs and by
+`compare_baseline.py` on scheduled runs. The performance lane
+(`.buildkite/scripts/lanes/performance.sh`) also mirrors each captured log into
+`$PERF_REPORTS_DIR` as `worker_<benchmark_id>_<ts>.md` next to the raw JSON
+results, so the log is retrievable as a build artifact even when the
+comparison phase never runs. The mirror uses an allowlisted extension because
+the trusted host relays only `.md`, `.html`, `.json`, and `.csv` files from
+that directory; the `.log` files themselves are never uploaded. Coverage
+caveat: only the `fastvideo` logger is captured (no torch/NCCL or raw stderr
+output), and ranks > 0 suppress `logger.info` by default, so the file contains
+rank-0 INFO plus WARNING/ERROR from all ranks.
 When the rolling-baseline phase runs, it emits:
 
 * **Markdown summary** — appended to `$GITHUB_STEP_SUMMARY` when that variable
@@ -489,7 +579,9 @@ When the rolling-baseline phase runs, it emits:
   per-benchmark row with current vs. baseline values for latency, throughput,
   memory, text encoder time, DiT time, and VAE decode time.
 * **Plotly dashboard** — `dashboard_<sha>_<ts>.html` showing time-series for
-  each metric grouped by comparison cohort.
+  each metric grouped by comparison cohort. Chart titles distinguish
+  `Legacy v1` and incomplete `Invalid v2` records, and point hover data includes
+  stored comparison and baseline status metadata.
 * **Normalized records** — `normalized_perf_*.json`, one per benchmark.
   Useful as input to the
   [`reseed-performance-baseline`](https://github.com/hao-ai-lab/FastVideo/blob/main/.agents/skills/reseed-performance-baseline/SKILL.md)
@@ -513,7 +605,8 @@ When the rolling-baseline phase runs, it emits:
      "generation_kwargs": { "num_frames": 45, ... },
      "test_prompts": ["..."],
      "run_config": { "required_gpus": 1,
-                     "num_warmup_runs": 1, "num_measurement_runs": 3 },
+                     "num_warmup_runs": 1, "num_measurement_runs": 3,
+                     "gpu_types": ["<device-name-substring>"] },
      "thresholds": {
        "L40S": {
          "max_generation_time_s": 34.0,
