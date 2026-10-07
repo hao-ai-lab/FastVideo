@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from numbers import Integral
 from typing import Any, Literal
 
@@ -544,13 +544,27 @@ def _key_valid_mask(block_idx, variable_block_sizes, tile_elems: int):
     return offsets[None, None, None, :] < selected_sizes[:, :, :, None]
 
 
-_REFERENCE_GATHER_TARGET_BYTES = 2 * 1024**3
+_REFERENCE_GATHER_MIN_BYTES = 256 * 1024**2
+_REFERENCE_GATHER_MAX_BYTES = 2 * 1024**3
+
+
+@lru_cache(maxsize=1)
+def _reference_gather_target_bytes() -> int:
+    """1/128 of unified memory in 256 MiB-2 GiB: 32 GB Macs keep room for resident weights."""
+    import mlx.core as mx
+
+    device_info = getattr(mx, "device_info", None) or mx.metal.device_info
+    try:
+        total = int(device_info().get("memory_size", 0))
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        total = 0
+    return min(_REFERENCE_GATHER_MAX_BYTES, max(_REFERENCE_GATHER_MIN_BYTES, total // 128))
 
 
 def _reference_gather_query_chunk(heads: int, dim: int, k_sel: int, tile_elems: int, n_q: int) -> int:
-    """Batch as many query tiles as fit in ~2 GiB of gathered BF16 K/V."""
+    """Bound gathered BF16 K/V by the device's gather budget."""
     bytes_per_query = 4 * heads * max(k_sel, 1) * tile_elems * dim
-    chunk = min(n_q, max(1, _REFERENCE_GATHER_TARGET_BYTES // max(bytes_per_query, 1)))
+    chunk = min(n_q, max(1, _reference_gather_target_bytes() // max(bytes_per_query, 1)))
     return int(chunk)
 
 

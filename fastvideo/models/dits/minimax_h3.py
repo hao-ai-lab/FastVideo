@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import math
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -14,6 +15,8 @@ import torch.nn.functional as F
 
 from fastvideo import envs
 from fastvideo.attention import DistributedAttention
+from fastvideo.attention.backends.abstract import layer_idx_from_prefix
+from fastvideo.attention.backends.video_sparse_attn_h3 import MiniMaxH3VSAMetadata
 from fastvideo.attention.layer import DistributedAttention_VSA
 from fastvideo.attention.selector import get_attn_backend
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
@@ -21,7 +24,9 @@ from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard,
 )
-from fastvideo.distributed.parallel_state import get_sp_world_size, model_parallel_is_initialized
+from fastvideo.distributed.parallel_state import (get_sp_group, get_sp_world_size,
+                                                 model_parallel_is_initialized)
+from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
 from fastvideo.layers.mlp import MLP
@@ -30,6 +35,8 @@ from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.models.dits.minimax_h3_vsa_fp4 import (STAGES, vsa_fp4_attention, vsa_fp4_attention_sp,
+                                                       vsa_fp4_requested, vsa_tile_first_attention)
 from fastvideo.models.dits.minimax_h3_fusions import (
     HAVE_TRITON,
     fused_qknorm_rope,
@@ -72,6 +79,13 @@ def _can_run_minimax_h3_fusion(tensor: torch.Tensor) -> bool:
     hitting the strict wrappers' hard RuntimeError mid-forward.
     """
     return HAVE_TRITON and tensor.is_cuda and not torch.is_grad_enabled()
+
+
+@torch.compile(dynamic=True, fullgraph=True)
+def _gated_residual(hidden_states: torch.Tensor, gate_table: torch.Tensor, indices: torch.Tensor,
+                    branch: torch.Tensor) -> torch.Tensor:
+    """``hidden + gate[indices] * branch`` in one pass (eager materializes the gathered gate)."""
+    return hidden_states + gate_table.index_select(0, indices) * branch
 
 
 class MiniMaxH3RotaryPosEmbed(nn.Module):
@@ -125,8 +139,22 @@ class MiniMaxH3FeedForward(nn.Module):
         self.fuse_swiglu = fuse_swiglu
         self.use_mxfp8 = isinstance(self.fc_in.quant_method, MXFP8QuantizeMethod) and isinstance(
             self.fc_out.quant_method, MXFP8QuantizeMethod)
+        # Inference-only token chunking: the 2 * ffn_dim intermediate is ~5.3x the block input
+        # (4.5 GiB at 78k tokens), so chunks bound the activation peak on 24-32 GB GPUs.
+        self.chunk_tokens = envs.FASTVIDEO_H3_FFN_CHUNK_TOKENS.get()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        tokens = hidden_states.shape[-2] if hidden_states.dim() > 1 else 0
+        if (self.chunk_tokens and tokens > self.chunk_tokens and not torch.is_grad_enabled()
+                and not torch.compiler.is_compiling() and hidden_states.numel() == tokens * hidden_states.shape[-1]):
+            out = torch.empty_like(hidden_states)
+            for start in range(0, tokens, self.chunk_tokens):
+                rows = slice(start, start + self.chunk_tokens)
+                out[..., rows, :] = self._forward(hidden_states[..., rows, :].contiguous())
+            return out
+        return self._forward(hidden_states)
+
+    def _forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         if self.use_mxfp8:
             from fastvideo.layers.mxfp8linear import mxfp8_swiglu_feed_forward
 
@@ -209,6 +237,11 @@ class MiniMaxH3Attention(nn.Module):
             prefix=prefix,
             fa4_packed_varlen=fa4_packed_varlen,
         )
+        # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
+        # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
+        self._layer_idx = layer_idx_from_prefix(prefix, default=-1)
+        self._vsa_fp4 = use_vsa and vsa_fp4_requested()
+        self._vsa_tile_first = use_vsa and envs.FASTVIDEO_H3_VSA_TILE_FIRST.get()
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
         # skips the gate branch entirely while it is structurally zero.
@@ -255,6 +288,12 @@ class MiniMaxH3Attention(nn.Module):
             return
         if self._gate_compress_active is None:
             weight = self.to_gate_compress.weight
+            if weight is None:
+                # Packed NVFP4 gate: any nonzero E2M1 magnitude (bits 0x7 of
+                # either nibble) makes the branch live.
+                packed = self.to_gate_compress._nvfp4_weight
+                self._gate_compress_active = bool((packed & 0x77).any())
+                return
             # bool() on a DTensor reduction resolves collectively, so every
             # rank caches the same answer.
             self._gate_compress_active = bool((weight != 0).any())
@@ -282,9 +321,41 @@ class MiniMaxH3Attention(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
     ) -> torch.Tensor:
-        query, _ = self.to_q(hidden_states)
-        key, _ = self.to_k(hidden_states)
-        value, _ = self.to_v(hidden_states)
+        if (self._vsa_fp4 and rotary_emb is not None and not torch.is_grad_enabled()
+                and not torch.compiler.is_compiling()):
+            meta = get_forward_context().attn_metadata
+            # Exempt mode lists the first prefix tile for every query, which the
+            # FP4 kernel relies on to start each row from a finite running max.
+            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.exempt:
+                use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
+                if not model_parallel_is_initialized() or get_sp_world_size() == 1:
+                    hidden_states = vsa_fp4_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
+                else:
+                    hidden_states = vsa_fp4_attention_sp(self, hidden_states, rotary_emb, meta, use_fused_rope,
+                                                         get_sp_group())
+                with STAGES.span("out_proj"):
+                    hidden_states, _ = self.to_out(hidden_states)
+                return hidden_states
+        if (self._vsa_tile_first and hidden_states.is_cuda and rotary_emb is not None
+                and not torch.is_grad_enabled() and not torch.compiler.is_compiling()
+                and (not model_parallel_is_initialized() or get_sp_world_size() == 1)):
+            meta = get_forward_context().attn_metadata
+            if isinstance(meta, MiniMaxH3VSAMetadata) and meta.tile_elems == 64:
+                use_fused_rope = self.fuse_qknorm_rope and _can_run_minimax_h3_fusion(hidden_states)
+                hidden_states = vsa_tile_first_attention(self, hidden_states, rotary_emb, meta, use_fused_rope)
+                with STAGES.span("out_proj"):
+                    hidden_states, _ = self.to_out(hidden_states)
+                return hidden_states
+        with STAGES.span("qkv_proj"):
+            # All three projections see the same activations. Reuse their FP8
+            # quantization when the loaded methods have identical granularity.
+            from fastvideo.models.dits.minimax_h3_vsa_fp4 import _shared_input_projections
+            if not torch.is_grad_enabled() and not torch.compiler.is_compiling():
+                query, key, value = _shared_input_projections((self.to_q, self.to_k, self.to_v), hidden_states)
+            else:
+                query, _ = self.to_q(hidden_states)
+                key, _ = self.to_k(hidden_states)
+                value, _ = self.to_v(hidden_states)
         query = query.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         key = key.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
         value = value.unflatten(-1, (self.num_attention_heads, self.attention_head_dim))
@@ -308,16 +379,18 @@ class MiniMaxH3Attention(nn.Module):
             gate_compress, _ = self.to_gate_compress(hidden_states)
             extra_attention_kwargs["gate_compress"] = gate_compress.unflatten(
                 -1, (self.num_attention_heads, self.attention_head_dim))
-        hidden_states, _ = self.distributed_attention(
-            query,
-            key,
-            value,
-            original_seq_len=original_seq_len,
-            freqs_cis=None,
-            **extra_attention_kwargs,
-        )
+        with STAGES.span("attention"):
+            hidden_states, _ = self.distributed_attention(
+                query,
+                key,
+                value,
+                original_seq_len=original_seq_len,
+                freqs_cis=None,
+                **extra_attention_kwargs,
+            )
         hidden_states = hidden_states.flatten(2, 3).type_as(query)
-        hidden_states, _ = self.to_out(hidden_states)
+        with STAGES.span("out_proj"):
+            hidden_states, _ = self.to_out(hidden_states)
         return hidden_states
 
 
@@ -421,7 +494,51 @@ class MiniMaxH3AdaLayerNormModulation(nn.Module):
             prefix=f"{prefix}.linear",
         )
 
+    def enable_host_cache(self, table: dict | None = None) -> None:
+        """Keep the projection in pinned host memory and cache its output per timestep set.
+
+        The modulation is a pure function of the timestep embedding, and few-step checkpoints sample a fixed
+        timestep ladder, so each block's output is a small constant table. The weights (the largest bf16 tensors
+        in the DiT) then never occupy device memory: a cache miss copies them in for one matmul.
+        """
+        weight, bias = self.linear.weight, self.linear.bias
+        if table is not None and (weight is None or bias is None):
+            # Table-only load skipped these tensors entirely.
+            self._host_weight = self._host_bias = None
+            self._modulation_cache = dict(table)
+            self._cache_key = None
+            return
+        weight, bias = weight.data, bias.data
+        if table is None:
+            self._host_weight = weight.to("cpu").pin_memory()
+            self._host_bias = bias.to("cpu").pin_memory()
+        else:
+            # Precomputed modulation for a fixed timestep ladder: the projection weights are not needed at all.
+            self._host_weight = self._host_bias = None
+        self.linear.weight.data = torch.empty(0, dtype=weight.dtype)
+        self.linear.bias.data = torch.empty(0, dtype=bias.dtype)
+        self._modulation_cache: dict[Any, torch.Tensor] = dict(table or {})
+        self._cache_key: Any = None
+
     def forward(self, temb: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        cache = getattr(self, "_modulation_cache", None)
+        if cache is not None:
+            out = cache.get(self._cache_key)
+            if out is None:
+                if self._host_weight is None:
+                    raise RuntimeError(f"No precomputed AdaLN modulation for timestep key {self._cache_key}; the "
+                                       "table only covers the checkpoint's fixed ladder. Load without "
+                                       "FASTVIDEO_H3_ADALN_TABLE to use other timesteps.")
+                x = F.silu(temb) if self.apply_silu else temb
+                weight = self._host_weight.to(temb.device, non_blocking=True)
+                bias = self._host_bias.to(temb.device, non_blocking=True)
+                out = F.linear(x.to(weight.dtype), weight, bias)
+                if self._cache_key is not None:
+                    cache[self._cache_key] = out
+                    if envs.FASTVIDEO_H3_ADALN_DUMP.get():
+                        # Projection inputs, kept only when dumping, for offline low-rank fits.
+                        self.__dict__.setdefault("_modulation_inputs", {})[self._cache_key] = x.detach()
+            return out.view(-1, 6 * self.hidden_size).chunk(6, dim=-1)
         if self.apply_silu:
             temb = F.silu(temb)
         temb, _ = self.linear(temb.to(self.linear.weight.dtype))
@@ -546,6 +663,9 @@ class MiniMaxH3TransformerBlock(nn.Module):
                     1.0 + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
         with nvtx_range("minimax_h3.transformer_block.self_attention"):
             attention_output = self.attn(norm_hidden_states, rotary_emb, original_seq_len)
+        # The attention input is dead now. Keeping it until assignment below
+        # overlaps three full-width activations during the residual fusion.
+        del norm_hidden_states
         if use_modulate_fusion:
             with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
                 hidden_states, norm_hidden_states = fused_residual_gate_rmsnorm_modulate(
@@ -564,8 +684,11 @@ class MiniMaxH3TransformerBlock(nn.Module):
                 norm_hidden_states = self.norm2(hidden_states)
                 norm_hidden_states = norm_hidden_states * (
                     1.0 + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
-        with nvtx_range("minimax_h3.transformer_block.feed_forward"):
+        del attention_output
+        with nvtx_range("minimax_h3.transformer_block.feed_forward"), STAGES.span("feed_forward"):
             feed_forward_output = self.ff(norm_hidden_states)
+        if use_modulate_fusion and not torch.compiler.is_compiling():
+            return _gated_residual(hidden_states, gate_mlp, adaln_indices, feed_forward_output)
         return hidden_states + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
 
 
@@ -891,6 +1014,55 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         self._rope_cache = (position_ids, dtype, value)
         return value
 
+    def attach_step_splice(self, late: nn.Module, from_step: int) -> None:
+        """Hand denoising steps ``from_step`` onward to ``late`` (same architecture, other weights).
+
+        Early DMD steps fix layout and object count, late ones texture and detail, so two checkpoints
+        can split the trajectory. ``late`` is kept out of this module's children: it is placed, offloaded
+        and checkpointed on its own.
+        """
+        object.__setattr__(self, "_splice_late", late)
+        self._splice_from_step = int(from_step)
+
+    def enable_adaln_host_cache(self, table_path: str | None = None) -> None:
+        """Move every block's AdaLN projection to pinned host memory behind a per-timestep cache.
+
+        With ``table_path`` (written by FASTVIDEO_H3_ADALN_DUMP), the cache is prefilled from precomputed
+        modulation tables and the projection weights are dropped entirely.
+        """
+        tables = None
+        if table_path:
+            import ast
+            raw = torch.load(table_path, map_location="cpu")
+            tables = {int(i): {ast.literal_eval(k): v for k, v in blk.items()} for i, blk in raw.items()}
+        for index, block in enumerate(self.transformer_blocks):
+            block.adaln_proj.enable_host_cache(None if tables is None else tables[index])
+        self._adaln_host_cache = True
+        self._adaln_dumped_entries = -1
+
+    def _move_adaln_tables(self, device: torch.device) -> None:
+        for block in self.transformer_blocks:
+            cache = block.adaln_proj._modulation_cache
+            for key, value in cache.items():
+                if value.device != device:
+                    cache[key] = value.to(device)
+
+    def _maybe_dump_adaln_tables(self) -> None:
+        path = envs.FASTVIDEO_H3_ADALN_DUMP.get()
+        if not path:
+            return
+        entries = sum(len(b.adaln_proj._modulation_cache) for b in self.transformer_blocks)
+        if entries == self._adaln_dumped_entries:
+            return
+        self._adaln_dumped_entries = entries
+        if model_parallel_is_initialized() and get_sp_group().rank_in_group != 0:
+            return
+        torch.save({i: {repr(k): v.detach().cpu() for k, v in b.adaln_proj._modulation_cache.items()}
+                    for i, b in enumerate(self.transformer_blocks)}, path)
+        first = self.transformer_blocks[0].adaln_proj.__dict__.get("_modulation_inputs", {})
+        torch.save({repr(k): v.detach().cpu() for k, v in first.items()}, path + ".inputs")
+        logger.info("Dumped AdaLN modulation tables (%d entries) to %s", entries, path)
+
     def _refined_text(self, encoder_hidden_states: torch.Tensor) -> torch.Tensor:
         """The prompt embedding is constant across the denoising loop and the
         refiner blocks are timestep-free, so refine once per generation
@@ -930,6 +1102,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         text_indices: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict video and audio velocities from one caller-defined packed layout."""
+        late = self.__dict__.get("_splice_late")
+        if late is not None and get_forward_context().current_timestep >= self._splice_from_step:
+            return late(hidden_states, audio_hidden_states, encoder_hidden_states, timestep, timestep_indices,
+                        token_tags, position_ids, video_indices, audio_indices, text_indices)
         if position_ids.ndim != 2 or position_ids.shape[-1] != 3:
             raise ValueError(f"position_ids must have shape (seq_len, 3), got {tuple(position_ids.shape)}.")
         sequence_length = position_ids.shape[0]
@@ -972,10 +1148,20 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
             local_timestep_indices, _ = sequence_model_parallel_shard(local_timestep_indices, dim=0)
             rotary_emb = (rotary_cos, rotary_sin)
 
+        if getattr(self, "_adaln_host_cache", False):
+            # One host read per forward keys every block's modulation cache by the timestep values.
+            key = (tuple(timestep.reshape(-1).tolist()), tuple(temb.shape), str(temb.dtype))
+            for block in self.transformer_blocks:
+                block.adaln_proj._cache_key = key
+            self._move_adaln_tables(temb.device)
+
         # The eager driver owns profiling markers while each block's compiled
         # forward owns the graph that the marker surrounds.
         for block_index, block in enumerate(self.transformer_blocks):
-            with nvtx_range(f"minimax_h3.transformer_block.{block_index}"):
+            if STAGES.enabled:
+                logger.info("H3_MEMORY_BLOCK %d allocated=%.3f GiB reserved=%.3f GiB", block_index,
+                            torch.cuda.memory_allocated() / 2**30, torch.cuda.memory_reserved() / 2**30)
+            with nvtx_range(f"minimax_h3.transformer_block.{block_index}"), STAGES.span("block_total"):
                 packed_hidden_states = block(
                     packed_hidden_states,
                     temb,
@@ -997,6 +1183,12 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         video_output = video_output.index_select(1, video_indices)
         audio_output = audio_output.index_select(1, audio_indices)
 
+        if getattr(self, "_adaln_host_cache", False):
+            self._maybe_dump_adaln_tables()
+        if STAGES.enabled:
+            stages = STAGES.flush()
+            if not model_parallel_is_initialized() or get_sp_group().rank_in_group == 0:
+                logger.info("H3_STAGE_MS %s", json.dumps(stages))
         return video_output, audio_output
 
 
