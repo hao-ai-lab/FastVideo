@@ -726,13 +726,19 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
         encoder_worker = h3_is_encoder_worker(fastvideo_args)
         batch = self._stage_name_mapping["input_preparation_stage"](batch, fastvideo_args)
         if encoder_worker:
-            if h3_is_primary_encoder_worker(fastvideo_args):
+            # One prompt presentation per request: rank 0 is the only encoder
+            # that broadcasts. With tp_size > 1 the Qwen3-VL conditioner is
+            # TP-sharded, so every encoder rank must enter its forward: the TP
+            # all-reduces span each encoder TP group and rank 0 would block
+            # forever while its TP peers waited in the receive below. With
+            # tp_size == 1 only rank 0 computes and the spare encoder ranks stay
+            # idle. Either way the other encoder ranks mirror the broadcast so
+            # the world-group collectives stay aligned, then drop the payload.
+            if h3_is_primary_encoder_worker(fastvideo_args) or fastvideo_args.tp_size > 1:
                 batch = self._stage_name_mapping["conditioning_stage"](batch, fastvideo_args)
+            if h3_is_primary_encoder_worker(fastvideo_args):
                 h3_broadcast_condition(batch, fastvideo_args)
             else:
-                # One prompt presentation per request: rank 0 is the only
-                # encoder. Spare encoder ranks mirror the broadcast so the
-                # world-group collectives stay aligned, then drop the payload.
                 h3_receive_condition(batch, fastvideo_args)
             # The embedding and any input media only exist to travel over NCCL;
             # shipping them back through the Ray actor return would pickle
