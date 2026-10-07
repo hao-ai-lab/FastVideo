@@ -1,14 +1,15 @@
 """Shared GPU-arch helpers for the QAD 5090 example scripts.
 
 The default (non ``--bf16``) path of the NVFP4 scripts runs DiT linears through
-flashinfer's cutlass FP4 gemm, which ships sm_120a cubins only (RTX 5090-class
-consumer Blackwell). These helpers pick the right FLASHINFER_CUDA_ARCH_LIST and
+flashinfer's cutlass FP4 gemm, which has no fallback and targets consumer
+Blackwell only (sm_120a RTX 5090-class, or sm_121a GB10/DGX Spark, which also
+needs CUDA >= 12.9). These helpers pick the right FLASHINFER_CUDA_ARCH_LIST and
 fail fast with a readable error instead of an opaque flashinfer ValueError.
 """
 
 import torch
 
-# Capabilities the flashinfer FP4 gemm path has cubins for.
+# Compute capabilities the flashinfer FP4 gemm path is gated on.
 FP4_CAPABILITIES = ((12, 0), (12, 1))
 
 

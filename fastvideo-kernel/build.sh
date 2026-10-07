@@ -144,6 +144,11 @@ if [ "${GPU_BACKEND}" = "CUDA" ]; then
             # AUTO gate (matches 12.0a/120a/sm_120a) builds the attn_qat_infer
             # (modified SageAttention3 FP4) kernels instead of silently skipping.
             export TORCH_CUDA_ARCH_LIST="12.0a"
+        elif [ "${cc_major}" = "12" ] && [ "${cc_minor}" = "1" ]; then
+            # GB10 / DGX Spark (sm_121) is arch-conditional like sm_120: the 'a'
+            # suffix lets CMake's AUTO gate (matches 12.1a/121a/sm_121a) build the
+            # attn_qat_infer FP4 kernels instead of silently skipping.
+            export TORCH_CUDA_ARCH_LIST="12.1a"
         else
             export TORCH_CUDA_ARCH_LIST="${cc_major}.${cc_minor}"
         fi

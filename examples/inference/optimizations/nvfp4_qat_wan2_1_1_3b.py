@@ -61,7 +61,7 @@ def main():
         require_fp4_capable_gpu()
 
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_INFER")
-    os.environ["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] = "0"
+    os.environ.setdefault("FASTVIDEO_DISABLE_ATTENTION_COMPILE", "0")
     os.environ.setdefault("FLASHINFER_CUDA_ARCH_LIST", flashinfer_arch_list())
 
     from fastvideo import VideoGenerator

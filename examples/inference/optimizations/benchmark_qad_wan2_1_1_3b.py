@@ -108,7 +108,7 @@ def main() -> None:
 
     os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", backend)
     if needs_fp4:
-        os.environ["FASTVIDEO_DISABLE_ATTENTION_COMPILE"] = "0"
+        os.environ.setdefault("FASTVIDEO_DISABLE_ATTENTION_COMPILE", "0")
         os.environ.setdefault("FLASHINFER_CUDA_ARCH_LIST", flashinfer_arch_list())
 
     from fastvideo import VideoGenerator
