@@ -98,6 +98,28 @@ def _validate_benchmark_config(cfg, path="<memory>"):
         if field in cfg and not isinstance(cfg[field], Mapping):
             raise ValueError(f"{path}: benchmark config field {field!r} must be an object")
 
+    run_config = cfg.get("run_config")
+    if isinstance(run_config, Mapping):
+        gpu_types = run_config.get("gpu_types")
+        if gpu_types is not None and (
+                not isinstance(gpu_types, (list, tuple))
+                or any(not isinstance(g, str) or not g for g in gpu_types)):
+            raise ValueError(
+                f"{path}: run_config.gpu_types must be a list of non-empty strings")
+        if gpu_types:
+            # The device gate and _get_thresholds both substring-match against
+            # the same device name, so every gpu_types entry needs a matching
+            # thresholds key, plus a default fallback for other devices.
+            thresholds = cfg.get("thresholds")
+            if not isinstance(thresholds, Mapping):
+                raise ValueError(f"{path}: run_config.gpu_types requires a 'thresholds' object")
+            missing_thresholds = [g for g in gpu_types if g not in thresholds]
+            if missing_thresholds:
+                raise ValueError(f"{path}: run_config.gpu_types entries missing thresholds keys: "
+                                 f"{', '.join(missing_thresholds)}")
+            if "default" not in thresholds:
+                raise ValueError(f"{path}: run_config.gpu_types requires a 'default' thresholds block")
+
     schema_version = cfg.get("config_schema_version")
     if schema_version is None:
         if _has_v2_fields(cfg):
@@ -517,6 +539,21 @@ def _build_result_record(
 
 # -- Test -------------------------------------------------------------------
 
+def _gpu_type_skip_reason(cfg, run_config, device_name):
+    """Return a skip reason if the config restricts itself to GPU types the
+    current device does not match, else None.
+
+    ``run_config.gpu_types`` is an optional list of substrings matched against
+    the CUDA device name, so a hardware-specific config (e.g. a DGX Spark GB10
+    single-GPU workload) does not run on the shared H100/L40S lanes. Configs
+    without ``gpu_types`` run on any device, as before.
+    """
+    gpu_types = run_config.get("gpu_types")
+    if gpu_types and not any(g in device_name for g in gpu_types):
+        return (f"{cfg['benchmark_id']} is restricted to gpu_types={gpu_types}, "
+                f"current device is {device_name!r}")
+    return None
+
 
 def _run_benchmark(cfg):
     run_config = cfg.get("run_config") or {}
@@ -534,6 +571,14 @@ def _run_benchmark(cfg):
     prompt = prompts[0]
 
     num_warmup, num_measure = _validate_run_counts(run_config, cfg["benchmark_id"])
+
+    # Device gating comes after config-shape validation so a gated config's
+    # run counts are still checked on non-matching lanes.
+    skip_reason = _gpu_type_skip_reason(cfg, run_config,
+                                        torch.cuda.get_device_name())
+    if skip_reason:
+        pytest.skip(skip_reason)
+
     thresholds = _get_thresholds(cfg)
 
     # Remap JSON keys to VideoGenerator kwargs
