@@ -253,6 +253,11 @@ def collate_rows_from_parquet_schema(rows,
             # Empty entries have to stack against the real ones, so follow
             # their dtype instead of the bfloat16 placeholder default.
             empty_dtype = next((t.dtype for t in tensor_list if t.numel() > 0), torch.bfloat16)
+            # ...and their width: a row whose stream is missing entirely (a
+            # legacy shard mixed into the same batch) carries only a 1-D
+            # placeholder, and must not inject a 768-wide stub that cannot
+            # stack against the real rows.
+            empty_width = next((int(t.shape[1]) for t in tensor_list if t.dim() > 1), 768)
 
             for tensor in tensor_list:
                 if tensor.numel() > 0:
@@ -261,7 +266,7 @@ def collate_rows_from_parquet_schema(rows,
                     attention_masks.append(mask)
                 else:
                     # Handle empty embeddings - assume default embedding dimension
-                    width = (int(tensor.shape[1]) if tensor.dim() > 1 else 768)
+                    width = (int(tensor.shape[1]) if tensor.dim() > 1 else empty_width)
                     padded_tensors.append(torch.zeros(text_padding_length, width, dtype=empty_dtype))
                     attention_masks.append(torch.zeros(text_padding_length))
 

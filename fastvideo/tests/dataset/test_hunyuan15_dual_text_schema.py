@@ -94,3 +94,30 @@ def test_collate_omits_second_stream_for_legacy_parquet(tmp_path: Path) -> None:
     assert "text_embedding_2" not in batch
     assert "text_attention_mask_2" not in batch
     assert batch["text_embedding"].shape == (1, 8, _QWEN_DIM)
+
+
+def test_collate_mixed_legacy_and_dual_rows(tmp_path: Path) -> None:
+    """A legacy shard mixed into a dual-text batch must not break stacking.
+
+    The all-legacy skip above cannot fire once one row carries the bytes;
+    the rows without them become zero-token streams of the batch's real
+    width (their masks say "no glyph text"), not a 768-wide stub that
+    cannot stack against the real rows.
+    """
+    dual = _write_row(tmp_path / "data_00000.parquet",
+                      byt5_tokens=3,
+                      schema=pyarrow_schema_t2v_dual_text)
+    legacy = _write_row(tmp_path / "data_00001.parquet",
+                        byt5_tokens=0,
+                        schema=pyarrow_schema_t2v)
+
+    batch = collate_rows_from_parquet_schema([dual, legacy],
+                                             pyarrow_schema_t2v_dual_text,
+                                             text_padding_length=8)
+
+    assert batch["text_embedding_2"].shape == (2, 8, _BYT5_DIM)
+    torch.testing.assert_close(
+        batch["text_attention_mask_2"],
+        torch.tensor([[1.0] * 3 + [0.0] * 5, [0.0] * 8]),
+    )
+    assert batch["text_embedding"].shape == (2, 8, _QWEN_DIM)
