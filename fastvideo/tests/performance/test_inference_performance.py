@@ -601,8 +601,8 @@ def _run_benchmark(cfg):
     finally:
         # Shutdown stops workers producing; close() then drains the queue so
         # the log file is complete before any assertion reads it back. The
-        # performance CI lane copies results/worker_logs/ into PERF_REPORTS_DIR
-        # for artifact upload.
+        # performance CI lane mirrors results/worker_logs/*.log into
+        # PERF_REPORTS_DIR as allowlisted .md files for artifact upload.
         _shutdown_executor(generator)
         capture.close()
 
@@ -631,15 +631,14 @@ def _run_benchmark(cfg):
     _write_results(results)
 
     try:
-        _assert_thresholds(results, thresholds, device_name)
+        _assert_thresholds(results, thresholds, device_name, avg_time=avg_time, max_peak_memory=max_peak_memory)
     except AssertionError:
         print(format_worker_log_tail(cfg["benchmark_id"], capture.log_path), flush=True)
         raise
 
 
-def _assert_thresholds(results, thresholds, device_name):
-    avg_time = results["avg_generation_time_s"]
-    max_peak_memory = results["max_peak_memory_mb"]
+def _assert_thresholds(results, thresholds, device_name, avg_time, max_peak_memory):
+    """Gate on the raw measurements: the emitted record stores rounded copies."""
     max_time = thresholds["max_generation_time_s"]
     max_mem = thresholds["max_peak_memory_mb"]
 

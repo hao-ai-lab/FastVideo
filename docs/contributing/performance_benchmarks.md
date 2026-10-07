@@ -489,10 +489,13 @@ Each benchmark run also captures worker-process logs into
 via `worker_log_path`; the field is null/absent in older and HF-synced
 records). On a hard regression, a 200-line tail of that log is printed in the
 failure output — by the pytest assertion on PR runs and by
-`compare_baseline.py` on scheduled runs — and the performance lane
-(`.buildkite/scripts/lanes/performance.sh`) copies `results/worker_logs/` into
-`$PERF_REPORTS_DIR` next to the raw JSON results, so the CI host relays it as
-a build artifact even when the comparison phase never runs. Coverage
+`compare_baseline.py` on scheduled runs. The performance lane
+(`.buildkite/scripts/lanes/performance.sh`) also mirrors each captured log into
+`$PERF_REPORTS_DIR` as `worker_<benchmark_id>_<ts>.md` next to the raw JSON
+results, so the log is retrievable as a build artifact even when the
+comparison phase never runs. The mirror uses an allowlisted extension because
+the trusted host relays only `.md`, `.html`, `.json`, and `.csv` files from
+that directory; the `.log` files themselves are never uploaded. Coverage
 caveat: only the `fastvideo` logger is captured (no torch/NCCL or raw stderr
 output), and ranks > 0 suppress `logger.info` by default, so the file contains
 rank-0 INFO plus WARNING/ERROR from all ranks.
