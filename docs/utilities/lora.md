@@ -54,7 +54,9 @@ Important options:
   output-specific namespace under `fastvideo-lora-extract/`, and only that namespace is cleaned up. Resume requires indexed
   safetensors and validates both checkpoints' index/shard fingerprints before reusing partial results.
 
-The adapter retains changes that do not fit a low-rank product: `.diff` and `.diff_b` hold exact additive weight/bias deltas, `.diff_param` handles standalone parameters such as `scale_shift_table`, and `.set_weight`/`.set_param` hold parameters absent from the base checkpoint. Bit-identical parameters are omitted. The extractor writes an adjacent `*.report.json` with tensor counts, settings, and reconstruction residuals.
+The adapter retains changes that do not fit a low-rank product: `.diff` and `.diff_b` hold exact additive weight/bias deltas, `.diff_param` handles standalone parameters such as `scale_shift_table`, and `.set_weight`/`.set_param` hold parameters absent from the base checkpoint. Bit-identical parameters are omitted. The extractor writes an adjacent `*.report.json` with tensor counts, settings, and reconstruction residuals (`factorized_weighted_relative_residual` reports SVD truncation before
+`--factor-dtype` casting; `factorized_weighted_reconstruction_relative_residual` reports the shipped factors'
+fidelity including storage-precision loss).
 
 For the validated MiniMax-H3 rank-64 command, including its exact-boundary patterns, see [`scripts/lora_extraction/README.md`](https://github.com/hao-ai-lab/FastVideo/blob/main/scripts/lora_extraction/README.md).
 

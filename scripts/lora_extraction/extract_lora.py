@@ -419,8 +419,7 @@ def build_dense_payload(
         if float(delta.abs().max()) <= min_delta:
             continue
         output_key = dense_payload_key(key)
-        if output_key is not None:
-            payload[output_key] = delta.to(finetuned.dtype).contiguous()
+        payload[output_key] = delta.to(finetuned.dtype).contiguous()
     return payload
 
 
@@ -569,6 +568,7 @@ def _extract_layers(
         raise RuntimeError(f"CUDA device requested but CUDA is unavailable: {device}")
     factor_dtype = _torch_dtype(config.factor_dtype)
     exact_patterns = _compile_patterns(config.exact_tensor_patterns)
+    base_keys = base.keys
 
     for index, key in enumerate(tqdm(sorted(finetuned.keys), desc="extracting LoRA", unit="tensor")):
         tensor_file = work_dir / "tensors" / f"{index:05d}.safetensors"
@@ -577,7 +577,7 @@ def _extract_layers(
             continue
 
         finetuned_tensor = finetuned.get_tensor(key)
-        if key not in base.keys:
+        if key not in base_keys:
             if not config.dense_payload:
                 manifest["layers"][key] = {
                     "kind": "skipped",
@@ -638,13 +638,22 @@ def _extract_layers(
             # default when no scalar is present. Emitting per-layer rank/alpha
             # bookkeeping adds hundreds of keys, and several adapter naming
             # schemes map those scalars differently from their A/B factors.
+            factor_a = lora_a.to(factor_dtype)
+            factor_b = lora_b.to(factor_dtype)
             payload = {
-                output_keys[0]: lora_a.to(factor_dtype),
-                output_keys[1]: lora_b.to(factor_dtype),
+                output_keys[0]: factor_a,
+                output_keys[1]: factor_b,
             }
             _save_layer_payload(tensor_file, payload, key)
             captured = float(singular_values.double().square().sum().item())
-            residual = (max(0.0, 1.0 - captured / delta_fro_sq)**0.5) if delta_fro_sq else 0.0
+            truncation_residual = (max(0.0, 1.0 - captured / delta_fro_sq)**0.5) if delta_fro_sq else 0.0
+            # Reconstruction residual of the shipped factors AFTER casting to
+            # factor_dtype, so the report reflects storage precision as well as
+            # SVD truncation. `relative_residual` is the pre-cast truncation only.
+            reconstruction_residual = (
+                float((delta - factor_b.float() @ factor_a.float()).square().sum().sqrt().item()) /
+                (delta_fro_sq**0.5) if delta_fro_sq else 0.0
+            )
             manifest["layers"][key] = {
                 "kind": "lora",
                 "shape": list(shape),
@@ -653,10 +662,11 @@ def _extract_layers(
                 "rank": actual_rank,
                 "method": method,
                 "delta_frobenius_norm": delta_fro_sq**0.5,
-                "relative_residual": residual,
+                "relative_residual": truncation_residual,
+                "reconstruction_relative_residual": reconstruction_residual,
                 "max_abs_delta": max_abs_delta,
             }
-            del lora_a, lora_b, singular_values, payload
+            del lora_a, lora_b, factor_a, factor_b, singular_values, payload
         else:
             output_key = dense_payload_key(key)
             if config.dense_payload:
@@ -740,21 +750,31 @@ def _build_report(manifest: dict[str, Any], out_path: Path) -> dict[str, Any]:
     counts: dict[str, int] = {}
     delta_energy = 0.0
     residual_energy = 0.0
+    reconstruction_energy = 0.0
     for layer in manifest["layers"].values():
         kind = layer["kind"]
         counts[kind] = counts.get(kind, 0) + 1
         if kind == "lora":
             norm = float(layer["delta_frobenius_norm"])
             residual = float(layer["relative_residual"])
+            reconstruction = float(layer.get("reconstruction_relative_residual", residual))
             delta_energy += norm * norm
             residual_energy += (norm * residual)**2
+            reconstruction_energy += (norm * reconstruction)**2
     weighted_residual = (residual_energy / delta_energy)**0.5 if delta_energy else 0.0
+    weighted_reconstruction = (reconstruction_energy / delta_energy)**0.5 if delta_energy else 0.0
     return {
         "format": FORMAT_VERSION,
         "adapter": str(out_path.resolve()),
         "adapter_size_bytes": out_path.stat().st_size,
         "counts": counts,
         "factorized_weighted_relative_residual": weighted_residual,
+        "factorized_weighted_reconstruction_relative_residual": weighted_reconstruction,
+        "residual_note": (
+            "factorized_weighted_relative_residual is the SVD truncation error before casting factors to "
+            "factor_dtype; factorized_weighted_reconstruction_relative_residual is the reconstruction error "
+            "of the shipped factors after that cast, including storage-precision loss."
+        ),
         "config": manifest["config"],
         "layers": manifest["layers"],
     }
@@ -766,7 +786,7 @@ def extract_lora_adapter(
     out: str,
     rank: int = 32,
     full_rank: bool = False,
-    min_delta: float = 1e-6,
+    min_delta: float = 1e-8,
     checkpoint: str | None = None,
     resume: bool = False,
     log_level: str = "INFO",

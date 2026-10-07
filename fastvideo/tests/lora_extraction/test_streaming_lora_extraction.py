@@ -583,6 +583,32 @@ def test_auto_mode_does_not_drop_revision_during_fallback(monkeypatch: pytest.Mo
         )
 
 
+def test_pipeline_mode_extracts_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The documented --load-mode pipeline fallback must complete an extraction."""
+    base, finetuned = _toy_states()
+    output = tmp_path / "adapter.safetensors"
+
+    def fake_load(model_path: str, **_kwargs: object) -> dict[str, torch.Tensor]:
+        return dict(base) if model_path == "org/base" else dict(finetuned)
+
+    monkeypatch.setattr(extract_lora, "load_transformer_state_dict_from_model", fake_load)
+    result = extract_lora.extract_lora_adapter(
+        base="org/base",
+        ft="org/finetuned",
+        out=str(output),
+        rank=2,
+        min_delta=1e-8,
+        load_mode="pipeline",
+        device="cpu",
+        svd_method="exact",
+    )
+
+    assert result == output
+    adapter = load_file(output)
+    assert "blocks.0.linear.lora_A.weight" in adapter
+    assert "blocks.0.linear.lora_B.weight" in adapter
+
+
 def test_cli_defaults_exact_dense_deltas_to_float32(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["extract_lora.py", "--base", "base", "--ft", "finetuned"])
     assert extract_lora.parse_args().dense_dtype == "float32"

@@ -45,7 +45,8 @@ python extract_lora.py \
   --exact-tensor-pattern '^time_embedder\.'
 ```
 
-`q=320, niter=4` retained 99.9355% of the energy captured by exact rank-64 SVD in a 362-matrix MiniMax-H3 comparison. Exact CPU SVD is still the default; randomized SVD must be requested explicitly.
+`q=320, niter=4` retained 99.9355% of the energy captured by exact rank-64 SVD in a 362-matrix MiniMax-H3 comparison (an SVD-basis energy metric measured before `--factor-dtype` casting; the
+adjacent `*.report.json` also reports the shipped factors' post-cast reconstruction residual). Exact CPU SVD is still the default; randomized SVD must be requested explicitly.
 
 This FastH3 checkpoint contains VSA compression-gate replacements. Load the extracted adapter with
 [`basic_fasth3_lora_preview.py`](../../examples/inference/basic/basic_fasth3_lora_preview.py), which inspects the payload
