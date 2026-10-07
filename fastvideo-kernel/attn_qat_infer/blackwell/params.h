@@ -114,6 +114,23 @@
      int * __restrict__ seqused_k;
  
      int *__restrict__ blockmask;
+
+     // Block-sparse KV iteration (non-causal only). When q2k_idx is null the
+     // kernel is dense. Otherwise query block m of (batch b, head h) visits
+     // the q2k_num[(b*h + h)*num_m_blocks + m] KV blocks listed at
+     // q2k_idx[((b*h + h)*num_m_blocks + m)*q2k_max + i], in any order.
+     int const *__restrict__ q2k_idx;
+     int const *__restrict__ q2k_num;
+     int q2k_max;
+     int num_m_blocks;
+     // Optional valid token count of each 64-column half of every KV block,
+     // kv_valid[2*n + half] (valid tokens first within a half); null means only
+     // the sequence tail beyond the unpadded key length is masked.
+     int const *__restrict__ kv_valid;
+     // Optional quadrant mask per list entry (same layout as q2k_idx): bit
+     // (2*row_half + col_half) set when that 64-row query half attends that
+     // 64-column key half. Lets 64-token VSA tiles run on 128x128 blocks.
+     uint8_t const *__restrict__ q2k_quad;
  
      // The K_new and V_new matrices.
      void * __restrict__ knew_ptr;

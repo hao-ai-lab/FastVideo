@@ -128,10 +128,10 @@ def test_retained_weight_lora_merge_reaches_nvfp4_buffers(monkeypatch) -> None:
     assert layer.weight is not None
     assert not layer.weight.detach().equal(original)
 
-    # What set_lora_adapter now runs after merging: re-derive the FP4 buffers
-    # from the merged dense weight.
-    from fastvideo.pipelines.lora_pipeline import _convert_quantized_weights_after_lora_merge
-    _convert_quantized_weights_after_lora_merge({"transformer": root})
+    # What set_lora_adapter runs after merging each block: re-derive the FP4
+    # buffers from the merged dense weight.
+    from fastvideo.pipelines.lora_pipeline import _convert_quantized_weights_after_lora_change
+    _convert_quantized_weights_after_lora_change([root])
     assert captured[-1].equal(layer.weight.detach())
     assert not captured[-1].equal(original)
 
@@ -162,6 +162,27 @@ def test_apply_out_dim_survives_purge(monkeypatch) -> None:
     x = torch.randn(2, 3, 16, dtype=torch.bfloat16)
     out = layer.quant_method.apply(layer, x)
     assert out.shape == (2, 3, 8)
+
+
+def test_convert_refuses_fsdp_sharded_bf16_purge(monkeypatch) -> None:
+    import torch.distributed.tensor as tdt
+
+    class DummyDTensor:
+        def __init__(self, data: torch.Tensor) -> None:
+            self._data = data
+
+        def to_local(self) -> torch.Tensor:
+            return self._data
+
+        def float(self) -> torch.Tensor:
+            return self._data.float()
+
+    monkeypatch.setattr(tdt, "DTensor", DummyDTensor)
+    model = _model(retain=False)
+    del model.always_fp4._parameters["weight"]
+    object.__setattr__(model.always_fp4, "weight", DummyDTensor(torch.randn(8, 16, dtype=torch.bfloat16)))
+    with pytest.raises(RuntimeError, match="FSDP-sharded"):
+        nv.convert_model_to_nvfp4(model)
 
 
 def test_dense_path_after_purge_raises_with_flag_named(monkeypatch) -> None:

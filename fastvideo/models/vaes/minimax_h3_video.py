@@ -7,6 +7,7 @@ This module intentionally uses only PyTorch and FastVideo configuration types.
 """
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import torch
@@ -14,7 +15,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+import fastvideo.envs as envs
+
+from fastvideo.attention import get_attn_backend
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
+from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.profiler import nvtx_range
 
 
 class DiagonalGaussianDistribution:
@@ -291,10 +297,12 @@ class MiniMaxH3VideoRotaryPosEmbed(nn.Module):
 class MiniMaxH3VideoAttention(nn.Module):
 
     def __init__(self, dim: int, heads: int, dim_head: int, eps: float = 1e-5, bias: bool = True) -> None:
+        """Build projections and the selected dense FastVideo attention implementation."""
         super().__init__()
         self.heads = heads
         self.dim_head = dim_head
         self.use_bias = bias
+        self._share_int8_qkv = envs.FASTVIDEO_H3_VAE_INT8_SHARED_QKV.get()
         inner_dim = heads * dim_head
         self.norm_q = nn.RMSNorm(dim_head, eps=eps, elementwise_affine=False)
         self.norm_k = nn.RMSNorm(dim_head, eps=eps, elementwise_affine=False)
@@ -302,15 +310,45 @@ class MiniMaxH3VideoAttention(nn.Module):
         self.to_k = nn.Linear(dim, inner_dim, bias=bias)
         self.to_v = nn.Linear(dim, inner_dim, bias=bias)
         self.to_out = nn.ModuleList([nn.Linear(inner_dim, dim, bias=bias), nn.Dropout(0.0)])
+        self.attn_impl = None
+        from fastvideo.platforms import current_platform
+
+        if current_platform.is_cuda_alike():
+            attention_backend = get_attn_backend(
+                dim_head,
+                # FlashAttention executes the FP32 VAE activations in BF16 and
+                # restores FP32 output, so resolve against the kernel dtype.
+                torch.bfloat16,
+                supported_attention_backends=(
+                    AttentionBackendEnum.TORCH_SDPA,
+                    AttentionBackendEnum.FLASH_ATTN,
+                ),
+            )
+            self.attn_impl = attention_backend.get_impl_cls()(
+                num_heads=heads,
+                head_size=dim_head,
+                softmax_scale=dim_head**-0.5,
+                num_kv_heads=heads,
+                causal=False,
+                # The FASTVIDEO_NVFP4_FA4 env opt-in targets the DiT; this VAE
+                # is FP32-pinned (_keep_in_fp32_modules), so force-disable FP4
+                # Q/K quantization for its attention regardless of the env.
+                nvfp4_fa4=False,
+            )
 
     def forward(
         self,
         hidden_states: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
-        query = self.to_q(hidden_states).unflatten(2, (self.heads, -1))
-        key = self.to_k(hidden_states).unflatten(2, (self.heads, -1))
-        value = self.to_v(hidden_states).unflatten(2, (self.heads, -1))
+        """Apply dense self-attention to one spatial VAE token sequence."""
+        if self._share_int8_qkv and not torch.is_grad_enabled() and not torch.compiler.is_compiling():
+            from fastvideo.models.vaes.minimax_h3_int8_convrot import shared_int8_projections
+            projections = shared_int8_projections((self.to_q, self.to_k, self.to_v), hidden_states)
+        else:
+            projections = tuple(layer(hidden_states) for layer in (self.to_q, self.to_k, self.to_v))
+        query, key, value = (projection.unflatten(2, (self.heads, -1)) for projection in projections)
+        del projections
 
         query = self.norm_q(query.float()).to(query.dtype)
         key = self.norm_k(key.float()).to(key.dtype)
@@ -328,9 +366,17 @@ class MiniMaxH3VideoAttention(nn.Module):
             query = torch.cat([query_rotary * cos + query_rotated * sin, query_pass], dim=-1)
             key = torch.cat([key_rotary * cos + key_rotated * sin, key_pass], dim=-1)
 
-        query, key, value = (tensor.permute(0, 2, 1, 3) for tensor in (query, key, value))
-        hidden_states = F.scaled_dot_product_attention(query, key, value)
-        hidden_states = hidden_states.permute(0, 2, 1, 3).flatten(2, 3)
+        if self.attn_impl is not None and query.device.type != "cpu":
+            # VAE decoding has no diffusion-step metadata, so call the selected
+            # backend implementation directly with dense BSHD tensors.
+            hidden_states = self.attn_impl.forward(query, key, value, None)
+            hidden_states = hidden_states.flatten(2, 3)
+        else:
+            # Keep CPU construction and execution available without requiring
+            # an accelerator attention backend.
+            query, key, value = (tensor.permute(0, 2, 1, 3) for tensor in (query, key, value))
+            hidden_states = F.scaled_dot_product_attention(query, key, value)
+            hidden_states = hidden_states.permute(0, 2, 1, 3).flatten(2, 3)
         return self.to_out[0](hidden_states)
 
 
@@ -433,6 +479,7 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         self.gradient_checkpointing = False
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """Decode one latent spatial input through the H3 video transformer."""
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         hidden_states = hidden_states.permute(0, 2, 3, 4, 1).reshape(
             batch_size,
@@ -482,6 +529,16 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
         )
 
 
+def _tile_batch_size() -> int:
+    """Spatial tiles decoded per decoder call (``FASTVIDEO_H3_VAE_TILE_BATCH``, default 1 = per tile)."""
+    return max(1, envs.FASTVIDEO_H3_VAE_TILE_BATCH.get())
+
+
+def _is_minimax_h3_video_vae_decoder(name: str, submodule: nn.Module) -> bool:
+    """Select the video decoder that serves the H3 VAE ``decode`` path."""
+    return name == "decoder" and isinstance(submodule, MiniMaxH3VideoViTDecoder3d)
+
+
 class AutoencoderKLMiniMaxH3(nn.Module):
     """MiniMax-H3 causal encoder and ViT decoder with exact release geometry."""
 
@@ -489,6 +546,10 @@ class AutoencoderKLMiniMaxH3(nn.Module):
     _no_split_modules = ["MiniMaxH3VideoResnetBlock3d", "MiniMaxH3VideoTransformerBlock"]
     _repeated_blocks = ["MiniMaxH3VideoTransformerBlock"]
     _keep_in_fp32_modules = ["encoder", "decoder", "quant_conv", "post_quant_conv"]
+    _compile_conditions = [_is_minimax_h3_video_vae_decoder]
+    # ``prepare_for_compile`` flips this per instance when the pipeline opts
+    # into ``enable_torch_compile_vae``; default instances stay fully eager.
+    _tile_helpers_compiled = False
 
     def __init__(self, config: MiniMaxH3VideoVAEConfig) -> None:
         super().__init__()
@@ -654,12 +715,40 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         slice_rest[dim] = slice(blend_extent, None)
         return torch.cat([blended, b[tuple(slice_rest)]], dim=dim)
 
+    def prepare_for_compile(self) -> None:
+        """Compile the fixed-shape tile helpers for the opt-in VAE compile path.
+
+        ``ComposedPipelineBase._maybe_compile_pipeline_module`` calls this hook
+        only when ``enable_torch_compile_vae`` is set, right before the decoder
+        is compiled through ``_compile_conditions``. The spatial tile grid and
+        the per-tile decoder-input projection have fixed shapes, so
+        ``mode="reduce-overhead"`` records one CUDA graph per geometry and
+        replays it for every tile and temporal chunk. Keeping this behind the
+        opt-in means default (eager) users pay neither the inductor/triton
+        toolchain requirement and first-decode compile latency nor the
+        permanent cudagraph memory pools, and multi-resolution callers never
+        churn ``dynamic=False`` recompiles they did not ask for.
+        """
+        if self._tile_helpers_compiled:
+            return
+        # The fixed spatial tile grid reuses one compiled blend-and-concatenate graph.
+        self._stitch_tiles = torch.compile(self._stitch_tiles, backend="inductor", mode="reduce-overhead", dynamic=False)
+        # Each fixed-shape latent tile reuses one compiled decoder-input projection.
+        self._project_decoder_tile = torch.compile(
+            self._project_decoder_tile,
+            backend="inductor",
+            mode="reduce-overhead",
+            dynamic=False,
+        )
+        self._tile_helpers_compiled = True
+
     def _stitch_tiles(
         self,
         tiles: list[list[torch.Tensor]],
         height_overlaps: list[int],
         width_overlaps: list[int],
     ) -> torch.Tensor:
+        """Blend decoded tile overlaps and concatenate the spatial canvas."""
         result_rows = []
         for row_index, row in enumerate(tiles):
             result_row = []
@@ -675,6 +764,10 @@ class AutoencoderKLMiniMaxH3(nn.Module):
                 result_row.append(tile)
             result_rows.append(torch.cat(result_row, dim=-1))
         return torch.cat(result_rows, dim=-2)
+
+    def _project_decoder_tile(self, tile: torch.Tensor) -> torch.Tensor:
+        """Project one spatial latent tile into the decoder input channels."""
+        return self.post_quant_conv(tile)
 
     def _encode_clip(self, x: torch.Tensor) -> torch.Tensor:
         if not self.use_tiling:
@@ -699,36 +792,94 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             rows.append(row)
         latent_y_overlaps = [overlap // self.spatial_compression_ratio for overlap in y_overlaps]
         latent_x_overlaps = [overlap // self.spatial_compression_ratio for overlap in x_overlaps]
-        return self._stitch_tiles(rows, latent_y_overlaps, latent_x_overlaps)
+        stitched = self._stitch_tiles(rows, latent_y_overlaps, latent_x_overlaps)
+        if self._tile_helpers_compiled:
+            # Under the opt-in mode="reduce-overhead" compile the stitched
+            # canvas is a CUDA-graph static buffer that the next _stitch_tiles
+            # replay overwrites. Callers (_encode/_encode_pixels/
+            # encode_keyframe) collect per-clip results across replays before
+            # concatenating, so hand them a caller-owned tensor instead of
+            # cudagraph-pooled storage. Eager instances return the fresh
+            # torch.cat result directly.
+            stitched = stitched.clone()
+        return stitched
 
     def _decode_clip(self, z: torch.Tensor) -> torch.Tensor:
-        if not self.use_tiling:
-            return self.decoder(self.post_quant_conv(z))
-        height = z.shape[-2] * self.spatial_compression_ratio
-        width = z.shape[-1] * self.spatial_compression_ratio
-        y_indices, y_lengths, y_overlaps = self._split_tiles(
-            height,
-            self.tile_sample_min_height,
-            self.tile_sample_min_overlap_height,
-        )
-        x_indices, x_lengths, x_overlaps = self._split_tiles(
-            width,
-            self.tile_sample_min_width,
-            self.tile_sample_min_overlap_width,
-        )
-        ratio = self.spatial_compression_ratio
-        rows = []
-        for y_position, y_length in zip(y_indices, y_lengths):
-            row = []
-            for x_position, x_length in zip(x_indices, x_lengths):
-                tile = z[
-                    ...,
-                    y_position // ratio:y_position // ratio + y_length // ratio,
-                    x_position // ratio:x_position // ratio + x_length // ratio,
-                ]
-                row.append(self.decoder(self.post_quant_conv(tile)))
-            rows.append(row)
-        return self._stitch_tiles(rows, y_overlaps, x_overlaps)
+        """Decode one temporal clip, with optional overlapping spatial tiles."""
+        with nvtx_range("minimax_h3.vae.decode_clip"):
+            if not self.use_tiling:
+                with nvtx_range("minimax_h3.vae.decode_clip.no_s_tile.post_quant_conv"):
+                    projected_clip = self.post_quant_conv(z)
+                with nvtx_range("minimax_h3.vae.decode_clip.no_s_tile.decoder_forward"):
+                    return self.decoder(projected_clip)
+
+            height = z.shape[-2] * self.spatial_compression_ratio
+            width = z.shape[-1] * self.spatial_compression_ratio
+            with nvtx_range("minimax_h3.vae.decode_clip.split_tiles"):
+                y_indices, y_lengths, y_overlaps = self._split_tiles(
+                    height,
+                    self.tile_sample_min_height,
+                    self.tile_sample_min_overlap_height,
+                )
+                x_indices, x_lengths, x_overlaps = self._split_tiles(
+                    width,
+                    self.tile_sample_min_width,
+                    self.tile_sample_min_overlap_width,
+                )
+
+            ratio = self.spatial_compression_ratio
+            rows = []
+            if _tile_batch_size() > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+                # Every tile of the grid has one shape, and the ViT decoder
+                # treats batch entries independently: decode the grid in a few
+                # large calls instead of one small call per tile.
+                with nvtx_range("minimax_h3.vae.decode_clip.decode_tile_batches"):
+                    latent_tiles = [
+                        z[..., y_position // ratio:(y_position + y_length) // ratio,
+                          x_position // ratio:(x_position + x_length) // ratio]
+                        for y_position, y_length in zip(y_indices, y_lengths)
+                        for x_position, x_length in zip(x_indices, x_lengths)
+                    ]
+                    decoded: list[torch.Tensor] = []
+                    per_call = _tile_batch_size()
+                    for start in range(0, len(latent_tiles), per_call):
+                        batch = torch.cat(latent_tiles[start:start + per_call], dim=0)
+                        # Clone before retaining: under the reduce-overhead compile the decoder output lives in
+                        # a CUDA-graph pool that the next batch's replay overwrites.
+                        out = self.decoder(self._project_decoder_tile(batch)).clone()
+                        decoded.extend(out.split(z.shape[0], dim=0))
+                    columns = len(x_indices)
+                    rows = [decoded[index:index + columns] for index in range(0, len(decoded), columns)]
+            # The eager tile driver owns NVTX so each marker remains outside
+            # the compiled decoder graph.
+            with nvtx_range("minimax_h3.vae.decode_clip.decode_tiles"):
+                for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths) if not rows else ()):
+                    row = []
+                    for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
+                        with nvtx_range(f"minimax_h3.vae.decode_clip.tile.{row_index}.{column_index}"):
+                            tile = z[
+                                ...,
+                                y_position // ratio:y_position // ratio + y_length // ratio,
+                                x_position // ratio:x_position // ratio + x_length // ratio,
+                            ]
+                            projected_tile = self._project_decoder_tile(tile)
+                            with nvtx_range("minimax_h3.vae.decode_clip.tile.decoder_forward"):
+                                decoded_tile = self.decoder(projected_tile)
+                            row.append(decoded_tile)
+                    rows.append(row)
+
+            with nvtx_range("minimax_h3.vae.decode_clip.stitch_tiles"):
+                stitched = self._stitch_tiles(rows, y_overlaps, x_overlaps)
+                if self._tile_helpers_compiled:
+                    # Same CUDA-graph output-ownership contract as
+                    # _encode_clip: _decode collects chunks across
+                    # _stitch_tiles replays before torch.cat, so the pooled
+                    # canvas must not escape this driver. (The streaming
+                    # _decode_to_pixels path copies each chunk out before the
+                    # next decode; the clone keeps it correct too at one D2D
+                    # copy per chunk.)
+                    stitched = stitched.clone()
+                return stitched
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         clip_length = self.config.clip_length
@@ -747,43 +898,157 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             moments = moments[:, :, :-self.config.token_drop]
         return moments
 
-    def _decode(self, z: torch.Tensor) -> torch.Tensor:
-        tokens_chunk_size = self.tokens_chunk_size
+    def _encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Encode unnormalized pixels while keeping full videos off the accelerator."""
+        clip_length = self.config.clip_length
+        moments = []
+        for frame_start in range(0, pixels.shape[2], clip_length):
+            clip = pixels[:, :, frame_start:frame_start + clip_length].to(
+                device=self.pixel_mean.device,
+                dtype=torch.float32,
+            )
+            if pixels.dtype == torch.uint8:
+                clip = clip / 255.0
+            if clip.shape[2] < clip_length:
+                pad_frames = clip[:, :, -1:].repeat(1, 1, clip_length - clip.shape[2], 1, 1)
+                clip = torch.cat([clip, pad_frames], dim=2)
+            clip = self.normalize_pixels(clip)
+            moments.append(self._encode_clip(clip))
+            del clip
+        encoded = torch.cat(moments, dim=2)
+        if self.config.token_drop > 0:
+            encoded = encoded[:, :, :-self.config.token_drop]
+        return encoded
+
+    def _temporal_decode_plan(self, latent_num_frames: int) -> tuple[int, int, int]:
+        """Return pad tokens, chunk count, and exact decoded frame count."""
+        if latent_num_frames <= 0:
+            raise ValueError(f"MiniMax-H3 latent frame count must be positive, got {latent_num_frames}.")
+
         token_drop = self.config.token_drop
+        tokens_chunk_size = self.tokens_chunk_size
         temporal_ratio = self.temporal_compression_ratio
-        chunk_num_frames = tokens_chunk_size * temporal_ratio
-        num_tokens = z.shape[2] + token_drop
+        num_tokens = latent_num_frames + token_drop
         pad_tokens = (-num_tokens) % tokens_chunk_size
         num_chunks = (num_tokens + pad_tokens) // tokens_chunk_size - int(token_drop > 0)
+        if num_chunks < 1:
+            pad_tokens += tokens_chunk_size
+            num_chunks = 1
+
+        decoded_num_frames = num_chunks * (tokens_chunk_size * temporal_ratio - self.frame_pre_padding)
+        if token_drop > 0:
+            decoded_num_frames += self.frame_overlap
+        if pad_tokens > 0:
+            intra_tail = self.config.clip_length % temporal_ratio
+            pad_frames = sum(intra_tail if intra_tail and (latent_num_frames + offset) %
+                             tokens_chunk_size == 0 else temporal_ratio for offset in range(pad_tokens))
+            decoded_num_frames -= pad_frames
+        if decoded_num_frames <= 0:
+            raise RuntimeError(
+                f"MiniMax-H3 decode plan produced {decoded_num_frames} frames for {latent_num_frames} latent "
+                "frames; the clip_length/token_drop configuration is inconsistent.")
+        return pad_tokens, num_chunks, decoded_num_frames
+
+    def _decode_chunks(self, z: torch.Tensor) -> Iterator[torch.Tensor]:
+        """Yield finalized temporal chunks in decode order."""
+        tokens_chunk_size = self.tokens_chunk_size
+        chunk_num_frames = tokens_chunk_size * self.temporal_compression_ratio
+        pad_tokens, num_chunks, output_num_frames = self._temporal_decode_plan(z.shape[2])
         if pad_tokens > 0:
             z = torch.cat([z, z[:, :, -1:].repeat(1, 1, pad_tokens, 1, 1)], dim=2)
 
-        decoded_chunks = []
+        output_frame_start = 0
         overlap = None
-        for index in range(num_chunks):
-            start = index * tokens_chunk_size
-            clip = self._decode_clip(z[:, :, start:start + tokens_chunk_size + self.token_overlap])
-            for overlap_index in range(int(token_drop > 0) + 1):
-                frame_start = overlap_index * chunk_num_frames
-                chunk = clip[:, :, frame_start:frame_start + chunk_num_frames]
-                chunk = chunk[:, :, self.frame_pre_padding:]
-                if overlap_index == 0:
+        for chunk_index in range(num_chunks):
+            with nvtx_range(f"minimax_h3.vae.temporal_chunk.{chunk_index}"):
+                start = chunk_index * tokens_chunk_size
+                clip = self._decode_clip(z[:, :, start:start + tokens_chunk_size + self.token_overlap])
+                with nvtx_range(f"minimax_h3.vae.temporal_chunk.{chunk_index}.frame_segment.0"):
+                    chunk = clip[:, :, self.frame_pre_padding:chunk_num_frames]
                     if overlap is not None:
                         chunk = self._blend(overlap, chunk, self.frame_overlap, dim=-3)
-                    decoded_chunks.append(chunk)
-                else:
-                    overlap = chunk
-        if overlap is not None:
-            decoded_chunks.append(overlap)
-        decoded = torch.cat(decoded_chunks, dim=2)
+                    num_frames = min(chunk.shape[2], output_num_frames - output_frame_start)
+                    chunk = chunk[:, :, :num_frames]
 
-        if pad_tokens > 0:
-            intra_tail = self.config.clip_length % temporal_ratio
-            num_tokens_before_pad = z.shape[2] - pad_tokens
-            pad_frames = sum(intra_tail if intra_tail and (num_tokens_before_pad + offset) %
-                             tokens_chunk_size == 0 else temporal_ratio for offset in range(pad_tokens))
-            decoded = decoded[:, :, :-pad_frames]
-        return decoded
+                next_overlap = None
+                if self.config.token_drop > 0:
+                    with nvtx_range(f"minimax_h3.vae.temporal_chunk.{chunk_index}.frame_segment.1"):
+                        next_overlap = clip[:, :, chunk_num_frames + self.frame_pre_padding:].clone()
+
+            # Yield after the ranges close so consumer-side CPU copies do not inflate decoder timing.
+            overlap = next_overlap
+            if num_frames > 0:
+                output_frame_start += num_frames
+                yield chunk
+
+        if overlap is not None and output_frame_start < output_num_frames:
+            yield overlap[:, :, :output_num_frames - output_frame_start]
+
+    def decoded_pixel_shape(self, latent_shape: torch.Size | tuple[int, ...]) -> tuple[int, int, int, int, int]:
+        """Return the exact CPU pixel-buffer shape for a latent tensor shape."""
+        if len(latent_shape) != 5:
+            raise ValueError(f"MiniMax-H3 latents must be five-dimensional, got shape {tuple(latent_shape)}.")
+        batch_size, channels, latent_num_frames, latent_height, latent_width = map(int, latent_shape)
+        if channels != self.latent_channels:
+            raise ValueError(f"MiniMax-H3 latents must have {self.latent_channels} channels, got {channels}.")
+        _, _, decoded_num_frames = self._temporal_decode_plan(latent_num_frames)
+        return (
+            batch_size,
+            int(self.config.out_channels),
+            decoded_num_frames,
+            latent_height * self.spatial_compression_ratio,
+            latent_width * self.spatial_compression_ratio,
+        )
+
+    @staticmethod
+    def _streams_chunk_copies(z: torch.Tensor, output: torch.Tensor) -> bool:
+        """Whether finalized chunks copy to ``output`` asynchronously on the current CUDA stream."""
+        return z.device.type == "cuda" and output.is_pinned()
+
+    @staticmethod
+    def _copy_chunk_pixels(pixels: torch.Tensor, output: torch.Tensor, frame_start: int, non_blocking: bool) -> None:
+        """Copy one finalized fp32 pixel chunk into the CPU ``output`` buffer.
+
+        Device-to-host copies run per (batch, channel) plane: the temporal
+        slice of ``output`` is strided across channels, but each plane is
+        contiguous on both sides, so every transfer stays a direct memcpy
+        instead of staging through a pageable CPU temporary. With a pinned
+        ``output`` and ``non_blocking=True`` the copies are additionally
+        asynchronous on the current CUDA stream; callers synchronize once
+        before releasing the buffer.
+        """
+        target = output[:, :, frame_start:frame_start + pixels.shape[2]]
+        if pixels.device.type == "cuda":
+            pixels = pixels.contiguous()
+            for batch_index in range(pixels.shape[0]):
+                for channel_index in range(pixels.shape[1]):
+                    target[batch_index, channel_index].copy_(pixels[batch_index, channel_index],
+                                                             non_blocking=non_blocking)
+        else:
+            target.copy_(pixels)
+
+    def _decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> None:
+        """Decode temporal chunks and immediately copy finalized pixels to CPU.
+
+        Each finalized chunk streams through ``_copy_chunk_pixels`` (direct
+        per-plane memcpys; asynchronous with a pinned ``output``) so the
+        copies overlap the next chunk's decode; ``decode_to_pixels``
+        synchronizes once before returning.
+        """
+        non_blocking = self._streams_chunk_copies(z, output)
+        output_frame_start = 0
+        for chunk in self._decode_chunks(z):
+            num_frames = chunk.shape[2]
+            pixels = self.denormalize_pixels(chunk.float()).clamp_(0, 1)
+            self._copy_chunk_pixels(pixels, output, output_frame_start, non_blocking)
+            output_frame_start += num_frames
+        if output_frame_start != output.shape[2]:
+            raise RuntimeError(
+                f"MiniMax-H3 decode wrote {output_frame_start} frames into an output buffer expecting "
+                f"{output.shape[2]}.")
+
+    def _decode(self, z: torch.Tensor) -> torch.Tensor:
+        return torch.cat(list(self._decode_chunks(z)), dim=2)
 
     def encode(
         self,
@@ -794,6 +1059,34 @@ class AutoencoderKLMiniMaxH3(nn.Module):
             moments = torch.cat([self._encode(x_slice) for x_slice in x.split(1)])
         else:
             moments = self._encode(x)
+        posterior = DiagonalGaussianDistribution(moments)
+        if not return_dict:
+            return (posterior, )
+        return AutoencoderKLOutput(latent_dist=posterior)
+
+    def encode_pixels(
+        self,
+        pixels: torch.Tensor,
+        return_dict: bool = True,
+    ) -> AutoencoderKLOutput | tuple[DiagonalGaussianDistribution]:
+        """Encode CPU-resident pixels one VAE clip at a time.
+
+        ``pixels`` stays on CPU as ``uint8`` in ``[0, 255]`` or floating point
+        in ``[0, 1]``; each clip is moved to the VAE device, normalized, and
+        encoded so only one clip of pixels is resident on the accelerator.
+        """
+        if pixels.ndim != 5 or pixels.shape[1] != self.config.in_channels or pixels.shape[2] <= 0:
+            raise ValueError(
+                f"`pixels` must have shape [B, {self.config.in_channels}, T, H, W] with T > 0, "
+                f"got {tuple(pixels.shape)}.")
+        if pixels.device.type != "cpu":
+            raise ValueError(f"`pixels` must remain on CPU, got device={pixels.device}.")
+        if pixels.dtype != torch.uint8 and not pixels.is_floating_point():
+            raise TypeError(f"`pixels` must use uint8 or a floating-point dtype, got {pixels.dtype}.")
+        if self.use_slicing and pixels.shape[0] > 1:
+            moments = torch.cat([self._encode_pixels(pixel_slice) for pixel_slice in pixels.split(1)])
+        else:
+            moments = self._encode_pixels(pixels)
         posterior = DiagonalGaussianDistribution(moments)
         if not return_dict:
             return (posterior, )
@@ -824,6 +1117,26 @@ class AutoencoderKLMiniMaxH3(nn.Module):
         if not return_dict:
             return (decoded, )
         return DecoderOutput(sample=decoded)
+
+    def decode_to_pixels(self, z: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
+        """Stream decoded ``[0, 1]`` FP32 pixels into a caller-owned CPU buffer."""
+        expected_shape = self.decoded_pixel_shape(z.shape)
+        if output.device.type != "cpu" or output.dtype != torch.float32 or tuple(output.shape) != expected_shape:
+            raise ValueError(
+                "`output` must be a CPU float32 tensor with shape "
+                f"{expected_shape}, got device={output.device}, dtype={output.dtype}, shape={tuple(output.shape)}.")
+        try:
+            if self.use_slicing and z.shape[0] > 1:
+                for batch_index, z_slice in enumerate(z.split(1)):
+                    self._decode_to_pixels(z_slice, output[batch_index:batch_index + 1])
+            else:
+                self._decode_to_pixels(z, output)
+        finally:
+            # Drain async chunk copies before the caller (or an exception
+            # handler) can read or release the pinned buffer.
+            if self._streams_chunk_copies(z, output):
+                torch.cuda.current_stream(z.device).synchronize()
+        return output
 
     def forward(
         self,

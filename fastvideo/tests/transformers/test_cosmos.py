@@ -6,6 +6,7 @@ import pytest
 import torch
 from diffusers.models.transformers.transformer_cosmos import CosmosTransformer3DModel
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -18,8 +19,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29504"
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29504")
 
 BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
 

@@ -22,22 +22,67 @@ extern std::vector<torch::Tensor> block_sparse_attention_backward(
 );
 #endif
 
+#ifdef FASTVIDEO_KERNEL_COMPILE_ULYSSES_A2A
+// Ulysses sequence-parallel all-to-all (csrc/comm/)
+void register_ulysses_a2a(pybind11::module_ &);
+#endif
+
 // TurboDiffusion kernels
 void register_quant(pybind11::module_ &);
 void register_rms_norm(pybind11::module_ &);
 void register_layer_norm(pybind11::module_ &);
 void register_gemm(pybind11::module_ &);
 
+#ifdef TK_COMPILE_BLOCK_SPARSE_VSA_SM100A
+extern std::vector<torch::Tensor> block_sparse_sm100a_fwd(
+    torch::Tensor q, torch::Tensor k, torch::Tensor v, c10::optional<torch::Tensor> v_t,
+    torch::Tensor q2k_idx, torch::Tensor q2k_num, torch::Tensor variable_block_sizes,
+    double sm_scale, bool need_lse);
+extern std::vector<torch::Tensor> block_sparse_sm100a_blk128_fwd(
+    torch::Tensor q, torch::Tensor k, torch::Tensor v, c10::optional<torch::Tensor> v_t,
+    torch::Tensor q2k_idx, torch::Tensor q2k_num, torch::Tensor variable_block_sizes,
+    double sm_scale, bool need_lse);
+extern std::vector<torch::Tensor> block_sparse_sm100a_bwd(
+    torch::Tensor grad_o, torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o,
+    torch::Tensor lse, torch::Tensor k2q_idx, torch::Tensor k2q_num,
+    torch::Tensor variable_block_sizes, double sm_scale);
+extern std::vector<torch::Tensor> block_sparse_sm100a_blk128_bwd(
+    torch::Tensor grad_o, torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o,
+    torch::Tensor lse, torch::Tensor k2q_idx, torch::Tensor k2q_num,
+    torch::Tensor variable_block_sizes, double sm_scale);
+#endif
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "FastVideo CUDA Kernels";
 
+#ifdef TK_COMPILE_BLOCK_SPARSE_VSA_SM100A
+    m.def("block_sparse_sm100a_fwd",
+          torch::wrap_pybind_function(block_sparse_sm100a_fwd),
+          "VSA block-sparse attention forward, 64-token blocks (Blackwell sm100a/sm103a)");
+    m.def("block_sparse_sm100a_blk128_fwd",
+          torch::wrap_pybind_function(block_sparse_sm100a_blk128_fwd),
+          "VSA block-sparse attention forward, 128-token blocks (Blackwell sm100a/sm103a)");
+    m.def("block_sparse_sm100a_bwd",
+          torch::wrap_pybind_function(block_sparse_sm100a_bwd),
+          "VSA block-sparse attention backward, 64-token blocks (Blackwell sm100a/sm103a)");
+    m.def("block_sparse_sm100a_blk128_bwd",
+          torch::wrap_pybind_function(block_sparse_sm100a_blk128_bwd),
+          "VSA block-sparse attention backward, 128-token blocks (Blackwell sm100a/sm103a)");
+#endif
+
 #ifdef TK_COMPILE_ST_ATTN
+
     m.def("sta_fwd", torch::wrap_pybind_function(sta_forward), "sliding tile attention (Hopper)");
 #endif
 
 #ifdef TK_COMPILE_BLOCK_SPARSE
     m.def("block_sparse_fwd", torch::wrap_pybind_function(block_sparse_attention_forward), "block sparse attention forward (Hopper)");
     m.def("block_sparse_bwd", torch::wrap_pybind_function(block_sparse_attention_backward), "block sparse attention backward (Hopper)");
+#endif
+
+#ifdef FASTVIDEO_KERNEL_COMPILE_ULYSSES_A2A
+    // Ulysses sequence-parallel all-to-all
+    register_ulysses_a2a(m);
 #endif
 
     // TurboDiffusion

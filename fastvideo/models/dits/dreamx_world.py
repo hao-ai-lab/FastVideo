@@ -13,7 +13,7 @@ from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
-from fastvideo.models.dits.wanvideo import (LayerNormScaleShift, PatchEmbed, WanTimeTextImageEmbedding,
+from fastvideo.models.wan.transformer import (LayerNormScaleShift, PatchEmbed, WanTimeTextImageEmbedding,
                                             WanTransformer3DModel, WanTransformerBlock)
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 from fastvideo.attention import LocalAttention
