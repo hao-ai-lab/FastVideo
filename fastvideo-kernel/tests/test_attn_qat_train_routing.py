@@ -152,8 +152,8 @@ def test_sm100_optimized_forward_backward_matches_legacy(monkeypatch, q_length, 
 
 
 @pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 12,
-    reason="SM120 parity test",
+    not torch.cuda.is_available() or torch.cuda.get_device_capability() != (12, 0),
+    reason="SM120 joined P@V parity test; GB10 uses the split path",
 )
 @pytest.mark.parametrize(("q_length", "kv_length"), [(2_112, 2_112), (2_112, 2_080)])
 def test_sm120_joined_pv_forward_backward_matches_split_path(monkeypatch, q_length, kv_length):
@@ -200,3 +200,98 @@ def test_sm120_joined_pv_forward_backward_matches_split_path(monkeypatch, q_leng
     assert torch.equal(joined[1], split[1])
     assert torch.equal(joined[2], split[2])
     assert torch.equal(joined[3], split[3])
+
+
+def _set_join_switch(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV", raising=False)
+    else:
+        monkeypatch.setenv("FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV", value)
+
+
+@pytest.mark.parametrize("capability", [(12, 0), (12, 1), (12, 2), (10, 0), (9, 0)])
+@pytest.mark.parametrize("switch", [None, "0", "1"])
+def test_joined_pv_requires_sm120_on_the_input_device(monkeypatch, capability, switch):
+    device = torch.device("cuda", 1)
+
+    def get_capability(selected_device):
+        assert selected_device == device
+        return capability
+
+    monkeypatch.setattr(kernel, "is_cuda", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", get_capability)
+    _set_join_switch(monkeypatch, switch)
+    assert kernel._use_consumer_blackwell_joined_qat_pv(device) == (capability == (12, 0) and switch != "0")
+
+
+def test_joined_pv_does_not_probe_cuda_for_another_backend(monkeypatch):
+    monkeypatch.setattr(kernel, "is_cuda", lambda: False)
+
+    def unexpected_probe(device):
+        pytest.fail("Non-CUDA routing must not probe a CUDA device")
+
+    monkeypatch.setattr(torch.cuda, "get_device_capability", unexpected_probe)
+    assert not kernel._use_consumer_blackwell_joined_qat_pv(torch.device("cpu"))
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or torch.cuda.get_device_capability() != (12, 1),
+    reason="GB10 split-path parity test requires SM121",
+)
+@pytest.mark.parametrize(
+    ("q_length", "kv_length", "heads", "seed"),
+    [(2_112, 2_112, 1, 11), (2_112, 2_080, 1, 11), (31_200, 31_200, 3, 0)],
+)
+def test_sm121_forward_backward_keeps_split_path(monkeypatch, q_length, kv_length, heads, seed):
+    torch.manual_seed(seed)
+    q_shape = (1, heads, q_length, 128)
+    kv_shape = (1, heads, kv_length, 128)
+    inputs = [
+        torch.randn(shape, device="cuda", dtype=torch.bfloat16) for shape in (q_shape, kv_shape, kv_shape)
+    ]
+    grad_out = torch.randn(q_shape, device="cuda", dtype=torch.bfloat16)
+    flags = tuple(
+        dict(
+            use_qat_qkv_backward=True,
+            smooth_k=False,
+            warp_specialize=True,
+            IS_QAT=True,
+            two_level_quant_P=False,
+            fake_quant_P=True,
+            use_high_prec_o=True,
+            smooth_q=False,
+            use_global_sf_P=False,
+            use_global_sf_QKV=False,
+        ).values())
+    launched_joined_pv = []
+    original_forward = kernel._attn_fwd
+
+    class ForwardRecorder:
+
+        def __getitem__(self, grid):
+            launch = original_forward[grid]
+
+            def record_launch(*args, **kwargs):
+                launched_joined_pv.append(kwargs["JOIN_QAT_PV"])
+                return launch(*args, **kwargs)
+
+            return record_launch
+
+    monkeypatch.setattr(kernel, "_attn_fwd", ForwardRecorder())
+
+    def run(switch):
+        _set_join_switch(monkeypatch, switch)
+        q, k, v = [tensor.clone().requires_grad_(True) for tensor in inputs]
+        output = kernel.attention(q, k, v, False, 1.0 / math.sqrt(q_shape[-1]), *flags)
+        ste_output, stats = output.grad_fn.saved_tensors[3:]
+        grads = torch.autograd.grad(output, (q, k, v), grad_out)
+        return output.detach(), *grads, ste_output, stats
+
+    split = run("0")
+    for switch in (None, "1"):
+        actual = run(switch)
+        for name, candidate, reference in zip(("output", "dQ", "dK", "dV", "STE output", "M"), actual, split):
+            assert torch.isfinite(candidate).all(), name
+            assert torch.equal(candidate, reference), name
+
+    assert launched_joined_pv == [False] * 3, launched_joined_pv
