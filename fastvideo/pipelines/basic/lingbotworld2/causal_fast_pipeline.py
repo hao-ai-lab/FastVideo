@@ -307,6 +307,9 @@ class LingBotWorld2CausalFastGenerationStage(PipelineStage):
                 }
                 x0 = current_latent
                 for timestep_idx, timestep_value in enumerate(timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     timestep = torch.stack([timestep_value]).to(device)
                     noise_pred = self.transformer(
                         x=[current_latent.to(device)],
