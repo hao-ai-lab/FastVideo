@@ -1,7 +1,7 @@
 """Whole-parameter LoRA payload: key classification, application, and reporting.
 
-CPU-only. Nothing here loads a model -- the point is the key algebra and the arithmetic,
-which is where a wrong answer is silent rather than loud.
+Nothing here loads a model. Most tests exercise key algebra and arithmetic on the CPU;
+one regression test verifies cross-device adapter loading when CUDA is available.
 """
 import logging
 
@@ -132,6 +132,18 @@ def test_apply_to_adds_the_delta(tmp_path):
     patch = DenseLoRAPatch.from_adapter(path)
     out = patch.apply_to("blocks.0.norm1.weight", torch.ones(4))
     assert torch.allclose(out, torch.full((4, ), 1.25))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required for cross-device adapter loading")
+def test_apply_to_moves_cpu_delta_to_base_tensor_device(tmp_path):
+    """A CPU safetensors delta follows a directly loaded CUDA checkpoint tensor."""
+    path = write_adapter(tmp_path, {"blocks.0.norm1.diff": torch.full((4, ), 0.25)})
+    patch = DenseLoRAPatch.from_adapter(path)
+
+    out = patch.apply_to("blocks.0.norm1.weight", torch.ones(4, device="cuda"))
+
+    assert out.device.type == "cuda"
+    assert torch.allclose(out.cpu(), torch.full((4, ), 1.25))
 
 
 def test_apply_to_leaves_unrelated_parameters_untouched(tmp_path):

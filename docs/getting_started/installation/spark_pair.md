@@ -7,7 +7,7 @@ by the QSFP ConnectX-7 cables can run **one clip faster** and can hold a
 **longer clip** (up to the FastH3 15 s cap).
 
 Copy-paste commands for both counts are on the
-[MiniMax H3 cookbook](../../cookbook/minimax-h3.md): FastH3 Preview → NVIDIA DGX
+[MiniMax H3 cookbook](../../cookbook/minimax-h3.md): FastH3 V1 → NVIDIA DGX
 Spark → 1 Spark or 2 Sparks.
 
 This is FastVideo sequence parallel (`sp_size=2`) over Ray, not a third-party
@@ -109,7 +109,7 @@ Run the driver on the **head**, same venv, same QSFP IP.
 `basic_fasth3.py` defaults target a four-GPU GB200 profile: 768×1344, `sm100a`
 VSA, FA4, four GPUs. On Sparks you must override the kernel flags. Height,
 width, frames, steps, seed, and prompt are yours. Change them. Legal
-`num_frames` values are `17n+5`, capped at 345.
+`num_frames` values are `17n+5`, capped at 362.
 
 GB10 has no FA4 / sm_100a VSA kernel, so `--vsa-kernel triton --no-fa4` stays
 required on this box. `--execution-backend ray` is optional when `RAY_ADDRESS`
@@ -149,11 +149,34 @@ fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yam
 
 Stop the cluster when you are done: `ray stop` on both nodes.
 
+## Released V2 and Trim NVFP4 stacks
+
+The public eight-forward V2 and Trim stacks include the NVFP4 encoder and
+lightweight video VAE. Use the environment above plus the release kernel
+settings, then run one of these configs from the head:
+
+```bash
+export FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass
+export FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1
+export FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0
+export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1
+fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair_v2_nvfp4.yaml
+# Or basic_fasth3_spark_pair_pruned_nvfp4.yaml for FastH3 Trim.
+```
+
+Both configs use their released Hugging Face model paths, `h3_dit_vsa`,
+832x480, 124 frames, seed 1234, VSA 0.8 and 64-token tiles. All components
+stay resident; lazy/sequential loading and compilation are disabled for
+these compact stacks. The older BF16/Preview memory guidance below applies
+to those larger stacks. Set 1344x768 for native 768p with the same 124 frames.
+See [the resident release recipe](spark_performance.md#fasth3-v2-nvfp4-on-one-spark)
+for checkpoint contents and the timing protocol.
+
 ## FastH3 frame counts
 
 H3 is 24 fps. Legal `num_frames` values are `17n+5`. The pipeline rejects
-clips longer than **15 s**. The longest legal length is **345 frames**
-(14.375 s). 360 frames aligns to 362 and fails the duration check.
+clips longer than **15 s**. The longest legal length is **362 frames**
+(15.083 s). 360 frames aligns to 362 and is accepted.
 
 ## Measured on two GB10s (2026-08-31)
 
@@ -179,7 +202,7 @@ VAE, same 4-step schedule:
 | Two Sparks, SP=2 | 2 | 124 | **215.2 s** | 72.4 s |
 
 Those medians used `--height` / `--width` / `--num-frames` as CLI flags. Swap
-them. Native 480p on this model is 480×832, 124 frames. The 15 s cap is 345
+them. Native 480p on this model is 480×832, 124 frames. The 15 s cap is 362
 frames.
 
 The first VAE decode still pays `torch.compile`. Later `generate()` calls in

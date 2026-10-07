@@ -16,10 +16,10 @@ bottom — they need no GPU, no mocks, and run wherever this file is collected.
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29523")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29523")
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -174,7 +174,7 @@ def test_streaming_long_tuning_multi_stage_train_steps(monkeypatch: pytest.Monke
 
     # Grad-norm regression on the post-reset chunk (grads zeroed at the top
     # of this iteration, so the reference captures exactly one step). Keep
-    # this last: under FASTVIDEO_GRADNORM_UPDATE=1 it records and skips.
+    # this last: under FASTVIDEO_TEST_GRADNORM_UPDATE=1 it records and skips.
     check_grad_norm_regression(
         "test_streaming_long_tuning",
         student.transformer,

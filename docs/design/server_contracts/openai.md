@@ -25,11 +25,13 @@ requests. HTTP handling and job polling remain asynchronous.
 | `GET` | `/v1/videos/{id}/content` | Download a completed MP4 |
 | `DELETE` | `/v1/videos/{id}` | Delete a job and its completed artifact |
 | `POST` | `/v1/images` | Generate an image |
+| `POST` | `/v1/images/generations` | OpenAI-compatible alias for image generation |
 | `POST` | `/v1/images/edits` | Generate an image from image references |
 | `GET` | `/v1/images/{id}/content` | Download a generated image |
 | `GET` | `/health` | Liveness probe |
 
-`POST /v1/videos/generations` remains an alias for older FastVideo clients.
+`POST /v1/videos/generations` remains an alias for older FastVideo clients, and
+`POST /v1/images/generations` is the OpenAI Python client's image generation path.
 The OpenAI Python and JavaScript clients can create, retrieve, list, download,
 and delete video jobs. Use the [H3 server cookbook](../../cookbook/openai-api.md)
 for pinned client versions and executable examples. Download variants other
