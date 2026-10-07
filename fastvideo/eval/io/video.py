@@ -40,6 +40,29 @@ def extract_frames(video: torch.Tensor, n_frames: int | None = None) -> torch.Te
     return video[indices]
 
 
+def probe_video_fps(source: str | Path) -> float | None:
+    """Read a path-backed video's native frame rate without decoding frames."""
+    try:
+        import av
+
+        with av.open(str(source)) as container:
+            if not container.streams.video:
+                return None
+            stream = container.streams.video[0]
+            rate = stream.average_rate or stream.guessed_rate
+            if rate is not None and float(rate) > 0:
+                return float(rate)
+    except (ImportError, OSError, ValueError):
+        pass
+    try:
+        from decord import VideoReader, cpu
+
+        rate = float(VideoReader(str(source), ctx=cpu(0)).get_avg_fps())
+        return rate if rate > 0 else None
+    except (ImportError, OSError, RuntimeError, ValueError):
+        return None
+
+
 # --- Internal helpers ---
 
 

@@ -441,6 +441,12 @@ FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
     category="performance",
     doc="Flux denoising disables reduced-precision reductions in bf16 matmuls, which tightens accumulation for "
     "the 4-step Klein model.")
+# Global kill switch for the opt-in, inference-only Triton fusion in
+# fastvideo/layers/triton_fused_norm.py, for debugging numerics or Triton issues.
+FASTVIDEO_DISABLE_FUSED_NORM = EnvBool(False,
+                                       category="performance",
+                                       doc="Turn off the Triton-fused residual + LayerNorm + modulate inference "
+                                       "path that Wan blocks opt into, and use the eager path.")
 
 # ================== Output encoding ==================
 
@@ -707,6 +713,12 @@ FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR = EnvStr("data/kandinsky5_overfit_p
                                                       category="test",
                                                       doc="Output directory for preprocess_kandinsky5_overfit.py.",
                                                       deprecated_names=("KANDINSKY5_OVERFIT_OUTPUT_DIR", ))
+FASTVIDEO_TEST_HUNYUAN15_OVERFIT_DATA_DIR = EnvStr("data/hunyuan15_overfit",
+                                                   category="test",
+                                                   doc="Raw data directory for preprocess_hunyuan15_overfit.py.")
+FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR = EnvStr("data/hunyuan15_overfit_preprocessed",
+                                                     category="test",
+                                                     doc="Output directory for preprocess_hunyuan15_overfit.py.")
 
 # Switches and paths that only tests read. Each old name stays readable, with a
 # warning, until the next minor release.
@@ -826,6 +838,10 @@ FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
                                             category="test",
                                             doc="Upstream taehv checkout for the MLX TAEH3 parity test.",
                                             deprecated_names=("TAEH3_REFERENCE_DIR", ))
+FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR = EnvStr(None,
+                                              category="test",
+                                              doc="Local Wan2.2-Animate-14B checkpoint for the Wan-Animate weight tests.",
+                                              deprecated_names=("WAN_ANIMATE_MODEL_PATH", ))
 FASTVIDEO_TEST_ZIMAGE_MODEL_DIR = EnvStr("Tongyi-MAI/Z-Image-Turbo",
                                          category="test",
                                          doc="Model for the Z-Image SSIM test.",

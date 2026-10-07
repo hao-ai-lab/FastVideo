@@ -31,6 +31,17 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Wan-Animate driving inputs: paths to the *preprocessed* artifacts the
+    # official preprocessing pipeline produces (src_pose.mp4, src_face.mp4;
+    # replace mode adds src_bg.mp4 + src_mask.mp4). `animate_mode` selects
+    # animation (character on the reference image's background) vs replace
+    # (character composited into the background video).
+    pose_video_path: str | None = None
+    face_video_path: str | None = None
+    background_video_path: str | None = None
+    mask_video_path: str | None = None
+    animate_mode: str | None = None
+
     # Audio inputs. `audio_path` drives audio-conditioned generation (Wan S2V):
     # the waveform is encoded and cross-attended to per video frame. Distinct
     # from the Stable Audio `init_audio` fields below, which seed audio output.
