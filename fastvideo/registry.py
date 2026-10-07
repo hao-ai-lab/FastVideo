@@ -814,7 +814,10 @@ def _register_configs() -> None:
         sampling_param_cls=None,
         pipeline_config_cls=Kandinsky6TI2VAConfig,
         workload_types=(WorkloadType.T2V, WorkloadType.I2V),
-        hf_model_paths=["kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers"],
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers",
+            "kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers",
+        ],
         model_detectors=[
             _is_kandinsky6_distilled,
         ],
@@ -829,6 +832,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers",
             "kandinskylab/Kandinsky-6.0-Pro-sft-5s-Diffusers",
+            "kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers",
         ],
         model_detectors=[
             _is_kandinsky6,

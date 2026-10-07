@@ -7,12 +7,16 @@ mp4 automatically. To upscale a generated clip, see [Kandinsky 6 Video SR](kandi
 
 ## Models
 
-Both variants are official Diffusers repos, loaded directly through their `model_index.json`:
+Kandinsky 6 comes in two sizes, Pro (30.1B-parameter DiT) and Lite (3.2B), each with a base and a pi-Flow distilled
+checkpoint. All four are official Diffusers repos, loaded directly through their `model_index.json`; Lite shares Pro's
+architecture, text encoders, VAEs and schedulers, with a narrower and shallower DiT.
 
-| Variant | Hub repo | Scheduler | Steps | Guidance | Example |
-|---|---|---|---|---|---|
-| T2IVA | `kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers` | `FlowMatchEulerDiscreteScheduler` (shift 5.0) | 50 | 5.0 | [`basic_kandinsky6_ti2va.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
-| T2IVA distilled | `kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers` | `PiflowScheduler` (`n_grid` 10, shift 5.0) | 10 | 1.0 | [`basic_kandinsky6_ti2va.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| Size | Variant | Hub repo | Scheduler | Steps | Guidance | Example |
+|---|---|---|---|---|---|---|
+| Pro | T2IVA | `kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers` | `FlowMatchEulerDiscreteScheduler` (shift 5.0) | 50 | 5.0 | [`basic_kandinsky6_ti2va.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| Pro | T2IVA distilled | `kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers` | `PiflowScheduler` (`n_grid` 10, shift 5.0) | 10 | 1.0 | [`basic_kandinsky6_ti2va.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| Lite | T2IVA | `kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers` | `FlowMatchEulerDiscreteScheduler` (shift 5.0) | 50 | 5.0 | [`basic_kandinsky6_ti2va.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| Lite | T2IVA distilled | `kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers` | `PiflowScheduler` (`n_grid` 10, shift 5.0) | 10 | 1.0 | [`basic_kandinsky6_ti2va.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
 
 The steps and guidance columns are the defaults of the preset the registry selects for each repo id. Everything else is
 shared: 512x768, 121 frames (5 s at 24 fps) and the Diffusers default negative prompt (only used when
@@ -101,7 +105,7 @@ nothing:
 
 ## Memory
 
-The Pro DiT has 30.1B parameters, about 60 GB in bf16 (`dit_precision` defaults to `bf16`), and the Qwen2.5-VL text
-encoder adds 16.6 GB. FastVideo enables `dit_cpu_offload` by default; the examples turn it off (`dit_cpu_offload=False`)
+The Pro DiT has 30.1B parameters, about 60 GB in bf16 (`dit_precision` defaults to `bf16`); the Lite DiT has 3.2B,
+about 6.4 GB. Both use the same Qwen2.5-VL text encoder, which adds 16.6 GB. FastVideo enables `dit_cpu_offload` by default; the examples turn it off (`dit_cpu_offload=False`)
 to keep the DiT resident on the GPU and offload the text encoder instead (`text_encoder_cpu_offload=True`). See
 [Offloading](offloading.md) for the memory knobs.
