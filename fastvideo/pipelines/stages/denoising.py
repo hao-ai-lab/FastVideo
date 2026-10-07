@@ -1200,13 +1200,17 @@ class Cosmos25DistilledT2WDenoisingStage(Cosmos25DenoisingStage):
         )
 
         if batch.fps is None:
-            fps_tensor = torch.full((batch_size, ), 16, device=latents.device, dtype=target_dtype)
+            fps_tensor = torch.full((1, ), 24, device=latents.device, dtype=target_dtype)
         else:
             fps_tensor = torch.as_tensor(batch.fps, device=latents.device, dtype=target_dtype).reshape(-1)
-            if fps_tensor.numel() == 1:
-                fps_tensor = fps_tensor.repeat(batch_size)
-            elif fps_tensor.numel() != batch_size:
-                raise ValueError(f"fps must contain one value or one per sample; got {fps_tensor.numel()}")
+            if fps_tensor.numel() != 1:
+                # The Cosmos25 RoPE builds one batch-independent (THW, D) table
+                # (see cosmos2_5.py), so the DiT consumes a single shared fps
+                # value per forward pass, never one value per sample.
+                if not torch.equal(fps_tensor, fps_tensor[:1].expand_as(fps_tensor)):
+                    raise ValueError(
+                        f"fps must be one shared value for the whole batch; got {fps_tensor.tolist()}")
+                fps_tensor = fps_tensor[:1]
 
         state = latents.to(torch.float32)
         with self.progress_bar(total=len(timesteps)) as progress_bar:
@@ -1261,7 +1265,12 @@ class Cosmos25DistilledT2WDenoisingStage(Cosmos25DenoisingStage):
                 progress_bar.update()
 
         # The official implementation returns a finite FP32 x0 for VAE decode.
-        batch.latents = torch.nan_to_num(state.float())
+        state = state.float()
+        if not torch.isfinite(state).all():
+            raise FloatingPointError(
+                "Cosmos25 distilled rollout produced non-finite latents; refusing to "
+                "silently substitute NaN/Inf values into the decoded video")
+        batch.latents = state
         return batch
 
 
@@ -1320,10 +1329,14 @@ class Cosmos25DFDV2WDenoisingStage(Cosmos25DenoisingStage):
 
         fps_value = 24 if batch.fps is None else batch.fps
         fps_tensor = torch.as_tensor(fps_value, device=state.device, dtype=torch.float32).reshape(-1)
-        if fps_tensor.numel() == 1:
-            fps_tensor = fps_tensor.repeat(batch_size)
-        elif fps_tensor.numel() != batch_size:
-            raise ValueError(f"fps must contain one value or one per sample; got {fps_tensor.numel()}")
+        if fps_tensor.numel() != 1:
+            # The Cosmos25 RoPE builds one batch-independent (THW, D) table
+            # (see cosmos2_5.py), so the DiT consumes a single shared fps
+            # value per forward pass, never one value per sample.
+            if not torch.equal(fps_tensor, fps_tensor[:1].expand_as(fps_tensor)):
+                raise ValueError(
+                    f"fps must be one shared value for the whole batch; got {fps_tensor.tolist()}")
+            fps_tensor = fps_tensor[:1]
 
         state = state.to(target_dtype)
         with self.progress_bar(total=len(timesteps)) as progress_bar:
@@ -1367,7 +1380,12 @@ class Cosmos25DFDV2WDenoisingStage(Cosmos25DenoisingStage):
                 state = conditioning_full * mask_channels + step_output.prev_sample * (1 - mask_channels)
                 progress_bar.update()
 
-        batch.latents = torch.nan_to_num(prediction.to(target_dtype))
+        prediction = prediction.to(target_dtype)
+        if not torch.isfinite(prediction).all():
+            raise FloatingPointError(
+                "Cosmos25 DFD rollout produced non-finite latents; refusing to "
+                "silently substitute NaN/Inf values into the decoded video")
+        batch.latents = prediction
         return batch
 
 

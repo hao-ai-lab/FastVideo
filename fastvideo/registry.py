@@ -951,12 +951,16 @@ def _register_configs() -> None:
         pipeline_config_cls=Cosmos25Config,
         workload_types=(WorkloadType.I2V, ),
         model_detectors=[
-            lambda path: "dfd" in path.lower() and any(token in path.lower() for token in (
-                "cosmos25",
-                "cosmos2_5",
-                "cosmos2.5",
-                "cosmos-predict2.5",
-            )),
+            # "dfd" is matched in the last path component only (like the
+            # Kandinsky-6 distilled marker above) so a parent directory that
+            # merely contains "dfd" cannot re-label a base Predict2.5 package.
+            lambda path: "dfd" in path.lower().rstrip("/").rsplit("/", 1)[-1] and any(
+                token in path.lower() for token in (
+                    "cosmos25",
+                    "cosmos2_5",
+                    "cosmos2.5",
+                    "cosmos-predict2.5",
+                )),
         ],
         model_family="cosmos25",
         default_preset="cosmos25_dfd_v2w_2b",
