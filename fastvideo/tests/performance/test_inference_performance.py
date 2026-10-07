@@ -20,6 +20,10 @@ import pytest
 import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.performance.worker_log_capture import (
+    WorkerLogCapture,
+    format_worker_log_tail,
+)
 from fastvideo.tests.performance.identity import (
     benchmark_identity_from_config,
     build_recipe_from_benchmark_config,
@@ -32,7 +36,6 @@ from fastvideo.tests.performance.identity import (
     software_profile,
     software_profile_id,
 )
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
@@ -198,8 +201,7 @@ def _get_thresholds(cfg):
 def _shutdown_executor(generator):
     if generator is None:
         return
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
 
 def _extract_component_times(result: dict) -> dict[str, float | None]:
@@ -313,6 +315,14 @@ def _write_results(results):
     with open(filepath, "w") as f:
         json.dump(results, f, indent=2)
     logger.info("Performance results written to %s", filepath)
+
+
+_WORKER_LOG_DIRNAME = "worker_logs"
+
+
+def _worker_log_dir():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, "results", _WORKER_LOG_DIRNAME)
 
 
 def _backend_name(value) -> str:
@@ -484,6 +494,7 @@ def _build_result_record(
     runtime_identity: Mapping[str, Any],
     device_name: str,
     timestamp: str | None = None,
+    worker_log_path: str | None = None,
 ) -> dict[str, Any]:
     if not times or not peak_memories:
         raise ValueError("Cannot build a performance result record without measurement runs")
@@ -521,6 +532,8 @@ def _build_result_record(
         "individual_peak_memories_mb": [round(m, 1) for m in peak_memories],
         "thresholds":
         dict(thresholds),
+        "worker_log_path":
+        worker_log_path,
         "regression_thresholds":
         cfg.get("regression_thresholds", {}),
         "commit":
@@ -594,10 +607,19 @@ def _run_benchmark(cfg):
     os.makedirs(output_dir, exist_ok=True)
     gen_kwargs["output_path"] = output_dir
 
+    capture = WorkerLogCapture(
+        _worker_log_dir(),
+        cfg["benchmark_id"],
+        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+    )
     generator = None
     try:
+        # log_queue only goes to from_pretrained: workers keep the handler for
+        # their lifetime, covering model load + warmups + measured runs.
+        # Passing it to generate_video would detach it after the first call.
         generator = VideoGenerator.from_pretrained(
             model_path=model_info["model_path"],
+            log_queue=capture.log_queue,
             **init_kwargs,
         )
         runtime_identity = _runtime_identity_from_generator(generator)
@@ -621,7 +643,12 @@ def _run_benchmark(cfg):
             peak_memories.append(peak_mb)
             all_component_times.append(component_times)
     finally:
+        # Shutdown stops workers producing; close() then drains the queue so
+        # the log file is complete before any assertion reads it back. The
+        # performance CI lane mirrors results/worker_logs/*.log into
+        # PERF_REPORTS_DIR as allowlisted .md files for artifact upload.
         _shutdown_executor(generator)
+        capture.close()
 
     avg_time = sum(times) / len(times)
     max_peak_memory = max(peak_memories)
@@ -640,12 +667,22 @@ def _run_benchmark(cfg):
         prompt=prompt,
         runtime_identity=runtime_identity,
         device_name=device_name,
+        worker_log_path=capture.log_path,
     )
 
     logger.info("Performance results: avg_time=%.2fs, "
                 "max_peak_memory=%.0fMB", avg_time, max_peak_memory)
     _write_results(results)
 
+    try:
+        _assert_thresholds(results, thresholds, device_name, avg_time=avg_time, max_peak_memory=max_peak_memory)
+    except AssertionError:
+        print(format_worker_log_tail(cfg["benchmark_id"], capture.log_path), flush=True)
+        raise
+
+
+def _assert_thresholds(results, thresholds, device_name, avg_time, max_peak_memory):
+    """Gate on the raw measurements: the emitted record stores rounded copies."""
     max_time = thresholds["max_generation_time_s"]
     max_mem = thresholds["max_peak_memory_mb"]
 
