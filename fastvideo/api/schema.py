@@ -143,6 +143,7 @@ class InputConfig:
     background_video_path: str | list[str] | None = None
     mask_video_path: str | list[str] | None = None
     animate_mode: str | None = None
+    audio_path: str | list[str] | None = None
     pil_image: Any | None = None
     last_image: Any | None = None
     references: list[Any] | None = None
