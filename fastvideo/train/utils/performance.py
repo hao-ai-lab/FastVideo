@@ -189,9 +189,11 @@ def estimate_transformer_forward(
             if local_attn_size >= 0:
                 max_frames = local_attn_size
             else:
-                # Causal Wan keeps GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES (21)
-                # frames of KV when local_attn_size is unset. MatrixGame2's
-                # 15-frame compatibility window is not modeled here.
+                # Causal Wan caps the KV window at
+                # GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES (21) frames when
+                # local_attn_size is unset; sliding_window_num_frames only
+                # sizes the streaming KV cache. MatrixGame2's 15-frame
+                # compatibility window is not modeled here.
                 max_frames = 21
             key_tokens = min(current_start + seq_len, max_frames * spatial_tokens)
             attention_pairs = float(seq_len * key_tokens)

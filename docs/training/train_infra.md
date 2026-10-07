@@ -226,12 +226,17 @@ MFU is an analytic Transformer-core estimate. Each no-grad forward contributes
 approximately `2F` backward). Activation-checkpoint recomputation is excluded,
 as expected for model FLOPs utilization. Wan VSA uses the kernel's clamped
 tile-top-k density and includes its gate projection and pooled-attention
-overhead. Causal Wan uses the configured chunk size, local window, and actual
-streaming cache position; MatrixGame2's 15-frame compatibility window is not
-modeled, so its attention density is an upper bound. Embedding, normalization,
-optimizer, communication, MatrixGame action modules, and other non-core work
-are not included, so MFU is an estimate rather than a hardware-profiler
-measurement.
+overhead. VMOBA runs are modeled as dense self-attention: the MoBA top-k
+selection is not estimated, so `perf/attention_density` stays at `1.0` and the
+attention-dependent FLOPs are an upper bound. Causal Wan uses the configured
+chunk size, local window, and actual streaming cache position; when
+`local_attn_size` is unset, the modeled window is the transformer's 21-frame
+compatibility cap, and `pipeline.dit_config.sliding_window_num_frames` only
+sizes the streaming KV cache. MatrixGame2's 15-frame compatibility window is
+not modeled, so its attention density is an upper bound. Embedding,
+normalization, optimizer, communication, MatrixGame action modules, and other
+non-core work are not included, so MFU is an estimate rather than a
+hardware-profiler measurement.
 
 `perf/estimated_tflops_per_gpu` and `perf/estimated_mfu` aggregate every role
 (student, teacher, critic, EMA) that ran during the step, so they are not
