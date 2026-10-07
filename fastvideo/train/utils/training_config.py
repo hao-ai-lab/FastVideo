@@ -69,6 +69,16 @@ class TrackerConfig:
 
 
 @dataclass(slots=True)
+class PerformanceConfig:
+    """Low-overhead per-step training performance metrics."""
+
+    enabled: bool = True
+    # Dense BF16 tensor-core peak for one GPU. When unset, known NVIDIA
+    # accelerators are inferred from their device name.
+    peak_tflops_per_gpu: float | None = None
+
+
+@dataclass(slots=True)
 class ModelTrainingConfig:
     weighting_scheme: str = "uniform"
     logit_mean: float = 0.0
@@ -87,6 +97,7 @@ class TrainingConfig:
     loop: TrainingLoopConfig = field(default_factory=TrainingLoopConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
+    performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     vsa_sparsity: float = 0.0
     # Reuse the per-step padded VSA tile buffer across attention layers.
     # Defaults to False for training: under full activation checkpointing the

@@ -67,7 +67,8 @@ filters, and workflow files.
 3. Fix pre-commit failures locally with `pre-commit run --all-files`.
 4. Wait for at least one approving review.
 5. When the PR is approved and ready, comment `/merge`.
-6. `/merge` adds `ready`, waits for cheap checks, and triggers the minimal
+6. `/merge` adds `ready`, directly calls the trusted merge-gate workflow,
+   waits for cheap checks, and triggers the minimal
    path-relevant integration lanes for the PR branch.
 7. If all required checks pass, Mergify squash-merges the PR to `main`.
 8. If the merge gate fails, fix the regression, push again, and re-run
