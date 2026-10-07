@@ -11,8 +11,10 @@ equivalent.
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
+import fastvideo.models.wan.causal_transformer as causal_transformer
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.wan.causal_transformer import CausalWanSelfAttention
 from fastvideo.pipelines.basic.wan.stages.causal_denoising import CausalDMDDenosingStage
@@ -52,6 +54,13 @@ def test_initialize_kv_cache_stores_int_offsets():
         assert entry["local_end_index"] == 0
 
 
+@pytest.fixture
+def single_rank_sp(monkeypatch):
+    """The attention splits heads across the SP group; stand in a one-rank group."""
+    monkeypatch.setattr(causal_transformer, "get_sp_world_size", lambda: 1)
+    monkeypatch.setattr(causal_transformer, "get_sp_parallel_rank", lambda: 0)
+
+
 def _run_attention(counter):
     """One self-attention step against a fresh cache; returns output and cache."""
     torch.manual_seed(0)
@@ -71,7 +80,7 @@ def _run_attention(counter):
     return out, kv_cache
 
 
-def test_int_and_tensor_offsets_are_equivalent():
+def test_int_and_tensor_offsets_are_equivalent(single_rank_sp):
     """An int counter must take the same path as the legacy device-tensor counter."""
     out_int, cache_int = _run_attention(lambda: 0)
     out_tensor, cache_tensor = _run_attention(lambda: torch.tensor([0], dtype=torch.long))
