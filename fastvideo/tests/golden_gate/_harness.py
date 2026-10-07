@@ -24,17 +24,17 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-GOLDEN_REPO_ID = os.environ.get("FASTVIDEO_SSIM_REFERENCE_HF_REPO", "FastVideo/ssim-reference-videos")
-GOLDEN_ROOT = Path(os.environ.get("FASTVIDEO_GOLDEN_GATE_DIR", Path(__file__).resolve().parent / "goldens"))
+import fastvideo.envs as envs
+
 DEFAULT_SEED = 20260805
 
 # Must be set before cuBLAS initializes for use_deterministic_algorithms.
-os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-os.environ.setdefault("MASTER_PORT", "29661")
-os.environ.setdefault("RANK", "0")
-os.environ.setdefault("WORLD_SIZE", "1")
-os.environ.setdefault("LOCAL_RANK", "0")
+envs.setdefault_external("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+envs.setdefault_external("MASTER_ADDR", "127.0.0.1")
+envs.setdefault_external("MASTER_PORT", "29661")
+envs.setdefault_external("RANK", "0")
+envs.setdefault_external("WORLD_SIZE", "1")
+envs.setdefault_external("LOCAL_RANK", "0")
 
 
 @dataclass
@@ -55,34 +55,47 @@ class GateSpec:
     dtype: torch.dtype = torch.bfloat16
     # some blocks return tuples (e.g. double-stream img/txt) — reduce to one tensor
     postprocess: Callable[[Any], torch.Tensor] = field(default=lambda out: out)
-    model_root_env: str | None = None  # env var naming a local checkpoint root
+    model_root: Callable[[], str | None] | None = None  # returns a local checkpoint root, or None to download
     weight_file: str = "diffusion_pytorch_model.safetensors"  # single-file fallback
+    revision: str | None = None  # Immutable checkpoint revision for pinned gates.
 
 
-def env_fingerprint(spec: GateSpec) -> dict[str, str]:
+def env_fingerprint(spec: GateSpec | str | None) -> dict[str, str]:
     try:
         import flash_attn
         fa_version = str(getattr(flash_attn, "__version__", "?"))
     except ImportError:
         fa_version = "<not installed>"
-    return {
+    backend = spec.attention_backend if isinstance(spec, GateSpec) else spec
+    result = {
         "torch": str(torch.__version__),
         "cuda": str(torch.version.cuda),
         "cudnn": str(torch.backends.cudnn.version()),
         "flash_attn": fa_version,
         "device_name": torch.cuda.get_device_name(0),
-        "attention_backend": spec.attention_backend,
-        "fastvideo_fa4": os.environ.get("FASTVIDEO_FA4", "<unset>"),
+        "attention_backend": backend or "NONE",
+        "fastvideo_fa4": str(int(envs.FASTVIDEO_FA4.get())) if envs.FASTVIDEO_FA4.is_set() else "<unset>",
         "tf32_matmul": str(torch.backends.cuda.matmul.allow_tf32),
         "tf32_cudnn": str(torch.backends.cudnn.allow_tf32),
     }
+    if backend is None:
+        # Codec gates do not execute FlashAttention; its version/selection is not
+        # part of the codec compute path. Keep torch/CUDA/cuDNN/device/TF32 pins.
+        result.pop("flash_attn")
+        result.pop("fastvideo_fa4")
+    elif not isinstance(spec, GateSpec):
+        # Tensor gates record the effective switch, so unset and "0" both record
+        # "0". Block gates record "<unset>" when FASTVIDEO_FA4 is unset, and "1"
+        # or "0" when it is set.
+        result["fastvideo_fa4"] = str(int(envs.FASTVIDEO_FA4.get()))
+    return result
 
 
 def _component_dir(spec: GateSpec) -> Path:
     """Local checkout wins; otherwise fetch the index + only the shards holding
     this layer (or the single weight file for index-less checkpoints)."""
-    if spec.model_root_env:
-        root = os.environ.get(spec.model_root_env)
+    if spec.model_root is not None:
+        root = spec.model_root()
         if root:
             return Path(root) / spec.subfolder
 
@@ -92,16 +105,16 @@ def _component_dir(spec: GateSpec) -> Path:
     index_name = f"{spec.subfolder}/{spec.weight_file}.index.json"
     prefix = spec.prefix_template.format(N=spec.layer)
     try:
-        index_path = Path(hf_hub_download(spec.repo_id, index_name))
+        index_path = Path(hf_hub_download(spec.repo_id, index_name, revision=spec.revision))
     except EntryNotFoundError:
-        single = Path(hf_hub_download(spec.repo_id, f"{spec.subfolder}/{spec.weight_file}"))
+        single = Path(hf_hub_download(spec.repo_id, f"{spec.subfolder}/{spec.weight_file}", revision=spec.revision))
         return single.parent
     weight_map = json.loads(index_path.read_text())["weight_map"]
     shards = sorted({shard for name, shard in weight_map.items() if name.startswith(prefix)})
     if not shards:
         pytest.fail(f"no shards found for prefix {prefix} in {spec.repo_id}", pytrace=False)
     for shard in shards:
-        hf_hub_download(spec.repo_id, f"{spec.subfolder}/{shard}")
+        hf_hub_download(spec.repo_id, f"{spec.subfolder}/{shard}", revision=spec.revision)
     return index_path.parent
 
 
@@ -133,19 +146,34 @@ def load_layer_state(spec: GateSpec, component_dir: Path) -> dict[str, torch.Ten
     return state
 
 
+def device_folder() -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", torch.cuda.get_device_name(0)).strip("_")
+
+
 def _golden_relpath(spec: GateSpec) -> str:
-    device_slug = re.sub(r"[^A-Za-z0-9]+", "_", torch.cuda.get_device_name(0)).strip("_")
-    return f"{device_slug}/{spec.name}_layer{spec.layer}_{spec.attention_backend}_seed{spec.seed}.pt"
+    return f"{device_folder()}/{spec.name}_layer{spec.layer}_{spec.attention_backend}_seed{spec.seed}.pt"
 
 
 def _resolve_golden(spec: GateSpec) -> tuple[Path, bool]:
-    local = GOLDEN_ROOT / _golden_relpath(spec)
+    return resolve_golden_path(_golden_relpath(spec))
+
+
+def _golden_repo_id() -> str:
+    return envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO.get()
+
+
+def _golden_root() -> Path:
+    return Path(envs.FASTVIDEO_TEST_GOLDEN_GATE_DIR.get() or Path(__file__).resolve().parent / "goldens")
+
+
+def resolve_golden_path(relative_path: str) -> tuple[Path, bool]:
+    local = _golden_root() / relative_path
     if local.exists():
         return local, True
     from huggingface_hub import hf_hub_download
     from huggingface_hub.errors import EntryNotFoundError
     try:
-        remote = hf_hub_download(GOLDEN_REPO_ID, f"golden_gates/{_golden_relpath(spec)}", repo_type="dataset")
+        remote = hf_hub_download(_golden_repo_id(), f"golden_gates/{relative_path}", repo_type="dataset")
         return Path(remote), True
     except EntryNotFoundError:
         return local, False
@@ -155,7 +183,12 @@ def run_gate(spec: GateSpec) -> None:
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         pytest.skip("golden-gate requires a bf16-capable CUDA GPU")
 
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = spec.attention_backend
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override(spec.attention_backend):
+        _run_block_against_golden(spec)
+
+
+def _run_block_against_golden(spec: GateSpec) -> None:
+    """Run the gated block on the fixed seeded batch and compare the output bitwise with the golden."""
     torch.use_deterministic_algorithms(True)
     torch.backends.cudnn.benchmark = False
 
@@ -190,7 +223,7 @@ def run_gate(spec: GateSpec) -> None:
         torch.save({"output": out, "metadata": meta}, golden_path)
         pytest.fail(
             f"golden latent seeded at {golden_path} ({meta}). Verify with a second run, "
-            f"then upload to {GOLDEN_REPO_ID} at golden_gates/{_golden_relpath(spec)}",
+            f"then upload to {_golden_repo_id()} at golden_gates/{_golden_relpath(spec)}",
             pytrace=False,
         )
 

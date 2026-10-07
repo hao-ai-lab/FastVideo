@@ -1,3 +1,7 @@
+import dataclasses
+import json
+import shutil
+import subprocess
 import os
 from types import SimpleNamespace
 import warnings
@@ -8,6 +12,8 @@ import torch
 from einops import rearrange
 
 import fastvideo.entrypoints.video_generator as video_generator_module
+import fastvideo.envs as envs
+import fastvideo.utils as fastvideo_utils
 from fastvideo.api import (
     ConfigValidationError,
     GenerationRequest,
@@ -36,6 +42,7 @@ def _new_runtime_video_generator() -> VideoGenerator:
         model_path="test-model",
         prompt_txt=None,
         workload_type=SimpleNamespace(value="t2v"),
+        pipeline_config=SimpleNamespace(apply_request_constraints=lambda request, sampling_param: sampling_param),
     )
     generator.executor = SimpleNamespace(
         set_log_queue=lambda queue: None,
@@ -109,7 +116,9 @@ def _single_video_args(output_type="pil"):
         output_type=output_type,
         pin_cpu_memory=False,
         VSA_sparsity=0.0,
-        pipeline_config=SimpleNamespace(flow_shift=1.0, embedded_cfg_scale=1.0),
+        pipeline_config=SimpleNamespace(flow_shift=1.0,
+                                        embedded_cfg_scale=1.0,
+                                        apply_request_constraints=lambda request, sampling_param: sampling_param),
         workload_type=SimpleNamespace(value="t2v"),
     )
 
@@ -273,6 +282,39 @@ def test_generate_single_video_return_frames_still_materializes_output(tmp_path)
     assert result["video_path"] is None
 
 
+def test_generate_single_video_retries_pageable_output_when_pinned_allocation_fails(monkeypatch, tmp_path):
+    output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
+    output_batch = _single_video_output_batch(output)
+    fastvideo_args = _single_video_args()
+    fastvideo_args.pin_cpu_memory = True
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    real_empty = torch.empty
+    allocation_attempts = []
+    warnings = []
+
+    def fake_empty(size, **kwargs):
+        allocation_attempts.append(kwargs.get("pin_memory", False))
+        if kwargs.get("pin_memory"):
+            raise RuntimeError("CUDA error: out of memory")
+        return real_empty(size, **kwargs)
+
+    monkeypatch.setattr(fastvideo_utils, "is_pin_memory_available", lambda: True)
+    monkeypatch.setattr(fastvideo_utils.torch, "empty", fake_empty)
+    monkeypatch.setattr(fastvideo_utils.logger, "warning", lambda message, *args: warnings.append(message % args))
+
+    result = generator._generate_single_video(
+        prompt="pinned allocation fallback",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=True),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    torch.testing.assert_close(result["samples"], output)
+    assert allocation_attempts[:2] == [True, False]
+    assert len(warnings) == 1
+    assert "retrying with pageable memory" in warnings[0]
+
+
 def test_generate_single_video_frames_match_legacy_cpu_loop(tmp_path):
     """The on-device quantize path (#1362) must reproduce the legacy
     per-frame CPU loop (make_grid -> permute -> *255 -> uint8) bit-exactly
@@ -335,6 +377,33 @@ def test_generate_single_video_frames_clamp_out_of_range_pixels(tmp_path):
     assert frames[0].shape == (16, 16, 3)
     assert (frames[0] == 255).all()
     assert (frames[1] == 0).all()
+
+
+def test_generate_single_video_accepts_uint8_worker_output(tmp_path):
+    """A worker may quantize decoded pixels to uint8 before they cross the
+    executor boundary (the MiniMax-H3 decode stage does, cutting the IPC
+    payload 4x). Post-decode must pass those frames through untouched and
+    ``samples`` must stay on its [0, 1] float contract. CPU-only."""
+    torch.manual_seed(0)
+    pixels = torch.rand((1, 3, 2, 16, 16), dtype=torch.float32)
+    output_u8 = (pixels * 255).clamp_(0, 255).to(torch.uint8)
+    output_batch = _single_video_output_batch(output_u8)
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+
+    result = generator._generate_single_video(
+        prompt="uint8 worker output",
+        sampling_param=_small_sampling_param(save_video=False, return_frames=True),
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    torch.testing.assert_close(result["samples"], output_u8.float() / 255)
+    frames = result["frames"]
+    assert len(frames) == 2
+    for index, frame in enumerate(frames):
+        assert frame.dtype == np.uint8
+        np.testing.assert_array_equal(frame, output_u8[0, :, index].permute(1, 2, 0).numpy())
 
 
 def test_generate_single_video_save_video_still_builds_frames(monkeypatch, tmp_path):
@@ -639,6 +708,31 @@ def test_generate_uses_typed_request_path(monkeypatch):
     assert result.video_path == "outputs/test.mp4"
 
 
+@pytest.mark.parametrize("entry", ["generate", "generate_video"])
+def test_generate_applies_pipeline_config_request_constraints(monkeypatch, entry):
+    """Both entry points run the sampling params that the loaded model's request constraints return."""
+    generator = _new_runtime_video_generator()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+
+    def apply_request_constraints(request, sampling_param):
+        return dataclasses.replace(sampling_param, num_inference_steps=8)
+
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(apply_request_constraints=apply_request_constraints)
+    captured = {}
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+    if entry == "generate":
+        generator.generate(GenerationRequest(prompt="hello world"))
+    else:
+        with pytest.warns(DeprecationWarning):
+            generator.generate_video(prompt="hello world")
+    assert captured["sampling_param"].num_inference_steps == 8
+
+
 def test_generate_rejects_stage_override_outside_registered_stage(monkeypatch) -> None:
     """Validate typed stage overrides at the public generation entrypoint."""
     generator = _new_runtime_video_generator()
@@ -858,7 +952,8 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
 
 def test_generate_video_legacy_call_routes_compat_kwargs(monkeypatch):
     generator = _new_runtime_video_generator()
-    generator.fastvideo_args.pipeline_config = SimpleNamespace(embedded_cfg_scale=1.0)
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(
+        embedded_cfg_scale=1.0, apply_request_constraints=lambda request, sampling_param: sampling_param)
     captured = {}
 
     def fake_generate_video_impl(
@@ -958,3 +1053,29 @@ def test_generate_batched_request_rejects_mismatched_media_inputs(monkeypatch):
                 prompt=["first prompt", "second prompt"],
                 inputs=InputConfig(image_path=["first.png"]),
             ))
+
+
+@pytest.mark.parametrize("audio_seconds", [1, 2, 3])
+def test_ffmpeg_pipe_preserves_video_duration(tmp_path, env_overrides, audio_seconds):
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if ffmpeg is None or ffprobe is None:
+        pytest.skip("ffmpeg and ffprobe are required")
+    env_overrides.enter_context(envs.FASTVIDEO_FFMPEG_BIN.override(ffmpeg))
+    env_overrides.enter_context(envs.FASTVIDEO_VIDEO_CODEC.override("libx264"))
+    env_overrides.enter_context(envs.FASTVIDEO_OUTPUT_PIX_FMT.override("yuv420p"))
+    fps, frame_count, sample_rate = 24, 48, 32000
+    frames = [np.full((64, 64, 3), index * 4, dtype=np.uint8) for index in range(frame_count)]
+    audio = np.zeros((2, audio_seconds * sample_rate), dtype=np.float32)
+    output = tmp_path / "video.mp4"
+
+    assert VideoGenerator._save_video_with_audio_ffmpeg_pipe(str(output), frames, fps, audio, sample_rate)
+    probe = json.loads(subprocess.check_output([
+        ffprobe, "-v", "error", "-count_frames", "-show_entries",
+        "stream=codec_type,nb_read_frames,duration", "-of", "json", str(output),
+    ], text=True))
+    video = next(stream for stream in probe["streams"] if stream["codec_type"] == "video")
+    sound = next(stream for stream in probe["streams"] if stream["codec_type"] == "audio")
+    assert int(video["nb_read_frames"]) == frame_count
+    assert float(video["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
+    assert float(sound["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)

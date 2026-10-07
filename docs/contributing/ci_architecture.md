@@ -141,6 +141,24 @@ it), while a GitHub outage or a >25 min wait lets it run anyway (fail open).
 The complete static graph remains available through `/test full`; path
 selection never deletes or dynamically invents a Buildkite step.
 
+Integration steps depend on `golden-gate`. A failed selected golden prevents
+the expensive downstream jobs from starting; `/test full` still selects all
+twenty lanes. A condition-skipped golden satisfies the dependency, so direct
+lane reruns, scheduled SSIM, and training-only merge plans keep their existing
+meaning. This follows Buildkite's
+[conditional dependency rules](https://buildkite.com/docs/pipelines/configure/depends-on).
+No dependency allows failures. The trusted uploader accepts either the old
+complete graph or the complete golden-first graph during rollout, and rejects
+partial or arbitrary dependency changes.
+
+The six automatic Fastcheck lanes are unchanged. Within VAE and transformer
+lanes, small Wan goldens run before independent component parity. Wan paths
+select matching VAE, dense/trajectory, or causal-cache goldens; shared Wan
+config and pipeline wiring select all four. Shared runtime changes continue
+to select broader coverage. The existing block references retain their exact
+environment identity; new tensor gates distinguish the effective FA2/FA4
+switch and VAE gates do not depend on an unused attention backend.
+
 | Lane | Public `TEST_TYPE` | GPUs | Typical merge trigger |
 |---|---|---:|---|
 | Encoder | `encoder` | 1 | Universal Fastcheck |

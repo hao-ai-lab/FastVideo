@@ -13,7 +13,7 @@ from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.utils import align_to, shallow_asdict
+from fastvideo.utils import align_to, pixels_to_uint8, shallow_asdict
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
@@ -252,7 +252,7 @@ class StreamingVideoGenerator(VideoGenerator):
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=1)
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            frames.append((x * 255).cpu().numpy().astype(np.uint8))
+            frames.append(pixels_to_uint8(x).cpu().numpy())
 
         return frames
 

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import itertools
 import math
-import os
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Callable, Iterator, List, NamedTuple, Tuple
@@ -17,12 +16,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+import fastvideo.envs as envs
 from fastvideo.models.vaes.common import DiagonalGaussianDistribution
-
-
-def _is_env_enabled(name: str, default: str = "") -> bool:
-    value = os.getenv(name, default)
-    return value.lower() in {"1", "true", "yes", "on"}
 
 
 # =============================================================================
@@ -1595,7 +1590,7 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         self._use_tiling: bool = False
         self._use_channels_last_3d: bool = False
 
-        if _is_env_enabled("FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D", default="1"):
+        if envs.FASTVIDEO_LTX2_VAE_CHANNELS_LAST_3D.get():
             self.enable_channels_last_3d()
 
     def _as_channels_last_3d(self, tensor: torch.Tensor) -> torch.Tensor:

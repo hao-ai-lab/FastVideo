@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The causal KV cache keeps its window offsets as plain Python ints.
 
-``CausalDMDDenosingStage._initialize_kv_cache`` stores ``global_end_index`` /
+``WanCausalDenoisingBase._initialize_kv_cache`` (shared by
+``CausalDMDDenosingStage`` and ``CausalDenoisingStage``) stores ``global_end_index`` /
 ``local_end_index`` as ints so the attention block can slice the cache without
 a host sync per layer per step. ``CausalWanSelfAttention`` still accepts a
 device tensor for callers that hand it one, so both spellings must stay
@@ -13,8 +14,8 @@ from types import SimpleNamespace
 import torch
 
 from fastvideo.forward_context import set_forward_context
-from fastvideo.models.dits.causal_wanvideo import CausalWanSelfAttention
-from fastvideo.pipelines.stages.causal_denoising import CausalDMDDenosingStage
+from fastvideo.models.wan.causal_transformer import CausalWanSelfAttention
+from fastvideo.pipelines.basic.wan.stages.causal_denoising import CausalDMDDenosingStage
 
 NUM_HEADS = 2
 HEAD_DIM = 8
