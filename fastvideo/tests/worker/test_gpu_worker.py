@@ -172,18 +172,20 @@ def test_execute_forward_drops_save_only_audio_placeholder():
 
 
 @pytest.mark.parametrize(
-    ("save_video", "return_frames"),
+    ("save_video", "return_frames", "return_samples"),
     [
-        (True, False),
-        (False, True),
-        (True, True),
+        (True, False, False),
+        (False, True, False),
+        (True, True, False),
+        (False, False, True),
     ],
 )
-def test_execute_forward_preserves_requested_output(save_video, return_frames):
+def test_execute_forward_preserves_requested_output(save_video, return_frames, return_samples):
     output = torch.ones((1, 3, 2, 4, 4))
     output_batch = ForwardBatch(data_type="video", output=output)
     worker = _worker_returning(output_batch)
-    request_batch = ForwardBatch(data_type="video", save_video=save_video, return_frames=return_frames)
+    request_batch = ForwardBatch(data_type="video", save_video=save_video, return_frames=return_frames,
+                                 return_samples=return_samples)
 
     result = worker.execute_forward(request_batch, FastVideoArgs(model_path="test"))
 

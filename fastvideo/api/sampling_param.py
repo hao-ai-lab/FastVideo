@@ -215,6 +215,7 @@ class SamplingParam:
     # Misc
     save_video: bool = True
     return_frames: bool = True
+    return_samples: bool = field(default=False, kw_only=True)
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 

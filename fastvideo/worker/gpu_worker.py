@@ -97,8 +97,11 @@ class Worker:
         # so that each worker uses the correct device
         # Both multiprocessing and Ray pass the worker-local rank explicitly.
         # Ray deliberately excludes LOCAL_RANK from the copied driver
-        # environment and exposes all GPUs assigned to the node, so leaving an
-        # inherited or missing value here would bind every Ray actor to cuda:0.
+        # environment. On NVIDIA GPUs the executor keeps each actor on its
+        # raylet's device list and passes the worker's ordinal in that list;
+        # on other platforms it passes the index in the node's device list.
+        # Leaving an inherited or missing value here would bind every Ray
+        # actor to device 0.
         # The external-launcher executor passes the launcher's LOCAL_RANK too.
         envs.set_external("LOCAL_RANK", str(self.local_rank))
         if self.fastvideo_args.distributed_executor_backend != "external_launcher":
@@ -165,13 +168,14 @@ class Worker:
         if not self.fastvideo_args.is_output_rank:
             forward_batch.save_video = False
             forward_batch.return_frames = False
+            forward_batch.return_samples = False
             forward_batch.return_trajectory_latents = False
             forward_batch.return_trajectory_decoded = False
             forward_batch.return_continuation_state = False
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
-        needs_output = forward_batch.return_frames or (forward_batch.save_video
-                                                       and fastvideo_args.output_type != "latent"
-                                                       and not output_batch.extra.get("audio_only"))
+        needs_output = forward_batch.return_frames or forward_batch.return_samples or (
+            forward_batch.save_video and fastvideo_args.output_type != "latent"
+            and not output_batch.extra.get("audio_only"))
         if output_batch.output is not None and not needs_output:
             # Drop the decoded tensor before multiprocessing or Ray transports
             # the worker result back to the generator.

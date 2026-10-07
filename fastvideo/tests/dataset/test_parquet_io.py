@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
+from fastvideo.dataset.dataloader import parquet_io
 from fastvideo.dataset.dataloader.parquet_io import (
     ParquetDatasetWriter,
     records_to_table,
@@ -104,3 +106,89 @@ def test_writer_parallel_workers(tmp_path: Path):
     assert len(files) == 4
     total_rows = sum(pq.read_table(str(f)).num_rows for f in files)
     assert total_rows == 40
+
+
+def _write_ids(writer: ParquetDatasetWriter, ids: list[int], **flush_kwargs) -> int:
+    writer.append_table(pa.table({"id": ids}))
+    return writer.flush(**flush_kwargs)
+
+
+def _read_ids(out_dir: Path) -> list[int]:
+    ids = [i for f in out_dir.rglob("*.parquet") for i in pq.read_table(str(f)).column("id").to_pylist()]
+    assert len(ids) == len(set(ids)), f"duplicate ids on disk: {sorted(ids)}"
+    return sorted(ids)
+
+
+@pytest.mark.parametrize(
+    "flushes",
+    [
+        # The second flush has fewer chunks, so each worker's chunk range shrinks.
+        [([0, 1, 2], 2), ([3, 4], 2)],
+        # The second flush has more workers, so each worker's chunk range shrinks.
+        [([0, 1, 2, 3], 2), ([4, 5, 6, 7], 4)],
+    ],
+    ids=["fewer_chunks", "more_workers"],
+)
+def test_writer_successive_flushes_preserve_samples(tmp_path: Path, flushes):
+    writer = ParquetDatasetWriter(str(tmp_path), samples_per_file=1)
+    expected: list[int] = []
+    for ids, num_workers in flushes:
+        assert _write_ids(writer, ids, num_workers=num_workers) == len(ids)
+        expected.extend(ids)
+    assert _read_ids(tmp_path) == expected
+
+
+def test_writer_default_workers_preserve_samples(tmp_path: Path, monkeypatch):
+    # The default worker count is min(cpu_count, chunks), so a final flush with
+    # fewer chunks than earlier ones repartitions chunks across workers.
+    monkeypatch.setattr(parquet_io.multiprocessing, "cpu_count", lambda: 2)
+    writer = ParquetDatasetWriter(str(tmp_path), samples_per_file=2)
+    assert _write_ids(writer, list(range(6))) == 6
+    assert _write_ids(writer, list(range(6, 11)), write_remainder=True) == 5
+    assert _read_ids(tmp_path) == list(range(11))
+
+
+@pytest.mark.parametrize(
+    "samples_per_file, flush_kwargs",
+    [(1, {"num_workers": 1}), (10, {"write_remainder": True})],
+    ids=["full_chunk", "remainder"],
+)
+def test_writer_does_not_overwrite_existing_shard(tmp_path: Path, samples_per_file, flush_kwargs):
+    # Existing numbering with a gap (no data_chunk_0) must not cause the next
+    # shard to reuse data_chunk_1.
+    (tmp_path / "worker_0").mkdir()
+    pq.write_table(pa.table({"id": [-1]}), str(tmp_path / "worker_0" / "data_chunk_1.parquet"))
+
+    writer = ParquetDatasetWriter(str(tmp_path), samples_per_file=samples_per_file)
+    assert _write_ids(writer, [0], **flush_kwargs) == 1
+    assert _read_ids(tmp_path) == [-1, 0]
+
+
+def test_writer_write_remainder_counts_all_rows(tmp_path: Path):
+    writer = ParquetDatasetWriter(str(tmp_path), samples_per_file=10)
+    assert _write_ids(writer, list(range(25)), num_workers=1, write_remainder=True) == 25
+    assert _read_ids(tmp_path) == list(range(25))
+
+
+def test_write_chunk_refuses_to_overwrite(tmp_path: Path):
+    chunk_path = tmp_path / "data_chunk_0.parquet"
+    pq.write_table(pa.table({"id": [-1]}), str(chunk_path))
+
+    with pytest.raises(FileExistsError):
+        parquet_io._write_chunk(pa.table({"id": [0]}), str(chunk_path), "zstd")
+
+    assert pq.read_table(str(chunk_path)).column("id").to_pylist() == [-1]
+
+
+def test_write_chunk_removes_temp_file_on_failure(tmp_path: Path, monkeypatch):
+
+    def fail_mid_write(table, where, **kwargs):
+        Path(where).write_bytes(b"partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(parquet_io.pq, "write_table", fail_mid_write)
+
+    with pytest.raises(OSError, match="disk full"):
+        parquet_io._write_chunk(pa.table({"id": [0]}), str(tmp_path / "data_chunk_0.parquet"), "zstd")
+
+    assert list(tmp_path.iterdir()) == []
