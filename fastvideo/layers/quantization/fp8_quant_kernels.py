@@ -24,7 +24,9 @@ FP8_MIN_SCALE = 1.0 / (FP8_MAX * 512.0)
 try:
     import triton
     import triton.language as tl
-    _HAS_TRITON = True
+    # The kernels need propagate_nan= on tl.maximum/minimum (tl.PropagateNan),
+    # which older Tritons lack; without it fall back to the eager formulas.
+    _HAS_TRITON = hasattr(tl, "PropagateNan")
 except Exception:  # noqa: BLE001
     _HAS_TRITON = False
 
@@ -46,7 +48,8 @@ if _HAS_TRITON:
 
         The row is re-read from L2 in the second sweep, so K is not limited by
         the register tile and the kernel stays one launch."""
-        row = tl.program_id(0)
+        # int64 offsets: M * K can pass 2^31 elements on long videos.
+        row = tl.program_id(0).to(tl.int64)
         x_row = x_ptr + row * stride_x
         amax = tl.zeros([BLOCK], dtype=tl.float32)
         for start in range(0, K, BLOCK):
@@ -67,7 +70,7 @@ if _HAS_TRITON:
     @triton.jit
     def _scale_cast_kernel(x_ptr, out_ptr, inv_scale_ptr, n_elements, FP8_MAX: tl.constexpr, BLOCK: tl.constexpr):
         """Tensorwise second pass: one read, one FP8 write."""
-        pid = tl.program_id(0)
+        pid = tl.program_id(0).to(tl.int64)  # int64 offsets: n can pass 2^31 elements
         offs = pid * BLOCK + tl.arange(0, BLOCK)
         mask = offs < n_elements
         inv = tl.load(inv_scale_ptr)
@@ -87,16 +90,17 @@ def quantize_rowwise_fused(x_2d: torch.Tensor) -> tuple[torch.Tensor, torch.Tens
     out = torch.empty((m, k), dtype=FP8_DTYPE, device=x_2d.device)
     scale = torch.empty((m, 1), dtype=torch.float32, device=x_2d.device)
     block = min(4096, triton.next_power_of_2(k))
-    _rowwise_quant_kernel[(m, )](x_2d,
-                                 out,
-                                 scale,
-                                 k,
-                                 x_2d.stride(0),
-                                 out.stride(0),
-                                 FP8_MAX=FP8_MAX,
-                                 MIN_SCALE=FP8_MIN_SCALE,
-                                 BLOCK=block,
-                                 num_warps=8)
+    if m:
+        _rowwise_quant_kernel[(m, )](x_2d,
+                                     out,
+                                     scale,
+                                     k,
+                                     x_2d.stride(0),
+                                     out.stride(0),
+                                     FP8_MAX=FP8_MAX,
+                                     MIN_SCALE=FP8_MIN_SCALE,
+                                     BLOCK=block,
+                                     num_warps=8)
     return out, scale
 
 

@@ -43,6 +43,14 @@ def test_cpu_inputs_keep_the_eager_path() -> None:
     _assert_eager_path(torch.randn(8, 64, dtype=torch.bfloat16))
 
 
+def test_cpu_empty_rows_keep_the_eager_path() -> None:
+    x = torch.empty((0, 96), dtype=torch.bfloat16)
+    q, s = fp8_config._quantize_rowwise(x)
+    q_ref, s_ref = _eager_rowwise(x)
+    assert q.shape == (0, 96) and s.shape == (0, 1)
+    assert torch.equal(q.view(torch.uint8), q_ref.view(torch.uint8)) and torch.equal(s, s_ref)
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_gpu_without_triton_keeps_the_eager_path(monkeypatch) -> None:
     monkeypatch.setattr(fp8_quant_kernels, "_HAS_TRITON", False)
@@ -75,6 +83,15 @@ def test_fused_matches_eager_on_gpu(m: int, k: int, magnitude: float, dtype: tor
         # one FP8 ulp at the row/tensor maximum, scaled back to the activation's range
         ulp = (s * FP8_MAX / 2**3).max()
         assert (dequant - dequant_ref).abs().max() <= ulp
+
+
+@needs_gpu_and_triton
+def test_fused_rowwise_empty_rows_on_gpu() -> None:
+    x = torch.empty((0, 96), device="cuda", dtype=torch.bfloat16)
+    q, s = quantize_rowwise_fused(x)
+    q_ref, s_ref = _eager_rowwise(x)
+    assert q.shape == q_ref.shape and s.shape == s_ref.shape
+    assert torch.equal(q.view(torch.uint8), q_ref.view(torch.uint8)) and torch.equal(s, s_ref)
 
 
 @needs_gpu_and_triton
