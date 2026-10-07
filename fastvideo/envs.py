@@ -288,6 +288,11 @@ FASTVIDEO_WORKER_MULTIPROC_METHOD = EnvChoice("spawn",
                                               choices=("spawn", "fork", "forkserver"),
                                               category="distributed",
                                               doc="Multiprocessing start method for worker processes.")
+FASTVIDEO_EXTERNAL_LAUNCHER = EnvBool(
+    False,
+    category="distributed",
+    doc="With the default mp backend, offline inference runs SPMD under torchrun or srun: each launched process is "
+    "one worker joining the env:// rendezvous. All ranks must call generate() together; world rank 0 owns outputs.")
 FASTVIDEO_ULYSSES_A2A = EnvChoice(
     "off",
     choices=("off", "auto"),

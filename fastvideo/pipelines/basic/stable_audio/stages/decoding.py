@@ -33,6 +33,15 @@ class StableAudioDecodingStage(PipelineStage):
         pc = fastvideo_args.pipeline_config
         latents = batch.latents
 
+        if not fastvideo_args.is_output_rank:
+            batch.extra.pop("audio", None)
+            batch.extra.pop("audio_sample_rate", None)
+            batch.extra.pop("decoded_audio", None)
+            batch.extra["audio_only"] = True
+            batch.output = torch.empty(0, device="cpu")
+            batch.latents = None
+            return batch
+
         # Latent regression path: hand back the un-decoded denoised latent
         # so the LatentSimilarityUtils harness can compare on pre-VAE
         # numerics. Mirrors the bypass in `pipelines/stages/decoding.py`

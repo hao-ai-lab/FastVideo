@@ -163,7 +163,7 @@ class FastVideoArgs:
     sp_size: int = -1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
-    dist_timeout: int | None = None  # timeout for torch.distributed
+    dist_timeout: int | None = None  # torch.distributed timeout in seconds
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
     preprocess_config: PreprocessConfig | None = None
@@ -379,6 +379,20 @@ class FastVideoArgs:
     def training_mode(self) -> bool:
         return not self.inference_mode
 
+    @property
+    def is_output_rank(self) -> bool:
+        """Whether this process may materialize user-facing outputs.
+
+        This is runtime state assigned by an SPMD executor, not a public
+        configuration field, so dataclass serialization and typed config
+        parsing deliberately ignore it.
+        """
+        return getattr(self, "_is_output_rank", True)
+
+    @is_output_rank.setter
+    def is_output_rank(self, value: bool) -> None:
+        self._is_output_rank = bool(value)
+
     def __post_init__(self):
         if not math.isfinite(self.lora_strength):
             raise ValueError(f"lora_strength must be finite, got {self.lora_strength}")
@@ -568,10 +582,12 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp", "uni", "ray"],
+            choices=["mp", "uni", "ray", "external_launcher"],
             default=FastVideoArgs.distributed_executor_backend,
             help=("Executor backend: mp (multiprocess; in-process when num_gpus=1), "
-                  "uni (always in-process, num_gpus=1), or ray."),
+                  "uni (always in-process, num_gpus=1), ray, or external_launcher "
+                  "(one SPMD worker per torchrun/srun process, offline generation only; "
+                  "FASTVIDEO_EXTERNAL_LAUNCHER=1 also selects it for mp)."),
         )
 
         parser.add_argument(
@@ -630,7 +646,7 @@ class FastVideoArgs:
             "--dist-timeout",
             type=int,
             default=FastVideoArgs.dist_timeout,
-            help="Set timeout for torch.distributed initialization.",
+            help="Set the torch.distributed process-group timeout in seconds.",
         )
 
         # Output type
@@ -1028,6 +1044,9 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
+        if self.dist_timeout is not None and self.dist_timeout <= 0:
+            raise ValueError(f"dist_timeout must be greater than zero seconds, got {self.dist_timeout}")
+
         # Validate mode and inference_mode consistency
         assert isinstance(self.mode, ExecutionMode), f"Mode must be an ExecutionMode enum, got {type(self.mode)}"
         assert self.mode in ExecutionMode.choices(), f"Invalid execution mode: {self.mode}"
