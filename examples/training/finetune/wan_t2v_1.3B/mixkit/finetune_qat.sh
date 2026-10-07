@@ -30,7 +30,9 @@ MAX_TRAIN_STEPS=${MAX_TRAIN_STEPS:-4000}
 VALIDATION_SAMPLING_STEPS=${VALIDATION_SAMPLING_STEPS:-50}
 
 torchrun --nnodes 1 --nproc_per_node "${NUM_GPUS}" \
-    fastvideo/training/wan_training_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanTrainingPipeline \
+    --pipeline-module fastvideo.training.wan_training_pipeline \
     --num_gpus "${NUM_GPUS}" --sp_size "${NUM_GPUS}" --tp_size 1 \
     --hsdp_replicate_dim 1 --hsdp_shard_dim "${NUM_GPUS}" \
     --model_path "${MODEL_PATH}" --pretrained_model_name_or_path "${MODEL_PATH}" \
