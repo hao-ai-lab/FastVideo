@@ -4,7 +4,6 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
-import os
 import weakref
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -141,8 +140,7 @@ class DenoisingStage(PipelineStage):
         # gates should graduate to arch-config declarations like the precision
         # policies above.
         _is_flux = (getattr(fastvideo_args.pipeline_config.dit_config, "prefix", "") == "Flux")
-        if _is_flux and os.getenv("FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION",
-                                  "").lower() in {"1", "true", "yes"}:
+        if _is_flux and envs.FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION.get():
             # Gate 1: tighten bf16 matmul accumulation for the 4-step Klein model (opt-in via env var).
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
         # Gate 2: Flux2 runs its bf16 transformer WITHOUT autocast — autocast perturbs long-sequence attention enough to break 4-step latent parity.
@@ -255,6 +253,7 @@ class DenoisingStage(PipelineStage):
 
         state = self.prepare_denoising(batch, fastvideo_args, target_dtype)
         latents = state.latents
+        model_kwargs, model_kwargs_uncond = self.prepare_model_kwargs(batch, fastvideo_args)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -283,7 +282,7 @@ class DenoisingStage(PipelineStage):
         # compute.  See envs.py for semantics.  delta_cached_model_id tracks
         # which underlying transformer produced the cache so we invalidate on
         # Wan2.2 expert switch.
-        _cfg_gate_fraction = envs.FASTVIDEO_CFG_GATE_STEP
+        _cfg_gate_fraction = envs.FASTVIDEO_CFG_GATE_STEP.get()
         if not 0.0 <= _cfg_gate_fraction <= 1.0:
             raise ValueError(f"FASTVIDEO_CFG_GATE_STEP must be in [0.0, 1.0], got {_cfg_gate_fraction!r}. "
                              "Use 1.0 (default) to disable; lower values trade quality for speed.")
@@ -423,6 +422,7 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **model_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -467,6 +467,7 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **model_kwargs_uncond,
                                 )
                             _cfg_gate_fresh_uncond += 1
 
@@ -568,6 +569,14 @@ class DenoisingStage(PipelineStage):
             latents=latents,
             video_padding=torch.zeros_like(latents) if batch.video_latent is not None else None,
         )
+
+    def prepare_model_kwargs(self, batch, fastvideo_args) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Step-invariant transformer kwargs as (conditional, unconditional).
+
+        Family stages add named conditioning here (Wan-S2V's audio, reference
+        and motion latents) without the shared loop learning about it.
+        """
+        return {}, {}
 
     def activate_transformer(self, model, inactive_model, fastvideo_args) -> None:
         """Keep CPU/layerwise/FSDP offload decisions independent of the sampling recipe."""

@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from dataclasses import dataclass
 
+import fastvideo.envs as envs
 from fastvideo.attention.utils.flash_attn_default import (
     fa_version,
     flash_attn_func_compilable,
@@ -264,7 +265,7 @@ class FlashAttentionImpl(AttentionImpl):
         # keeps its previous semantics.
         nvfp4_fa4 = extra_impl_args.get("nvfp4_fa4")
         if nvfp4_fa4 is None:
-            nvfp4_fa4 = os.environ.get("FASTVIDEO_NVFP4_FA4", "0") == "1"
+            nvfp4_fa4 = envs.FASTVIDEO_NVFP4_FA4.get()
         self.nvfp4_fa4 = bool(nvfp4_fa4)
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()

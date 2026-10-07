@@ -145,6 +145,15 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      audio_encoder_precision:
+        sources:
+          - fastvideo.configs.pipelines.wan.WanS2V14BConfig
+      motion_frames:
+        sources:
+          - fastvideo.configs.pipelines.wan.WanS2V14BConfig
+      clip_frames:
+        sources:
+          - fastvideo.configs.pipelines.wan.WanS2V14BConfig
       flux2_text_encoder_type:
         sources:
           - fastvideo.configs.pipelines.flux_2.Flux2PipelineConfig
@@ -458,6 +467,14 @@ surfaces:
         sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
       video_txt_guidance_scale:
         sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
+      piflow_eps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      piflow_final_step_size_scale:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      piflow_num_policy_substeps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      sample_fps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -470,15 +487,19 @@ surfaces:
       coords_style: "MagiHuman internal data-proxy coordinate convention."
       frame_receptive_field: "MagiHuman internal data-proxy receptive-field setting."
       image_conditioning: "MagiHuman preset variant marker for reference-image conditioning."
+      pdd_step_indices: "MiniMax-H3 PDD fine-grid partition; resolve_checkpoint_settings sets it from fastvideo_inference.json."
       ref_audio_offset: "MagiHuman internal data-proxy audio alignment offset."
       scheduler_sigma_min: "Z-Image scheduler parity invariant; not part of the public typed inference API."
       scheduler_use_reference_discrete_timesteps: "Z-Image scheduler parity invariant; not part of the public typed inference API."
       sr_local_attn_layers: "MagiHuman SR internal sparse-attention layer selection."
       text_offset: "MagiHuman internal data-proxy text alignment offset."
       vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
+      vsa_ref_keep_rate: "MiniMax-H3 PDD reference-video VSA keep rate; defaults to the checkpoint's trained value."
       z_dim: "MagiHuman internal VAE latent channel setting."
       vocoder_config: "Legacy internal component config object."
       vocoder_precision: "Precision override pending dedicated component precision design."
+      audio_sample_rate: "Kandinsky6 audio-latent length constant (audio VAE sample rate); tied to the checkpoint, not a request knob."
+      audio_downsample_factor: "Kandinsky6 audio-latent length constant (audio VAE downsample factor); tied to the checkpoint, not a request knob."
 
   sampling_param_base:
     moved:
@@ -489,6 +510,7 @@ surfaces:
       video_path: request.inputs.video_path
       latents: request.inputs.latents
       audio_latents: request.inputs.audio_latents
+      audio_path: request.inputs.audio_path
       mouse_cond: request.inputs.mouse_cond
       keyboard_cond: request.inputs.keyboard_cond
       grid_sizes: request.inputs.grid_sizes

@@ -62,10 +62,9 @@ def _dit_shape(spec: dict) -> tuple[int, int, int]:
 def _torch_meta(spec: dict, tile_size: int = 256, sparsity: float = 0.0):
     return MiniMaxH3VSAMetadataBuilder().build(
         current_timestep=0,
-        raw_latent_shape=spec["raw_latent_shape"],
         patch_size=spec["patch_size"],
         VSA_sparsity=sparsity,
-        prefix_segments=spec["prefix_segments"],
+        packed_segments=(*spec["prefix_segments"], spec["raw_latent_shape"]),
         device=_CPU,
         tile_size=tile_size,
     )
@@ -112,7 +111,7 @@ def test_routing_mask_parity_exempt_and_compete() -> None:
     k_vid = compute_topk(0.9, v)
     for exempt in (True, False):
         mlx_mask = build_block_mask(scores, p, v, 0.9, exempt=exempt)
-        torch_mask = _build_block_mask(torch.tensor(scores), p, v, 0.9, exempt=exempt).numpy()
+        torch_mask = _build_block_mask(torch.tensor(scores), p, 0.9, exempt, ((p, p + v), ), (0.9, )).numpy()
         assert mlx_mask[:, :, :p].all()
         if exempt:
             assert mlx_mask[..., :p].all()

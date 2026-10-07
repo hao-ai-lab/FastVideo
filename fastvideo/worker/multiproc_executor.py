@@ -150,7 +150,7 @@ class MultiprocExecutor(Executor):
         output = responses[0]["output_batch"]
 
         logging_info = None
-        logging_info = responses[0]["logging_info"] if envs.FASTVIDEO_STAGE_LOGGING else None
+        logging_info = responses[0]["logging_info"] if envs.FASTVIDEO_STAGE_LOGGING.get() else None
 
         # Get extra dict (contains audio, peak_memory_mb, etc.)
         extra = responses[0].get("extra", {})
@@ -743,7 +743,7 @@ class WorkerMultiprocProc:
                         fastvideo_args = kwargs['fastvideo_args']
                         output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
                         logging_info = None
-                        if envs.FASTVIDEO_STAGE_LOGGING:
+                        if envs.FASTVIDEO_STAGE_LOGGING.get():
                             logging_info = output_batch.logging_info
                         # result tensor shared by CUDA IPC to avoid serialization overhead
                         result = output_batch.output

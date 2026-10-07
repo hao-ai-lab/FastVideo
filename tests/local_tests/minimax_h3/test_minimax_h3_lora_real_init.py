@@ -20,6 +20,7 @@ import torch
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed.tensor import DTensor, Shard
 
+import fastvideo.envs as envs
 from fastvideo.distributed import (
     cleanup_dist_env_and_memory,
     maybe_init_distributed_environment_and_model_parallel,
@@ -46,9 +47,9 @@ def test_minimax_h3_ref2va_real_checkpoint_lora_fsdp_init() -> None:
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         pytest.fail("the scoped real-checkpoint init gate requires WORLD_SIZE=1", pytrace=False)
 
-    model_root_value = os.environ.get("MINIMAX_H3_MODEL_ROOT")
+    model_root_value = envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get()
     if not model_root_value:
-        pytest.fail("MINIMAX_H3_RUN_LORA_REAL_INIT=1 requires MINIMAX_H3_MODEL_ROOT", pytrace=False)
+        pytest.fail("MINIMAX_H3_RUN_LORA_REAL_INIT=1 requires FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT", pytrace=False)
     model_root = Path(model_root_value).resolve()
     component = model_root / "transformer_ref"
     if not (model_root / "model_index.json").is_file() or not (component / "config.json").is_file():

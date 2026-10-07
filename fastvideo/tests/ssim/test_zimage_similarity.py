@@ -8,12 +8,14 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     run_text_to_video_similarity_test, )
 from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
+    with_model_path,
 )
 
 logger = init_logger(__name__)
@@ -21,15 +23,6 @@ logger = init_logger(__name__)
 REQUIRED_GPUS = 1
 pytestmark = pytest.mark.skip(reason="Disabled pending removal of Z-Image support.")
 ZIMAGE_MIN_SSIM = 0.98
-
-ZIMAGE_MODEL_PATH = os.getenv(
-    "ZIMAGE_MODEL_DIR",
-    "Tongyi-MAI/Z-Image-Turbo",
-)
-ZIMAGE_MODEL_REVISION = os.getenv(
-    "ZIMAGE_MODEL_REVISION",
-    "f332072aa78be7aecdf3ee76d5c247082da564a6",
-)
 
 TEST_PROMPTS = [
     "Young Chinese woman in red Hanfu, intricate embroidery. Impeccable makeup, red floral forehead pattern. "
@@ -55,10 +48,10 @@ device_reference_folder = resolve_device_reference_folder(
     logger=logger,
 )
 
+# The test adds "model_path" from FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.
 ZIMAGE_MODEL_TO_PARAMS: dict[str, dict[str, object]] = {
     "Tongyi-MAI__Z-Image-Turbo": {
         "num_gpus": 1,
-        "model_path": ZIMAGE_MODEL_PATH,
         "sp_size": 1,
         "tp_size": 1,
         "height": 1024,
@@ -86,10 +79,11 @@ def test_zimage_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
-    is_hf_repo = "/" in ZIMAGE_MODEL_PATH and not ZIMAGE_MODEL_PATH.startswith("/")
-    if not is_hf_repo and not os.path.isdir(ZIMAGE_MODEL_PATH):
-        pytest.skip(f"Z-Image weights not found at {ZIMAGE_MODEL_PATH} "
-                    "(set ZIMAGE_MODEL_DIR to override)")
+    zimage_model_path = envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.get()
+    is_hf_repo = "/" in zimage_model_path and not zimage_model_path.startswith("/")
+    if not is_hf_repo and not os.path.isdir(zimage_model_path):
+        pytest.skip(f"Z-Image weights not found at {zimage_model_path} "
+                    "(set FASTVIDEO_TEST_ZIMAGE_MODEL_DIR to override)")
 
     run_text_to_video_similarity_test(
         logger=logger,
@@ -98,12 +92,12 @@ def test_zimage_similarity(
         prompt=prompt,
         attention_backend_name=attention_backend_name,
         model_id=model_id,
-        default_params_map=ZIMAGE_MODEL_TO_PARAMS,
-        full_quality_params_map=ZIMAGE_FULL_QUALITY_MODEL_TO_PARAMS,
+        default_params_map=with_model_path(ZIMAGE_MODEL_TO_PARAMS, zimage_model_path),
+        full_quality_params_map=with_model_path(ZIMAGE_FULL_QUALITY_MODEL_TO_PARAMS, zimage_model_path),
         min_acceptable_ssim=ZIMAGE_MIN_SSIM,
         media_extension=".png",
         init_kwargs_override={
-            "revision": ZIMAGE_MODEL_REVISION,
+            "revision": envs.FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION.get(),
             "workload_type": "t2i",
             "trust_remote_code": True,
             "use_fsdp_inference": False,

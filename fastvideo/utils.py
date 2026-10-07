@@ -64,7 +64,7 @@ def find_nccl_library() -> str:
     After importing `torch`, `libnccl.so.2` or `librccl.so.1` can be
     found by `ctypes` automatically.
     """
-    so_file = envs.FASTVIDEO_NCCL_SO_PATH
+    so_file = envs.FASTVIDEO_NCCL_SO_PATH.get()
 
     # manually load the nccl library
     if so_file:
@@ -82,16 +82,16 @@ def find_nccl_library() -> str:
 
 def find_hccl_library() -> str:
     """
-    We either use the library file specified by the `HCCL_SO_PATH`
+    We either use the library file specified by the `FASTVIDEO_HCCL_SO_PATH`
     environment variable, or we find the library file brought by PyTorch.
     After importing `torch`, `libhccl.so` can be
     found by `ctypes` automatically.
     """
-    so_file = envs.HCCL_SO_PATH
+    so_file = envs.FASTVIDEO_HCCL_SO_PATH.get()
 
     # manually load the nccl library
     if so_file:
-        logger.info("Found hccl from environment variable HCCL_SO_PATH=%s", so_file)
+        logger.info("Found hccl from environment variable FASTVIDEO_HCCL_SO_PATH=%s", so_file)
     else:
         if torch.version.cann is not None:  # codespell:ignore cann
             so_file = "libhccl.so"
@@ -664,8 +664,10 @@ def verify_model_config_and_directory(
     # Diffusers convention: component entries start with [library, class].
     # Modular manifests may append loading metadata, which FastVideo does not
     # need because published component subfolders match their manifest keys.
-    # Non-list entries are scalar metadata
-    # (e.g. boundary_ratio); a None first element marks a disabled
+    # Non-list entries, and list entries whose first element isn't a string,
+    # are scalar/tuple pipeline metadata (e.g. boundary_ratio, or a
+    # tuple-valued field registered via register_to_config, which serializes
+    # to a JSON list just like a component entry); a None first element marks a disabled
     # component (matches composed_pipeline_base.py). Pipelines that
     # lazy-load shared components from upstream HF repos simply omit the
     # key, so we only enforce "declared, active, but missing on disk".
@@ -677,7 +679,7 @@ def verify_model_config_and_directory(
         for key, value in config.items():
             if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
                 continue
-            if not isinstance(value, list) or len(value) < 1 or value[0] is None:
+            if (not isinstance(value, list) or len(value) < 1 or value[0] is None or not isinstance(value[0], str)):
                 continue
             subdir = os.path.join(model_path, key)
             if not os.path.exists(subdir):
@@ -747,20 +749,56 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
         raise ValueError(f"Failed to download or parse a Diffusers manifest for {model_name_or_path}: {e}") from e
 
 
-_HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
+def read_optional_model_json(model_name_or_path: str,
+                             relative_path: str,
+                             revision: str | None = None) -> dict[str, Any] | None:
+    """Read one JSON file of a local model directory or Hub repo; None when the model has no such file.
+
+    For a Hub repo only that file is downloaded, into the shared HF cache, so
+    a run can read small checkpoint metadata before any component weights.
+    """
+    if os.path.exists(model_name_or_path):
+        path = os.path.join(model_name_or_path, relative_path)
+        if not os.path.isfile(path):
+            return None
+    else:
+        from huggingface_hub import hf_hub_download
+        from huggingface_hub.utils import EntryNotFoundError
+
+        repo_id, subfolder = _split_hf_repo_subfolder(model_name_or_path)
+        filename = f"{subfolder}/{relative_path}" if subfolder else relative_path
+        try:
+            path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
+        except EntryNotFoundError:
+            return None
+    with open(path, encoding="utf-8") as f:
+        return cast(dict[str, Any], json.load(f))
+
+
+# Token variables that `huggingface_hub` itself reads, in its priority order.
+HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+# FastVideo-specific token names, kept as deprecated aliases until the next
+# minor release.
+DEPRECATED_HF_TOKEN_ENV_VARS = ("HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
 
 
 def resolve_hf_token() -> str | None:
-    """Return the first non-empty HF token from the standard env vars.
+    """Return the first non-empty Hugging Face token from the environment.
 
-    Order: `HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`, `HF_API_KEY` (the last is
-    a FastVideo convention; `huggingface_hub` itself doesn't read it).
-    Does not mutate `os.environ`.
+    Reads `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`, then the deprecated
+    FastVideo-specific aliases `HUGGINGFACE_HUB_TOKEN` and `HF_API_KEY`,
+    which log a deprecation warning. Does not mutate `os.environ`.
     """
-    for src in _HF_TOKEN_ENV_VARS:
-        v = os.environ.get(src)
-        if v:
-            return v
+    for name in HF_TOKEN_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            return value
+    for name in DEPRECATED_HF_TOKEN_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            logger.warning_once(f"{name} is deprecated and will be removed in the next minor release; "
+                                f"set HF_TOKEN instead.")
+            return value
     return None
 
 
@@ -1117,7 +1155,7 @@ def _append_to_memory_trace(message: str, log_file_path: str | os.PathLike[str] 
 
 # TODO(xingyu): add adopted message for this
 def get_ip() -> str:
-    host_ip = envs.FASTVIDEO_HOST_IP
+    host_ip = envs.FASTVIDEO_HOST_IP.get()
     if host_ip:
         return host_ip
 
@@ -1159,7 +1197,7 @@ def test_loopback_bind(address: str, family: socket.AddressFamily) -> bool:
 
 
 def get_loopback_ip() -> str:
-    loopback_ip = envs.FASTVIDEO_LOOPBACK_IP
+    loopback_ip = envs.FASTVIDEO_LOOPBACK_IP.get()
     if loopback_ip:
         return loopback_ip
 
@@ -1230,9 +1268,9 @@ def xpu_is_initialized() -> bool:
 
 
 def force_spawn() -> None:
-    if os.environ.get("FASTVIDEO_WORKER_MULTIPROC_METHOD") == "fork":
+    if envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.get() == "fork":
         logger.warning("We must use the `spawn` multiprocessing start method.")
-        os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
+        envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.set("spawn")
 
 
 def get_mp_context() -> BaseContext:
@@ -1243,7 +1281,7 @@ def get_mp_context() -> BaseContext:
     FASTVIDEO_WORKER_MULTIPROC_METHOD.
     """
     force_spawn()
-    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD
+    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.get()
     return multiprocessing.get_context(mp_method)
 
 

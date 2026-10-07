@@ -24,6 +24,7 @@ import torch
 from PIL import Image
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConfig
 from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
 from fastvideo.models.loader.component_loader import TextEncoderLoader
@@ -38,9 +39,9 @@ def _require_assets() -> tuple[torch.device, Path]:
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         pytest.fail("MiniMax-H3 Qwen3-VL parity requires a bf16-capable CUDA GPU", pytrace=False)
 
-    model_root = os.environ.get("MINIMAX_H3_MODEL_ROOT")
+    model_root = envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get()
     if not model_root:
-        pytest.fail("set MINIMAX_H3_MODEL_ROOT to the downloaded MiniMax-H3 checkpoint", pytrace=False)
+        pytest.fail("set FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT to the downloaded MiniMax-H3 checkpoint", pytrace=False)
     root = Path(model_root)
     required = (root / "text_encoder", root / "tokenizer", root / "processor")
     missing = [str(path) for path in required if not path.is_dir()]

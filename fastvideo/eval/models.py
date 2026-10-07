@@ -44,10 +44,7 @@ def get_cache_dir() -> Path:
     ``cache_dir``, etc.), pass ``str(get_cache_dir() / "<library>")`` so
     users get a single ``FASTVIDEO_EVAL_CACHE`` knob to redirect them all.
     """
-    return Path(os.environ.get(
-        "FASTVIDEO_EVAL_CACHE",
-        os.path.join(envs.FASTVIDEO_CACHE_ROOT, "eval"),
-    ))
+    return Path(envs.FASTVIDEO_EVAL_CACHE.get())
 
 
 def ensure_checkpoint(

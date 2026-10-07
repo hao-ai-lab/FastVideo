@@ -41,10 +41,13 @@ and API clients share the same server; both can run locally.
 
 For native Apple Silicon MLX, use
 `python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3.yaml`
-after preparing the weights and editing their paths in that configuration.
-The same playground and clients work with MLX. Its pipeline still loads and
-releases components between phases to limit unified-memory use. See the
-cookbook for setup and the supported text-to-video/audio request fields.
+(Preview) or `examples/serving/mlx_fasth3_8step.yaml` (8-Step V2) after preparing
+the weights and editing their paths in that configuration. The same playground
+and OpenAI Python client work with MLX. Its pipeline still loads and releases
+components between phases to limit unified-memory use. See the cookbook for
+setup and the supported text-to-video/audio request fields.
+
+CUDA FastH3 8-Step V2 serving uses `examples/serving/openai_fasth3_8step.yaml`.
 
 ## Wan configs
 
