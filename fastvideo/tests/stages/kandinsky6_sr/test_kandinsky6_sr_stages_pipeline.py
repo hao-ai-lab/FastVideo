@@ -172,6 +172,21 @@ def test_a_missing_upscaler_scale_is_reported(fv_args, distilled_bundle, tmp_pat
         pipeline.forward(_batch(video_path=str(clip), sr_resolution_scale=4.0), fv_args)
 
 
+def test_non_output_spmd_rank_skips_the_source_audio_and_the_decode(fv_args, distilled_bundle, clip, monkeypatch):
+    # An external-launcher rank other than world rank 0 encodes and denoises with its peers but returns no media.
+    pipeline = _load(distilled_bundle, fv_args)
+    monkeypatch.setattr(sr_io, "read_audio", lambda *a, **k: pytest.fail("non-output ranks must not decode audio"))
+    decodes = _count_calls(monkeypatch, pipeline.get_module("vae"), "decode")
+    fv_args.is_output_rank = False
+
+    result = pipeline.forward(_batch(video_path=str(clip), save_video=False), fv_args)
+
+    assert not decodes
+    assert tuple(result.output.shape) == (0, 3, 0, 0, 0)
+    assert "audio" not in result.extra
+    assert result.latents is None and result.lq_latents is None
+
+
 def test_warmup_request_without_a_video_completes(fv_args, distilled_bundle):
     result = _load(distilled_bundle, fv_args).forward(_batch(save_video=False), fv_args)
     assert result.output.ndim == 5

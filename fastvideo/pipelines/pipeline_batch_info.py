@@ -353,6 +353,7 @@ class TrainingBatch:
     timesteps: torch.Tensor | None = None
     sigmas: torch.Tensor | None = None
     noise: torch.Tensor | None = None
+    training_target: torch.Tensor | None = None
 
     # MiniMax H3 reuses the packed row boundaries from batch preparation to
     # split the transformer's joint sequence back into video and audio outputs.

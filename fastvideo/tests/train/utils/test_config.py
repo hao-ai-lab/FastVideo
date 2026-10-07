@@ -54,6 +54,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     cfg = load_run_config(_write_yaml(tmp_path, _minimal_yaml()))
     t = cfg.training
 
+    assert t.distributed.strategy == "fsdp"
     assert t.distributed.num_gpus == 1
     assert t.distributed.tp_size == 1
     assert t.distributed.sp_size == 1
@@ -67,9 +68,13 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
 
     assert t.optimizer.learning_rate == 0.0
     assert t.optimizer.betas == (0.9, 0.999)
+    assert t.optimizer.eps == pytest.approx(1e-8)
     assert t.optimizer.weight_decay == 0.0
     assert t.optimizer.lr_scheduler == "constant"
     assert t.optimizer.min_lr_ratio == 0.5
+    assert t.optimizer.lr_milestones == ()
+    assert t.optimizer.lr_gamma == pytest.approx(0.1)
+    assert t.optimizer.fused is False
 
     assert t.loop.max_train_steps == 0
     assert t.loop.gradient_accumulation_steps == 1
@@ -88,6 +93,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.model.precondition_outputs is False
     assert t.model.moba_config == {}
     assert t.model.enable_torch_compile is False
+    assert t.model.compile_train_fn is False
     assert t.model.torch_compile_kwargs == {}
 
     assert t.dit_precision == "fp32"
@@ -108,6 +114,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
         },
         "data": {
             "data_path": "/some/path",
+            "preprocessed_data_type": "mmaudio_features",
             "train_batch_size": 2,
             "dataloader_num_workers": 4,
             "training_cfg_rate": 0.1,
@@ -120,10 +127,13 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
         "optimizer": {
             "learning_rate": 1e-4,
             "betas": [0.9, 0.95],
+            "eps": 1e-6,
             "weight_decay": 0.01,
             "lr_scheduler": "cosine",
             "lr_warmup_steps": 100,
             "min_lr_ratio": 0.1,
+            "lr_milestones": [240, 270],
+            "lr_gamma": 0.2,
         },
         "loop": {
             "max_train_steps": 1000,
@@ -152,7 +162,9 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "logit_std": 1.5,
             "precondition_outputs": True,
             "enable_torch_compile": True,
+            "compile_train_fn": True,
             "torch_compile_kwargs": {
+                "backend": "eager",
                 "dynamic": False,
             },
         },
@@ -167,14 +179,18 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
 
     assert t.data.train_batch_size == 2
     assert t.data.data_path == "/some/path"
+    assert t.data.preprocessed_data_type == "mmaudio_features"
     assert t.data.num_frames == 33
     assert t.data.seed == 42
 
     assert t.optimizer.learning_rate == pytest.approx(1e-4)
     assert t.optimizer.betas == (0.9, 0.95)
+    assert t.optimizer.eps == pytest.approx(1e-6)
     assert t.optimizer.lr_scheduler == "cosine"
     assert t.optimizer.lr_warmup_steps == 100
     assert t.optimizer.min_lr_ratio == pytest.approx(0.1)
+    assert t.optimizer.lr_milestones == (240, 270)
+    assert t.optimizer.lr_gamma == pytest.approx(0.2)
 
     assert t.loop.max_train_steps == 1000
     assert t.loop.gradient_accumulation_steps == 4
@@ -192,7 +208,11 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.model.weighting_scheme == "logit_normal"
     assert t.model.precondition_outputs is True
     assert t.model.enable_torch_compile is True
-    assert t.model.torch_compile_kwargs == {"dynamic": False}
+    assert t.model.compile_train_fn is True
+    assert t.model.torch_compile_kwargs == {
+        "backend": "eager",
+        "dynamic": False,
+    }
     assert t.dit_precision == "bf16"
 
 
@@ -266,6 +286,20 @@ def test_betas_parses_list_and_string_forms(
     data["training"] = {"optimizer": {"betas": betas_value}}
     cfg = load_run_config(_write_yaml(tmp_path, data))
     assert cfg.training.optimizer.betas == expected
+
+
+def test_distributed_strategy_parses_ddp(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"distributed": {"strategy": "DDP"}}
+    cfg = load_run_config(_write_yaml(tmp_path, data))
+    assert cfg.training.distributed.strategy == "ddp"
+
+
+def test_distributed_strategy_rejects_unknown_value(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"distributed": {"strategy": "zero3"}}
+    with pytest.raises(ValueError, match="strategy must be one of"):
+        load_run_config(_write_yaml(tmp_path, data))
 
 
 def test_pipeline_quant_config_resolves_for_load_and_export(tmp_path: Path) -> None:

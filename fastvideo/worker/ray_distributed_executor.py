@@ -375,8 +375,11 @@ class RayDistributedExecutor(Executor):
         # Under the MiniMax-H3 encoder split the encoder ranks answer with a
         # stub batch; the decoded output lives on the first denoise rank.
         src = 0
-        if getattr(self.fastvideo_args, "h3_encoder_split", False):
-            src = int(self.fastvideo_args.h3_encoder_workers)
+        # The executor's own args carry h3_encoder_workers (stamped when the
+        # workers were placed); fall back to the per-call args when absent.
+        split_args = getattr(self, "fastvideo_args", fastvideo_args)
+        if getattr(split_args, "h3_encoder_split", False):
+            src = int(split_args.h3_encoder_workers)
         output = responses[src].output.cpu()
 
         logging_info = None
@@ -437,6 +440,10 @@ class RayDistributedExecutor(Executor):
                        timeout: float | None = None,
                        args: tuple = (),
                        kwargs: dict | None = None) -> list[Any]:
+        if timeout is not None:
+            raise NotImplementedError(
+                "RayDistributedExecutor.collective_rpc does not support per-call timeouts; "
+                "omit the timeout and rely on Ray's own task failure handling instead.")
         return self._run_ray_workers(method, *args, **(kwargs or {}))
 
     def _run_ray_workers(

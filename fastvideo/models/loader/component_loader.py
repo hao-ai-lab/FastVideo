@@ -1066,7 +1066,15 @@ class AudioDecoderLoader(ComponentLoader):
             audio_vae.load_state_dict(loaded, strict=True)
             return audio_vae.eval()
 
-        precision = getattr(fastvideo_args.pipeline_config, "audio_decoder_precision", "bf16")
+        # A preprocessing component may carry the MMAudio encoder in addition
+        # to the inference decoder. Feature extraction is defined in fp32 by
+        # the published recipe; do not quantize it to decoder inference dtype.
+        needs_encoder = bool(config.get("need_encoder", False))
+        precision_name = (
+            "audio_encoder_precision" if needs_encoder else
+            "audio_decoder_precision")
+        precision = getattr(fastvideo_args.pipeline_config, precision_name,
+                            "fp32" if needs_encoder else "bf16")
         # MMAudio normalizes its magnitude-preserving convolution weights in
         # fp32 and only then casts the whole feature utility module to bf16.
         # Constructing/loading directly in bf16 quantizes the unnormalized

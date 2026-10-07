@@ -413,11 +413,17 @@ def maybe_load_fsdp_model(
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=load_weights_to_cpu)
     logger.info("Loading transformer weights with to_cpu=%s", load_weights_to_cpu)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
-    dense_lora_patch = DenseLoRAPatch.from_adapter(
-        lora_path,
-        param_names_mapping_fn,
-        strength=lora_strength,
-    )
+    dense_lora_patch = None
+    if lora_path:
+        # LoRA-specific mappings are optional and must not become a dependency of ordinary model loading.
+        lora_mapping = getattr(model, "lora_param_names_mapping", None)
+        lora_param_names_mapping_fn = get_param_names_mapping(lora_mapping) if lora_mapping else None
+        dense_lora_patch = DenseLoRAPatch.from_adapter(
+            lora_path,
+            param_names_mapping_fn,
+            lora_param_names_mapping=lora_param_names_mapping_fn,
+            strength=lora_strength,
+        )
     if dense_lora_patch is not None:
         # H3's compression gate is created only by the VSA attention backend. Loading a
         # VSA student under dense attention would otherwise warn about 50 unmatched
@@ -545,6 +551,77 @@ def _strip_checkpoint_wrapper_prefix(name: str) -> str:
     must compare clean names.
     """
     return name.replace("._checkpoint_wrapped_module.", ".").removeprefix("_checkpoint_wrapped_module.")
+
+
+def build_fsdp_model_from_scratch(
+    model_cls: type[nn.Module],
+    init_params: dict[str, Any],
+    device: torch.device,
+    hsdp_replicate_dim: int,
+    hsdp_shard_dim: int,
+    default_dtype: torch.dtype,
+    param_dtype: torch.dtype,
+    reduce_dtype: torch.dtype,
+    *,
+    seed: int,
+    cpu_offload: bool = False,
+    output_dtype: torch.dtype | None = None,
+    pin_cpu_memory: bool = True,
+) -> torch.nn.Module:
+    """Deterministically initialize and FSDP-shard a model without weights."""
+
+    mp_policy = MixedPrecisionPolicy(
+        param_dtype,
+        reduce_dtype,
+        output_dtype,
+        cast_forward_inputs=False,
+    )
+    set_mixed_precision_policy(
+        param_dtype=param_dtype,
+        reduce_dtype=reduce_dtype,
+        output_dtype=output_dtype,
+        mp_policy=mp_policy,
+    )
+
+    fork_devices: list[int] = []
+    if device.type == "cuda":
+        fork_devices = [
+            device.index if device.index is not None else torch.cuda.current_device()
+        ]
+    with torch.random.fork_rng(devices=fork_devices):
+        torch.manual_seed(int(seed))
+        with set_default_dtype(default_dtype), torch.device(device):
+            model = model_cls(**init_params)
+
+    from fastvideo.platforms import current_platform
+
+    if not current_platform.is_mps():
+        pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
+        if current_platform.is_npu():
+            device_mesh = init_device_mesh(
+                "npu",
+                mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                mesh_dim_names=("replicate", "shard"),
+            )
+        else:
+            device_mesh = init_device_mesh(
+                "cuda",
+                mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                mesh_dim_names=("replicate", "shard"),
+            )
+        shard_model(
+            model,
+            cpu_offload=cpu_offload,
+            reshard_after_forward=True,
+            mp_policy=mp_policy,
+            mesh=device_mesh,
+            fsdp_shard_conditions=model._fsdp_shard_conditions,
+            pin_cpu_memory=pin_cpu_memory,
+        )
+
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+    return model
 
 
 def _regional_compile_unsupported_reason(
@@ -1006,7 +1083,7 @@ def load_model_from_full_model_state_dict(
         else:
             if tuple(initialized_tensor.shape) != tuple(meta_sharded_param.shape):
                 if adapter_value is not None:
-                    raise ValueError(f"LoRA set_weight for {new_param_name} has shape {tuple(initialized_tensor.shape)}, "
+                    raise ValueError(f"LoRA replacement for {new_param_name} has shape {tuple(initialized_tensor.shape)}, "
                                      f"but the parameter is {tuple(meta_sharded_param.shape)}")
                 raise ValueError(f"Initializer returned shape {tuple(initialized_tensor.shape)} for {new_param_name!r}; "
                                  f"expected {tuple(meta_sharded_param.shape)}")
