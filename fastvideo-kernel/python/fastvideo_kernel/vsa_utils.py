@@ -14,7 +14,10 @@ import math
 import torch
 
 VSA_TILE_SIZE = (4, 4, 4)
-_SUPPORTED_VSA_BLOCK_VOLUMES = (64, 256)
+# 128 is served by the sm_100a/sm_103a CUDA backend (legacy API name
+# block_sparse_attn_sm100a); 64 and 256 by
+# Triton and the CuTe-DSL path. A volume here only needs a backend that accepts it.
+_SUPPORTED_VSA_BLOCK_VOLUMES = (64, 128, 256)
 
 
 def _canonicalize_device(device: torch.device | str) -> torch.device:

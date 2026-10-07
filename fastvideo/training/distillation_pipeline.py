@@ -34,7 +34,8 @@ from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
                                                get_scheduler, load_distillation_checkpoint,
                                                save_distillation_checkpoint, shift_timestep)
-from fastvideo.utils import (is_vsa_available, maybe_download_model, set_random_seed, verify_model_config_and_directory)
+from fastvideo.utils import (is_vsa_available, maybe_download_model, pixels_to_uint8, set_random_seed,
+                             verify_model_config_and_directory)
 
 try:
     vsa_available = is_vsa_available()
@@ -1114,7 +1115,7 @@ class DistillationPipeline(TrainingPipeline):
                     for x in video:
                         x = torchvision.utils.make_grid(x, nrow=6)
                         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                        frames.append((x * 255).numpy().astype(np.uint8))
+                        frames.append(pixels_to_uint8(x).numpy())
                     videos.append(frames)
                     audios.append(output_batch.extra.get("audio"))
                     audio_sample_rates.append(output_batch.extra.get("audio_sample_rate"))
@@ -1323,7 +1324,7 @@ class DistillationPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
 
-        use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN"
+        use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND.get() == "VIDEO_SPARSE_ATTN"
         for step in range(self.init_steps + 1, self.training_args.max_train_steps + 1):
             if step % 5 == 0:
                 gc.collect()
@@ -1505,7 +1506,7 @@ class DistillationPipeline(TrainingPipeline):
         if self.training_args.use_ema and self.is_ema_ready():
             self.save_ema_weights(self.training_args.output_dir, self.training_args.max_train_steps)
 
-        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR.get():
             logger.info("Stopping profiler...")
             self.profiler_controller.stop()
             logger.info("Profiler stopped.")

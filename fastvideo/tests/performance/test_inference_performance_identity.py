@@ -2,6 +2,7 @@
 
 import copy
 
+import fastvideo.envs as envs
 from fastvideo.tests.performance import compare_baseline
 from fastvideo.tests.performance import test_inference_performance as perf
 
@@ -45,8 +46,8 @@ def _benchmark_config():
     }
 
 
-def test_performance_producer_emits_v2_identity_from_raw_result_shape(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
+def test_performance_producer_emits_v2_identity_from_raw_result_shape(env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASH_ATTN"))
     cfg = _benchmark_config()
     init_kwargs = dict(cfg["init_kwargs"])
     cfg["generation_kwargs"]["output_path"] = "/tmp/generated"
@@ -95,8 +96,8 @@ def test_performance_producer_emits_v2_identity_from_raw_result_shape(monkeypatc
     assert "output_path" not in record["recipe"]["generation_kwargs"]
 
 
-def test_display_benchmark_id_rename_preserves_producer_fingerprint_and_cohort(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
+def test_display_benchmark_id_rename_preserves_producer_fingerprint_and_cohort(env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASH_ATTN"))
     original = _benchmark_config()
     renamed = copy.deepcopy(original)
     renamed["benchmark_id"] = "wan-t2v-renamed-display-id"
@@ -122,8 +123,8 @@ def test_display_benchmark_id_rename_preserves_producer_fingerprint_and_cohort(m
         original_identity) == compare_baseline._comparison_identity_filters(renamed_identity)
 
 
-def test_v2_identity_tolerates_null_run_config(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
+def test_v2_identity_tolerates_null_run_config(env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASH_ATTN"))
     cfg = _benchmark_config()
     cfg["run_config"] = None
     init_kwargs = dict(cfg["init_kwargs"])
@@ -141,8 +142,8 @@ def test_v2_identity_tolerates_null_run_config(monkeypatch):
     assert identity_fields["hardware_profile"]["gpu_count"] == 2
 
 
-def test_effective_gpu_count_is_recorded_in_recipe_and_hardware(monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
+def test_effective_gpu_count_is_recorded_in_recipe_and_hardware(env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASH_ATTN"))
     cfg = _benchmark_config()
     del cfg["init_kwargs"]["num_gpus"]
     init_kwargs = dict(cfg["init_kwargs"])
@@ -161,7 +162,7 @@ def test_effective_gpu_count_is_recorded_in_recipe_and_hardware(monkeypatch):
     assert identity_fields["hardware_profile"]["gpu_count"] == 2
 
 
-def test_producer_tracks_runtime_software_identity_and_container_audit(monkeypatch):
+def test_producer_tracks_runtime_software_identity_and_container_audit(monkeypatch, env_overrides):
     base_profile = {
         "python": "3.12",
         "pytorch": "2.7",
@@ -172,14 +173,15 @@ def test_producer_tracks_runtime_software_identity_and_container_audit(monkeypat
         },
     }
     monkeypatch.setattr(perf, "software_profile", lambda: dict(base_profile))
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "SAGE_ATTN")
-    monkeypatch.setenv("FASTVIDEO_FA4", "1")
-    monkeypatch.setenv("FASTVIDEO_PERFORMANCE_PROFILE_VERSION", "perf-profile-v2")
-    monkeypatch.setenv("IMAGE_VERSION", "py3.12-cuda13.0")
-    monkeypatch.setenv(
-        "FASTVIDEO_CONTAINER_IMAGE_REF",
-        "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:abc",
-    )
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("SAGE_ATTN"))
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(True))
+    env_overrides.enter_context(envs.override_external("FASTVIDEO_PERFORMANCE_PROFILE_VERSION", "perf-profile-v2"))
+    env_overrides.enter_context(envs.override_external("IMAGE_VERSION", "py3.12-cuda13.0"))
+    env_overrides.enter_context(
+        envs.override_external(
+            "FASTVIDEO_CONTAINER_IMAGE_REF",
+            "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:abc",
+        ))
 
     cfg = _benchmark_config()
     identity_fields = perf._build_identity_fields(
@@ -204,10 +206,11 @@ def test_producer_tracks_runtime_software_identity_and_container_audit(monkeypat
     assert identity_fields["environment_metadata"]["env"]["FASTVIDEO_CONTAINER_IMAGE_REF"].endswith("sha256:abc")
 
     first_profile_id = identity_fields["software_profile_id"]
-    monkeypatch.setenv(
-        "FASTVIDEO_CONTAINER_IMAGE_REF",
-        "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:def",
-    )
+    env_overrides.enter_context(
+        envs.override_external(
+            "FASTVIDEO_CONTAINER_IMAGE_REF",
+            "ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev@sha256:def",
+        ))
     changed_audit = perf._build_identity_fields(
         cfg,
         dict(cfg["init_kwargs"]),
@@ -220,7 +223,7 @@ def test_producer_tracks_runtime_software_identity_and_container_audit(monkeypat
     assert changed_audit["software_profile_id"] == first_profile_id
     assert changed_audit["environment_metadata"]["env"]["FASTVIDEO_CONTAINER_IMAGE_REF"].endswith("sha256:def")
 
-    monkeypatch.setenv("FASTVIDEO_FA4", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(False))
     changed_runtime = perf._build_identity_fields(
         cfg,
         dict(cfg["init_kwargs"]),

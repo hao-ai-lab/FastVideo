@@ -33,7 +33,6 @@ jobs:
             core.setOutput('has_write', String(hasWrite));
 
       - name: Add ready label and react
-        id: label
         if: steps.perm.outputs.has_write == 'true'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
@@ -48,47 +47,6 @@ jobs:
               comment_id: context.payload.comment.id,
               content: 'rocket',
             });
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
-            core.setOutput('pr_sha', pr.head.sha);
-            core.setOutput('pr_branch', pr.head.ref);
-            core.setOutput('pr_number', String(prNumber));
-            core.setOutput('pr_title', pr.title);
-
-      - name: Trigger Full Suite
-        if: steps.perm.outputs.has_write == 'true'
-        env:
-          BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
-          PR_SHA: ${{ steps.label.outputs.pr_sha }}
-          PR_BRANCH: ${{ steps.label.outputs.pr_branch }}
-          PR_NUMBER: ${{ steps.label.outputs.pr_number }}
-          PR_TITLE: ${{ steps.label.outputs.pr_title }}
-          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
-          BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
-        run: |
-          curl -sS --fail-with-body -X POST \
-            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
-            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data-raw "$(jq -n \
-              --arg commit "$PR_SHA" \
-              --arg branch "$PR_BRANCH" \
-              --arg message "Full Suite for PR #${PR_NUMBER} (via /merge)" \
-              --arg pr_title "$PR_TITLE" \
-              --argjson pr_id "$PR_NUMBER" \
-              '{
-                commit: $commit,
-                branch: $branch,
-                message: $message,
-                ignore_pipeline_branch_filters: true,
-                pull_request_id: $pr_id,
-                pull_request_base_branch: "main",
-                env: {
-                    TEST_SCOPE: "full",
-                    FULL_SUITE: "true",
-                    PR_NUMBER: ($pr_id | tostring),
-                    PR_TITLE: $pr_title
-                  }
-                }')"
 
   parse-command:
     if: >-
@@ -129,7 +87,7 @@ jobs:
           set -euo pipefail
           TEST_NAME=$(echo "$COMMENT" | grep -oP '(?<=/test\s)\S+' | head -1 || true)
 
-          VALID="encoder vae transformer kernel unit dreamverse ssim golden-gate training lora-inference lora-training lora-extraction distillation self-forcing vsa vmoba performance api train-framework eval full fastcheck pre-commit"
+          VALID="encoder vae transformer kernel unit dreamverse ssim golden-gate training lora-inference lora-training lora-extraction distillation self-forcing vsa vmoba performance api train-framework eval unit-ci kernel-ci dreamverse-ci ssim-ci golden-gate-ci encoder-ci vae-ci transformer-ci lora-inference-ci lora-training-ci lora-extraction-ci training-ci distillation-ci self-forcing-ci vsa-ci vmoba-ci performance-ci api-ci train-framework-ci eval-ci full fastcheck pre-commit"
           if [ -z "$TEST_NAME" ] || ! echo "$VALID" | grep -qw "$TEST_NAME"; then
             echo "Unknown test: '$TEST_NAME'. Valid: $VALID"
             exit 1
@@ -137,7 +95,17 @@ jobs:
 
           declare -A MAP=(
             [encoder]=encoder [vae]=vae [transformer]=transformer
-            [kernel]=kernel_tests [unit]=unit_test [dreamverse]=dreamverse_app
+            [kernel]=kernel_tests [unit]=unit_test [unit-ci]=unit_test_ci
+            [kernel-ci]=kernel_tests_ci [dreamverse-ci]=dreamverse_app_ci
+            [ssim-ci]=ssim_ci [vmoba-ci]=inference_vmoba_ci
+            [golden-gate-ci]=golden_gate_ci [training-ci]=training_ci
+            [encoder-ci]=encoder_ci [vae-ci]=vae_ci [transformer-ci]=transformer_ci
+            [lora-inference-ci]=inference_lora_ci [lora-training-ci]=training_lora_ci
+            [lora-extraction-ci]=lora_extraction_ci [distillation-ci]=distillation_dmd_ci
+            [self-forcing-ci]=self_forcing_ci [vsa-ci]=training_vsa_ci
+            [performance-ci]=performance_ci [api-ci]=api_server_ci
+            [train-framework-ci]=train_framework_ci [eval-ci]=eval_ci
+            [dreamverse]=dreamverse_app
             [ssim]=ssim [golden-gate]=golden_gate [training]=training
             [lora-inference]=inference_lora [lora-training]=training_lora
             [lora-extraction]=lora_extraction

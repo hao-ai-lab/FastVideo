@@ -11,9 +11,10 @@
 
 | Scope | Evidence | State |
 |---|---|---|
-| Qwen3-VL encoder | exact text/image/video hidden states through the production loader | complete |
+| Qwen3-VL encoder | exact text/image/video hidden states through the production loader; bounded exact vision interpolation | complete |
 | FL2VA and Ref2VA DiTs | exact video/audio heads for both model partitions | complete |
 | Video VAE | exact encode, normalization, and decode through the production loader | complete |
+| Video VAE streaming | exact chunked encode/decode and output-rank-only distributed decode | complete |
 | Audio VAE | exact encode and normalization; decode maximum absolute drift `2.4e-7` | complete |
 | Video/audio schedulers | pinned `12/3` schedule parity | complete |
 | FL2VA packing | pinned row, position, tag, timestep, and RNG parity | complete |
@@ -24,7 +25,11 @@
 
 ## Current validation
 
-T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly.
+T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly. On 2026-08-26, the Qwen3-VL production loader
+also matched Transformers 5.15.1 exactly for text, image, and video layer-50 hidden states on GB10. Its production
+`[15, 42, 74] x 1152` vision interpolation matched the official helper bit-exactly while reducing incremental CUDA
+allocation from `1,291,986,432` to `284,866,048` bytes relative to the unbounded float32 implementation. A packed
+production image/video grid reduced the same metric from `2,086,086,144` to `418,362,880` bytes.
 
 ## Decisions
 
@@ -34,6 +39,9 @@ T2VA, FL2VA, and Ref2VA match the official video/audio latents exactly.
 - Load `transformer/` for T2VA/FL2VA and `transformer_ref/` for Ref2VA.
 - Keep `last_image`, `references`, and `audio_latents` on the typed request path.
 - Treat the published component folders as the loading boundary.
+- Keep reference videos on CPU between VAE clips and decode final pixels only on the executor's output rank.
+- Preserve Qwen3-VL's float32 vision interpolation through accumulation, bound its four-tap temporary workspace, and
+  cast the completed positions only at the vision residual-add boundary.
 
 ## Evidence boundary
 

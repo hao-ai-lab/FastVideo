@@ -26,29 +26,48 @@ jobs:
               per_page: 100,
             });
 
-            const bkStatuses = data.statuses.filter(
-              s => s.context.startsWith('buildkite/ci/')
-            );
-
-            const FASTCHECK_PREFIX = 'buildkite/ci/microscope-';
+            // Buildkite derives the GitHub context prefix from the label emoji.
+            // Keep hard Full Suite lanes in test-tube/bar-chart namespaces and
+            // Fastcheck lanes in microscope so targeted reruns cannot clear the
+            // wrong aggregate status. Automatic PR jobs use pr-fastcheck while
+            // slash-command and Full Suite jobs use ci; normalize the suffix
+            // and keep the newest status for each logical lane.
+            const FASTCHECK_PREFIXES = [
+              'buildkite/pr-fastcheck/microscope-',
+              'buildkite/ci/microscope-',
+            ];
             const FULL_SUITE_PREFIXES = [
               'buildkite/ci/test-tube-',
               'buildkite/ci/bar-chart-',
             ];
 
-            const fastcheck = bkStatuses.filter(
-              s => s.context.startsWith(FASTCHECK_PREFIX)
-            );
-            const fullSuite = bkStatuses.filter(
-              s => FULL_SUITE_PREFIXES.some(p => s.context.startsWith(p))
-            );
+            function newestByLane(prefixes) {
+              const statuses = new Map();
+              for (const status of data.statuses) {
+                const prefix = prefixes.find(p => status.context.startsWith(p));
+                if (!prefix) continue;
+                const lane = status.context.slice(prefix.length);
+                const previous = statuses.get(lane);
+                if (!previous || Date.parse(status.updated_at) > Date.parse(previous.updated_at)) {
+                  statuses.set(lane, status);
+                }
+              }
+              return statuses;
+            }
 
-            if (
-              fastcheck.length > 0
-              && fastcheck.every(s => s.state === 'success')
-            ) {
+            const fastcheck = newestByLane(FASTCHECK_PREFIXES);
+            const fullSuiteOnly = newestByLane(FULL_SUITE_PREFIXES);
+            const fastcheckPassed =
+              fastcheck.size === 6
+              && [...fastcheck.values()].every(s => s.state === 'success');
+            const fullSuitePassed =
+              fastcheckPassed
+              && fullSuiteOnly.size === 14
+              && [...fullSuiteOnly.values()].every(s => s.state === 'success');
+
+            if (fastcheckPassed) {
               core.info(
-                `All ${fastcheck.length} fastcheck tests passed — updating fastcheck-passed`
+                `All ${fastcheck.size} fastcheck tests passed — updating fastcheck-passed`
               );
               await github.rest.repos.createCommitStatus({
                 owner: context.repo.owner,
@@ -56,17 +75,13 @@ jobs:
                 sha,
                 state: 'success',
                 context: 'fastcheck-passed',
-                description:
-                  `All ${fastcheck.length} fastcheck tests passed`,
+                description: `All ${fastcheck.size} fastcheck tests passed`,
               });
             }
 
-            if (
-              fullSuite.length > 0
-              && fullSuite.every(s => s.state === 'success')
-            ) {
+            if (fullSuitePassed) {
               core.info(
-                `All ${fullSuite.length} full suite tests passed — updating full-suite-passed`
+                'All 20 full suite tests passed — updating full-suite-passed'
               );
               await github.rest.repos.createCommitStatus({
                 owner: context.repo.owner,
@@ -74,7 +89,6 @@ jobs:
                 sha,
                 state: 'success',
                 context: 'full-suite-passed',
-                description:
-                  `All ${fullSuite.length} full suite tests passed`,
+                description: 'All 20 full suite tests passed',
               });
             }

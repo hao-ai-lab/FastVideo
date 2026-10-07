@@ -1,87 +1,60 @@
 # SPDX-License-Identifier: Apache-2.0
-import os
+"""Wan VAE encode/decode parity against Diffusers (one CUDA GPU, FP32)."""
 
-import numpy as np
 import pytest
 import torch
 from diffusers import AutoencoderKLWan
-
-from fastvideo.configs.pipelines import PipelineConfig
-from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.logger import init_logger
-from fastvideo.models.loader.component_loader import VAELoader
-from fastvideo.configs.models.vaes import WanVAEConfig
-from fastvideo.utils import maybe_download_model
 from torch.testing import assert_close
 
-logger = init_logger(__name__)
+import fastvideo.envs as envs
+from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.models.loader.component_loader import VAELoader
+from fastvideo.models.wan.vae_config import WanVAEConfig
+from fastvideo.tests.golden_gate._wan_checkpoint import component_path
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29503"
-
-BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))
-VAE_PATH = os.path.join(MODEL_PATH, "vae")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29503")
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Wan VAE parity requires one CUDA GPU")
 @pytest.mark.usefixtures("distributed_setup")
 def test_wan_vae():
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    vae_path = str(component_path("vae"))
+    device = torch.device("cuda:0")
     precision = torch.float32
-    precision_str = "fp32"
-    args = FastVideoArgs(model_path=VAE_PATH,
-                         pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision=precision_str))
+    args = FastVideoArgs(model_path=vae_path,
+                         pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision="fp32"))
     args.device = device
     args.vae_cpu_offload = False
 
-    loader = VAELoader()
-    model2 = loader.load(VAE_PATH, args)
-    assert model2.use_feature_cache  # Default to use the original WanVAE algorithm
+    candidate = VAELoader().load(vae_path, args)
+    assert candidate.use_feature_cache  # Preserve the original Wan VAE algorithm.
+    reference = AutoencoderKLWan.from_pretrained(vae_path, torch_dtype=precision).to(device).eval()
+    input_tensor = torch.randn(1, 3, 81, 32, 32, device=device, dtype=precision)
 
-    model1 = AutoencoderKLWan.from_pretrained(VAE_PATH, torch_dtype=precision).to(device).eval()
-
-    # Create identical inputs for both models
-    batch_size = 1
-
-    # Video input [B, C, T, H, W]
-    input_tensor = torch.randn(batch_size, 3, 81, 32, 32, device=device, dtype=precision)
-    # latent_tensor = torch.randn(batch_size,
-    #                             16,
-    #                             21,
-    #                             32,
-    #                             32,
-    #                             device=device,
-    #                             dtype=precision)
-
-    # Disable gradients for inference
     with torch.no_grad():
-        # Test encoding
-        logger.info("Testing encoding...")
-        latent1 = model1.encode(input_tensor).latent_dist
-        print("--------------------------------")
-        latent2 = model2.encode(input_tensor)
-        # Check if latents have the same shape
-        assert latent1.mean.shape == latent2.mean.shape, (
-            f"Latent shapes don't match: {latent1.mean.shape} vs {latent2.mean.shape}")
-        # Check if latents are similar
-        assert_close(latent1.mean, latent2.mean, atol=1e-4, rtol=1e-4)
-        # Test decoding
-        logger.info("Testing decoding...")
-        latent1_tensor = latent1.mode()
-        mean1 = (torch.tensor(model1.config.latents_mean).view(1, model1.config.z_dim, 1, 1,
-                                                               1).to(input_tensor.device, input_tensor.dtype))
-        std1 = (1.0 / torch.tensor(model1.config.latents_std).view(1, model1.config.z_dim, 1, 1, 1)).to(
-            input_tensor.device, input_tensor.dtype)
-        latent1_tensor = latent1_tensor / std1 + mean1
-        output1 = model1.decode(latent1_tensor).sample
+        reference_latent = reference.encode(input_tensor).latent_dist
+        candidate_latent = candidate.encode(input_tensor)
+        assert_close(reference_latent.mean, candidate_latent.mean, atol=1e-4, rtol=1e-4)
+        assert_close(reference_latent.logvar, candidate_latent.logvar, atol=1e-4, rtol=1e-4)
 
-        mean2 = model2.config.arch_config.shift_factor.to(input_tensor.device, input_tensor.dtype)
-        std2 = model2.config.arch_config.scaling_factor.to(input_tensor.device, input_tensor.dtype)
-        latent2_tensor = latent2.mode()
-        latent2_tensor = latent2_tensor / std2 + mean2
-        output2 = model2.decode(latent2_tensor)
-        # Check if outputs have the same shape
-        assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
+        reference_mean = torch.tensor(reference.config.latents_mean, device=device, dtype=precision).view(
+            1, reference.config.z_dim, 1, 1, 1)
+        reference_scale = (1.0 / torch.tensor(reference.config.latents_std).view(
+            1, reference.config.z_dim, 1, 1, 1)).to(device, precision)
+        reference_output = reference.decode(reference_latent.mode() / reference_scale + reference_mean).sample
 
-        # Check if outputs are similar
-        assert_close(output1, output2, atol=1e-5, rtol=1e-3)
+        candidate_mean = candidate.config.arch_config.shift_factor.to(device, precision)
+        candidate_scale = candidate.config.arch_config.scaling_factor.to(device, precision)
+        decode_input = candidate_latent.mode() / candidate_scale + candidate_mean
+        candidate_output = candidate.decode(decode_input)
+        assert_close(reference_output, candidate_output, atol=1e-5, rtol=1e-3)
+
+        # The same decoder is also used incrementally by streaming consumers.
+        cache = candidate.get_streaming_cache()
+        outputs = []
+        for index, chunk in enumerate(decode_input.split(1, dim=2)):
+            output, cache = candidate.streaming_decode(chunk, cache, is_first_chunk=index == 0)
+            outputs.append(output)
+        assert_close(torch.cat(outputs, dim=2), candidate_output, atol=1e-5, rtol=1e-3)

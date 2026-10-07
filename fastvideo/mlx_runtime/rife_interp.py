@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from huggingface_hub.utils import LocalEntryNotFoundError
@@ -20,6 +21,28 @@ class RIFEBackendError(RuntimeError):
 
 class RIFEWeightsUnavailableError(RIFEBackendError):
     """Raised when uncached RIFE weights cannot be downloaded."""
+
+
+def ensure_weights_available(version: str = "4.25", weights_dir: str | None = None) -> Path:
+    """Resolve or download RIFE weights without constructing the MLX model."""
+    try:
+        from fastvideo.third_party.rife_mlx.config import VERSIONS
+        from fastvideo.third_party.rife_mlx.utils.weights import _resolve_dir
+    except ImportError as exc:
+        raise RIFEBackendError("MLX RIFE is unavailable; install with `uv pip install -e '.[mlx]'`.") from exc
+
+    try:
+        config = VERSIONS[version]
+        resolved = Path(_resolve_dir(config, weights_dir))
+    except LocalEntryNotFoundError as exc:
+        raise RIFEWeightsUnavailableError(f"MLX RIFE {version} weights are unavailable: {exc}") from exc
+    except (KeyError, OSError) as exc:
+        raise RIFEWeightsUnavailableError(f"MLX RIFE {version} weights are unavailable: {exc}") from exc
+
+    missing = [name for name in ("config.json", "model.safetensors") if not (resolved / name).is_file()]
+    if missing:
+        raise RIFEWeightsUnavailableError(f"MLX RIFE {version} weights under {resolved} are missing {missing}.")
+    return resolved
 
 
 def aligned_keyframe_count(target_frames: int, factor: int, temporal_compression: int = 4) -> int:
@@ -134,4 +157,44 @@ def interpolate(
         for step in range(1, factor):
             out.append(interpolate_pair(left, right, step / factor, model=model, scale=scale))
     out.append(frame_list[-1])
+    return out
+
+
+def interpolate_to_frame_count(
+    frames: list[np.ndarray] | Iterable[np.ndarray],
+    target_frames: int,
+    *,
+    model=None,
+    scale: float = 1.0,
+) -> list[np.ndarray]:
+    """Interpolate a sparse sequence to an exact frame count.
+
+    Unlike :func:`interpolate`, this accepts targets that are not an integer
+    multiple of the source interval count. The first and last source frames
+    remain the first and last output frames, and every intermediate output is
+    evaluated at its uniformly spaced source-time position.
+    """
+    frame_list = [_require_hwc_rgb(frame, idx) for idx, frame in enumerate(frames)]
+    if target_frames < len(frame_list):
+        raise ValueError(f"target_frames must be at least the source count ({len(frame_list)}), got {target_frames}.")
+    if target_frames == len(frame_list):
+        return [frame.copy() for frame in frame_list]
+    if len(frame_list) < 2:
+        raise ValueError("at least two source frames are required for interpolation")
+
+    if model is None:
+        model = load_model()
+
+    positions = np.linspace(0.0, len(frame_list) - 1, target_frames, dtype=np.float64)
+    out: list[np.ndarray] = []
+    for position in positions:
+        left = int(np.floor(position))
+        if left >= len(frame_list) - 1:
+            out.append(frame_list[-1].copy())
+            continue
+        fraction = float(position - left)
+        if fraction <= 1e-12:
+            out.append(frame_list[left].copy())
+            continue
+        out.append(interpolate_pair(frame_list[left], frame_list[left + 1], fraction, model=model, scale=scale))
     return out

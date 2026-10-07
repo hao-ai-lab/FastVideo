@@ -8,7 +8,7 @@ compute ~3.7×, so the wall-clock drops far more than 2×. RIFE (which estimates
 its own optical flow — no motion vectors needed) fills the dropped frames back
 in for ~1.4 s, and a light unsharp pass counters its softening.
 
-Measured on the 1.3B INT8 QAD model (fox, 480×832×81, M4): generate 41 + RIFE→81
+Measured on the 1.3B INT8 QAD model (480×832×81, M4): generate 41 + RIFE→81
 runs in ~35 s of denoise vs ~90 s full, at reconstruction MS-SSIM **0.97**.
 Reproduce with `python -m fastvideo.benchmarks.eval_metalfx_rife --mode int8`.
 
@@ -26,10 +26,11 @@ uv pip install -e ".[mlx]"   # RIFE ships vendored; this only needs MLX
 
 ```bash
 python examples/inference/basic/mlx_wan_prompt_to_video.py \
-  --mlx-checkpoint <FastWan2.1-T2V-1.3B-INT8-QAD> \
-  --prompt "A red fox trotting through a snowy pine forest at golden hour, cinematic" \
+  --model-root ./FastMetal-1.3B-QAD \
+  --mlx-checkpoint ./FastMetal-1.3B-QAD \
+  --prompt "A bird's-eye view of a misty forest valley at dawn." \
   --num-frames 81 --fast \
-  --output-path video_samples/fox_fast.mp4
+  --output-path video_samples/forest_fast.mp4
 ```
 
 `--num-frames` stays the *target* length; fast mode generates the smallest
@@ -57,9 +58,9 @@ of denoise. It composes with `--fast`; both together run the same clip in
 
 ```bash
 python examples/inference/basic/mlx_wan_prompt_to_video.py \
-  --prompt "A red fox trotting through a snowy pine forest at golden hour, cinematic" \
+  --prompt "A bird's-eye view of a misty forest valley at dawn." \
   --height 480 --width 832 --num-frames 81 --fast-spatial \
-  --output-path video_samples/fox_fast_spatial.mp4
+  --output-path video_samples/forest_fast_spatial.mp4
 ```
 
 | Flag | Default | Meaning |

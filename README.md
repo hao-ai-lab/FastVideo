@@ -3,13 +3,18 @@
 </div>
 
 <p align="center">
-     | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/"><b> Quick Start</b></a> | <a href="https://github.com/hao-ai-lab/FastVideo/discussions/982"  target="_blank"><b>Weekly Dev Meeting</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://github.com/hao-ai-lab/FastVideo/discussions/1097" target="_blank"> <b> WeChat </b> </a> |
+     | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://haoailab.com/FastVideo/cookbook/"><b>Cookbook</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/"><b> Quick Start</b></a> | <a href="https://github.com/hao-ai-lab/FastVideo/discussions/982"  target="_blank"><b>Weekly Dev Meeting</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://github.com/hao-ai-lab/FastVideo/discussions/1097" target="_blank"> <b> WeChat </b> </a> |
 </p>
 
 **FastVideo is a unified post-training and real-time inference framework for accelerated video generation.**
 
 ## NEWS
-- `2026/08/19`: FastVideo now supports MLX on Apple Silicon with [FastMetal-QAD](https://huggingface.co/collections/FastVideo/fastmetal), a family of 1.3B, 5B, and 14B models optimized for Mac—follow the [Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/) and read the [Blog](https://haoailab.com/blogs/fastmetal/).
+- `2026/10/06`: FastH3 V2 now runs on a single consumer machine: NVIDIA RTX 5090, RTX 4090 and RTX PRO 6000 GPUs, DGX Spark and Apple Silicon. We also release [FastH3 Trim](https://huggingface.co/FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4), an experimental pruned model that is 4.2× smaller than base H3 and runs in as little as 8 GB of GPU memory. Get the [models](https://huggingface.co/collections/FastVideo/fastvideo-fasth3) and read the [Blog](https://haoailab.com/blogs/fasth3-rtx/).
+- `2026/10/06`: FastVideo now supports [Kandinsky 6](https://x.com/kandinskylab_ai/status/2107374635218055345) from Kandinsky Lab: text- and image-to-video with synchronized audio (base and 10-step distilled pi-Flow checkpoints) plus video super-resolution up to 4x. See the [Kandinsky 6 recipes](https://haoailab.com/FastVideo/cookbook/kandinsky6/).
+- `2026/09/15`: Release [FastH3 8-Step V2](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2), an eight-forward data-free DMD2 checkpoint distilled from MiniMax-H3 with 80% Video Sparse Attention. Run it with `examples/inference/basic/basic_fasth3_8step.py` or the [FastH3 8-Step V2 recipe](https://haoailab.com/FastVideo/cookbook/minimax-h3/).
+- `2026/09/01`: FastH3 now runs locally on Apple Silicon through MLX and on NVIDIA DGX Spark through CUDA 13, including two-Spark inference. Follow the [FastH3 recipes](https://haoailab.com/FastVideo/cookbook/minimax-h3/) and read the [Blog](https://haoailab.com/blogs/fasth3-local/).
+- `2026/08/27`: [FastH3 Preview v1](https://haoailab.com/blogs/fasth3-preview/) is an open-weight 4-step sparse-distilled MiniMax-H3 model for synchronized video-and-audio generation, developed in collaboration with [Nuva Lab](https://nuvalab.ai/) and the [NVIDIA FastGen team](https://github.com/NVlabs/FastGen). Download the recommended [VSA / Data-Free weights](https://huggingface.co/FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree), or see the [full FastH3 collection](https://huggingface.co/collections/FastVideo/fastvideo-fasth3).
+- `2026/08/19`: FastVideo now supports MLX on Apple Silicon with [FastMetal-QAD](https://huggingface.co/collections/FastVideo/fastmetal), a family of 1.3B, 5B, and 14B models optimized for Mac. Follow the [MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/) and read the [Blog](https://haoailab.com/blogs/fastmetal/).
 - `2026/06/23`: Release FastWan-QAD: 5s of Video generated in 1.8s E2E. See the [FastWan-QAD models](https://huggingface.co/FastVideo/FastWan-QAD-FP8-1.3B), [Attn-QAT training guide](https://haoailab.com/FastVideo/training/attn_qat/), and [blog](https://haoailab.com/blogs/fastwan-qad/).
 - `2026/03/17`: Release demo: Into the Dreamverse: Vibe Directing in FastVideo, check out the [Blog](https://haoailab.com/blogs/dreamverse/).
 - `2026/03/13`: Release demo: Create a 5s 1080p Video in 4.5s with FastVideo on a Single GPU, check out the [Blog](https://haoailab.com/blogs/fastvideo_realtime_1080p/).
@@ -61,12 +66,12 @@ UV_TORCH_BACKEND=cu126 uv pip install fastvideo
 ```
 
 Use `UV_TORCH_BACKEND=cu130` on CUDA 13. Apple silicon users should follow the
-[MPS installation guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+[MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
 
-> **On an Apple Silicon Mac?** FastVideo runs FastWan text-to-video natively
-> through an MLX runtime — a 5-second 480p clip generated locally, no cloud,
-> no discrete GPU. Install with `uv pip install -e '.[mlx]'` and follow the
-> [Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+> **On an Apple Silicon Mac?** Install with `uv pip install -e '.[mlx]'` from
+> a clone, then pick a recipe in the
+> [cookbook](https://haoailab.com/FastVideo/cookbook/). See the
+> [MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
 
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
 
@@ -84,7 +89,7 @@ Install FastVideo (https://github.com/hao-ai-lab/FastVideo) into a fresh uv virt
    https://hao-ai-lab.github.io/FastVideo/getting_started/installation/):
      - NVIDIA GPU, x86_64                         -> docs/getting_started/installation/gpu.md
      - NVIDIA DGX Spark / GB10, aarch64, CUDA 13  -> docs/getting_started/installation/spark.md
-     - Apple Silicon, macOS                       -> docs/getting_started/installation/mps.md
+     - Apple Silicon, macOS                       -> docs/getting_started/installation/mlx.md
 3. Use uv for every step. If a command fails, debug it and tell me what you changed.
 4. Verify the result:
      python -c "import fastvideo, torch; print('cuda', torch.cuda.is_available())"
