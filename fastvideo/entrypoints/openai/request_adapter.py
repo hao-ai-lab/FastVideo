@@ -277,17 +277,17 @@ def _apply_reference_inputs(
         raise RequestAdaptationError("The loaded pipeline does not accept audio reference inputs.")
 
 
-def build_generation_request(
-    request_id: str,
+def resolve_video_sampling_fields(
     request: VideoGenerationRequest,
-    args: FastVideoArgs,
     *,
-    served_model_name: str,
-    output_dir: str,
     default_request: GenerationRequest | None = None,
-) -> GenerationRequest:
-    """Build one tracked FastVideo request using explicit-field precedence."""
-    validate_model_and_lora(request, args, served_model_name)
+    default_fps: int = 24,
+) -> dict[str, Any]:
+    """Resolve dimensions, FPS, and frames identically for admission and generation.
+
+    Non-null top-level fields win over nested video_params, then server defaults.
+    Explicit size wins over both width/height spellings.
+    """
     kwargs: dict[str, Any] = {}
     if default_request is not None:
         kwargs.update(explicit_request_updates(default_request))
@@ -307,24 +307,41 @@ def build_generation_request(
         elif "video_params" in body_set and "height" in nested_set and request.video_params.height is not None:
             kwargs["height"] = request.video_params.height
 
-    fps_explicit = ("fps" in body_set
-                    and request.fps is not None) or ("video_params" in body_set and "fps" in nested_set
-                                                     and request.video_params.fps is not None)
-    if fps_explicit:
-        fps = request.fps if "fps" in body_set else request.video_params.fps
-        if fps is not None:
-            kwargs["fps"] = fps
-    kwargs.setdefault("fps", 24)
+    if "fps" in body_set and request.fps is not None:
+        kwargs["fps"] = request.fps
+    elif "video_params" in body_set and "fps" in nested_set and request.video_params.fps is not None:
+        kwargs["fps"] = request.video_params.fps
+    kwargs.setdefault("fps", default_fps)
 
     frames_explicit = ("num_frames" in body_set
                        and request.num_frames is not None) or ("video_params" in body_set and "num_frames" in nested_set
                                                                and request.video_params.num_frames is not None)
-    if frames_explicit:
-        num_frames = request.num_frames if "num_frames" in body_set else request.video_params.num_frames
-        if num_frames is not None:
-            kwargs["num_frames"] = num_frames
+    if "num_frames" in body_set and request.num_frames is not None:
+        kwargs["num_frames"] = request.num_frames
+    elif frames_explicit:
+        kwargs["num_frames"] = request.video_params.num_frames
     elif "seconds" in body_set and request.seconds is not None:
         kwargs["num_frames"] = int(request.seconds) * int(kwargs["fps"])
+    return kwargs
+
+
+def build_generation_request(
+    request_id: str,
+    request: VideoGenerationRequest,
+    args: FastVideoArgs,
+    *,
+    served_model_name: str,
+    output_dir: str,
+    default_request: GenerationRequest | None = None,
+) -> GenerationRequest:
+    """Build one tracked FastVideo request using explicit-field precedence."""
+    validate_model_and_lora(request, args, served_model_name)
+    kwargs = resolve_video_sampling_fields(request, default_request=default_request)
+    body_set = request.model_fields_set
+    nested_set = request.video_params.model_fields_set if request.video_params is not None else set()
+    frames_explicit = ("num_frames" in body_set
+                       and request.num_frames is not None) or ("video_params" in body_set and "num_frames" in nested_set
+                                                               and request.video_params.num_frames is not None)
 
     direct_fields = (
         "seed",

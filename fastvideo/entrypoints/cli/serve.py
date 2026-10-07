@@ -32,6 +32,12 @@ class ServeSubcommand(CLISubcommand):
 
         logger.info("CLI serve config: %s", serve_config)
 
+        if getattr(serve_config, "runtime", None) == "mlx":
+            from fastvideo.entrypoints.openai.mlx_common import run_mlx_server
+
+            run_mlx_server(serve_config)
+            return
+
         # A `streaming:` block selects the WebSocket/Dynamo runtime;
         # its deps stay out of REST-only deployments via lazy import.
         if serve_config.streaming is not None:

@@ -46,6 +46,12 @@ LEGACY_VARIANTS = (
     ("FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers", "SelfForcingWan2_2_T2V480PConfig", "sf_wan_2_2_i2v_a14b", ("i2v",)),
 )
 
+FASTMETAL_VARIANTS = (
+    ("FastVideo/FastMetal-1.3B-QAD", "FastWan2_1_T2V_480P_Config", "fast_wan_t2v_480p", ("t2v",)),
+    ("FastVideo/FastMetal-14B-QAD", "FastWan2_1_T2V_480P_Config", "fast_wan_t2v_480p", ("t2v",)),
+    ("FastVideo/FastMetal-5B-QAD", "FastWan2_2_TI2V_5B_Config", "fast_wan_2_2_ti2v_5b", ("t2v",)),
+)
+
 
 @pytest.fixture(autouse=True)
 def no_hub_access(monkeypatch):
@@ -58,8 +64,8 @@ def no_hub_access(monkeypatch):
     registry.get_model_info.cache_clear()
 
 
-@pytest.mark.parametrize("model_path,config_name,preset_name,workloads", LEGACY_VARIANTS)
-def test_legacy_aliases_and_sampling_defaults(model_path, config_name, preset_name, workloads):
+@pytest.mark.parametrize("model_path,config_name,preset_name,workloads", LEGACY_VARIANTS + FASTMETAL_VARIANTS)
+def test_aliases_and_sampling_defaults(model_path, config_name, preset_name, workloads):
     expected_config = getattr(pipeline_config, config_name)
     preset = get_preset(preset_name, "wan")
     # Exact HF ID, mirror ID, and renamed parent directory of a local checkpoint
@@ -166,9 +172,10 @@ def test_component_precision_and_sampling_defaults(config_name, flow_shift, dmd_
 def test_definitions_are_complete_data_only_and_reference_existing_configs():
     paths = [path for definition in WAN_MODEL_DEFINITIONS for path in definition.hf_model_paths]
     assert len(paths) == len(set(paths))
-    assert set(paths) == {case[0] for case in LEGACY_VARIANTS}
+    assert set(paths) == {case[0] for case in LEGACY_VARIANTS + FASTMETAL_VARIANTS}
     assert {definition.preset for definition in WAN_MODEL_DEFINITIONS} == {preset.name for preset in ALL_PRESETS}
-    assert len(WAN_MODEL_DEFINITIONS) == len(ALL_PRESETS)
+    # FastMetal 5B shares the TI2V preset, but only exposes text-to-video.
+    assert len(WAN_MODEL_DEFINITIONS) == len(ALL_PRESETS) + 1
     assert DMD_TRAINING_NOISE_SHIFT == 8.0
     for definition in WAN_MODEL_DEFINITIONS:
         assert json.loads(json.dumps(dataclasses.asdict(definition)))["preset"] == definition.preset
