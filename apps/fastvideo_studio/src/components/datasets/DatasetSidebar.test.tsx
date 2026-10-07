@@ -6,6 +6,9 @@ import * as api from '@/lib/api';
 import type { Dataset } from '@/lib/api';
 
 vi.mock('@/lib/api');
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn() },
+}));
 
 const mockedApi = vi.mocked(api);
 
@@ -27,6 +30,27 @@ beforeEach(() => {
 });
 
 describe('DatasetSidebar', () => {
+  it('fills the mobile viewport without reserving main-content width', async () => {
+    const onWidthChange = vi.fn();
+
+    render(
+      <DatasetSidebar
+        dataset={dataset}
+        isMobile
+        onClose={() => {}}
+        onWidthChange={onWidthChange}
+      />,
+    );
+
+    const drawer = screen.getByRole('dialog', {
+      name: 'My Dataset dataset details',
+    });
+    expect(drawer).toHaveStyle({ width: '100%', maxWidth: 'none' });
+    expect(drawer).toHaveAttribute('aria-modal', 'true');
+    expect(drawer).toHaveFocus();
+    expect(onWidthChange).toHaveBeenCalledWith(0);
+  });
+
   it('lists dataset files after loading', async () => {
     render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
 
@@ -41,6 +65,16 @@ describe('DatasetSidebar', () => {
     // Media URLs are requested per visible file.
     expect(mockedApi.getDatasetMediaUrl).toHaveBeenCalledWith('ds-1', 'a.mp4');
     expect(mockedApi.getDatasetMediaUrl).toHaveBeenCalledWith('ds-1', 'b.mp4');
+  });
+
+  it('shows a fallback when a dataset preview cannot load', async () => {
+    render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
+
+    const preview = await screen.findByLabelText('Preview of a.mp4');
+    fireEvent.error(preview);
+
+    expect(screen.getByText('Preview unavailable')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Preview of a.mp4')).not.toBeInTheDocument();
   });
 
   it('debounces caption save by 500ms', async () => {
@@ -94,6 +128,39 @@ describe('DatasetSidebar', () => {
         'a.mp4',
         'two',
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a failed save and lets the user retry it', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockedApi.updateDatasetCaption
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(undefined);
+    render(<DatasetSidebar dataset={dataset} onClose={() => {}} />);
+    const textarea = await screen.findByDisplayValue('cap a');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(textarea, { target: { value: 'needs retry' } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.getByText(/Not saved/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(mockedApi.updateDatasetCaption).toHaveBeenCalledTimes(2);
+      expect(mockedApi.updateDatasetCaption).toHaveBeenLastCalledWith(
+        'ds-1',
+        'a.mp4',
+        'needs retry',
+      );
+      expect(screen.getByText('Saved')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

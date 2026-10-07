@@ -48,25 +48,15 @@ def _torch_vsa256_reference(
     scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / math.sqrt(dim)
     attn = torch.softmax(scores, dim=-1)
     out_c = torch.matmul(attn, v_c)
-    out_c = (
-        out_c.view(bsz, heads, q_blocks, 1, dim)
-        .repeat(1, 1, 1, q_block, 1)
-        .view_as(q)
-    )
+    out_c = (out_c.view(bsz, heads, q_blocks, 1, dim).repeat(1, 1, 1, q_block, 1).view_as(q))
 
     with torch.no_grad():
         topk_idx = torch.topk(scores.detach(), topk_logical, dim=-1).indices
         block_mask = torch.zeros_like(scores, dtype=torch.bool).scatter_(-1, topk_idx, True)
         block_token_idx = torch.arange(kv_block, device=kv_var.device, dtype=torch.int32)
-        kv_token_valid_by_block = (
-            block_token_idx.view(1, -1) < kv_var.to(torch.int32).view(-1, 1)
-        ).to(torch.bool)
+        kv_token_valid_by_block = (block_token_idx.view(1, -1) < kv_var.to(torch.int32).view(-1, 1)).to(torch.bool)
         kv_token_valid = kv_token_valid_by_block.reshape(1, 1, 1, kv_blocks * kv_block)
-        token_mask = (
-            block_mask
-            .repeat_interleave(q_block, dim=2)
-            .repeat_interleave(kv_block, dim=3)
-        )
+        token_mask = (block_mask.repeat_interleave(q_block, dim=2).repeat_interleave(kv_block, dim=3))
         token_mask = token_mask & kv_token_valid
 
     qf, kf, vf = q.float(), k.float(), v.float()
@@ -98,8 +88,8 @@ def test_vsa256_cute_variable_block_size_vs_torch_ref() -> None:
     k = torch.randn(bsz, heads, skv, dim, device=device, dtype=dtype)
     v = torch.randn(bsz, heads, skv, dim, device=device, dtype=dtype)
 
-    q_var = torch.full((q_blocks_256,), q_block, dtype=torch.int32, device=device)
-    kv_var = torch.randint(16, kv_block + 1, (kv_blocks_256,), dtype=torch.int32, device=device)
+    q_var = torch.full((q_blocks_256, ), q_block, dtype=torch.int32, device=device)
+    kv_var = torch.randint(16, kv_block + 1, (kv_blocks_256, ), dtype=torch.int32, device=device)
     token_idx = torch.arange(kv_block, device=device, dtype=torch.int32)
     kv_valid = token_idx.view(1, -1) < kv_var.view(-1, 1)
     kv_valid = kv_valid.view(1, 1, kv_blocks_256, kv_block, 1)
@@ -108,7 +98,9 @@ def test_vsa256_cute_variable_block_size_vs_torch_ref() -> None:
     v = v * kv_valid.to(v.dtype)
 
     out = video_sparse_attn(
-        q, k, v,
+        q,
+        k,
+        v,
         kv_var,
         q_var,
         topk_logical,
@@ -120,10 +112,8 @@ def test_vsa256_cute_variable_block_size_vs_torch_ref() -> None:
     diff = (out - out_ref).abs()
     avg_abs = diff.mean().item()
     max_rel = (diff.max() / (out_ref.abs().mean() + 1e-6)).item()
-    print(
-        f"[vsa256-cute-vbs] kv_var[min={int(kv_var.min().item())}, "
-        f"max={int(kv_var.max().item())}], "
-        f"avg_abs={avg_abs:.6e}, max_rel={max_rel:.6e}"
-    )
+    print(f"[vsa256-cute-vbs] kv_var[min={int(kv_var.min().item())}, "
+          f"max={int(kv_var.max().item())}], "
+          f"avg_abs={avg_abs:.6e}, max_rel={max_rel:.6e}")
 
     assert avg_abs < 1e-3 and max_rel < 0.2

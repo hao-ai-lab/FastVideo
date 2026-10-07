@@ -27,7 +27,6 @@ class _FakePlatform:
 def test_role_override_invalidates_cached_backend(monkeypatch) -> None:
     monkeypatch.setattr(platforms, "_current_platform", _FakePlatform())
     monkeypatch.setattr(selector, "resolve_obj_by_qualname", lambda name: name)
-    selector.global_force_attn_backend(None)
 
     supported = (
         AttentionBackendEnum.FLASH_ATTN,
@@ -42,16 +41,32 @@ def test_role_override_invalidates_cached_backend(monkeypatch) -> None:
 
     try:
         assert selector.get_attn_backend(**kwargs) == "FLASH_ATTN"
-        with selector.global_force_attn_backend_context_manager(
-                AttentionBackendEnum.TORCH_SDPA):
-            # Same cache key as above; the role-local override must still win.
+        with selector._component_attention_backend_scope(AttentionBackendEnum.TORCH_SDPA, component="role"):
+            # Same cache key as above; the role-local request must still win.
             assert selector.get_attn_backend(**kwargs) == "TORCH_SDPA"
 
         # Exiting the role scope restores the previous resolution as well.
         assert selector.get_attn_backend(**kwargs) == "FLASH_ATTN"
     finally:
-        # Do not leave fake-platform resolutions cached for later tests.
-        selector.global_force_attn_backend(None)
+        # Do not leave fake-platform resolutions cached for later tests:
+        # selection inputs are cache-key members, so evict explicitly.
+        selector._cached_get_attn_backend.cache_clear()
+
+
+def test_unsupported_role_override_honors_layer_default(monkeypatch) -> None:
+    monkeypatch.setattr(platforms, "_current_platform", _FakePlatform())
+    monkeypatch.setattr(selector, "resolve_obj_by_qualname", lambda name: name)
+
+    try:
+        with selector._component_attention_backend_scope(AttentionBackendEnum.ATTN_QAT_TRAIN, component="role"):
+            assert selector.get_attn_backend(
+                head_size=128,
+                dtype=torch.bfloat16,
+                supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+                default_backend=AttentionBackendEnum.TORCH_SDPA,
+            ) == "TORCH_SDPA"
+    finally:
+        selector._cached_get_attn_backend.cache_clear()
 
 
 def test_explicit_backend_config_rejects_typos() -> None:

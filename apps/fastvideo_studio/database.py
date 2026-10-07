@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -46,8 +47,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 
 def _sqlite_row_get(row: sqlite3.Row, key: str, default: Any) -> Any:
-    """Like dict.get for sqlite3.Row (Row has no .get on Python 3.10)."""
-    return row[key] if key in row else default  # noqa: SIM401
+    """Like dict.get for sqlite3.Row (Row has no .get on Python 3.10).
+
+    NOTE: `key in row` tests Row *values*, not column names, so the membership
+    check has to go through .keys() -- otherwise every lookup falls back to the
+    default and jobs restored from the database lose their stored fields.
+    """
+    return row[key] if key in row.keys() else default  # noqa: SIM401, SIM118
 
 
 def _get_db_path(data_dir: Path) -> Path:
@@ -83,6 +89,9 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "jobs", "fps", "INTEGER", "24")
     _add_column_if_missing(conn, "jobs", "workload_type", "TEXT", "'t2v'")
     _add_column_if_missing(conn, "jobs", "image_path", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "name", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "last_image_path", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "references_json", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "job_type", "TEXT", "'inference'")
     _add_column_if_missing(conn, "jobs", "data_path", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "max_train_steps", "INTEGER", "1000")
@@ -242,7 +251,8 @@ class Database:
         self._execute(
             """
             INSERT INTO jobs (
-                id, model_id, prompt, workload_type, image_path, job_type, status,
+                id, model_id, name, prompt, workload_type, image_path,
+                last_image_path, references_json, job_type, status,
                 created_at, started_at, finished_at, error, output_path, log_file_path,
                 num_inference_steps, num_frames, height, width, guidance_scale,
                 guidance_rescale, fps, seed, num_gpus, dit_cpu_offload,
@@ -254,14 +264,17 @@ class Database:
                 dmd_use_vsa, dmd_vsa_sparsity, dmd_denoising_steps,
                 real_score_guidance_scale,
                 generator_update_interval, real_score_model_path, fake_score_model_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
                 job["model_id"],
+                job.get("name", ""),
                 job["prompt"],
                 job.get("workload_type", "t2v"),
                 job.get("image_path", ""),
+                job.get("last_image_path", ""),
+                json.dumps(job.get("references") or []),
                 job.get("job_type", "inference"),
                 job["status"],
                 job["created_at"],
@@ -540,9 +553,12 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     result = {
         "id": row["id"],
         "model_id": row["model_id"],
+        "name": _sqlite_row_get(row, "name", "") or "",
         "prompt": row["prompt"],
         "workload_type": _sqlite_row_get(row, "workload_type", "t2v"),
         "image_path": _sqlite_row_get(row, "image_path", "") or "",
+        "last_image_path": _sqlite_row_get(row, "last_image_path", "") or "",
+        "references": _sqlite_row_get(row, "references_json", "") or "",
         "job_type": _sqlite_row_get(row, "job_type", "inference"),
         "status": row["status"],
         "created_at": row["created_at"],

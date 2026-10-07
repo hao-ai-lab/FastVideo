@@ -10,7 +10,6 @@ import sys
 
 import pytest
 
-
 ROOT = Path("/mnt/weka/shrd/wm/junda/fv-hub/lingbot-world-v2")
 REFERENCE_STATUS = ROOT / "outputs" / "reference" / "status.tsv"
 FASTVIDEO_STATUS = ROOT / "outputs" / "fastvideo" / "status.tsv"
@@ -29,9 +28,5 @@ def test_lingbotworld2_generated_matrix_matches_reference_exactly() -> None:
     if not compared:
         pytest.fail("No LingBot World 2 matrix cases had both reference and FastVideo videos to compare.")
 
-    failures = [
-        item
-        for item in compared
-        if not item["comparison"].get("exact")
-    ]
+    failures = [item for item in compared if not item["comparison"].get("exact")]
     assert failures == []

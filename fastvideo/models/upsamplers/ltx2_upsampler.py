@@ -211,8 +211,7 @@ class LatentUpsampler(nn.Module):
             raise ValueError("Either spatial_upsample or temporal_upsample must be True")
 
         self.post_upsample_res_blocks = nn.ModuleList(
-            [ResBlock(mid_channels, dims=dims) for _ in range(num_blocks_per_stage)]
-        )
+            [ResBlock(mid_channels, dims=dims) for _ in range(num_blocks_per_stage)])
 
         self.final_conv = conv(mid_channels, in_channels, kernel_size=3, padding=1)
 

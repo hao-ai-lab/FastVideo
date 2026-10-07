@@ -10,8 +10,7 @@ from torch.utils.data import IterableDataset, get_worker_info
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.dataset.utils import collate_latents_embs_masks
-from fastvideo.distributed import (get_sp_world_size, get_world_group,
-                                   get_world_rank, get_world_size)
+from fastvideo.distributed import (get_sp_world_size, get_world_group, get_world_rank, get_world_size)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -19,8 +18,7 @@ logger = init_logger(__name__)
 
 class BatchIterator:
     # TODO: Implement state_dict and load_state_dict to support resume.
-    def __init__(self, files, batch_size, text_padding_length, keys,
-                 worker_num_samples, read_batch_size):
+    def __init__(self, files, batch_size, text_padding_length, keys, worker_num_samples, read_batch_size):
         self.files = files
         self.batch_size = batch_size
         self.text_padding_length = text_padding_length
@@ -90,25 +88,18 @@ class LatentsParquetIterStyleDataset(IterableDataset):
             self.path, self.num_sp_groups, num_workers, seed)
 
         if drop_last:
-            self.worker_num_samples = min(
-                shard_total_samples) // batch_size * batch_size
+            self.worker_num_samples = min(shard_total_samples) // batch_size * batch_size
             # Assign files to current rank's SP group
             ith_sp_group = self.global_rank // self.sp_world_size
-            self.sp_group_parquet_files = shard_parquet_files[ith_sp_group::self
-                                                              .num_sp_groups]
-            self.sp_group_parquet_lengths = shard_parquet_lengths[
-                ith_sp_group::self.num_sp_groups]
-            self.sp_group_num_samples = shard_total_samples[ith_sp_group::self.
-                                                            num_sp_groups]
-            logger.info(
-                "In total %d parquet files, %d samples, after sharding we retain %d samples due to drop_last",
-                sum([len(shard) for shard in shard_parquet_files]),
-                sum(shard_total_samples),
-                self.worker_num_samples * self.num_sp_groups * num_workers)
+            self.sp_group_parquet_files = shard_parquet_files[ith_sp_group::self.num_sp_groups]
+            self.sp_group_parquet_lengths = shard_parquet_lengths[ith_sp_group::self.num_sp_groups]
+            self.sp_group_num_samples = shard_total_samples[ith_sp_group::self.num_sp_groups]
+            logger.info("In total %d parquet files, %d samples, after sharding we retain %d samples due to drop_last",
+                        sum([len(shard) for shard in shard_parquet_files]), sum(shard_total_samples),
+                        self.worker_num_samples * self.num_sp_groups * num_workers)
         else:
             raise ValueError("drop_last must be True")
-        logger.info("Each dataloader worker will load %d samples",
-                    self.worker_num_samples)
+        logger.info("Each dataloader worker will load %d samples", self.worker_num_samples)
 
     def __iter__(self):
         worker_info = get_worker_info()
@@ -116,20 +107,18 @@ class LatentsParquetIterStyleDataset(IterableDataset):
 
         worker_files = self.sp_group_parquet_files[worker_id]
 
-        batch_iterator = BatchIterator(
-            files=worker_files,
-            batch_size=self.batch_size,
-            text_padding_length=self.text_padding_length,
-            keys=self.keys,
-            worker_num_samples=self.worker_num_samples,
-            read_batch_size=self.read_batch_size)  # type: ignore
+        batch_iterator = BatchIterator(files=worker_files,
+                                       batch_size=self.batch_size,
+                                       text_padding_length=self.text_padding_length,
+                                       keys=self.keys,
+                                       worker_num_samples=self.worker_num_samples,
+                                       read_batch_size=self.read_batch_size)  # type: ignore
 
         yield from batch_iterator
 
         if batch_iterator.processed_samples != self.worker_num_samples:
-            raise ValueError(
-                "Rank %d, Worker %d: Not enough samples to process, this should not happen",
-                self.global_rank, worker_id)
+            raise ValueError("Rank %d, Worker %d: Not enough samples to process, this should not happen",
+                             self.global_rank, worker_id)
 
 
 def shard_parquet_files_across_sp_groups_and_workers(
@@ -154,8 +143,7 @@ def shard_parquet_files_across_sp_groups_and_workers(
         - List of dictionaries mapping file paths to their lengths
     """
     # Check if sharding plan already exists
-    sharding_info_dir = os.path.join(
-        path, f"sharding_info_{num_sp_groups}_sp_groups_{num_workers}_workers")
+    sharding_info_dir = os.path.join(path, f"sharding_info_{num_sp_groups}_sp_groups_{num_workers}_workers")
 
     # Only rank 0 handles cache checking and file scanning
     if get_world_rank() == 0:
@@ -168,17 +156,11 @@ def shard_parquet_files_across_sp_groups_and_workers(
         if os.path.exists(sharding_info_dir):
             logger.info("Loading sharding plan from %s", sharding_info_dir)
             try:
-                with open(
-                        os.path.join(sharding_info_dir,
-                                     "shard_parquet_files.pkl"), "rb") as f:
+                with open(os.path.join(sharding_info_dir, "shard_parquet_files.pkl"), "rb") as f:
                     shard_parquet_files = pickle.load(f)
-                with open(
-                        os.path.join(sharding_info_dir,
-                                     "shard_total_samples.pkl"), "rb") as f:
+                with open(os.path.join(sharding_info_dir, "shard_total_samples.pkl"), "rb") as f:
                     shard_total_samples = pickle.load(f)
-                with open(
-                        os.path.join(sharding_info_dir,
-                                     "shard_parquet_lengths.pkl"), "rb") as f:
+                with open(os.path.join(sharding_info_dir, "shard_parquet_lengths.pkl"), "rb") as f:
                     shard_parquet_lengths = pickle.load(f)
                 cache_loaded = True
                 logger.info("Successfully loaded sharding plan")
@@ -210,8 +192,7 @@ def shard_parquet_files_across_sp_groups_and_workers(
                 lengths.append(pq.ParquetFile(file).metadata.num_rows)
 
             total_samples = sum(lengths)
-            logger.info("Found %d files with %d total samples",
-                        len(parquet_files), total_samples)
+            logger.info("Found %d files with %d total samples", len(parquet_files), total_samples)
 
             # Sort files by length for better balancing
             sorted_indices = np.argsort(lengths)
@@ -226,9 +207,7 @@ def shard_parquet_files_across_sp_groups_and_workers(
 
             # Distribute files to shards using a greedy approach
             logger.info("Distributing files to shards...")
-            for file, length in zip(reversed(sorted_files),
-                                    reversed(sorted_lengths),
-                                    strict=True):
+            for file, length in zip(reversed(sorted_files), reversed(sorted_lengths), strict=True):
                 # Find shard with minimum current length
                 target_shard = np.argmin(shard_total_samples)
                 shard_parquet_files[target_shard].append(file)
@@ -241,17 +220,11 @@ def shard_parquet_files_across_sp_groups_and_workers(
 
             # Save the sharding plan
             os.makedirs(sharding_info_dir, exist_ok=True)
-            with open(
-                    os.path.join(sharding_info_dir, "shard_parquet_files.pkl"),
-                    "wb") as f:
+            with open(os.path.join(sharding_info_dir, "shard_parquet_files.pkl"), "wb") as f:
                 pickle.dump(shard_parquet_files, f)
-            with open(
-                    os.path.join(sharding_info_dir, "shard_total_samples.pkl"),
-                    "wb") as f:
+            with open(os.path.join(sharding_info_dir, "shard_total_samples.pkl"), "wb") as f:
                 pickle.dump(shard_total_samples, f)
-            with open(
-                    os.path.join(sharding_info_dir,
-                                 "shard_parquet_lengths.pkl"), "wb") as f:
+            with open(os.path.join(sharding_info_dir, "shard_parquet_lengths.pkl"), "wb") as f:
                 pickle.dump(shard_parquet_lengths, f)
             logger.info("Saved sharding info to %s", sharding_info_dir)
 
@@ -260,41 +233,35 @@ def shard_parquet_files_across_sp_groups_and_workers(
     world_group.barrier()
 
     # Now all ranks load the sharding plan (it should exist and be valid now)
-    logger.info("Loading sharding plan from %s after barrier",
-                sharding_info_dir)
-    with open(os.path.join(sharding_info_dir, "shard_parquet_files.pkl"),
-              "rb") as f:
+    logger.info("Loading sharding plan from %s after barrier", sharding_info_dir)
+    with open(os.path.join(sharding_info_dir, "shard_parquet_files.pkl"), "rb") as f:
         shard_parquet_files = pickle.load(f)
-    with open(os.path.join(sharding_info_dir, "shard_total_samples.pkl"),
-              "rb") as f:
+    with open(os.path.join(sharding_info_dir, "shard_total_samples.pkl"), "rb") as f:
         shard_total_samples = pickle.load(f)
-    with open(os.path.join(sharding_info_dir, "shard_parquet_lengths.pkl"),
-              "rb") as f:
+    with open(os.path.join(sharding_info_dir, "shard_parquet_lengths.pkl"), "rb") as f:
         shard_parquet_lengths = pickle.load(f)
 
     return shard_parquet_files, shard_total_samples, shard_parquet_lengths
 
 
 def build_parquet_iterable_style_dataloader(
-    path: str,
-    batch_size: int,
-    num_data_workers: int,
-    cfg_rate: float = 0.0,
-    drop_last: bool = True,
-    text_padding_length: int = 512,
-    seed: int = 42,
-    read_batch_size: int = 32
-) -> tuple[LatentsParquetIterStyleDataset, StatefulDataLoader]:
+        path: str,
+        batch_size: int,
+        num_data_workers: int,
+        cfg_rate: float = 0.0,
+        drop_last: bool = True,
+        text_padding_length: int = 512,
+        seed: int = 42,
+        read_batch_size: int = 32) -> tuple[LatentsParquetIterStyleDataset, StatefulDataLoader]:
     """Build a dataloader for the LatentsParquetIterStyleDataset."""
-    dataset = LatentsParquetIterStyleDataset(
-        path=path,
-        batch_size=batch_size,
-        cfg_rate=cfg_rate,
-        num_workers=num_data_workers,
-        drop_last=drop_last,
-        text_padding_length=text_padding_length,
-        seed=seed,
-        read_batch_size=read_batch_size)
+    dataset = LatentsParquetIterStyleDataset(path=path,
+                                             batch_size=batch_size,
+                                             cfg_rate=cfg_rate,
+                                             num_workers=num_data_workers,
+                                             drop_last=drop_last,
+                                             text_padding_length=text_padding_length,
+                                             seed=seed,
+                                             read_batch_size=read_batch_size)
 
     loader = StatefulDataLoader(
         dataset,

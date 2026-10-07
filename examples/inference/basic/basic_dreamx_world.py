@@ -2,7 +2,6 @@ import os
 
 from fastvideo import VideoGenerator
 
-
 OUTPUT_PATH = os.getenv("DREAMX_WORLD_OUTPUT_PATH", "video_samples_dreamx_world")
 
 
@@ -46,10 +45,8 @@ def main():
         "num_inference_steps": _env_int("DREAMX_WORLD_STEPS", 30),
         "guidance_scale": _env_float("DREAMX_WORLD_GUIDANCE", 5.0),
         "action_list": os.getenv("DREAMX_WORLD_ACTIONS", "w,d,w").split(","),
-        "action_speed_list": [
-            float(value)
-            for value in os.getenv("DREAMX_WORLD_ACTION_SPEEDS", "4.0,2.0,4.0").split(",")
-        ],
+        "action_speed_list":
+        [float(value) for value in os.getenv("DREAMX_WORLD_ACTION_SPEEDS", "4.0,2.0,4.0").split(",")],
     }
     if image_path:
         kwargs["image_path"] = image_path

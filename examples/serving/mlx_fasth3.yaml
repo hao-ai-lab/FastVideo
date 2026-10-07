@@ -1,0 +1,23 @@
+# Native MLX H3 server. Run from the repository root after downloading and converting weights.
+runtime: mlx
+generator:
+  model_path: FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2
+  model_root: ./FastH3-Preview-v0.2
+  mlx_checkpoint: ./FastH3-MLX/int6
+  prompt_cache_dir: ./outputs/h3_prompt_cache
+  vae_dtype: fp32
+server:
+  host: 127.0.0.1
+  port: 8000
+  served_model_name: fasth3
+  output_dir: outputs/mlx_fasth3
+default_request:
+  sampling:
+    height: 480
+    width: 832
+    num_frames: 124
+    fps: 24
+    # HTTP convention: five sigma points, four DiT forwards. Native MLX uses num_steps=4.
+    num_inference_steps: 5
+    guidance_scale: 1.0
+    seed: 2026

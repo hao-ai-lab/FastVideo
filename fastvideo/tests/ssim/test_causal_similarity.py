@@ -28,8 +28,7 @@ SF_WAN_T2V_PARAMS = {
     "tp_size": 1,
 }
 
-_SF_WAN_T2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers")
+_SF_WAN_T2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers")
 SF_WAN_T2V_FULL_QUALITY_PARAMS = {
     "num_gpus": SF_WAN_T2V_PARAMS["num_gpus"],
     "model_path": SF_WAN_T2V_PARAMS["model_path"],

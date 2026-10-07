@@ -104,9 +104,9 @@ def _rename_layernorm_keys(state: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k, v in state.items():
         if k.endswith(".gamma"):
-            out[k[: -len(".gamma")] + ".weight"] = v
+            out[k[:-len(".gamma")] + ".weight"] = v
         elif k.endswith(".beta"):
-            out[k[: -len(".beta")] + ".bias"] = v
+            out[k[:-len(".beta")] + ".bias"] = v
         else:
             out[k] = v
     return out
@@ -134,9 +134,7 @@ def _split_state_dict(src_safetensors: Path) -> dict[str, dict[str, Any]]:
     return buckets
 
 
-def _detect_projection_flags(
-        diff_cfg: dict[str, Any],
-        dit_state: dict[str, Any]) -> tuple[bool, bool]:
+def _detect_projection_flags(diff_cfg: dict[str, Any], dit_state: dict[str, Any]) -> tuple[bool, bool]:
     """Decide `project_cond_tokens` / `project_global_cond` by comparing
     the actual `to_cond_embed.0` / `to_global_embed.0` weight shapes
     in the DiT state dict against `cond_token_dim` / `global_cond_dim`.
@@ -243,9 +241,8 @@ def convert(src: str, dst: str) -> None:
         raise FileNotFoundError(f"Expected monolithic safetensors at {monolithic}")
     cfg_path = src_dir / "model_config.json"
     if not cfg_path.is_file():
-        raise FileNotFoundError(
-            f"Expected model_config.json at {cfg_path} (Stable Audio's authoritative "
-            f"per-component arch config).")
+        raise FileNotFoundError(f"Expected model_config.json at {cfg_path} (Stable Audio's authoritative "
+                                f"per-component arch config).")
     with open(cfg_path) as f:
         model_config = json.load(f)
 
@@ -257,8 +254,7 @@ def convert(src: str, dst: str) -> None:
 
     print("\n[3/4] Writing per-component configs + safetensors:")
     component_cfgs = _component_config(model_config)
-    project_cond, project_glob = _detect_projection_flags(component_cfgs["transformer"],
-                                                          buckets["transformer"])
+    project_cond, project_glob = _detect_projection_flags(component_cfgs["transformer"], buckets["transformer"])
     component_cfgs["transformer"]["project_cond_tokens"] = project_cond
     component_cfgs["transformer"]["project_global_cond"] = project_glob
     for name in ("transformer", "vae", "conditioner"):
@@ -284,7 +280,8 @@ def convert(src: str, dst: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--src", required=True,
+    parser.add_argument("--src",
+                        required=True,
                         help="HF repo id or local directory containing model.safetensors + model_config.json")
     parser.add_argument("--dst", required=True, help="Output directory for the Diffusers-format repo")
     args = parser.parse_args()

@@ -11,7 +11,6 @@ from fastvideo.models.dits.lingbotworld.cam_utils import (
     interpolate_camera_poses,
 )
 
-
 WSAD_OFFSET = 12.35
 DIAGONAL_OFFSET = 8.73
 MOUSE_PITCH_SENSITIVITY = 15.0
@@ -236,7 +235,8 @@ def select_memory_idx_fov(
         grid_x.reshape(-1) * grid_z.reshape(-1) * (width / (2 * fx)),
         grid_y.reshape(-1) * grid_z.reshape(-1) * (height / (2 * fy)),
         grid_z.reshape(-1),
-    ], dim=0)
+    ],
+                                  dim=0)
 
     selected_index: list[int] = []
     selected_confidence: list[float] = []
@@ -244,7 +244,8 @@ def select_memory_idx_fov(
         base_pose = extrinsics_tensor[frame_idx]
         points_world = base_pose[:3, :3] @ points_cam_base + base_pose[:3, 3:4]
         points_world_batched = points_world.unsqueeze(0)
-        points_in_cands = torch.bmm(r_cand_inv, points_world_batched.expand(len(candidate_indices), -1, -1)) + t_cand_inv
+        points_in_cands = torch.bmm(r_cand_inv, points_world_batched.expand(len(candidate_indices), -1,
+                                                                            -1)) + t_cand_inv
 
         x = points_in_cands[:, 0, :]
         y = points_in_cands[:, 1, :]
@@ -295,9 +296,7 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = No
         actions_single_camera = []
         keyboard_idx = {"still": 0, "forward": 1, "back": 2, "left": 3, "right": 4, "a": 5, "d": 6}
 
-    actions_to_test = (
-        actions_double_action * 5 + actions_single_camera * 5 + actions_single_action * 5
-    )
+    actions_to_test = (actions_double_action * 5 + actions_single_camera * 5 + actions_single_action * 5)
     for action in (actions_single_action + actions_double_action):
         for camera in actions_single_camera:
             actions_to_test.append(f"{action}_{camera}")

@@ -61,10 +61,8 @@ class _JITGen3CTokenizerInner(nn.Module):
         super().__init__()
         self._dtype = dtype
         self._forced_bf16 = False
-        self.encoder = torch.jit.load(encoder_path, map_location=device).eval().to(
-            device=device, dtype=dtype)
-        self.decoder = torch.jit.load(decoder_path, map_location=device).eval().to(
-            device=device, dtype=dtype)
+        self.encoder = torch.jit.load(encoder_path, map_location=device).eval().to(device=device, dtype=dtype)
+        self.decoder = torch.jit.load(decoder_path, map_location=device).eval().to(device=device, dtype=dtype)
 
         latent_mean, latent_std = torch.load(mean_std_path, map_location="cpu")
         latent_mean = latent_mean.view(latent_channels, -1)[:, :latent_chunk_duration]
@@ -72,14 +70,12 @@ class _JITGen3CTokenizerInner(nn.Module):
 
         self.register_buffer(
             "_latent_mean",
-            latent_mean.to(torch.float32).view(1, latent_channels,
-                                               latent_chunk_duration, 1, 1),
+            latent_mean.to(torch.float32).view(1, latent_channels, latent_chunk_duration, 1, 1),
             persistent=False,
         )
         self.register_buffer(
             "_latent_std",
-            latent_std.to(torch.float32).view(1, latent_channels,
-                                              latent_chunk_duration, 1, 1),
+            latent_std.to(torch.float32).view(1, latent_channels, latent_chunk_duration, 1, 1),
             persistent=False,
         )
 
@@ -92,10 +88,8 @@ class _JITGen3CTokenizerInner(nn.Module):
         if t < mean.shape[2]:
             return mean[:, :, :t], std[:, :, :t]
         # fallback for non-default lengths
-        mean = torch.nn.functional.interpolate(
-            mean, size=(t, 1, 1), mode="trilinear", align_corners=False)
-        std = torch.nn.functional.interpolate(
-            std, size=(t, 1, 1), mode="trilinear", align_corners=False)
+        mean = torch.nn.functional.interpolate(mean, size=(t, 1, 1), mode="trilinear", align_corners=False)
+        std = torch.nn.functional.interpolate(std, size=(t, 1, 1), mode="trilinear", align_corners=False)
         return mean, std
 
     @staticmethod
@@ -113,9 +107,7 @@ class _JITGen3CTokenizerInner(nn.Module):
         self.decoder = self.decoder.to(dtype=torch.bfloat16)
         self._dtype = torch.bfloat16
         self._forced_bf16 = True
-        logger.warning(
-            "GEN3C tokenizer JIT hit fp16/bf16 mismatch; coercing tokenizer encoder/decoder to bf16."
-        )
+        logger.warning("GEN3C tokenizer JIT hit fp16/bf16 mismatch; coercing tokenizer encoder/decoder to bf16.")
 
     def encode(self, x: torch.Tensor) -> _TensorLatentDist:
         enc_dtype, enc_device = self._module_dtype_device(self.encoder)
@@ -225,12 +217,9 @@ class AutoencoderKLGen3CTokenizer(nn.Module):
         if self._target_temporal_compression == 2 * self._inner_temporal_compression:
             b, c, t, h, w = z_target.shape
             t_inner = 2 * t - 1
-            out = torch.empty(
-                b, c, t_inner, h, w, device=z_target.device, dtype=z_target.dtype)
+            out = torch.empty(b, c, t_inner, h, w, device=z_target.device, dtype=z_target.dtype)
             out[:, :, 0::2, :, :] = z_target
-            out[:, :, 1::2, :, :] = 0.5 * (
-                z_target[:, :, :-1, :, :] + z_target[:, :, 1:, :, :]
-            )
+            out[:, :, 1::2, :, :] = 0.5 * (z_target[:, :, :-1, :, :] + z_target[:, :, 1:, :, :])
             return out.contiguous()
 
         # Generic fallback: linear index interpolation in time.
@@ -354,8 +343,7 @@ class AutoencoderKLGen3CTokenizer(nn.Module):
             dtype=dtype,
             device=device,
             latent_channels=16,
-            latent_chunk_duration=1 + (pixel_chunk_duration - 1) //
-            target_temporal_compression,
+            latent_chunk_duration=1 + (pixel_chunk_duration - 1) // target_temporal_compression,
         )
         return cls(
             inner,

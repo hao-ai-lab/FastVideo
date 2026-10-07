@@ -13,12 +13,15 @@ def _is_kandinsky5_transformer_block(n: str, m) -> bool:
 class Kandinsky5ArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_is_kandinsky5_transformer_block])
 
-    # NABLA block-sparse attention for attention_type="nabla" checkpoints, plus
-    # the dense backends every DiT supports.
+    # NABLA block-sparse attention for attention_type="nabla" checkpoints, the
+    # dense backends every DiT supports, and the Attn-QAT backends needed for
+    # quantization-aware finetuning/distillation (fastvideo/train/models/kandinsky5/).
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.NABLA_ATTN,
         AttentionBackendEnum.FLASH_ATTN,
         AttentionBackendEnum.TORCH_SDPA,
+        AttentionBackendEnum.ATTN_QAT_INFER,
+        AttentionBackendEnum.ATTN_QAT_TRAIN,
     )
 
     # Native FastVideo implementation uses the same parameter names as diffusers

@@ -39,8 +39,12 @@ class ResNetAudio(ResNet):
 
         # replacing the old conv1 to the new one (RGB - 3; spectrogram - 1)
         conv1 = self.conv1
-        self.conv1 = torch.nn.Conv2d(1, conv1.out_channels, conv1.kernel_size,
-                                     conv1.stride, conv1.padding, bias=conv1.bias)
+        self.conv1 = torch.nn.Conv2d(1,
+                                     conv1.out_channels,
+                                     conv1.kernel_size,
+                                     conv1.stride,
+                                     conv1.padding,
+                                     bias=conv1.bias)
         self.extract_features = extract_features
         self.embed_dim = self.fc.in_features
 
@@ -75,20 +79,20 @@ class ResNetAudio(ResNet):
 class ResNet18AudioFeatures(ResNetAudio):
 
     # ckpt_path should default to None, otherwise when no pre-training is desired it will throw an error
-    def __init__(self,
-                 extract_features: bool = False,
-                 ckpt_path: str = None,
-                 feat_type: str = None,
-                 max_spec_t: int = None,
-                 factorize_freq_time: bool = None,
-                 agg_freq_module: str = None,
-                 agg_time_module: str = None,
-                 add_global_repr: bool = True,
-                 agg_segments_module: str = None,
-                 max_segments: int = None,
-                 ) -> None:
-        super().__init__(arch_name='resnet18', num_classes=308, extract_features=extract_features,
-                         ckpt_path=ckpt_path)
+    def __init__(
+        self,
+        extract_features: bool = False,
+        ckpt_path: str = None,
+        feat_type: str = None,
+        max_spec_t: int = None,
+        factorize_freq_time: bool = None,
+        agg_freq_module: str = None,
+        agg_time_module: str = None,
+        add_global_repr: bool = True,
+        agg_segments_module: str = None,
+        max_segments: int = None,
+    ) -> None:
+        super().__init__(arch_name='resnet18', num_classes=308, extract_features=extract_features, ckpt_path=ckpt_path)
         assert extract_features, 'Not implemented otherwise'
         self.extract_features = extract_features
         self.feat_type = feat_type
@@ -113,8 +117,13 @@ class ResNet18AudioFeatures(ResNetAudio):
         self.factorize_freq_time = factorize_freq_time
         # avoiding code duplication (used only if agg_*_module is TransformerEncoderLayer)
         transf_enc_layer_kwargs = dict(
-            d_model=self.embed_dim, nhead=self.nhead, dim_feedforward=self.mlp_ratio*self.embed_dim,
-            activation=torch.nn.GELU(), batch_first=True, dropout=self.drop_rate, layer_norm_eps=1e-6,
+            d_model=self.embed_dim,
+            nhead=self.nhead,
+            dim_feedforward=self.mlp_ratio * self.embed_dim,
+            activation=torch.nn.GELU(),
+            batch_first=True,
+            dropout=self.drop_rate,
+            layer_norm_eps=1e-6,
             norm_first=True,
         )
         if factorize_freq_time:
@@ -139,10 +148,10 @@ class ResNet18AudioFeatures(ResNetAudio):
                 # we can reuse the same layer as for temporal factorization (B, dim_to_agg, D) -> (B, D)
                 # we need to add pos emb (PE) because previously we added the same PE for each segment
                 pos_max_len = max_segments if max_segments is not None else 16  # 16 = 10sec//0.64sec + 1
-                self.global_attn_agg = TemporalTransformerEncoderLayer(
-                    add_pos_emb=True, pos_emb_drop=self.drop_rate,
-                    pos_max_len=pos_max_len, **transf_enc_layer_kwargs
-                )
+                self.global_attn_agg = TemporalTransformerEncoderLayer(add_pos_emb=True,
+                                                                       pos_emb_drop=self.drop_rate,
+                                                                       pos_max_len=pos_max_len,
+                                                                       **transf_enc_layer_kwargs)
             elif agg_segments_module == 'AveragePooling':
                 self.global_attn_agg = AveragePooling(avg_pattern='B S D -> B D')
 

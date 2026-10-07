@@ -64,7 +64,7 @@ def find_nccl_library() -> str:
     After importing `torch`, `libnccl.so.2` or `librccl.so.1` can be
     found by `ctypes` automatically.
     """
-    so_file = envs.FASTVIDEO_NCCL_SO_PATH
+    so_file = envs.FASTVIDEO_NCCL_SO_PATH.get()
 
     # manually load the nccl library
     if so_file:
@@ -82,16 +82,16 @@ def find_nccl_library() -> str:
 
 def find_hccl_library() -> str:
     """
-    We either use the library file specified by the `HCCL_SO_PATH`
+    We either use the library file specified by the `FASTVIDEO_HCCL_SO_PATH`
     environment variable, or we find the library file brought by PyTorch.
     After importing `torch`, `libhccl.so` can be
     found by `ctypes` automatically.
     """
-    so_file = envs.HCCL_SO_PATH
+    so_file = envs.FASTVIDEO_HCCL_SO_PATH.get()
 
     # manually load the nccl library
     if so_file:
-        logger.info("Found hccl from environment variable HCCL_SO_PATH=%s", so_file)
+        logger.info("Found hccl from environment variable FASTVIDEO_HCCL_SO_PATH=%s", so_file)
     else:
         if torch.version.cann is not None:  # codespell:ignore cann
             so_file = "libhccl.so"
@@ -493,11 +493,26 @@ def import_pynvml():
     return pynvml
 
 
+def _split_hf_repo_subfolder(model_name_or_path: str) -> tuple[str, str | None]:
+    """Split an ``org/repo/subfolder`` reference into its Hub coordinates."""
+    parts = model_name_or_path.split("/")
+    if (len(parts) < 3 or model_name_or_path.startswith("/") or model_name_or_path.startswith(".") or "" in parts):
+        return model_name_or_path, None
+
+    sub_parts = parts[2:]
+    if any(part in (".", "..") for part in sub_parts) or any(char in part for part in sub_parts for char in "*?["):
+        raise ValueError(f"Invalid umbrella-repo subfolder in {model_name_or_path!r}: "
+                         "`.`/`..` segments and glob metacharacters (`*`, `?`, `[`) "
+                         "are not allowed.")
+    return "/".join(parts[:2]), "/".join(sub_parts)
+
+
 def maybe_download_model(
     model_name_or_path: str,
     local_dir: str | None = None,
     download: bool = True,
     revision: str | None = None,
+    allow_patterns: list[str] | None = None,
 ) -> str:
     """
     Check if the model path is a Hugging Face Hub model ID and download it if needed.
@@ -516,6 +531,9 @@ def maybe_download_model(
         local_dir: Local directory to save the model
         download: Whether to download the model from Hugging Face Hub
         revision: Optional immutable Hub revision.
+        allow_patterns: Optional Hub glob patterns limiting downloaded files.
+            Local paths are returned unchanged. For umbrella references, the
+            patterns are interpreted relative to the selected subfolder.
 
     Returns:
         Local path to the model (or to the subfolder inside the snapshot).
@@ -530,31 +548,18 @@ def maybe_download_model(
     # repo ids are exactly two components ("org/name"); anything more is
     # always a subfolder reference. Local absolute paths are excluded by
     # the os.path.exists check above and by the leading-slash test below.
-    repo_id = model_name_or_path
-    subfolder: str | None = None
-    parts = model_name_or_path.split("/")
-    if (len(parts) >= 3 and not model_name_or_path.startswith("/") and not model_name_or_path.startswith(".")
-            and "" not in parts):
-        # Reject path-traversal segments and fnmatch metacharacters in the
-        # subfolder portion. Without this, "org/repo/../../x" would resolve
-        # outside the snapshot via os.path.join, and "org/repo/base*" would
-        # broaden allow_patterns into unrelated subtrees.
-        sub_parts = parts[2:]
-        if any(p in (".", "..") for p in sub_parts) or any(c in p for p in sub_parts for c in "*?["):
-            raise ValueError(f"Invalid umbrella-repo subfolder in {model_name_or_path!r}: "
-                             "`.`/`..` segments and glob metacharacters (`*`, `?`, `[`) "
-                             "are not allowed.")
-        repo_id = "/".join(parts[:2])
-        subfolder = "/".join(sub_parts)
+    repo_id, subfolder = _split_hf_repo_subfolder(model_name_or_path)
 
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
         if subfolder is not None:
             logger.info("Downloading umbrella-repo subfolder %s/%s from HF Hub...", repo_id, subfolder)
+            subfolder_allow_patterns = ([f"{subfolder}/{pattern}" for pattern in allow_patterns]
+                                        if allow_patterns is not None else [f"{subfolder}/**"])
             with get_lock(model_name_or_path):
                 snapshot_root = snapshot_download(
                     repo_id=repo_id,
-                    allow_patterns=[f"{subfolder}/**"],
+                    allow_patterns=subfolder_allow_patterns,
                     local_dir=local_dir,
                     revision=revision,
                 )
@@ -575,6 +580,7 @@ def maybe_download_model(
         logger.info("Downloading model snapshot from HF Hub for %s...", model_name_or_path)
         with get_lock(model_name_or_path):
             local_path = snapshot_download(repo_id=model_name_or_path,
+                                           allow_patterns=allow_patterns,
                                            ignore_patterns=["*.onnx", "*.msgpack"],
                                            local_dir=local_dir,
                                            revision=revision)
@@ -610,39 +616,61 @@ def maybe_download_lora(model_name_or_path: str, local_dir: str | None = None, d
     return os.path.join(local_path, weight_name)
 
 
-def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
+def verify_model_config_and_directory(
+    model_path: str,
+    required_component_dirs: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     """
-    Verify that the model directory contains a valid diffusers configuration.
+    Verify that the model directory contains a valid Diffusers configuration.
     
     Args:
         model_path: Path to the model directory
+        required_component_dirs: Component directories required by the selected
+            pipeline. ``None`` preserves full-snapshot validation; an empty
+            collection validates only the manifest.
         
     Returns:
         The loaded model configuration as a dictionary
     """
 
-    # Check for model_index.json which is required for diffusers models
-    config_path = os.path.join(model_path, "model_index.json")
-    if not os.path.exists(config_path):
-        raise ValueError(f"Model directory {model_path} does not contain model_index.json. "
-                         "Only Hugging Face diffusers format is supported.")
+    # Some Diffusers checkpoints publish a modular manifest instead of model_index.json.
+    config_filename = next(
+        (name for name in ("model_index.json", "modular_model_index.json")
+         if os.path.isfile(os.path.join(model_path, name))),
+        None,
+    )
+    if config_filename is None:
+        raise ValueError(f"Model directory {model_path} does not contain model_index.json or "
+                         "modular_model_index.json. Only Hugging Face Diffusers format is supported.")
+    config_path = os.path.join(model_path, config_filename)
 
-    # Load the config first so directory checks below can be conditional
-    # on what model_index.json actually declares.
+    # Load the config first so directory checks below can be conditional on
+    # what the manifest actually declares.
     with open(config_path) as f:
         config = json.load(f)
 
-    # Generation/training component trees require a transformer. Explicitly
-    # marked offline preprocessor trees contain only frozen encoders and avoid
-    # duplicating a DiT that will never be loaded.
-    transformer_dir = os.path.join(model_path, "transformer")
-    preprocessor_only = config.get("_fastvideo_preprocessor_only") is True
-    if not preprocessor_only and not os.path.exists(transformer_dir):
-        raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
+    if required_component_dirs is not None:
+        for component_dir in required_component_dirs:
+            if not os.path.isdir(os.path.join(model_path, component_dir)):
+                raise ValueError(f"Model directory {model_path} is missing the selected "
+                                 f"{component_dir}/ component directory.")
+    else:
+        # Full snapshots keep the historical invariant that transformer/ is
+        # present and every active manifest component exists locally.
+        # Explicitly marked offline preprocessor trees contain only frozen
+        # encoders and avoid duplicating a DiT that will never be loaded.
+        transformer_dir = os.path.join(model_path, "transformer")
+        preprocessor_only = config.get("_fastvideo_preprocessor_only") is True
+        if not preprocessor_only and not os.path.exists(transformer_dir):
+            raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
-    # Diffusers convention: model_index.json entries are [library, class]
-    # pairs for on-disk components. Non-list entries are scalar metadata
-    # (e.g. boundary_ratio); a None first element marks a disabled
+    # Diffusers convention: component entries start with [library, class].
+    # Modular manifests may append loading metadata, which FastVideo does not
+    # need because published component subfolders match their manifest keys.
+    # Non-list entries, and list entries whose first element isn't a string,
+    # are scalar/tuple pipeline metadata (e.g. boundary_ratio, or a
+    # tuple-valued field registered via register_to_config, which serializes
+    # to a JSON list just like a component entry); a None first element marks a disabled
     # component (matches composed_pipeline_base.py). Pipelines that
     # lazy-load shared components from upstream HF repos simply omit the
     # key, so we only enforce "declared, active, but missing on disk".
@@ -650,85 +678,130 @@ def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     # their text encoder (e.g. LTX2's gemma tokenizer lives under
     # text_encoder/gemma/); the pipeline subclass resolves that fallback
     # at load time.
-    for key, value in config.items():
-        if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
-            continue
-        if not isinstance(value, list) or len(value) < 1 or value[0] is None:
-            continue
-        subdir = os.path.join(model_path, key)
-        if not os.path.exists(subdir):
-            raise ValueError(f"Model directory {model_path} declares `{key}` in "
-                             f"model_index.json but is missing the {key}/ subfolder.")
+    if required_component_dirs is None:
+        for key, value in config.items():
+            if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
+                continue
+            if (not isinstance(value, list) or len(value) < 1 or value[0] is None or not isinstance(value[0], str)):
+                continue
+            subdir = os.path.join(model_path, key)
+            if not os.path.exists(subdir):
+                raise ValueError(f"Model directory {model_path} declares `{key}` in "
+                                 f"{config_filename} but is missing the {key}/ subfolder.")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
-        raise ValueError("model_index.json does not contain _diffusers_version")
+        raise ValueError(f"{config_filename} does not contain _diffusers_version")
 
     logger.info("Diffusers version: %s", config["_diffusers_version"])
     return cast(dict[str, Any], config)
 
 
-def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
+def maybe_download_model_index(model_name_or_path: str, revision: str | None = None) -> dict[str, Any]:
     """
-    Download and extract just the model_index.json for a Hugging Face model.
+    Download and extract a Diffusers model manifest for a Hugging Face model.
     
     Args:
         model_name_or_path: Path or HF Hub model ID
+        revision: Optional immutable Hub revision.
         
     Returns:
-        The parsed model_index.json as a dictionary
+        The parsed model_index.json or modular_model_index.json dictionary
     """
-    import tempfile
-
     from huggingface_hub import hf_hub_download
 
-    # If it's a local path, verify it directly
+    # This helper resolves manifests only; component validation happens after
+    # the concrete pipeline has selected its required directories.
     if os.path.exists(model_name_or_path):
-        return verify_model_config_and_directory(model_name_or_path)
+        return verify_model_config_and_directory(model_name_or_path, required_component_dirs=[])
 
-    # For remote models, download just the model_index.json
+    # For remote models, download only the small manifest. No ``local_dir``:
+    # the default path serves from (and populates) the shared HF cache, so
+    # repeat builds skip the copy and a warm cache keeps working offline.
     try:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            # Download just the model_index.json file
-            model_index_path = hf_hub_download(repo_id=model_name_or_path,
-                                               filename="model_index.json",
-                                               local_dir=tmp_dir)
+        repo_id, subfolder = _split_hf_repo_subfolder(model_name_or_path)
+        from huggingface_hub.utils import EntryNotFoundError
 
-            # Load the model_index.json
-            with open(model_index_path) as f:
-                config: dict[str, Any] = json.load(f)
+        config_filename = "model_index.json"
+        try:
+            filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
+            model_index_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
+        except EntryNotFoundError:
+            config_filename = "modular_model_index.json"
+            filename = f"{subfolder}/{config_filename}" if subfolder else config_filename
+            model_index_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
 
-            # Verify it has the required fields
-            if "_class_name" not in config:
-                raise ValueError(f"model_index.json for {model_name_or_path} does not contain _class_name field")
+        # Load the selected manifest.
+        with open(model_index_path) as f:
+            config: dict[str, Any] = json.load(f)
 
-            if "_diffusers_version" not in config:
-                raise ValueError(f"model_index.json for {model_name_or_path} does not contain _diffusers_version field")
+        # Verify it has the required fields
+        if "_class_name" not in config:
+            raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _class_name field")
 
-            # Add the pipeline name for downstream use
-            config["pipeline_name"] = config["_class_name"]
+        if "_diffusers_version" not in config:
+            raise ValueError(f"{config_filename} for {model_name_or_path} does not contain _diffusers_version field")
 
-            logger.info("Downloaded model_index.json for %s, pipeline: %s", model_name_or_path, config["_class_name"])
-            return config
+        # Add the pipeline name for downstream use
+        config["pipeline_name"] = config["_class_name"]
+
+        logger.info("Downloaded %s for %s, pipeline: %s", config_filename, model_name_or_path, config["_class_name"])
+        return config
 
     except Exception as e:
-        raise ValueError(f"Failed to download or parse model_index.json for {model_name_or_path}: {e}") from e
+        raise ValueError(f"Failed to download or parse a Diffusers manifest for {model_name_or_path}: {e}") from e
 
 
-_HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
+def read_optional_model_json(model_name_or_path: str,
+                             relative_path: str,
+                             revision: str | None = None) -> dict[str, Any] | None:
+    """Read one JSON file of a local model directory or Hub repo; None when the model has no such file.
+
+    For a Hub repo only that file is downloaded, into the shared HF cache, so
+    a run can read small checkpoint metadata before any component weights.
+    """
+    if os.path.exists(model_name_or_path):
+        path = os.path.join(model_name_or_path, relative_path)
+        if not os.path.isfile(path):
+            return None
+    else:
+        from huggingface_hub import hf_hub_download
+        from huggingface_hub.utils import EntryNotFoundError
+
+        repo_id, subfolder = _split_hf_repo_subfolder(model_name_or_path)
+        filename = f"{subfolder}/{relative_path}" if subfolder else relative_path
+        try:
+            path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
+        except EntryNotFoundError:
+            return None
+    with open(path, encoding="utf-8") as f:
+        return cast(dict[str, Any], json.load(f))
+
+
+# Token variables that `huggingface_hub` itself reads, in its priority order.
+HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+# FastVideo-specific token names, kept as deprecated aliases until the next
+# minor release.
+DEPRECATED_HF_TOKEN_ENV_VARS = ("HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
 
 
 def resolve_hf_token() -> str | None:
-    """Return the first non-empty HF token from the standard env vars.
+    """Return the first non-empty Hugging Face token from the environment.
 
-    Order: `HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`, `HF_API_KEY` (the last is
-    a FastVideo convention; `huggingface_hub` itself doesn't read it).
-    Does not mutate `os.environ`.
+    Reads `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`, then the deprecated
+    FastVideo-specific aliases `HUGGINGFACE_HUB_TOKEN` and `HF_API_KEY`,
+    which log a deprecation warning. Does not mutate `os.environ`.
     """
-    for src in _HF_TOKEN_ENV_VARS:
-        v = os.environ.get(src)
-        if v:
-            return v
+    for name in HF_TOKEN_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            return value
+    for name in DEPRECATED_HF_TOKEN_ENV_VARS:
+        value = os.environ.get(name)
+        if value:
+            logger.warning_once(f"{name} is deprecated and will be removed in the next minor release; "
+                                f"set HF_TOKEN instead.")
+            return value
     return None
 
 
@@ -989,6 +1062,20 @@ def best_output_size(w, h, dw, dh, expected_area):
         return ow2, oh2
 
 
+def pixels_to_uint8(pixels: torch.Tensor) -> torch.Tensor:
+    """Return decoded pixels as uint8 bytes.
+
+    Decode stages hand back either normalized float pixels in [0, 1] or uint8
+    that a worker already quantized before the executor boundary (the
+    MiniMax-H3 video decode stage does). uint8 passes through untouched;
+    scaling it by 255 again would wrap modulo 256. Float pixels are clamped so
+    VAE output slightly outside [0, 1] saturates instead of wrapping.
+    """
+    if pixels.dtype == torch.uint8:
+        return pixels
+    return (pixels * 255).clamp_(0, 255).to(torch.uint8)
+
+
 def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor], output_path: str, fps: int):
     # Process outputs
     videos = rearrange(decoded_latents, "b c t h w -> t b c h w")
@@ -1071,7 +1158,7 @@ def _append_to_memory_trace(message: str, log_file_path: str | os.PathLike[str] 
 
 # TODO(xingyu): add adopted message for this
 def get_ip() -> str:
-    host_ip = envs.FASTVIDEO_HOST_IP
+    host_ip = envs.FASTVIDEO_HOST_IP.get()
     if host_ip:
         return host_ip
 
@@ -1113,7 +1200,7 @@ def test_loopback_bind(address: str, family: socket.AddressFamily) -> bool:
 
 
 def get_loopback_ip() -> str:
-    loopback_ip = envs.FASTVIDEO_LOOPBACK_IP
+    loopback_ip = envs.FASTVIDEO_LOOPBACK_IP.get()
     if loopback_ip:
         return loopback_ip
 
@@ -1184,9 +1271,9 @@ def xpu_is_initialized() -> bool:
 
 
 def force_spawn() -> None:
-    if os.environ.get("FASTVIDEO_WORKER_MULTIPROC_METHOD") == "fork":
+    if envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.get() == "fork":
         logger.warning("We must use the `spawn` multiprocessing start method.")
-        os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
+        envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.set("spawn")
 
 
 def get_mp_context() -> BaseContext:
@@ -1197,7 +1284,7 @@ def get_mp_context() -> BaseContext:
     FASTVIDEO_WORKER_MULTIPROC_METHOD.
     """
     force_spawn()
-    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD
+    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD.get()
     return multiprocessing.get_context(mp_method)
 
 
@@ -1274,3 +1361,35 @@ def _cached_pin_memory_available(pid: int) -> bool:
 
 def is_pin_memory_available() -> bool:
     return _cached_pin_memory_available(os.getpid())
+
+
+def allocate_cpu_tensor_with_pin_fallback(
+    size: tuple[int, ...] | torch.Size,
+    *,
+    dtype: torch.dtype | None = None,
+    pin_memory: bool = False,
+) -> torch.Tensor:
+    """Allocate a CPU tensor, retrying pageable memory if pinning fails.
+
+    ``is_pin_memory_available`` intentionally uses a small capability probe.
+    Large decoded-video buffers can still exhaust the CUDA host allocator after
+    that probe succeeds, especially on unified-memory systems. Treat pinning as
+    a performance preference: preserve the requested shape and dtype by
+    retrying the allocation without pinning.
+    """
+    kwargs: dict[str, object] = {"device": "cpu"}
+    if dtype is not None:
+        kwargs["dtype"] = dtype
+
+    if not pin_memory or not is_pin_memory_available():
+        return torch.empty(size, **kwargs)
+
+    try:
+        return torch.empty(size, pin_memory=True, **kwargs)
+    except RuntimeError as exc:
+        logger.warning(
+            "Pinned CPU allocation failed for shape %s; retrying with pageable memory: %s",
+            tuple(size),
+            exc,
+        )
+        return torch.empty(size, **kwargs)

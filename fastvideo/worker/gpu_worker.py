@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-import os
 from typing import Any, cast
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed import (cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -11,6 +11,46 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, LoRAPipeline, build_pipeline
 
 logger = init_logger(__name__)
+
+
+def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
+    """Record an NVIDIA worker UUID when external NVTX profiling is enabled."""
+    if not envs.FASTVIDEO_NVTX_PROFILE.get():
+        return
+    device_uuid = torch.cuda.get_device_properties(device).uuid
+    logger.info("Worker %d CUDA device UUID: GPU-%s", rank, device_uuid, local_main_process_only=False)
+
+
+def _log_pipeline_memory(pipeline) -> None:
+    """Debug (FASTVIDEO_MEMORY_REPORT=1): bytes held per pipeline component, by device and dtype, plus the
+    largest tensors, so the resident footprint can be attributed before choosing offload placements."""
+    gib = 1024**3
+    for name, module in getattr(pipeline, "modules", {}).items():
+        if not isinstance(module, torch.nn.Module):
+            continue
+        by_kind: dict[str, int] = {}
+        largest: list[tuple[int, str, str]] = []
+        seen: set[int] = set()
+        for tname, t in list(module.named_parameters()) + list(module.named_buffers()):
+            if t is None or id(t) in seen:
+                continue
+            seen.add(id(t))
+            nbytes = t.numel() * t.element_size()
+            key = f"{t.device.type}/{str(t.dtype).replace('torch.', '')}"
+            by_kind[key] = by_kind.get(key, 0) + nbytes
+            largest.append((nbytes, tname, key))
+        largest.sort(reverse=True)
+        total = sum(by_kind.values())
+        logger.info("MEMREPORT %s total=%.2f GiB %s", name, total / gib, {
+            k: round(v / gib, 2)
+            for k, v in sorted(by_kind.items(), key=lambda kv: -kv[1])
+        })
+        for nbytes, tname, key in largest[:8]:
+            logger.info("MEMREPORT %s   %.3f GiB %s %s", name, nbytes / gib, key, tname)
+    if torch.cuda.is_available():
+        logger.info("MEMREPORT cuda allocated=%.2f GiB reserved=%.2f GiB",
+                    torch.cuda.memory_allocated() / gib,
+                    torch.cuda.memory_reserved() / gib)
 
 
 class Worker:
@@ -41,16 +81,19 @@ class Worker:
         # this behavior.
         # Related issue:
         # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
-        os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
+        envs.set_external("TORCH_NCCL_AVOID_RECORD_STREAMS", "1")
         # This env var set by Ray causes exceptions with graph building.
-        os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
+        envs.unset_external("NCCL_ASYNC_ERROR_HANDLING")
 
         # Set environment variables BEFORE calling get_local_torch_device()
         # so that each worker uses the correct device
-        if self.fastvideo_args.distributed_executor_backend == "mp":
-            os.environ["LOCAL_RANK"] = str(self.local_rank)
-        os.environ["RANK"] = str(self.rank)
-        os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
+        # Both multiprocessing and Ray pass the worker-local rank explicitly.
+        # Ray deliberately excludes LOCAL_RANK from the copied driver
+        # environment and exposes all GPUs assigned to the node, so leaving an
+        # inherited or missing value here would bind every Ray actor to cuda:0.
+        envs.set_external("LOCAL_RANK", str(self.local_rank))
+        envs.set_external("RANK", str(self.rank))
+        envs.set_external("WORLD_SIZE", str(self.fastvideo_args.num_gpus))
 
         # Platform-agnostic device initialization
         self.device = get_local_torch_device()
@@ -60,16 +103,33 @@ class Worker:
         # Set the CUDA device BEFORE any CUDA calls
         if current_platform.is_cuda_alike():
             torch.cuda.set_device(self.device)
+            # Debug: FASTVIDEO_CUDA_MEMORY_CAP_GIB emulates a smaller card by capping this process's allocator.
+            cap_gib = envs.FASTVIDEO_CUDA_MEMORY_CAP_GIB.get()
+            if cap_gib > 0:
+                total = torch.cuda.get_device_properties(self.device).total_memory
+                torch.cuda.set_per_process_memory_fraction(min(1.0, cap_gib * 1024**3 / total), self.device)
+                logger.info("Capped CUDA allocator at %s GiB of %.1f GiB", cap_gib, total / 1024**3)
             self.init_gpu_memory = torch.cuda.mem_get_info(self.device)[0]
+            if current_platform.is_cuda():
+                _log_cuda_device_uuid(self.rank, self.device)
         else:
             # For MPS, we can't get memory info the same way
             self.init_gpu_memory = 0
+
+        # CUDA's unified-memory classification reads runtime device
+        # properties, so make this decision only after this worker has bound
+        # its own device. The worker-local args object is what every loader and
+        # pipeline stage below will consume.
+        device_id = self.device.index if self.device.index is not None else 0
+        self.fastvideo_args.finalize_device_offload_policy(device_id)
 
         # Initialize the distributed environment.
         maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
                                                               self.distributed_init_method)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
+        if envs.FASTVIDEO_MEMORY_REPORT.get() and self.rank == 0:
+            _log_pipeline_memory(self.pipeline)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)

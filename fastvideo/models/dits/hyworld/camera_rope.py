@@ -126,9 +126,9 @@ def _prepare_apply_fns_all_dim(
     coeffs_x: Optional[torch.Tensor] = None,
     coeffs_y: Optional[torch.Tensor] = None,
 ) -> Tuple[
-    Callable[[torch.Tensor], torch.Tensor],
-    Callable[[torch.Tensor], torch.Tensor],
-    Callable[[torch.Tensor], torch.Tensor],
+        Callable[[torch.Tensor], torch.Tensor],
+        Callable[[torch.Tensor], torch.Tensor],
+        Callable[[torch.Tensor], torch.Tensor],
 ]:
     """Prepare transforms for PRoPE-style positional encoding."""
     device = viewmats.device
@@ -184,8 +184,8 @@ def _prepare_apply_fns_all_dim(
 
 
 def _apply_tiled_projmat(
-    feats: torch.Tensor,  # (batch, num_heads, seqlen, feat_dim)
-    matrix: torch.Tensor,  # (batch, cameras, D, D)
+        feats: torch.Tensor,  # (batch, num_heads, seqlen, feat_dim)
+        matrix: torch.Tensor,  # (batch, cameras, D, D)
 ) -> torch.Tensor:
     """Apply projection matrix to features."""
     # - seqlen => (cameras, patches_x * patches_y)

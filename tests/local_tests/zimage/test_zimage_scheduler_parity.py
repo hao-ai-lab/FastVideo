@@ -23,16 +23,12 @@ import torch
 from torch.testing import assert_close
 
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler as FastVideoScheduler,
-)
-
+    FlowMatchEulerDiscreteScheduler as FastVideoScheduler, )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ZIMAGE_REPO = REPO_ROOT / "Z-Image"
 ZIMAGE_SRC = REPO_ROOT / "Z-Image" / "src"
-ZIMAGE_SCHEDULER_CFG = (
-    REPO_ROOT / "official_weights" / "Z-Image" / "scheduler" / "scheduler_config.json"
-)
+ZIMAGE_SCHEDULER_CFG = (REPO_ROOT / "official_weights" / "Z-Image" / "scheduler" / "scheduler_config.json")
 ZIMAGE_REFERENCE_REVISION = "26f23eda626ffadda020b04ff79488e1d72004cd"
 PARITY_SCOPE = "implementation_subcomponent"
 
@@ -56,8 +52,7 @@ def _require_pinned_reference_module(module_name: str, source_file: Path):
     actual_revision = result.stdout.strip()
     assert actual_revision == ZIMAGE_REFERENCE_REVISION, (
         "Z-Image reference clone is not at the pinned revision: "
-        f"expected {ZIMAGE_REFERENCE_REVISION}, got {actual_revision}"
-    )
+        f"expected {ZIMAGE_REFERENCE_REVISION}, got {actual_revision}")
 
     if str(ZIMAGE_SRC) not in sys.path:
         sys.path.insert(0, str(ZIMAGE_SRC))
@@ -67,9 +62,8 @@ def _require_pinned_reference_module(module_name: str, source_file: Path):
         pytest.fail(f"Cannot import pinned Z-Image module {module_name}: {exc}")
 
     module_file = Path(module.__file__ or "").resolve()
-    assert module_file.is_relative_to(ZIMAGE_SRC.resolve()), (
-        f"{module_name} resolved outside the pinned clone: {module_file}"
-    )
+    assert module_file.is_relative_to(
+        ZIMAGE_SRC.resolve()), (f"{module_name} resolved outside the pinned clone: {module_file}")
     return module
 
 
@@ -199,12 +193,9 @@ def test_reference_schedule_preserves_float64_linspace_rounding():
     )
     scheduler.set_timesteps(num_inference_steps=9, device="cpu")
 
-    expected = torch.from_numpy(
-        np.linspace(1000.0, 0.0, 10)[:-1] / 1000.0,
-    ).to(torch.float32) * 1000.0
+    expected = torch.from_numpy(np.linspace(1000.0, 0.0, 10)[:-1] / 1000.0, ).to(torch.float32) * 1000.0
     float32_regression = torch.from_numpy(
-        np.linspace(1000.0, 0.0, 10, dtype=np.float32)[:-1] / np.float32(1000.0),
-    ) * 1000.0
+        np.linspace(1000.0, 0.0, 10, dtype=np.float32)[:-1] / np.float32(1000.0), ) * 1000.0
 
     # The fifth timestep differs by one float32 ULP depending on where the
     # linspace is rounded, so this assertion fails if dtype=np.float32 returns.

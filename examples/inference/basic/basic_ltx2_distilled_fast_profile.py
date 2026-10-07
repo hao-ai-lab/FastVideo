@@ -12,15 +12,11 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
 from fastvideo.utils import maybe_download_model
 
-VALIDATION_JSON = (
-    Path(__file__).resolve().parents[2] / "training" / "finetune" / "ltx2" / "validation.json"
-)
+VALIDATION_JSON = (Path(__file__).resolve().parents[2] / "training" / "finetune" / "ltx2" / "validation.json")
 
 # Override with a local snapshot or converted directory when needed, e.g.
 #   export LTX2_MODEL_PATH=/raid/$USER/hf/FastVideo/LTX2-Distilled-Diffusers
-MODEL_ID = os.path.expandvars(
-    os.path.expanduser(os.getenv("LTX2_MODEL_PATH", "FastVideo/LTX2-Distilled-Diffusers"))
-)
+MODEL_ID = os.path.expandvars(os.path.expanduser(os.getenv("LTX2_MODEL_PATH", "FastVideo/LTX2-Distilled-Diffusers")))
 OUTPUT_DIR = Path("outputs_video/ltx2_distilled_fast_profile")
 
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
@@ -69,9 +65,7 @@ def print_stage_breakdown(
     return total
 
 
-def extract_sr_forward_latency(
-    result: dict,
-) -> tuple[float | None, list[tuple[str, float]], list[str]]:
+def extract_sr_forward_latency(result: dict, ) -> tuple[float | None, list[tuple[str, float]], list[str]]:
     logging_info = result.get("logging_info")
     if logging_info is None:
         return None, [], []
@@ -89,12 +83,8 @@ def extract_sr_forward_latency(
         if sr_match_substr:
             is_sr_stage = sr_match_substr in stage_name_l
         else:
-            is_sr_stage = (
-                "srdenoisingstage" in stage_name_l
-                or "sr_denoising" in stage_name_l
-                or "upsample" in stage_name_l
-                or ("refine" in stage_name_l and "denois" in stage_name_l)
-            )
+            is_sr_stage = ("srdenoisingstage" in stage_name_l or "sr_denoising" in stage_name_l
+                           or "upsample" in stage_name_l or ("refine" in stage_name_l and "denois" in stage_name_l))
         if not is_sr_stage:
             continue
         exec_time = float(stage_metrics.get("execution_time", 0.0))
@@ -161,11 +151,9 @@ def resolve_refine_upsampler_path(model_root: str) -> Path:
             return candidate
 
     checked = "\n".join(f"  - {candidate}" for candidate in candidates)
-    raise FileNotFoundError(
-        "Could not find an LTX2 refine upsampler directory.\n"
-        "Checked:\n"
-        f"{checked}"
-    )
+    raise FileNotFoundError("Could not find an LTX2 refine upsampler directory.\n"
+                            "Checked:\n"
+                            f"{checked}")
 
 
 def main() -> None:
@@ -191,6 +179,22 @@ def main() -> None:
     print(f"Using refine upsampler: {refine_upsampler_path}")
 
     pipeline_config = PipelineConfig.from_pretrained(model_root)
+    # LTX-2 NVFP4 deploy contract (train==deploy surface):
+    #   * Linears: NVFP4 block-scaled GEMMs (per-16 E2M1 + E4M3 SFs) on every
+    #     arch, via flashinfer.
+    #   * ATTN_QAT_INFER attention differs per arch: sm_120a/sm_121a use the
+    #     fastvideo-kernel CUTLASS (SageAttention3-FP4) scheme that
+    #     ATTN_QAT_TRAIN simulates; sm_100a (GB200) / sm_103a (GB300) use the
+    #     FP4 FA4 kernel (flash-attention-fp4) with per-16 block-scaled NVFP4
+    #     Q/K and BF16 P/V -- a train-sim mismatch that is gated by MS-SSIM
+    #     measurement, not assumed equal. The selection receipt is logged at
+    #     backend resolution ("ATTN_QAT_INFER resolved: ...").
+    # Original-weight retention: the default purges the always-FP4 layers'
+    # bf16 originals after conversion. Refine-only layers (the cross-modal
+    # AV projections) always keep theirs: the base stage profile runs them
+    # dense by deployment contract -- in the two-stage fast profile AND the
+    # distilled single-stage deploy. retain_original_weights=True keeps
+    # everything (debugging).
     pipeline_config.dit_config.quant_config = NVFP4Config()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     torch_compile_kwargs = {
@@ -298,19 +302,15 @@ def main() -> None:
 
         measured_times = run_times[measured_start_idx:]
         avg_time = sum(measured_times) / len(measured_times)
-        print(
-            f"Average video generation time over {len(measured_times)} runs "
-            f"(runs {measured_start_idx + 1}-{len(run_times)}, skipping first {warmup_runs} warmup runs): "
-            f"{avg_time:.2f}s"
-        )
+        print(f"Average video generation time over {len(measured_times)} runs "
+              f"(runs {measured_start_idx + 1}-{len(run_times)}, skipping first {warmup_runs} warmup runs): "
+              f"{avg_time:.2f}s")
 
         measured_e2e_times = e2e_times[measured_start_idx:]
         avg_e2e_time = sum(measured_e2e_times) / len(measured_e2e_times)
-        print(
-            f"Average end-to-end latency over {len(measured_e2e_times)} runs "
-            f"(runs {measured_start_idx + 1}-{len(e2e_times)}, skipping first {warmup_runs} warmup runs): "
-            f"{avg_e2e_time:.2f}s"
-        )
+        print(f"Average end-to-end latency over {len(measured_e2e_times)} runs "
+              f"(runs {measured_start_idx + 1}-{len(e2e_times)}, skipping first {warmup_runs} warmup runs): "
+              f"{avg_e2e_time:.2f}s")
 
         if sr_forward_times:
             avg_sr_forward = sum(sr_forward_times) / len(sr_forward_times)
@@ -322,10 +322,8 @@ def main() -> None:
 
         if non_stage_overhead_times:
             avg_non_stage_overhead = sum(non_stage_overhead_times) / len(non_stage_overhead_times)
-            print(
-                "Average non-stage overhead over "
-                f"{len(non_stage_overhead_times)} measured runs: {avg_non_stage_overhead:.3f}s"
-            )
+            print("Average non-stage overhead over "
+                  f"{len(non_stage_overhead_times)} measured runs: {avg_non_stage_overhead:.3f}s")
         else:
             print("Average non-stage overhead unavailable (no stage timings).")
     finally:

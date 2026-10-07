@@ -13,16 +13,28 @@ on:
         required: false
         default: false
         type: boolean
-  # Auto-rebuild the CUDA images when their Dockerfile changes on main. The CUDA
-  # matrix is the only lane that builds from docker/Dockerfile, so a path-scoped
-  # push trigger is a sufficient change detector on its own -- no separate
-  # detect-changes/paths-filter job is needed now that there is a single
-  # in-scope Dockerfile. Dreamverse (apps/dreamverse/docker/Dockerfile) and the
-  # rocm Dockerfile stay manual-dispatch only.
+      build_ci_runner_image:
+        description: 'Build the ARM64 CUDA 13 CI runner image (sm_100)'
+        required: false
+        default: false
+        type: boolean
+  # Auto-rebuild the CUDA images when a repository-controlled image input
+  # changes on main. This includes the trusted SM89 kernel artifact's source,
+  # metadata/key helper, ABI dependency metadata, and build orchestration.
+  # Dreamverse (apps/dreamverse/docker/Dockerfile) and the ROCm Dockerfile stay
+  # manual-dispatch only.
   push:
     branches: [main]
     paths:
+      - '.dockerignore'
+      - '.github/workflows/_template-build-image.yml'
+      - '.github/workflows/infra-build-image.yml'
+      - '.gitmodules'
       - 'docker/Dockerfile'
+      - 'docker/uv-excludes'
+      - 'fastvideo-kernel/**'
+      - 'fastvideo/tests/modal/kernel_build_cache.py'
+      - 'pyproject.toml'
 
 
 permissions:
@@ -50,7 +62,7 @@ jobs:
   # 2.8.3 comes from the architecture-specific prebuilt releases.
   build-cuda-images:
     # Runs on a manual dispatch when build_cuda_matrix is set, or automatically
-    # on a push that changed docker/Dockerfile (inputs are null on push). The
+    # on an in-scope main push (inputs are null on push). The
     # repository guard keeps fork syncs from auto-building; manual dispatch
     # still works in forks.
     if: ${{ (github.event_name == 'push' && github.repository == 'hao-ai-lab/FastVideo') || github.event.inputs.build_cuda_matrix == 'true' }}
@@ -190,6 +202,28 @@ jobs:
 
           docker buildx imagetools create "${TAG_ARGS[@]}" "${IMAGE_REFS[@]}"
           docker buildx imagetools inspect "${TAGS[0]}"
+
+  # The CI runner is ARM64 like DGX Spark, but targets sm_100 rather than sm_121.
+  # Publish a single-architecture variant so the self-hosted CI runner can reuse
+  # the exact prebuilt kernel instead of compiling it in every job.
+  build-ci-runner-image:
+    if: ${{ (github.event_name == 'push' && github.repository == 'hao-ai-lab/FastVideo') || github.event.inputs.build_ci_runner_image == 'true' }}
+    uses: ./.github/workflows/_template-build-image.yml
+    with:
+      python_version: '3.12'
+      dockerfile_path: docker/Dockerfile
+      tag_suffix: py3.12-cuda13.0.0-sm100
+      runner: ubuntu-24.04-arm
+      architecture: arm64
+      build_args: |
+        PYTHON_VERSION=3.12
+        CUDA_VERSION=13.0.0
+        UV_TORCH_BACKEND=cu130
+        TORCH_CUDA_ARCH_LIST=10.0
+        CMAKE_BUILD_PARALLEL_LEVEL=1
+        FLASH_ATTN_WHEEL_TAG=cu130torch2.12
+        FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
+    secrets: inherit
 
   # Dreamverse matrix: {backend, UI} x {12.6.3, 13.0.0}, Python 3.12. Torch backend
   # matches the base CUDA (cu126 / cu130). Keep these images amd64-only until the

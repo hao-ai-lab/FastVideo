@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GpuGrid from './GpuGrid';
@@ -72,5 +72,31 @@ describe('GpuGrid', () => {
     expect(
       await screen.findByText(/Could not reach the API server/),
     ).toBeInTheDocument();
+  });
+
+  it('keeps the last snapshot visible and warns when a refresh fails', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getGpus)
+        .mockResolvedValueOnce(SNAPSHOT)
+        .mockRejectedValueOnce(new Error('network down'));
+
+      render(<GpuGrid />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getAllByText('NVIDIA B200')).toHaveLength(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+
+      expect(
+        screen.getByText(/values below may be stale/),
+      ).toBeInTheDocument();
+      expect(screen.getAllByText('NVIDIA B200')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

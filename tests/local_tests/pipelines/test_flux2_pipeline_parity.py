@@ -29,7 +29,6 @@ from diffusers.utils.torch_utils import randn_tensor
 from safetensors.torch import safe_open
 from torch.testing import assert_close
 
-
 DEFAULT_PROMPT = "a photo of a banana on a wooden table, studio lighting"
 PROMPT = os.getenv("FLUX2_PROMPT", DEFAULT_PROMPT)
 SEED = int(os.getenv("FLUX2_SEED", "0"))
@@ -59,12 +58,10 @@ FULL_GUIDANCE_SCALE = float(os.getenv("FLUX2_FULL_GUIDANCE_SCALE", "4.0"))
 FULL_MAX_SEQUENCE_LENGTH = int(os.getenv("FLUX2_FULL_MAX_SEQUENCE_LENGTH", "64"))
 FULL_NUM_GPUS = int(os.getenv("FLUX2_FULL_NUM_GPUS", "2"))
 FULL_TP_SIZE = int(os.getenv("FLUX2_FULL_TP_SIZE", str(FULL_NUM_GPUS)))
-FULL_SP_SIZE = int(
-    os.getenv(
-        "FLUX2_FULL_SP_SIZE",
-        "1" if FULL_NUM_GPUS > 1 else str(FULL_NUM_GPUS),
-    )
-)
+FULL_SP_SIZE = int(os.getenv(
+    "FLUX2_FULL_SP_SIZE",
+    "1" if FULL_NUM_GPUS > 1 else str(FULL_NUM_GPUS),
+))
 FULL_INPUT_VARIANTS = (
     (
         "changed_prompt_seed0",
@@ -74,7 +71,6 @@ FULL_INPUT_VARIANTS = (
     ("default_prompt_seed123", DEFAULT_PROMPT, 123),
 )
 
-
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="Flux2 Klein pipeline parity requires CUDA",
@@ -83,13 +79,11 @@ pytestmark = pytest.mark.skipif(
 
 def _log_tensor_stats(label: str, tensor: torch.Tensor) -> None:
     tensor_f32 = tensor.detach().float()
-    print(
-        f"[FLUX2 PIPELINE] {label}: shape={tuple(tensor.shape)} "
-        f"dtype={tensor.dtype} device={tensor.device} "
-        f"mean={tensor_f32.mean().item():.6f} "
-        f"abs_mean={tensor_f32.abs().mean().item():.6f} "
-        f"min={tensor_f32.min().item():.6f} max={tensor_f32.max().item():.6f}"
-    )
+    print(f"[FLUX2 PIPELINE] {label}: shape={tuple(tensor.shape)} "
+          f"dtype={tensor.dtype} device={tensor.device} "
+          f"mean={tensor_f32.mean().item():.6f} "
+          f"abs_mean={tensor_f32.abs().mean().item():.6f} "
+          f"min={tensor_f32.min().item():.6f} max={tensor_f32.max().item():.6f}")
 
 
 def _print_assert_close_means(
@@ -99,13 +93,11 @@ def _print_assert_close_means(
 ) -> None:
     expected_f32 = expected.detach().float()
     actual_f32 = actual.detach().float()
-    print(
-        f"[{label}] assert_close means "
-        f"expected_mean={expected_f32.mean().item():.6f} "
-        f"actual_mean={actual_f32.mean().item():.6f} "
-        f"expected_abs_mean={expected_f32.abs().mean().item():.6f} "
-        f"actual_abs_mean={actual_f32.abs().mean().item():.6f}"
-    )
+    print(f"[{label}] assert_close means "
+          f"expected_mean={expected_f32.mean().item():.6f} "
+          f"actual_mean={actual_f32.mean().item():.6f} "
+          f"expected_abs_mean={expected_f32.abs().mean().item():.6f} "
+          f"actual_abs_mean={actual_f32.abs().mean().item():.6f}")
 
 
 def _require_tp_size() -> int:
@@ -116,10 +108,8 @@ def _require_tp_size() -> int:
     if tp_size <= 1:
         pytest.skip("Flux2 tensor-parallel parity requires FLUX2_TP_SIZE>1")
     if torch.cuda.device_count() < tp_size:
-        pytest.skip(
-            f"Flux2 tensor-parallel parity requires {tp_size} CUDA devices; "
-            f"found {torch.cuda.device_count()}"
-        )
+        pytest.skip(f"Flux2 tensor-parallel parity requires {tp_size} CUDA devices; "
+                    f"found {torch.cuda.device_count()}")
     return tp_size
 
 
@@ -137,10 +127,8 @@ def _require_full_model_dir() -> Path:
 
 def _require_full_parallel_config() -> tuple[int, int, int]:
     if torch.cuda.device_count() < FULL_NUM_GPUS:
-        pytest.skip(
-            f"Full Flux2 pipeline parity requires {FULL_NUM_GPUS} CUDA devices; "
-            f"found {torch.cuda.device_count()}"
-        )
+        pytest.skip(f"Full Flux2 pipeline parity requires {FULL_NUM_GPUS} CUDA devices; "
+                    f"found {torch.cuda.device_count()}")
     return FULL_NUM_GPUS, FULL_TP_SIZE, FULL_SP_SIZE
 
 
@@ -155,12 +143,10 @@ def _compare_tensor(
     expected_cpu = expected.detach().float().cpu()
     actual_cpu = actual.detach().float().cpu()
     diff = (expected_cpu - actual_cpu).abs()
-    print(
-        f"[FLUX2 SETUP] {label}: shape={tuple(expected.shape)} "
-        f"expected_dtype={expected.dtype} actual_dtype={actual.dtype} "
-        f"diff max={diff.max().item():.6f} "
-        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
-    )
+    print(f"[FLUX2 SETUP] {label}: shape={tuple(expected.shape)} "
+          f"expected_dtype={expected.dtype} actual_dtype={actual.dtype} "
+          f"diff max={diff.max().item():.6f} "
+          f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}")
     assert_close(expected, actual, atol=atol, rtol=rtol)
 
 
@@ -198,22 +184,16 @@ def _print_diff_quantization(label: str, diff: torch.Tensor) -> None:
         atol=1e-6,
         rtol=0.0,
     )
-    print(
-        f"[FLUX2 {label}] diff quantization "
-        f"nonzero={int((diff_flat > 0).sum().item())}/{diff_flat.numel()} "
-        f"multiples_of_1/128={int(q128_hits.sum().item())}/{diff_flat.numel()} "
-        f"multiples_of_1/16={int(q16_hits.sum().item())}/{diff_flat.numel()}"
-    )
-    print(
-        f"[FLUX2 {label}] top_abs_diffs="
-        f"{[round(v.item(), 6) for v in top_values]} "
-        f"flat_indices={[int(i.item()) for i in top_indices]}"
-    )
+    print(f"[FLUX2 {label}] diff quantization "
+          f"nonzero={int((diff_flat > 0).sum().item())}/{diff_flat.numel()} "
+          f"multiples_of_1/128={int(q128_hits.sum().item())}/{diff_flat.numel()} "
+          f"multiples_of_1/16={int(q16_hits.sum().item())}/{diff_flat.numel()}")
+    print(f"[FLUX2 {label}] top_abs_diffs="
+          f"{[round(v.item(), 6) for v in top_values]} "
+          f"flat_indices={[int(i.item()) for i in top_indices]}")
     if unique_nonzero.numel():
-        print(
-            f"[FLUX2 {label}] largest_unique_abs_diffs="
-            f"{[(round(v.item(), 6), int(c.item())) for v, c in zip(largest_unique, largest_counts, strict=True)]}"
-        )
+        print(f"[FLUX2 {label}] largest_unique_abs_diffs="
+              f"{[(round(v.item(), 6), int(c.item())) for v, c in zip(largest_unique, largest_counts, strict=True)]}")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -232,9 +212,7 @@ def _load_flux2_vae_bn_stats(model_dir: Path) -> tuple[torch.Tensor, torch.Tenso
     else:
         index = vae_dir / "diffusion_pytorch_model.safetensors.index.json"
         if not index.exists():
-            raise FileNotFoundError(
-                f"Missing Flux2 VAE safetensors checkpoint in {vae_dir}"
-            )
+            raise FileNotFoundError(f"Missing Flux2 VAE safetensors checkpoint in {vae_dir}")
         weight_map = _load_json(index)["weight_map"]
         paths = sorted({vae_dir / cast(str, weight_map[key]) for key in keys})
 
@@ -253,9 +231,7 @@ def _load_flux2_vae_bn_stats(model_dir: Path) -> tuple[torch.Tensor, torch.Tenso
 
 def _unpatchify_flux2_latents(latents: torch.Tensor) -> torch.Tensor:
     batch_size, num_channels, height, width = latents.shape
-    latents = latents.reshape(
-        batch_size, num_channels // 4, 2, 2, height, width
-    )
+    latents = latents.reshape(batch_size, num_channels // 4, 2, 2, height, width)
     latents = latents.permute(0, 1, 4, 2, 5, 3)
     return latents.reshape(batch_size, num_channels // 4, height * 2, width * 2)
 
@@ -266,9 +242,7 @@ def _normalize_fastvideo_flux2_latents(
 ) -> torch.Tensor:
     if latents.ndim == 5:
         if latents.shape[2] != 1:
-            raise AssertionError(
-                f"Expected Flux2 image latents with T=1, got {latents.shape}"
-            )
+            raise AssertionError(f"Expected Flux2 image latents with T=1, got {latents.shape}")
         latents = latents[:, :, 0]
 
     running_mean, running_var = _load_flux2_vae_bn_stats(model_dir)
@@ -293,9 +267,7 @@ def _normalize_fastvideo_flux2_latents(
 def _pack_fastvideo_flux2_latents(latents: torch.Tensor) -> torch.Tensor:
     if latents.ndim == 5:
         if latents.shape[2] != 1:
-            raise AssertionError(
-                f"Expected Flux2 packed image latents with T=1, got {latents.shape}"
-            )
+            raise AssertionError(f"Expected Flux2 packed image latents with T=1, got {latents.shape}")
         return latents.permute(0, 2, 3, 4, 1).reshape(
             latents.shape[0],
             latents.shape[3] * latents.shape[4],
@@ -398,13 +370,11 @@ def _run_fastvideo_flux2_pipeline(
     )
     try:
         executor_world_size = getattr(generator.executor, "world_size", None)
-        print(
-            "[FLUX2 PIPELINE] fastvideo parallel config "
-            f"num_gpus={generator.fastvideo_args.num_gpus} "
-            f"tp_size={generator.fastvideo_args.tp_size} "
-            f"sp_size={generator.fastvideo_args.sp_size} "
-            f"executor_world_size={executor_world_size}"
-        )
+        print("[FLUX2 PIPELINE] fastvideo parallel config "
+              f"num_gpus={generator.fastvideo_args.num_gpus} "
+              f"tp_size={generator.fastvideo_args.tp_size} "
+              f"sp_size={generator.fastvideo_args.sp_size} "
+              f"executor_world_size={executor_world_size}")
         assert generator.fastvideo_args.num_gpus == num_gpus
         assert generator.fastvideo_args.tp_size == tp_size
         assert generator.fastvideo_args.sp_size == sp_size
@@ -592,10 +562,8 @@ def _assert_flux2_full_pipeline_case(
     max_mean_diff: float | None = FULL_TP_MAX_MEAN_DIFF,
     max_abs_mean_drift: float | None = FULL_TP_MAX_ABS_MEAN_DRIFT,
 ) -> None:
-    print(
-        f"[FLUX2 {label}] inputs prompt={prompt!r} seed={seed} "
-        f"num_gpus={num_gpus} tp_size={tp_size} sp_size={sp_size}"
-    )
+    print(f"[FLUX2 {label}] inputs prompt={prompt!r} seed={seed} "
+          f"num_gpus={num_gpus} tp_size={tp_size} sp_size={sp_size}")
 
     diffusers_latents, diffusers_trajectory = _run_diffusers_flux2_full_pipeline(
         model_dir,
@@ -640,56 +608,39 @@ def _assert_flux2_pipeline_latent_parity(
     max_abs_mean_drift: float | None = None,
 ) -> None:
     if len(diffusers_trajectory) == len(fastvideo_trajectory):
-        for step, (diffusers_step, fastvideo_step) in enumerate(
-            zip(diffusers_trajectory, fastvideo_trajectory, strict=True)
-        ):
+        for step, (diffusers_step,
+                   fastvideo_step) in enumerate(zip(diffusers_trajectory, fastvideo_trajectory, strict=True)):
             step_diff = (diffusers_step - fastvideo_step).abs()
-            print(
-                f"[FLUX2 {label}] trajectory_step={step} "
-                f"diff max={step_diff.max().item():.6f} "
-                f"mean={step_diff.mean().item():.6f} "
-                f"median={step_diff.median().item():.6f}"
-            )
+            print(f"[FLUX2 {label}] trajectory_step={step} "
+                  f"diff max={step_diff.max().item():.6f} "
+                  f"mean={step_diff.mean().item():.6f} "
+                  f"median={step_diff.median().item():.6f}")
             _print_assert_close_means(
                 f"FLUX2 {label} trajectory step {step}",
                 diffusers_step,
                 fastvideo_step,
             )
     else:
-        print(
-            f"[FLUX2 {label}] trajectory length mismatch "
-            f"diffusers={len(diffusers_trajectory)} fastvideo={len(fastvideo_trajectory)}"
-        )
+        print(f"[FLUX2 {label}] trajectory length mismatch "
+              f"diffusers={len(diffusers_trajectory)} fastvideo={len(fastvideo_trajectory)}")
 
-    assert diffusers_latents.shape == fastvideo_latents.shape, (
-        f"shape mismatch: diffusers={diffusers_latents.shape} "
-        f"fastvideo={fastvideo_latents.shape}"
-    )
+    assert diffusers_latents.shape == fastvideo_latents.shape, (f"shape mismatch: diffusers={diffusers_latents.shape} "
+                                                                f"fastvideo={fastvideo_latents.shape}")
 
     diff = (diffusers_latents - fastvideo_latents).abs()
-    print(
-        f"[FLUX2 {label}] diff max={diff.max().item():.6f} "
-        f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}"
-    )
+    print(f"[FLUX2 {label}] diff max={diff.max().item():.6f} "
+          f"mean={diff.mean().item():.6f} median={diff.median().item():.6f}")
     _print_diff_quantization(label, diff)
-    print(
-        f"[FLUX2 {label}] abs-mean drift "
-        f"diffusers={diffusers_latents.abs().mean().item():.6f} "
-        f"fastvideo={fastvideo_latents.abs().mean().item():.6f}"
-    )
+    print(f"[FLUX2 {label}] abs-mean drift "
+          f"diffusers={diffusers_latents.abs().mean().item():.6f} "
+          f"fastvideo={fastvideo_latents.abs().mean().item():.6f}")
     if max_mean_diff is not None:
         assert diff.mean().item() <= max_mean_diff, (
-            f"{label} mean diff {diff.mean().item():.6f} exceeds {max_mean_diff}"
-        )
+            f"{label} mean diff {diff.mean().item():.6f} exceeds {max_mean_diff}")
     if max_abs_mean_drift is not None:
-        abs_mean_drift = abs(
-            diffusers_latents.abs().mean().item() -
-            fastvideo_latents.abs().mean().item()
-        )
-        assert abs_mean_drift <= max_abs_mean_drift, (
-            f"{label} abs-mean drift {abs_mean_drift:.6f} exceeds "
-            f"{max_abs_mean_drift}"
-        )
+        abs_mean_drift = abs(diffusers_latents.abs().mean().item() - fastvideo_latents.abs().mean().item())
+        assert abs_mean_drift <= max_abs_mean_drift, (f"{label} abs-mean drift {abs_mean_drift:.6f} exceeds "
+                                                      f"{max_abs_mean_drift}")
 
     _print_assert_close_means(f"FLUX2 {label}", diffusers_latents, fastvideo_latents)
     assert_close(diffusers_latents, fastvideo_latents, atol=atol, rtol=rtol)
@@ -769,8 +720,7 @@ def test_flux2_full_pipeline_setup_matches_diffusers() -> None:
 
     from fastvideo.configs.pipelines.flux_2 import Flux2PipelineConfig
     from fastvideo.pipelines.basic.flux_2.flux_2_latent_preparation import (
-        Flux2LatentPreparationStage,
-    )
+        Flux2LatentPreparationStage, )
     from fastvideo.pipelines.basic.flux_2.flux_2_text_encoding import (
         FLUX2_SYSTEM_MESSAGE,
         Flux2TextEncodingStage,
@@ -840,10 +790,8 @@ def test_flux2_full_pipeline_setup_matches_diffusers() -> None:
     )
     assert torch.equal(diffusers_text_ids, fv_text_ids.cpu())
     assert torch.equal(_prepare_flux2_text_ids(fv_prompt_embeds).cpu(), diffusers_text_ids)
-    print(
-        f"[FLUX2 SETUP] text_ids exact shape={tuple(diffusers_text_ids.shape)} "
-        f"last={diffusers_text_ids[0, -1].tolist()}"
-    )
+    print(f"[FLUX2 SETUP] text_ids exact shape={tuple(diffusers_text_ids.shape)} "
+          f"last={diffusers_text_ids[0, -1].tolist()}")
 
     del text_encoder
     gc.collect()
@@ -919,10 +867,8 @@ def test_flux2_full_pipeline_setup_matches_diffusers() -> None:
         fv_packed_latents,
     )
     assert torch.equal(diffusers_latent_ids, fv_latent_ids)
-    print(
-        f"[FLUX2 SETUP] img_ids exact shape={tuple(diffusers_latent_ids.shape)} "
-        f"last={diffusers_latent_ids[0, -1].tolist()}"
-    )
+    print(f"[FLUX2 SETUP] img_ids exact shape={tuple(diffusers_latent_ids.shape)} "
+          f"last={diffusers_latent_ids[0, -1].tolist()}")
 
     diffusers_scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
         str(model_dir / "scheduler"),
@@ -973,8 +919,7 @@ def test_flux2_full_pipeline_setup_matches_diffusers() -> None:
         fastvideo_compute_empirical_mu(
             diffusers_packed_latents.shape[1],
             FULL_NUM_INFERENCE_STEPS,
-        )
-    )
+        ))
 
     diffusers_guidance = torch.full(
         [1],
@@ -1056,9 +1001,7 @@ def test_flux2_full_pipeline_latent_parity_input_variants(
     seed: int,
 ) -> None:
     if not FULL_INPUT_VARIANTS_ENABLED:
-        pytest.skip(
-            "Set FLUX2_FULL_RUN_INPUT_VARIANTS=1 to run the full Flux2 prompt/seed drift diagnostic"
-        )
+        pytest.skip("Set FLUX2_FULL_RUN_INPUT_VARIANTS=1 to run the full Flux2 prompt/seed drift diagnostic")
     model_dir = _require_full_model_dir()
     num_gpus, tp_size, sp_size = _require_full_parallel_config()
     if torch.cuda.is_available():

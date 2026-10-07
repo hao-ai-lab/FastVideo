@@ -626,7 +626,9 @@ async def benchmark(args: argparse.Namespace) -> None:
         ) as resp:
             if resp.status == 200:
                 info = await resp.json()
-                if "model_path" in info and info["model_path"]:
+                if info.get("served_model_name"):
+                    args.model = info["served_model_name"]
+                elif info.get("model_path"):
                     args.model = info["model_path"]
                     logger.info("Updated model name from server: %s", args.model)
     except Exception as e:

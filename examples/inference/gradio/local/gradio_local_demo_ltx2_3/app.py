@@ -4,10 +4,10 @@ from pathlib import Path
 
 import gradio as gr
 
+from fastvideo import SamplingParam
 from fastvideo.configs.pipelines.base import PipelineConfig
-from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.entrypoints.video_generator import VideoGenerator
-from fastvideo.layers.quantization.fp4_config import FP4Config
+from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
 from fastvideo.utils import maybe_download_model
 
 from .config import (
@@ -20,15 +20,15 @@ from .config import (
 )
 from .ui import create_gradio_interface
 
+
 def main():
     parser = argparse.ArgumentParser(description="FastVideo Gradio Local Demo")
-    parser.add_argument("--t2v_model_paths", type=str,
+    parser.add_argument("--t2v_model_paths",
+                        type=str,
                         default=MODEL_ID,
                         help="Comma separated list of paths to the T2V model(s)")
-    parser.add_argument("--host", type=str, default="0.0.0.0",
-                        help="Host to bind to")
-    parser.add_argument("--port", type=int, default=7860,
-                        help="Port to bind to")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=7860, help="Port to bind to")
     args = parser.parse_args()
     gradio_temp_dir = os.path.abspath("outputs/gradio_tmp")
     os.makedirs(gradio_temp_dir, exist_ok=True)
@@ -44,7 +44,7 @@ def main():
         resolved_model_path = Path(model_root)
 
         pipeline_config = PipelineConfig.from_pretrained(str(resolved_model_path))
-        pipeline_config.dit_config.quant_config = FP4Config()
+        pipeline_config.dit_config.quant_config = NVFP4Config()
         refine_upsampler_path = resolve_refine_upsampler_path(resolved_model_path)
         print(f"Using refine upsampler: {refine_upsampler_path}")
 
@@ -71,54 +71,46 @@ def main():
             text_encoder_cpu_offload=False,
             ltx2_vae_tiling=False,
         )
-        default_params[model_path] = apply_ltx2_defaults(
-            SamplingParam.from_pretrained(str(resolved_model_path))
-        )
+        default_params[model_path] = apply_ltx2_defaults(SamplingParam.from_pretrained(str(resolved_model_path)))
     demo = create_gradio_interface(default_params, generators)
     print(f"Starting Gradio frontend at http://{args.host}:{args.port}")
     print(f"T2V Models: {args.t2v_model_paths}")
-    
+
     from fastapi import FastAPI, Request, HTTPException
     from fastapi.responses import HTMLResponse, FileResponse
     import uvicorn
-    
+
     app = FastAPI()
-    
+
     @app.get("/logo.png")
     def get_logo():
-        return FileResponse(
-            "assets/full.svg",
-            media_type="image/svg+xml",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
+        return FileResponse("assets/full.svg",
+                            media_type="image/svg+xml",
+                            headers={
+                                "Cache-Control": "public, max-age=3600",
+                                "Access-Control-Allow-Origin": "*"
+                            })
 
     @app.get("/nvidia.png")
     def get_nvidia_logo():
-        return FileResponse(
-            "assets/nv.png",
-            media_type="image/png",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
-    
+        return FileResponse("assets/nv.png",
+                            media_type="image/png",
+                            headers={
+                                "Cache-Control": "public, max-age=3600",
+                                "Access-Control-Allow-Origin": "*"
+                            })
+
     @app.get("/favicon.ico")
     def get_favicon():
         favicon_path = "assets/icon-simple.svg"
-        
+
         if os.path.exists(favicon_path):
-            return FileResponse(
-                favicon_path, 
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*"
-                }
-            )
+            return FileResponse(favicon_path,
+                                media_type="image/svg+xml",
+                                headers={
+                                    "Cache-Control": "public, max-age=3600",
+                                    "Access-Control-Allow-Origin": "*"
+                                })
         else:
             raise HTTPException(status_code=404, detail="Favicon not found")
 
@@ -138,7 +130,7 @@ def main():
                 "Access-Control-Allow-Origin": "*",
             },
         )
-    
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         base_url = str(request.base_url).rstrip('/')
@@ -210,16 +202,14 @@ def main():
         </body>
         </html>
         """
-    
-    app = gr.mount_gradio_app(
-        app, 
-        demo, 
-        path="/gradio",
-        allowed_paths=[
-            os.path.abspath("outputs"),
-            os.path.abspath("outputs_video"),
-            os.path.abspath("fastvideo-logos"),
-        ]
-    )
-    
+
+    app = gr.mount_gradio_app(app,
+                              demo,
+                              path="/gradio",
+                              allowed_paths=[
+                                  os.path.abspath("outputs"),
+                                  os.path.abspath("outputs_video"),
+                                  os.path.abspath("fastvideo-logos"),
+                              ])
+
     uvicorn.run(app, host=args.host, port=args.port)

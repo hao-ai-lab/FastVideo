@@ -8,7 +8,7 @@
 - first_variant: `large_44k_v2`
 - phase: `all_official_variants_and_scratch_training_integrated`
 - status: `large_v2_inference_parity_and_4gpu_scratch_training_pass`
-- last_updated: `2026-07-25`
+- last_updated: `2026-08-02`
 
 ## Native Components
 
@@ -17,7 +17,7 @@
 | MMAudio transformer | `fastvideo/models/dits/mmaudio.py` | Native 1D multimodal DiT | exact |
 | DFN5B text/vision | `fastvideo/models/encoders/mmaudio_clip.py` | Shared native CLIP core, MMAudio adapters | exact |
 | Synchformer visual encoder | `fastvideo/models/encoders/mmaudio_synchformer.py` | Shared backbone under `fastvideo/third_party/synchformer` | exact, including 16-frame/stride-8 usage contract |
-| 44.1 kHz VAE | `fastvideo/models/audio/mmaudio_vae.py` | Native audio component | exact |
+| 44.1 kHz VAE | `fastvideo/models/audio/mmaudio_vae.py` | Native audio component | exact state structure, FP32/BF16 random-weight decoder, and real-weight encode/decode parity |
 | BigVGAN-v2 | `fastvideo/models/audio/bigvgan.py` | Shared native vocoder | exact |
 | Euler flow schedule | shared `FlowMatchEulerDiscreteScheduler` | Reuse schedule; preserve official BF16 scalar update in MMAudio stage | exact |
 
@@ -130,6 +130,9 @@ The v1 training smoke additionally uses a transformer-only component tree at
 | Combined parity/dataset/training regression | `33 passed, 1 skipped` |
 | Real filtered-caption manifests | exact ID/order/caption/count parity: train 180,062; val 2,047; test 15,221 |
 | Filtered-caption tokenizer lengths | 0/197,330 exceed the 77-token contract; maximum 74 |
+| Local suite | full rerun pending; VAE FP32/BF16 random-weight and real-weight cases pass |
+| VAE component parity | state structure and FP32/BF16 random-weight decoder parity pass on GB200 (`atol=1e-6`, `rtol=1e-6`); real-weight encode/decode parity passes (`atol=1e-5`, `rtol=1e-5`) |
+| Exact-head GB200 V2A examples | two 5-second, 25-step, seed-42 generations pass; each output is mono PCM16 at 44.1 kHz with 221,184 samples |
 
 Commands:
 
