@@ -24,6 +24,7 @@ exec pytest \
   ./fastvideo/tests/attention/test_vsa_h3_metadata.py \
   ./fastvideo/tests/attention/test_vsa_h3_ref2va_regions.py \
   ./fastvideo/tests/layers/test_pdd_linear.py \
+  ./fastvideo/tests/layers/test_triton_fused_norm.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \
   ./fastvideo/tests/modal/test_ssim_test.py \

@@ -11,13 +11,18 @@ Collapses the eager chain
 into a single kernel with two outputs, both already in the stream dtype, so the
 caller-side casts become no-ops. All arithmetic is fp32 regardless of I/O dtype.
 
-Numerics: the eager path's rounding points are replicated exactly. When the
-gate is a fp32 tensor, eager type promotion keeps the whole chain in fp32 with
-one final round -- the kernel does the same. When the gate is the scalar 1 and
-the stream is bf16, eager materializes bf16 intermediates (the residual sum and
-the norm output), so the kernel round-trips through bf16 at the same two
-points. The only remaining difference from eager is the reduction order inside
-mean/variance (last-ulp fp32).
+Numerics: for the two Wan input classes the eager path's rounding points are
+replicated exactly. When the gate is a fp32 tensor, eager type promotion keeps
+the whole chain in fp32 with one final round -- the kernel does the same. When
+the gate is the scalar 1 and the stream is bf16, eager materializes bf16
+intermediates (the residual sum and the norm output), so the kernel round-trips
+through bf16 at the same two points. A bf16 *tensor* gate with a bf16 stream is
+only half-modelled: eager rounds the product ``x * gate`` to bf16 before the
+add, while the kernel keeps the product in fp32 and rounds the sum once, so the
+fused residual can differ from eager by up to one bf16 ulp of the product (the
+fused value is slightly more accurate, not wrong). The remaining differences
+from eager are the reduction order inside mean/variance (last-ulp fp32) and
+that product-rounding case.
 
 Inference-only: callers must gate on ``torch.is_grad_enabled()``; there is no
 backward. Disable globally with FASTVIDEO_DISABLE_FUSED_NORM=1.
@@ -128,9 +133,15 @@ if _HAS_TRITON:
             tl.store(OUT + b * o_sb + s * o_ss + cols, y, mask=mask)
 
 
-def _broadcast_strides(t: torch.Tensor, batch: int, seq: int) -> tuple[int, int] | None:
-    """(batch_stride, seq_stride) for a [B|1, S|1, H] tensor, or None if unsupported."""
-    if t.dim() != 3 or t.stride(-1) != 1 or t.shape[-1] == 0:
+def _broadcast_strides(t: torch.Tensor, batch: int, seq: int, hidden: int) -> tuple[int, int] | None:
+    """(batch_stride, seq_stride) for a [B|1, S|1, H] tensor, or None if unsupported.
+
+    The last dim must equal ``hidden`` exactly: the kernel indexes columns
+    ``0..hidden-1`` of every modulation tensor, so a narrower (which eager would
+    broadcast) or wider last dim would silently read the wrong elements instead
+    of raising.
+    """
+    if t.dim() != 3 or t.stride(-1) != 1 or t.shape[-1] != hidden:
         return None
     tb, ts, _ = t.shape
     if tb not in (1, batch) or ts not in (1, seq):
@@ -151,6 +162,14 @@ def fused_path_supported(
         return False
     if torch.is_grad_enabled():
         return False
+    if torch.compiler.is_compiling():
+        # Dynamo must not trace into the Triton launcher (see the custom-op
+        # boundaries in fastvideo/models/dits/minimax_h3_fusions/modulation.py).
+        # Until this kernel is wrapped in torch.library.custom_op + register_fake
+        # the way that module does, compiled forwards take the eager path, so
+        # enable_torch_compile keeps its pre-fusion behavior instead of hitting
+        # an unregistered launch inside the compiled graph.
+        return False
     # LayerNorm family only (RMS keeps its own path); weight/bias fp32 as
     # FP32LayerNorm guarantees after .float().
     if not isinstance(norm, torch.nn.LayerNorm):
@@ -169,7 +188,7 @@ def fused_path_supported(
     if isinstance(gate, torch.Tensor):
         if gate.dtype not in (torch.float32, residual.dtype) or not gate.is_cuda:
             return False
-        if _broadcast_strides(gate, batch, seq) is None:
+        if _broadcast_strides(gate, batch, seq, hidden) is None:
             return False
     elif gate != 1:
         return False
@@ -179,7 +198,7 @@ def fused_path_supported(
         for t in (shift, scale):
             if t.dtype not in (torch.float32, residual.dtype) or not t.is_cuda:
                 return False
-            if _broadcast_strides(t, batch, seq) is None:
+            if _broadcast_strides(t, batch, seq, hidden) is None:
                 return False
     return True
 
@@ -209,14 +228,14 @@ def fused_residual_norm_mod(
     intermediate_round = (not gate_is_tensor or gate.dtype == stream_dtype) and stream_dtype == torch.bfloat16
 
     if gate_is_tensor:
-        g_sb, g_ss = _broadcast_strides(gate, batch, seq)  # type: ignore[misc]
+        g_sb, g_ss = _broadcast_strides(gate, batch, seq, hidden)  # type: ignore[misc]
         gate_arg = gate
     else:
         g_sb = g_ss = 0
         gate_arg = residual  # unused placeholder pointer
     if has_mod:
-        sh_sb, sh_ss = _broadcast_strides(shift, batch, seq)  # type: ignore[arg-type,misc]
-        sc_sb, sc_ss = _broadcast_strides(scale, batch, seq)  # type: ignore[arg-type,misc]
+        sh_sb, sh_ss = _broadcast_strides(shift, batch, seq, hidden)  # type: ignore[arg-type,misc]
+        sc_sb, sc_ss = _broadcast_strides(scale, batch, seq, hidden)  # type: ignore[arg-type,misc]
         shift_arg, scale_arg = shift, scale
     else:
         sh_sb = sh_ss = sc_sb = sc_ss = 0
