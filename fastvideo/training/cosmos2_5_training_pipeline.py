@@ -133,7 +133,6 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
 # Entry point (mirrors wan_training_pipeline.py)
 # ---------------------------------------------------------------------------
 
-
 if __name__ == "__main__":
     logger.warning("\n"
                    "================================================================================\n"

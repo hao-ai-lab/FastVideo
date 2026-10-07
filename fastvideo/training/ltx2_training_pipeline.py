@@ -98,12 +98,11 @@ class LTX2TrainingPipeline(TrainingPipeline):
         )
 
         if float(getattr(training_args, "training_cfg_rate", 0.0) or 0.0) > 0.0:
-            raise NotImplementedError(
-                "--training-cfg-rate > 0 is not implemented in LTX2TrainingPipeline: "
-                "this legacy pipeline never instantiates LTX2Model, so nothing would "
-                "perform the CFG drop and the flag would be silently ignored. Use the "
-                "modular trainer (fastvideo/train LTX2Model, which swaps in the "
-                "unconditional embedding) or set --training-cfg-rate 0.")
+            raise NotImplementedError("--training-cfg-rate > 0 is not implemented in LTX2TrainingPipeline: "
+                                      "this legacy pipeline never instantiates LTX2Model, so nothing would "
+                                      "perform the CFG drop and the flag would be silently ignored. Use the "
+                                      "modular trainer (fastvideo/train LTX2Model, which swaps in the "
+                                      "unconditional embedding) or set --training-cfg-rate 0.")
 
         if self._has_precomputed_pt_data(training_args.data_path):
             data_sources = self._get_ltx2_data_sources(training_args.data_path)

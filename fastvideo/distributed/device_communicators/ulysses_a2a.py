@@ -297,12 +297,14 @@ class UlyssesA2AHelper:
             # capabilities - would silently keep every later call on NCCL.
             self._contract_mismatch_logged = True
             differing = [
-                index for index in range(_CONTRACT_SIZE) if any(contract[index] != first[index] for contract in contracts)
+                index for index in range(_CONTRACT_SIZE)
+                if any(contract[index] != first[index] for contract in contracts)
             ]
-            details = ", ".join(
-                f"field {index}: {sorted({contract[index] for contract in contracts})}" for index in differing)
-            logger.info("Ulysses fused all-to-all declined: ranks disagree on the call contract (%s); "
-                        "this and later disagreeing calls use the NCCL path", details)
+            details = ", ".join(f"field {index}: {sorted({contract[index] for contract in contracts})}"
+                                for index in differing)
+            logger.info(
+                "Ulysses fused all-to-all declined: ranks disagree on the call contract (%s); "
+                "this and later disagreeing calls use the NCCL path", details)
         return use_fused, permanently_unavailable, lifecycle_consistent
 
     def _build(self, nbytes: int) -> bool:

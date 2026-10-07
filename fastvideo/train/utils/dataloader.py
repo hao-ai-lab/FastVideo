@@ -32,8 +32,7 @@ def build_parquet_t2v_train_dataloader(
         data_config.train_batch_size,
         num_data_workers=(data_config.dataloader_num_workers),
         parquet_schema=parquet_schema,
-        cfg_rate=(float(data_config.training_cfg_rate or 0.0)
-                  if cfg_rate is None else float(cfg_rate)),
+        cfg_rate=(float(data_config.training_cfg_rate or 0.0) if cfg_rate is None else float(cfg_rate)),
         drop_last=True,
         text_padding_length=int(text_len),
         seed=int(data_config.seed or 0),
