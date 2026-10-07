@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import functools
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
@@ -16,6 +17,7 @@ except ImportError:
 
 from typing import Any
 
+import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.distributed import get_sp_group
@@ -156,6 +158,8 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     # can release the large tiled QKVG scratch tensor after each attention call.
     tile_buf: torch.Tensor | None = None
     cache_tile_buf: bool = True
+    fused_tile_source_index: torch.Tensor | None = None
+    fused_layout_active: bool = False
 
 
 def compute_topk(sparsity: float, num_blocks: int) -> int:
@@ -197,6 +201,27 @@ def scatter_into_tile_buf(
         buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
     buf[:, dst_index] = x if src_index is None else x[:, src_index]
     return buf
+
+
+@functools.cache
+def _get_tile_to_bhsd() -> Callable[..., Any] | None:
+    try:
+        from fastvideo_kernel.triton_kernels.vsa_tile_layout import tile_to_bhsd
+    except ImportError:
+        return None
+    return tile_to_bhsd
+
+
+def _can_fuse_vsa64_layout(x: torch.Tensor, metadata: VideoSparseAttentionMetadata) -> bool:
+    """Restrict the fused layout to the validated SM100 BF16 inference route."""
+    if envs.FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT.get():
+        return False
+    if _get_tile_to_bhsd() is None:
+        return False
+    return (math.prod(VSA_TILE_SIZE) == 64 and metadata.cache_tile_buf and not torch.is_grad_enabled()
+            and not x.requires_grad and x.is_cuda and x.dtype == torch.bfloat16 and x.ndim == 4
+            and x.shape[1] == metadata.total_seq_length and x.shape[-1] == 128
+            and torch.cuda.get_device_capability(x.device) == (10, 0))
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -268,11 +293,11 @@ class VideoSparseAttentionImpl(AttentionImpl):
         valid until the next ``tile()`` / ``preprocess_qkv`` call on the
         same ``attn_metadata``.  Callers must consume (or copy) the
         result before invoking another VSA layer with the same metadata.
-        Today ``forward()`` materializes copies of q/k/v via
-        ``.transpose(...).contiguous()`` and consumes the gate view
-        synchronously inside the same call (the coarse/sparse combine
-        reads it before returning), so the contract holds; future
-        callers must preserve it.
+        The default 64-token path materializes q/k/v copies in ``forward()``
+        and consumes its transposed gate view synchronously in the coarse/sparse
+        combine before returning. The SM100 inference path instead writes BHSD
+        directly to this buffer. Both paths consume the result before the next
+        layer reuses it; future callers must preserve this contract.
         """
         num_tiles = attn_metadata.num_tiles
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
@@ -305,7 +330,33 @@ class VideoSparseAttentionImpl(AttentionImpl):
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
         """Tile QKV; aliasing contract: see ``tile()``."""
-        return self.tile(qkv, attn_metadata)
+        attn_metadata.fused_layout_active = _can_fuse_vsa64_layout(qkv, attn_metadata)
+        if not attn_metadata.fused_layout_active:
+            return self.tile(qkv, attn_metadata)
+
+        tile_to_bhsd = _get_tile_to_bhsd()
+        assert tile_to_bhsd is not None
+
+        padded_sequence = attn_metadata.variable_block_sizes.numel() * math.prod(VSA_TILE_SIZE)
+        if attn_metadata.fused_tile_source_index is None:
+            source_index = torch.full((padded_sequence, ), -1, device=qkv.device, dtype=torch.int32)
+            source_index[attn_metadata.non_pad_index] = attn_metadata.tile_partition_indices.to(torch.int32)
+            attn_metadata.fused_tile_source_index = source_index
+        target_shape = (qkv.shape[0], qkv.shape[2], padded_sequence, qkv.shape[3])
+        buffer = attn_metadata.tile_buf
+        if buffer is None or buffer.shape != target_shape or buffer.dtype != qkv.dtype or buffer.device != qkv.device:
+            buffer = torch.empty(target_shape, device=qkv.device, dtype=qkv.dtype)
+            attn_metadata.tile_buf = buffer
+        tile_to_bhsd(
+            qkv,
+            attn_metadata.fused_tile_source_index,
+            buffer,
+            qkv.shape[1],
+            padded_sequence,
+            qkv.shape[2],
+            qkv.shape[3],
+        )
+        return buffer
 
     def postprocess_output(
         self,
@@ -339,14 +390,17 @@ class VideoSparseAttentionImpl(AttentionImpl):
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
-        # Default 64-element-tile path (unchanged): BHSD round-trip. The gate is
-        # only read elementwise by the coarse/sparse combine, which views it at
-        # block resolution without requiring contiguity, so the transposed view
-        # is handed over as is (no full-sequence copy).
-        query = query.transpose(1, 2).contiguous()
-        key = key.transpose(1, 2).contiguous()
-        value = value.transpose(1, 2).contiguous()
-        gate_compress = gate_compress.transpose(1, 2)
+        # The SM100 inference preprocessing path already emits BHSD. Other
+        # shapes, architectures, training, and the benchmark disable switch
+        # retain the original BSHD scatter/transpose path.
+        padded_sequence = attn_metadata.variable_block_sizes.numel() * block_elements
+        if not (attn_metadata.fused_layout_active and query.shape[2] == padded_sequence):
+            query = query.transpose(1, 2).contiguous()
+            key = key.transpose(1, 2).contiguous()
+            value = value.transpose(1, 2).contiguous()
+            # The coarse/sparse combine only reads the gate elementwise at
+            # block resolution, so its transposed view needs no contiguous copy.
+            gate_compress = gate_compress.transpose(1, 2)
         return video_sparse_attn(query,
                                  key,
                                  value,
