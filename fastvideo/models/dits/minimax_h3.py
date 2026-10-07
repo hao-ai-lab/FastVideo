@@ -37,6 +37,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.minimax_h3_vsa_fp4 import (STAGES, vsa_fp4_attention, vsa_fp4_attention_sp,
                                                        vsa_fp4_requested, vsa_tile_first_attention)
+from fastvideo.models.dits.minimax_h3_fusions import exact as exact_kernels
 from fastvideo.models.dits.minimax_h3_fusions import (
     HAVE_TRITON,
     fused_qknorm_rope,
@@ -53,6 +54,7 @@ logger = init_logger(__name__)
 MINIMAX_H3_MODALITY_NUM = 3
 _CFG = MiniMaxH3Config()
 _MINIMAX_H3_FUSION_NAMES = frozenset({"modulate", "qknorm_rope", "swiglu"})
+_MINIMAX_H3_EXACT_KERNEL_NAMES = frozenset({"rope", "modulate", "swiglu"})
 
 
 def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
@@ -68,6 +70,22 @@ def _enabled_minimax_h3_fusions(value: str | None = None) -> frozenset[str]:
     if unknown:
         supported = ",".join(sorted(_MINIMAX_H3_FUSION_NAMES))
         raise ValueError(f"Unknown MiniMax H3 fusion(s) {sorted(unknown)}; expected a subset of {supported}.")
+    return enabled
+
+
+def _enabled_minimax_h3_exact_kernels(value: str | None = None) -> frozenset[str]:
+    """Parse the bit-exact kernel set (``FASTVIDEO_MINIMAX_H3_EXACT_KERNELS``)."""
+    raw = envs.FASTVIDEO_MINIMAX_H3_EXACT_KERNELS.get() if value is None else value
+    normalized = raw.strip().lower()
+    if normalized in {"", "0", "none"}:
+        return frozenset()
+    if normalized in {"1", "all"}:
+        return _MINIMAX_H3_EXACT_KERNEL_NAMES
+    enabled = frozenset(item.strip() for item in normalized.split(",") if item.strip())
+    unknown = enabled - _MINIMAX_H3_EXACT_KERNEL_NAMES
+    if unknown:
+        supported = ",".join(sorted(_MINIMAX_H3_EXACT_KERNEL_NAMES))
+        raise ValueError(f"Unknown MiniMax H3 exact kernel(s) {sorted(unknown)}; expected a subset of {supported}.")
     return enabled
 
 
@@ -120,6 +138,7 @@ class MiniMaxH3FeedForward(nn.Module):
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
         fuse_swiglu: bool = False,
+        exact_swiglu: bool = False,
     ) -> None:
         super().__init__()
         self.fc_in = ReplicatedLinear(
@@ -137,6 +156,7 @@ class MiniMaxH3FeedForward(nn.Module):
             prefix=f"{prefix}.fc_out",
         )
         self.fuse_swiglu = fuse_swiglu
+        self.exact_swiglu = exact_swiglu
         self.use_mxfp8 = isinstance(self.fc_in.quant_method, MXFP8QuantizeMethod) and isinstance(
             self.fc_out.quant_method, MXFP8QuantizeMethod)
         # Inference-only token chunking: the 2 * ffn_dim intermediate is ~5.3x the block input
@@ -162,6 +182,8 @@ class MiniMaxH3FeedForward(nn.Module):
         hidden_states, _ = self.fc_in(hidden_states)
         if self.fuse_swiglu and _can_run_minimax_h3_fusion(hidden_states):
             hidden_states = minimax_h3_swiglu(hidden_states)
+        elif self.exact_swiglu and exact_kernels.supports_rowwise(hidden_states):
+            hidden_states = exact_kernels.swiglu(hidden_states)
         else:
             hidden_states, gate = hidden_states.chunk(2, dim=-1)
             hidden_states = hidden_states * F.silu(gate)
@@ -183,6 +205,7 @@ class MiniMaxH3Attention(nn.Module):
         prefix: str,
         fuse_qknorm_rope: bool = False,
         fa4_packed_varlen: bool = False,
+        exact_rope: bool = False,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -219,6 +242,7 @@ class MiniMaxH3Attention(nn.Module):
             prefix=f"{prefix}.to_out",
         )
         self.fuse_qknorm_rope = fuse_qknorm_rope
+        self.exact_rope = exact_rope
         # VSA carries a learned gate on its pooled-compression branch. The H3
         # checkpoint has no such weight, so the loader zero-initializes it
         # (ALLOWED_NEW_PARAM_PATTERNS) and the branch is exactly disabled
@@ -315,6 +339,11 @@ class MiniMaxH3Attention(nn.Module):
         hidden_states_rotary = hidden_states_rotary * cos + hidden_states_rotated * sin
         return torch.cat((hidden_states_rotary, hidden_states_pass), dim=-1).contiguous()
 
+    def _rotate(self, hidden_states: torch.Tensor, rotary_emb: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+        if self.exact_rope and exact_kernels.supports_rope(hidden_states, rotary_emb):
+            return exact_kernels.rope_prefix(hidden_states, rotary_emb)
+        return self._apply_rotary_emb(hidden_states, rotary_emb)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -369,8 +398,8 @@ class MiniMaxH3Attention(nn.Module):
             query = self.norm_q(query)
             key = self.norm_k(key)
             if rotary_emb is not None:
-                query = self._apply_rotary_emb(query, rotary_emb)
-                key = self._apply_rotary_emb(key, rotary_emb)
+                query = self._rotate(query, rotary_emb)
+                key = self._rotate(key, rotary_emb)
 
         # H3 rotates only 96/128 channels, which the generic `freqs_cis`
         # branch cannot express. Apply it above, then pass no RoPE here.
@@ -602,6 +631,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_qknorm_rope: bool = False,
         fuse_swiglu: bool = False,
         fa4_packed_varlen: bool = False,
+        exact_kernels: frozenset[str] = frozenset(),
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -615,6 +645,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             prefix=f"{prefix}.attn",
             fuse_qknorm_rope=fuse_qknorm_rope,
             fa4_packed_varlen=fa4_packed_varlen,
+            exact_rope="rope" in exact_kernels,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -623,6 +654,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.ff",
             fuse_swiglu=fuse_swiglu,
+            exact_swiglu="swiglu" in exact_kernels,
         )
         self.adaln_proj = MiniMaxH3AdaLayerNormModulation(
             time_embed_dim,
@@ -632,6 +664,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             apply_silu=adaln_apply_silu,
         )
         self.fuse_modulate = fuse_modulate
+        self.exact_modulate = "modulate" in exact_kernels
 
     def forward(
         self,
@@ -646,6 +679,10 @@ class MiniMaxH3TransformerBlock(nn.Module):
                 t.to(hidden_states.dtype) for t in self.adaln_proj(temb))
 
         use_modulate_fusion = self.fuse_modulate and _can_run_minimax_h3_fusion(hidden_states)
+        # The bit-exact kernels replace only the eager expressions below.
+        use_exact_modulate = (not use_modulate_fusion and self.exact_modulate and adaln_indices.is_contiguous()
+                              and exact_kernels.supports_rowwise(hidden_states, shift_msa, scale_msa, gate_msa,
+                                                                 shift_mlp, scale_mlp, gate_mlp))
         if use_modulate_fusion:
             with nvtx_range("minimax_h3.transformer_block.modulate_fusion"):
                 norm_hidden_states = fused_rmsnorm_modulate(
@@ -656,6 +693,10 @@ class MiniMaxH3TransformerBlock(nn.Module):
                     adaln_indices,
                     self.norm1.eps,
                 )
+        elif use_exact_modulate:
+            with nvtx_range("minimax_h3.transformer_block.exact_modulate"):
+                norm_hidden_states = exact_kernels.modulate(self.norm1(hidden_states), scale_msa, shift_msa,
+                                                            adaln_indices)
         else:
             with nvtx_range("minimax_h3.transformer_block.no_modulate_fusion"):
                 norm_hidden_states = self.norm1(hidden_states)
@@ -678,6 +719,11 @@ class MiniMaxH3TransformerBlock(nn.Module):
                     adaln_indices,
                     self.norm2.eps,
                 )
+        elif use_exact_modulate:
+            with nvtx_range("minimax_h3.transformer_block.exact_modulate"):
+                hidden_states = exact_kernels.gate_residual(hidden_states, gate_msa, attention_output, adaln_indices)
+                norm_hidden_states = exact_kernels.modulate(self.norm2(hidden_states), scale_mlp, shift_mlp,
+                                                            adaln_indices)
         else:
             with nvtx_range("minimax_h3.transformer_block.no_modulate_fusion"):
                 hidden_states = hidden_states + gate_msa.index_select(0, adaln_indices) * attention_output
@@ -689,6 +735,8 @@ class MiniMaxH3TransformerBlock(nn.Module):
             feed_forward_output = self.ff(norm_hidden_states)
         if use_modulate_fusion and not torch.compiler.is_compiling():
             return _gated_residual(hidden_states, gate_mlp, adaln_indices, feed_forward_output)
+        if use_exact_modulate:
+            return exact_kernels.gate_residual(hidden_states, gate_mlp, feed_forward_output, adaln_indices)
         return hidden_states + gate_mlp.index_select(0, adaln_indices) * feed_forward_output
 
 
@@ -746,6 +794,17 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 logger.warning(
                     "FASTVIDEO_MINIMAX_H3_FUSIONS requested %s but Triton is unavailable; "
                     "every forward stays on the eager path.", ",".join(sorted(self.enabled_fusions)))
+        self.enabled_exact_kernels = _enabled_minimax_h3_exact_kernels()
+        if self.enabled_exact_kernels:
+            if exact_kernels.HAVE_TRITON:
+                logger.info(
+                    "MiniMax H3 bit-exact kernels enabled: %s (CUDA BF16 inference-only; other inputs and any "
+                    "op whose FASTVIDEO_MINIMAX_H3_FUSIONS fusion is on keep their existing path).",
+                    ",".join(sorted(self.enabled_exact_kernels)))
+            else:
+                logger.warning(
+                    "FASTVIDEO_MINIMAX_H3_EXACT_KERNELS requested %s but Triton is unavailable; "
+                    "every forward stays on the eager path.", ",".join(sorted(self.enabled_exact_kernels)))
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if arch.num_attention_heads % sp_world_size:
             raise ValueError(f"MiniMax H3 attention heads ({arch.num_attention_heads}) must be divisible by "
@@ -847,6 +906,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_qknorm_rope="qknorm_rope" in self.enabled_fusions,
                 fuse_swiglu="swiglu" in self.enabled_fusions,
                 fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN.get(),
+                exact_kernels=self.enabled_exact_kernels,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
