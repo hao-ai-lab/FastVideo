@@ -104,11 +104,10 @@ def test_distilled_denoising_uses_per_frame_timesteps_and_official_rollout(
 
     expected_scheduler = Cosmos25DistilledScheduler()
     expected_scheduler.set_timesteps(2)
-    expected = initial.clone()
+    expected = initial.clone().to(torch.float64)
     for timestep in expected_scheduler.timesteps:
-        expected_fp32 = expected.float()
-        expected_scheduler.scale_model_input(expected_fp32, timestep)
-        expected = expected_scheduler.step(torch.zeros_like(expected_fp32), timestep, expected_fp32).prev_sample
+        expected_model_input = expected_scheduler.scale_model_input(expected, timestep).float()
+        expected = expected_scheduler.step(torch.zeros_like(expected_model_input), timestep, expected).prev_sample
 
     assert batch.latents is not None
     assert batch.latents.dtype is torch.float32

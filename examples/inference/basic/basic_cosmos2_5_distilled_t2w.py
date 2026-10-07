@@ -14,7 +14,7 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=77)
     parser.add_argument("--height", type=int, default=704)
     parser.add_argument("--width", type=int, default=1280)
-    parser.add_argument("--fps", type=int, default=16)
+    parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--return-frames",

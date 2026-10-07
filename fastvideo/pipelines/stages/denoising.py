@@ -73,8 +73,8 @@ class DenoisingStage(PipelineStage):
             dtype=torch.float16,  # TODO(will): hack
             supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.BSA_ATTN,
                                           AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE),  # hack
+                                          AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.SAGE_ATTN_THREE,
+                                          AttentionBackendEnum.ATTN_QAT_INFER),  # hack
             # Build metadata for the backend this transformer actually resolved
             # instead of re-deriving it from the environment. The two agreed
             # only when the request arrived via the env var: a request passed as
@@ -228,6 +228,8 @@ class DenoisingStage(PipelineStage):
                 "img_ids": batch.extra.get("flux2_img_ids"),
             },
         )
+
+        animate_kwargs, animate_uncond_kwargs = self._animate_conditioning_kwargs(batch)
 
         # Get latents and embeddings
         latents = batch.latents
@@ -423,6 +425,7 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **animate_kwargs,
                             **model_kwargs,
                         )
 
@@ -468,6 +471,7 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **animate_uncond_kwargs,
                                     **model_kwargs_uncond,
                                 )
                             _cfg_gate_fresh_uncond += 1
@@ -560,6 +564,28 @@ class DenoisingStage(PipelineStage):
             logger.info("Memory after deallocating transformer: %s", torch.mps.current_allocated_memory())
 
         return batch
+
+    def _animate_conditioning_kwargs(self, batch: ForwardBatch) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(conditional, unconditional) kwargs for pose/face-driven models (Wan-Animate).
+
+        Like the other kwarg groups, ``prepare_extra_func_kwargs`` drops every
+        key the transformer's forward does not name, so this is empty -- and a
+        no-op -- for all other models. The unconditional variant keeps the pose
+        and blanks the face crops to -1 (black in the [-1, 1] pixel range),
+        matching diffusers' WanAnimatePipeline (``face * 0 - 1``); note Animate
+        runs with guidance 1.0 by default, so the uncond pass rarely fires.
+        """
+        kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "pose_latents": batch.pose_latents,
+                "face_pixel_values": batch.face_pixel_values,
+            },
+        )
+        uncond_kwargs = dict(kwargs)
+        if uncond_kwargs.get("face_pixel_values") is not None:
+            uncond_kwargs["face_pixel_values"] = torch.full_like(uncond_kwargs["face_pixel_values"], -1.0)
+        return kwargs, uncond_kwargs
 
     def prepare_denoising(self, batch, fastvideo_args, target_dtype) -> DenoisingState:
         """Build request-local state. Family stages specialize latent conditioning."""
@@ -1201,22 +1227,26 @@ class Cosmos25DistilledT2WDenoisingStage(Cosmos25DenoisingStage):
         )
 
         if batch.fps is None:
-            fps_tensor = torch.full((batch_size, ), 16, device=latents.device, dtype=target_dtype)
+            fps_tensor = torch.full((1, ), 24, device=latents.device, dtype=target_dtype)
         else:
             fps_tensor = torch.as_tensor(batch.fps, device=latents.device, dtype=target_dtype).reshape(-1)
-            if fps_tensor.numel() == 1:
-                fps_tensor = fps_tensor.repeat(batch_size)
-            elif fps_tensor.numel() != batch_size:
-                raise ValueError(f"fps must contain one value or one per sample; got {fps_tensor.numel()}")
+            if fps_tensor.numel() != 1:
+                # The Cosmos25 RoPE builds one batch-independent (THW, D) table
+                # (see cosmos2_5.py), so the DiT consumes a single shared fps
+                # value per forward pass, never one value per sample.
+                if not torch.equal(fps_tensor, fps_tensor[:1].expand_as(fps_tensor)):
+                    raise ValueError(
+                        f"fps must be one shared value for the whole batch; got {fps_tensor.tolist()}")
+                fps_tensor = fps_tensor[:1]
 
-        state = latents.to(torch.float32)
+        state = latents.to(torch.float64)
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for timestep_value in timesteps:
-                # The official loop truncates the evolving FP64 state to FP32
-                # before each x0 prediction, then promotes the result back to
-                # FP64 for the fixed-noise update.
-                state_fp32 = state.float()
-                model_input = self.scheduler.scale_model_input(state_fp32, timestep_value)
+                # Truncate the evolving FP64 state to FP32 only for the network
+                # input; the x0 reconstruction and the fixed-noise update run in
+                # FP64, as in the official driver transcribed in
+                # test_cosmos25_distilled_scheduler_parity.py.
+                model_input = self.scheduler.scale_model_input(state, timestep_value).float()
                 model_timestep = torch.full(
                     (batch_size, latent_frames),
                     float(timestep_value),
@@ -1255,14 +1285,19 @@ class Cosmos25DistilledT2WDenoisingStage(Cosmos25DenoisingStage):
                 state = self.scheduler.step(
                     model_output.float(),
                     timestep_value,
-                    state_fp32,
+                    state,
                     generator=batch.generator,
                     return_dict=False,
                 )[0]
                 progress_bar.update()
 
         # The official implementation returns a finite FP32 x0 for VAE decode.
-        batch.latents = torch.nan_to_num(state.float())
+        state = state.float()
+        if not torch.isfinite(state).all():
+            raise FloatingPointError(
+                "Cosmos25 distilled rollout produced non-finite latents; refusing to "
+                "silently substitute NaN/Inf values into the decoded video")
+        batch.latents = state
         return batch
 
 
@@ -1321,10 +1356,14 @@ class Cosmos25DFDV2WDenoisingStage(Cosmos25DenoisingStage):
 
         fps_value = 24 if batch.fps is None else batch.fps
         fps_tensor = torch.as_tensor(fps_value, device=state.device, dtype=torch.float32).reshape(-1)
-        if fps_tensor.numel() == 1:
-            fps_tensor = fps_tensor.repeat(batch_size)
-        elif fps_tensor.numel() != batch_size:
-            raise ValueError(f"fps must contain one value or one per sample; got {fps_tensor.numel()}")
+        if fps_tensor.numel() != 1:
+            # The Cosmos25 RoPE builds one batch-independent (THW, D) table
+            # (see cosmos2_5.py), so the DiT consumes a single shared fps
+            # value per forward pass, never one value per sample.
+            if not torch.equal(fps_tensor, fps_tensor[:1].expand_as(fps_tensor)):
+                raise ValueError(
+                    f"fps must be one shared value for the whole batch; got {fps_tensor.tolist()}")
+            fps_tensor = fps_tensor[:1]
 
         state = state.to(target_dtype)
         with self.progress_bar(total=len(timesteps)) as progress_bar:
@@ -1368,7 +1407,12 @@ class Cosmos25DFDV2WDenoisingStage(Cosmos25DenoisingStage):
                 state = conditioning_full * mask_channels + step_output.prev_sample * (1 - mask_channels)
                 progress_bar.update()
 
-        batch.latents = torch.nan_to_num(prediction.to(target_dtype))
+        prediction = prediction.to(target_dtype)
+        if not torch.isfinite(prediction).all():
+            raise FloatingPointError(
+                "Cosmos25 DFD rollout produced non-finite latents; refusing to "
+                "silently substitute NaN/Inf values into the decoded video")
+        batch.latents = prediction
         return batch
 
 

@@ -29,6 +29,7 @@ exec pytest \
   ./fastvideo/tests/inference/test_basic_fasth3_omniref_pdd.py \
   ./fastvideo/tests/attention/ \
   ./fastvideo/tests/layers/test_pdd_linear.py \
+  ./fastvideo/tests/layers/test_triton_fused_norm.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \
   ./fastvideo/tests/modal/test_pr_test.py \
   ./fastvideo/tests/modal/test_ssim_test.py \
