@@ -648,6 +648,11 @@ FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
                                      category="performance",
                                      doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
                                      "tile.")
+FASTVIDEO_H3_VAE_TILE_PARALLEL = EnvBool(False,
+                                         category="performance",
+                                         doc="Split MiniMax-H3 VAE spatial tiles (not only temporal chunks) across "
+                                         "the sequence-parallel ranks in the parallel decode and keyframe encode; "
+                                         "bitwise equal to the serial path.")
 FASTVIDEO_H3_VAE_INT8_SHARED_QKV = EnvBool(False,
                                            category="performance",
                                            doc="Share the INT8 activation rotation and quantization across the "

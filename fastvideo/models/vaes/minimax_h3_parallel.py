@@ -47,10 +47,12 @@ from typing import TYPE_CHECKING
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.models.vaes.minimax_h3_video import (
     AutoencoderKLMiniMaxH3,
     AutoencoderKLOutput,
     DiagonalGaussianDistribution,
+    _tile_batch_size,
 )
 from fastvideo.profiler import nvtx_range
 
@@ -233,6 +235,133 @@ def decode_to_pixels_parallel(
     return output
 
 
+# -- spatial-tile split (FASTVIDEO_H3_VAE_TILE_PARALLEL) ---------------------
+#
+# The chunk split above leaves ranks idle when a clip has few temporal chunks
+# (a 124-frame 768p clip has fewer chunks than eight ranks hold work for) and
+# cannot split a one-frame keyframe at all. With spatial tiling on, every
+# chunk (or keyframe) is itself a grid of independent tile forwards that the
+# serial path stitches afterwards. The tile split hands out (chunk, tile)
+# forwards round-robin instead, gathers them, and stitches each chunk on the
+# assembling rank with the serial ``_stitch_tiles`` before the unchanged chunk
+# join, so the result is bitwise the serial one under the same contract as the
+# chunk split.
+
+
+def _tile_split_applies(vae: AutoencoderKLMiniMaxH3, x: torch.Tensor) -> bool:
+    # The batched tile decode (FASTVIDEO_H3_VAE_TILE_BATCH) is a different
+    # serial path; the tile split replays only the per-tile one.
+    return (envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.get() and vae.use_tiling and not vae._tile_helpers_compiled
+            and x.shape[0] == 1 and _tile_batch_size() == 1 and not torch.is_grad_enabled())
+
+
+def _tile_grid(vae: AutoencoderKLMiniMaxH3, height: int, width: int):
+    """The serial tile split of a ``height`` x ``width`` pixel canvas: rows, columns, and their boxes."""
+    rows = vae._split_tiles(height, vae.tile_sample_min_height, vae.tile_sample_min_overlap_height)
+    columns = vae._split_tiles(width, vae.tile_sample_min_width, vae.tile_sample_min_overlap_width)
+    boxes = [(y, h, x, w) for y, h in zip(rows[0], rows[1]) for x, w in zip(columns[0], columns[1])]
+    return rows, columns, boxes
+
+
+def _as_grid(tiles: list[torch.Tensor], num_columns: int) -> list[list[torch.Tensor]]:
+    return [tiles[start:start + num_columns] for start in range(0, len(tiles), num_columns)]
+
+
+def encode_keyframe_tile_parallel(vae: AutoencoderKLMiniMaxH3, x: torch.Tensor,
+                                  group: "GroupCoordinator") -> torch.Tensor | None:
+    """``vae._encode_clip(x)`` for a one-frame keyframe with its tiles split across ``group``.
+
+    All group ranks call this together with identical ``x`` and all receive
+    the moments. Returns ``None`` (on every rank alike) when the split does not
+    apply; the caller then runs the serial encode.
+    """
+    if group.world_size == 1 or not _tile_split_applies(vae, x):
+        return None
+    rows, columns, boxes = _tile_grid(vae, *x.shape[-2:])
+    if len(boxes) < group.world_size:
+        return None
+    world_size, rank = group.world_size, group.rank_in_group
+    tiles: list[torch.Tensor] = []
+    placeholder = None
+    for round_start in range(0, len(boxes), world_size):
+        index = round_start + rank
+        if index < len(boxes):
+            y, h, x0, w = boxes[index]
+            with nvtx_range(f"minimax_h3.vae.parallel_keyframe_tile.{index}"):
+                mine = vae.quant_conv(vae.encoder(x[..., y:y + h, x0:x0 + w])).contiguous()
+            placeholder = mine
+        else:
+            # Only the last round can be short, and every rank owned a tile in
+            # round 0, so the placeholder shape is the tile shape of this grid.
+            mine = torch.zeros_like(placeholder)
+        gathered = group.all_gather(mine.unsqueeze(0), dim=0)
+        tiles.extend(gathered[slot] for slot in range(min(world_size, len(boxes) - round_start)))
+    ratio = vae.spatial_compression_ratio
+    return vae._stitch_tiles(_as_grid(tiles, len(columns[0])), [o // ratio for o in rows[2]],
+                             [o // ratio for o in columns[2]])
+
+
+def _decode_single_tile_parallel(
+    vae: AutoencoderKLMiniMaxH3,
+    z: torch.Tensor,
+    output: torch.Tensor | None,
+    group: "GroupCoordinator",
+    strategy: str,
+) -> bool:
+    """The tile split of ``_decode_single_parallel``; False (on every rank alike) when it does not apply."""
+    if not _tile_split_applies(vae, z):
+        return False
+    pad_tokens, num_chunks, output_num_frames = vae._temporal_decode_plan(z.shape[2])
+    ratio = vae.spatial_compression_ratio
+    rows, columns, boxes = _tile_grid(vae, z.shape[-2] * ratio, z.shape[-1] * ratio)
+    jobs = [(chunk, box) for chunk in range(num_chunks) for box in range(len(boxes))]
+    world_size, rank = group.world_size, group.rank_in_group
+    if len(jobs) < world_size:
+        return False
+    if pad_tokens > 0:
+        z = torch.cat([z, z[:, :, -1:].repeat(1, 1, pad_tokens, 1, 1)], dim=2)
+    assembler = None
+    if output is not None:
+        assembler = _ChunkAssembler(vae, output, output_num_frames, vae._streams_chunk_copies(z, output), z.device)
+    pending: dict[tuple[int, int], torch.Tensor] = {}
+    next_chunk = 0
+    placeholder = None
+    try:
+        for round_start in range(0, len(jobs), world_size):
+            index = round_start + rank
+            if index < len(jobs):
+                chunk, box = jobs[index]
+                start = chunk * vae.tokens_chunk_size
+                y, h, x, w = boxes[box]
+                tile = z[:, :, start:start + vae.tokens_chunk_size + vae.token_overlap, y // ratio:(y + h) // ratio,
+                         x // ratio:(x + w) // ratio]
+                with nvtx_range(f"minimax_h3.vae.parallel_tile.{chunk}.{box}"):
+                    mine = vae.decoder(vae._project_decoder_tile(tile)).contiguous()
+                placeholder = mine
+            else:
+                mine = torch.zeros_like(placeholder)
+            with nvtx_range(f"minimax_h3.vae.parallel_tile_{strategy}.{round_start // world_size}"):
+                if strategy == "gather":
+                    gathered = group.gather(mine.unsqueeze(0), dst=0, dim=0)
+                else:
+                    gathered = group.all_gather(mine.unsqueeze(0), dim=0)
+            if assembler is None or gathered is None:
+                continue
+            for slot in range(min(world_size, len(jobs) - round_start)):
+                pending[jobs[round_start + slot]] = gathered[slot]
+            while next_chunk < num_chunks and all((next_chunk, box) in pending for box in range(len(boxes))):
+                tiles = [pending.pop((next_chunk, box)) for box in range(len(boxes))]
+                clip = vae._stitch_tiles(_as_grid(tiles, len(columns[0])), rows[2], columns[2])
+                assembler.push(clip[:, :, vae.frame_pre_padding:].contiguous())
+                next_chunk += 1
+        if assembler is not None:
+            assembler.finalize()
+    finally:
+        if assembler is not None:
+            assembler.synchronize()
+    return True
+
+
 def _decode_single_parallel(
     vae: AutoencoderKLMiniMaxH3,
     z: torch.Tensor,
@@ -240,6 +369,8 @@ def _decode_single_parallel(
     group: "GroupCoordinator",
     strategy: str,
 ) -> None:
+    if _decode_single_tile_parallel(vae, z, output, group, strategy):
+        return
     pad_tokens, num_chunks, output_num_frames = vae._temporal_decode_plan(z.shape[2])
     if pad_tokens > 0:
         z = torch.cat([z, z[:, :, -1:].repeat(1, 1, pad_tokens, 1, 1)], dim=2)
