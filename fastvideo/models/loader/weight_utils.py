@@ -168,7 +168,7 @@ def safetensors_weights_iterator(hf_weights_files: list[str],
         hf_weights_files: List of safetensor files to load.
         to_cpu: Whether to load the weights to CPU. If False, will load to the GPU device bound to the current
             process.
-        broadcast: Whether local rank 0 should read GPU weights and broadcast them to the other local ranks.
+        broadcast: Whether node-group rank 0 should read GPU weights and broadcast them to the other ranks of the node.
         async_broadcast: Whether to overlap loading from disk and broadcasting to other ranks. If True,
             must iterate over all the weights before use. Only used when broadcast is True and to_cpu is False.
     """
