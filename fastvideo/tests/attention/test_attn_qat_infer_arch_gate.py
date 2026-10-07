@@ -24,11 +24,23 @@ def _patch(monkeypatch, *, cap, cutlass, fa4) -> None:
     monkeypatch.setattr(aqi, "_fa4_fp4_available", lambda: fa4)
 
 
+def _flash_attn_backend():
+    """The FLASH_ATTN backend module, or a skip when it cannot be imported.
+
+    It needs a flash-attention package (FA2/FA3, or FA4 with FASTVIDEO_FA4=1)
+    at import, like the other FlashAttentionImpl tests that skip without one.
+    """
+    return pytest.importorskip(
+        "fastvideo.attention.backends.flash_attn",
+        reason="no usable flash-attention package installed",
+        exc_type=ImportError,
+    )
+
+
 def _impl_cls(impl_module: str):
     if impl_module == "attn_qat_infer":
         return aqi.AttnQatInferImpl
-    from fastvideo.attention.backends.flash_attn import FlashAttentionImpl
-    return FlashAttentionImpl
+    return _flash_attn_backend().FlashAttentionImpl
 
 
 @pytest.mark.parametrize(
@@ -241,7 +253,7 @@ def test_fa4_fp8_pv_path_is_fullgraph_traceable(monkeypatch) -> None:
     the cast needs no custom-op boundary of its own."""
     import torch
 
-    from fastvideo.attention.backends import flash_attn as fa
+    fa = _flash_attn_backend()
 
     _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
     monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", aqi._configured_fa4_pv_mode)
