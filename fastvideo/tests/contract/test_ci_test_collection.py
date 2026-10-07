@@ -60,7 +60,6 @@ SLURM_LANES = [
 # reason; remove the entry when the directory gets wired into a lane.
 # State as found on 2026-07-05 — these SHOULD shrink over time, not grow.
 ALLOWLIST = {
-    "attention": "no lane yet — GPU attention-backend tests, run manually",
     "audio": "no lane yet — audio encoder tests, run manually",
     "distributed": "no lane yet — multi-GPU torchrun tests, run manually",
     "hooks": "no lane yet — run manually",
