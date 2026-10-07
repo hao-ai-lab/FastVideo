@@ -36,7 +36,6 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-
 _SA_AUDIO_ID = "stabilityai/stable-audio-open-1.0"
 
 
@@ -93,11 +92,9 @@ def _stable_audio_snapshot() -> str:
 )
 @pytest.mark.skipif(
     not _can_access(),
-    reason=(
-        f"{_SA_AUDIO_ID} not accessible — gated Stability AI repo; set "
-        "HF_TOKEN / HF_API_KEY and accept the terms on "
-        f"https://huggingface.co/{_SA_AUDIO_ID}."
-    ),
+    reason=(f"{_SA_AUDIO_ID} not accessible — gated Stability AI repo; set "
+            "HF_TOKEN / HF_API_KEY and accept the terms on "
+            f"https://huggingface.co/{_SA_AUDIO_ID}."),
 )
 def test_magi_human_sa_audio_official_decode_parity():
     # Make sure both HF helpers and FastVideo's loader see the same token alias.
@@ -144,17 +141,13 @@ def test_magi_human_sa_audio_official_decode_parity():
         upstream_out = upstream_vae.decode(latent).detach().float().cpu()
         fv_out = fv_vae.decode(latent).detach().float().cpu()
 
-    print(
-        f"upstream shape={tuple(upstream_out.shape)} "
-        f"abs_mean={upstream_out.abs().mean().item():.6f} "
-        f"range=[{upstream_out.min().item():.4f}, "
-        f"{upstream_out.max().item():.4f}]"
-    )
-    print(
-        f"fv       shape={tuple(fv_out.shape)} "
-        f"abs_mean={fv_out.abs().mean().item():.6f} "
-        f"range=[{fv_out.min().item():.4f}, {fv_out.max().item():.4f}]"
-    )
+    print(f"upstream shape={tuple(upstream_out.shape)} "
+          f"abs_mean={upstream_out.abs().mean().item():.6f} "
+          f"range=[{upstream_out.min().item():.4f}, "
+          f"{upstream_out.max().item():.4f}]")
+    print(f"fv       shape={tuple(fv_out.shape)} "
+          f"abs_mean={fv_out.abs().mean().item():.6f} "
+          f"range=[{fv_out.min().item():.4f}, {fv_out.max().item():.4f}]")
     diff = (upstream_out - fv_out).abs()
     print(f"diff max={diff.max().item():.6e} mean={diff.mean().item():.6e}")
 

@@ -22,8 +22,7 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-if version.parse(version.parse(
-        PIL.__version__).base_version) >= version.parse("9.1.0"):
+if version.parse(version.parse(PIL.__version__).base_version) >= version.parse("9.1.0"):
     PIL_INTERPOLATION = {
         "linear": PIL.Image.Resampling.BILINEAR,
         "bilinear": PIL.Image.Resampling.BILINEAR,
@@ -95,9 +94,7 @@ def normalize(images: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     return 2.0 * images - 1.0
 
 
-def _fetch_image_bytes(url: str,
-                       attempts: int = 3,
-                       timeout: float = 30.0) -> bytes:
+def _fetch_image_bytes(url: str, attempts: int = 3, timeout: float = 30.0) -> bytes:
     """Download ``url`` fully, retrying transient network errors.
 
     Reads the whole body via ``response.content`` instead of handing PIL a
@@ -111,28 +108,23 @@ def _fetch_image_bytes(url: str,
             response.raise_for_status()
             return response.content
         except requests.RequestException as e:
-            status = getattr(getattr(e, "response", None), "status_code",
-                             None)
+            status = getattr(getattr(e, "response", None), "status_code", None)
             # Permanent client errors (4xx except 408/429) won't heal on
             # retry — fail fast.
-            if (status is not None and 400 <= status < 500
-                    and status not in (408, 429)):
+            if (status is not None and 400 <= status < 500 and status not in (408, 429)):
                 raise
             if attempt == attempts - 1:
                 raise
             backoff = 2**attempt
-            logger.warning(
-                "Failed to download image %s (attempt %d/%d): %s. "
-                "Retrying in %ds.", url, attempt + 1, attempts, e, backoff)
+            logger.warning("Failed to download image %s (attempt %d/%d): %s. "
+                           "Retrying in %ds.", url, attempt + 1, attempts, e, backoff)
             time.sleep(backoff)
     raise AssertionError("unreachable")
 
 
 # adapted from diffusers.utils import load_image
-def load_image(
-    image: str | PIL.Image.Image,
-    convert_method: Callable[[PIL.Image.Image], PIL.Image.Image] | None = None
-) -> PIL.Image.Image:
+def load_image(image: str | PIL.Image.Image,
+               convert_method: Callable[[PIL.Image.Image], PIL.Image.Image] | None = None) -> PIL.Image.Image:
     """
     Loads `image` to a PIL Image.
 
@@ -160,8 +152,7 @@ def load_image(
         image = image
     else:
         raise ValueError(
-            "Incorrect format used for the image. Should be a URL linking to an image, a local path, or a PIL image."
-        )
+            "Incorrect format used for the image. Should be a URL linking to an image, a local path, or a PIL image.")
 
     image = PIL.ImageOps.exif_transpose(image)
 
@@ -202,8 +193,7 @@ def _load_gif(gif_path: str) -> tuple[list[PIL.Image.Image], float | None]:
     return pil_images, original_fps
 
 
-def _load_video_with_ffmpeg(
-        video_path: str) -> tuple[list[PIL.Image.Image], float | None]:
+def _load_video_with_ffmpeg(video_path: str) -> tuple[list[PIL.Image.Image], float | None]:
     """
     Load frames from a video file using ffmpeg.
 
@@ -220,9 +210,8 @@ def _load_video_with_ffmpeg(
     try:
         imageio.plugins.ffmpeg.get_exe()
     except AttributeError as e:
-        raise AttributeError(
-            "Unable to find an ffmpeg installation on your machine. "
-            "Please install via `uv pip install imageio-ffmpeg`") from e
+        raise AttributeError("Unable to find an ffmpeg installation on your machine. "
+                             "Please install via `uv pip install imageio-ffmpeg`") from e
 
     pil_images = []
     original_fps = None
@@ -273,22 +262,18 @@ def load_video(
 
     if not (is_url or is_file):
         raise ValueError(
-            f"Incorrect path or URL. URLs must start with `http://` or `https://`, and {video} is not a valid path."
-        )
+            f"Incorrect path or URL. URLs must start with `http://` or `https://`, and {video} is not a valid path.")
 
     if is_url:
         response = requests.get(video, stream=True)
         if response.status_code != 200:
-            raise ValueError(
-                f"Failed to download video. Status code: {response.status_code}"
-            )
+            raise ValueError(f"Failed to download video. Status code: {response.status_code}")
 
         parsed_url = urlparse(video)
         file_name = os.path.basename(unquote(parsed_url.path))
 
         suffix = os.path.splitext(file_name)[1] or ".mp4"
-        with tempfile.NamedTemporaryFile(suffix=suffix,
-                                         delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
             video_path = temp_file.name
             video_data = response.iter_content(chunk_size=8192)
             for chunk in video_data:
@@ -357,8 +342,8 @@ def get_default_height_width(
         else:
             width = image.shape[2]
 
-    width, height = (x - x % vae_scale_factor for x in (width, height)
-                     )  # resize to integer multiple of vae_scale_factor
+    width, height = (x - x % vae_scale_factor
+                     for x in (width, height))  # resize to integer multiple of vae_scale_factor
 
     return height, width
 
@@ -394,12 +379,10 @@ def resize(
             The resized image.
     """
     if resize_mode != "default" and not isinstance(image, PIL.Image.Image):
-        raise ValueError(
-            f"Only PIL image input is supported for resize_mode {resize_mode}")
+        raise ValueError(f"Only PIL image input is supported for resize_mode {resize_mode}")
     assert isinstance(image, PIL.Image.Image)
     if resize_mode == "default":
-        image = image.resize((width, height),
-                             resample=PIL_INTERPOLATION[resample])
+        image = image.resize((width, height), resample=PIL_INTERPOLATION[resample])
     elif resize_mode == "crop":
         src_w, src_h = image.size
         target_ratio = height / width
@@ -415,14 +398,15 @@ def resize(
         top = max(0, (src_h - crop_h) // 2)
         left = max(0, (src_w - crop_w) // 2)
         image = image.crop((left, top, left + crop_w, top + crop_h))
-        image = image.resize((width, height),
-                             resample=PIL_INTERPOLATION[resample])
+        image = image.resize((width, height), resample=PIL_INTERPOLATION[resample])
     else:
         raise ValueError(f"resize_mode {resize_mode} is not supported")
     return image
 
 
-def create_default_image(width: int = 512, height: int = 512, color: tuple[int, int, int] = (0, 0, 0)) -> PIL.Image.Image:
+def create_default_image(width: int = 512,
+                         height: int = 512,
+                         color: tuple[int, int, int] = (0, 0, 0)) -> PIL.Image.Image:
     """
     Create a default black PIL image.
 
@@ -455,12 +439,8 @@ def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.de
     image_tensor = TF.to_tensor(image).sub_(0.5).div_(0.5).to(device)
 
     # Resize to CLIP's expected input size (224x224) using bicubic interpolation
-    resized_tensor = F.interpolate(
-        image_tensor.unsqueeze(0),
-        size=(224, 224),
-        mode='bicubic',
-        align_corners=False
-    ).squeeze(0)
+    resized_tensor = F.interpolate(image_tensor.unsqueeze(0), size=(224, 224), mode='bicubic',
+                                   align_corners=False).squeeze(0)
 
     # Denormalize back to [0, 1] range
     denormalized_tensor = resized_tensor.mul_(0.5).add_(0.5)

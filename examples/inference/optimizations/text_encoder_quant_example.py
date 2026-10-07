@@ -18,7 +18,7 @@ def main(text_encoder_path: str):
         dit_cpu_offload=True,
         vae_cpu_offload=False,
         text_encoder_cpu_offload=False,
-        # AbsMaxFP8 is the quantization method used by ComfyUI; 
+        # AbsMaxFP8 is the quantization method used by ComfyUI;
         # check fastvideo/layers/quantization/* for more quantization methods
         override_text_encoder_quant="AbsMaxFP8",
         # for Wan 2.2, this is the path to "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
@@ -29,9 +29,7 @@ def main(text_encoder_path: str):
     # I2V is triggered just by passing in an image_path argument
     prompt = "Summer beach vacation style, a white cat wearing sunglasses sits on a surfboard. The fluffy-furred feline gazes directly at the camera with a relaxed expression. Blurred beach scenery forms the background featuring crystal-clear waters, distant green hills, and a blue sky dotted with white clouds. The cat assumes a naturally relaxed posture, as if savoring the sea breeze and warm sunlight. A close-up shot highlights the feline's intricate details and the refreshing atmosphere of the seaside."
     image_path = "https://huggingface.co/datasets/YiYiXu/testing-images/resolve/main/wan_i2v_input.JPG"
-    video = generator.generate_video(
-        prompt, output_path=OUTPUT_PATH, save_video=True, image_path=image_path
-    )
+    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, image_path=image_path)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,9 @@
 The capability sets route:
   * sm_120a/sm_121a -> fastvideo-kernel CUTLASS extension,
   * sm_100a/sm_103a -> FP4 FA4 (flash-attention-fp4, #1221 plumbing),
-  * anything else  -> unavailable (honest FlashAttention fallback upstream).
+  * anything else  -> unavailable (hard ImportError upstream: an explicitly
+    selected QAT-inference backend must never silently degrade to plain
+    FlashAttention, or A/B benchmarks measure bf16 against bf16).
 
 All device/import probes are monkeypatched; no GPU or kernel install needed.
 """
@@ -71,6 +73,22 @@ def test_unsupported_arch_receipt_lists_support_matrix(monkeypatch) -> None:
     assert "sm_100a/sm_103a" in receipt
 
 
+def test_selecting_unavailable_backend_raises_instead_of_falling_back(monkeypatch) -> None:
+    """Explicit ATTN_QAT_INFER on an arch without the kernel must hard-fail.
+
+    The old behavior logged "Fall back to Flash Attention" and continued,
+    which let FP4 A/B benchmarks silently measure bf16 against bf16.
+    """
+    import torch
+
+    from fastvideo.platforms.cuda import CudaPlatform
+    from fastvideo.platforms.interface import AttentionBackendEnum
+
+    _patch(monkeypatch, cap=(9, 0), cutlass=False, fa4=False)
+    with pytest.raises(ImportError, match="ATTN_QAT_INFER selected but"):
+        CudaPlatform.get_attn_backend_cls(AttentionBackendEnum.ATTN_QAT_INFER, 128, torch.bfloat16)
+
+
 def test_unsupported_arch_forward_never_calls_bundled_extension(monkeypatch) -> None:
     """An unsupported GPU (e.g. sm_90) carrying an importable sm_12x wheel
     must fail cleanly at forward — never dispatch into the wrong binary."""
@@ -126,11 +144,9 @@ def _register_fa4_quantize_cpu_kernel():
     def _cpu_kernel(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         batch, seqlen, nheads, headdim = tensor_4d.shape
         seqlen_padded = (seqlen + 127) // 128 * 128
-        fp4 = torch.zeros(batch, seqlen_padded, nheads, headdim // 2,
-                          dtype=torch.int8).view(torch.float4_e2m1fn_x2)
+        fp4 = torch.zeros(batch, seqlen_padded, nheads, headdim // 2, dtype=torch.int8).view(torch.float4_e2m1fn_x2)
         rest_m, rest_k = seqlen_padded // 128, (headdim // 16) // 4
-        sf = torch.zeros(batch, nheads, rest_m, rest_k, 32, 4, 4,
-                         dtype=torch.uint8).permute(4, 5, 2, 6, 3, 1, 0)
+        sf = torch.zeros(batch, nheads, rest_m, rest_k, 32, 4, 4, dtype=torch.uint8).permute(4, 5, 2, 6, 3, 1, 0)
         return fp4, sf
 
     try:
@@ -179,6 +195,6 @@ def test_fa4_quantize_op_fake_matches_real() -> None:
     x = torch.randn(2, 200, 2, 128, dtype=torch.bfloat16)
     torch.library.opcheck(
         torch.ops.fastvideo.nvfp4_quantize_fa4,
-        (x,),
+        (x, ),
         test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
     )

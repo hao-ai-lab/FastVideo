@@ -25,6 +25,8 @@ class SamplingParam:
     # Image inputs
     image_path: str | None = None
     pil_image: Any | None = None
+    last_image: Any | None = None
+    references: list[Any] | None = None
 
     # Video inputs
     video_path: str | None = None
@@ -32,6 +34,7 @@ class SamplingParam:
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
+    audio_latents: Any | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: Any | None = None  # Shape: (B, T, 2)
@@ -187,7 +190,7 @@ class SamplingParam:
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
 
-    def check_sampling_param(self):
+    def check_sampling_param(self) -> None:
         if self.prompt_path and not self.prompt_path.endswith(".txt"):
             raise ValueError("prompt_path must be a txt file")
 

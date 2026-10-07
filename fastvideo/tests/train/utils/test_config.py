@@ -27,8 +27,7 @@ def _minimal_yaml() -> dict[str, Any]:
             },
         },
         "method": {
-            "_target_":
-            "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod",
+            "_target_": "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod",
         },
         "training": {},
     }
@@ -44,8 +43,7 @@ def test_minimal_yaml_loads_happy_path(tmp_path: Path) -> None:
 
     assert isinstance(cfg, RunConfig)
     assert isinstance(cfg.training, TrainingConfig)
-    assert cfg.method["_target_"] == (
-        "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod")
+    assert cfg.method["_target_"] == ("fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod")
     assert "student" in cfg.models
     assert cfg.callbacks == {}
     # raw retains the original YAML dict for downstream logging.
@@ -252,17 +250,11 @@ def test_pipeline_quant_config_resolves_for_load_and_export(tmp_path: Path) -> N
         _run_config_from_raw, )
 
     data = _minimal_yaml()
-    data["models"]["student"]["init_from"] = (
-        "FastVideo/LTX2-Distilled-Diffusers")
-    data["pipeline"] = {
-        "dit_config": {
-            "quant_config": "nvfp4_qat_train"
-        }
-    }
+    data["models"]["student"]["init_from"] = ("FastVideo/LTX2-Distilled-Diffusers")
+    data["pipeline"] = {"dit_config": {"quant_config": "nvfp4_qat_train"}}
 
     cfg = load_run_config(_write_yaml(tmp_path, data))
-    assert isinstance(cfg.training.pipeline_config.dit_config.quant_config,
-                      NVFP4QATTrainConfig)
+    assert isinstance(cfg.training.pipeline_config.dit_config.quant_config, NVFP4QATTrainConfig)
 
     export_cfg = _run_config_from_raw(cfg.raw)
     assert isinstance(
@@ -273,13 +265,8 @@ def test_pipeline_quant_config_resolves_for_load_and_export(tmp_path: Path) -> N
 
 def test_pipeline_quant_config_rejects_unknown_name(tmp_path: Path) -> None:
     data = _minimal_yaml()
-    data["models"]["student"]["init_from"] = (
-        "FastVideo/LTX2-Distilled-Diffusers")
-    data["pipeline"] = {
-        "dit_config": {
-            "quant_config": "not_a_quantization_method"
-        }
-    }
+    data["models"]["student"]["init_from"] = ("FastVideo/LTX2-Distilled-Diffusers")
+    data["pipeline"] = {"dit_config": {"quant_config": "not_a_quantization_method"}}
 
     with pytest.raises(ValueError, match="Invalid quantization method"):
         load_run_config(_write_yaml(tmp_path, data))
@@ -387,8 +374,7 @@ def test_callbacks_passed_through_when_present(tmp_path: Path) -> None:
     data = _minimal_yaml()
     data["callbacks"] = {
         "grad_clip": {
-            "_target_":
-            "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
+            "_target_": "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
             "max_grad_norm": 1.0,
         },
     }

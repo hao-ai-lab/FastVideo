@@ -55,18 +55,18 @@ def load_transformer_state_dict_from_safetensors(model_path: str) -> Dict[str, t
     """
     from huggingface_hub import snapshot_download
     import os
-    
+
     # Download or locate the model
     if os.path.isdir(model_path):
         local_path = model_path
     else:
         local_path = snapshot_download(model_path)
-    
+
     # Find transformer directory
     transformer_dir = os.path.join(local_path, "transformer")
     if not os.path.isdir(transformer_dir):
         raise FileNotFoundError(f"Transformer directory not found at {transformer_dir}")
-    
+
     # Load all safetensors files
     state_dict: Dict[str, torch.Tensor] = {}
     for fname in sorted(os.listdir(transformer_dir)):
@@ -75,12 +75,13 @@ def load_transformer_state_dict_from_safetensors(model_path: str) -> Dict[str, t
             with safe_open(fpath, framework='pt', device='cpu') as f:
                 for key in f.keys():
                     state_dict[key] = f.get_tensor(key)
-    
+
     if not state_dict:
         raise ValueError(f"No safetensors files found in {transformer_dir}")
-    
+
     LOG.info("Loaded %d keys directly from safetensors", len(state_dict))
     return state_dict
+
 
 # Configure minimal logging
 LOG = logging.getLogger("extract_lora")
@@ -140,7 +141,8 @@ def load_transformer_state_dict_from_model(
         pipeline_attr = getattr(pipeline, "pipeline", None)
         transformer = getattr(pipeline_attr, "transformer", None) if pipeline_attr else None
     if transformer is None:
-        raise RuntimeError("Transformer not found in pipeline. Expected pipeline.transformer or pipeline.modules['transformer'].")
+        raise RuntimeError(
+            "Transformer not found in pipeline. Expected pipeline.transformer or pipeline.modules['transformer'].")
 
     state_dict = transformer.state_dict()
 
@@ -179,12 +181,108 @@ def is_extractable_weight(key: str) -> bool:
     return True
 
 
-def save_adapter_state(adapter_state: Dict[str, torch.Tensor], out_path: Path) -> None:
-    """Save adapter state dict to safetensors (if available) or torch.save."""
+# Suffixes read by fastvideo.models.loader.lora_patch, and by ComfyUI's loader, for
+# payload that is not a low-rank product. Keep these spellings in sync with that module.
+DIFF_SUFFIX = ".diff"
+DIFF_BIAS_SUFFIX = ".diff_b"
+SET_WEIGHT_SUFFIX = ".set_weight"
+
+
+def dense_payload_key(param_name: str) -> Optional[str]:
+    """The adapter key that carries ``param_name`` whole, or None if we cannot name one."""
+    if param_name.endswith(".weight"):
+        return param_name[:-len(".weight")] + DIFF_SUFFIX
+    if param_name.endswith(".bias"):
+        return param_name[:-len(".bias")] + DIFF_BIAS_SUFFIX
+    return None
+
+
+def build_dense_payload(
+    base_sd: Dict[str, torch.Tensor],
+    ft_sd: Dict[str, torch.Tensor],
+    low_rank_keys: set,
+    min_delta: float,
+) -> Dict[str, torch.Tensor]:
+    """Capture the parameters low-rank extraction cannot represent.
+
+    ``is_extractable_weight`` rejects norms, biases, and embeddings, and the SVD loop
+    additionally skips anything the base model does not have. Those exclusions are
+    correct -- a rank-``r`` factorization of a length-``n`` vector costs ``r(1 + n) > n``,
+    and a parameter with no base weight has no delta to factor -- but dropping the
+    tensors outright loses whatever the fine-tune did to them. A distillation that
+    retunes its norms, or a VSA student whose compression gate exists only after
+    distillation, comes out measurably wrong.
+
+    Two rules:
+
+    * present in the base and changed -> ``.diff`` / ``.diff_b``, an exact delta
+    * absent from the base            -> ``.set_weight``, the parameter itself
+
+    Anything bit-identical to the base is skipped. That is not an optimization: shipping
+    a delta of exactly zero states "this changed" in a file whose whole purpose is to
+    record what changed, and on real extractions it is the majority of the candidates.
+    """
+    payload: Dict[str, torch.Tensor] = {}
+    identical = 0
+    skipped: list = []
+
+    for key in sorted(ft_sd.keys()):
+        if key in low_rank_keys:
+            continue
+
+        ft_tensor = ft_sd[key].detach().cpu()
+        base_tensor = base_sd.get(key)
+
+        if base_tensor is None:
+            # No base weight exists, so no delta is expressible: ship the parameter.
+            # `.set_weight` is only defined for a module's weight; a bias with no base
+            # counterpart has no agreed spelling, so say so rather than invent one.
+            if not key.endswith(".weight"):
+                skipped.append(key)
+                continue
+            payload[key[:-len(".weight")] + SET_WEIGHT_SUFFIX] = ft_tensor.contiguous()
+            continue
+
+        base_tensor = base_tensor.detach().cpu()
+        if base_tensor.shape != ft_tensor.shape:
+            skipped.append(key)
+            continue
+        if torch.equal(base_tensor, ft_tensor):
+            identical += 1
+            continue
+
+        delta = (ft_tensor.to(torch.float32) - base_tensor.to(torch.float32))
+        if float(delta.abs().max()) < min_delta:
+            identical += 1
+            continue
+
+        out_key = dense_payload_key(key)
+        if out_key is None:
+            skipped.append(key)
+            continue
+        payload[out_key] = delta.to(ft_tensor.dtype).contiguous()
+
+    LOG.info(
+        "Dense payload: %d tensors emitted, %d unchanged and dropped, %d skipped (unnameable or reshaped)",
+        len(payload), identical, len(skipped))
+    for key in skipped[:10]:
+        LOG.warning("Dense payload skipped %s", key)
+    return payload
+
+
+def save_adapter_state(adapter_state: Dict[str, torch.Tensor],
+                       out_path: Path,
+                       metadata: Optional[Dict[str, str]] = None) -> None:
+    """Save adapter state dict to safetensors (if available) or torch.save.
+
+    Provenance goes in the safetensors header rather than a sidecar file so that it
+    survives being copied, renamed, or downloaded on its own -- which is how adapters
+    actually travel.
+    """
     cleaned = {k: v.detach().cpu().contiguous() for k, v in adapter_state.items()}
     out_str = str(out_path)
     if out_path.suffix == ".safetensors" and _HAVE_SAFETENSORS:
-        safetensors_save(cleaned, out_str)
+        safetensors_save(cleaned, out_str, metadata=metadata or None)
     else:
         torch.save(cleaned, out_str)
 
@@ -257,12 +355,12 @@ def build_adapter_from_states(
             continue
 
         S_sqrt = torch.sqrt(S[:chosen_rank].to(torch.float32))
-        U_r = U[:, :chosen_rank].to(torch.float32)    # (out, r)
+        U_r = U[:, :chosen_rank].to(torch.float32)  # (out, r)
         Vh_r = Vh[:chosen_rank, :].to(torch.float32)  # (r, in)
 
-        lora_B = (U_r * S_sqrt.unsqueeze(0)).contiguous()        # (out, r)
-        tmp = (Vh_r.T * S_sqrt.unsqueeze(0)).contiguous()       # (in, r)
-        lora_A = tmp.T.contiguous()                              # (r, in)
+        lora_B = (U_r * S_sqrt.unsqueeze(0)).contiguous()  # (out, r)
+        tmp = (Vh_r.T * S_sqrt.unsqueeze(0)).contiguous()  # (in, r)
+        lora_A = tmp.T.contiguous()  # (r, in)
 
         base_name = key[:-len(".weight")]
         a_key = f"{base_name}.lora_A.weight"
@@ -296,8 +394,8 @@ def build_adapter_from_states(
             pass
 
     avg_delta = (sum(mean_deltas) / len(mean_deltas)) if mean_deltas else 0.0
-    LOG.info("Extraction complete: processed_keys=%d, extracted_layers=%d, avg_abs_delta=%.6e",
-             len(keys), processed, avg_delta)
+    LOG.info("Extraction complete: processed_keys=%d, extracted_layers=%d, avg_abs_delta=%.6e", len(keys), processed,
+             avg_delta)
     return adapter_state
 
 
@@ -311,6 +409,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min-delta", type=float, default=1e-8, help="Minimum mean abs delta to consider a layer changed")
     p.add_argument("--checkpoint", default="extract_lora_checkpoint.pt", help="Checkpoint path to resume/save progress")
     p.add_argument("--resume", action="store_true", help="Resume from checkpoint if available")
+    p.add_argument("--no-dense-payload",
+                   dest="dense_payload",
+                   action="store_false",
+                   help="Emit only low-rank factors, dropping changed norms/biases and any parameter "
+                   "the base model lacks (pre-2026 behaviour)")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     return p.parse_args()
 
@@ -325,6 +428,7 @@ def extract_lora_adapter(
     checkpoint: Optional[str] = None,
     resume: bool = False,
     log_level: str = "INFO",
+    dense_payload: bool = True,
 ) -> None:
     """Extract LoRA adapter from fine-tuned model.
     
@@ -338,6 +442,11 @@ def extract_lora_adapter(
         checkpoint: Checkpoint file path
         resume: Resume from checkpoint
         log_level: Logging level
+        dense_payload: Also capture parameters the SVD path cannot represent -- norms,
+            biases, and anything absent from the base model -- as `.diff` / `.diff_b` /
+            `.set_weight` keys. On by default: without it a distillation that retunes
+            its norms, or a VSA student whose compression gate exists only after
+            distillation, is silently reproduced without those changes.
     """
     configure_logging(log_level)
 
@@ -359,7 +468,6 @@ def extract_lora_adapter(
         base_sd = load_transformer_state_dict_from_safetensors(base)
         LOG.info("Loading fine-tuned model directly from safetensors: %s", ft)
         ft_sd = load_transformer_state_dict_from_safetensors(ft)
-
 
     resume_idx = 0
     adapter_existing: Dict[str, torch.Tensor] = {}
@@ -385,8 +493,30 @@ def extract_lora_adapter(
     )
     adapter_state.update(new_adapter)
 
+    if dense_payload:
+        low_rank_keys = {k.split(".lora_")[0] + ".weight" for k in adapter_state if ".lora_" in k}
+        adapter_state.update(
+            build_dense_payload(
+                base_sd=base_sd,
+                ft_sd=ft_sd,
+                low_rank_keys=low_rank_keys,
+                min_delta=min_delta,
+            ))
+
     # final save
-    save_adapter_state(adapter_state, out_path)
+    save_adapter_state(
+        adapter_state,
+        out_path,
+        metadata={
+            "base_model": base,
+            "finetuned_model": ft,
+            "requested_rank": str(rank),
+            "full_rank": str(bool(full_rank)),
+            "dense_payload": str(bool(dense_payload)),
+            "application": "W_effective = W_base + lora_B @ lora_A, then .diff added and .set_weight assigned",
+            "format": "fastvideo-lora-v2",
+        },
+    )
 
     # cleanup checkpoint if present
     if checkpoint_path and checkpoint_path.exists():
@@ -411,6 +541,7 @@ def main() -> None:
         checkpoint=args.checkpoint,
         resume=args.resume,
         log_level=args.log_level,
+        dense_payload=args.dense_payload,
     )
 
 

@@ -43,13 +43,13 @@ def _reference_metric_names() -> list[str]:
 # perfect-match value on duplicate (gen, ref). No reference JSON needed.
 INVARIANT_SPEC = [
     # (metric, expected, abs_tolerance, location)
-    ("common.ssim",                  1.0, 1e-3, "per_sample"),
-    ("common.psnr",                 99.0, None, "per_sample"),  # ≥ threshold (identical → ~inf, capped by floats)
-    ("common.lpips",                 0.0, 1e-2, "per_sample"),
+    ("common.ssim", 1.0, 1e-3, "per_sample"),
+    ("common.psnr", 99.0, None, "per_sample"),  # ≥ threshold (identical → ~inf, capped by floats)
+    ("common.lpips", 0.0, 1e-2, "per_sample"),
     ("optical_flow.gt_optical_flow", 0.0, 1e-2, "per_sample"),
-    ("common.fvd",                   0.0, 1.0,  "corpus"),
-    ("audio.frechet_distance",       0.0, 1.0,  "corpus"),
-    ("audio.kl_divergence",          0.0, 1e-3, "per_sample"),
+    ("common.fvd", 0.0, 1.0, "corpus"),
+    ("audio.frechet_distance", 0.0, 1.0, "corpus"),
+    ("audio.kl_divergence", 0.0, 1e-3, "per_sample"),
 ]
 
 
@@ -102,8 +102,10 @@ def invariant_results(asset_meta) -> EvalResults:
     """
     tmp = Path(tempfile.mkdtemp(prefix="eval_regression_inv_"))
     try:
-        gen = tmp / "gen"; ref = tmp / "ref"
-        gen.mkdir(); ref.mkdir()
+        gen = tmp / "gen"
+        ref = tmp / "ref"
+        gen.mkdir()
+        ref.mkdir()
         for i in range(N_DUP):
             shutil.copyfile(ASSET_VIDEO, gen / f"clip_{i:03d}.mp4")
             shutil.copyfile(ASSET_VIDEO, ref / f"clip_{i:03d}.mp4")
@@ -112,7 +114,8 @@ def invariant_results(asset_meta) -> EvalResults:
             skip_missing_deps=True,
         )
         samples = samples_from(
-            video=gen, reference=ref,
+            video=gen,
+            reference=ref,
             text_prompt=asset_meta["text_prompt"],
             fps=asset_meta["fps"],
             extract_audio=tmp / "audio_cache",

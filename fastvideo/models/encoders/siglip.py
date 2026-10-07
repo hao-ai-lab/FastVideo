@@ -16,8 +16,7 @@ from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.models.encoders.siglip import SiglipVisionArchConfig, SiglipVisionConfig
 from fastvideo.distributed import divide, get_tp_world_size
 from fastvideo.layers.activation import get_act_fn
-from fastvideo.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
-                                     RowParallelLinear)
+from fastvideo.layers.linear import (ColumnParallelLinear, QKVParallelLinear, RowParallelLinear)
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.logger import init_logger
 from fastvideo.models.encoders.base import ImageEncoder
@@ -48,7 +47,7 @@ class SiglipVisionEmbeddings(nn.Module):
         )
 
         # Integer division - with valid padding, edge pixels are ignored
-        self.num_patches = (self.image_size // self.patch_size) ** 2
+        self.num_patches = (self.image_size // self.patch_size)**2
         self.num_positions = self.num_patches
         self.position_embedding = nn.Embedding(self.num_positions, self.embed_dim)
         self.register_buffer(
@@ -59,9 +58,7 @@ class SiglipVisionEmbeddings(nn.Module):
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         target_dtype = self.patch_embedding.weight.dtype
-        patch_embeds = self.patch_embedding(
-            pixel_values.to(dtype=target_dtype)
-        )  # shape = [*, embed_dim, grid, grid]
+        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))  # shape = [*, embed_dim, grid, grid]
         embeddings = patch_embeds.flatten(2).transpose(1, 2)
         embeddings = embeddings + self.position_embedding(self.position_ids)
         return embeddings
@@ -83,13 +80,11 @@ class SiglipAttention(nn.Module):
         self.embed_dim = arch_config.hidden_size
         self.num_heads = arch_config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
-        
+
         if self.head_dim * self.num_heads != self.embed_dim:
-            raise ValueError(
-                f"embed_dim must be divisible by num_heads "
-                f"(got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads})."
-            )
-        
+            raise ValueError(f"embed_dim must be divisible by num_heads "
+                             f"(got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads}).")
+
         self.scale = self.head_dim**-0.5 if enable_scale else None
         self.dropout = arch_config.attention_dropout
 
@@ -124,25 +119,17 @@ class SiglipAttention(nn.Module):
         """Input shape: Batch x Time x Channel"""
         qkv_states, _ = self.qkv_proj(hidden_states)
         query_states, key_states, value_states = qkv_states.chunk(3, dim=-1)
-        
-        query_states = query_states.reshape(
-            query_states.shape[0], query_states.shape[1],
-            self.num_heads_per_partition, self.head_dim
-        )
-        key_states = key_states.reshape(
-            key_states.shape[0], key_states.shape[1],
-            self.num_heads_per_partition, self.head_dim
-        )
-        value_states = value_states.reshape(
-            value_states.shape[0], value_states.shape[1],
-            self.num_heads_per_partition, self.head_dim
-        )
-        
+
+        query_states = query_states.reshape(query_states.shape[0], query_states.shape[1], self.num_heads_per_partition,
+                                            self.head_dim)
+        key_states = key_states.reshape(key_states.shape[0], key_states.shape[1], self.num_heads_per_partition,
+                                        self.head_dim)
+        value_states = value_states.reshape(value_states.shape[0], value_states.shape[1], self.num_heads_per_partition,
+                                            self.head_dim)
+
         attn_output = self.attn(query_states, key_states, value_states)
-        attn_output = attn_output.reshape(
-            attn_output.shape[0], attn_output.shape[1],
-            self.num_heads_per_partition * self.head_dim
-        )
+        attn_output = attn_output.reshape(attn_output.shape[0], attn_output.shape[1],
+                                          self.num_heads_per_partition * self.head_dim)
         attn_output, _ = self.out_proj(attn_output)
         return attn_output, None
 
@@ -198,17 +185,13 @@ class SiglipEncoderLayer(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
         )
-        self.layer_norm1 = nn.LayerNorm(
-            arch_config.hidden_size, eps=arch_config.layer_norm_eps
-        )
+        self.layer_norm1 = nn.LayerNorm(arch_config.hidden_size, eps=arch_config.layer_norm_eps)
         self.mlp = SiglipMLP(
             arch_config,
             quant_config=quant_config,
             prefix=f"{prefix}.mlp",
         )
-        self.layer_norm2 = nn.LayerNorm(
-            arch_config.hidden_size, eps=arch_config.layer_norm_eps
-        )
+        self.layer_norm2 = nn.LayerNorm(arch_config.hidden_size, eps=arch_config.layer_norm_eps)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         # SigLIP uses post-norm (like original ViT)
@@ -244,7 +227,7 @@ class SiglipEncoder(nn.Module):
             num_hidden_layers = arch_config.num_hidden_layers
         else:
             num_hidden_layers = num_hidden_layers_override
-            
+
         self.layers = nn.ModuleList([
             SiglipEncoderLayer(
                 arch_config=arch_config,
@@ -252,8 +235,7 @@ class SiglipEncoder(nn.Module):
                 is_causal=is_causal,
                 quant_config=quant_config,
                 prefix=f"{prefix}.layers.{layer_idx}",
-            )
-            for layer_idx in range(num_hidden_layers)
+            ) for layer_idx in range(num_hidden_layers)
         ])
 
     def forward(
@@ -302,10 +284,8 @@ class SiglipVisionTransformer(nn.Module):
 
         num_hidden_layers = arch_config.num_hidden_layers
         if len(self.encoder.layers) > arch_config.num_hidden_layers:
-            raise ValueError(
-                f"The original encoder only has {num_hidden_layers} "
-                f"layers, but you requested {len(self.encoder.layers)} layers."
-            )
+            raise ValueError(f"The original encoder only has {num_hidden_layers} "
+                             f"layers, but you requested {len(self.encoder.layers)} layers.")
 
         # Post layer norm (applied to output)
         if require_post_norm is None:
@@ -344,7 +324,7 @@ class SiglipVisionTransformer(nn.Module):
 
 class SiglipVisionModel(ImageEncoder):
     """SigLIP Vision Model for FastVideo."""
-    
+
     config_class = SiglipVisionConfig
     main_input_name = "pixel_values"
     packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
@@ -382,14 +362,13 @@ class SiglipVisionModel(ImageEncoder):
             # Skip projection layers if any
             if name.startswith("visual_projection"):
                 continue
-                
+
             # Skip head if any
             if "head" in name:
                 continue
 
             # Post layernorm handling
-            if (name.startswith("vision_model.post_layernorm")
-                    and self.vision_model.post_layernorm is None):
+            if (name.startswith("vision_model.post_layernorm") and self.vision_model.post_layernorm is None):
                 continue
 
             # Omit layers when num_hidden_layers_override is set
@@ -415,8 +394,9 @@ class SiglipVisionModel(ImageEncoder):
                     weight_loader = getattr(param, "weight_loader", default_weight_loader)
                     weight_loader(param, loaded_weight)
             loaded_params.add(name)
-            
+
         return loaded_params
+
 
 # Entry point for model registry
 EntryClass = SiglipVisionModel

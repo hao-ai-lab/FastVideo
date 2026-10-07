@@ -10,7 +10,6 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-
 _MODULE_NAME = "_fastvideo_flash_attn_cute_for_tests"
 
 
@@ -18,12 +17,7 @@ def _load_local_flash_attn_cute_module():
     if _MODULE_NAME in sys.modules:
         return sys.modules[_MODULE_NAME]
 
-    module_path = (
-        Path(__file__).resolve().parents[2]
-        / "attention"
-        / "utils"
-        / "flash_attn_cute.py"
-    )
+    module_path = (Path(__file__).resolve().parents[2] / "attention" / "utils" / "flash_attn_cute.py")
     spec = importlib.util.spec_from_file_location(_MODULE_NAME, module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to load module spec from {module_path}")
@@ -101,9 +95,7 @@ def flash_attn_impls():
 
     major, _ = torch.cuda.get_device_capability()
     if major not in (9, 10, 11):
-        pytest.skip(
-            f"flash_attn.cute supports SM 9/10/11, got compute capability {major}"
-        )
+        pytest.skip(f"flash_attn.cute supports SM 9/10/11, got compute capability {major}")
 
     try:
         from flash_attn.cute import (
@@ -124,9 +116,7 @@ def flash_attn_impls():
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("causal", [False, True])
-def test_flash_attn_func_parity_forward_backward(
-    flash_attn_impls, dtype: torch.dtype, causal: bool
-):
+def test_flash_attn_func_parity_forward_backward(flash_attn_impls, dtype: torch.dtype, causal: bool):
     if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
         pytest.skip("bfloat16 is not supported on this GPU")
 
@@ -152,33 +142,31 @@ def test_flash_attn_func_parity_forward_backward(
     k_test = k_ref.detach().clone().requires_grad_(True)
     v_test = v_ref.detach().clone().requires_grad_(True)
 
-    out_ref = _extract_out(ref_flash_attn_func(
-        q_ref,
-        k_ref,
-        v_ref,
-        softmax_scale=None,
-        causal=causal,
-        deterministic=False,
-    ))
-    out_test = _extract_out(custom_flash_attn_func(
-        q_test,
-        k_test,
-        v_test,
-        dropout_p=0.0,
-        softmax_scale=None,
-        causal=causal,
-        deterministic=False,
-    ))
+    out_ref = _extract_out(
+        ref_flash_attn_func(
+            q_ref,
+            k_ref,
+            v_ref,
+            softmax_scale=None,
+            causal=causal,
+            deterministic=False,
+        ))
+    out_test = _extract_out(
+        custom_flash_attn_func(
+            q_test,
+            k_test,
+            v_test,
+            dropout_p=0.0,
+            softmax_scale=None,
+            causal=causal,
+            deterministic=False,
+        ))
 
     _assert_close(out_test, out_ref, dtype=dtype)
 
     dout = torch.randn_like(out_ref)
-    dq_ref, dk_ref, dv_ref = torch.autograd.grad(
-        (out_ref * dout).sum(), (q_ref, k_ref, v_ref)
-    )
-    dq_test, dk_test, dv_test = torch.autograd.grad(
-        (out_test * dout).sum(), (q_test, k_test, v_test)
-    )
+    dq_ref, dk_ref, dv_ref = torch.autograd.grad((out_ref * dout).sum(), (q_ref, k_ref, v_ref))
+    dq_test, dk_test, dv_test = torch.autograd.grad((out_test * dout).sum(), (q_test, k_test, v_test))
 
     _assert_close(dq_test, dq_ref, dtype=dtype, is_grad=True)
     _assert_close(dk_test, dk_ref, dtype=dtype, is_grad=True)
@@ -187,9 +175,7 @@ def test_flash_attn_func_parity_forward_backward(
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("causal", [False, True])
-def test_flash_attn_varlen_func_parity_forward_backward(
-    flash_attn_impls, dtype: torch.dtype, causal: bool
-):
+def test_flash_attn_varlen_func_parity_forward_backward(flash_attn_impls, dtype: torch.dtype, causal: bool):
     if dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
         pytest.skip("bfloat16 is not supported on this GPU")
 
@@ -211,9 +197,7 @@ def test_flash_attn_varlen_func_parity_forward_backward(
     total = int(cu[-1].item())
     max_seqlen = max(seqlens)
 
-    q_ref = torch.randn(
-        total, nheads, headdim, device=device, dtype=dtype, requires_grad=True
-    )
+    q_ref = torch.randn(total, nheads, headdim, device=device, dtype=dtype, requires_grad=True)
     k_ref = torch.randn_like(q_ref, requires_grad=True)
     v_ref = torch.randn_like(q_ref, requires_grad=True)
 
@@ -221,41 +205,39 @@ def test_flash_attn_varlen_func_parity_forward_backward(
     k_test = k_ref.detach().clone().requires_grad_(True)
     v_test = v_ref.detach().clone().requires_grad_(True)
 
-    out_ref = _extract_out(ref_flash_attn_varlen_func(
-        q_ref,
-        k_ref,
-        v_ref,
-        cu_seqlens_q=cu,
-        cu_seqlens_k=cu,
-        max_seqlen_q=max_seqlen,
-        max_seqlen_k=max_seqlen,
-        softmax_scale=None,
-        causal=causal,
-        deterministic=False,
-    ))
-    out_test = _extract_out(custom_flash_attn_varlen_func(
-        q_test,
-        k_test,
-        v_test,
-        cu,
-        cu,
-        max_seqlen,
-        max_seqlen,
-        dropout_p=0.0,
-        softmax_scale=None,
-        causal=causal,
-        deterministic=False,
-    ))
+    out_ref = _extract_out(
+        ref_flash_attn_varlen_func(
+            q_ref,
+            k_ref,
+            v_ref,
+            cu_seqlens_q=cu,
+            cu_seqlens_k=cu,
+            max_seqlen_q=max_seqlen,
+            max_seqlen_k=max_seqlen,
+            softmax_scale=None,
+            causal=causal,
+            deterministic=False,
+        ))
+    out_test = _extract_out(
+        custom_flash_attn_varlen_func(
+            q_test,
+            k_test,
+            v_test,
+            cu,
+            cu,
+            max_seqlen,
+            max_seqlen,
+            dropout_p=0.0,
+            softmax_scale=None,
+            causal=causal,
+            deterministic=False,
+        ))
 
     _assert_close(out_test, out_ref, dtype=dtype)
 
     dout = torch.randn_like(out_ref)
-    dq_ref, dk_ref, dv_ref = torch.autograd.grad(
-        (out_ref * dout).sum(), (q_ref, k_ref, v_ref)
-    )
-    dq_test, dk_test, dv_test = torch.autograd.grad(
-        (out_test * dout).sum(), (q_test, k_test, v_test)
-    )
+    dq_ref, dk_ref, dv_ref = torch.autograd.grad((out_ref * dout).sum(), (q_ref, k_ref, v_ref))
+    dq_test, dk_test, dv_test = torch.autograd.grad((out_test * dout).sum(), (q_test, k_test, v_test))
 
     _assert_close(dq_test, dq_ref, dtype=dtype, is_grad=True)
     _assert_close(dk_test, dk_ref, dtype=dtype, is_grad=True)

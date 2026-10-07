@@ -182,7 +182,7 @@ Ready-to-run training scripts are available for multiple models:
 
 Each example includes:
 
-- `download_dataset.sh` — download sample data
+- a README pointing at the matching download script under `examples/datasets/`
 - `preprocess_*.sh` — run preprocessing
 - `finetune_*.sh` — full finetune launcher
 - `finetune_*_lora.sh` — LoRA finetune launcher

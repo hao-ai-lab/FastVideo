@@ -34,9 +34,7 @@ class TestFusedTopkMaskTies:
         for topk in [1, 3, 5, 8]:
             mask = self._run_topk_mask(scores, topk)
             row_counts = mask.sum(dim=-1)
-            assert (row_counts == topk).all(), (
-                f"topk={topk}, row_counts={row_counts}"
-            )
+            assert (row_counts == topk).all(), (f"topk={topk}, row_counts={row_counts}")
 
     def test_reviewer_example(self):
         """Exact case from the reviewer: two 0.8875 with topk=1 → must select 1."""
@@ -58,9 +56,7 @@ class TestFusedTopkMaskTies:
         ).view(1, 1, 1, -1)
         for topk in [1, 2, 3, 4, 7, 8]:
             mask = self._run_topk_mask(scores, topk)
-            assert mask.sum().item() == topk, (
-                f"topk={topk}, selected={mask.sum().item()}"
-            )
+            assert mask.sum().item() == topk, (f"topk={topk}, selected={mask.sum().item()}")
 
     def test_batch_heads_ties(self):
         """Multiple batch/heads with tie-heavy scores."""
@@ -73,8 +69,7 @@ class TestFusedTopkMaskTies:
             mask = self._run_topk_mask(scores, topk)
             row_counts = mask.sum(dim=-1)
             assert (row_counts == topk).all(), (
-                f"topk={topk}, row_counts min={row_counts.min()}, max={row_counts.max()}"
-            )
+                f"topk={topk}, row_counts min={row_counts.min()}, max={row_counts.max()}")
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +127,7 @@ class TestFusedBlockMeanEquivalence:
         seq_len = num_blocks * block_elements
 
         x = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device="cuda")
-        vbs = torch.randint(16, 65, (num_blocks,), dtype=torch.int32, device="cuda")
+        vbs = torch.randint(16, 65, (num_blocks, ), dtype=torch.int32, device="cuda")
 
         fused_out = fused_block_mean(x, vbs, block_elements)
 
@@ -140,9 +135,8 @@ class TestFusedBlockMeanEquivalence:
         ref_out = (x_blocks.float().sum(dim=3) / vbs.view(1, 1, -1, 1).float()).to(torch.bfloat16)
 
         assert fused_out.shape == ref_out.shape
-        assert torch.allclose(fused_out, ref_out, atol=1e-2, rtol=1e-2), (
-            f"max diff={( fused_out - ref_out).abs().max().item()}"
-        )
+        assert torch.allclose(fused_out, ref_out, atol=1e-2,
+                              rtol=1e-2), (f"max diff={( fused_out - ref_out).abs().max().item()}")
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +164,7 @@ class TestFusedBlockMeanBackward:
         block_elements = 64
         seq_len = num_blocks * block_elements
 
-        vbs = torch.randint(16, 65, (num_blocks,), dtype=torch.int32, device="cuda")
+        vbs = torch.randint(16, 65, (num_blocks, ), dtype=torch.int32, device="cuda")
         grad_out = torch.randn(B, H, num_blocks, D, dtype=torch.bfloat16, device="cuda")
 
         x_fused = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device="cuda")
@@ -189,9 +183,7 @@ class TestFusedBlockMeanBackward:
         assert x_fused.grad.shape == x_ref.grad.shape
 
         max_diff = (x_fused.grad - x_ref.grad).abs().max().item()
-        assert torch.allclose(x_fused.grad, x_ref.grad, atol=1e-2, rtol=1e-2), (
-            f"gradient max diff={max_diff}"
-        )
+        assert torch.allclose(x_fused.grad, x_ref.grad, atol=1e-2, rtol=1e-2), (f"gradient max diff={max_diff}")
 
     def test_gradient_parity_variable_block_sizes(self):
         """Backward parity with non-uniform variable_block_sizes."""
@@ -203,7 +195,7 @@ class TestFusedBlockMeanBackward:
         block_elements = 64
         seq_len = num_blocks * block_elements
 
-        vbs = torch.randint(1, 65, (num_blocks,), dtype=torch.int32, device="cuda")
+        vbs = torch.randint(1, 65, (num_blocks, ), dtype=torch.int32, device="cuda")
         grad_out = torch.randn(B, H, num_blocks, D, dtype=torch.bfloat16, device="cuda")
 
         x_fused = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device="cuda")
@@ -218,9 +210,7 @@ class TestFusedBlockMeanBackward:
         out_ref.backward(grad_out)
 
         max_diff = (x_fused.grad - x_ref.grad).abs().max().item()
-        assert torch.allclose(x_fused.grad, x_ref.grad, atol=1e-2, rtol=1e-2), (
-            f"gradient max diff={max_diff}"
-        )
+        assert torch.allclose(x_fused.grad, x_ref.grad, atol=1e-2, rtol=1e-2), (f"gradient max diff={max_diff}")
 
     def test_gradient_through_matmul_chain(self):
         """End-to-end backward through the compress branch: block_mean → matmul → softmax → matmul."""
@@ -232,16 +222,14 @@ class TestFusedBlockMeanBackward:
         block_elements = 64
         seq_len = num_blocks * block_elements
 
-        vbs = torch.full((num_blocks,), block_elements, dtype=torch.int32, device="cuda")
+        vbs = torch.full((num_blocks, ), block_elements, dtype=torch.int32, device="cuda")
 
         def _forward_compress(x_q, x_k, x_v, use_fused):
-            mean_fn = fused_block_mean if use_fused else (
-                lambda x, v, be: _ref_block_mean_with_grad(x, v, be)
-            )
+            mean_fn = fused_block_mean if use_fused else (lambda x, v, be: _ref_block_mean_with_grad(x, v, be))
             q_c = mean_fn(x_q, vbs, block_elements)
             k_c = mean_fn(x_k, vbs, block_elements)
             v_c = mean_fn(x_v, vbs, block_elements)
-            scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (D ** 0.5)
+            scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (D**0.5)
             attn = torch.softmax(scores, dim=-1)
             return torch.matmul(attn, v_c)
 
@@ -261,12 +249,10 @@ class TestFusedBlockMeanBackward:
 
         for name, (g_fused, g_ref) in zip(
             ["dQ", "dK", "dV"],
-            zip(grads["fused"], grads["ref"]),
+                zip(grads["fused"], grads["ref"]),
         ):
             max_diff = (g_fused - g_ref).abs().max().item()
-            assert torch.allclose(g_fused, g_ref, atol=1e-2, rtol=1e-2), (
-                f"{name} gradient max diff={max_diff}"
-            )
+            assert torch.allclose(g_fused, g_ref, atol=1e-2, rtol=1e-2), (f"{name} gradient max diff={max_diff}")
 
 
 # ---------------------------------------------------------------------------
@@ -275,8 +261,13 @@ class TestFusedBlockMeanBackward:
 
 
 def _old_pytorch_video_sparse_attn(
-    q, k, v, variable_block_sizes, q_variable_block_sizes,
-    topk, block_elements,
+    q,
+    k,
+    v,
+    variable_block_sizes,
+    q_variable_block_sizes,
+    topk,
+    block_elements,
 ):
     """Reproduce the pre-optimization PyTorch pipeline from ops.py."""
     batch, heads, q_seq_len, dim = q.shape
@@ -291,7 +282,7 @@ def _old_pytorch_video_sparse_attn(
     k_c = (k_c.float().sum(dim=3) / variable_block_sizes.view(1, 1, -1, 1)).to(k.dtype)
     v_c = (v_c.float().sum(dim=3) / variable_block_sizes.view(1, 1, -1, 1)).to(v.dtype)
 
-    scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim ** 0.5)
+    scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (dim**0.5)
     attn = torch.softmax(scores, dim=-1)
     out_c = torch.matmul(attn, v_c)
     out_c = out_c.view(batch, heads, q_num_blocks, 1, dim)
@@ -311,7 +302,7 @@ class TestVideoSparseAttnEquivalence:
         q = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device=device)
         k = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device=device)
         v = torch.randn(B, H, seq_len, D, dtype=torch.bfloat16, device=device)
-        vbs = torch.full((num_blocks,), block_elements, dtype=torch.int32, device=device)
+        vbs = torch.full((num_blocks, ), block_elements, dtype=torch.int32, device=device)
         return q, k, v, vbs
 
     def test_compress_branch_equivalence(self):
@@ -327,17 +318,22 @@ class TestVideoSparseAttnEquivalence:
         q_c_fused = fused_block_mean(q, vbs, block_elements)
         k_c_fused = fused_block_mean(k, vbs, block_elements)
         v_c_fused = fused_block_mean(v, vbs, block_elements)
-        scores_fused = torch.matmul(q_c_fused, k_c_fused.transpose(-2, -1)) / (D ** 0.5)
+        scores_fused = torch.matmul(q_c_fused, k_c_fused.transpose(-2, -1)) / (D**0.5)
         attn_fused = torch.softmax(scores_fused, dim=-1)
         out_c_fused = torch.matmul(attn_fused, v_c_fused)
 
         old_out_c, old_scores, _ = _old_pytorch_video_sparse_attn(
-            q, k, v, vbs, vbs, topk, block_elements,
+            q,
+            k,
+            v,
+            vbs,
+            vbs,
+            topk,
+            block_elements,
         )
 
-        assert torch.allclose(scores_fused, old_scores, atol=1e-2, rtol=1e-2), (
-            f"scores max diff={( scores_fused - old_scores).abs().max().item()}"
-        )
+        assert torch.allclose(scores_fused, old_scores, atol=1e-2,
+                              rtol=1e-2), (f"scores max diff={( scores_fused - old_scores).abs().max().item()}")
 
     def test_topk_mask_row_count_matches(self):
         """Fused topk mask must select exactly topk per row, same as torch.topk."""
@@ -354,16 +350,20 @@ class TestVideoSparseAttnEquivalence:
 
         q_c = fused_block_mean(q, vbs, block_elements)
         k_c = fused_block_mean(k, vbs, block_elements)
-        scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (D ** 0.5)
+        scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (D**0.5)
 
         fused_mask = fused_topk_mask(scores, topk)
         row_counts = fused_mask.sum(dim=-1)
-        assert (row_counts == topk).all(), (
-            f"row_counts min={row_counts.min()}, max={row_counts.max()}"
-        )
+        assert (row_counts == topk).all(), (f"row_counts min={row_counts.min()}, max={row_counts.max()}")
 
         _, _, ref_mask = _old_pytorch_video_sparse_attn(
-            q, k, v, vbs, vbs, topk, block_elements,
+            q,
+            k,
+            v,
+            vbs,
+            vbs,
+            topk,
+            block_elements,
         )
         ref_counts = ref_mask.sum(dim=-1)
         assert (ref_counts == topk).all()
@@ -383,7 +383,7 @@ class TestVideoSparseAttnEquivalence:
 
         q_c = fused_block_mean(q, vbs, block_elements)
         k_c = fused_block_mean(k, vbs, block_elements)
-        scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (D ** 0.5)
+        scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (D**0.5)
 
         fused_mask = fused_topk_mask(scores, topk)
 

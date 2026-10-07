@@ -20,6 +20,7 @@ except ImportError:
     rms_norm_cuda = None
     layer_norm_cuda = None
 
+
 def int8_quant(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Quantize a floating-point tensor to int8 using a custom CUDA kernel.
@@ -67,6 +68,7 @@ def int8_linear(
     gemm_cuda(x_q, x_s, w_q, w_s, y)
     return y.reshape(*shape[:-1], n)
 
+
 def flatten_if_batched(*tensors):
     """
     Flattens all input tensors from (B, N, D_i) to (B * N, D_i) if they are batched (3D).
@@ -92,9 +94,8 @@ def flatten_if_batched(*tensors):
         batched = True
         batch_size = first.shape[0]
         assert all(t.shape[0] == batch_size for t in tensors), "All input tensors must have the same batch size"
-        assert all(
-            t.shape[1] == first.shape[1] for t in tensors
-        ), "All input tensors must have the same sequence length"
+        assert all(t.shape[1] == first.shape[1]
+                   for t in tensors), "All input tensors must have the same sequence length"
         flat_tensors = [t.reshape(-1, t.shape[-1]) for t in tensors]
     else:
         batched = False
@@ -167,21 +168,21 @@ def rmsnorm(x, w, eps):
     # allocate output
     M, N = x.shape
     y = torch.empty_like(x, dtype=x.dtype)
-    rstd = torch.empty((M,), dtype=torch.float32, device=x.device)
+    rstd = torch.empty((M, ), dtype=torch.float32, device=x.device)
 
     # heuristics for number of warps
     num_warps = 8
-    
+
     # Avoid illegal memory access
     N2 = triton.next_power_of_2(N)
-    
+
     if N <= 512:
         BLOCK_M = 32
     else:
         BLOCK_M = 1
 
     # Call the triton kernel
-    _rms_norm_fwd_fused[(triton.cdiv(M, BLOCK_M),)](  #
+    _rms_norm_fwd_fused[(triton.cdiv(M, BLOCK_M), )](  #
         x,
         y,
         w,
@@ -200,6 +201,7 @@ def rmsnorm(x, w, eps):
         y = y.reshape(BS, -1, y.shape[-1])
 
     return y, rstd
+
 
 @triton.jit
 def _layer_norm_param_fwd_fused(
@@ -245,7 +247,7 @@ def _layer_norm_param_fwd_fused(
 
     w = tl.load(W + cols)
     b = tl.load(B + cols)
-    
+
     x_hat = x_hat * w + b
 
     # Write output
@@ -260,20 +262,20 @@ def layernorm_param(x, w, b, eps):
     # allocate output
     M, N = x.shape
     y = torch.empty_like(x, dtype=torch.float32)
-    mean = torch.empty((M,), dtype=torch.float32, device=x.device)
-    rstd = torch.empty((M,), dtype=torch.float32, device=x.device)
+    mean = torch.empty((M, ), dtype=torch.float32, device=x.device)
+    rstd = torch.empty((M, ), dtype=torch.float32, device=x.device)
     # heuristics for number of warps
     num_warps = 8
 
     N2 = triton.next_power_of_2(N)
-    
+
     if N <= 512:
         BLOCK_M = 32
     else:
         BLOCK_M = 1
 
     # enqueue kernel
-    _layer_norm_param_fwd_fused[(triton.cdiv(M, BLOCK_M),)](  #
+    _layer_norm_param_fwd_fused[(triton.cdiv(M, BLOCK_M), )](  #
         x,
         y,
         w,
@@ -355,20 +357,20 @@ def layernorm_noparam(x, eps):
     # allocate output
     M, N = x.shape
     y = torch.empty_like(x, dtype=torch.float32)
-    mean = torch.empty((M,), dtype=torch.float32, device=x.device)
-    rstd = torch.empty((M,), dtype=torch.float32, device=x.device)
+    mean = torch.empty((M, ), dtype=torch.float32, device=x.device)
+    rstd = torch.empty((M, ), dtype=torch.float32, device=x.device)
     # heuristics for number of warps
     num_warps = 8
 
     N2 = triton.next_power_of_2(N)
-    
+
     if N <= 512:
         BLOCK_M = 32
     else:
         BLOCK_M = 1
 
     # enqueue kernel
-    _layer_norm_noparam_fwd_fused[(triton.cdiv(M, BLOCK_M),)](  #
+    _layer_norm_noparam_fwd_fused[(triton.cdiv(M, BLOCK_M), )](  #
         x,
         y,
         mean,
@@ -388,6 +390,7 @@ def layernorm_noparam(x, eps):
 
     return y, mean, rstd
 
+
 def layernorm(x, w, b, eps, elementwise_affine=True):
     if elementwise_affine:
         assert w is not None and b is not None
@@ -396,8 +399,10 @@ def layernorm(x, w, b, eps, elementwise_affine=True):
         assert w is None and b is None
         return layernorm_noparam(x, eps)
 
+
 def cdiv(a: int, b: int):
     return (a + b - 1) // b
+
 
 def dequantize_weight(w_q, w_s, dtype):
     # w_q: (N, K) int8
@@ -412,12 +417,14 @@ def dequantize_weight(w_q, w_s, dtype):
     w_s_exp = w_s_exp[:N, :K]
     return w_q.to(dtype) * w_s_exp.to(dtype)
 
+
 class Int8LinearFunction(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, x, w_q, w_s, bias=None):
         ctx.save_for_backward(x, w_q, w_s, bias)
         ctx.bias_requires_grad = bias.requires_grad if bias is not None else False
-        
+
         out = int8_linear(x, w_q, w_s)
         if bias is not None:
             out = out + bias
@@ -426,24 +433,26 @@ class Int8LinearFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         x, w_q, w_s, bias = ctx.saved_tensors
-        
+
         grad_input = None
-        grad_weight = None 
+        grad_weight = None
         grad_scale = None
         grad_bias = None
-        
-        if ctx.needs_input_grad[0]: 
+
+        if ctx.needs_input_grad[0]:
             # grad_input = grad_output @ W
             w_float = dequantize_weight(w_q, w_s, grad_output.dtype)
             grad_input = torch.matmul(grad_output, w_float)
-            
+
         if ctx.bias_requires_grad:
             dim_to_sum = list(range(grad_output.dim() - 1))
             grad_bias = grad_output.sum(dim=dim_to_sum)
-            
+
         return grad_input, grad_weight, grad_scale, grad_bias
 
+
 class RMSNormFunction(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, x, w, eps):
         y, rstd = rmsnorm(x, w, eps)
@@ -459,14 +468,14 @@ class RMSNormFunction(torch.autograd.Function):
         x, w, rstd = ctx.saved_tensors
         eps = ctx.eps
         N = x.shape[-1]
-        
+
         # dL/dy * w
         dx = grad_output * w
-        
+
         # Expand rstd
-        rstd = rstd.unsqueeze(-1) # (B, 1) or (M, 1)
+        rstd = rstd.unsqueeze(-1)  # (B, 1) or (M, 1)
         if x.dim() == 3:
-            # Flatten if necessary or handle dimensions. 
+            # Flatten if necessary or handle dimensions.
             # forward flattens x to (M, N) internally but saved x might be 3D?
             # rmsnorm takes x, flattens it. But does it modify x in place? No.
             # But ctx.save_for_backward saves the original x (3D if input was 3D).
@@ -479,36 +488,36 @@ class RMSNormFunction(torch.autograd.Function):
             x_flat = x
             grad_output_flat = grad_output
             dx = dx
-            
+
         # Standard RMSNorm backward
         # dy = grad_output_flat
         # x_hat = x * rstd
         # w * dy
         # c1 = mean(dy * w * x) * rstd^2
         # dx = (dy * w - c1 * x) * rstd
-        
+
         # More precise:
         # y = x * rstd * w
         # dy = grad_output
         # dw = sum(dy * x * rstd, dim=0)
-        
+
         grad_w = None
-        if ctx.needs_input_grad[1]: # w
-             # grad_w = (grad_output_flat * x_flat * rstd).sum(dim=0)
-             # More accurate gradient for weight when considering rstd was computed from x
-             # Actually, for Affine part (w), it is just sum(dL/dy * x_hat).
-             # y = x_hat * w
-             # dL/dw = sum(dL/dy * x_hat)
-             x_hat = x_flat * rstd
-             grad_w = (grad_output_flat * x_hat).sum(dim=0)
+        if ctx.needs_input_grad[1]:  # w
+            # grad_w = (grad_output_flat * x_flat * rstd).sum(dim=0)
+            # More accurate gradient for weight when considering rstd was computed from x
+            # Actually, for Affine part (w), it is just sum(dL/dy * x_hat).
+            # y = x_hat * w
+            # dL/dw = sum(dL/dy * x_hat)
+            x_hat = x_flat * rstd
+            grad_w = (grad_output_flat * x_hat).sum(dim=0)
 
         grad_input = None
-        if ctx.needs_input_grad[0]: # x
+        if ctx.needs_input_grad[0]:  # x
             # x_hat = x * rstd
-            # dx = rstd * (w * dy - mean(w * dy * x_hat) * x_hat) 
+            # dx = rstd * (w * dy - mean(w * dy * x_hat) * x_hat)
             # but for RMSNorm:
             # dx = rstd * (w * dy - (x * rstd^2) * mean(w * dy * x)) -> check formula
-            
+
             # Using PyTorch autograd for reference logic:
             # y = x / sqrt(mean(x^2) + eps) * w
             # Let sigma = sqrt(...)
@@ -518,12 +527,12 @@ class RMSNormFunction(torch.autograd.Function):
             # dL/dx = (dL/dy * w)/sigma - sum(dL/dy * w * x) * x / (N * sigma^3)
             #       = (1/sigma) * [ (dL/dy * w) - x * sum(dL/dy * w * x) / (N * sigma^2) ]
             #       = rstd * [ (dL/dy * w) - x * rstd^2 * mean(dL/dy * w * x) ] # Wait, sum/N is mean
-            
+
             # Let's compute:
             dy_w = grad_output_flat * w
             # term2 = (dy_w * x_flat).sum(dim=-1, keepdim=True) / N # mean(dy*w*x)
             # grad_input = rstd * (dy_w - x_flat * (rstd ** 2) * term2)
-            
+
             # Re-derivation:
             # x_hat = x * rstd
             # y = x_hat * w
@@ -531,20 +540,22 @@ class RMSNormFunction(torch.autograd.Function):
             # dy/dx = w * dx_hat/dx
             # dx_hat/dx = rstd * (I - x * x^T * rstd^2 / N) ?? No.
             # dx_hat_i / dx_j = rstd * (delta_ij - x_i * x_j * rstd^2 / N)
-            
+
             # dL/dx_hat = dL/dy * w
             # dL/dx = rstd * (dL/dx_hat - x * rstd^2 * mean(dL/dx_hat * x))
-            
+
             dx_hat = grad_output_flat * w
             dx_hat_x_mean = (dx_hat * x_flat).mean(dim=-1, keepdim=True)
-            grad_input = rstd * (dx_hat - x_flat * (rstd ** 2) * dx_hat_x_mean)
-            
+            grad_input = rstd * (dx_hat - x_flat * (rstd**2) * dx_hat_x_mean)
+
             if x.dim() == 3:
                 grad_input = grad_input.reshape(x.shape)
-            
+
         return grad_input, grad_w, None
 
+
 class LayerNormFunction(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, x, w, b, eps, elementwise_affine):
         if elementwise_affine:
@@ -553,7 +564,7 @@ class LayerNormFunction(torch.autograd.Function):
         else:
             y, mean, rstd = layernorm_noparam(x, eps)
             ctx.save_for_backward(x, None, None, mean, rstd)
-            
+
         ctx.eps = eps
         ctx.elementwise_affine = elementwise_affine
         return y
@@ -562,60 +573,62 @@ class LayerNormFunction(torch.autograd.Function):
     def backward(ctx, grad_output):
         x, w, b, mean, rstd = ctx.saved_tensors
         N = x.shape[-1]
-        
+
         if x.dim() == 3:
             x_flat = x.reshape(-1, N)
             grad_output_flat = grad_output.reshape(-1, N)
         else:
             x_flat = x
             grad_output_flat = grad_output
-            
+
         if w is None:
-             w_eff = 1.0
+            w_eff = 1.0
         else:
-             w_eff = w
-        
+            w_eff = w
+
         # dx calculation
         # x_hat = (x - mean) * rstd
         # y = x_hat * w + b
         # dL/dx_hat = dL/dy * w
-        
+
         dy = grad_output_flat
         dx_hat = dy * w_eff
-        
+
         # dL/dvar = sum(dL/dx_hat * (x-mean) * (-0.5) * (var+eps)^(-1.5))
         #         = -0.5 * rstd^3 * sum(dx_hat * (x-mean))
         # dL/dmean = sum(dL/dx_hat * (-rstd)) + dL/dvar * (-2/N) * sum(x-mean)
         # term sum(x-mean) is 0. So second part vanishes.
         # dL/dmean = -rstd * sum(dx_hat)
-        
+
         # dL/dx = dL/dx_hat * rstd + dL/dvar * 2(x-mean)/N + dL/dmean * 1/N
         #       = dx_hat * rstd + (-0.5 * rstd^3 * sum(dx_hat * (x-mean))) * 2(x-mean)/N + (-rstd * sum(dx_hat))/N
         #       = rstd * [ dx_hat - mean(dx_hat) - (x-mean)*rstd^2 * mean(dx_hat * (x-mean)) ]
-        
+
         x_centered = x_flat - mean.unsqueeze(-1)
         dx_hat_mean = dx_hat.mean(dim=-1, keepdim=True)
         dx_hat_x_centered_mean = (dx_hat * x_centered).mean(dim=-1, keepdim=True)
-        
-        grad_input = rstd.unsqueeze(-1) * (dx_hat - dx_hat_mean - x_centered * (rstd.unsqueeze(-1)**2) * dx_hat_x_centered_mean)
-        
+
+        grad_input = rstd.unsqueeze(-1) * (dx_hat - dx_hat_mean - x_centered *
+                                           (rstd.unsqueeze(-1)**2) * dx_hat_x_centered_mean)
+
         if x.dim() == 3:
             grad_input = grad_input.reshape(x.shape)
 
         grad_w = None
         grad_b = None
-        
+
         if ctx.elementwise_affine:
             if ctx.needs_input_grad[1]:
-                 x_hat = x_centered * rstd.unsqueeze(-1)
-                 grad_w = (dy * x_hat).sum(dim=0)
+                x_hat = x_centered * rstd.unsqueeze(-1)
+                grad_w = (dy * x_hat).sum(dim=0)
             if ctx.needs_input_grad[2]:
-                 grad_b = dy.sum(dim=0)
-                 
+                grad_b = dy.sum(dim=0)
+
         return grad_input, grad_w, grad_b, None, None
 
 
 class Int8Linear(nn.Module):
+
     def __init__(self, in_features, out_features, bias=True, dtype=torch.bfloat16):
         super().__init__()
         self.in_features = in_features
@@ -623,27 +636,24 @@ class Int8Linear(nn.Module):
 
         row_blocks = cdiv(out_features, b=128)
         col_blocks = cdiv(in_features, b=128)
-        
+
         self.register_buffer("int8_weight", torch.empty((out_features, in_features), dtype=torch.int8))
         self.register_buffer("scale", torch.empty((row_blocks, col_blocks), dtype=torch.float32))
         if bias:
             self.register_buffer("bias", torch.empty(out_features, dtype=dtype))
         else:
             self.bias = None
-        
 
     def forward(self, x):
         return Int8LinearFunction.apply(x, self.int8_weight, self.scale, self.bias)
 
     @classmethod
     def from_linear(cls, original_linear: nn.Linear, quantize: bool = True):
-    
-        int8_layer = cls(
-            original_linear.in_features,
-            original_linear.out_features,
-            bias=original_linear.bias is not None,
-            dtype=original_linear.weight.dtype
-        )
+
+        int8_layer = cls(original_linear.in_features,
+                         original_linear.out_features,
+                         bias=original_linear.bias is not None,
+                         dtype=original_linear.weight.dtype)
         if quantize:
             w_data = original_linear.weight.data.cuda()
             int8_w, scale = int8_quant(w_data)
@@ -652,10 +662,12 @@ class Int8Linear(nn.Module):
             int8_layer.scale.copy_(scale)
             if original_linear.bias is not None:
                 int8_layer.bias.data.copy_(original_linear.bias.data.cuda())
-            
+
         return int8_layer
-    
+
+
 class FastRMSNorm(nn.Module):
+
     def __init__(self, dim: int, eps: float = 1e-5):
         super().__init__()
         self.dim = dim
@@ -667,23 +679,15 @@ class FastRMSNorm(nn.Module):
 
     @classmethod
     def from_rmsnorm(cls, original_rmsnorm):
-        rmsnorm_layer = cls(
-            dim=original_rmsnorm.dim,
-            eps=original_rmsnorm.eps
-        )
+        rmsnorm_layer = cls(dim=original_rmsnorm.dim, eps=original_rmsnorm.eps)
         if original_rmsnorm.weight.device != torch.device('meta'):
             rmsnorm_layer.weight.data.copy_(original_rmsnorm.weight.float().data)
         return rmsnorm_layer
-    
+
+
 class FastLayerNorm(nn.Module):
 
-    def __init__(
-        self,
-        dim: int,
-        eps: float = 1e-5,
-        elementwise_affine: bool = False,
-        bias: bool = True
-    ) :
+    def __init__(self, dim: int, eps: float = 1e-5, elementwise_affine: bool = False, bias: bool = True):
         super().__init__()
         self.dim = dim  # type: ignore[arg-type]
         self.eps = eps
@@ -700,15 +704,13 @@ class FastLayerNorm(nn.Module):
 
     def forward(self, x):
         return LayerNormFunction.apply(x.float(), self.weight, self.bias, self.eps, self.elementwise_affine).to(x.dtype)
-    
+
     @classmethod
     def from_layernorm(cls, original_layernorm):
-        layernorm_layer = cls(
-            dim=original_layernorm.normalized_shape[0],
-            eps=original_layernorm.eps,
-            elementwise_affine=False if original_layernorm.weight is None else True,
-            bias=original_layernorm.bias is not None
-        )
+        layernorm_layer = cls(dim=original_layernorm.normalized_shape[0],
+                              eps=original_layernorm.eps,
+                              elementwise_affine=False if original_layernorm.weight is None else True,
+                              bias=original_layernorm.bias is not None)
         if original_layernorm.weight is not None and original_layernorm.weight.device != torch.device('meta'):
             layernorm_layer.weight.data.copy_(original_layernorm.weight.data)
         if original_layernorm.bias is not None and original_layernorm.bias.device != torch.device('meta'):

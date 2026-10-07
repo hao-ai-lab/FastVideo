@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29518")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29518")
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 from pathlib import Path
@@ -28,9 +30,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.train.models.kandinsky5 import Kandinsky5Model
 from fastvideo.train.utils.config import load_run_config
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures" /
-    "kandinsky5_t2v_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "kandinsky5_t2v_min.yaml")
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -68,8 +68,7 @@ def test_kandinsky5_model_loads_and_forwards():
     latent_h = grid_h * patch_size[1]
     latent_w = grid_w * patch_size[2]
 
-    latents = torch.randn(
-        1, latent_t, latent_h, latent_w, in_visual_dim, device=device, dtype=dtype)
+    latents = torch.randn(1, latent_t, latent_h, latent_w, in_visual_dim, device=device, dtype=dtype)
     if bool(getattr(transformer, "visual_cond", False)):
         # The shipped checkpoint has visual_cond=True (unified T2V/I2V):
         # Kandinsky5VisualEmbeddings expects [real | zero_cond | zero_mask]
@@ -107,6 +106,5 @@ def test_kandinsky5_model_loads_and_forwards():
         ).sample
 
     expected_shape = (1, latent_t, latent_h, latent_w, out_visual_dim)
-    assert tuple(out.shape) == expected_shape, (
-        f"output shape {tuple(out.shape)} != expected {expected_shape}")
+    assert tuple(out.shape) == expected_shape, (f"output shape {tuple(out.shape)} != expected {expected_shape}")
     assert torch.isfinite(out).all().item(), "output contains NaN/Inf"

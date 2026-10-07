@@ -8,10 +8,10 @@ PR TITLE: Must start with a type tag, e.g.:
 MERGE WORKFLOW:
   1. Ensure pre-commit passes and you have at least 1 approval
   2. Comment /merge (or add the "ready" label) to enter the Merge Queue
-  3. Full Test Suite runs automatically on a staging branch → auto-merge on success
+  3. A path-aware merge gate runs only relevant integration tests → auto-merge on success
 
 ON-DEMAND TESTING (write access required):
-  /test full       — Full Test Suite        /test ssim        — SSIM regression
+  /test full       — Explicit all-lane run  /test ssim        — Full SSIM regression
   /test training   — Training pipeline      /test encoder     — Encoder tests
   /test transformer — Transformer tests     /test vae         — VAE tests
   /test kernel     — CUDA kernel tests      /test unit        — Unit tests

@@ -15,8 +15,8 @@ REQUIRED_GPUS = 1
 
 
 @pytest.mark.parametrize("metric,expected,tol,where", INVARIANT_SPEC)
-def test_metric_identity_invariant(metric: str, expected: float, tol: float | None,
-                                   where: str, invariant_results) -> None:
+def test_metric_identity_invariant(metric: str, expected: float, tol: float | None, where: str,
+                                   invariant_results) -> None:
     if where == "corpus":
         result = invariant_results.corpus.get(metric)
     else:
@@ -30,11 +30,7 @@ def test_metric_identity_invariant(metric: str, expected: float, tol: float | No
     if tol is None:
         # threshold form (e.g. PSNR ≥ 99); for identical inputs PSNR
         # approaches infinity but float epsilon caps it at ~100.
-        assert result.score >= expected, (
-            f"{metric}: {result.score:.4f} below threshold {expected}"
-        )
+        assert result.score >= expected, (f"{metric}: {result.score:.4f} below threshold {expected}")
     else:
         delta = abs(result.score - expected)
-        assert delta <= tol, (
-            f"{metric}: got {result.score:.6f}, expected ≈ {expected} (|Δ|={delta:.6f} > tol={tol})"
-        )
+        assert delta <= tol, (f"{metric}: got {result.score:.6f}, expected ≈ {expected} (|Δ|={delta:.6f} > tol={tol})")

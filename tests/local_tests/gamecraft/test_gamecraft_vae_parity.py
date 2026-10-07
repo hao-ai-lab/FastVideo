@@ -44,21 +44,14 @@ def _load_weights(weights_path: Path) -> dict[str, torch.Tensor]:
     return vae_sd
 
 
-def _load_into_model(
-    model: torch.nn.Module, weights: dict[str, torch.Tensor], name: str
-) -> tuple[int, list[str]]:
+def _load_into_model(model: torch.nn.Module, weights: dict[str, torch.Tensor], name: str) -> tuple[int, list[str]]:
     """Load weights into a model, checking for missing/unexpected keys."""
     model_state = model.state_dict()
-    filtered = {
-        k: v for k, v in weights.items()
-        if k in model_state and model_state[k].shape == v.shape
-    }
+    filtered = {k: v for k, v in weights.items() if k in model_state and model_state[k].shape == v.shape}
     missing = [k for k in model_state.keys() if k not in filtered]
     unexpected = [k for k in weights.keys() if k not in model_state]
-    print(
-        f"[VAE TEST] {name}: Loading {len(filtered)}/{len(model_state)} tensors "
-        f"({len(missing)} missing, {len(unexpected)} unexpected)"
-    )
+    print(f"[VAE TEST] {name}: Loading {len(filtered)}/{len(model_state)} tensors "
+          f"({len(missing)} missing, {len(unexpected)} unexpected)")
     if missing:
         print(f"[VAE TEST] {name} missing keys: {missing[:5]}{'...' if len(missing) > 5 else ''}")
     if not filtered:
@@ -67,10 +60,7 @@ def _load_into_model(
     return len(filtered), missing
 
 
-def _load_official_vae(
-    official_path: Path, vae_sd: dict[str, torch.Tensor],
-    device: torch.device, dtype: torch.dtype
-):
+def _load_official_vae(official_path: Path, vae_sd: dict[str, torch.Tensor], device: torch.device, dtype: torch.dtype):
     """Load the official GameCraft VAE from hymm_sp/vae."""
     sys.path.insert(0, str(official_path))
 
@@ -79,9 +69,7 @@ def _load_official_vae(
     except ImportError as e:
         pytest.skip(f"Failed to import official VAE: {e}")
 
-    config_path = (
-        official_path / "weights" / "stdmodels" / "vae_3d" / "hyvae" / "config.json"
-    )
+    config_path = (official_path / "weights" / "stdmodels" / "vae_3d" / "hyvae" / "config.json")
     if not config_path.exists():
         pytest.skip(f"VAE config not found at {config_path}")
 
@@ -117,9 +105,7 @@ def _load_official_vae(
     return vae.to(device=device, dtype=dtype).eval()
 
 
-def _load_fastvideo_vae(
-    vae_sd: dict[str, torch.Tensor], device: torch.device, dtype: torch.dtype
-):
+def _load_fastvideo_vae(vae_sd: dict[str, torch.Tensor], device: torch.device, dtype: torch.dtype):
     """Load FastVideo GameCraftVAE with official weights."""
     from fastvideo.configs.models.vaes import GameCraftVAEConfig
     from fastvideo.models.vaes.gamecraftvae import GameCraftVAE
@@ -144,15 +130,12 @@ def test_gamecraft_vae_parity():
     """
     torch.manual_seed(42)
 
-    official_path = Path(
-        os.getenv("GAMECRAFT_OFFICIAL_PATH", repo_root / "Hunyuan-GameCraft-1.0")
-    )
+    official_path = Path(os.getenv("GAMECRAFT_OFFICIAL_PATH", repo_root / "Hunyuan-GameCraft-1.0"))
     vae_weights_path = Path(
         os.getenv(
             "GAMECRAFT_VAE_PATH",
             repo_root / "Hunyuan-GameCraft-1.0" / "weights" / "stdmodels" / "vae_3d" / "hyvae" / "pytorch_model.pt",
-        )
-    )
+        ))
 
     if not official_path.exists():
         pytest.skip(f"Official GameCraft repo not found at {official_path}")
@@ -253,20 +236,19 @@ def test_gamecraft_vae_parity():
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 def test_gamecraft_vae_config_compatibility():
     """Test that GameCraft VAE config is compatible with FastVideo's GameCraftVAE."""
-    vae_config_path = (
-        repo_root / "Hunyuan-GameCraft-1.0" / "weights" / "stdmodels" / "vae_3d" / "hyvae" / "config.json"
-    )
-    
+    vae_config_path = (repo_root / "Hunyuan-GameCraft-1.0" / "weights" / "stdmodels" / "vae_3d" / "hyvae" /
+                       "config.json")
+
     if not vae_config_path.exists():
         pytest.skip(f"VAE config not found at {vae_config_path}")
-    
+
     with open(vae_config_path) as f:
         gc_config = json.load(f)
-    
+
     print("\n[VAE CONFIG TEST] GameCraft VAE config:")
     for k, v in gc_config.items():
         print(f"  {k}: {v}")
-    
+
     # Expected HunyuanVideo VAE config
     expected_config = {
         "in_channels": 3,
@@ -276,14 +258,14 @@ def test_gamecraft_vae_config_compatibility():
         "time_compression_ratio": 4,
         "scaling_factor": 0.476986,
     }
-    
+
     # Verify compatibility
     for key, expected in expected_config.items():
         if key in gc_config:
             actual = gc_config[key]
             assert actual == expected, f"Config mismatch for {key}: expected {expected}, got {actual}"
             print(f"[VAE CONFIG TEST] {key}: OK (matches expected)")
-    
+
     print("[VAE CONFIG TEST] Config compatibility check passed!")
 
 

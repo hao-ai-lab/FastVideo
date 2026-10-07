@@ -46,7 +46,8 @@ class _FakeVideoGenerator:
         self.executor = _FakeExecutor()
 
     def _generate_request_impl(
-        self, request: GenerationRequest,
+        self,
+        request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
         return self._result
 
@@ -59,18 +60,15 @@ class _FakeVideoGenerator:
         from fastvideo.entrypoints.video_generator import VideoGenerator
 
         instance = cls(result)
-        instance.generate_async = VideoGenerator.generate_async.__get__(
-            instance, cls)
-        instance.default_health_check_request = (
-            VideoGenerator.default_health_check_request)
+        instance.generate_async = VideoGenerator.generate_async.__get__(instance, cls)
+        instance.default_health_check_request = (VideoGenerator.default_health_check_request)
         return instance
 
 
 def _make_request(**overrides: Any) -> GenerationRequest:
     base = GenerationRequest(
         prompt="hi",
-        sampling=SamplingConfig(num_inference_steps=4, height=64, width=64,
-                                 num_frames=8),
+        sampling=SamplingConfig(num_inference_steps=4, height=64, width=64, num_frames=8),
         output=OutputConfig(save_video=False, return_frames=False),
     )
     for key, value in overrides.items():
@@ -152,8 +150,7 @@ class TestFinalEventShape:
         assert final.metadata["generation_time"] == 0.01
 
     def test_carries_continuation_state_when_present(self):
-        state = ContinuationState(
-            kind="ltx2.v1", payload={"schema_version": 1, "segment_index": 3})
+        state = ContinuationState(kind="ltx2.v1", payload={"schema_version": 1, "segment_index": 3})
         result = _make_result(state=state)
         gen = _FakeVideoGenerator.bind(result)
 
@@ -235,12 +232,7 @@ class TestDynamoStyleHandlerIntegration:
     def test_async_handler_yields_typed_events_without_internal_imports(self):
         # The import set is exactly what the Dynamo backend uses.
         from fastvideo.api import (  # noqa: F401
-            ContinuationState,
-            GenerationRequest,
-            InputConfig,
-            OutputConfig,
-            SamplingConfig,
-            VideoFinalEvent,
+            ContinuationState, GenerationRequest, InputConfig, OutputConfig, SamplingConfig, VideoFinalEvent,
             VideoProgressEvent,
         )
 
@@ -250,9 +242,7 @@ class TestDynamoStyleHandlerIntegration:
             # Adapter: dict -> typed request.
             req = GenerationRequest(
                 prompt=request_dict["prompt"],
-                sampling=SamplingConfig(
-                    num_inference_steps=1, num_frames=8,
-                    height=256, width=256),
+                sampling=SamplingConfig(num_inference_steps=1, num_frames=8, height=256, width=256),
                 output=OutputConfig(save_video=False, return_frames=False),
             )
             async for event in gen.generate_async(req):
