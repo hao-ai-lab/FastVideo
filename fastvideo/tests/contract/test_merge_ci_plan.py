@@ -37,6 +37,15 @@ def test_model_family_change_selects_focused_golden_and_ssim():
         "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
 
 
+def test_hunyuan15_change_selects_its_i2v_ssim_test():
+    plan = PLAN_MERGE_CI.classify_paths(["fastvideo/pipelines/basic/hunyuan15/hunyuan15_i2v_pipeline.py"])
+
+    assert plan.encoded_lanes() == ",golden-gate,ssim,"
+    # No HunyuanVideo 1.5 golden test exists yet, so golden coverage stays "all".
+    assert plan.encoded_golden_tests() == "all"
+    assert plan.encoded_ssim_tests() == "test_hunyuan15_i2v_similarity.py"
+
+
 def test_flux2_change_does_not_pull_unrelated_flux1_quality_tests():
     plan = PLAN_MERGE_CI.classify_paths(["fastvideo/pipelines/basic/flux_2/flux_2_pipeline.py"])
 

@@ -117,6 +117,10 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
+
+        The reference image is encoded once and reused for the whole latent
+        batch. ``DenoisingStage`` still asserts a batch of one, so the repeat is
+        a no-op today; the stage no longer assumes a batch of one itself.
         """
         device = get_local_torch_device()
         batch_size = batch.raw_latent_shape[0]

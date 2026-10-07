@@ -65,10 +65,16 @@ class _ConstantEncoder(torch.nn.Module):
         self.out_channels = out_channels
         self.spatial_compression_ratio = spatial_compression_ratio
         self.forward_calls = 0
+        self.pixel_shapes: list[tuple[int, ...]] = []
 
     def forward(self, pixels: torch.Tensor) -> torch.Tensor:
         self.forward_calls += 1
+        self.pixel_shapes.append(tuple(pixels.shape))
         batch_size, _, _, height, width = pixels.shape
+        # The real encoder packs 2x2 spatial blocks at each of its four stages,
+        # so a side that is a multiple of 8 but not 16 blows up in its view().
+        assert height % 16 == 0, height
+        assert width % 16 == 0, width
         return torch.full(
             (
                 batch_size,
@@ -92,24 +98,27 @@ class _UnusedDecoder(torch.nn.Module):
         return latents
 
 
-def _batch(pil_image, batch_size: int = 1):
-    raw_latent_shape = (batch_size, ) + LATENT_SHAPE[1:]
+def _batch(pil_image, batch_size: int = 1, height: int | None = None, width: int | None = None):
+    height = height or LATENT_SHAPE[3] * VAE_SPATIAL_COMPRESSION_RATIO
+    width = width or LATENT_SHAPE[4] * VAE_SPATIAL_COMPRESSION_RATIO
+    raw_latent_shape = (batch_size, LATENT_SHAPE[1], LATENT_SHAPE[2], height // VAE_SPATIAL_COMPRESSION_RATIO,
+                        width // VAE_SPATIAL_COMPRESSION_RATIO)
     return SimpleNamespace(
         pil_image=pil_image,
         raw_latent_shape=raw_latent_shape,
         image_embeds=[],
         image_latent=None,
         video_latent=None,
-        height=LATENT_SHAPE[3] * VAE_SPATIAL_COMPRESSION_RATIO,
-        width=LATENT_SHAPE[4] * VAE_SPATIAL_COMPRESSION_RATIO,
+        height=height,
+        width=width,
     )
 
 
-def _args():
+def _args(vae_tiling: bool = True):
     return SimpleNamespace(
         pipeline_config=SimpleNamespace(
             vae_precision="fp32",
-            vae_tiling=True,
+            vae_tiling=vae_tiling,
             vae_config=SimpleNamespace(
                 arch_config=SimpleNamespace(spatial_compression_ratio=VAE_SPATIAL_COMPRESSION_RATIO)),
         ),
@@ -167,6 +176,16 @@ def test_i2v_configs_build_the_vae_encoder_and_decoder(config_cls, lightweight_v
     assert pipeline_config.text_encoder_configs[0].arch_config.output_hidden_states is True
     assert isinstance(vae.encoder, _ConstantEncoder)
     assert isinstance(vae.decoder, _UnusedDecoder)
+
+
+@pytest.mark.parametrize(
+    "config_cls",
+    [Hunyuan15I2V480PStepDistilledConfig, Hunyuan15I2V720PConfig],
+)
+def test_i2v_configs_run_the_image_encoder_in_fp16(config_cls) -> None:
+    # fp32 is the PipelineConfig default; the SigLIP tower only doubles its
+    # footprint for it. HYWorldConfig runs the same tower in fp16.
+    assert config_cls().image_encoder_precision == "fp16"
 
 
 @pytest.mark.parametrize(
@@ -255,6 +274,19 @@ class TestImageToVideoPath:
         # DenoisingStage checks video_latent first and would append the mask
         # ahead of the conditioning, so this slot has to stay empty.
         assert batch.video_latent is None
+
+    def test_reference_image_is_aligned_to_the_vae_compression_ratio(self, i2v_stage) -> None:
+        # 552 is a multiple of 8, which is all InputValidationStage checks, but
+        # not of 16, which the encoder's 2x2 rearrange needs, so the stage has
+        # to hand the VAE 544 -- the same ratio the latent preparation divides
+        # by. Tiling is off so the encoder sees the aligned image and not tiles.
+        height, width = 552, 96
+        batch = i2v_stage.forward(_batch(REFERENCE_IMAGE, height=height, width=width), _args(vae_tiling=False))
+
+        assert i2v_stage.vae.encoder.pixel_shapes == [(1, 3, 1, 544, width)]
+        assert batch.image_latent.shape == (1, LATENT_SHAPE[1] + 1, LATENT_SHAPE[2],
+                                            height // VAE_SPATIAL_COMPRESSION_RATIO,
+                                            width // VAE_SPATIAL_COMPRESSION_RATIO)
 
     def test_single_reference_conditioning_repeats_to_the_latent_batch(self, i2v_stage) -> None:
         batch_size = 2

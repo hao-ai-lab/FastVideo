@@ -121,12 +121,15 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
 
 
 @dataclass
-class Hunyuan15I2V480PStepDistilledConfig(Hunyuan15T2V480PConfig):
-    flow_shift: int = 7
+class Hunyuan15I2VConfig(Hunyuan15T2V480PConfig):
+    """Shared configuration for the HunyuanVideo 1.5 image-to-video checkpoints."""
 
     # The i2v checkpoints ship a SigLIP vision tower; declaring it here is what
     # makes the loader build one.
     image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)
+    # HYWorldConfig runs the same tower in fp16; fp32 only doubles the
+    # footprint and slows the matmuls.
+    image_encoder_precision: str = "fp16"
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -136,6 +139,13 @@ class Hunyuan15I2V480PStepDistilledConfig(Hunyuan15T2V480PConfig):
         super().check_pipeline_config()
         if not self.vae_config.load_encoder:
             raise ValueError("HunyuanVideo 1.5 I2V requires the VAE encoder.")
+
+
+@dataclass
+class Hunyuan15I2V480PStepDistilledConfig(Hunyuan15I2VConfig):
+    """480p step-distilled image-to-video checkpoint."""
+
+    flow_shift: int = 7
 
 
 @dataclass
@@ -147,22 +157,10 @@ class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
 
 
 @dataclass
-class Hunyuan15I2V720PConfig(Hunyuan15T2V720PConfig):
-    """Base configuration for HunYuan pipeline architecture."""
+class Hunyuan15I2V720PConfig(Hunyuan15I2VConfig):
+    """720p distilled image-to-video checkpoint."""
 
-    # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 7
-
-    image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        self.vae_config.load_encoder = True
-
-    def check_pipeline_config(self) -> None:
-        super().check_pipeline_config()
-        if not self.vae_config.load_encoder:
-            raise ValueError("HunyuanVideo 1.5 I2V requires the VAE encoder.")
 
 
 @dataclass
