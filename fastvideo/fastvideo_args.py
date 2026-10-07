@@ -1243,6 +1243,10 @@ class TrainingArgs(FastVideoArgs):
     arguments. If there are any conflicts, the training arguments will take
     precedence.
     """
+    # Generic runner entry point (fastvideo/training/runner.py)
+    pipeline_class: str = ""
+    pipeline_module: str = ""
+
     data_path: str = ""
     dataloader_num_workers: int = 0
     num_height: int = 0

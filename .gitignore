@@ -143,5 +143,6 @@ fastvideo/tests/ssim/.reference_videos_download.lock
 *.nvimlog
 .nvimlog
 .python-version
+/LTX-2-Reference/
 scripts/benchmarks/minimax_h3_pro6000/headline_results/
 fastvideo/tests/ssim/.reference_videos_download.lock

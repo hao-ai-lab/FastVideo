@@ -340,6 +340,13 @@ FASTVIDEO_NVFP4_FA4 = EnvBool(
     category="attention",
     doc="FlashAttention-4 quantizes Q and K to NVFP4. An explicit nvfp4_fa4 attention implementation argument "
     "takes precedence.")
+FASTVIDEO_FA4_PV_MODE = EnvChoice(
+    "bf16",
+    choices=("bf16", "fp8"),
+    category="attention",
+    doc="V dtype on the NVFP4 FlashAttention-4 path (FLASH_ATTN with nvfp4_fa4, ATTN_QAT_INFER on sm_100a/sm_103a): "
+    "bf16 keeps V in BF16; fp8 casts V to float8 e4m3 without scaling. An explicit fa4_pv_mode attention "
+    "implementation argument takes precedence.")
 FASTVIDEO_DISABLE_ATTENTION_COMPILE = EnvBool(
     True,
     category="attention",
