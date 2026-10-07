@@ -293,6 +293,9 @@ class LingBotVideoDenoisingStage(PipelineStage):
         trajectory: list[torch.Tensor] = []
         trajectory_timesteps: list[torch.Tensor] = []
         for timestep in batch.timesteps:
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             timestep_batch = self._transformer_timestep(timestep, transformer_dtype).expand(1).to(device)
             latent_input = latents
             if do_cfg and batch.batch_cfg:
