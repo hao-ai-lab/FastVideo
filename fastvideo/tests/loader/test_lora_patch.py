@@ -1,7 +1,7 @@
 """Whole-parameter LoRA payload: key classification, application, and reporting.
 
-CPU-only. Nothing here loads a model -- the point is the key algebra and the arithmetic,
-which is where a wrong answer is silent rather than loud.
+Nothing here loads a model. Most tests exercise key algebra and arithmetic on the CPU;
+one regression test verifies cross-device adapter loading when CUDA is available.
 """
 import logging
 
@@ -142,7 +142,7 @@ def _stub_fsdp_loading(monkeypatch):
     monkeypatch.setattr(fsdp_load, "set_mixed_precision_policy", lambda **_: None)
     monkeypatch.setattr(fsdp_load, "safetensors_weights_iterator", lambda *_args, **_kwargs: iter(()))
     monkeypatch.setattr(fsdp_load, "load_model_from_full_model_state_dict", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(fsdp_load, "_maybe_quantize_model", lambda _model: None)
+    monkeypatch.setattr(fsdp_load, "_maybe_quantize_model", lambda _model, **_kwargs: None)
 
 
 def _load_tiny_model(model_cls, *, lora_path=None, lora_strength=1.0):
@@ -279,6 +279,18 @@ def test_apply_to_supports_standalone_parameters(tmp_path):
     patch = DenseLoRAPatch.from_adapter(path)
     out = patch.apply_to("blocks.0.scale_shift_table", torch.ones(4))
     assert torch.allclose(out, torch.full((4, ), 1.25))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required for cross-device adapter loading")
+def test_apply_to_moves_cpu_delta_to_base_tensor_device(tmp_path):
+    """A CPU safetensors delta follows a directly loaded CUDA checkpoint tensor."""
+    path = write_adapter(tmp_path, {"blocks.0.norm1.diff": torch.full((4, ), 0.25)})
+    patch = DenseLoRAPatch.from_adapter(path)
+
+    out = patch.apply_to("blocks.0.norm1.weight", torch.ones(4, device="cuda"))
+
+    assert out.device.type == "cuda"
+    assert torch.allclose(out.cpu(), torch.full((4, ), 1.25))
 
 
 def test_apply_to_leaves_unrelated_parameters_untouched(tmp_path):

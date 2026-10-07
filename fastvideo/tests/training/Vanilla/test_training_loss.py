@@ -1,7 +1,9 @@
 import os
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29512")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29512")
 import sys
 import subprocess
 from pathlib import Path
@@ -58,8 +60,6 @@ def run_worker():
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ.setdefault("WANDB_MODE", "offline")
-
     data_dir = Path("data/crush-smol_processed_t2v")
 
     if not data_dir.exists():
@@ -78,7 +78,8 @@ def test_distributed_training():
         os.environ["MASTER_PORT"],
         str(current_file)
     ]
-    process = subprocess.run(cmd, capture_output=True, text=True)
+    with envs.override_external("WANDB_MODE", "offline"):
+        process = subprocess.run(cmd, capture_output=True, text=True)
 
     # Print stdout and stderr for debugging
     if process.stdout:

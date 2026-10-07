@@ -22,8 +22,10 @@ dependencies = [
 
     # Machine Learning & Transformers
     # GLM-Image's AR encoder (GlmImageForConditionalGeneration) first ships in
-    # transformers 5.0.0; floor bumped from >=4.57.3 to >=5.0.0 (stable, not rc).
-    "transformers>=5.0.0",
+    # transformers 5.0.0. Floor raised from >=5.0.0 to >=5.15.0 for the public
+    # vision interpolation helper (get_vision_interpolation_indices_and_weights)
+    # that the MiniMax-H3 Qwen3-VL encoder cross-checks against.
+    "transformers>=5.15.0",
     # <0.23: tokenizers 0.23 renamed RobertaProcessing's binding args, so
     # transformers' CLIP-style tokenizer loading dies with
     # "RobertaProcessing.__new__() got an unexpected keyword argument 'cls'".
@@ -151,6 +153,7 @@ lint = [
 
 test = [
     "av",
+    "openai==3.6.0",  # OpenAI video-client compatibility tests; no cloud requests.
     "pytorch-msssim>=1.0.0",
     "pytest",
     "pandas",
@@ -187,6 +190,7 @@ dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 fasth3 = [
     "flash-attn-4",
     "fastvideo-kernel==0.3.5; sys_platform == 'linux'",
+    "quack-kernels==0.5.3",
 ]
 
 prompt-safety = [
@@ -234,6 +238,7 @@ where = [".", "apps/dreamverse"]
 exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
 
 [tool.setuptools.package-data]
+"fastvideo.entrypoints.openai" = ["static/*.html", "static/*.css", "static/*.js"]
 dreamverse = ["prompts/*.md"]
 "fastvideo.third_party.rife_mlx" = ["LICENSE"]
 "fastvideo.third_party.taehv" = ["LICENSE"]
