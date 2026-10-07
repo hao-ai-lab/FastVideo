@@ -26,6 +26,7 @@ from fastvideo.api.schema import (
     SamplingConfig,
 )
 from fastvideo.api.sampling_param import SamplingParam
+from fastvideo.configs.pipelines.kandinsky6_sr_options import SR_REQUEST_FIELDS
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.ltx2.stage_overrides import (
     refine_preset_override_fields,
@@ -44,6 +45,18 @@ _LEGACY_REQUEST_ALIASES = {
 _REQUEST_PIPELINE_OVERRIDE_FIELDS = frozenset({
     "embedded_cfg_scale",
 })
+REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS = (
+    "ltx2_audio_latents",
+    "ltx2_audio_clean_latent",
+    "ltx2_audio_denoise_mask",
+    "audio_num_frames",
+    "video_position_offset_sec",
+    "vsa_mode",
+    "vsa_dense_first_n_steps",
+    "vsa_dense_layers",
+    # Recognized transport keys; validate_request_batch_extra restricts them to Kandinsky6 SR.
+    *SR_REQUEST_FIELDS,
+)
 # torch.compile kwargs that map to first-class CompileConfig fields.
 _COMPILE_TYPED_KEYS = ("backend", "fullgraph", "mode", "dynamic")
 # LTX-2 refine flat kwargs (init + per-request) known to FastVideoArgs.
@@ -116,6 +129,8 @@ def legacy_from_pretrained_to_config(
             offload["vae"] = value
         elif key == "pin_cpu_memory":
             offload["pin_cpu_memory"] = value
+        elif key == "lazy_module_load":
+            offload["lazy_module_load"] = value
         elif key == "enable_torch_compile":
             compile_config["enabled"] = value
         elif key == "enable_torch_compile_text_encoder":
@@ -165,6 +180,10 @@ def legacy_from_pretrained_to_config(
             pipeline["workload_type"] = value
         elif key == "lora_path":
             components["lora_path"] = value
+        elif key == "lora_nickname":
+            components["lora_nickname"] = value
+        elif key == "lora_strength":
+            components["lora_strength"] = value
         elif key == "override_pipeline_cls_name":
             components["override_pipeline_cls_name"] = value
         elif key == "override_transformer_cls_name":
@@ -239,6 +258,7 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         "image_encoder_cpu_offload": engine.offload.image_encoder,
         "vae_cpu_offload": engine.offload.vae,
         "pin_cpu_memory": engine.offload.pin_cpu_memory,
+        "lazy_module_load": engine.offload.lazy_module_load,
         "enable_torch_compile": engine.compile.enabled,
         "torch_compile_kwargs": _compile_config_to_torch_kwargs(engine.compile),
         "enable_stage_verification": engine.enable_stage_verification,
@@ -267,6 +287,8 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
     quantization = engine.quantization
     if quantization is not None and quantization.text_encoder_quant is not None:
         kwargs["override_text_encoder_quant"] = quantization.text_encoder_quant
+    if quantization is not None and quantization.layer_profile is not None and quantization.transformer_quant is None:
+        raise ValueError("engine.quantization.layer_profile requires transformer_quant (for example NVFP4)")
     if quantization is not None and quantization.transformer_quant is not None:
         # Resolve the typed quant name to a concrete ``QuantizationConfig``
         # instance and pin it on ``dit_config.quant_config``. The legacy
@@ -275,14 +297,26 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         # typed surface accepts a string and does the wiring here so
         # downstream code can rely on a single source of truth.
         from fastvideo.layers.quantization import get_quantization_config
+        from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
         _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
-        kwargs["transformer_quant"] = _resolved_quant_cls()
+        quant_instance = _resolved_quant_cls()
+        if quantization.layer_profile is not None:
+            if not isinstance(quant_instance, NVFP4Config):
+                raise ValueError("engine.quantization.layer_profile is only valid with transformer_quant NVFP4, "
+                                 f"got {type(quant_instance).__name__}")
+            quant_instance = NVFP4Config(
+                layer_profile=quantization.layer_profile,
+                retain_original_weights=quant_instance.retain_original_weights,
+            )
+        kwargs["transformer_quant"] = quant_instance
 
     components = normalized.pipeline.components
     if components.pipeline_config_path is not None:
         kwargs["pipeline_config"] = components.pipeline_config_path
     if components.lora_path is not None:
         kwargs["lora_path"] = components.lora_path
+        kwargs["lora_nickname"] = components.lora_nickname
+        kwargs["lora_strength"] = components.lora_strength
     if components.override_pipeline_cls_name is not None:
         kwargs["override_pipeline_cls_name"] = components.override_pipeline_cls_name
     if components.override_transformer_cls_name is not None:
@@ -364,11 +398,12 @@ def request_to_sampling_param(
     if request.output.return_state:
         sampling_param.return_continuation_state = True
     updates = explicit_request_updates(request)
+    validate_request_batch_extra(updates, model_path=model_path)
 
     for key, value in updates.items():
         if hasattr(sampling_param, key):
             setattr(sampling_param, key, deepcopy(value))
-        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
+        elif key in _REQUEST_PIPELINE_OVERRIDE_FIELDS or key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS:
             continue
         elif value == _SCHEMA_DEFAULT_UPDATES.get(key, _MISSING):
             # Schema-default field that isn't on SamplingParam; tolerated
@@ -465,6 +500,26 @@ def request_to_pipeline_overrides(request: GenerationRequest) -> dict[str, Any]:
         if key in _REQUEST_PIPELINE_OVERRIDE_FIELDS:
             overrides[key] = deepcopy(value)
     return overrides
+
+
+def validate_request_batch_extra(updates: Mapping[str, Any], *, model_path: str) -> None:
+    """Reject Kandinsky6 SR extensions for other model families, including the legacy API."""
+    sr_keys = sorted(set(updates).intersection(SR_REQUEST_FIELDS))
+    if not sr_keys:
+        return
+    from fastvideo.registry import get_preset_selection
+
+    _, model_family = get_preset_selection(model_path)
+    if model_family != "kandinsky6_sr":
+        raise ValueError(f"Request fields {sr_keys} are only supported by Kandinsky6 SR, not {model_path}")
+
+
+def request_to_batch_extra(request: GenerationRequest) -> dict[str, Any]:
+    """Extract typed-request extensions consumed through ``ForwardBatch.extra``."""
+    return {
+        key: deepcopy(value)
+        for key, value in explicit_request_updates(request).items() if key in REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS
+    }
 
 
 def explicit_request_updates(request: GenerationRequest) -> dict[str, Any]:
@@ -640,6 +695,7 @@ def _validate_batched_input_length(
 
 
 __all__ = [
+    "REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS",
     "explicit_request_updates",
     "generator_config_to_fastvideo_args",
     "legacy_from_pretrained_to_config",
@@ -648,6 +704,8 @@ __all__ = [
     "normalize_generation_request",
     "normalize_generator_config",
     "register_continuation_kind",
+    "request_to_batch_extra",
+    "validate_request_batch_extra",
     "request_to_pipeline_overrides",
     "request_to_sampling_param",
 ]

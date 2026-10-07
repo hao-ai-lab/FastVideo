@@ -7,9 +7,9 @@ keyed by dimension).
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
+import fastvideo.envs as envs
 from fastvideo.eval.datasets.base import PromptDataset
 from fastvideo.eval.datasets.registry import register_dataset
 
@@ -23,12 +23,12 @@ _FULL_INFO_REL = "fastvideo/third_party/eval/vbench/vbench/VBench_full_info.json
 
 
 def _locate_full_info() -> Path:
-    env = os.environ.get("VBENCH_FULL_INFO_JSON")
+    env = envs.FASTVIDEO_VBENCH_FULL_INFO_JSON.get()
     if env:
         p = Path(env)
         if p.is_file():
             return p
-        raise FileNotFoundError(f"VBENCH_FULL_INFO_JSON={env} does not point at a file")
+        raise FileNotFoundError(f"FASTVIDEO_VBENCH_FULL_INFO_JSON={env} does not point at a file")
     here = Path(__file__).resolve()
     for ancestor in here.parents:
         candidate = ancestor / _FULL_INFO_REL
@@ -38,7 +38,7 @@ def _locate_full_info() -> Path:
             break
     raise FileNotFoundError("Could not locate VBench_full_info.json. Initialize the upstream "
                             "submodule (`git submodule update --init "
-                            "fastvideo/third_party/eval/vbench`) or set VBENCH_FULL_INFO_JSON.")
+                            "fastvideo/third_party/eval/vbench`) or set FASTVIDEO_VBENCH_FULL_INFO_JSON.")
 
 
 @register_dataset("vbench")

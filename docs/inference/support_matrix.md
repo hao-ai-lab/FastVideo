@@ -54,6 +54,9 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
+| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Pro-sft-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| kandinsky6_sr | `kandinskylab/Kandinsky-6.0-VSR-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-VSR-distilled2steps-5s-Diffusers` | — | [basic_kandinsky6_sr.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_sr.py) |
 | lingbot_video | `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbot_video | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbotworld | `FastVideo/LingBot-World-Base-Cam-Diffusers` | I2V | [basic_lingbotworld_base_cam.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_base_cam.py) |
@@ -102,7 +105,15 @@ to convert the official weights locally and set `MMAUDIO_MODEL_PATH`.
 
 **Note (MiniMax H3)**: T2VA, FL2VA, and Ref2VA all generate video with stereo
 audio. Use the Ref2VA example when passing ordered image, video, or audio
-references.
+references. Distilled Ref2VA PDD students (eight transformer forwards, with
+reference videos as sparse VSA regions) run through
+[basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py);
+see [FastH3 distilled checkpoint schedules](fasth3-distilled.md#ref2va-pdd-students).
+
+**Note (Kandinsky 6)**: the `kandinsky6` IDs (Pro 30.1B and Lite 3.2B, each base
+and distilled) generate video with audio from text, optionally plus an image (see the [T2IVA guide](kandinsky6.md)); the
+`kandinsky6_sr` IDs upscale an existing video (see the
+[Video SR guide](kandinsky6_sr.md)).
 
 **Note (Wan-VACE)**: not currently supported — no VACE pipeline or registered
 model ID exists on `main`
@@ -179,6 +190,23 @@ optimizations: absence means **untested**, not incompatible.
 | Matrix Game 3.0 Base Distilled | `FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers` | 720x1280 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | GEN3C Cosmos 7B | `FastVideo/GEN3C-Cosmos-7B-Diffusers` | 704px1280p | ❌ | ❌ | ❌ | ⭕ | ⭕ |
 
+## Apple Silicon native runtime
+
+| Release path | Model | Mode | Validated hardware | Status |
+| --- | --- | --- | --- | --- |
+| MLX FastMetal T2V 1.3B | [`FastVideo/FastMetal-1.3B-QAD`](https://huggingface.co/FastVideo/FastMetal-1.3B-QAD) | 480x832, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 16 GB+ unified memory | Released |
+| MLX FastMetal T2V 5B | [`FastVideo/FastMetal-5B-QAD`](https://huggingface.co/FastVideo/FastMetal-5B-QAD) | 480p / 720p, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode; optional `--fast`, `--fast-spatial`, `--refine`. The checked-in example is T2V. CUDA Wan2.2 TI2V 5B is the image-capable path. | Apple M4 Max, 16 GB+ unified memory | Released |
+| MLX FastMetal T2V 14B | [`FastVideo/FastMetal-14B-QAD`](https://huggingface.co/FastVideo/FastMetal-14B-QAD) | 480p / 720p, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 36 GB+ unified memory | Released |
+| MLX FastH3 V1 T2VA | [`FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2`](https://huggingface.co/FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2) + locally converted DiT | 480p / 720p, 124 frames, 4-step DMD2, INT8/INT6/INT4 **weight-only** DiT, native video + audio VAE; optional temporal RIFE fast mode; optional spatial fast mode; optional VSA (tile 64/256, exempt/compete) on `--include-vsa` checkpoints | Apple M4 Max, 36 GB unified memory | Source runtime; T2VA only |
+| MLX FastH3 V2 T2VA | [`FastVideo/FastVideo-FastH3-8-Step-V2`](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2) + locally converted DiT | 480p / 720p, 124 frames, 8-step DMD2, INT8 **weight-only** DiT with `--include-vsa`, trained VSA 0.8 / tile 64, native video + audio VAE; AdaLN cache from `fastvideo_inference.json` | Apple M4 Max, 36 GB unified memory | Source runtime; T2VA only |
+
+Apple Silicon uses the native MLX runtime. FastMetal-QAD is the packaged Wan
+release. FastH3 V1 and FastH3 V2 use a source checkout and local DiT conversion.
+CUDA FastWan-QAD (`FastVideo/FastWan-QAD-1.3B`,
+`FastVideo/FastWan-QAD-FP8-1.3B`) is the NVIDIA release. See the
+[MLX install guide](../getting_started/installation/mlx.md) and the
+[FastMetal-QAD blog](https://haoailab.com/blogs/fastmetal/).
+
 **Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
 
 ***Lucy Edit Dev uses a non-commercial model license. FastVideo support is
@@ -206,9 +234,13 @@ Per the installation guides:
   [GPU install guide](../getting_started/installation/gpu.md).
 - **NVIDIA DGX Spark (GB10, aarch64)** — CUDA 13, from-source kernel build; see
   the [DGX Spark install guide](../getting_started/installation/spark.md).
-- **Apple silicon (MPS)** — macOS 14 or newer; see the
-  [MPS install guide](../getting_started/installation/mps.md) and
-  [`basic_mps.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mps.py).
+  Two Sparks over QSFP use Ray sequence parallel; see
+  [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
+- **Apple silicon** — macOS 14 or newer; MLX runtime for FastMetal-QAD, FastH3
+  V1, and FastH3 V2. See the
+  [MLX install guide](../getting_started/installation/mlx.md). The older
+  [`basic_mps.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mps.py)
+  demo is PyTorch MPS only.
 
 Optimization-specific hardware constraints (e.g. STA requiring Hopper) are
 listed under [Special requirements](#special-requirements).

@@ -18,15 +18,12 @@ FLASH_ATTN; mirrored here before any fastvideo import.
 
 from __future__ import annotations
 
-import os
-
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
 
 __all__ = ["distributed_runtime"]
-
-os.environ.setdefault("FASTVIDEO_FA4", "0")  # test_kandinsky5_similarity.py:84
 
 MODEL_DIM = 1792  # Kandinsky-5.0-T2V-Lite transformer/config.json
 TIME_DIM = 512
@@ -99,5 +96,11 @@ SPEC = GateSpec(
 )
 
 
-def test_kandinsky5_golden_gate(distributed_runtime) -> None:
+def test_kandinsky5_golden_gate(distributed_runtime, env_overrides) -> None:
+    # Pin FA4 off for THIS test only (test_kandinsky5_similarity.py:84). A
+    # module-level os.environ.setdefault here leaked into every other
+    # golden-gate test's env fingerprint at pytest collection time, breaking
+    # full-directory runs in environments where FASTVIDEO_FA4 is unset
+    # (observed on the self-hosted CI runner lane).
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(envs.FASTVIDEO_FA4.get()))
     run_gate(SPEC)

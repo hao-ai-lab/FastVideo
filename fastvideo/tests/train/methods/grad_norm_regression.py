@@ -14,17 +14,17 @@ forward/backward is reproducible within bf16 reduction noise on a given GPU.
 
 Why device-keyed: grad norms differ across GPU architectures (kernels,
 accumulation order), so a single golden value can't cover every runner. The
-JSON currently carries refs for the two GPUs we actually run on — ``L40S`` (CI)
-and ``GB200`` (our Blackwell dev box; ``B200`` maps to the same key).
+JSON carries legacy ``L40S`` references and active Slinky CI ``GB200``
+references (``B200`` maps to the same Blackwell key).
 
 Seeding a reference for the current device:
 
-- **CI / L40S** — invoke ``modal run`` against ``seed_grad_norm_references`` in
-  ``fastvideo/tests/modal/pr_test.py`` (pinned to ``gpu="L40S:1"``), then copy
-  the recorded value from the log into ``grad_norm_refs.json``.
-- **Local / non-L40S GPUs** — on that workstation::
+- **CI / GB200** — run the target train-framework lane on the Slinky Slurm
+  runner with update mode only during an intentional reviewed reseed, then
+  copy the recorded value from the log into ``grad_norm_refs.json``.
+- **Local / other GPUs** — on that workstation::
 
-      FASTVIDEO_GRADNORM_UPDATE=1 \\
+      FASTVIDEO_TEST_GRADNORM_UPDATE=1 \\
           pytest fastvideo/tests/train/methods -vs -rs
 
   The harness writes the measured norm into ``grad_norm_refs.json`` under the
@@ -35,14 +35,15 @@ Seeding a reference for the current device:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
 import torch
 
+import fastvideo.envs as envs
+
 _REFS_PATH = Path(__file__).resolve().parent / "grad_norm_refs.json"
-_UPDATE_ENV = "FASTVIDEO_GRADNORM_UPDATE"
+_UPDATE_ENV = "FASTVIDEO_TEST_GRADNORM_UPDATE"
 
 # bf16 single-step smoke: catch gross breakage (wrong wiring, dead grads,
 # scale regressions), not micro-drift from reduction nondeterminism.
@@ -56,6 +57,7 @@ _DEVICE_MAPPINGS: tuple[tuple[str, str], ...] = (
     ("GB200", "GB200"),
     ("B200", "GB200"),  # same Blackwell arch as GB200
     ("H200", "H200"),
+    ("NVIDIA GB10", "GB10"),
 )
 
 
@@ -146,13 +148,13 @@ def check_grad_norm_regression(
 
     - Skips when the current GPU has no reference (unsupported device, or not
       yet seeded) so a new runner never hard-fails before its golden exists.
-    - With ``FASTVIDEO_GRADNORM_UPDATE=1`` records/updates the reference for the
+    - With ``FASTVIDEO_TEST_GRADNORM_UPDATE=1`` records/updates the reference for the
       current device instead of asserting.
     """
     norm = layer0_grad_norm(transformer)
     device_key = resolve_device_key()
 
-    if os.environ.get(_UPDATE_ENV) == "1":
+    if envs.FASTVIDEO_TEST_GRADNORM_UPDATE.get():
         if device_key is None:
             pytest.skip(f"{_UPDATE_ENV}=1 but GPU '{_device_name()}' has no reference "
                         "key; add it to _DEVICE_MAPPINGS first")

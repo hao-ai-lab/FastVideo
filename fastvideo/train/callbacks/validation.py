@@ -38,7 +38,7 @@ from fastvideo.train.utils.moduleloader import (
     make_inference_args, )
 from fastvideo.train.utils.validation_media import write_validation_mp4
 from fastvideo.training.trackers import DummyTracker
-from fastvideo.utils import shallow_asdict
+from fastvideo.utils import pixels_to_uint8, shallow_asdict
 
 if TYPE_CHECKING:
     from fastvideo.train.methods.base import TrainingMethod
@@ -240,6 +240,43 @@ class ValidationCallback(Callback):
     # Callback hooks
     # ----------------------------------------------------------
 
+    def _adopt_training_denoising_ladder(
+        self,
+        method: TrainingMethod,
+    ) -> None:
+        """Keep validation on the timestep ladder the method trains against.
+
+        ``sampling_steps`` only sets ``num_inference_steps``, which the
+        scheduler turns into an N-point sigma grid -- N-1 forwards on its own
+        spacing, not the trained ladder. Validation reaches the trained
+        operating point only when ``sampling_timesteps`` repeats
+        ``method.dmd_denoising_steps`` exactly, so inherit it by default and
+        refuse to run when the two disagree.
+        """
+        method_config = getattr(method, "method_config", None)
+        if not isinstance(method_config, dict):
+            return
+        raw = method_config.get("dmd_denoising_steps")
+        if not isinstance(raw, list) or not raw:
+            return
+        trained = [int(s) for s in raw]
+
+        if self.sampling_timesteps is None:
+            self.sampling_timesteps = trained
+            logger.info(
+                "validation: inheriting the trained denoising ladder %s "
+                "(%d forwards)",
+                trained,
+                len(trained),
+            )
+            return
+        if self.sampling_timesteps != trained:
+            raise ValueError("callbacks.validation.sampling_timesteps "
+                             f"{self.sampling_timesteps} disagrees with the trained ladder "
+                             f"{trained} (method.dmd_denoising_steps). Validation would "
+                             "sample off the operating point the student is trained for. "
+                             "Drop the override to inherit the ladder, or align the two.")
+
     def on_train_start(
         self,
         method: TrainingMethod,
@@ -247,6 +284,7 @@ class ValidationCallback(Callback):
     ) -> None:
         self.method = method
         tc = self.training_config
+        self._adopt_training_denoising_ladder(method)
 
         self.world_group = get_world_group()
         self.sp_group = get_sp_group()
@@ -1527,7 +1565,7 @@ class ValidationCallback(Callback):
                     nrow=6,
                 )
                 x = (x.transpose(0, 1).transpose(1, 2).squeeze(-1))
-                frames.append((x * 255).numpy().astype(np.uint8))
+                frames.append(pixels_to_uint8(x).numpy())
             videos.append(frames)
             captions.append(batch.prompt)
             audio_waveforms.append(output_audio)

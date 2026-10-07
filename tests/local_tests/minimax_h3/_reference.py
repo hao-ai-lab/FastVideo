@@ -3,6 +3,7 @@
 import hashlib
 import inspect
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,28 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 REFERENCE_ROOT = Path(os.environ.get("MINIMAX_H3_OFFICIAL_REF_DIR") or REPO_ROOT / "DiffusersMiniMaxH3").resolve()
 REFERENCE_SRC = REFERENCE_ROOT / "src"
 PINNED_COMMIT = "abc5e9bf71fd38f53cd471bc3acaa84bc5ecbfdc"
+
+
+def _run_git(*args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REFERENCE_ROOT), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as error:
+        raise RuntimeError(f"Could not verify the MiniMax-H3 reference checkout at {REFERENCE_ROOT}.") from error
+    return result.stdout.strip()
+
+
+def assert_reference_revision() -> None:
+    actual_commit = _run_git("rev-parse", "HEAD")
+    if actual_commit != PINNED_COMMIT:
+        raise RuntimeError(f"MiniMax-H3 parity requires Diffusers commit {PINNED_COMMIT}, got {actual_commit}.")
+    dirty_source = _run_git("status", "--short", "--untracked-files=no", "--", "src/diffusers")
+    if dirty_source:
+        raise RuntimeError(f"MiniMax-H3 reference source has tracked changes:\n{dirty_source}")
 
 
 def assert_pinned_reference(relative_path: str, sha256: str) -> Path:
