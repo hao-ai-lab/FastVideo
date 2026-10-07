@@ -23,6 +23,16 @@ logger = init_logger(__name__)
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
 
+def canonical_param_name(name: str) -> str:
+    """Drop activation-checkpoint wrapper segments so names match ``state_dict()`` keys.
+
+    ``named_parameters()`` keeps the ``_checkpoint_wrapped_module`` segment of every
+    wrapped submodule, so the same weight gets a different name under each
+    checkpointing policy.
+    """
+    return name.replace("._checkpoint_wrapped_module.", ".")
+
+
 def gather_state_dict_on_cpu_rank0(
     model,
     device: torch.device | None = None,
@@ -30,10 +40,7 @@ def gather_state_dict_on_cpu_rank0(
     rank = dist.get_rank()
     cpu_state_dict = {}
     sharded_sd = model.state_dict()
-    param_requires_grad = set([
-        k.replace("._checkpoint_wrapped_module.", ".") for k, v in dict(model.named_parameters()).items()
-        if v.requires_grad
-    ])
+    param_requires_grad = set([canonical_param_name(k) for k, v in model.named_parameters() if v.requires_grad])
     for param_name, param in sharded_sd.items():
         if param_name not in param_requires_grad:
             continue
@@ -797,6 +804,10 @@ def load_distillation_checkpoint(
 def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
     if model_type == "hunyuan_hf" or model_type == "hunyuan":
         return latents * vae.config.scaling_factor
+    elif model_type == "hunyuan15":
+        # Parquet latents are raw latent_dist.mode() outputs; inference
+        # divides by scaling_factor before decode, so training multiplies.
+        return latents * vae.scaling_factor
     elif model_type == "wan":
         latents_mean = torch.tensor(vae.latents_mean)
         latents_std = 1.0 / torch.tensor(vae.latents_std)
@@ -985,6 +996,42 @@ def _get_total_norm(
             norms.extend([torch.linalg.vector_norm(g, norm_type) for g in local_tensors])
 
     total_norm = torch.linalg.vector_norm(torch.stack([norm.to(first_device) for norm in norms]), norm_type)
+
+    # The per-tensor norms above come from ``to_local()``, so for DTensor grads
+    # they describe only this rank's shard. Reduce across the mesh so every
+    # rank derives the same clip coefficient: sum the squared norms over sharded
+    # dims (each rank holds a disjoint slice) and average them over replicated
+    # dims (every rank holds the same values).
+    mesh_dims: dict[tuple[int, int], tuple[torch.distributed.device_mesh.DeviceMesh, int, bool]] = {}
+    for tensor in tensors:
+        if not isinstance(tensor, torch.distributed.tensor.DTensor):
+            continue
+        for mesh_dim, placement in enumerate(tensor.placements):
+            if tensor.device_mesh.size(mesh_dim) <= 1:
+                continue
+            key = (id(tensor.device_mesh), mesh_dim)
+            replicate = isinstance(placement, torch.distributed.tensor.Replicate)
+            previous = mesh_dims.get(key)
+            mesh_dims[key] = (tensor.device_mesh, mesh_dim, replicate if previous is None else previous[2] and replicate)
+
+    if mesh_dims and dist.is_available() and dist.is_initialized():
+        if norm_type == math.inf:
+            # Max commutes with both reductions: exact across sharded dims
+            # (disjoint slices) and idempotent across replicated dims. The
+            # sum-of-powers reduction below is only valid for finite norms.
+            for mesh, mesh_dim, _replicate in mesh_dims.values():
+                dist.all_reduce(
+                    total_norm,
+                    op=dist.ReduceOp.MAX,
+                    group=mesh.get_group(mesh_dim),
+                )
+        else:
+            accumulated = total_norm.pow(norm_type)
+            for mesh, mesh_dim, replicate in mesh_dims.values():
+                dist.all_reduce(accumulated, group=mesh.get_group(mesh_dim))
+                if replicate:
+                    accumulated.div_(mesh.size(mesh_dim))
+            total_norm = accumulated.pow(1.0 / norm_type)
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(f"The total norm of order {norm_type} for gradients from "
@@ -1619,13 +1666,15 @@ class EMA_FSDP:
                 self.shadow = {}
             return
 
-        # local_shard: maintain EMA of local shards for requires_grad params
+        # local_shard: maintain EMA of local shards for requires_grad params.
+        # Shadow keys use canonical names so EMA state stays loadable when the
+        # activation checkpointing policy changes between runs.
         self.shadow = {}
         for name, p in module.named_parameters():
             if not p.requires_grad:
                 continue
             local = self._to_local_tensor(p.detach())
-            self.shadow[name] = local.clone().float().cpu()
+            self.shadow[canonical_param_name(name)] = local.clone().float().cpu()
 
     @torch.no_grad()
     def update(self, module):
@@ -1646,6 +1695,7 @@ class EMA_FSDP:
         for name, p in module.named_parameters():
             if not p.requires_grad:
                 continue
+            name = canonical_param_name(name)
             local = self._to_local_tensor(p.detach())
             v_cpu = local.float().cpu()
             if name not in self.shadow:
@@ -1659,7 +1709,8 @@ class EMA_FSDP:
         return {k: v.clone() for k, v in self.shadow.items()}
 
     def load_state_dict(self, sd: dict[str, torch.Tensor]):
-        self.shadow = {k: v.clone() for k, v in sd.items()}
+        # Checkpoints saved before keys were canonical carry wrapper segments.
+        self.shadow = {canonical_param_name(k): v.clone() for k, v in sd.items()}
 
     @torch.no_grad()
     def copy_to_unwrapped(self, module) -> None:
@@ -1669,7 +1720,7 @@ class EMA_FSDP:
         """
         if self.mode == "rank0_full" and self.rank != 0:
             return
-        name_to_param = dict(module.named_parameters())
+        name_to_param = {canonical_param_name(n): p for n, p in module.named_parameters()}
         for n, w in self.shadow.items():
             if n in name_to_param:
                 p = name_to_param[n]
@@ -1695,8 +1746,8 @@ class EMA_FSDP:
                         # Nothing to swap on this rank for this param
                         continue
                     self.saved[name] = p_local.clone().to("cpu")
-                    if name in self.ema.shadow:
-                        ema_cpu = self.ema.shadow[name]
+                    ema_cpu = self.ema.shadow.get(canonical_param_name(name))
+                    if ema_cpu is not None:
                         if ema_cpu.numel() != p_local.numel():
                             # Shard shape mismatch (e.g., empty shard here), skip
                             continue

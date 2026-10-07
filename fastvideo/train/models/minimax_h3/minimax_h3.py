@@ -24,7 +24,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 )
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.train.models.base import ModelBase, NoisePrediction
-from fastvideo.train.utils.activation_checkpoint import apply_activation_checkpointing
+from fastvideo.train.utils.activation_checkpoint import (apply_activation_checkpointing, resolve_checkpointing_type)
 from fastvideo.train.utils.module_state import apply_trainable
 from fastvideo.train.utils.moduleloader import load_module_from_path
 from fastvideo.train.utils.lora import finalize_lora_training, LoraConfig
@@ -103,7 +103,10 @@ class MiniMaxH3Model(ModelBase):
         self.transformer = self._load_transformer(
             trainable=trainable,
             disable_custom_init_weights=disable_custom_init_weights,
-            enable_gradient_checkpointing_type=enable_gradient_checkpointing_type,
+            enable_gradient_checkpointing_type=resolve_checkpointing_type(
+                enable_gradient_checkpointing_type,
+                training_config,
+            ),
             transformer_override_safetensor=transformer_override_safetensor,
         )
         self.noise_scheduler = MiniMaxH3Scheduler(shift=_VIDEO_SCHEDULER_SHIFT)
@@ -146,12 +149,10 @@ class MiniMaxH3Model(ModelBase):
             attention_backend=self.attention_backend,
             pre_fsdp_model_transform=pre_fsdp_model_transform,
         )
-        checkpointing_type = (enable_gradient_checkpointing_type
-                              or self.training_config.model.enable_gradient_checkpointing_type)
-        if trainable and checkpointing_type:
+        if trainable and enable_gradient_checkpointing_type:
             transformer = apply_activation_checkpointing(
                 transformer,
-                checkpointing_type=checkpointing_type,
+                checkpointing_type=enable_gradient_checkpointing_type,
             )
         if self._lora_config is not None and self._lora_config.enable:
             finalized_layers = finalize_lora_training(transformer)

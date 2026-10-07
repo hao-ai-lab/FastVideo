@@ -51,7 +51,7 @@ torchrun --nproc_per_node=8 \
 ## Config Format
 
 Every run is defined by a single YAML file with five top-level sections.
-See `examples/train/example.yaml` for a fully-commented reference.
+See `examples/train/configs/example.yaml` for a fully-commented reference.
 
 ### `models` — Role-based model instances
 
@@ -80,8 +80,24 @@ Common model parameters:
 | `trainable` | `true` | Whether the model's parameters require gradients |
 | `disable_custom_init_weights` | `false` | Skip custom weight initialization (use for teacher/critic) |
 | `flow_shift` | `3.0` | Timestep shifting factor |
-| `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"` or `null`) |
+| `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"`, `"ops"`, `"block_skip"`, or `null`); a role that leaves it unset uses `training.model`'s value |
 | `attention_backend` | `null` | Optional role-local backend for Wan models (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
+
+`full` and `ops` checkpoint the same transformer blocks; layers outside them,
+such as embeddings and the output head, keep their activations under either.
+`full` recomputes every block operation and is the memory-conservative choice.
+`ops` also retains the outputs of fused attention ops that the PyTorch
+dispatcher can see. It can reduce recompute time at the cost of higher
+activation memory, so use it only when the training shape has verified memory
+headroom. `block_skip` currently behaves like `full`, because the modular
+trainer has no setting for its layer interval.
+
+These attention paths have no retainable dispatcher op, so they still
+recompute in full under `ops`: math SDPA, VMoBA, SLA, `ATTN_QAT_TRAIN`, every
+FA3 path, FA4 masked self-attention, FA4 below sm90, and CuTe VSA with 128- or
+256-token blocks (`FASTVIDEO_VSA_CUTEDSL=1`). A run in which a checkpointed
+block retains nothing logs a one-time warning. With sequence parallelism, the
+Ulysses all-to-alls inside each block also run again during recompute.
 
 Which roles are needed depends on the training method:
 
@@ -165,6 +181,8 @@ training:
     decay_rate: 0.0
     decay_interval_steps: 0
 ```
+
+`training.data.training_cfg_rate` enables classifier-free-guidance dropout. For most models the shared dataloader drops text conditioning by zeroing the stored embedding. LTX-2 is the exception: `LTX2Model` performs the drop itself and swaps in the checkpoint preset's unconditional embedding (the preset's `negative_prompt` — empty for the distilled presets, the quality-negative prompt for the base presets), because a zeroed post-connector embedding is not the model's unconditional input. The legacy `LTX2TrainingPipeline` (`fastvideo/training/`) does not implement the drop and rejects `training_cfg_rate > 0`.
 
 `training.data.data_path` can also mix multiple preprocessed datasets by using a mapping from dataset path to repeat count:
 

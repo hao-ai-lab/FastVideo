@@ -134,13 +134,90 @@ def _is_excluded_layer(
     return any(excluded in module_name for excluded in excluded_modules)
 
 
+def _replicated_dims(parameter: DTensor) -> list[int]:
+    return [
+        mesh_dim for mesh_dim, placement in enumerate(parameter.placements)
+        if isinstance(placement, Replicate) and parameter.device_mesh.size(mesh_dim) > 1
+    ]
+
+
+def sync_replicated_lora_gradients(transformer: torch.nn.Module) -> int:
+    """Average every replicated LoRA gradient over its mesh, on every rank.
+
+    A per-parameter ``register_post_accumulate_grad_hook`` is not enough: the
+    hook only fires on ranks where that parameter actually received a
+    gradient, so a rank whose loss skipped a layer issues fewer collectives
+    than its peers -- the ranks then pair the wrong tensors together, or hang
+    outright when the totals differ. This pass runs after backward and before
+    clipping/the optimizer step, walks the LoRA parameters in a stable order,
+    and joins the collective on every rank, zero-filling the gradient where the
+    rank contributed none (a rank that skipped the layer contributes exactly
+    zero to the average).
+
+    Returns the number of parameters synchronized.
+    """
+
+    if not dist.is_available() or not dist.is_initialized():
+        return 0
+
+    synced = 0
+    for module in transformer.modules():
+        for attr_name in ("lora_A", "lora_B"):
+            parameter = getattr(module, attr_name, None)
+            if not isinstance(parameter, DTensor) or not parameter.requires_grad:
+                continue
+            replicated_dims = _replicated_dims(parameter)
+            if not replicated_dims:
+                continue
+            grad = parameter.grad
+            if grad is None:
+                local_grad = torch.zeros_like(parameter.to_local())
+                parameter.grad = DTensor.from_local(
+                    local_grad,
+                    device_mesh=parameter.device_mesh,
+                    placements=parameter.placements,
+                    run_check=False,
+                )
+            else:
+                local_grad = grad.to_local() if isinstance(grad, DTensor) else grad
+            for mesh_dim in replicated_dims:
+                dist.all_reduce(
+                    local_grad,
+                    group=parameter.device_mesh.get_group(mesh_dim),
+                )
+                local_grad.div_(parameter.device_mesh.size(mesh_dim))
+            synced += 1
+    return synced
+
+
+def _make_replicated_lora_parameter(
+    parameter: nn.Parameter,
+    mesh: DeviceMesh,
+) -> nn.Parameter:
+    """Create a synchronized replicated DTensor for a late-added LoRA weight."""
+
+    placements = [Replicate()] * mesh.ndim
+    replicated = DTensor.from_local(
+        parameter.detach(),
+        device_mesh=mesh,
+        placements=placements,
+        run_check=True,
+    )
+    replicated_parameter = nn.Parameter(
+        replicated,
+        requires_grad=parameter.requires_grad,
+    )
+    return replicated_parameter
+
+
 def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
     """Wrap LoRA params in replicated DTensors when distributed is active.
 
     The training loaders shard the base transformer with FSDP/HSDP before the
     model plugin sees it. Newly-added LoRA parameters therefore need to be
     explicit replicated DTensors so optimizers/checkpointing can treat them the
-    same way across ranks.
+    same way across ranks. Replicated values are broadcast during creation,
+    and their rank-local gradients are averaged before the optimizer step.
 
     The mesh is reused from the FSDP-wrapped base_layer parameters rather than
     rebuilt via ``init_device_mesh`` — building a parallel mesh with a different
@@ -175,8 +252,6 @@ def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
     if mesh is None:
         return
 
-    placements = [Replicate()] * mesh.ndim
-
     for module in transformer.modules():
         if not isinstance(module, BaseLayerWithLoRA):
             continue
@@ -190,12 +265,11 @@ def _replicate_lora_parameters(transformer: torch.nn.Module, ) -> None:
             param.requires_grad_(True)
             if isinstance(param, DTensor):
                 continue
-            replicated = DTensor.from_local(
-                param.detach(),
-                device_mesh=mesh,
-                placements=placements,
+            setattr(
+                module,
+                attr_name,
+                _make_replicated_lora_parameter(param, mesh),
             )
-            setattr(module, attr_name, nn.Parameter(replicated))
 
 
 def _initialize_lora_parameter(
