@@ -295,6 +295,15 @@ FASTVIDEO_ULYSSES_A2A = EnvChoice(
     doc="Sequence-parallel all-to-all backend. off uses the NCCL path in DistributedAutograd.AllToAll4D. auto uses "
     "the fused NVLink kernel when the group is a load-store accessible mesh of 2, 4, 6, or 8 ranks in eager "
     "execution, and the NCCL path otherwise.")
+# Keep the original long-training transport by default. Opt into bounded
+# chunks after validating the training recipe's activation memory budget.
+FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = EnvChoice(
+    "auto",
+    choices=("auto", "chunked"),
+    category="distributed",
+    doc="Fused Ulysses all-to-all policy for grad-enabled calls whose window exceeds the long-training plane limit. "
+    "auto keeps the original unchunked transport. chunked uses bounded chunks; validate the recipe's activation "
+    "memory first.")
 
 # ================== Logging ==================
 
@@ -427,6 +436,12 @@ FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
     category="performance",
     doc="Flux denoising disables reduced-precision reductions in bf16 matmuls, which tightens accumulation for "
     "the 4-step Klein model.")
+# Global kill switch for the opt-in, inference-only Triton fusion in
+# fastvideo/layers/triton_fused_norm.py, for debugging numerics or Triton issues.
+FASTVIDEO_DISABLE_FUSED_NORM = EnvBool(False,
+                                       category="performance",
+                                       doc="Turn off the Triton-fused residual + LayerNorm + modulate inference "
+                                       "path that Wan blocks opt into, and use the eager path.")
 
 # ================== Output encoding ==================
 
