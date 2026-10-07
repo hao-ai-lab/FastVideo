@@ -1,3 +1,5 @@
+import type { ConditioningAsset, GenerationAsset, GenerationMode } from "./generationMode";
+
 const DB_NAME = "fastvideo-projects";
 const DB_VERSION = 1;
 const PROJECTS_STORE = "projects";
@@ -35,6 +37,11 @@ export interface StoredProject {
 	createdAt: number;
 	lastThumbnail: string | null;
 	promptEvents: Record<string, unknown>[];
+	/** Optional for projects created before generation modes were introduced. */
+	generationMode?: GenerationMode;
+	conditioningAssets?: ConditioningAsset[];
+	assets?: GenerationAsset[];
+	mock?: boolean;
 }
 
 export interface StoredClip {
