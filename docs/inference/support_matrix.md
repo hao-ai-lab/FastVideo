@@ -54,8 +54,8 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
-| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Pro-sft-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
-| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Pro-sft-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
 | kandinsky6_sr | `kandinskylab/Kandinsky-6.0-VSR-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-VSR-distilled2steps-5s-Diffusers` | — | [basic_kandinsky6_sr.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_sr.py) |
 | lingbot_video | `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbot_video | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
@@ -87,6 +87,7 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | wan | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_wan2_2_ti2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_ti2v.py) |
 | wan | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`<br>`FastVideo/FastWan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
 | wan | `decart-ai/Lucy-Edit-Dev`<br>`decart-ai/Lucy-Edit-1.1-Dev` | — | [basic_lucy_edit.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lucy_edit.py) |
+| wan | `FastVideo/Wan2.2-S2V-14B-Diffusers` | I2V | [basic_wan_s2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_s2v.py) |
 | wan | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | T2V | [basic_wan2_2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2.py) |
 | wan | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | I2V | [basic_wan2_2_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_i2v.py) |
 | wan | `wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers` | T2V | [basic_self_forcing_causal.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal.py) |
@@ -109,8 +110,8 @@ reference videos as sparse VSA regions) run through
 [basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py);
 see [FastH3 distilled checkpoint schedules](fasth3-distilled.md#ref2va-pdd-students).
 
-**Note (Kandinsky 6)**: the two `kandinsky6` IDs generate video with audio from
-text, optionally plus an image (see the [T2IVA guide](kandinsky6.md)); the
+**Note (Kandinsky 6)**: the `kandinsky6` IDs (Pro 30.1B and Lite 3.2B, each base
+and distilled) generate video with audio from text, optionally plus an image (see the [T2IVA guide](kandinsky6.md)); the
 `kandinsky6_sr` IDs upscale an existing video (see the
 [Video SR guide](kandinsky6_sr.md)).
 
@@ -171,6 +172,7 @@ optimizations: absence means **untested**, not incompatible.
 | DreamX-World 5B Cam | `FastVideo/DreamX-World-5B-Cam-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | DreamX-World 5B AR | `FastVideo/DreamX-World-5B-Diffusers` | 704px1280p | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Lucy Edit Dev 5B*** | `decart-ai/Lucy-Edit-Dev` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
+| Wan2.2 S2V 14B**** | `FastVideo/Wan2.2-S2V-14B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Wan2.2 T2V A14B | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
 | Wan2.2 I2V A14B | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
 | HunyuanVideo | `hunyuanvideo-community/HunyuanVideo` | 720px1280p<br>544px960p | ❌ | ✅ | ✅ | ⭕ | ⭕ |
@@ -210,6 +212,16 @@ CUDA FastWan-QAD (`FastVideo/FastWan-QAD-1.3B`,
 
 ***Lucy Edit Dev uses a non-commercial model license. FastVideo support is
 focused on inference integration for video editing workflows.
+
+****Wan2.2 S2V is audio-driven: it takes a reference image plus a speech/audio
+track and animates the subject in sync with it. The official checkpoint ships
+in native Wan format; `scripts/checkpoint_conversion/wan_s2v_to_diffusers.py`
+repackages it into the Diffusers layout this repo id refers to (bundling the
+`wav2vec2-large-xlsr-53-english` audio encoder). `num_frames` follows the
+usual `4k+1` contract (default 81): one clip generates 84 frames and shows
+81, and longer requests chain clips that carry the previous 73 frames forward
+as motion context, as the official runner does. The source audio is muxed into
+the saved MP4. Sequence parallelism is not yet wired up for this pipeline.
 
 `Sliding Tile Attn (Legacy Branch)` entries refer to the archived
 `sta_do_not_delete` branch workflow, not active `main` inference wiring.

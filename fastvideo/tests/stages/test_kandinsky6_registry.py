@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Registry routing and presets of the Kandinsky6 TI2VA checkpoints: base (Pro-sft) and pi-Flow distilled (Pro-distill).
+"""Registry routing and presets of the Kandinsky6 TI2VA checkpoints: base and pi-Flow distilled, Pro and Lite sizes.
 
 Both official Diffusers repos declare the same model_index ``_class_name`` (``Kandinsky6TI2VAPipeline``), so they are
 told apart by repo id or directory name, laid out like the LTX-2 distilled/base pair: the distilled entry is registered
@@ -28,6 +28,8 @@ from fastvideo.pipelines.basic.kandinsky6.presets import (
 BASE_ID = "kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers"
 OLD_BASE_ID = "kandinskylab/Kandinsky-6.0-Pro-sft-5s-Diffusers"
 DISTILLED_ID = "kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers"
+LITE_ID = "kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers"
+LITE_DISTILLED_ID = "kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers"
 BASE_PRESET = "kandinsky6_ti2va"
 DISTILLED_PRESET = "kandinsky6_ti2va_distilled"
 
@@ -48,7 +50,8 @@ def _matching_presets(text: str) -> set[str]:
 
 
 @pytest.mark.parametrize("repo_id,preset", [(BASE_ID, BASE_PRESET), (OLD_BASE_ID, BASE_PRESET),
-                                            (DISTILLED_ID, DISTILLED_PRESET)])
+                                            (DISTILLED_ID, DISTILLED_PRESET), (LITE_ID, BASE_PRESET),
+                                            (LITE_DISTILLED_ID, DISTILLED_PRESET)])
 def test_official_repo_ids_resolve_to_their_presets(repo_id, preset):
     assert repo_id in registry.get_registered_model_paths()
     assert registry.get_pipeline_config_cls_from_name(repo_id) is Kandinsky6TI2VAConfig
@@ -60,7 +63,7 @@ def test_official_repo_ids_resolve_to_their_presets(repo_id, preset):
     assert info.workload_types == (WorkloadType.T2V, WorkloadType.I2V)
 
 
-@pytest.mark.parametrize("repo_id", [BASE_ID, DISTILLED_ID])
+@pytest.mark.parametrize("repo_id", [BASE_ID, DISTILLED_ID, LITE_ID, LITE_DISTILLED_ID])
 def test_get_model_info_resolves_both_repo_ids_to_the_ti2va_pipeline(monkeypatch, repo_id):
     model_index = {"_class_name": "Kandinsky6TI2VAPipeline", "_diffusers_version": "0.41.0.dev0"}
     monkeypatch.setattr(registry, "maybe_download_model_index", lambda *_args, **_kwargs: model_index)
@@ -71,13 +74,15 @@ def test_get_model_info_resolves_both_repo_ids_to_the_ti2va_pipeline(monkeypatch
 
 def test_registered_model_listing_offers_both_repo_ids_for_text_and_image_workloads():
     listed = {model["id"]: model["workload_types"] for model in registry.get_registered_models_with_workloads()}
-    assert listed[BASE_ID] == listed[DISTILLED_ID] == ["t2v", "i2v"]
+    assert listed[BASE_ID] == listed[DISTILLED_ID] == listed[LITE_ID] == listed[LITE_DISTILLED_ID] == ["t2v", "i2v"]
 
 
 @pytest.mark.parametrize("name,preset", [
     ("Kandinsky-6.0-Pro-5s-Diffusers", BASE_PRESET),
     ("Kandinsky-6.0-Pro-sft-5s-Diffusers", BASE_PRESET),
     ("Kandinsky-6.0-Pro-distill-5s-Diffusers", DISTILLED_PRESET),
+    ("Kandinsky-6.0-Lite-5s-Diffusers", BASE_PRESET),
+    ("Kandinsky-6.0-Lite-distill-5s-Diffusers", DISTILLED_PRESET),
     ("kandinsky6-distilled-export", DISTILLED_PRESET),
     ("kandinsky6-export", BASE_PRESET),
     ("my_export", BASE_PRESET),
@@ -102,6 +107,8 @@ def test_distill_in_a_parent_directory_does_not_make_a_base_checkpoint_distilled
     ("/models/kandinsky6-distilled-export", {DISTILLED_PRESET}),
     ("/models/kandinsky6-distilled-export/", {DISTILLED_PRESET}),
     ("kandinsky-6.0-pro-sft-5s-diffusers", {BASE_PRESET}),
+    ("kandinsky-6.0-lite-5s-diffusers", {BASE_PRESET}),
+    ("kandinsky-6.0-lite-distill-5s-diffusers", {DISTILLED_PRESET}),
     ("kandinsky6ti2vapipeline", {BASE_PRESET}),
     ("/distill_experiments/kandinsky6-export", {BASE_PRESET}),
 ])
@@ -141,7 +148,8 @@ def test_denoise_stage_overrides_accept_steps_and_guidance(preset):
     validate_preset_selection(preset, "kandinsky6", stage_overrides=overrides)
 
 
-@pytest.mark.parametrize("repo_id,steps,guidance", [(BASE_ID, 50, 5.0), (DISTILLED_ID, 10, 1.0)])
+@pytest.mark.parametrize("repo_id,steps,guidance", [(BASE_ID, 50, 5.0), (DISTILLED_ID, 10, 1.0), (LITE_ID, 50, 5.0),
+                                                     (LITE_DISTILLED_ID, 10, 1.0)])
 def test_sampling_param_defaults_follow_the_repo_id(repo_id, steps, guidance):
     sampling_param = SamplingParam.from_pretrained(repo_id)
     assert (sampling_param.num_inference_steps, sampling_param.guidance_scale) == (steps, guidance)

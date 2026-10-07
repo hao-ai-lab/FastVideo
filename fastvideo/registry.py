@@ -814,7 +814,10 @@ def _register_configs() -> None:
         sampling_param_cls=None,
         pipeline_config_cls=Kandinsky6TI2VAConfig,
         workload_types=(WorkloadType.T2V, WorkloadType.I2V),
-        hf_model_paths=["kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers"],
+        hf_model_paths=[
+            "kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers",
+            "kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers",
+        ],
         model_detectors=[
             _is_kandinsky6_distilled,
         ],
@@ -829,6 +832,7 @@ def _register_configs() -> None:
         hf_model_paths=[
             "kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers",
             "kandinskylab/Kandinsky-6.0-Pro-sft-5s-Diffusers",
+            "kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers",
         ],
         model_detectors=[
             _is_kandinsky6,
@@ -1269,6 +1273,8 @@ def _register_presets() -> None:
         ALL_PRESETS as LONGCAT_PRESETS, )
     from fastvideo.pipelines.basic.ltx2.presets import (
         ALL_PRESETS as LTX2_PRESETS, )
+    from fastvideo.pipelines.basic.magi_human.presets import (
+        ALL_PRESETS as MAGI_HUMAN_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame2.presets import (
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
@@ -1307,6 +1313,7 @@ def _register_presets() -> None:
         LINGBOTWORLD2_PRESETS,
         LONGCAT_PRESETS,
         LTX2_PRESETS,
+        MAGI_HUMAN_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
         MINIMAX_H3_PRESETS,
