@@ -9,6 +9,7 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed.parallel_state import (
@@ -23,10 +24,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29507"
-os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
-os.environ.setdefault("DISABLE_SP", "1")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29507")
 
 # Path to converted weights (local path, not HuggingFace)
 TRANSFORMER_PATH = "official_weights/hunyuan-gamecraft/transformer"
@@ -39,12 +38,18 @@ REFERENCE_LATENT = 42351.12903189659
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_hunyuangamecraft_transformer():
+def test_hunyuangamecraft_transformer(env_overrides):
     """Test HunyuanGameCraft transformer regression."""
-    
+
     if not os.path.exists(TRANSFORMER_PATH):
         pytest.skip(f"Weights not found at {TRANSFORMER_PATH}")
-    
+
+    # Keep this model-specific override local to this test. Setting
+    # TORCHDYNAMO_DISABLE during module collection disables torch.compile for
+    # every later transformer test in the same pytest process; FakeTensor
+    # compile checks then execute Triton kernels against fake CUDA pointers.
+    env_overrides.enter_context(envs.override_external("TORCHDYNAMO_DISABLE", "1"))
+
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
 
@@ -56,9 +61,7 @@ def test_hunyuangamecraft_transformer():
         model_path=TRANSFORMER_PATH,
         dit_cpu_offload=False,
         use_fsdp_inference=False,
-        pipeline_config=PipelineConfig(
-            dit_config=HunyuanGameCraftConfig(), dit_precision=precision_str
-        ),
+        pipeline_config=PipelineConfig(dit_config=HunyuanGameCraftConfig(), dit_precision=precision_str),
     )
     args.device = device
 
@@ -82,10 +85,13 @@ def test_hunyuangamecraft_transformer():
     text_seq_len = 32
 
     # Input latents [B, 33, T, H, W] - 16 latent + 16 gt_latent + 1 mask
-    hidden_states = torch.randn(
-        batch_size, 33, latent_frames, latent_height, latent_width,
-        device=device, dtype=precision
-    )
+    hidden_states = torch.randn(batch_size,
+                                33,
+                                latent_frames,
+                                latent_height,
+                                latent_width,
+                                device=device,
+                                dtype=precision)
 
     if sp_world_size > 1:
         chunk_per_rank = hidden_states.shape[2] // sp_world_size
@@ -93,10 +99,10 @@ def test_hunyuangamecraft_transformer():
 
     # Text embeddings (LLaMA)
     text_states = torch.randn(batch_size, text_seq_len, 4096, device=device, dtype=precision)
-    
+
     # CLIP pooled embeddings
     text_states_2 = torch.randn(batch_size, 768, device=device, dtype=precision)
-    
+
     # Text mask
     text_mask = torch.ones(batch_size, text_seq_len, device=device, dtype=torch.long)
 
@@ -105,10 +111,7 @@ def test_hunyuangamecraft_transformer():
 
     # Camera states [B, num_frames, 6, H, W] - 33 video frames at full resolution
     # For 9 latent frames, we use 33 camera frames (matching official model)
-    camera_states = torch.randn(
-        batch_size, 33, 6, 352, 640,
-        device=device, dtype=precision
-    )
+    camera_states = torch.randn(batch_size, 33, 6, 352, 640, device=device, dtype=precision)
 
     encoder_hidden_states = [text_states, text_states_2]
 

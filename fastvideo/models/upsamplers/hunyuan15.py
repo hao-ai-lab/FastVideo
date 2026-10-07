@@ -32,7 +32,9 @@ from fastvideo.models.vaes.hunyuan15vae import (
 from fastvideo.layers.activation import get_act_fn
 from fastvideo.configs.models.upsamplers import SRTo720pUpsamplerConfig, SRTo1080pUpsamplerConfig
 
+
 class HunyuanVideo15ResnetBlock(nn.Module):
+
     def __init__(
         self,
         in_channels: int,
@@ -70,7 +72,9 @@ class HunyuanVideo15ResnetBlock(nn.Module):
 
         return hidden_states + residual
 
+
 class SRResidualCausalBlock3D(nn.Module):
+
     def __init__(self, channels: int):
         super().__init__()
         self.block = nn.Sequential(

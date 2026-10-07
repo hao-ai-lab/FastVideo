@@ -87,9 +87,15 @@ def test_extract_component_times_keeps_legacy_class_name_keys():
     result = {
         "logging_info": {
             "stages": {
-                "TextEncodingStage": {"execution_time": 1.0},
-                "DenoisingStage": {"execution_time": 2.0},
-                "DecodingStage": {"execution_time": 3.0},
+                "TextEncodingStage": {
+                    "execution_time": 1.0
+                },
+                "DenoisingStage": {
+                    "execution_time": 2.0
+                },
+                "DecodingStage": {
+                    "execution_time": 3.0
+                },
             },
         },
     }
@@ -130,9 +136,15 @@ def test_extract_component_times_ignores_unmapped_stages():
     result = {
         "logging_info": {
             "stages": {
-                "PostDecodeFrameProcessStage": {"execution_time": 0.2},
-                "VideoSaveStage": {"execution_time": 0.4},
-                "AudioMuxStage": {"execution_time": 0.1},
+                "PostDecodeFrameProcessStage": {
+                    "execution_time": 0.2
+                },
+                "VideoSaveStage": {
+                    "execution_time": 0.4
+                },
+                "AudioMuxStage": {
+                    "execution_time": 0.1
+                },
             },
         },
     }

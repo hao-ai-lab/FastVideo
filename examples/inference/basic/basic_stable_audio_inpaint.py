@@ -54,16 +54,15 @@ PROMPT = "Steady lo-fi hip hop drum loop with vinyl crackle."
 # ...) you want to extend or repair. The pipeline raises if a mask is
 # passed without a reference, so this must be a real path.
 REFERENCE_AUDIO_PATH = "path/to/your/loop.wav"
-KEEP_SECONDS = 6.0       # first KEEP_SECONDS preserved exactly
-TOTAL_SECONDS = 12.0     # extend the loop to this duration
+KEEP_SECONDS = 6.0  # first KEEP_SECONDS preserved exactly
+TOTAL_SECONDS = 12.0  # extend the loop to this duration
 
 
 def main() -> None:
     if not os.path.isfile(REFERENCE_AUDIO_PATH):
-        raise FileNotFoundError(
-            f"REFERENCE_AUDIO_PATH={REFERENCE_AUDIO_PATH!r} does not exist. "
-            "Edit this script to point at a real audio file (wav/mp3/mp4/"
-            "m4a/flac) before running.")
+        raise FileNotFoundError(f"REFERENCE_AUDIO_PATH={REFERENCE_AUDIO_PATH!r} does not exist. "
+                                "Edit this script to point at a real audio file (wav/mp3/mp4/"
+                                "m4a/flac) before running.")
     generator = VideoGenerator.from_pretrained(
         "FastVideo/stable-audio-open-1.0-Diffusers",
         num_gpus=1,

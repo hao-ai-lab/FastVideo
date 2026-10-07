@@ -17,15 +17,9 @@ pytest.importorskip("starlette")
 from starlette.testclient import TestClient  # noqa: E402
 
 from fastvideo.api.schema import (  # noqa: E402
-    ContinuationState,
-    GeneratorConfig,
-    SamplingConfig,
-    ServeConfig,
-    StreamingConfig,
-    GenerationRequest,
+    ContinuationState, GeneratorConfig, SamplingConfig, ServeConfig, StreamingConfig, GenerationRequest,
 )
 from fastvideo.entrypoints.streaming.server import build_app  # noqa: E402
-
 
 _FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
 
@@ -39,10 +33,7 @@ class _MockGenerator:
     return_state: bool = True
 
     def generate(self, request: GenerationRequest) -> dict[str, Any]:
-        frames = [
-            np.full((self.height, self.width, 3), i * 5, dtype=np.uint8)
-            for i in range(self.num_frames)
-        ]
+        frames = [np.full((self.height, self.width, 3), i * 5, dtype=np.uint8) for i in range(self.num_frames)]
         state = (ContinuationState(
             kind="ltx2.v1",
             payload={
@@ -61,15 +52,13 @@ class _MockGenerator:
 def _build_serve_config() -> ServeConfig:
     return ServeConfig(
         generator=GeneratorConfig(model_path="/models/fake"),
-        default_request=GenerationRequest(
-            sampling=SamplingConfig(
-                num_frames=12,
-                height=64,
-                width=64,
-                fps=12,
-                num_inference_steps=1,
-            ),
-        ),
+        default_request=GenerationRequest(sampling=SamplingConfig(
+            num_frames=12,
+            height=64,
+            width=64,
+            fps=12,
+            num_inference_steps=1,
+        ), ),
         streaming=StreamingConfig(
             session_timeout_seconds=60,
             generation_segment_cap=2,
@@ -132,7 +121,10 @@ class TestSessionHandshake:
                 "preset": "ltx2_two_stage",
                 "continuation_state": {
                     "kind": "ltx2.v1",
-                    "payload": {"schema_version": 1, "segment_index": 3},
+                    "payload": {
+                        "schema_version": 1,
+                        "segment_index": 3
+                    },
                 },
             })
             # Drain handshake frames
@@ -153,8 +145,7 @@ class TestSegmentFlow:
     def test_segment_generates_media_init_plus_complete(self):
         client, generator = _build_client()
         with client.websocket_connect("/v1/stream") as ws:
-            ws.send_json({"type": "session_init_v2",
-                          "preset": "ltx2_two_stage"})
+            ws.send_json({"type": "session_init_v2", "preset": "ltx2_two_stage"})
             for _ in range(3):
                 ws.receive_json()  # queue_status + gpu_assigned + stream_start
 
@@ -195,8 +186,7 @@ class TestContinuationStatePersistence:
             pytest.skip("ffmpeg not installed")
         client, generator = _build_client()
         with client.websocket_connect("/v1/stream") as ws:
-            ws.send_json({"type": "session_init_v2",
-                          "preset": "ltx2_two_stage"})
+            ws.send_json({"type": "session_init_v2", "preset": "ltx2_two_stage"})
             for _ in range(3):
                 ws.receive_json()
             ws.send_json({

@@ -38,7 +38,6 @@ from fastvideo.api import (
     SamplingConfig,
 )
 
-
 # ----------------------------------------------------------------------
 # Fake Dynamo-side types (the real ones live in dynamo.llm and dynamo.*)
 # We mimic their dict shape so the adapter code under test is realistic.
@@ -87,8 +86,7 @@ def _parse_size(size: str | None) -> tuple[int, int]:
     return int(w), int(h)
 
 
-def nv_request_to_generation_request(
-    request: dict[str, Any], ) -> GenerationRequest:
+def nv_request_to_generation_request(request: dict[str, Any], ) -> GenerationRequest:
     """Translate Dynamo's request shape into FastVideo's typed request.
 
     This function is the template integrators copy into the Dynamo repo.
@@ -150,7 +148,9 @@ class _MockFastVideoHandler:
             await asyncio.sleep(0)  # model call stub
         elapsed = time.perf_counter() - t0
         yield {
-            "data": [{"b64_json": self._fake_result["b64_json"]}],
+            "data": [{
+                "b64_json": self._fake_result["b64_json"]
+            }],
             "inference_time_s": elapsed,
             "model": request.get("model"),
             "nvext": {
@@ -184,13 +184,11 @@ class TestDynamoAdapterShape:
         assert req.negative_prompt == "blurry"
 
     def test_nvext_num_frames_overrides_seconds_times_fps(self):
-        req = nv_request_to_generation_request(
-            _nv_create_video_request(nvext={"num_frames": 33}))
+        req = nv_request_to_generation_request(_nv_create_video_request(nvext={"num_frames": 33}))
         assert req.sampling.num_frames == 33
 
     def test_input_reference_maps_to_image_path(self):
-        req = nv_request_to_generation_request(
-            _nv_create_video_request(input_reference="/tmp/init.png"))
+        req = nv_request_to_generation_request(_nv_create_video_request(input_reference="/tmp/init.png"))
         assert req.inputs.image_path == "/tmp/init.png"
 
     def test_continuation_state_round_trips_through_adapter(self):
@@ -201,8 +199,7 @@ class TestDynamoAdapterShape:
                 "segment_index": 2,
             },
         }
-        req = nv_request_to_generation_request(
-            _nv_create_video_request(nvext={"continuation_state": state}))
+        req = nv_request_to_generation_request(_nv_create_video_request(nvext={"continuation_state": state}))
         assert isinstance(req.state, ContinuationState)
         assert req.state.kind == "ltx2.v1"
         assert req.state.payload["segment_index"] == 2
@@ -215,8 +212,7 @@ class TestDynamoHandlerContract:
 
         async def run():
             out = []
-            async for chunk in handler.generate(
-                    _nv_create_video_request(), _FakeContext()):
+            async for chunk in handler.generate(_nv_create_video_request(), _FakeContext()):
                 out.append(chunk)
             return out
 
@@ -235,22 +231,21 @@ class TestDynamoHandlerContract:
         handler = _MockFastVideoHandler({"b64_json": "abc"})
         state_in = {
             "kind": "ltx2.v1",
-            "payload": {"schema_version": 1, "segment_index": 4},
+            "payload": {
+                "schema_version": 1,
+                "segment_index": 4
+            },
         }
 
         async def run():
-            async for chunk in handler.generate(
-                    _nv_create_video_request(
-                        nvext={"continuation_state": state_in}),
-                    _FakeContext()):
+            async for chunk in handler.generate(_nv_create_video_request(nvext={"continuation_state": state_in}),
+                                                _FakeContext()):
                 return chunk
             raise AssertionError("no chunk emitted")
 
         chunk = asyncio.run(run())
         assert chunk["nvext"]["continuation_state"]["kind"] == "ltx2.v1"
-        assert (
-            chunk["nvext"]["continuation_state"]["payload"]["segment_index"]
-            == 4)
+        assert (chunk["nvext"]["continuation_state"]["payload"]["segment_index"] == 4)
 
 
 class TestNoInternalImports:
@@ -284,20 +279,15 @@ class TestNoInternalImports:
 
         adapter_source = inspect.getsource(nv_request_to_generation_request)
         for banned in self._BANNED_PREFIXES:
-            assert banned not in adapter_source, (
-                f"Dynamo adapter template must not depend on {banned}*; "
-                "found a reference in the adapter function body.")
+            assert banned not in adapter_source, (f"Dynamo adapter template must not depend on {banned}*; "
+                                                  "found a reference in the adapter function body.")
 
     def test_public_types_are_stable_imports(self):
         # These lines match the exact import snippet in docs/design/
         # server_contracts/dynamo.md; any rename breaks CI.
         from fastvideo import VideoGenerator  # noqa: F401
         from fastvideo.api import (  # noqa: F401
-            ContinuationState,
-            GenerationRequest,
-            InputConfig,
-            OutputConfig,
-            SamplingConfig,
+            ContinuationState, GenerationRequest, InputConfig, OutputConfig, SamplingConfig,
         )
 
     @pytest.mark.skipif(
@@ -315,8 +305,7 @@ class TestNoInternalImports:
             "SamplingConfig",
         }
         missing = required - set(api.__all__)
-        assert not missing, (
-            f"fastvideo.api.__all__ missing Dynamo-contract symbols: {missing}")
+        assert not missing, (f"fastvideo.api.__all__ missing Dynamo-contract symbols: {missing}")
 
 
 def _read_own_source() -> str:

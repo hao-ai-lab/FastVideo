@@ -7,7 +7,7 @@ IMAGE_PATH = "assets/girl.png"
 
 def main():
     generator = VideoGenerator.from_pretrained(
-        "kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers", 
+        "kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers",
         # "kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers"
         # "kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers"
         num_gpus=1,
@@ -19,9 +19,7 @@ def main():
         # image_encoder_cpu_offload=False,
     )
 
-    prompt = (
-        "A woman stands up and walks away"
-    )
+    prompt = ("A woman stands up and walks away")
     _ = generator.generate_video(
         prompt,
         image_path=IMAGE_PATH,

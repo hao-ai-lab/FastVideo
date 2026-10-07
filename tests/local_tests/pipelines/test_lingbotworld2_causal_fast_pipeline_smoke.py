@@ -10,7 +10,6 @@ from typing import Any, cast
 import pytest
 import torch
 
-
 MODEL_DIR = Path("/mnt/weka/shrd/wm/junda/fv-hub/lingbot-world-v2/ckpts/lingbot-world-v2-14b-causal-fast-fastvideo")
 FASTVIDEO_ROOT = Path(__file__).resolve().parents[3]
 ACTION_PATH = FASTVIDEO_ROOT / "examples" / "dataset" / "lingbotworld2"

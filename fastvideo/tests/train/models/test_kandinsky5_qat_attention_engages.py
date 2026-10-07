@@ -18,9 +18,9 @@ Two silent-fallback traps this guards against:
 
 This test itself must not become that stale-selection source for whichever
 model test runs next in the same pytest process: ``FASTVIDEO_ATTENTION_BACKEND``
-is set via ``monkeypatch`` (auto-restored at teardown, including on
+is set via ``env_overrides`` (auto-restored at teardown, including on
 failure) and the cache is cleared again in a ``finally`` block, since
-``monkeypatch`` only restores the env var, not the separate process-wide
+``env_overrides`` only restores the env var, not the separate process-wide
 cache keyed on it.
 
 Unlike ``fastvideo.platforms.cuda``'s other backends, ATTN_QAT_TRAIN has no
@@ -44,10 +44,10 @@ sidesteps both problems.
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29519")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29519")
 
 from pathlib import Path
 
@@ -59,13 +59,11 @@ from fastvideo.attention.selector import _cached_get_attn_backend
 from fastvideo.forward_context import set_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 
-_FIXTURE = str(
-    Path(__file__).resolve().parent.parent / "fixtures" /
-    "kandinsky5_t2v_min.yaml")
+_FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "kandinsky5_t2v_min.yaml")
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
+def test_kandinsky5_attn_qat_train_engages_and_backprops(env_overrides):
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
 
@@ -74,7 +72,7 @@ def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
     if not is_attn_qat_train_available():
         pytest.skip("fastvideo_kernel ATTN_QAT_TRAIN kernel is not built")
 
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "ATTN_QAT_TRAIN")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("ATTN_QAT_TRAIN"))
     _cached_get_attn_backend.cache_clear()
     try:
         from fastvideo.train.models.kandinsky5 import Kandinsky5Model
@@ -108,9 +106,14 @@ def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
         latent_h = grid_h * patch_size[1]
         latent_w = grid_w * patch_size[2]
 
-        latents = torch.randn(
-            1, latent_t, latent_h, latent_w, in_visual_dim, device=device, dtype=dtype,
-            requires_grad=True)
+        latents = torch.randn(1,
+                              latent_t,
+                              latent_h,
+                              latent_w,
+                              in_visual_dim,
+                              device=device,
+                              dtype=dtype,
+                              requires_grad=True)
         if bool(getattr(transformer, "visual_cond", False)):
             # See Kandinsky5Model._build_distill_input_kwargs /
             # Kandinsky5LatentPreparationStage: visual_cond=True checkpoints
@@ -150,11 +153,10 @@ def test_kandinsky5_attn_qat_train_engages_and_backprops(monkeypatch):
         assert latents.grad is not None
         assert torch.isfinite(latents.grad).all().item(), "input grad contains NaN/Inf"
         assert attn.to_query.weight.grad is not None
-        assert torch.isfinite(attn.to_query.weight.grad.to_local()
-                              if hasattr(attn.to_query.weight.grad, "to_local") else
-                              attn.to_query.weight.grad).all().item(), "weight grad contains NaN/Inf"
+        assert torch.isfinite(attn.to_query.weight.grad.to_local() if hasattr(attn.to_query.weight.grad, "to_local")
+                              else attn.to_query.weight.grad).all().item(), "weight grad contains NaN/Inf"
     finally:
-        # monkeypatch restores FASTVIDEO_ATTENTION_BACKEND itself, but the
+        # env_overrides restores FASTVIDEO_ATTENTION_BACKEND itself, but the
         # selector cache is a separate process-wide functools.cache keyed on
         # (head_size, dtype, supported_backends) -- not on the env var -- so
         # it must be cleared again here or a later model test in this same

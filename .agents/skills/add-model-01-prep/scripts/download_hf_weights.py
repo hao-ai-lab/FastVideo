@@ -8,14 +8,12 @@ import os
 import sys
 from pathlib import Path
 
-
 HF_TOKEN_ENV_KEYS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_API_KEY")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Download a HF model snapshot or selected files into a local directory."
-    )
+        description="Download a HF model snapshot or selected files into a local directory.")
     parser.add_argument("repo_id", help="HF repo id, for example Org/Model")
     parser.add_argument("local_dir", help="Destination directory")
     parser.add_argument("--repo-type", default="model", help="HF repo type (default: model)")

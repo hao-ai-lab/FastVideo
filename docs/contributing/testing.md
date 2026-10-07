@@ -10,6 +10,7 @@ slash-command mappings, and workflow ownership live in
 |---|---|---|
 | Unit tests | `fastvideo/tests/api`, `fastvideo/tests/dataset`, `fastvideo/tests/entrypoints`, `fastvideo/tests/workflow`, CPU-safe `fastvideo/tests/train` subsets | Validate individual functions, APIs, contracts, and lightweight workflows. |
 | Component tests | `fastvideo/tests/encoders`, `fastvideo/tests/transformers`, `fastvideo/tests/vaes` | Validate loading and basic behavior for model components. |
+| Golden gates | `fastvideo/tests/golden_gate` | Compare small, deterministic component outputs exactly against device/runtime-matched reference tensors. |
 | Train framework tests | `fastvideo/tests/train/models`, `fastvideo/tests/train/methods` | Exercise the new `fastvideo/train/` framework on real checkpoints and tiny synthetic batches. |
 | SSIM tests | `fastvideo/tests/ssim` | Compare generated videos against references to catch visual regressions. |
 | Training tests | `fastvideo/tests/training` | Validate legacy training loops, LoRA, distillation, self-forcing, and VSA behavior. |
@@ -20,14 +21,74 @@ slash-command mappings, and workflow ownership live in
 
 ## Running Tests Locally
 
-Run the narrowest useful suite while iterating:
+Start with the cheapest checks that cover the changed behavior, and stop on a
+failure before starting heavier dependent checks:
+
+1. Run pre-commit on changed files and focused import, config, and contract tests.
+2. Run the smallest matching component golden gate. Prefer one GPU, tiny fixed
+   inputs, cached component weights, and direct tensor comparisons over renders.
+3. Run focused component parity or default SSIM when the golden does not cover
+   the changed behavior, such as VAE normalization or pipeline wiring.
+4. Run full-quality renders or broad suites when required by the change, an
+   explicit request, or CI policy, rather than on every edit.
+
+A golden must cover the component being changed. Wan has four small gates:
+
+| Gate | Boundary |
+|---|---|
+| `test_wan_t2v.py` | Dense transformer block 0 |
+| `test_wan_vae.py` | FP32 encode, BF16 decode, streaming, and cache reset |
+| `test_wan_causal.py` | Real block weights, cache append/rewrite, and sink eviction |
+| `test_wan_denoising.py` | Three real 1.3B DiT/UniPC steps with fixed prompt embeddings |
+
+These use an immutable Wan checkpoint revision and only download the required
+component. The trajectory gate needs no tokenizer, text encoder, VAE, or video
+reference. Weight-free stage tests also exercise every step of a 50-step UniPC
+loop, CFG caching, expert switching, conditioning layouts, and DMD RNG order.
+These checks do not replace independent Diffusers parity or end-to-end SSIM.
+
+Use the golden's matching GPU, dtype, backend, and runtime. A missing reference
+or environment mismatch is not a pass. Do not replace a reference with the
+candidate output just to clear a failure. For a relocation, the unchanged
+parent is the baseline; two imports of the same class are not numerical proof.
+
+The VAE and transformer CI lanes run their Wan component goldens first.
+Selected integration lanes wait for the golden lane in merge/full builds.
+See [CI/CD Architecture](ci_architecture.md) for direct-rerun and skip semantics.
+
+For Wan, one command enforces the local ordering and stops on failure:
+
+The initial contracts include `tests/api/test_wan_definitions.py`: all registered
+Wan aliases, local-manifest detector precedence, sampling/precision defaults,
+config isolation, and legacy serialized-config compatibility. These require no
+weights or Hub access; the current package import still needs its prepared
+runtime environment.
 
 ```bash
-pytest tests/
-pytest fastvideo/tests/ -v
-pytest fastvideo/tests/encoders -vs
-pytest fastvideo/tests/transformers -vs
-pytest fastvideo/tests/vaes -vs
+bash scripts/validate_wan.sh vae           # contracts, then the VAE golden
+bash scripts/validate_wan.sh dense parity  # contracts, goldens, Diffusers parity
+bash scripts/validate_wan.sh all default   # then focused T2V/I2V/causal SSIM
+```
+
+The second argument is an upper validation tier, not a reference override.
+Supply the GPU/backend/runtime and SSIM model/tier settings that match the
+reference. The script never updates references. Causal component coverage is
+a block-cache fingerprint, not independent full causal-pipeline parity.
+
+New named-tensor gates write a missing output to `*.candidate.pt` and fail;
+running candidate code again cannot turn it into an approved reference. Seed
+from unchanged, pushed source, verify two independent processes bit-for-bit,
+then review and publish only the new reference files. Preserve the baseline
+source SHA, test recipe SHA, checkpoint revision, runtime, and comparison
+receipt with the run artifacts. Never overwrite an existing video reference
+as a side effect of adding a tensor gate.
+
+Examples of focused checks:
+
+```bash
+pytest fastvideo/tests/loader/test_wan_family_imports.py -q
+pytest fastvideo/tests/golden_gate/test_wan_t2v.py -q
+pytest fastvideo/tests/vaes/test_wan_vae.py -q
 ```
 
 GPU-heavy suites need the right hardware, credentials, local caches, and
@@ -138,47 +199,31 @@ pytest fastvideo/tests/ssim/ -vs
 
 Use a machine whose GPU and backend match the reference folder you are testing.
 
-## Modal Runs For SSIM
+## Slurm CI Runs For SSIM
 
-For CI-like SSIM execution, use `fastvideo/tests/modal/ssim_test.py`:
+Comment `/test ssim` on a pull request to run the canonical four-GPU SSIM
+lane on the Slinky Slurm cluster. `fastvideo/tests/ssim/ci_runner.py`
+discovers the suite without importing test modules, packs independent pytest
+processes across the four assigned GPUs, and stops the lane on the first
+failure.
 
-```bash
-python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests
-```
+The change-aware `/merge` planner may run only the SSIM test basenames owned
+by the changed model family. Shared SSIM harness changes still select the
+complete lane. Independently, `main` runs the full SSIM matrix every Sunday at
+05:00 UTC so infrequently touched model families retain periodic coverage.
 
-Target specific files or model ids:
-
-```bash
-python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
-  --test-files test_wan_t2v_similarity.py \
-  --model-ids Wan2.1-T2V-1.3B-Diffusers
-```
-
-If `HF_API_KEY`, `HUGGINGFACE_HUB_TOKEN`, or `HF_TOKEN` is not set, the local
-entrypoint fails fast.
-
-To export raw generated videos from Modal to the shared volume:
+For a focused developer run, invoke pytest directly and optionally select one
+model from a parameterized test through `FASTVIDEO_SSIM_MODEL_ID`:
 
 ```bash
-python -m modal run fastvideo/tests/modal/ssim_test.py::run_ssim_tests \
-  --sync-generated-to-volume
+pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs
+
+FASTVIDEO_SSIM_MODEL_ID=Wan2.1-T2V-1.3B-Diffusers \
+pytest fastvideo/tests/ssim/test_wan_t2v_similarity.py -vs
 ```
 
-The raw export path is quality-tiered:
-
-- default params: `ssim_generated_videos/default/<subdir>/generated_videos`
-- full-quality params: `ssim_generated_videos/full_quality/<subdir>/generated_videos`
-
-The printed `modal volume get` command downloads into
-`./generated_videos_modal/<quality-tier>`. Convert those outputs into local
-references with `copy-local`:
-
-```bash
-python fastvideo/tests/ssim/reference_videos_cli.py copy-local \
-  --quality-tier full_quality \
-  --generated-dir ./generated_videos_modal/full_quality/L40S_reference_videos \
-  --device-folder L40S_reference_videos
-```
+The files under `fastvideo/tests/modal/` are retained only as a disabled
+manual rollback implementation. No active CI trigger invokes them.
 
 ### SSIM Bootstrap Mode
 
@@ -206,28 +251,30 @@ python fastvideo/tests/ssim/reference_videos_cli.py promote-draft \
 
 ## CI Integration
 
-FastVideo CI tests are orchestrated by Buildkite and run on Modal GPU
-instances. The main files are:
+FastVideo GPU CI is orchestrated by Buildkite and runs only on isolated Slinky
+Slurm workers. The main files are:
 
 | File | Purpose |
 |---|---|
-| `.buildkite/pipeline.yml` | Buildkite test graph and path filters. |
-| `.buildkite/scripts/pr_test.sh` | Dispatches `TEST_TYPE` to a Modal function. |
-| `fastvideo/tests/modal/pr_test.py` | Modal functions for most test lanes. |
-| `fastvideo/tests/modal/ssim_test.py` | Modal functions and partitioning for SSIM. |
+| `.buildkite/pipeline.yml` | Static, validated 20-lane Slurm test graph. |
+| `.github/scripts/plan_merge_ci.py` | Trusted path-to-lane and focused quality-test policy for `/merge`. |
+| `.buildkite/scripts/unit_test.sh`, `.buildkite/scripts/lanes/*.sh` | Repository-owned test payloads executed inside Slurm containers. |
+| `fastvideo/tests/ssim/ci_runner.py` | Four-GPU SSIM task discovery and scheduling. |
+| `.buildkite/scripts/pr_test.sh`, `fastvideo/tests/modal/*.py` | Dormant manual rollback path; rejected in Buildkite. |
 
-For exact tier membership, path filters, slash commands, and aggregate statuses,
+For exact tier membership, slash commands, runner isolation, and aggregate statuses,
 see [CI/CD Architecture](ci_architecture.md).
 
 ### Adding A New CI Test Category
 
 If a new test does not fit an existing lane:
 
-1. Add a Modal function in `fastvideo/tests/modal/pr_test.py` or a focused
-   companion module.
-2. Add a matching `TEST_TYPE` case in `.buildkite/scripts/pr_test.sh`.
-3. Add Buildkite direct-test and path-filter entries in `.buildkite/pipeline.yml`.
-4. Add the `/test` mapping in `.github/workflows/ci-slash-commands.yml`.
+1. Put the test payload in an executable `.buildkite/scripts/lanes/<lane>.sh`.
+2. Add its static step to `.buildkite/pipeline.yml`, its changed-path ownership
+   to `.github/scripts/plan_merge_ci.py`, and extend the CI contract tests.
+3. Add the `/test` mapping in `.github/workflows/ci-slash-commands.yml`.
+4. Coordinate the matching GPU, timeout, dependency, secret, and artifact
+   policy in the private Slurm runner allowlist.
 5. Document the new category in [CI/CD Architecture](ci_architecture.md) and add
    authoring notes here if contributors need them.
 

@@ -11,7 +11,7 @@ The encoded dataset is published on the Hugging Face Hub, ready to train:
 
 ```bash
 # from the repo root
-bash examples/training/finetune/wan_t2v_1.3B/mixkit/download_mixkit_data.sh
+bash examples/datasets/mixkit/download_dataset.sh
 ```
 
 This pulls [`weizhou03/HD-Mixkit-Finetune-Wan`](https://huggingface.co/datasets/weizhou03/HD-Mixkit-Finetune-Wan)

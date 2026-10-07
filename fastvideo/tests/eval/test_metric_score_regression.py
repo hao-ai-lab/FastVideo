@@ -16,29 +16,28 @@ from fastvideo.tests.eval.conftest import _reference_metric_names, load_referenc
 
 REQUIRED_GPUS = 1
 
-
 # Per-metric absolute tolerances. Tight for closed-form math, looser for
 # anything that runs CLIP/DINO/ViCLIP/VLM under bf16 or cuDNN.
 TOLERANCE: dict[str, float] = {
     # WER tolerates ~1 word/clip drift: reference runs openai-whisper with an
     # explicit language hint; fastvideo runs transformers WhisperForConditionalGeneration
     # without one (auto-detect). Same model weights, different decode paths.
-    "audio.wer":                       0.2,
-    "audio.desync":                    1e-3,
-    "audio.clap_score":                1e-2,
-    "audio.audiobox_aesthetics":       1e-2,
-    "audio.imagebind_score":           1e-2,
+    "audio.wer": 0.2,
+    "audio.desync": 1e-3,
+    "audio.clap_score": 1e-2,
+    "audio.audiobox_aesthetics": 1e-2,
+    "audio.imagebind_score": 1e-2,
     # videoscore2 is handled separately (per-dimension hard-score check) —
     # see _assert_videoscore2 below.
-    "vbench.aesthetic_quality":        1e-2,
-    "vbench.background_consistency":   1e-2,
-    "vbench.dynamic_degree":           0.0,   # binary 0/1 — must match exactly
-    "vbench.imaging_quality":          1e-2,
-    "vbench.motion_smoothness":        1e-2,
-    "vbench.overall_consistency":      1e-2,
-    "vbench.subject_consistency":      1e-2,
-    "vbench.temporal_flickering":      1e-2,
-    "vbench.temporal_style":           1e-2,
+    "vbench.aesthetic_quality": 1e-2,
+    "vbench.background_consistency": 1e-2,
+    "vbench.dynamic_degree": 0.0,  # binary 0/1 — must match exactly
+    "vbench.imaging_quality": 1e-2,
+    "vbench.motion_smoothness": 1e-2,
+    "vbench.overall_consistency": 1e-2,
+    "vbench.subject_consistency": 1e-2,
+    "vbench.temporal_flickering": 1e-2,
+    "vbench.temporal_style": 1e-2,
 }
 
 
@@ -54,17 +53,14 @@ def _assert_videoscore2(result, reference: dict) -> None:
     which still fails loudly on a parse miss (hard score ``None``) or a ≥2
     point divergence.
     """
-    for dim in ("visual_quality_hard", "text_alignment_hard",
-                "physical_consistency_hard"):
+    for dim in ("visual_quality_hard", "text_alignment_hard", "physical_consistency_hard"):
         ref_h = reference["details"].get(dim)
         got_h = result.details.get(dim)
         assert ref_h is not None, f"reference missing {dim}"
-        assert got_h is not None, (
-            f"videoscore2 did not parse {dim} "
-            f"(raw_output head: {result.details.get('raw_output', '')[:160]!r})")
-        assert abs(got_h - ref_h) <= 1, (
-            f"videoscore2 {dim}: fastvideo={got_h} vs reference={ref_h} "
-            f"(integer sub-score drifted >1 across environments)")
+        assert got_h is not None, (f"videoscore2 did not parse {dim} "
+                                   f"(raw_output head: {result.details.get('raw_output', '')[:160]!r})")
+        assert abs(got_h - ref_h) <= 1, (f"videoscore2 {dim}: fastvideo={got_h} vs reference={ref_h} "
+                                         f"(integer sub-score drifted >1 across environments)")
 
 
 @pytest.mark.parametrize("metric_name", _reference_metric_names())
@@ -91,7 +87,5 @@ def test_metric_score_regression(metric_name: str, gold_results: dict) -> None:
 
     delta = abs(result.score - reference["score"])
     assert math.isfinite(result.score), f"{metric_name} returned non-finite score"
-    assert delta <= tol, (
-        f"{metric_name}: fastvideo={result.score:.6f} vs reference={reference['score']:.6f} "
-        f"(|Δ|={delta:.6f} > tol={tol})"
-    )
+    assert delta <= tol, (f"{metric_name}: fastvideo={result.score:.6f} vs reference={reference['score']:.6f} "
+                          f"(|Δ|={delta:.6f} > tol={tol})")

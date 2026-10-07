@@ -18,11 +18,8 @@ from fastvideo.platforms import AttentionBackendEnum
 
 from .utils import retain_kv_with_sink
 
-
 DISABLE_COMPILE = False
-flex_attention = torch.compile(
-    flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
-)
+flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 
 def _get_nd_rotary_pos_embed_matrixgame2(
@@ -54,8 +51,8 @@ def _apply_rotary_emb_qk(
     seq_len = xq.shape[1]
 
     # Slice frequencies based on offset
-    cos = freqs_cos[start_offset : start_offset + seq_len]  # [S, D]
-    sin = freqs_sin[start_offset : start_offset + seq_len]  # [S, D]
+    cos = freqs_cos[start_offset:start_offset + seq_len]  # [S, D]
+    sin = freqs_sin[start_offset:start_offset + seq_len]  # [S, D]
 
     # Move to device
     cos = cos.to(xq.device)
@@ -128,29 +125,19 @@ def _update_kv_cache_and_attend(
         Attention output tensor
     """
     current_start = start_frame
-    current_end = current_start + (
-        k.shape[1] if use_k_for_num_tokens else q.shape[1]
-    )
+    current_end = current_start + (k.shape[1] if use_k_for_num_tokens else q.shape[1])
 
-    assert (
-        k.shape[1] if use_k_for_num_tokens else q.shape[1]
-    ) == num_frame_per_block
+    assert (k.shape[1] if use_k_for_num_tokens else q.shape[1]) == num_frame_per_block
 
     max_attention_size = local_attn_size
     sink_tokens = sink_size * 1
     kv_cache_size = kv_cache["k"].shape[1]
     num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
 
-    original_global_end_index = (
-        int(kv_cache["global_end_index"].item())
-        if isinstance(kv_cache["global_end_index"], torch.Tensor)
-        else int(kv_cache["global_end_index"])
-    )
-    original_local_end_index = (
-        int(kv_cache["local_end_index"].item())
-        if isinstance(kv_cache["local_end_index"], torch.Tensor)
-        else int(kv_cache["local_end_index"])
-    )
+    original_global_end_index = (int(kv_cache["global_end_index"].item()) if isinstance(
+        kv_cache["global_end_index"], torch.Tensor) else int(kv_cache["global_end_index"]))
+    original_local_end_index = (int(kv_cache["local_end_index"].item()) if isinstance(
+        kv_cache["local_end_index"], torch.Tensor) else int(kv_cache["local_end_index"]))
 
     if torch.is_grad_enabled():
         kv_cache["k"] = kv_cache["k"].detach().clone()
@@ -160,60 +147,31 @@ def _update_kv_cache_and_attend(
         kv_cache["v"] = kv_cache["v"].detach()
 
     # Check if we need to evict tokens
-    if (current_end > original_global_end_index) and (
-        num_new_tokens + original_local_end_index > kv_cache_size
-    ):
-        num_evicted_tokens = (
-            num_new_tokens + original_local_end_index - kv_cache_size
-        )
-        num_rolled_tokens = (
-            original_local_end_index
-            - num_evicted_tokens
-            - sink_tokens
-        )
+    if (current_end > original_global_end_index) and (num_new_tokens + original_local_end_index > kv_cache_size):
+        num_evicted_tokens = (num_new_tokens + original_local_end_index - kv_cache_size)
+        num_rolled_tokens = (original_local_end_index - num_evicted_tokens - sink_tokens)
         # Roll k cache
-        kv_cache["k"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
-            kv_cache["k"][
-                :,
-                sink_tokens + num_evicted_tokens : sink_tokens
-                + num_evicted_tokens
-                + num_rolled_tokens,
-            ].clone()
-        )
+        kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = (kv_cache["k"][
+            :,
+            sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens,
+        ].clone())
         # Roll v cache
-        kv_cache["v"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
-            kv_cache["v"][
-                :,
-                sink_tokens + num_evicted_tokens : sink_tokens
-                + num_evicted_tokens
-                + num_rolled_tokens,
-            ].clone()
-        )
+        kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = (kv_cache["v"][
+            :,
+            sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens,
+        ].clone())
         # Calculate indices with eviction adjustment
-        local_end_index = (
-            original_local_end_index
-            + current_end
-            - original_global_end_index
-            - num_evicted_tokens
-        )
+        local_end_index = (original_local_end_index + current_end - original_global_end_index - num_evicted_tokens)
         local_start_index = local_end_index - num_new_tokens
     else:
         # Calculate indices without eviction
-        local_end_index = (
-            original_local_end_index
-            + current_end
-            - original_global_end_index
-        )
+        local_end_index = (original_local_end_index + current_end - original_global_end_index)
         local_start_index = local_end_index - num_new_tokens
 
     # Store new k, v in cache
     if store_first_only:
-        kv_cache["k"][:, local_start_index:local_end_index] = k[
-            : kv_cache["k"].shape[0]
-        ]
-        kv_cache["v"][:, local_start_index:local_end_index] = v[
-            : kv_cache["v"].shape[0]
-        ]
+        kv_cache["k"][:, local_start_index:local_end_index] = k[:kv_cache["k"].shape[0]]
+        kv_cache["v"][:, local_start_index:local_end_index] = v[:kv_cache["v"].shape[0]]
     else:
         kv_cache["k"][:, local_start_index:local_end_index] = k
         kv_cache["v"][:, local_start_index:local_end_index] = v
@@ -275,12 +233,8 @@ class ActionModule(nn.Module):
         super().__init__()
         # Initialize mutable defaults
         patch_size = patch_size if patch_size is not None else [1, 2, 2]
-        rope_dim_list = (
-            rope_dim_list if rope_dim_list is not None else [8, 28, 28]
-        )
-        mouse_qk_dim_list = (
-            mouse_qk_dim_list if mouse_qk_dim_list is not None else [8, 28, 28]
-        )
+        rope_dim_list = (rope_dim_list if rope_dim_list is not None else [8, 28, 28])
+        mouse_qk_dim_list = (mouse_qk_dim_list if mouse_qk_dim_list is not None else [8, 28, 28])
         blocks = blocks if blocks is not None else []
         self.local_attn_size = local_attn_size
         self.sink_size = sink_size
@@ -302,8 +256,7 @@ class ActionModule(nn.Module):
             c = mouse_hidden_dim
             self.mouse_mlp = nn.Sequential(
                 nn.Linear(
-                    mouse_dim_in * vae_time_compression_ratio * windows_size
-                    + img_hidden_size,
+                    mouse_dim_in * vae_time_compression_ratio * windows_size + img_hidden_size,
                     c,
                     bias=True,
                 ),
@@ -314,64 +267,42 @@ class ActionModule(nn.Module):
 
             head_dim = c // heads_num
             self.t_qkv = ReplicatedLinear(c, c * 3, bias=qkv_bias)
-            self.img_attn_q_norm = (
-                RMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity()
-            )
-            self.img_attn_k_norm = (
-                RMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity()
-            )
-            self.proj_mouse = ReplicatedLinear(
-                c, img_hidden_size, bias=qkv_bias
-            )
+            self.img_attn_q_norm = (RMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity())
+            self.img_attn_k_norm = (RMSNorm(head_dim, eps=1e-6) if qk_norm else nn.Identity())
+            self.proj_mouse = ReplicatedLinear(c, img_hidden_size, bias=qkv_bias)
 
         if self.enable_keyboard:
             head_dim_key = keyboard_hidden_dim // heads_num
-            self.key_attn_q_norm = (
-                RMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity()
-            )
-            self.key_attn_k_norm = (
-                RMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity()
-            )
+            self.key_attn_q_norm = (RMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity())
+            self.key_attn_k_norm = (RMSNorm(head_dim_key, eps=1e-6) if qk_norm else nn.Identity())
 
-            self.mouse_attn_q = ReplicatedLinear(
-                img_hidden_size, keyboard_hidden_dim, bias=qkv_bias
-            )
+            self.mouse_attn_q = ReplicatedLinear(img_hidden_size, keyboard_hidden_dim, bias=qkv_bias)
             self.keyboard_attn_kv = ReplicatedLinear(
                 hidden_size * windows_size * vae_time_compression_ratio,
                 keyboard_hidden_dim * 2,
                 bias=qkv_bias,
             )
-            self.proj_keyboard = ReplicatedLinear(
-                keyboard_hidden_dim, img_hidden_size, bias=qkv_bias
-            )
+            self.proj_keyboard = ReplicatedLinear(keyboard_hidden_dim, img_hidden_size, bias=qkv_bias)
 
-        self.mouse_attn_layer = (
-            LocalAttention(
-                num_heads=heads_num,
-                head_size=mouse_hidden_dim // heads_num,
-                causal=False,
-                supported_attention_backends=(
-                    AttentionBackendEnum.FLASH_ATTN,
-                    AttentionBackendEnum.TORCH_SDPA,
-                ),
-            )
-            if self.enable_mouse
-            else None
-        )
+        self.mouse_attn_layer = (LocalAttention(
+            num_heads=heads_num,
+            head_size=mouse_hidden_dim // heads_num,
+            causal=False,
+            supported_attention_backends=(
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+            ),
+        ) if self.enable_mouse else None)
 
-        self.keyboard_attn_layer = (
-            LocalAttention(
-                num_heads=heads_num,
-                head_size=keyboard_hidden_dim // heads_num,
-                causal=False,
-                supported_attention_backends=(
-                    AttentionBackendEnum.FLASH_ATTN,
-                    AttentionBackendEnum.TORCH_SDPA,
-                ),
-            )
-            if self.enable_keyboard
-            else None
-        )
+        self.keyboard_attn_layer = (LocalAttention(
+            num_heads=heads_num,
+            head_size=keyboard_hidden_dim // heads_num,
+            causal=False,
+            supported_attention_backends=(
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+            ),
+        ) if self.enable_keyboard else None)
 
         self.vae_time_compression_ratio = vae_time_compression_ratio
         self.windows_size = windows_size
@@ -424,33 +355,20 @@ class ActionModule(nn.Module):
         if isinstance(self.patch_size, int):
             assert all(s % self.patch_size == 0 for s in latents_size), (
                 f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.patch_size}), "
-                f"but got {latents_size}."
-            )
+                f"but got {latents_size}.")
             rope_sizes = [s // self.patch_size for s in latents_size]
         elif isinstance(self.patch_size, list):
-            assert all(
-                s % self.patch_size[idx] == 0
-                for idx, s in enumerate(latents_size)
-            ), (
+            assert all(s % self.patch_size[idx] == 0 for idx, s in enumerate(latents_size)), (
                 f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.patch_size}), "
-                f"but got {latents_size}."
-            )
-            rope_sizes = [
-                s // self.patch_size[idx] for idx, s in enumerate(latents_size)
-            ]
+                f"but got {latents_size}.")
+            rope_sizes = [s // self.patch_size[idx] for idx, s in enumerate(latents_size)]
 
         if len(rope_sizes) != target_ndim:
-            rope_sizes = [1] * (
-                target_ndim - len(rope_sizes)
-            ) + rope_sizes  # time axis
+            rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes  # time axis
 
         if rope_dim_list is None:
-            rope_dim_list = [
-                head_dim // target_ndim for _ in range(target_ndim)
-            ]
-        assert sum(rope_dim_list) == head_dim, (
-            "sum(rope_dim_list) should equal to head_dim of attention layer"
-        )
+            rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
+        assert sum(rope_dim_list) == head_dim, ("sum(rope_dim_list) should equal to head_dim of attention layer")
         # Use Matrix-Game wrapper for FastVideo's function
         freqs_cos, freqs_sin = _get_nd_rotary_pos_embed_matrixgame2(
             rope_dim_list,
@@ -458,17 +376,9 @@ class ActionModule(nn.Module):
             theta=self.rope_theta,
             theta_rescale_factor=1,
         )
-        return freqs_cos[
-            -video_length
-            * rope_sizes[1]
-            * rope_sizes[2]
-            // self.patch_size[0] :
-        ], freqs_sin[
-            -video_length
-            * rope_sizes[1]
-            * rope_sizes[2]
-            // self.patch_size[0] :
-        ]
+        return freqs_cos[-video_length * rope_sizes[1] * rope_sizes[2] //
+                         self.patch_size[0]:], freqs_sin[-video_length * rope_sizes[1] * rope_sizes[2] //
+                                                         self.patch_size[0]:]
 
     def _forward_mouse(
         self,
@@ -494,67 +404,51 @@ class ActionModule(nn.Module):
         if is_causal and kv_cache_mouse is not None:
             mouse_condition = mouse_condition[
                 :,
-                self.vae_time_compression_ratio
-                * (N_feats - num_frame_per_block - self.windows_size)
-                + pad_t :,
+                self.vae_time_compression_ratio * (N_feats - num_frame_per_block - self.windows_size) + pad_t:,
                 :,
             ]
             group_mouse = [
                 mouse_condition[
                     :,
-                    self.vae_time_compression_ratio * (i - self.windows_size)
-                    + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                    self.vae_time_compression_ratio * (i - self.windows_size) +
+                    pad_t:i * self.vae_time_compression_ratio + pad_t,
                     :,
-                ]
-                for i in range(num_frame_per_block)
+                ] for i in range(num_frame_per_block)
             ]
         else:
             local_num_frames = tt
             group_mouse = [
                 mouse_condition[
                     :,
-                    self.vae_time_compression_ratio * (i - self.windows_size)
-                    + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                    self.vae_time_compression_ratio * (i - self.windows_size) +
+                    pad_t:i * self.vae_time_compression_ratio + pad_t,
                     :,
-                ]
-                for i in range(local_num_frames)
+                ] for i in range(local_num_frames)
             ]
 
         group_mouse = torch.stack(group_mouse, dim=1)
-        actual_num_frames = group_mouse.shape[
-            1
-        ]  # Use actual stacked frame count
+        actual_num_frames = group_mouse.shape[1]  # Use actual stacked frame count
 
         S = th * tw
-        group_mouse = group_mouse.unsqueeze(-1).expand(
-            B, actual_num_frames, pad_t, C, S
-        )
-        group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(
-            B * S, actual_num_frames, pad_t * C
-        )
+        group_mouse = group_mouse.unsqueeze(-1).expand(B, actual_num_frames, pad_t, C, S)
+        group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(B * S, actual_num_frames, pad_t * C)
 
         group_mouse = torch.cat([hidden_states, group_mouse], dim=-1)
         group_mouse = self.mouse_mlp(group_mouse)
         # qkv
         mouse_qkv, _ = self.t_qkv(group_mouse)
-        q, k, v = rearrange(
-            mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
-        )  # BHW F H C
+        q, k, v = rearrange(mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)  # BHW F H C
         q = self.img_attn_q_norm(q).to(v)
         k = self.img_attn_k_norm(k).to(v)
         # rope embd
 
         # freqs_cis = (self.freqs_cos, self.freqs_sin)
 
-        q, k = _apply_rotary_emb_qk(
-            q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
-        )
+        q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
         ## TODO: adding cache here
         if is_causal:
             if kv_cache_mouse is None:
-                assert (
-                    q.shape[0] == k.shape[0] and q.shape[0] % S == 0
-                )  # == 880, f"{q.shape[0]},{k.shape[0]}"
+                assert (q.shape[0] == k.shape[0] and q.shape[0] % S == 0)  # == 880, f"{q.shape[0]},{k.shape[0]}"
                 padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
                 padded_q = _padding_q_k_v(q, padded_length)
                 padded_k = _padding_q_k_v(k, padded_length)
@@ -610,20 +504,17 @@ class ActionModule(nn.Module):
         if is_causal and kv_cache_keyboard is not None:
             keyboard_condition = keyboard_condition[
                 :,
-                self.vae_time_compression_ratio
-                * (N_feats - num_frame_per_block - self.windows_size)
-                + pad_t :,
+                self.vae_time_compression_ratio * (N_feats - num_frame_per_block - self.windows_size) + pad_t:,
                 :,
             ]  # keyboard_condition[:, self.vae_time_compression_ratio*(start_frame - self.windows_size) + pad_t:start_frame * self.vae_time_compression_ratio + pad_t,:]
             keyboard_condition = self.keyboard_embed(keyboard_condition)
             group_keyboard = [
                 keyboard_condition[
                     :,
-                    self.vae_time_compression_ratio * (i - self.windows_size)
-                    + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                    self.vae_time_compression_ratio * (i - self.windows_size) +
+                    pad_t:i * self.vae_time_compression_ratio + pad_t,
                     :,
-                ]
-                for i in range(num_frame_per_block)
+                ] for i in range(num_frame_per_block)
             ]
         else:
             keyboard_condition = self.keyboard_embed(keyboard_condition)
@@ -631,16 +522,13 @@ class ActionModule(nn.Module):
             group_keyboard = [
                 keyboard_condition[
                     :,
-                    self.vae_time_compression_ratio * (i - self.windows_size)
-                    + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                    self.vae_time_compression_ratio * (i - self.windows_size) +
+                    pad_t:i * self.vae_time_compression_ratio + pad_t,
                     :,
-                ]
-                for i in range(local_num_frames)
+                ] for i in range(local_num_frames)
             ]
         group_keyboard = torch.stack(group_keyboard, dim=1)  # B F RW C
-        group_keyboard = group_keyboard.reshape(
-            shape=(group_keyboard.shape[0], group_keyboard.shape[1], -1)
-        )
+        group_keyboard = group_keyboard.reshape(shape=(group_keyboard.shape[0], group_keyboard.shape[1], -1))
         # apply cross attn
         mouse_q, _ = self.mouse_attn_q(hidden_states)
         keyboard_kv, _ = self.keyboard_attn_kv(group_keyboard)
@@ -650,9 +538,7 @@ class ActionModule(nn.Module):
         q = mouse_q.view(B, L, self.heads_num, D)
 
         B, L, KHD = keyboard_kv.shape
-        k, v = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(
-            2, 0, 1, 3, 4
-        )
+        k, v = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(2, 0, 1, 3, 4)
 
         # Compute cu_squlens and max_seqlen for flash attention
         # qk norm
@@ -666,9 +552,7 @@ class ActionModule(nn.Module):
             B, TS, H, D = q.shape
             T_ = TS // S
             q = q.view(B, T_, S, H, D).transpose(1, 2).reshape(B * S, T_, H, D)
-            q, k = _apply_rotary_emb_qk(
-                q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
-            )
+            q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
 
             k = k.repeat_interleave(S, dim=0)
             v = v.repeat_interleave(S, dim=0)
@@ -688,9 +572,7 @@ class ActionModule(nn.Module):
                         block_mask=block_mask_keyboard,
                     )[:, :, :-padded_length].transpose(2, 1)
                 else:
-                    assert (
-                        k.shape[0] == S
-                    )  # BS == 1 or the cache should not be saved/ load method should be modified
+                    assert (k.shape[0] == S)  # BS == 1 or the cache should not be saved/ load method should be modified
                     attn = _update_kv_cache_and_attend(
                         q,
                         k,
@@ -767,21 +649,15 @@ class ActionModule(nn.Module):
         target_device = x.device
         target_dtype = x.dtype
         if mouse_condition is not None:
-            mouse_condition = mouse_condition.to(
-                device=target_device, dtype=target_dtype
-            )
+            mouse_condition = mouse_condition.to(device=target_device, dtype=target_dtype)
         if keyboard_condition is not None:
-            keyboard_condition = keyboard_condition.to(
-                device=target_device, dtype=target_dtype
-            )
+            keyboard_condition = keyboard_condition.to(device=target_device, dtype=target_dtype)
         else:
             return x
 
         B, N_frames, C = keyboard_condition.shape
         assert tt * th * tw == x.shape[1]
-        assert (
-            (N_frames - 1) + self.vae_time_compression_ratio
-        ) % self.vae_time_compression_ratio == 0
+        assert ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0
         N_feats = int((N_frames - 1) / self.vae_time_compression_ratio) + 1
 
         # Lazy initialization of freqs on first forward pass
@@ -799,16 +675,13 @@ class ActionModule(nn.Module):
         freqs_cis = (self._freqs_cos, self._freqs_sin)
 
         if is_causal:
-            assert (N_feats == tt and kv_cache_mouse is None) or (
-                (N_frames - 1) // self.vae_time_compression_ratio + 1
-                == start_frame + num_frame_per_block
-            )
+            assert (N_feats == tt and kv_cache_mouse is None) or ((N_frames - 1) // self.vae_time_compression_ratio + 1
+                                                                  == start_frame + num_frame_per_block)
         # For non-causal (training), we trust that the caller provides correctly shaped inputs
 
         if self.enable_mouse and mouse_condition is not None:
-            hidden_states = rearrange(
-                x, "B (T S) C -> (B S) T C", T=tt, S=th * tw
-            )  # 65*272*480 -> 17*(272//16)*(480//16) -> 8670
+            hidden_states = rearrange(x, "B (T S) C -> (B S) T C", T=tt,
+                                      S=th * tw)  # 65*272*480 -> 17*(272//16)*(480//16) -> 8670
             B, N_frames, C = mouse_condition.shape
         else:
             hidden_states = x

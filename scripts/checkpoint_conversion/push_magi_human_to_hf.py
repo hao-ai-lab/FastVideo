@@ -35,10 +35,8 @@ def _validate_local_dir(local_dir: Path) -> None:
     required = ["model_index.json", "transformer"]
     missing = [r for r in required if not (local_dir / r).exists()]
     if missing:
-        sys.exit(
-            f"Error: {local_dir} is missing {missing}. Run "
-            f"convert_magi_human_to_diffusers.py first."
-        )
+        sys.exit(f"Error: {local_dir} is missing {missing}. Run "
+                 f"convert_magi_human_to_diffusers.py first.")
 
 
 def main() -> None:
@@ -73,15 +71,9 @@ def main() -> None:
     local_dir = Path(args.local_dir).resolve()
     _validate_local_dir(local_dir)
 
-    token = (
-        os.environ.get("HF_TOKEN")
-        or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-        or os.environ.get("HF_API_KEY")
-    )
+    token = (os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN") or os.environ.get("HF_API_KEY"))
     if not token:
-        sys.exit(
-            "Error: no HF token in env (set HF_TOKEN / HUGGINGFACE_HUB_TOKEN / HF_API_KEY)."
-        )
+        sys.exit("Error: no HF token in env (set HF_TOKEN / HUGGINGFACE_HUB_TOKEN / HF_API_KEY).")
 
     api = HfApi()
     me = api.whoami(token=token)

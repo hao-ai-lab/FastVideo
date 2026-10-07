@@ -9,8 +9,8 @@ from typing import Any, TYPE_CHECKING
 import torch
 
 from fastvideo.attention.selector import (
+    _component_attention_backend_scope,
     coerce_attn_backend,
-    global_force_attn_backend_context_manager,
 )
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.fastvideo_args import ExecutionMode, TrainingArgs
@@ -93,10 +93,15 @@ def load_module_from_path(
     transformer_override_safetensor: str | None = None,
     attention_backend: AttentionBackendEnum | str | None = None,
 ) -> torch.nn.Module:
-    """Load a single pipeline component module.
+    """Load one pipeline component with its role-scoped attention policy.
 
     Accepts a ``TrainingConfig`` and internally builds the
     ``TrainingArgs`` needed by ``PipelineComponentLoader``.
+
+    Diffusers component entries retain provider and architecture as their
+    first two fields and can append modular loading metadata. Attention layers
+    bind their backend during construction, so the requested backend remains
+    scoped to this load call.
     """
     fastvideo_args: Any = _make_training_args(training_config, model_path=model_path)
 
@@ -112,16 +117,14 @@ def load_module_from_path(
         raise ValueError(f"Module {module_type!r} has null value in "
                          f"config at {local_model_path}")
 
-    transformers_or_diffusers, _architecture = module_info
+    # Trailing modular-manifest metadata does not change component dispatch;
+    # the provider and architecture remain the first two fields.
+    transformers_or_diffusers, _architecture = module_info[:2]
     component_path = os.path.join(local_model_path, module_type)
 
-    old_override: str | None = None
+    # fastvideo_args is freshly built above and never escapes this function,
+    # so overrides are plain assignments — nothing to save or restore.
     if override_transformer_cls_name is not None:
-        old_override = getattr(
-            fastvideo_args,
-            "override_transformer_cls_name",
-            None,
-        )
         fastvideo_args.override_transformer_cls_name = str(override_transformer_cls_name)
 
     if transformer_override_safetensor:
@@ -131,34 +134,24 @@ def load_module_from_path(
         raise ValueError("attention_backend can only be set when loading "
                          f"a transformer, got module_type={module_type!r}")
     resolved_attention_backend = coerce_attn_backend(attention_backend)
-    attention_context = (nullcontext() if resolved_attention_backend is None else
-                         global_force_attn_backend_context_manager(resolved_attention_backend))
+    # Per-role request delivered as a construction scope: process-local,
+    # exception-safe, and part of the selector's cache key (no global
+    # mutation, no cache flushes between roles).
+    attention_context = (nullcontext() if resolved_attention_backend is None else _component_attention_backend_scope(
+        resolved_attention_backend, component=module_type))
 
     if disable_custom_init_weights:
         fastvideo_args._loading_teacher_critic_model = True
-    try:
-        # Attention implementations are bound while transformer layers are
-        # constructed. Scope the override to this one role so student,
-        # teacher, and critic can use independent backends in one process.
-        with attention_context:
-            module = PipelineComponentLoader.load_module(
-                module_name=module_type,
-                component_model_path=component_path,
-                transformers_or_diffusers=(transformers_or_diffusers),
-                fastvideo_args=fastvideo_args,
-            )
-    finally:
-        if disable_custom_init_weights and hasattr(fastvideo_args, "_loading_teacher_critic_model"):
-            del fastvideo_args._loading_teacher_critic_model
-        if override_transformer_cls_name is not None:
-            if old_override is None:
-                if hasattr(
-                        fastvideo_args,
-                        "override_transformer_cls_name",
-                ):
-                    fastvideo_args.override_transformer_cls_name = (None)
-            else:
-                fastvideo_args.override_transformer_cls_name = (old_override)
+    # Attention implementations are bound while transformer layers are
+    # constructed. Scope the override to this one role so student,
+    # teacher, and critic can use independent backends in one process.
+    with attention_context:
+        module = PipelineComponentLoader.load_module(
+            module_name=module_type,
+            component_model_path=component_path,
+            transformers_or_diffusers=(transformers_or_diffusers),
+            fastvideo_args=fastvideo_args,
+        )
 
     if not isinstance(module, torch.nn.Module):
         raise TypeError(f"Loaded {module_type!r} is not a "

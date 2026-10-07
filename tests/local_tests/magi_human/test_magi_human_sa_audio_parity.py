@@ -24,7 +24,6 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-
 _SA_AUDIO_ID = "stabilityai/stable-audio-open-1.0"
 
 
@@ -43,7 +42,9 @@ def _can_access() -> bool:
     try:
         from huggingface_hub import hf_hub_download
         hf_hub_download(
-            repo_id=_SA_AUDIO_ID, filename="vae/config.json", token=token,
+            repo_id=_SA_AUDIO_ID,
+            filename="vae/config.json",
+            token=token,
         )
         return True
     except Exception:
@@ -75,7 +76,9 @@ def test_magi_human_sa_audio_vae_decode_parity():
     #     SAAudioFeatureExtractor but via the Diffusers Oobleck port. ---
     from diffusers import AutoencoderOobleck
     ref_vae = AutoencoderOobleck.from_pretrained(
-        _SA_AUDIO_ID, subfolder="vae", torch_dtype=torch.float32,
+        _SA_AUDIO_ID,
+        subfolder="vae",
+        torch_dtype=torch.float32,
     ).to(device).eval()
 
     # --- FastVideo wrapper path (shared with the standalone Stable
@@ -97,23 +100,20 @@ def test_magi_human_sa_audio_vae_decode_parity():
     # decoder_input_channels=64, latent length ~8 frames for a quick test.
     latent = torch.randn(
         (1, fv_config.arch_config.decoder_input_channels, 8),
-        dtype=torch.float32, device=device,
+        dtype=torch.float32,
+        device=device,
     )
 
     with torch.inference_mode():
         ref_out = ref_vae.decode(latent).sample.detach().float().cpu()
         fv_out = fv_vae.decode(latent).detach().float().cpu()
 
-    print(
-        f"ref shape={tuple(ref_out.shape)} "
-        f"abs_mean={ref_out.abs().mean().item():.6f} "
-        f"range=[{ref_out.min().item():.4f}, {ref_out.max().item():.4f}]"
-    )
-    print(
-        f"fv  shape={tuple(fv_out.shape)} "
-        f"abs_mean={fv_out.abs().mean().item():.6f} "
-        f"range=[{fv_out.min().item():.4f}, {fv_out.max().item():.4f}]"
-    )
+    print(f"ref shape={tuple(ref_out.shape)} "
+          f"abs_mean={ref_out.abs().mean().item():.6f} "
+          f"range=[{ref_out.min().item():.4f}, {ref_out.max().item():.4f}]")
+    print(f"fv  shape={tuple(fv_out.shape)} "
+          f"abs_mean={fv_out.abs().mean().item():.6f} "
+          f"range=[{fv_out.min().item():.4f}, {fv_out.max().item():.4f}]")
     diff = (ref_out - fv_out).abs()
     print(f"diff max={diff.max().item():.6e} mean={diff.mean().item():.6e}")
 

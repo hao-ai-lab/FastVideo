@@ -48,7 +48,7 @@ For the complete two-stage Wan2.1 MixKit quantization-aware workflow, see
 
 Each example includes:
 
-- `download_dataset.sh` — download sample data
+- a README pointing at the matching download script under `examples/datasets/`
 - `preprocess_*.sh` — run preprocessing
 - `finetune_*.sh` — launch training (full finetune or LoRA)
 - `validation.json` — validation prompts for checkpoints

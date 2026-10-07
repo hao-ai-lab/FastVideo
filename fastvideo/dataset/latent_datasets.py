@@ -25,10 +25,8 @@ class LatentDataset(Dataset):
         self.datase_dir_path = os.path.dirname(json_path)
         self.video_dir = os.path.join(self.datase_dir_path, "video")
         self.latent_dir = os.path.join(self.datase_dir_path, "latent")
-        self.prompt_embed_dir = os.path.join(self.datase_dir_path,
-                                             "prompt_embed")
-        self.prompt_attention_mask_dir = os.path.join(self.datase_dir_path,
-                                                      "prompt_attention_mask")
+        self.prompt_embed_dir = os.path.join(self.datase_dir_path, "prompt_embed")
+        self.prompt_attention_mask_dir = os.path.join(self.datase_dir_path, "prompt_attention_mask")
         with open(self.json_path) as f:
             self.data_anno = json.load(f)
         # json.load(f) already keeps the order
@@ -38,15 +36,12 @@ class LatentDataset(Dataset):
         self.uncond_prompt_embed = torch.zeros(256, 4096).to(torch.float32)
 
         self.uncond_prompt_mask = torch.zeros(256).bool()
-        self.lengths = [
-            data_item.get("length", 1) for data_item in self.data_anno
-        ]
+        self.lengths = [data_item.get("length", 1) for data_item in self.data_anno]
 
     def __getitem__(self, idx):
         latent_file = self.data_anno[idx]["latent_path"]
         prompt_embed_file = self.data_anno[idx]["prompt_embed_path"]
-        prompt_attention_mask_file = self.data_anno[idx][
-            "prompt_attention_mask"]
+        prompt_attention_mask_file = self.data_anno[idx]["prompt_attention_mask"]
         # load
         latent = torch.load(
             os.path.join(self.latent_dir, latent_file),
@@ -64,8 +59,7 @@ class LatentDataset(Dataset):
                 weights_only=True,
             )
             prompt_attention_mask = torch.load(
-                os.path.join(self.prompt_attention_mask_dir,
-                             prompt_attention_mask_file),
+                os.path.join(self.prompt_attention_mask_dir, prompt_attention_mask_file),
                 map_location="cpu",
                 weights_only=True,
             )
