@@ -23,7 +23,6 @@ import types
 from pathlib import Path
 from typing import Callable
 
-
 # ---------------------------------------------------------------------------
 # magi_compiler stubs — identity decorators.
 # ---------------------------------------------------------------------------
@@ -54,8 +53,10 @@ def _install_magi_compiler_stub() -> None:
     pkg = types.ModuleType("magi_compiler")
 
     def magi_compile(config_patch=None):
+
         def decorator(cls_or_fn):
             return cls_or_fn
+
         return decorator
 
     # Create one Library per (namespace, schema) pair. Track by namespace
@@ -113,7 +114,12 @@ def _install_magi_compiler_stub() -> None:
         lse = torch.empty((q.shape[0], q.shape[1]), dtype=torch.float32, device=q.device)
         return out, lse
 
-    def magi_register_custom_op(name=None, mutates_args=(), infer_output_meta_fn=None, is_subgraph_boundary=False, **kwargs):
+    def magi_register_custom_op(name=None,
+                                mutates_args=(),
+                                infer_output_meta_fn=None,
+                                is_subgraph_boundary=False,
+                                **kwargs):
+
         def decorator(fn):
             if not name:
                 return fn
@@ -131,26 +137,19 @@ def _install_magi_compiler_stub() -> None:
             except Exception:
                 pass
             if op_name == "flash_attn_func":
-                torch.library.impl(
-                    _libs[namespace], op_name, "CUDA"
-                )(_sdpa_flash_attn_func)
-                torch.library.impl(
-                    _libs[namespace], op_name, "CPU"
-                )(_sdpa_flash_attn_func)
+                torch.library.impl(_libs[namespace], op_name, "CUDA")(_sdpa_flash_attn_func)
+                torch.library.impl(_libs[namespace], op_name, "CPU")(_sdpa_flash_attn_func)
             elif op_name == "flex_flash_attn_func":
-                torch.library.impl(
-                    _libs[namespace], op_name, "CUDA"
-                )(_sdpa_segments)
+                torch.library.impl(_libs[namespace], op_name, "CUDA")(_sdpa_segments)
             else:
                 # For ops we don't care about (compile-only wrappers), the
                 # Python fn path inside the module body is used directly —
                 # we just need `torch.ops.<ns>.<op>` to exist so module-
                 # load-time attribute lookups succeed.
-                torch.library.impl(
-                    _libs[namespace], op_name, "CUDA"
-                )(fn)
+                torch.library.impl(_libs[namespace], op_name, "CUDA")(fn)
             _defined.add((namespace, op_name))
             return fn
+
         return decorator
 
     pkg.magi_compile = magi_compile
@@ -164,8 +163,10 @@ def _install_magi_compiler_stub() -> None:
     config_mod = types.ModuleType("magi_compiler.config")
 
     class CompileConfig:
+
         class offload_config:  # pragma: no cover - pass-through
             gpu_resident_weight_ratio = 1.0
+
     config_mod.CompileConfig = CompileConfig
     sys.modules["magi_compiler.config"] = config_mod
     pkg.config = config_mod
@@ -269,7 +270,9 @@ def _base_arch_dict() -> dict:
         checkpoint_qk_layernorm_rope=False,
         params_dtype=torch.float32,
         tread_config=dict(
-            selection_rate=0.5, start_layer_idx=2, end_layer_idx=25,
+            selection_rate=0.5,
+            start_layer_idx=2,
+            end_layer_idx=25,
         ),
         mm_layers=[0, 1, 2, 3, 36, 37, 38, 39],
         local_attn_layers=[],

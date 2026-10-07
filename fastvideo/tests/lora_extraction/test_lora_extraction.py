@@ -16,13 +16,13 @@ from verify_lora import main as verify_lora_main
 def test_lora_extraction_pipeline():
     """Test end-to-end LoRA extraction workflow."""
     import tempfile
-    
+
     # Use temp directory for outputs to avoid polluting repo
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         adapter_path = tmpdir_path / "adapter_r16.safetensors"
         merged_dir = tmpdir_path / "merged_r16"
-        
+
         # 1. Extract rank-16 adapter
         print("\nExtracting rank-16 adapter")
         extract_lora_adapter(
@@ -32,7 +32,7 @@ def test_lora_extraction_pipeline():
             rank=16,
         )
         assert adapter_path.exists(), "Adapter file was not created"
-        
+
         # 2. Merge adapter
         print("\nMerging adapter")
         merge_lora(
@@ -42,7 +42,7 @@ def test_lora_extraction_pipeline():
             output=str(merged_dir),
         )
         assert merged_dir.exists(), "Merged model directory was not created"
-        
+
         # 3. Verify numerical accuracy
         print("\nVerifying merged model")
         # verify_lora uses sys.argv, so we need to mock it
@@ -50,11 +50,13 @@ def test_lora_extraction_pipeline():
         try:
             sys.argv = [
                 "verify_lora.py",
-                "--merged", str(merged_dir),
-                "--ft", "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
+                "--merged",
+                str(merged_dir),
+                "--ft",
+                "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
             ]
             verify_lora_main()
         finally:
             sys.argv = old_argv
-        
+
         print("\nLoRA extraction pipeline test PASSED")

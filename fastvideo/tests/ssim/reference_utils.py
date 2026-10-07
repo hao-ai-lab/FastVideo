@@ -9,8 +9,9 @@ from typing import TypeVar
 
 import torch
 
+import fastvideo.envs as envs
+
 DEVICE_REFERENCE_FOLDER_SUFFIX = "_reference_videos"
-FULL_QUALITY_ENV_VAR = "FASTVIDEO_SSIM_FULL_QUALITY"
 DEFAULT_OUTPUT_QUALITY_TIER = "default"
 FULL_OUTPUT_QUALITY_TIER = "full_quality"
 REFERENCE_VIDEOS_DIRNAME = "reference_videos"
@@ -89,17 +90,14 @@ def build_reference_folder_path(
         model_id,
         attention_backend,
     )
-    if quality_tier == DEFAULT_OUTPUT_QUALITY_TIER and os.path.exists(
-        legacy_reference_folder
-    ):
+    if quality_tier == DEFAULT_OUTPUT_QUALITY_TIER and os.path.exists(legacy_reference_folder):
         return legacy_reference_folder
 
     return tiered_reference_folder
 
 
 def use_full_quality_configs() -> bool:
-    value = os.environ.get(FULL_QUALITY_ENV_VAR, "").strip().lower()
-    return value in {"1", "true", "yes", "on"}
+    return envs.FASTVIDEO_TEST_SSIM_FULL_QUALITY.get()
 
 
 def get_output_quality_tier() -> str:
@@ -128,3 +126,8 @@ def select_ssim_params(default_params: T, full_quality_params: T) -> T:
     if use_full_quality_configs():
         return full_quality_params
     return default_params
+
+
+def with_model_path(params_map: dict[str, dict[str, object]], model_path: str) -> dict[str, dict[str, object]]:
+    """Return a copy of ``params_map`` in which every entry loads ``model_path``."""
+    return {model_id: {**params, "model_path": model_path} for model_id, params in params_map.items()}

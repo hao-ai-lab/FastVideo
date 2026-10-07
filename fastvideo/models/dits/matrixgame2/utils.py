@@ -16,19 +16,20 @@ try:
 except ImportError:
     cv2 = None
 
-
 CAM_VALUE = 0.1
-CAMERA_MAP = {
-    "i": [CAM_VALUE, 0], "k": [-CAM_VALUE, 0],
-    "j": [0, -CAM_VALUE], "l": [0, CAM_VALUE], "u": [0, 0]
-}
+CAMERA_MAP = {"i": [CAM_VALUE, 0], "k": [-CAM_VALUE, 0], "j": [0, -CAM_VALUE], "l": [0, CAM_VALUE], "u": [0, 0]}
 
 KEYBOARD_MAP_4 = {  # base_distilled_model (universal): W/S/A/D
-    "w": [1, 0, 0, 0], "s": [0, 1, 0, 0],
-    "a": [0, 0, 1, 0], "d": [0, 0, 0, 1], "q": [0, 0, 0, 0]
+    "w": [1, 0, 0, 0],
+    "s": [0, 1, 0, 0],
+    "a": [0, 0, 1, 0],
+    "d": [0, 0, 0, 1],
+    "q": [0, 0, 0, 0]
 }
 KEYBOARD_MAP_2 = {  # gta_distilled_model: W/S only (steering via mouse)
-    "w": [1, 0], "s": [0, 1], "q": [0, 0]
+    "w": [1, 0],
+    "s": [0, 1],
+    "q": [0, 0]
 }
 KEYBOARD_MAP_7 = {  # templerun_distilled_model: still/w/s/left/right/a/d
     "q": [1, 0, 0, 0, 0, 0, 0],  # still
@@ -71,24 +72,17 @@ def retain_kv_with_sink(
 
 def _require_cv2() -> bool:
     if cv2 is None:
-        logger.warning(
-            "OpenCV is not available; skipping MatrixGame2 validation overlay."
-        )
+        logger.warning("OpenCV is not available; skipping MatrixGame2 validation overlay.")
         return False
     return True
 
 
-def _matrixgame2_overlay_keys_from_keyboard(
-    keyboard_frame: np.ndarray | torch.Tensor,
-) -> dict[str, bool]:
+def _matrixgame2_overlay_keys_from_keyboard(keyboard_frame: np.ndarray | torch.Tensor, ) -> dict[str, bool]:
     vec = np.asarray(keyboard_frame, dtype=np.float32).reshape(-1)
     dim = vec.shape[0]
 
     if dim >= 23:
-        return {
-            key: bool(vec[idx] > 0.5)
-            for key, idx in SOLARIS_MOVEMENT_KEY_INDICES.items()
-        }
+        return {key: bool(vec[idx] > 0.5) for key, idx in SOLARIS_MOVEMENT_KEY_INDICES.items()}
     if dim == 7:
         return {
             "W": bool(vec[1] > 0.5),
@@ -145,10 +139,10 @@ def draw_rounded_rectangle(
 
 
 def draw_keys_on_frame(
-    frame: np.ndarray,
-    keys: dict[str, bool],
-    key_size: tuple[int, int] = (30, 30),
-    top_margin: int = 15,
+        frame: np.ndarray,
+        keys: dict[str, bool],
+        key_size: tuple[int, int] = (30, 30),
+        top_margin: int = 15,
 ) -> None:
     if not _require_cv2():
         return
@@ -177,9 +171,7 @@ def draw_keys_on_frame(
             radius=5,
             alpha=alpha,
         )
-        text_size = cv2.getTextSize(
-            key, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
-        )[0]
+        text_size = cv2.getTextSize(key, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
         text_x = x + (key_size[0] - text_size[0]) // 2
         text_y = y + (key_size[1] + text_size[1]) // 2
         cv2.putText(
@@ -295,38 +287,37 @@ def expand_action_to_frames(action: dict, num_frames: int) -> tuple[torch.Tensor
     result = {}
     for key, tensor in action.items():
         if tensor is not None:
-             # Expand to [num_frames, D] then unsqueeze to [1, num_frames, D]
+            # Expand to [num_frames, D] then unsqueeze to [1, num_frames, D]
             result[key] = tensor.unsqueeze(0).repeat(num_frames, 1).unsqueeze(0)
         else:
             result[key] = None
 
     if "mouse" not in result or result["mouse"] is None:
-         # keyboard device if available, otherwise default
-         device = result.get("keyboard", torch.tensor([])).device if result.get("keyboard") is not None else get_local_torch_device()
-         result["mouse"] = torch.zeros(1, num_frames, 2, device=device)
-    
+        # keyboard device if available, otherwise default
+        device = result.get("keyboard", torch.tensor(
+            [])).device if result.get("keyboard") is not None else get_local_torch_device()
+        result["mouse"] = torch.zeros(1, num_frames, 2, device=device)
+
     return result["keyboard"], result["mouse"]
+
 
 def get_current_action(mode="universal"):
 
     CAM_VALUE = 0.1
     if mode == 'universal':
         logger.info("")
-        logger.info('-'*30)
+        logger.info('-' * 30)
         logger.info("PRESS [I, K, J, L, U] FOR CAMERA TRANSFORM\n (I: up, K: down, J: left, L: right, U: no move)")
         logger.info("PRESS [W, S, A, D, Q] FOR MOVEMENT\n (W: forward, S: back, A: left, D: right, Q: no move)")
-        logger.info('-'*30)
+        logger.info('-' * 30)
         CAMERA_VALUE_MAP = {
-            "i":  [CAM_VALUE, 0],
-            "k":  [-CAM_VALUE, 0],
-            "j":  [0, -CAM_VALUE],
-            "l":  [0, CAM_VALUE],
-            "u":  [0, 0]
+            "i": [CAM_VALUE, 0],
+            "k": [-CAM_VALUE, 0],
+            "j": [0, -CAM_VALUE],
+            "l": [0, CAM_VALUE],
+            "u": [0, 0]
         }
-        KEYBOARD_IDX = { 
-            "w": [1, 0, 0, 0], "s": [0, 1, 0, 0], "a": [0, 0, 1, 0], "d": [0, 0, 0, 1],
-            "q": [0, 0, 0, 0]
-        }
+        KEYBOARD_IDX = {"w": [1, 0, 0, 0], "s": [0, 1, 0, 0], "a": [0, 0, 1, 0], "d": [0, 0, 0, 1], "q": [0, 0, 0, 0]}
         flag = 0
         while flag != 1:
             try:
@@ -340,22 +331,17 @@ def get_current_action(mode="universal"):
         keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard]).cuda()
     elif mode == 'gta_drive':
         logger.info("")
-        logger.info('-'*30)
+        logger.info('-' * 30)
         logger.info("PRESS [W, S, A, D, Q] FOR MOVEMENT\n (W: forward, S: back, A: left, D: right, Q: no move)")
-        logger.info('-'*30)
-        CAMERA_VALUE_MAP = {
-            "a":  [0, -CAM_VALUE],
-            "d":  [0, CAM_VALUE],
-            "q":  [0, 0]
-        }
-        KEYBOARD_IDX = { 
-            "w": [1, 0], "s": [0, 1],
-            "q": [0, 0]
-        }
+        logger.info('-' * 30)
+        CAMERA_VALUE_MAP = {"a": [0, -CAM_VALUE], "d": [0, CAM_VALUE], "q": [0, 0]}
+        KEYBOARD_IDX = {"w": [1, 0], "s": [0, 1], "q": [0, 0]}
         flag = 0
         while flag != 1:
             try:
-                indexes = input('Please input the actions (split with ` `):\n(e.g. `W` for forward, `W A` for forward and left)\n').strip().lower().split(' ')
+                indexes = input(
+                    'Please input the actions (split with ` `):\n(e.g. `W` for forward, `W A` for forward and left)\n'
+                ).strip().lower().split(' ')
                 idx_mouse = []
                 idx_keyboard = []
                 for i in indexes:
@@ -375,42 +361,46 @@ def get_current_action(mode="universal"):
         keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard[0]]).cuda()
     elif mode == 'templerun':
         logger.info("")
-        logger.info('-'*30)
-        logger.info("PRESS [W, S, A, D, Z, C, Q] FOR ACTIONS\n (W: jump, S: slide, A: left side, D: right side, Z: turn left, C: turn right, Q: no move)")
-        logger.info('-'*30)
-        KEYBOARD_IDX = { 
-            "w": [0, 1, 0, 0, 0, 0, 0], "s": [0, 0, 1, 0, 0, 0, 0],
-            "a": [0, 0, 0, 0, 0, 1, 0], "d": [0, 0, 0, 0, 0, 0, 1],
-            "z": [0, 0, 0, 1, 0, 0, 0], "c": [0, 0, 0, 0, 1, 0, 0],
+        logger.info('-' * 30)
+        logger.info(
+            "PRESS [W, S, A, D, Z, C, Q] FOR ACTIONS\n (W: jump, S: slide, A: left side, D: right side, Z: turn left, C: turn right, Q: no move)"
+        )
+        logger.info('-' * 30)
+        KEYBOARD_IDX = {
+            "w": [0, 1, 0, 0, 0, 0, 0],
+            "s": [0, 0, 1, 0, 0, 0, 0],
+            "a": [0, 0, 0, 0, 0, 1, 0],
+            "d": [0, 0, 0, 0, 0, 0, 1],
+            "z": [0, 0, 0, 1, 0, 0, 0],
+            "c": [0, 0, 0, 0, 1, 0, 0],
             "q": [1, 0, 0, 0, 0, 0, 0]
         }
         flag = 0
         while flag != 1:
             try:
-                idx_keyboard = input('Please input the action: \n(e.g. `W` for forward, `Z` for turning left)\n').strip().lower()
+                idx_keyboard = input(
+                    'Please input the action: \n(e.g. `W` for forward, `Z` for turning left)\n').strip().lower()
                 if idx_keyboard in KEYBOARD_IDX.keys():
                     flag = 1
             except Exception:
                 pass
         keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard]).cuda()
-    
+
     if mode != 'templerun':
-        return {
-            "mouse": mouse_cond,
-            "keyboard": keyboard_cond
-        }
-    return {
-        "keyboard": keyboard_cond
-    }
+        return {"mouse": mouse_cond, "keyboard": keyboard_cond}
+    return {"keyboard": keyboard_cond}
+
 
 async def get_current_action_async(mode="universal"):
     return await asyncio.to_thread(get_current_action, mode)
+
 
 def load_initial_image(image_path: str = None) -> Image.Image:
     if image_path and os.path.exists(image_path):
         return Image.open(image_path).convert("RGB")
     logger.warning("No image provided, creating placeholder...")
     return Image.new("RGB", (640, 352), (128, 128, 128))
+
 
 def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = None):
     if keyboard_dim not in (2, 4, 6, 7):
@@ -423,7 +413,7 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = No
         random.seed(seed)
 
     num_samples_per_action = 4
-    
+
     # Define actions based on keyboard_dim
     if keyboard_dim == 4:
         # Universal model: W, S, A, D
@@ -449,9 +439,7 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = No
         actions_single_camera = []  # No mouse for Temple Run
         keyboard_idx = {"still": 0, "forward": 1, "back": 2, "left": 3, "right": 4, "a": 5, "d": 6}
 
-    actions_to_test = (
-        actions_double_action * 5 + actions_single_camera * 5 + actions_single_action * 5
-    )
+    actions_to_test = (actions_double_action * 5 + actions_single_camera * 5 + actions_single_action * 5)
     for action in (actions_single_action + actions_double_action):
         for camera in actions_single_camera:
             actions_to_test.append(f"{action}_{camera}")
@@ -518,6 +506,7 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = No
 
     return {"keyboard": keyboard_condition, "mouse": mouse_condition}
 
+
 def parse_config(config, mode="universal"):
     assert mode in ['universal', 'gta_drive', 'templerun']
     key_data = {}
@@ -555,6 +544,7 @@ def parse_config(config, mode="universal"):
                 )
     return key_data, mouse_data
 
+
 # NOTE: drawing functions are commented out to avoid cv2/libGL dependency.
 #
 # def draw_rounded_rectangle(image, top_left, bottom_right, color, radius=10, alpha=0.5):
@@ -576,21 +566,21 @@ def parse_config(config, mode="universal"):
 #     vertical_shift = -20
 #     horizon_shift_all = 50
 #     key_positions = {
-#         "W": (w // 2 - key_size[0] // 2 - horison_shift - horizon_shift_all, 
+#         "W": (w // 2 - key_size[0] // 2 - horison_shift - horizon_shift_all,
 #               h - bottom_margin - key_size[1] * 2 + vertical_shift - 20),
-#         "A": (w // 2 - key_size[0] * 2 + 5 - horison_shift - horizon_shift_all, 
+#         "A": (w // 2 - key_size[0] * 2 + 5 - horison_shift - horizon_shift_all,
 #               h - bottom_margin - key_size[1] + vertical_shift),
-#         "S": (w // 2 - key_size[0] // 2 - horison_shift - horizon_shift_all, 
+#         "S": (w // 2 - key_size[0] // 2 - horison_shift - horizon_shift_all,
 #               h - bottom_margin - key_size[1] + vertical_shift),
-#         "D": (w // 2 + key_size[0] - 5 - horison_shift - horizon_shift_all, 
+#         "D": (w // 2 + key_size[0] - 5 - horison_shift - horizon_shift_all,
 #               h - bottom_margin - key_size[1] + vertical_shift),
 #     }
 #     key_icon = {"W": "W", "A": "A", "S": "S", "D": "D", "left": "left", "right": "right"}
 #     if mode == 'templerun':
 #         key_positions.update({
-#             "left": (w // 2 + key_size[0] * 2 + spacing * 2 - horison_shift - horizon_shift_all, 
+#             "left": (w // 2 + key_size[0] * 2 + spacing * 2 - horison_shift - horizon_shift_all,
 #                      h - bottom_margin - key_size[1] + vertical_shift),
-#             "right": (w // 2 + key_size[0] * 3 + spacing * 7 - horison_shift - horizon_shift_all, 
+#             "right": (w // 2 + key_size[0] * 3 + spacing * 7 - horison_shift - horizon_shift_all,
 #                       h - bottom_margin - key_size[1] + vertical_shift)
 #         })
 #
@@ -651,7 +641,7 @@ def parse_config(config, mode="universal"):
 #         frame_region[:, :, c] = (1 - alpha) * frame_region[:, :, c] + alpha * icon_rgb[:, :, c]
 #     frame[top_left_y:bottom_right_y, top_left_x:bottom_right_x] = frame_region
 #
-# def process_video(input_video, output_video, config, mouse_icon_path, 
+# def process_video(input_video, output_video, config, mouse_icon_path,
 #                   mouse_scale=1.0, mouse_rotation=0, process_icon=True, mode='universal'):
 #     key_data, mouse_data = parse_config(config, mode=mode)
 #     fps = 12
@@ -670,6 +660,6 @@ def parse_config(config, mode="universal"):
 #                 mouse_position = mouse_data.get(frame_idx, (frame_width // 2, frame_height // 2))
 #                 overlay_icon(frame, mouse_icon, mouse_position, scale=mouse_scale, rotation=mouse_rotation)
 #         out_video.append(frame / 255)
-#     
+#
 #     export_to_video(out_video, output_video, fps=fps)
 #     logger.info(f"Video saved to {output_video}")

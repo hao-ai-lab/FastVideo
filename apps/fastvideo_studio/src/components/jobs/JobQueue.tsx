@@ -1,8 +1,10 @@
 'use client';
 
 import * as React from 'react';
+import { AlertTriangle } from 'lucide-react';
 
 import JobCard from '@/components/jobs/JobCard';
+import { Button } from '@/components/ui/button';
 import { useStore } from '@/hooks/useStore';
 import { getJobsList } from '@/lib/api';
 import type { Job, JobType } from '@/lib/types';
@@ -32,6 +34,8 @@ function jobsShallowEqual(a: Job | null, b: Job | null): boolean {
 
 export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   const [jobs, setJobs] = React.useState<Job[]>([]);
+  const [isInitialLoading, setIsInitialLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
   const { nonce } = useStore(jobsRefreshStore);
   const { activeJobId } = useStore(activeJobStore);
 
@@ -71,11 +75,22 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
               new Date(a.created_at ?? 0).getTime(),
           );
       }
-      if (seq === fetchSeq.current) setJobs(next);
+      if (seq === fetchSeq.current) {
+        setJobs(next);
+        setError(null);
+      }
     } catch (e) {
       console.error('Failed to fetch jobs:', e);
+      if (seq === fetchSeq.current) {
+        setError(
+          'Could not load jobs from the Studio API. Check the server and try again.',
+        );
+      }
     } finally {
-      if (seq === fetchSeq.current) inFlight.current = false;
+      if (seq === fetchSeq.current) {
+        inFlight.current = false;
+        setIsInitialLoading(false);
+      }
     }
   }, [typesKey]);
 
@@ -122,20 +137,59 @@ export default function JobQueue({ jobType, jobTypesForList }: JobQueueProps) {
   const multiType = typesToFetch.length > 1;
 
   return (
-    <main className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
+    <div className="mx-auto flex w-full max-w-[850px] flex-col gap-6 px-4 pb-12">
       <section className="p-6">
-        <div>
-          {jobs.length === 0 ? (
+        <div aria-busy={isInitialLoading}>
+          {isInitialLoading ? (
+            <div
+              aria-label="Loading jobs"
+              className="flex flex-col gap-3 py-2"
+            >
+              {[0, 1, 2].map((item) => (
+                <div
+                  key={item}
+                  className="h-32 animate-pulse rounded-lg border border-border bg-muted/50"
+                />
+              ))}
+            </div>
+          ) : error && jobs.length === 0 ? (
+            <div
+              role="alert"
+              className="flex flex-col items-center gap-3 py-8 text-center"
+            >
+              <AlertTriangle
+                className="size-6 text-destructive"
+                aria-hidden
+              />
+              <p className="max-w-md text-sm text-muted-foreground">{error}</p>
+              <Button type="button" variant="outline" onClick={fetchJobs}>
+                Try Again
+              </Button>
+            </div>
+          ) : (
+            <>
+              {error && (
+                <p
+                  role="status"
+                  className="mb-3 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-foreground"
+                >
+                  Job updates are temporarily unavailable. Showing the most
+                  recent results.
+                </p>
+              )}
+              {jobs.length === 0 ? (
             <p className="py-8 text-center text-muted-foreground">
               No {multiType ? 'jobs' : `${jobType} jobs`} yet. Create one above.
             </p>
-          ) : (
-            jobs.map((job) => (
-              <JobCard key={job.id} job={job} onJobUpdated={fetchJobs} />
-            ))
+              ) : (
+                jobs.map((job) => (
+                  <JobCard key={job.id} job={job} onJobUpdated={fetchJobs} />
+                ))
+              )}
+            </>
           )}
         </div>
       </section>
-    </main>
+    </div>
   );
 }

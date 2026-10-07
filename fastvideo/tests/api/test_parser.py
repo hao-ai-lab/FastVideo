@@ -41,15 +41,15 @@ def test_parse_config_builds_nested_typed_config() -> None:
             },
             "state": {
                 "kind": "ltx2_continuation",
-                "payload": {"segment_index": 1},
+                "payload": {
+                    "segment_index": 1
+                },
             },
             "plan": {
-                "stages": [
-                    {
-                        "name": "base",
-                        "kind": "sample",
-                    }
-                ]
+                "stages": [{
+                    "name": "base",
+                    "kind": "sample",
+                }]
             },
         },
     }
@@ -77,10 +77,14 @@ def test_parse_config_accepts_existing_typed_instance() -> None:
 
 def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
     raw = {
-        "generator": {"model_path": "/models/wan"},
+        "generator": {
+            "model_path": "/models/wan"
+        },
         "request": {
             "prompt": "hello",
-            "sampling": {"num_frames": 16},
+            "sampling": {
+                "num_frames": 16
+            },
         },
     }
     path = tmp_path / "run.yaml"
@@ -110,6 +114,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "image_encoder": True,
                     "vae": True,
                     "pin_cpu_memory": True,
+                    "lazy_module_load": None,
                 },
                 "compile": {
                     "enabled": False,
@@ -144,6 +149,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                     "vae_weights": None,
                     "upsampler_weights": None,
                     "lora_path": None,
+                    "lora_nickname": "default",
+                    "lora_strength": 1.0,
                     "override_pipeline_cls_name": None,
                     "override_transformer_cls_name": None,
                 },
@@ -159,7 +166,12 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "prompt_path": None,
                 "image_path": None,
                 "video_path": None,
+                "audio_path": None,
                 "pil_image": None,
+                "last_image": None,
+                "references": None,
+                "latents": None,
+                "audio_latents": None,
                 "pose": None,
                 "mouse_cond": None,
                 "keyboard_cond": None,
@@ -182,6 +194,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "num_inference_steps": 50,
                 "num_inference_steps_sr": 50,
                 "guidance_scale": 1.0,
+                "batch_cfg": False,
                 "guidance_scale_2": None,
                 "cfg_normalization": False,
                 "cfg_truncation": 1.0,
@@ -213,9 +226,15 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
 
 def test_load_serve_config_supports_json_roundtrip(tmp_path) -> None:
     raw = {
-        "generator": {"model_path": "/models/server"},
-        "server": {"port": 9000},
-        "default_request": {"prompt": "serve default"},
+        "generator": {
+            "model_path": "/models/server"
+        },
+        "server": {
+            "port": 9000
+        },
+        "default_request": {
+            "prompt": "serve default"
+        },
     }
     path = tmp_path / "serve.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
@@ -235,7 +254,9 @@ def test_serve_config_streaming_defaults_to_none() -> None:
 
 def test_serve_config_parses_streaming_block() -> None:
     raw = {
-        "generator": {"model_path": "/models/server"},
+        "generator": {
+            "model_path": "/models/server"
+        },
         "streaming": {
             "session_timeout_seconds": 120,
             "generation_segment_cap": 4,
@@ -270,8 +291,7 @@ def test_serve_config_parses_streaming_block() -> None:
     assert loaded.streaming.session_timeout_seconds == 120
     assert loaded.streaming.generation_segment_cap == 4
     assert loaded.streaming.stream_mode == "legacy_jpeg"
-    assert loaded.streaming.warmup == WarmupConfig(
-        enabled=False, prompt="warmup prompt", timeout_seconds=600)
+    assert loaded.streaming.warmup == WarmupConfig(enabled=False, prompt="warmup prompt", timeout_seconds=600)
     assert loaded.streaming.pool == GpuPoolConfig(
         num_workers=2,
         enable_audio_reencode=False,
@@ -284,14 +304,17 @@ def test_serve_config_parses_streaming_block() -> None:
         timeout_ms=10000,
         system_prompt_dir="/opt/prompts",
     )
-    assert loaded.streaming.safety == PromptSafetyConfig(
-        enabled=True, classifier_path="/opt/safety.pt")
+    assert loaded.streaming.safety == PromptSafetyConfig(enabled=True, classifier_path="/opt/safety.pt")
 
 
 def test_serve_config_streaming_round_trip_through_config_to_dict() -> None:
     raw = {
-        "generator": {"model_path": "/models/server"},
-        "streaming": {"session_timeout_seconds": 600},
+        "generator": {
+            "model_path": "/models/server"
+        },
+        "streaming": {
+            "session_timeout_seconds": 600
+        },
     }
     loaded = parse_config(ServeConfig, raw)
     dumped = config_to_dict(loaded)
@@ -304,10 +327,14 @@ def test_serve_config_streaming_round_trip_through_config_to_dict() -> None:
 
 def test_load_serve_config_with_streaming_from_yaml(tmp_path) -> None:
     raw = {
-        "generator": {"model_path": "/models/server"},
+        "generator": {
+            "model_path": "/models/server"
+        },
         "streaming": {
             "stream_mode": "av_fmp4",
-            "pool": {"num_workers": 4},
+            "pool": {
+                "num_workers": 4
+            },
         },
     }
     path = tmp_path / "serve.yaml"

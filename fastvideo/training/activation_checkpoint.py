@@ -12,6 +12,8 @@ TRANSFORMER_BLOCK_NAMES = [
     "temporal_transformer_blocks",
     "transformer_double_blocks",
     "transformer_single_blocks",
+    "text_transformer_blocks",
+    "visual_transformer_blocks",
 ]
 
 

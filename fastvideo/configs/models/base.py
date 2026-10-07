@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field, fields
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastvideo.logger import init_logger
+
+if TYPE_CHECKING:
+    from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
@@ -23,6 +26,19 @@ class ModelConfig:
     arch_config: ArchConfig = field(default_factory=ArchConfig)
 
     # FastVideo-specific parameters here
+
+    # The attention backend requested for this component, resolved once at load
+    # time by the loader (explicit request, else the environment variable) and
+    # written here so the decision travels *on the component* rather than being
+    # looked up again while its layers are built. ``None`` means no request, so
+    # each layer falls through to its declared default and platform selection.
+    #
+    # This is the component-level decision, not a promise about the kernel any
+    # single layer ends up running: a layer that does not declare support for
+    # this backend still falls back (see ``fastvideo/attention/selector.py``).
+    # Keyword-only: the loader writes this by attribute assignment, so it must not
+    # take a slot in the positional signature that subclasses' fields inherit.
+    _resolved_attention_backend: "AttentionBackendEnum | None" = field(default=None, kw_only=True)
 
     def __getattr__(self, name):
         # Only called if 'name' is not found in ModelConfig directly

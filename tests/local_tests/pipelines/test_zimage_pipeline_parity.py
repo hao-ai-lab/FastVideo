@@ -16,10 +16,10 @@ import pytest
 import torch
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines.zimage import ZImagePipelineConfig
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler,
-)
+    FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines.basic.zimage.stages import (
     ZImageConditioningStage,
     ZImageDecodingStage,
@@ -30,11 +30,11 @@ from fastvideo.pipelines.basic.zimage.stages import (
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REFERENCE_REVISION = "26f23eda626ffadda020b04ff79488e1d72004cd"
 REFERENCE_REPO = Path(os.getenv("ZIMAGE_REFERENCE_REPO", REPO_ROOT / "Z-Image"))
-MODEL_DIR = Path(os.getenv("ZIMAGE_MODEL_DIR", REPO_ROOT / "official_weights" / "Z-Image"))
+MODEL_DIR = Path(envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.get() if envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.is_set() else
+                 REPO_ROOT / "official_weights" / "Z-Image")
 
 
 class _ConstantTransformer:
@@ -55,6 +55,7 @@ class _ConstantTransformer:
 
 
 class _RecordingVAE(torch.nn.Module):
+
     def __init__(self) -> None:
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.zeros(()))
@@ -65,7 +66,7 @@ class _RecordingVAE(torch.nn.Module):
         assert return_dict is False
         self.decode_input = latents.detach().clone()
         batch, _, height, width = latents.shape
-        return (torch.zeros(batch, 3, height * 8, width * 8, device=latents.device),)
+        return (torch.zeros(batch, 3, height * 8, width * 8, device=latents.device), )
 
 
 def _stage_args(*, output_type: str = "pil") -> SimpleNamespace:
@@ -226,9 +227,7 @@ def _require_pinned_reference() -> Path:
         text=True,
     )
     actual = result.stdout.strip()
-    assert actual == REFERENCE_REVISION, (
-        f"Tongyi Z-Image oracle must be pinned at {REFERENCE_REVISION}, got {actual}"
-    )
+    assert actual == REFERENCE_REVISION, (f"Tongyi Z-Image oracle must be pinned at {REFERENCE_REVISION}, got {actual}")
     return REFERENCE_REPO / "src"
 
 
@@ -241,8 +240,7 @@ def _import_reference_modules() -> tuple[object, object]:
     for module in (pipeline_module, utils_module):
         module_path = Path(module.__file__ or "").resolve()
         assert module_path.is_relative_to(source_root), (
-            f"Z-Image oracle import escaped the pinned repository: {module_path}"
-        )
+            f"Z-Image oracle import escaped the pinned repository: {module_path}")
     return pipeline_module, utils_module
 
 

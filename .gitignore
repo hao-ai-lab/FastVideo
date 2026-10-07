@@ -6,7 +6,7 @@ results/
 wandb/
 *.ipynb
 *.jpg
-!examples/dataset/lingbotworld2/image.jpg
+!examples/datasets/lingbotworld2/image.jpg
 *.safetensors
 *.mp4
 *.png
@@ -23,6 +23,7 @@ Miniconda3-latest-Linux-x86_64.sh
 *validation/
 data/
 outputs/
+outputs_audio/
 outputs_video
 checkpoints/
 sbatch.sh
@@ -54,6 +55,8 @@ eggs/
 
 # MkDocs documentation
 site/
+docs/assets/cookbook-serving.json
+examples/serving/clients/node_modules/
 docs/getting_started/examples/
 docs/examples/
 docs/inference/examples/
@@ -75,6 +78,7 @@ docs/distillation/examples/
 *.pkl
 
 # Reference videos (negations must come after the catch-all on line below)
+!fastvideo/tests/nightly/reference_video_*.mp4
 
 # Static images
 !docs/assets/images/**/*.png
@@ -130,8 +134,14 @@ openspec/
 fastvideo/tests/ssim/reference_videos/**
 !fastvideo/tests/ssim/reference_videos/**/*.mp4
 !fastvideo/tests/ssim/reference_videos/**/*.png
+fastvideo/tests/ssim/.reference_videos_download.lock
+
+# Local H3 MLX kernel / exactness benches (JSON, logs, frames, videos)
+.kernel_bench/
 
 # Editor logs and local Python version pins (accidentally committed)
 *.nvimlog
 .nvimlog
 .python-version
+scripts/benchmarks/minimax_h3_pro6000/headline_results/
+fastvideo/tests/ssim/.reference_videos_download.lock

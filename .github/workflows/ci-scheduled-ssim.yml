@@ -1,0 +1,44 @@
+name: Scheduled Full SSIM
+
+on:
+  schedule:
+    - cron: "0 5 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    if: github.repository == 'hao-ai-lab/FastVideo'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger weekly full SSIM on Slinky Slurm
+        env:
+          BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_BRANCH: ${{ github.event.repository.default_branch }}
+          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
+          BK_PIPELINE: ${{ vars.BUILDKITE_PIPELINE_SLUG }}
+        run: |
+          set -euo pipefail
+          curl -sS --fail-with-body -X POST \
+            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
+            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-raw "$(jq -n \
+              --arg commit "$SOURCE_SHA" \
+              --arg branch "$SOURCE_BRANCH" \
+              '{
+                commit: $commit,
+                branch: $branch,
+                message: "Weekly full SSIM on Slinky Slurm",
+                ignore_pipeline_branch_filters: true,
+                env: {
+                  TEST_SCOPE: "scheduled",
+                  FULL_SUITE: "false",
+                  TEST_TYPE: "ssim",
+                  PR_NUMBER: "false",
+                  PR_TITLE: "Scheduled full SSIM"
+                }
+              }')"

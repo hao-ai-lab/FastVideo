@@ -53,7 +53,7 @@ PC_PENDING='{"name": "pre-commit", "id": 1, "status": "in_progress", "conclusion
 DOCS_OK='{"name": "Deploy Documentation", "id": 2, "status": "completed", "conclusion": "success"}'
 DOCS_BAD='{"name": "Deploy Documentation", "id": 2, "status": "completed", "conclusion": "failure"}'
 DOCS_CANCELLED='{"name": "Deploy Documentation", "id": 2, "status": "completed", "conclusion": "cancelled"}'
-OTHER='{"name": "Trigger Full Suite", "id": 3, "status": "in_progress", "conclusion": null}'
+OTHER='{"name": "Trigger Merge Gate", "id": 3, "status": "in_progress", "conclusion": null}'
 NULL_NAME='{"name": null, "id": 4, "status": "completed", "conclusion": "failure"}'
 PC_OK_RERUN='{"name": "pre-commit", "id": 5, "status": "completed", "conclusion": "success"}'
 

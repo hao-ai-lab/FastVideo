@@ -5,6 +5,7 @@ from fastvideo.training.checkpointing_utils import ModelWrapper
 
 
 class DummyWrappedModule(nn.Module):
+
     def __init__(self):
         super().__init__()
         self._lora_a = nn.Parameter(torch.tensor([1.0, 2.0]))

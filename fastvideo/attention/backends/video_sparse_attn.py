@@ -61,6 +61,7 @@ def construct_variable_block_sizes(
     dit_seq_shape: tuple[int, int, int],
     num_tiles: tuple[int, int, int],
     device: torch.device,
+    tile_size: tuple[int, int, int] = VSA_TILE_SIZE,
 ) -> torch.LongTensor:
     """
     Compute the number of valid (non‑padded) tokens inside every
@@ -73,7 +74,7 @@ def construct_variable_block_sizes(
     """
     # unpack
     t, h, w = dit_seq_shape
-    ts_t, ts_h, ts_w = VSA_TILE_SIZE
+    ts_t, ts_h, ts_w = tile_size
     n_t, n_h, n_w = num_tiles
 
     def _sizes(dim_len: int, tile: int, n_tiles: int) -> torch.LongTensor:
@@ -157,10 +158,45 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     cache_tile_buf: bool = True
 
 
+def compute_topk(sparsity: float, num_blocks: int) -> int:
+    """Blocks to keep for a sparsity level, clamped to [1, num_blocks]."""
+    return max(1, min(math.ceil((1 - sparsity) * num_blocks), num_blocks))
+
+
 def _compute_cur_topk(attn_metadata: VideoSparseAttentionMetadata) -> int:
-    num_kv_blocks = attn_metadata.variable_block_sizes.numel()
-    cur_topk = math.ceil((1 - attn_metadata.VSA_sparsity) * num_kv_blocks)
-    return max(1, min(cur_topk, num_kv_blocks))
+    return compute_topk(attn_metadata.VSA_sparsity, attn_metadata.variable_block_sizes.numel())
+
+
+def scatter_into_tile_buf(
+    x: torch.Tensor,
+    target_shape: tuple[int, ...],
+    dst_index: torch.Tensor,
+    buf: torch.Tensor | None,
+    src_index: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Zero-padded tile scatter shared by the VSA backends.
+
+    Allocates (zeros) when ``buf`` is missing or mismatched; otherwise reuses
+    it — pad slots are never written and every non-pad slot is fully
+    overwritten per call, so a reused buffer stays valid. Callers own the
+    buffer's lifetime (per-metadata for Wan VSA, per-builder for VSA-H3) and
+    its aliasing contract: the result is only valid until the next call with
+    the same buffer.
+
+    Callers that pass ``buf`` also own its *graph* contract: ``buf[:, dst] = x``
+    is an autograd-tracked in-place write, so a non-grad destination becomes a
+    graph node as soon as ``x`` tracks gradients. A buffer that outlives the
+    fragment it was written from — VSA-H3's is owned by the metadata builder,
+    which serves the whole training run — then anchors that fragment, and the
+    activations its backward saved, for the rest of training. A caller inside a
+    grad-tracking forward should therefore pass ``buf=None`` unless the buffer
+    is scoped to that forward: VSA-H3 does so unconditionally, and Wan VSA
+    exposes the choice through ``cache_tile_buf`` (training defaults it off).
+    """
+    if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
+        buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
+    buf[:, dst_index] = x if src_index is None else x[:, src_index]
+    return buf
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -232,9 +268,11 @@ class VideoSparseAttentionImpl(AttentionImpl):
         valid until the next ``tile()`` / ``preprocess_qkv`` call on the
         same ``attn_metadata``.  Callers must consume (or copy) the
         result before invoking another VSA layer with the same metadata.
-        Today both call sites materialize copies via
-        ``.transpose(...).contiguous()`` inside ``forward()``, so the
-        contract holds; future callers must preserve it.
+        Today ``forward()`` materializes copies of q/k/v via
+        ``.transpose(...).contiguous()`` and consumes the gate view
+        synchronously inside the same call (the coarse/sparse combine
+        reads it before returning), so the contract holds; future
+        callers must preserve it.
         """
         num_tiles = attn_metadata.num_tiles
         t_padded_size = num_tiles[0] * VSA_TILE_SIZE[0]
@@ -243,23 +281,15 @@ class VideoSparseAttentionImpl(AttentionImpl):
         target_shape = (x.shape[0], t_padded_size * h_padded_size * w_padded_size, x.shape[-2], x.shape[-1])
 
         if not attn_metadata.cache_tile_buf:
-            buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
-            buf[:, attn_metadata.non_pad_index] = x[:, attn_metadata.tile_partition_indices]
-            return buf
+            return scatter_into_tile_buf(x, target_shape, attn_metadata.non_pad_index, None,
+                                         attn_metadata.tile_partition_indices)
 
-        # Reuse the per-step buffer stashed on metadata (lazily allocated
-        # on the first VSA layer's call within a denoising step).  Pad
-        # positions are zero from the initial torch.zeros and never
-        # written to.  Scoping to metadata makes reuse safe across
-        # concurrent requests and keeps the "pad positions are zero"
-        # invariant trivially true: ``non_pad_index`` is fixed within
-        # a single metadata instance.
-        buf = attn_metadata.tile_buf
-        if (buf is None or buf.shape != target_shape or buf.dtype != x.dtype or buf.device != x.device):
-            buf = torch.zeros(target_shape, device=x.device, dtype=x.dtype)
-            attn_metadata.tile_buf = buf
-
-        buf[:, attn_metadata.non_pad_index] = x[:, attn_metadata.tile_partition_indices]
+        # Buffer scoped to the per-step metadata (lazily allocated on the
+        # first VSA layer's call within a denoising step), which keeps reuse
+        # safe across concurrent requests.
+        buf = scatter_into_tile_buf(x, target_shape, attn_metadata.non_pad_index, attn_metadata.tile_buf,
+                                    attn_metadata.tile_partition_indices)
+        attn_metadata.tile_buf = buf
         return buf
 
     def untile(self, x: torch.Tensor, untile_combined_index: torch.LongTensor) -> torch.Tensor:
@@ -309,11 +339,14 @@ class VideoSparseAttentionImpl(AttentionImpl):
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
-        # Default 64-element-tile path (unchanged): BHSD round-trip.
+        # Default 64-element-tile path (unchanged): BHSD round-trip. The gate is
+        # only read elementwise by the coarse/sparse combine, which views it at
+        # block resolution without requiring contiguity, so the transposed view
+        # is handed over as is (no full-sequence copy).
         query = query.transpose(1, 2).contiguous()
         key = key.transpose(1, 2).contiguous()
         value = value.transpose(1, 2).contiguous()
-        gate_compress = gate_compress.transpose(1, 2).contiguous()
+        gate_compress = gate_compress.transpose(1, 2)
         return video_sparse_attn(query,
                                  key,
                                  value,

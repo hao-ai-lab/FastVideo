@@ -5,6 +5,8 @@ import json
 # from fastvideo.api.sampling_param import SamplingParam
 
 OUTPUT_PATH = "video_samples_self_forcing_causal_wan2_2_14B_i2v"
+
+
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
@@ -14,8 +16,8 @@ def main():
         "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
-        use_fsdp_inference=False, # set to True if GPU is out of memory
-        dit_cpu_offload=True, # DiT need to be offloaded for MoE
+        use_fsdp_inference=False,  # set to True if GPU is out of memory
+        dit_cpu_offload=True,  # DiT need to be offloaded for MoE
         dit_precision="fp32",
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
@@ -37,7 +39,11 @@ def main():
     for prompt_image_pair in prompt_image_pairs:
         prompt = prompt_image_pair["prompt"]
         image_path = prompt_image_pair["image_path"]
-        _ = generator.generate_video(prompt, image_path=image_path, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
+        _ = generator.generate_video(prompt,
+                                     image_path=image_path,
+                                     output_path=OUTPUT_PATH,
+                                     save_video=True,
+                                     sampling_param=sampling_param)
 
 
 if __name__ == "__main__":

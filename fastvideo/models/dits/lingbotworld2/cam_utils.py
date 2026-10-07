@@ -5,21 +5,21 @@ import torch
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation, Slerp
 
-
 # --- Official Code (Leave Unchanged) ---
- 
+
+
 def interpolate_camera_poses(
-    src_indices: np.ndarray, 
-    src_rot_mat: np.ndarray, 
-    src_trans_vec: np.ndarray, 
+    src_indices: np.ndarray,
+    src_rot_mat: np.ndarray,
+    src_trans_vec: np.ndarray,
     tgt_indices: np.ndarray,
 ) -> torch.Tensor:
     # interpolate translation
     interp_func_trans = interp1d(
-        src_indices, 
-        src_trans_vec, 
-        axis=0, 
-        kind='linear', 
+        src_indices,
+        src_trans_vec,
+        axis=0,
+        kind='linear',
         bounds_error=False,
         fill_value="extrapolate",
     )
@@ -30,7 +30,7 @@ def interpolate_camera_poses(
     # ensure there is no sudden change in qw
     quats = src_quat_vec.as_quat().copy()  # [N, 4]
     for i in range(1, len(quats)):
-        if np.dot(quats[i], quats[i-1]) < 0:
+        if np.dot(quats[i], quats[i - 1]) < 0:
             quats[i] = -quats[i]
     src_quat_vec = Rotation.from_quat(quats)
     slerp_func_rot = Slerp(src_indices, src_quat_vec)
@@ -45,8 +45,8 @@ def interpolate_camera_poses(
 
 
 def SE3_inverse(T: torch.Tensor) -> torch.Tensor:
-    Rot = T[:, :3, :3] # [B,3,3]
-    trans = T[:, :3, 3:] # [B,3,1]
+    Rot = T[:, :3, :3]  # [B,3,3]
+    trans = T[:, :3, 3:]  # [B,3,1]
     R_inv = Rot.transpose(-1, -2)
     t_inv = -torch.bmm(R_inv, trans)
     T_inv = torch.eye(4, device=T.device, dtype=T.dtype)[None, :, :].repeat(T.shape[0], 1, 1)
@@ -56,9 +56,9 @@ def SE3_inverse(T: torch.Tensor) -> torch.Tensor:
 
 
 def compute_relative_poses(
-    c2ws_mat: torch.Tensor, 
-    framewise: bool = False, 
-    normalize_trans: bool = True, 
+    c2ws_mat: torch.Tensor,
+    framewise: bool = False,
+    normalize_trans: bool = True,
 ) -> torch.Tensor:
     ref_w2cs = SE3_inverse(c2ws_mat[0:1])
     relative_poses = torch.matmul(ref_w2cs, c2ws_mat)
@@ -68,8 +68,8 @@ def compute_relative_poses(
         # compute pose between i and i+1
         relative_poses_framewise = torch.bmm(SE3_inverse(relative_poses[:-1]), relative_poses[1:])
         relative_poses[1:] = relative_poses_framewise
-    if normalize_trans: # note refer to camctrl2: "we scale the coordinate inputs to roughly 1 standard deviation to simplify model learning."
-        translations = relative_poses[:, :3, 3] # [f, 3]
+    if normalize_trans:  # note refer to camctrl2: "we scale the coordinate inputs to roughly 1 standard deviation to simplify model learning."
+        translations = relative_poses[:, :3, 3]  # [f, 3]
         max_norm = torch.norm(translations, dim=-1).max()
         # only normlaize when moving
         if max_norm > 0:
@@ -78,12 +78,17 @@ def compute_relative_poses(
 
 
 @torch.no_grad()
-def create_meshgrid(n_frames: int, height: int, width: int, bias: float = 0.5, device='cuda', dtype=torch.float32) -> torch.Tensor:
+def create_meshgrid(n_frames: int,
+                    height: int,
+                    width: int,
+                    bias: float = 0.5,
+                    device='cuda',
+                    dtype=torch.float32) -> torch.Tensor:
     x_range = torch.arange(width, device=device, dtype=dtype)
     y_range = torch.arange(height, device=device, dtype=dtype)
     grid_y, grid_x = torch.meshgrid(y_range, x_range, indexing='ij')
-    grid_xy = torch.stack([grid_x, grid_y], dim=-1).view([-1, 2]) + bias # [h*w, 2]
-    grid_xy = grid_xy[None, ...].repeat(n_frames, 1, 1) # [f, h*w, 2]
+    grid_xy = torch.stack([grid_x, grid_y], dim=-1).view([-1, 2]) + bias  # [h*w, 2]
+    grid_xy = grid_xy[None, ...].repeat(n_frames, 1, 1)  # [f, h*w, 2]
     return grid_xy
 
 
@@ -128,7 +133,7 @@ def get_Ks_transformed(
     height_final: int,
     width_final: int,
 ):
-    fx, fy, cx, cy = Ks.chunk(4, dim=-1) # [f, 1]
+    fx, fy, cx, cy = Ks.chunk(4, dim=-1)  # [f, 1]
 
     scale_x = width_resize / width_org
     scale_y = height_resize / height_org
@@ -143,7 +148,7 @@ def get_Ks_transformed(
 
     cx_final = cx_resize - crop_offset_x
     cy_final = cy_resize - crop_offset_y
-    
+
     Ks_transformed = torch.zeros_like(Ks)
     Ks_transformed[:, 0:1] = fx_resize
     Ks_transformed[:, 1:2] = fy_resize
@@ -154,6 +159,7 @@ def get_Ks_transformed(
 
 
 # --- Custom ---
+
 
 def prepare_camera_embedding(
     action_path: str,
@@ -167,9 +173,7 @@ def prepare_camera_embedding(
     num_frames = min(num_frames, len_c2ws)
     c2ws = c2ws[:num_frames]
 
-    Ks = torch.from_numpy(
-        np.load(os.path.join(action_path, "intrinsics.npy"))
-    ).float()
+    Ks = torch.from_numpy(np.load(os.path.join(action_path, "intrinsics.npy"))).float()
     Ks = get_Ks_transformed(
         Ks,
         height_org=480,

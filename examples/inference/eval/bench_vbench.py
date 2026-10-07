@@ -39,9 +39,8 @@ def _slugify(prompt: str, max_len: int = 100) -> str:
     return re.sub(r"\s+", " ", s) or "output"
 
 
-def _generate_videos(prompts: list[str], videos_dir: Path,
-                     model: str, num_gpus: int,
-                     num_frames: int, height: int, width: int) -> None:
+def _generate_videos(prompts: list[str], videos_dir: Path, model: str, num_gpus: int, num_frames: int, height: int,
+                     width: int) -> None:
     from fastvideo import VideoGenerator
 
     videos_dir.mkdir(parents=True, exist_ok=True)
@@ -57,53 +56,60 @@ def _generate_videos(prompts: list[str], videos_dir: Path,
     try:
         for prompt, out_path in todo:
             gen.generate_video(
-                prompt=prompt, output_path=str(out_path), save_video=True,
-                num_frames=num_frames, height=height, width=width,
+                prompt=prompt,
+                output_path=str(out_path),
+                save_video=True,
+                num_frames=num_frames,
+                height=height,
+                width=width,
             )
     finally:
         gen.shutdown()
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--dimensions", default="aesthetic_quality,subject_consistency",
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--dimensions",
+                   default="aesthetic_quality,subject_consistency",
                    help="Comma-separated VBench dimensions (or 'all').")
-    p.add_argument("--limit", type=int, default=None,
-                   help="Truncate to first N prompts for smoke runs.")
-    p.add_argument("--videos-dir", type=Path,
-                   default=Path("outputs_video/bench_vbench"))
+    p.add_argument("--limit", type=int, default=None, help="Truncate to first N prompts for smoke runs.")
+    p.add_argument("--videos-dir", type=Path, default=Path("outputs_video/bench_vbench"))
     p.add_argument("--num-gpus", type=int, default=1)
-    p.add_argument("--model", default="Davids048/LTX2-Base-Diffusers",
+    p.add_argument("--model",
+                   default="Davids048/LTX2-Base-Diffusers",
                    help="HF repo id of the text→video generator to use.")
     p.add_argument("--num-frames", type=int, default=121)
     p.add_argument("--height", type=int, default=1088)
     p.add_argument("--width", type=int, default=1920)
-    p.add_argument("--fps", type=float, default=24.0,
-                   help="Frame-rate annotation passed to fps-aware metrics.")
-    p.add_argument("--skip-generation", action="store_true",
+    p.add_argument("--fps", type=float, default=24.0, help="Frame-rate annotation passed to fps-aware metrics.")
+    p.add_argument("--skip-generation",
+                   action="store_true",
                    help="Re-score existing videos under --videos-dir without "
-                        "regenerating.")
-    p.add_argument("--scores-out", type=Path, default=None,
+                   "regenerating.")
+    p.add_argument("--scores-out",
+                   type=Path,
+                   default=None,
                    help="Where to dump per-prompt scores as JSON. "
-                        "Defaults to <videos-dir>/scores.json.")
+                   "Defaults to <videos-dir>/scores.json.")
     args = p.parse_args()
 
     # 1. Pull prompts from VBench.
-    dims_arg: list[str] | str = (
-        args.dimensions if args.dimensions == "all"
-        else [d.strip() for d in args.dimensions.split(",") if d.strip()]
-    )
+    dims_arg: list[str] | str = (args.dimensions if args.dimensions == "all" else
+                                 [d.strip() for d in args.dimensions.split(",") if d.strip()])
     ds = get_dataset("vbench", dimensions=dims_arg)
-    rows = list(ds)[: args.limit]
+    rows = list(ds)[:args.limit]
     print(f"[load] VBench: {len(rows)} prompts across {ds.dimensions}")
 
     # 2. Generate (or reuse) one mp4 per prompt.
     if not args.skip_generation:
         _generate_videos(
             [row["prompt"] for row in rows],
-            args.videos_dir, args.model, args.num_gpus,
-            args.num_frames, args.height, args.width,
+            args.videos_dir,
+            args.model,
+            args.num_gpus,
+            args.num_frames,
+            args.height,
+            args.width,
         )
 
     # 3. Score each video against the requested vbench sub-metrics.
@@ -122,7 +128,7 @@ def main() -> None:
         samples.append({
             "video": str(video_path),
             "fps": args.fps,
-            **row,                                       # prompt / aux / dims
+            **row,  # prompt / aux / dims
         })
         matched_rows.append(row)
 

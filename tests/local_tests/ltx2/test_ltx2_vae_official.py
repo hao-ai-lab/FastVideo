@@ -23,18 +23,12 @@ from fastvideo.models.loader.component_loader import VAELoader
     reason="LTX-2 VAE parity test requires CUDA.",
 )
 def test_ltx2_vae_parity_official():
-    diffusers_root = Path(
-        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
-    )
-    official_path = Path(
-        os.getenv(
-            "LTX2_OFFICIAL_PATH",
-            "official_ltx_weights/ltx-2-19b-distilled.safetensors",
-        )
-    )
-    fastvideo_path = Path(
-        os.getenv("LTX2_VAE_PATH", str(diffusers_root / "vae"))
-    )
+    diffusers_root = Path(os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers"))
+    official_path = Path(os.getenv(
+        "LTX2_OFFICIAL_PATH",
+        "official_ltx_weights/ltx-2-19b-distilled.safetensors",
+    ))
+    fastvideo_path = Path(os.getenv("LTX2_VAE_PATH", str(diffusers_root / "vae")))
     if not official_path.exists():
         pytest.skip(f"LTX-2 weights not found at {official_path}")
     if not fastvideo_path.exists():
@@ -65,9 +59,7 @@ def test_ltx2_vae_parity_official():
     )
 
     loader = VAELoader()
-    fastvideo_vae = loader.load(str(fastvideo_path), args).to(
-        device=device, dtype=precision
-    )
+    fastvideo_vae = loader.load(str(fastvideo_path), args).to(device=device, dtype=precision)
 
     encoder_builder = SingleGPUModelBuilder(
         model_class_configurator=VideoEncoderConfigurator,
@@ -79,12 +71,8 @@ def test_ltx2_vae_parity_official():
         model_path=str(official_path),
         model_sd_ops=VAE_DECODER_COMFY_KEYS_FILTER,
     )
-    ref_encoder = encoder_builder.build(
-        device=device, dtype=precision
-    ).to(device=device, dtype=precision)
-    ref_decoder = decoder_builder.build(
-        device=device, dtype=precision
-    ).to(device=device, dtype=precision)
+    ref_encoder = encoder_builder.build(device=device, dtype=precision).to(device=device, dtype=precision)
+    ref_decoder = decoder_builder.build(device=device, dtype=precision).to(device=device, dtype=precision)
 
     fastvideo_vae.encoder.eval()
     fastvideo_vae.decoder.eval()

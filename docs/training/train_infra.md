@@ -81,6 +81,7 @@ Common model parameters:
 | `disable_custom_init_weights` | `false` | Skip custom weight initialization (use for teacher/critic) |
 | `flow_shift` | `3.0` | Timestep shifting factor |
 | `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"` or `null`) |
+| `attention_backend` | `null` | Optional role-local backend for Wan models (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
 
 Which roles are needed depends on the training method:
 
@@ -150,6 +151,10 @@ training:
     project_name: my_project
     run_name: my_run
 
+  performance:
+    enabled: true
+    peak_tflops_per_gpu: null  # optional dense BF16 peak for one GPU
+
   model:
     weighting_scheme: uniform   # uniform, logit_normal, mode
     precondition_outputs: false
@@ -175,6 +180,81 @@ The repeat count duplicates that dataset's parquet file list before shuffling/sa
 
 See [Training Trackers](trackers.md) to configure Weights & Biases or SwanLab,
 including SwanLab installation and authentication.
+
+### Training performance metrics
+
+The modular trainer logs low-overhead performance metrics on every optimizer
+step. The Transformer boundary is instrumented separately for each model role,
+so the accounting includes all forwards performed by the selected method:
+
+- bidirectional SFT records its dense or VSA student forward;
+- causal SFT records block-causal attention geometry;
+- streaming/self-forcing records every rollout chunk and KV-cache update;
+- DMD records student, critic, and teacher forwards independently, including
+  repeated rollouts and the conditional/unconditional teacher passes.
+
+The common metrics are:
+
+| Metric | Meaning |
+|--------|---------|
+| `step_time_sec` | Training wall time for one optimizer step, excluding checkpoint and validation callbacks |
+| `perf/steps_per_sec` | Reciprocal of `step_time_sec` |
+| `perf/samples_per_sec` | Configured global samples processed per second, including gradient accumulation and data-parallel replicas |
+| `perf/model_forward_calls` | Actual Transformer invocations during the optimizer step |
+| `perf/causal_chunks` | Block-causal chunks represented by those invocations |
+| `perf/query_latent_frames_per_sec` | Latent query frames processed across all roles and rollouts |
+| `perf/query_tokens_per_sec` | Patch tokens processed across all roles and rollouts |
+| `perf/attention_density` | Effective self-attention pairs divided by dense attention pairs |
+| `perf/estimated_tflops_per_gpu` | Estimated useful model FLOP/s per GPU |
+| `perf/estimated_mfu` | Estimated useful FLOP/s divided by the dense BF16 peak (ratio, not percent) |
+| `perf/peak_tflops_per_gpu` | Dense BF16 peak used for the MFU ratio (configured or inferred) |
+| `perf/role/<role>/*` | Forward count, grad-carrying forward count, causal chunks, and estimated TFLOP/s for one role |
+
+For DMD2, combine these metrics with the existing `update_student` metric to
+separate the expensive generator-update steps from critic-only steps.
+
+`perf/samples_per_sec` uses the configured `train_batch_size`, gradient
+accumulation, and data-parallel replica count. Methods that manage their own
+optimization (for example DiffusionNFT, whose outer step consumes
+`num_batches_per_epoch` dataloader batches) report the throughput of a single
+batch in the denominator, so use the method's own sample counter
+(`nft/num_sampled`) for those runs. The FLOP-derived metrics still aggregate
+every forward the method performs.
+
+MFU is an analytic Transformer-core estimate. Each no-grad forward contributes
+`1F`; a forward whose result carries autograd contributes `3F` (forward plus an
+approximately `2F` backward). Activation-checkpoint recomputation is excluded,
+as expected for model FLOPs utilization. Wan VSA uses the kernel's clamped
+tile-top-k density and includes its gate projection and pooled-attention
+overhead. VMOBA runs are modeled as dense self-attention: the MoBA top-k
+selection is not estimated, so `perf/attention_density` stays at `1.0` and the
+attention-dependent FLOPs are an upper bound. Causal Wan uses the configured
+chunk size, local window, and actual streaming cache position; when
+`local_attn_size` is unset, the modeled window is the transformer's 21-frame
+compatibility cap, and `pipeline.dit_config.sliding_window_num_frames` only
+sizes the streaming KV cache. MatrixGame2's 15-frame compatibility window is
+not modeled, so its attention density is an upper bound. Embedding,
+normalization, optimizer, communication, MatrixGame action modules, and other
+non-core work are not included, so MFU is an estimate rather than a
+hardware-profiler measurement.
+
+`perf/estimated_tflops_per_gpu` and `perf/estimated_mfu` aggregate every role
+(student, teacher, critic, EMA) that ran during the step, so they are not
+directly comparable to a single-model MFU number. Replica scaling assumes
+`world_size = data_parallel x sp_size`; `tp_size > 1` is not modeled and would
+inflate the per-GPU estimates.
+
+Forward counts and wall-clock throughput work for every modular model. The
+FLOP-derived metrics currently require a Wan-style architecture exposing
+`hidden_size`, `ffn_dim`, `num_layers`, and a three-axis `patch_size`; they are
+omitted for other architectures instead of reporting a misleading estimate.
+
+Known NVIDIA accelerators use an inferred dense BF16 peak. Set
+`training.performance.peak_tflops_per_gpu` explicitly for a different board
+form factor or clock. If the device is unknown and no peak is configured, the
+trainer still logs throughput, call counts, attention density, and estimated
+TFLOP/s, but omits `perf/estimated_mfu`. Set `enabled: false` to disable the
+forward hooks and all `perf/*` metrics.
 
 ### `callbacks` — Pluggable hooks
 
@@ -210,6 +290,29 @@ Optional overrides for the inference pipeline used during validation:
 pipeline:
   flow_shift: 8
 ```
+
+Registered transformer linear-quantization configs can also be selected by
+name. For example, the LTX-2 NVFP4-QAT recipe applies real FP4 forward GEMMs
+with a straight-through-estimator backward to its deployment-targeted
+attention/FFN projections:
+
+```yaml
+pipeline:
+  dit_config:
+    quant_config: nvfp4_qat_train
+```
+
+The LTX-2 recipe in
+`examples/train/configs/overfit_ltx2_t2v_nvfp4_qat.yaml` combines that linear
+configuration with `models.student.attention_backend: ATTN_QAT_TRAIN` for
+video-attention forward/backward. On sm120, its validation callback temporarily
+switches those layers to `ATTN_QAT_INFER`.
+On GB200, set `callbacks.validation.attn_qat_infer: false` to keep validation on
+the train-time QAT backend; the inference kernel is sm120-only.
+
+User-adaptable LTX-2 fine-tuning recipes (full, LoRA, and NVFP4 QAT) live in
+`examples/train/configs/fine_tuning/ltx2/`, alongside the other model
+families under `examples/train/configs/fine_tuning/`.
 
 ---
 
@@ -298,6 +401,8 @@ method:
 | `dmd_denoising_steps` | *(required)* | Timestep schedule for student rollout |
 | `generator_update_interval` | `1` | Update student every N critic steps |
 | `real_score_guidance_scale` | `1.0` | CFG scale for teacher predictions |
+| `min_timestep_ratio` | `0.0` | Lower bound for randomly sampled teacher/critic score timesteps |
+| `max_timestep_ratio` | `1.0` | Upper bound for randomly sampled teacher/critic score timesteps |
 | `fake_score_learning_rate` | *(required)* | Critic optimizer learning rate |
 | `fake_score_betas` | *(required)* | Critic optimizer Adam betas |
 | `fake_score_lr_scheduler` | *(required)* | Critic LR scheduler type |

@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -27,13 +28,13 @@ device_reference_folder = resolve_device_reference_folder(
     (
         ("A40", "A40"),
         ("L40S", "L40S"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=get_cuda_device_name(),
     fallback_device_prefix="L40S",
     logger=logger,
 )
-
 
 MATRIXGAME3_PARAMS = {
     "num_gpus": 1,
@@ -45,8 +46,7 @@ MATRIXGAME3_PARAMS = {
     "guidance_scale": 5.0,
     "seed": 42,
 }
-_MATRIXGAME3_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    MATRIXGAME3_PARAMS["model_path"])
+_MATRIXGAME3_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(MATRIXGAME3_PARAMS["model_path"])
 MATRIXGAME3_FULL_QUALITY_PARAMS = {
     "num_gpus": MATRIXGAME3_PARAMS["num_gpus"],
     "model_path": MATRIXGAME3_PARAMS["model_path"],
@@ -57,7 +57,6 @@ MATRIXGAME3_FULL_QUALITY_PARAMS = {
     "guidance_scale": _MATRIXGAME3_FULL_QUALITY_DEFAULTS.guidance_scale,
     "seed": _MATRIXGAME3_FULL_QUALITY_DEFAULTS.seed,
 }
-
 
 MODEL_TO_PARAMS = {
     "Matrix-Game-3.0-Diffusers-Base": MATRIXGAME3_PARAMS,
@@ -80,12 +79,12 @@ TEST_IMAGE_PATHS = [
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """
     Test that runs MG3 inference (action conditions auto-generated from seed)
     and compares the output to reference videos using SSIM.
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
