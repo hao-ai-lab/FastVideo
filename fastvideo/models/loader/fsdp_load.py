@@ -261,6 +261,7 @@ def maybe_load_fsdp_model(
     strict: bool = True,
     cpu_offload: bool = False,
     fsdp_inference: bool = False,
+    device_mesh: DeviceMesh | None = None,
     output_dtype: torch.dtype | None = None,
     training_mode: bool = True,
     pin_cpu_memory: bool = True,
@@ -281,6 +282,10 @@ def maybe_load_fsdp_model(
     ``LoRAPipeline``. Passing it here is what lets an adapter contribute a parameter the
     base checkpoint does not contain, which has to happen while the tensor is still
     unsharded.
+
+    ``device_mesh`` overrides the mesh FSDP shards over. The MiniMax-H3 encoder
+    split passes one that covers the denoise ranks only, because the DiT is loaded
+    on no other rank.
 
     ``pre_fsdp_model_transform`` runs on the meta model before its sharding topology
     is established and before checkpoint weights are loaded. Training uses it to
@@ -346,7 +351,7 @@ def maybe_load_fsdp_model(
             hsdp_replicate_dim = world_size
             hsdp_shard_dim = 1
 
-        if current_platform.is_npu():
+        if device_mesh is None and current_platform.is_npu():
             with torch.device("cpu"):
                 device_mesh = init_device_mesh(
                     "npu",
@@ -354,7 +359,7 @@ def maybe_load_fsdp_model(
                     mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
                     mesh_dim_names=("replicate", "shard"),
                 )
-        else:
+        elif device_mesh is None:
             device_mesh = init_device_mesh(
                 "cuda",
                 # (Replicate(), Shard(dim=0))
