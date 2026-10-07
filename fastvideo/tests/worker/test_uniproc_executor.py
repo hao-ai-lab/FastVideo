@@ -119,11 +119,44 @@ def test_interrupt_flags_in_process_pipeline_stages() -> None:
     stage = SimpleNamespace()
     worker.worker = SimpleNamespace(pipeline=SimpleNamespace(stages=[stage]))
 
+    executor.begin_generation()
     executor.interrupt()
     assert stage.interrupt is True
 
     executor._clear_interrupt()
     assert stage.interrupt is False
+
+
+def test_interrupt_between_generations_is_dropped() -> None:
+    """A cancel that lands between runs must not silently skip the next one."""
+    executor, worker = _executor_with_fake_worker()
+    stage = SimpleNamespace()
+    worker.worker = SimpleNamespace(pipeline=SimpleNamespace(stages=[stage]))
+
+    executor.interrupt()  # no generation open: stale request
+    assert getattr(stage, "interrupt", False) is not True
+
+    executor.begin_generation()
+    executor.interrupt()
+    assert stage.interrupt is True
+
+
+def test_cancelled_run_raises_instead_of_returning_garbage() -> None:
+    """A cancelled run raises; it never returns undenoised output as success."""
+    executor, worker = _executor_with_fake_worker()
+    stage = SimpleNamespace()
+    worker.worker = SimpleNamespace(pipeline=SimpleNamespace(stages=[stage]))
+
+    executor.begin_generation()
+    executor.interrupt()
+    with pytest.raises(RuntimeError, match="cancelled"):
+        executor.execute_forward(ForwardBatch(data_type="video"), FastVideoArgs(model_path="test"))
+    assert getattr(stage, "interrupt", False) is False  # latch cleared at run end
+
+    executor.begin_generation()
+    executor.interrupt()
+    with pytest.raises(RuntimeError, match="cancelled"):
+        executor.execute_streaming_step()
 
 
 def test_uniproc_log_queue_stays_in_process() -> None:

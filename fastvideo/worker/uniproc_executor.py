@@ -36,6 +36,14 @@ class UniprocExecutor(Executor):
     Because the worker shares the caller's process there is no ``workers``
     list and no worker-side SIGINT handler: Ctrl-C reaches the main thread
     only, so call :meth:`interrupt` to cancel the in-flight forward pass.
+    Cancellation is scoped to a generation (:meth:`begin_generation`): a
+    request that lands while no generation is open is dropped, and a
+    cancelled run raises ``RuntimeError`` instead of returning undenoised
+    output as success.
+
+    ``StreamingVideoGenerator(use_queue_mode=True)`` prefetching needs a
+    ``MultiprocExecutor``; with this executor it warns and falls back to
+    per-step in-process calls.
     """
 
     def _init_executor(self) -> None:
@@ -66,12 +74,24 @@ class UniprocExecutor(Executor):
         atexit.register(self.shutdown)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        self._clear_interrupt()
-        responses: list[ForwardBatch] = self.collective_rpc("execute_forward",
-                                                            kwargs={
-                                                                "forward_batch": forward_batch,
-                                                                "fastvideo_args": fastvideo_args,
-                                                            })
+        self._generation_open = True  # implicit boundary for callers without begin_generation()
+        try:
+            responses: list[ForwardBatch] = self.collective_rpc("execute_forward",
+                                                                kwargs={
+                                                                    "forward_batch": forward_batch,
+                                                                    "fastvideo_args": fastvideo_args,
+                                                                })
+            cancelled = any(getattr(stage, "interrupt", False) for stage in self._pipeline_stages())
+        finally:
+            # Run-scoped latch: a cancellation requested before or during this
+            # call is honored by the stage loops; close the window and clear
+            # the flag when the run ends so a late cancel can never leak into
+            # (and silently skip) the next run.
+            self._generation_open = False
+            self._clear_interrupt()
+        if cancelled:
+            # A cancelled run must never return undenoised output as success.
+            raise RuntimeError("generation cancelled by interrupt()")
         output_batch = responses[0]
         extra = output_batch.extra or {}
         if torch.cuda.is_available():
@@ -79,13 +99,29 @@ class UniprocExecutor(Executor):
         output_batch.extra = extra
         return output_batch
 
+    def begin_generation(self) -> None:
+        """Mark the start of a generation.
+
+        Drops any stale cancellation left over from a previous run so it can
+        never silently skip this one, and opens the window in which
+        :meth:`interrupt` is honored (closed again when the run ends).
+        """
+        self._generation_open = True
+        self._clear_interrupt()
+
     def interrupt(self) -> None:
         """Request cancellation of the in-flight forward pass (best effort).
 
         There is no worker process to signal, so flag the in-process pipeline
-        stages whose denoising loop checks ``self.interrupt`` instead. The flag
-        is cleared at the start of the next forward pass.
+        stages whose denoising loop checks ``self.interrupt`` instead. The
+        request is honored only while a generation is open (from
+        :meth:`begin_generation`, or the first call, until the run ends): a
+        cancel that lands while no generation is open is dropped, and a
+        cancelled run raises ``RuntimeError`` instead of returning undenoised
+        output as success.
         """
+        if not getattr(self, "_generation_open", False):
+            return
         for stage in self._pipeline_stages():
             stage.interrupt = True
 
@@ -99,6 +135,7 @@ class UniprocExecutor(Executor):
         return list(getattr(pipeline, "stages", None) or [])
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+        self.begin_generation()  # session boundary: drop stale cancels, open the window
         responses: list[dict[str, Any]] = self.collective_rpc(
             "execute_streaming_reset",
             kwargs={
@@ -109,14 +146,21 @@ class UniprocExecutor(Executor):
         return responses[0]
 
     def execute_streaming_step(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
-        self._clear_interrupt()
-        responses: list[ForwardBatch] = self.collective_rpc(
-            "execute_streaming_step",
-            kwargs={
-                "keyboard_action": keyboard_action,
-                "mouse_action": mouse_action,
-            },
-        )
+        self._generation_open = True  # implicit boundary for callers without execute_streaming_reset
+        try:
+            responses: list[ForwardBatch] = self.collective_rpc(
+                "execute_streaming_step",
+                kwargs={
+                    "keyboard_action": keyboard_action,
+                    "mouse_action": mouse_action,
+                },
+            )
+            cancelled = any(getattr(stage, "interrupt", False) for stage in self._pipeline_stages())
+        finally:
+            self._clear_interrupt()
+        if cancelled:
+            # A cancelled step must never return an undenoised block as success.
+            raise RuntimeError("streaming step cancelled by interrupt()")
         return responses[0]
 
     async def execute_streaming_step_async(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
@@ -124,7 +168,11 @@ class UniprocExecutor(Executor):
         return await asyncio.to_thread(self.execute_streaming_step, keyboard_action, mouse_action)
 
     def execute_streaming_clear(self) -> dict[str, Any]:
-        responses: list[dict[str, Any]] = self.collective_rpc("execute_streaming_clear")
+        try:
+            responses: list[dict[str, Any]] = self.collective_rpc("execute_streaming_clear")
+        finally:
+            self._generation_open = False  # session over: late cancels are stale
+            self._clear_interrupt()
         return responses[0]
 
     def set_lora_adapter(self,
