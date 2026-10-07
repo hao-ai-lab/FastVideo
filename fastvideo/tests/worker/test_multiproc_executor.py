@@ -234,3 +234,22 @@ def test_executor_still_kills_worker_that_ignores_graceful_exit_and_sigterm() ->
     assert process.alive is False
     assert pipe.closed is True
     assert executor.workers == []
+
+
+def test_compile_worker_cleanup_dispatch_target_exists_in_real_inductor() -> None:
+    """Bind the cleanup dispatch to the real torch API, not a stub.
+
+    ``_shutdown_torch_compile_workers`` looks up
+    ``sys.modules["torch._inductor.async_compile"].shutdown_compile_workers``.
+    The tests above stub that object, so they cannot notice a torch release that
+    renames or moves the private API: the dispatch would silently become a
+    no-op and the orphaned compile-subprocess regression would return while the
+    suite stays green. Fail loudly on such an upgrade instead.
+    """
+    async_compile = pytest.importorskip(
+        "torch._inductor.async_compile",
+        reason="the dispatch contract only matters where torch ships Inductor",
+    )
+
+    assert sys.modules.get("torch._inductor.async_compile") is async_compile
+    assert callable(getattr(async_compile, "shutdown_compile_workers", None))
