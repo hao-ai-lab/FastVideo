@@ -107,6 +107,7 @@ surfaces:
       moba_config: "Derived runtime config loaded from moba_config_path."
       model_paths: "Runtime bookkeeping."
       model_loaded: "Runtime bookkeeping."
+      regional_compile: "Training-loader switch the modular fastvideo/train moduleloader sets to compile repeated DiT blocks regionally; no CLI flag, and inference regional compile is inference_torch_compile."
 
   pipeline_config_base:
     moved:
