@@ -14,7 +14,11 @@ def test_cpu_sdpa_resolution_through_selector(monkeypatch, requested):
     from fastvideo.attention.backends.sdpa import SDPABackend
     from fastvideo.attention.selector import _cached_get_attn_backend, get_attn_backend
 
-    monkeypatch.setattr(platforms, "current_platform", CpuPlatform())
+    # Patch the platform behind the lazy `current_platform` lookup. Patching
+    # `current_platform` itself makes monkeypatch restore the real platform as a
+    # module attribute afterwards, which shadows the lookup for every later test
+    # that patches `_current_platform` (test_gpu_worker, the ROCm detection test).
+    monkeypatch.setattr(platforms, "_current_platform", CpuPlatform())
     _cached_get_attn_backend.cache_clear()
     try:
         backend = get_attn_backend(64, torch.float32, (AttentionBackendEnum.TORCH_SDPA,), requested=requested)
