@@ -10,6 +10,7 @@ slash-command mappings, and workflow ownership live in
 |---|---|---|
 | Unit tests | `fastvideo/tests/api`, `fastvideo/tests/dataset`, `fastvideo/tests/entrypoints`, `fastvideo/tests/workflow`, CPU-safe `fastvideo/tests/train` subsets | Validate individual functions, APIs, contracts, and lightweight workflows. |
 | Component tests | `fastvideo/tests/encoders`, `fastvideo/tests/transformers`, `fastvideo/tests/vaes` | Validate loading and basic behavior for model components. |
+| Golden gates | `fastvideo/tests/golden_gate` | Compare small, deterministic component outputs exactly against device/runtime-matched reference tensors. |
 | Train framework tests | `fastvideo/tests/train/models`, `fastvideo/tests/train/methods` | Exercise the new `fastvideo/train/` framework on real checkpoints and tiny synthetic batches. |
 | SSIM tests | `fastvideo/tests/ssim` | Compare generated videos against references to catch visual regressions. |
 | Training tests | `fastvideo/tests/training` | Validate legacy training loops, LoRA, distillation, self-forcing, and VSA behavior. |
@@ -20,14 +21,74 @@ slash-command mappings, and workflow ownership live in
 
 ## Running Tests Locally
 
-Run the narrowest useful suite while iterating:
+Start with the cheapest checks that cover the changed behavior, and stop on a
+failure before starting heavier dependent checks:
+
+1. Run pre-commit on changed files and focused import, config, and contract tests.
+2. Run the smallest matching component golden gate. Prefer one GPU, tiny fixed
+   inputs, cached component weights, and direct tensor comparisons over renders.
+3. Run focused component parity or default SSIM when the golden does not cover
+   the changed behavior, such as VAE normalization or pipeline wiring.
+4. Run full-quality renders or broad suites when required by the change, an
+   explicit request, or CI policy, rather than on every edit.
+
+A golden must cover the component being changed. Wan has four small gates:
+
+| Gate | Boundary |
+|---|---|
+| `test_wan_t2v.py` | Dense transformer block 0 |
+| `test_wan_vae.py` | FP32 encode, BF16 decode, streaming, and cache reset |
+| `test_wan_causal.py` | Real block weights, cache append/rewrite, and sink eviction |
+| `test_wan_denoising.py` | Three real 1.3B DiT/UniPC steps with fixed prompt embeddings |
+
+These use an immutable Wan checkpoint revision and only download the required
+component. The trajectory gate needs no tokenizer, text encoder, VAE, or video
+reference. Weight-free stage tests also exercise every step of a 50-step UniPC
+loop, CFG caching, expert switching, conditioning layouts, and DMD RNG order.
+These checks do not replace independent Diffusers parity or end-to-end SSIM.
+
+Use the golden's matching GPU, dtype, backend, and runtime. A missing reference
+or environment mismatch is not a pass. Do not replace a reference with the
+candidate output just to clear a failure. For a relocation, the unchanged
+parent is the baseline; two imports of the same class are not numerical proof.
+
+The VAE and transformer CI lanes run their Wan component goldens first.
+Selected integration lanes wait for the golden lane in merge/full builds.
+See [CI/CD Architecture](ci_architecture.md) for direct-rerun and skip semantics.
+
+For Wan, one command enforces the local ordering and stops on failure:
+
+The initial contracts include `tests/api/test_wan_definitions.py`: all registered
+Wan aliases, local-manifest detector precedence, sampling/precision defaults,
+config isolation, and legacy serialized-config compatibility. These require no
+weights or Hub access; the current package import still needs its prepared
+runtime environment.
 
 ```bash
-pytest tests/
-pytest fastvideo/tests/ -v
-pytest fastvideo/tests/encoders -vs
-pytest fastvideo/tests/transformers -vs
-pytest fastvideo/tests/vaes -vs
+bash scripts/validate_wan.sh vae           # contracts, then the VAE golden
+bash scripts/validate_wan.sh dense parity  # contracts, goldens, Diffusers parity
+bash scripts/validate_wan.sh all default   # then focused T2V/I2V/causal SSIM
+```
+
+The second argument is an upper validation tier, not a reference override.
+Supply the GPU/backend/runtime and SSIM model/tier settings that match the
+reference. The script never updates references. Causal component coverage is
+a block-cache fingerprint, not independent full causal-pipeline parity.
+
+New named-tensor gates write a missing output to `*.candidate.pt` and fail;
+running candidate code again cannot turn it into an approved reference. Seed
+from unchanged, pushed source, verify two independent processes bit-for-bit,
+then review and publish only the new reference files. Preserve the baseline
+source SHA, test recipe SHA, checkpoint revision, runtime, and comparison
+receipt with the run artifacts. Never overwrite an existing video reference
+as a side effect of adding a tensor gate.
+
+Examples of focused checks:
+
+```bash
+pytest fastvideo/tests/loader/test_wan_family_imports.py -q
+pytest fastvideo/tests/golden_gate/test_wan_t2v.py -q
+pytest fastvideo/tests/vaes/test_wan_vae.py -q
 ```
 
 GPU-heavy suites need the right hardware, credentials, local caches, and

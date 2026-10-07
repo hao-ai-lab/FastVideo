@@ -1,6 +1,6 @@
 # Run H3 with a server and playground
 
-Start FastH3 on CUDA or Apple Silicon MLX, then iterate on prompts in a browser,
+Start FastH3 on CUDA, one DGX Spark, or Apple Silicon MLX, then iterate on prompts in a browser,
 with cURL, or from your app. The server and clients can run on the same machine.
 
 The server supports the OpenAI-compatible video-job API. The Python and
@@ -8,8 +8,9 @@ JavaScript client examples use that interface, but requests go to FastVideo.
 You do not need an OpenAI account or cloud key.
 
 The [H3 recipe selector](minimax-h3.md) provides the same workflow with runtime
-selection. This guide covers FastH3 Preview text-to-video/audio. Other H3
-recipes keep their direct Python commands.
+selection. This guide covers FastH3 V1 (four forwards) and FastH3 V2
+(eight forwards). Start a server, then iterate in the playground or with the
+OpenAI Python client. Other H3 recipes keep their direct Python commands.
 
 CUDA requests reuse one loaded `VideoGenerator`. The Python SDK can do the same
 when you reuse the generator across `generate()` calls. MLX keeps one
@@ -36,6 +37,40 @@ advertises it as `fasth3`. It configures four CUDA GPUs but does not record
 a GPU model or VRAM requirement. This is a source-backed server profile, not
 the measured GB200 Python performance profile. Compilation is disabled.
 
+For FastH3 V2, use the same install and the 8-step config (nine sigma
+points, eight DiT forwards, VSA sparsity 0.8):
+
+```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"
+fastvideo serve --config examples/serving/openai_fasth3_8step.yaml --server.host 127.0.0.1
+```
+
+Keep the server running. In another terminal, check readiness:
+
+```bash
+curl --fail-with-body http://127.0.0.1:8000/health
+```
+
+After model loading completes, the response is `{"status":"ok"}`.
+
+### NVIDIA DGX Spark
+
+Complete the [DGX Spark installation](../getting_started/installation/spark.md)
+before running these commands. GB10 has no FA4 / sm_100a VSA kernel:
+
+```bash
+UV_TORCH_BACKEND=cu130 uv pip install -e .
+FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+  fastvideo serve --config examples/serving/openai_fasth3_spark.yaml --server.host 127.0.0.1
+```
+
+The configuration loads `FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree`
+on one GB10 and advertises it as `fasth3`. Lazy module load still reloads
+Qwen3-VL and the DiT between phases of each request. Legal `num_frames` values
+are `17n+5`, capped at 362 (15.08 s); a 345-frame request on one Spark can OOM.
+There is no cookbook server for two Sparks; use the generate YAML after
+[pairing two Sparks](../getting_started/installation/spark_pair.md).
+
 Keep the server running. In another terminal, check readiness:
 
 ```bash
@@ -46,7 +81,7 @@ After model loading completes, the response is `{"status":"ok"}`.
 
 ### Apple Silicon MLX
 
-Complete the [Apple Silicon installation](../getting_started/installation/mps.md#run-fasth3-preview),
+Complete the [MLX install](../getting_started/installation/mlx.md),
 including `ffmpeg`. From your FastVideo clone, install the MLX extra:
 
 ```bash
@@ -77,13 +112,29 @@ LoRA selection, and alternate decoders are not exposed by this server adapter.
 Unsupported request options return HTTP 400 before a job starts.
 
 The server binds to `127.0.0.1:8000` and advertises `fasth3`, so the playground
-and clients below work unchanged. Do not run CUDA and MLX servers on the same
-port. MLX readiness means the pipeline is initialized; components load during
+and clients below work unchanged. Do not run CUDA, Spark, and MLX servers on the
+same port. MLX readiness means the pipeline is initialized; components load during
 generation. The first request can take longer than a repeated cached prompt.
 
 The MLX server has no recorded device or unified-memory requirement. The
 direct Python recipe's M4 Max measurements are not a server benchmark or a
 minimum-memory claim.
+
+For FastH3 V2, convert that checkpoint's transformer with `--include-vsa`
+and start the 8-step config. Do not overwrite a V1 export. The
+[MiniMax H3 cookbook](minimax-h3.md) has the same download and convert
+commands as the Python recipe.
+
+```bash
+hf download FastVideo/FastVideo-FastH3-8-Step-V2 --local-dir ./FastH3-8-Step-V2
+python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py --model-root ./FastH3-8-Step-V2/transformer --out ./FastH3-8-Step-V2-MLX --formats "int8" --include-vsa
+python -m fastvideo.entrypoints.openai.mlx_server --config examples/serving/mlx_fasth3_8step.yaml
+```
+
+That adapter passes `num_steps=8` when the HTTP field is `num_inference_steps=9`,
+and it enables the trained VSA recipe (sparsity 0.8, 64-token tiles). Reuse the
+preview VAE, audio VAE, text encoder, and tokenizer if those directories already
+exist; edit the YAML paths if your files live elsewhere.
 
 ## Open the playground
 
@@ -110,9 +161,11 @@ or manage a GPU server for you.
 ## Generate with cURL or an SDK
 
 These examples use the server's resolution, frame count, and sampling defaults.
-Do not copy Sora-specific durations or resolutions onto H3. Both server configs
-use 124 frames, 24 fps, and the five-point distilled sigma schedule with four
-DiT forwards. CUDA uses 1344 × 768; MLX uses 832 × 480.
+Do not copy Sora-specific durations or resolutions onto H3. V1 configs use
+124 frames, 24 fps, and the five-point distilled sigma schedule with four DiT
+forwards. V2 configs use nine sigma points and eight DiT forwards. CUDA
+and one Spark use 1344 × 768; MLX uses 832 × 480. The OpenAI Python client is
+the same for every FastH3 server that advertises `fasth3`.
 
 Each client submits a job, checks for completion or failure, and downloads an
 MP4 named after the job ID. Polling stops after 30 minutes; a timeout does not

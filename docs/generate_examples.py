@@ -43,6 +43,7 @@ COOKBOOK_FAMILIES = {
     "hunyuan",
     "cosmos",
     "kandinsky5",
+    "kandinsky6",
     "flux",
     "glm_image",
     "zimage",
@@ -76,6 +77,7 @@ COOKBOOK_EVIDENCE_STATES = {
 }
 COOKBOOK_HARDWARE_EVIDENCE = {"validated", "source-configured", "estimated", "unknown"}
 COOKBOOK_HARDWARE_PLATFORMS = {"cuda", "mlx", "mps"}
+COOKBOOK_HARDWARE_DEVICES = {"spark"}
 COOKBOOK_GPU_TYPES = {"NVIDIA", "Apple Silicon"}
 COOKBOOK_HARDWARE_TEXT_FIELDS = {
     "accelerator",
@@ -128,6 +130,12 @@ def validate_cookbook() -> None:
             raise ValueError(f"CUDA cookbook recipe needs an integer gpu_count >= 1: {recipe['id']}")
         if platform != "cuda" and gpu_count is not None:
             raise ValueError(f"Non-CUDA cookbook recipe must not use gpu_count: {recipe['id']}")
+        device = hardware.get("device")
+        if device is not None:
+            if device not in COOKBOOK_HARDWARE_DEVICES:
+                raise ValueError(f"Cookbook recipe has an unknown hardware device: {recipe['id']}: {device}")
+            if platform != "cuda":
+                raise ValueError(f"Cookbook hardware device requires platform cuda: {recipe['id']}: {device}")
         hardware_evidence = hardware.get("evidence")
         if hardware_evidence not in COOKBOOK_HARDWARE_EVIDENCE:
             raise ValueError(f"Cookbook recipe has unknown hardware evidence: {recipe['id']}: {hardware_evidence}\n"
@@ -261,12 +269,22 @@ def cookbook_serving_profile(recipe: dict) -> dict:
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError(f"Serving config needs a valid port: {recipe['id']}")
     hardware = {"platform": runtime, "evidence": "source-configured"}
+    device = recipe["hardware"].get("device")
+    if device:
+        hardware["device"] = device
     if runtime == "cuda":
         count = generator["engine"]["num_gpus"]
         if type(count) is not int or count < 1:
             raise ValueError(f"Serving config needs a valid GPU count: {recipe['id']}")
         hardware["gpu_count"] = count
-        command = f"fastvideo serve --config {serving['source']} --server.host 127.0.0.1"
+        env = serving.get("env")
+        if env is not None:
+            if not isinstance(env, str) or not env.strip() or "\n" in env:
+                raise ValueError(f"Serving env must be a single-line command prefix: {recipe['id']}")
+            prefix = env.strip() + " "
+        else:
+            prefix = ""
+        command = f"{prefix}fastvideo serve --config {serving['source']} --server.host 127.0.0.1"
     else:
         if server.get("host") != "127.0.0.1":
             raise ValueError(f"MLX cookbook server must bind to loopback: {recipe['id']}")
@@ -276,12 +294,16 @@ def cookbook_serving_profile(recipe: dict) -> dict:
     for language, (filename, install) in COOKBOOK_CLIENTS.items():
         path = ROOT_DIR / "examples/serving/clients" / filename
         text = path.read_text(encoding="utf-8")
-        # Keep displayed snippets identical to executable sources for the
-        # checked-in H3 profile, with only endpoint and alias substitutions.
+        # Keep displayed snippets identical to the executable sources, with
+        # only endpoint and alias substitutions.
         text = text.replace("http://127.0.0.1:8000/v1", base_url)
         text = text.replace('"fasth3"', json.dumps(model)).replace("${FASTVIDEO_MODEL:-fasth3}",
                                                                    "${FASTVIDEO_MODEL:-" + model + "}")
         clients[language] = {"source": path.relative_to(ROOT_DIR).as_posix(), "code": text, "install": install}
+    # The playground router only serves H3 servers (see require_h3 in
+    # fastvideo/entrypoints/openai/playground.py), so other families must not link to it.
+    has_playground = recipe["family"] == "minimax_h3"
+    compile_enabled = ((generator.get("engine") or {}).get("compile") or {}).get("enabled")
     return {
         "source": serving["source"],
         "install": serving["install"],
@@ -290,7 +312,10 @@ def cookbook_serving_profile(recipe: dict) -> dict:
         "prepare": serving.get("prepare", ""),
         "model": model,
         "base_url": base_url,
-        "playground_url": f"http://127.0.0.1:{port}/playground/",
+        "playground_url": f"http://127.0.0.1:{port}/playground/" if has_playground else None,
+        "audio": bool(serving.get("audio")),
+        # None when the config leaves compilation at its default.
+        "compile_enabled": compile_enabled,
         "health_command": f"curl --fail-with-body http://127.0.0.1:{port}/health",
         "hardware": hardware,
         "sampling": config["default_request"]["sampling"],

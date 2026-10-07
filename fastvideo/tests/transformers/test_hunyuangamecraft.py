@@ -9,6 +9,7 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed.parallel_state import (
@@ -23,8 +24,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 logger = init_logger(__name__)
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29507")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29507")
 
 # Path to converted weights (local path, not HuggingFace)
 TRANSFORMER_PATH = "official_weights/hunyuan-gamecraft/transformer"
@@ -37,18 +38,17 @@ REFERENCE_LATENT = 42351.12903189659
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_hunyuangamecraft_transformer(monkeypatch: pytest.MonkeyPatch):
+def test_hunyuangamecraft_transformer(env_overrides):
     """Test HunyuanGameCraft transformer regression."""
 
     if not os.path.exists(TRANSFORMER_PATH):
         pytest.skip(f"Weights not found at {TRANSFORMER_PATH}")
 
-    # Keep these model-specific overrides local to this test. Setting
+    # Keep this model-specific override local to this test. Setting
     # TORCHDYNAMO_DISABLE during module collection disables torch.compile for
     # every later transformer test in the same pytest process; FakeTensor
     # compile checks then execute Triton kernels against fake CUDA pointers.
-    monkeypatch.setenv("TORCHDYNAMO_DISABLE", "1")
-    monkeypatch.setenv("DISABLE_SP", "1")
+    env_overrides.enter_context(envs.override_external("TORCHDYNAMO_DISABLE", "1"))
 
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()

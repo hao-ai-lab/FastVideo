@@ -41,14 +41,14 @@ hide:
         <span class="cookbook-family-tile__footer">
           <span class="cookbook-family-tile__footer-top">
             <span><strong>MiniMax H3</strong><small>Video + stereo audio</small></span>
-            <span class="cookbook-count">7 recipes</span>
+            <span class="cookbook-count">9 recipes</span>
           </span>
           <ul class="cookbook-mode-row">
             <li>T2VA</li>
             <li>FL2VA</li>
             <li>Ref2VA</li>
             <li>MLX T2VA</li>
-            <li>2-Spark SP</li>
+            <li>DGX Spark</li>
           </ul>
         </span>
       </a>
@@ -137,6 +137,29 @@ hide:
           <ul class="cookbook-mode-row">
             <li>T2V</li>
             <li>I2V</li>
+          </ul>
+        </span>
+      </a>
+
+      <a class="cookbook-family-tile cookbook-family-tile--ready" href="./kandinsky6/" aria-label="Open Kandinsky 6 recipes">
+        <span class="cookbook-family-tile__visual" data-evervault>
+          <span class="cookbook-evervault" aria-hidden="true">
+            <span class="cookbook-evervault__gradient"></span>
+            <span class="cookbook-evervault__noise" data-cookbook-pattern></span>
+          </span>
+          <span class="cookbook-family-tile__logo-wrap">
+            <img class="off-glb" src="../assets/logos/kandinsky.webp" alt="" width="132" height="132" loading="lazy">
+          </span>
+        </span>
+        <span class="cookbook-family-tile__footer">
+          <span class="cookbook-family-tile__footer-top">
+            <span><strong>Kandinsky 6</strong><small>Video with audio, and video SR</small></span>
+            <span class="cookbook-count">4 recipes</span>
+          </span>
+          <ul class="cookbook-mode-row">
+            <li>T2VA</li>
+            <li>I2VA</li>
+            <li>VSR</li>
           </ul>
         </span>
       </a>

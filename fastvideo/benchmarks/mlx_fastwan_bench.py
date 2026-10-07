@@ -46,6 +46,7 @@ from examples.inference.basic.mlx_wan_prompt_to_video import (
     encode_prompt,
     make_rotary_embeddings,
 )
+import fastvideo.envs as envs
 from fastvideo.mlx_runtime.memory import add_memory_limit_args, apply_memory_limits, cleanup_mlx
 
 # The highest-fidelity cell; used as the default SSIM reference when no external
@@ -524,8 +525,8 @@ def _generate_cell(
         "peak_gib": max(load_peak, denoise_peak) / (1024**3),
         "quantization": quantization or "none",
         "compute_dtype": base_dtype,
-        "compile": os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1",
-        "fast_norm": os.environ.get("FASTVIDEO_MLX_FAST_NORM", "0") == "1",
+        "compile": envs.FASTVIDEO_MLX_COMPILE.get(),
+        "fast_norm": envs.FASTVIDEO_MLX_FAST_NORM.get(),
         "mlx_memory_limit_gib": args.mlx_memory_limit_gib,
         "mlx_cache_limit_gib": args.mlx_cache_limit_gib,
         "mlx_disable_cache": args.mlx_disable_cache,

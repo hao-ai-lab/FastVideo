@@ -19,7 +19,7 @@ from omegaconf import OmegaConf
 from torch.testing import assert_close
 
 from fastvideo.configs.pipelines.dreamx_world import make_dreamx_world_5b_cam_vae_config
-from fastvideo.models.vaes.wanvae import AutoencoderKLWan
+from fastvideo.models.wan.vae import AutoencoderKLWan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.getenv("DREAMX_WORLD_OFFICIAL_REF_DIR", REPO_ROOT / "DreamX-World"))

@@ -7,7 +7,7 @@ import pytest
 import torch
 
 # Import registers the model-local custom operators.
-import fastvideo.models.dits.wanvideo  # noqa: F401
+import fastvideo.models.wan.transformer  # noqa: F401
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")

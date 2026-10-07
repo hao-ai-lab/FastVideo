@@ -5,7 +5,20 @@ hide:
 
 # MiniMax H3 recipes
 
-<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=7">
+FastH3 is two distilled MiniMax-H3 checkpoints. **V1** is the four-step
+launch. Some Hub repo names still say Preview. That name is historical. V1 is
+a full model, not a demo. **V2** is the eight-step checkpoint. More forwards
+is why V2 is the higher-quality FastH3. The V2 schedule contract is in
+[FastH3 distilled checkpoint schedules](../inference/fasth3-distilled.md).
+**CompactH3** is the 42-block 20B NVFP4 H3 checkpoint for one Blackwell GPU
+(RTX 5090 or RTX PRO 6000). The FastH3 V1 and V2 recipes are unchanged.
+
+The 42-block pruned checkpoint has an [MLX INT8/INT6 conversion and
+eight-forward T2VA command](../getting_started/installation/mlx.md#pruned-eight-forward-checkpoint).
+It reads `fastvideo_inference.json` for the trained schedule. The command
+uses native 832x480 resolution and all requested frames.
+
+<div class="cookbook-shell cookbook-family-page" data-cookbook data-family="minimax_h3" data-default-recipe="fasth3-preview-cuda" data-recipes="../../assets/cookbook-recipes.json?v=15">
   <header class="cookbook-family-header">
     <a class="cookbook-back-link" href="../"><span aria-hidden="true">←</span> All model families</a>
     <div class="cookbook-family-header__body">
@@ -15,8 +28,8 @@ hide:
       <div>
         <p class="cookbook-eyebrow">Primary focus · Inference</p>
         <h2>MiniMax H3 recipes</h2>
-        <p>Generate video and audio with H3. Run a server on CUDA or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
-        <span class="cookbook-count" data-cookbook-count>7 maintained recipes</span>
+        <p>Generate video and audio with H3. Run a server on CUDA, one Blackwell GPU, one DGX Spark, or Apple Silicon MLX to iterate on prompts, or call the pipeline directly from Python.</p>
+        <span class="cookbook-count" data-cookbook-count>11 maintained recipes</span>
       </div>
     </div>
     <div class="cookbook-lifecycle" aria-label="Lifecycle stages">
@@ -41,9 +54,9 @@ hide:
     <h2 id="h3-modes-heading">Supported modes</h2>
     <p>
       CUDA covers T2VA, FL2VA, and Ref2VA on the full checkpoint, plus FastH3
-      Preview, FastH3 LoRA, and a two-node FastH3 Preview recipe over Ray
-      sequence parallel. MLX is T2VA only. Temporal <code>--fast</code>,
-      spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
+      V1 and FastH3 V2, plus CompactH3 NVFP4 on one Blackwell GPU. FastH3 V1 also has a DGX Spark runtime with
+      a 1-Spark or 2-Spark device row. MLX is T2VA only: V1 and V2.
+      Temporal <code>--fast</code>, spatial <code>--fast-spatial</code>, and opt-in VSA are flags on the same
       MLX script, not extra recipes.
     </p>
     <div class="cookbook-modes__table-wrap">
@@ -58,8 +71,8 @@ hide:
         <tbody>
           <tr>
             <td>T2VA</td>
-            <td>Full H3, FastH3 Preview, FastH3 LoRA</td>
-            <td>FastH3 Preview after a local DiT conversion</td>
+            <td>Full H3, FastH3 V1, FastH3 LoRA, FastH3 V2, CompactH3 NVFP4</td>
+            <td>FastH3 V1 or FastH3 V2 after a local DiT conversion</td>
           </tr>
           <tr>
             <td>FL2VA</td>
@@ -92,8 +105,13 @@ hide:
             <td>Not wired</td>
           </tr>
           <tr>
-            <td>2-Spark SP</td>
-            <td>FastH3 Preview across two DGX Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE</td>
+            <td>DGX Spark</td>
+            <td>FastH3 V1 on one GB10, or two Sparks with Ray sequence parallel (<code>sp_size=2</code>) over QSFP RoCE. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks.</td>
+            <td>Not wired</td>
+          </tr>
+          <tr>
+            <td>CompactH3 NVFP4</td>
+            <td>42-block 20B checkpoint on one RTX 5090 (32 GB, sequential encoder offload) or one RTX PRO 6000 Blackwell (96 GB, encoder+DiT+VAE resident). SageAttention3 FP4, packed NVFP4 DiT, Comfy int8-convrot VAE.</td>
             <td>Not wired</td>
           </tr>
         </tbody>
@@ -104,7 +122,7 @@ hide:
   <section class="cookbook-builder" id="recipe-builder" aria-labelledby="builder-heading">
     <div class="cookbook-builder__intro">
       <h2 id="builder-heading">Pick an H3 recipe and runtime</h2>
-      <p>Choose the result you want, then use a maintained CUDA or MLX path.
+      <p>Choose the result you want, then use a maintained CUDA, Blackwell, DGX Spark, or MLX path.
       Device claims stay tied to checked-in sources and recorded runs.</p>
     </div>
 
@@ -130,6 +148,15 @@ hide:
           </div>
         </div>
 
+        <div class="cookbook-selection-row" data-cookbook-device-row hidden>
+          <div class="cookbook-selection-row__label">
+            <strong>Devices</strong>
+            <span data-cookbook-device-caption>1 Spark or a QSFP pair</span>
+          </div>
+          <div class="cookbook-option-grid cookbook-option-grid--hardware" data-cookbook-device-options role="group" aria-label="Devices">
+          </div>
+        </div>
+
         <div data-cookbook-knobs></div>
 
         <p class="cookbook-selection-description" data-cookbook-description>Loading recipe details...</p>
@@ -139,7 +166,7 @@ hide:
             <span>Both can run locally</span>
           </div>
           <div class="cookbook-option-grid cookbook-option-grid--hardware" role="group" aria-label="How to run this recipe">
-            <button type="button" data-cookbook-mode="server" aria-pressed="false"><strong>Run a server</strong><span>Playground, cURL, or an API client</span></button>
+            <button type="button" data-cookbook-mode="server" aria-pressed="false"><strong>Run a server</strong><span data-cookbook-server-hint>Playground, cURL, or an API client</span></button>
             <button type="button" data-cookbook-mode="python" aria-pressed="false"><strong>Use Python directly</strong><span>Call the model in your own process</span></button>
           </div>
         </div>
@@ -186,17 +213,17 @@ hide:
           </section>
           <section class="cookbook-serving__step" aria-labelledby="serving-start-heading">
             <h4 id="serving-start-heading"><span aria-hidden="true">2</span> Start the server</h4>
-            <p>Keep this terminal running while you use the playground or API clients.</p>
+            <p>Keep this terminal running while you use <span data-cookbook-playground-only>the playground or </span>API clients.</p>
             <div class="cookbook-command"><div class="cookbook-command__bar"><span>GPU machine · Terminal</span></div><pre id="cookbook-server-command"><code class="language-bash" data-cookbook-server-command></code></pre></div>
             <details class="cookbook-serving__check"><summary>Check that the server is ready</summary><p>In another terminal, this returns <code>{"status":"ok"}</code> after startup.</p><div class="cookbook-command"><pre id="cookbook-health-command"><code class="language-bash" data-cookbook-health-command></code></pre></div></details>
           </section>
           <section class="cookbook-serving__step" aria-labelledby="serving-client-heading">
             <h4 id="serving-client-heading"><span aria-hidden="true">3</span> Generate and download a video</h4>
-            <div class="cookbook-serving__playground">
+            <div class="cookbook-serving__playground" data-cookbook-playground-only>
               <div><strong>Try prompts in your browser</strong><p>Edit a prompt, generate, and watch the result. The playground uses the same server as cURL and your app.</p></div>
               <a class="cookbook-serving__launch" data-cookbook-playground href="http://127.0.0.1:8000/playground/" target="_blank" rel="noopener">Open playground <span aria-hidden="true">↗</span></a>
             </div>
-            <p class="cookbook-serving__local-hint">Open after the server is ready. On a remote GPU machine, <a href="../openai-api/#connect-your-app">forward port 8000</a> to your computer first. This opens a local page, not a hosted demo.</p>
+            <p class="cookbook-serving__local-hint"><span data-cookbook-playground-only>Open after the server is ready. </span>On a remote GPU machine, <a href="../openai-api/#connect-your-app">forward port 8000</a> to your computer first.<span data-cookbook-playground-only> This opens a local page, not a hosted demo.</span></p>
             <details class="cookbook-serving__code"><summary>Use cURL or an SDK</summary>
             <p>Each example submits a job, checks its status, and saves the MP4. The Python and JavaScript examples use OpenAI-compatible clients; no OpenAI account is needed.</p>
             <div class="cookbook-serving__clients" role="group" aria-label="API client language">
@@ -242,10 +269,12 @@ cd FastVideo</code></pre>
       <pre><code>UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"</code></pre>
       <p class="cookbook-eyebrow">Apple Silicon</p>
       <pre><code>uv pip install -e ".[mlx]"</code></pre>
-      <p>Follow the <a href="../../getting_started/installation/mps/#run-fasth3-preview">Apple Silicon guide</a> for the download, conversion, and storage requirements.</p>
-      <p class="cookbook-eyebrow">Two DGX Sparks</p>
+      <p>Follow the <a href="../../getting_started/installation/mlx/">MLX install guide</a> for the extra, <code>ffmpeg</code>, and a clone. Then pick FastH3 V1 or V2 in the builder above.</p>
+      <p class="cookbook-eyebrow">NVIDIA DGX Spark</p>
+      <pre><code>UV_TORCH_BACKEND=cu130 uv pip install -e .</code></pre>
+      <p>Follow the <a href="../../getting_started/installation/spark/">DGX Spark install guide</a> for ARM64 CUDA 13. One Spark is a local process. Two Sparks need Ray on the QSFP link:</p>
       <pre><code>uv pip install ray</code></pre>
-      <p>The 2-Spark recipe needs two DGX Sparks on an active QSFP link, the same FastH3 snapshot on both NVMes, and a Ray cluster on top. Follow <a href="../../getting_started/installation/spark_pair/">pairing two Sparks</a> before running it.</p>
+      <p>Bring up the cluster from <a href="../../getting_started/installation/spark_pair/">pairing two Sparks</a> before selecting 2 Sparks in the builder.</p>
   </div>
 </details>
 
@@ -255,9 +284,11 @@ cd FastVideo</code></pre>
       <ul>
         <li>The full CUDA H3 examples request four GPUs by default. Their sources do not claim a GPU model or memory minimum.</li>
         <li>The FastH3 CUDA performance profile was measured on four GB200 GPUs. Use its strict profile when exact operation order matters more than the measured performance configuration.</li>
-        <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
-        <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
-        <li>The 2-Spark recipe fixes its own GPU count and execution backend in its YAML config and is not affected by the GPU count knob above. It requires a two-node Ray cluster on the QSFP interconnect; see the setup step above.</li>
+        <li>The MLX source runtime supports T2VA, optional temporal <code>--fast</code>, optional spatial <code>--fast-spatial</code>, and opt-in VSA on <code>--include-vsa</code> checkpoints. FastH3 V2 MLX converts with <code>--include-vsa</code> and runs eight forwards. FL2VA, Ref2VA, and two-pass refinement are not wired.</li>
+        <li>GPU count and VAE decode backend are configurable in the builder above for FastH3 CUDA recipes. Only the value shown by default has a recorded run; other supported values are unmeasured here.</li>
+        <li>DGX Spark is a runtime on FastH3 V1, not a separate family card. Select NVIDIA DGX Spark, then 1 Spark or 2 Sparks. The CUDA GPU-count knob does not apply to Spark.</li>
+        <li>CompactH3 NVFP4 is one Blackwell GPU. RTX 5090 (32 GB) parks the encoder in pinned host RAM. RTX PRO 6000 Blackwell (96 GB) keeps encoder, DiT, and VAE resident. Keep <code>FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER</code>, <code>FASTVIDEO_FA4=0</code>, <code>FASTVIDEO_VSA_SM100A=0</code>, and <code>FLASHINFER_CUDA_ARCH_LIST=12.0a</code>. On PRO 6000 enable VAE compile and leave DiT <code>inference_torch_compile</code> off. CompactH3 is a dense prune; do not enable <code>VIDEO_SPARSE_ATTN_H3</code> until a VSA-trained student exists.</li>
+        <li>GB10 has no FA4 / sm_100a VSA kernel. Keep <code>FASTVIDEO_FA4=0</code> and <code>FASTVIDEO_VSA_SM100A=0</code>. Legal <code>num_frames</code> values are <code>17n+5</code>, capped at 362 (15.08 s). A 345-frame request on one Spark can OOM. Native 16:9 sizes include 832×480 and 1344×768.</li>
         <li>Gated or missing checkpoints: run <code>huggingface-cli login</code> and confirm you accepted the model's license on Hugging Face.</li>
       </ul>
   </div>
