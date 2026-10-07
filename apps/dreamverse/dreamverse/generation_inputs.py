@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from dreamverse.assets import asset_store
 
@@ -84,10 +84,13 @@ def resolve_generation_inputs(payload: dict, model_id: str) -> GenerationInputs:
                 raise ValueError(f"Ref2VA accepts at most {limit} {kind} references.")
         for asset in assets:
             if asset.kind == "image":
-                with Image.open(asset.path) as image:
-                    if image.width > 4 * image.height or image.height > 4 * image.width:
-                        raise ValueError(
-                            "Ref2VA image aspect ratios must be between 1:4 and 4:1. Crop this image first.")
+                try:
+                    with Image.open(asset.path) as image:
+                        if image.width > 4 * image.height or image.height > 4 * image.width:
+                            raise ValueError(
+                                "Ref2VA image aspect ratios must be between 1:4 and 4:1. Crop this image first.")
+                except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+                    raise ValueError("A selected reference image could not be decoded. Upload it again.") from exc
     return GenerationInputs(mode, tuple(assets))
 
 

@@ -179,6 +179,7 @@ def test_simple_generate_cannot_replace_locked_inputs(controller_module, injecti
             await socket.wait_for("gpu_assigned")
             await socket.incoming.put({"type": "simple_generate", "prompt": "prompt", **injection})
             error = await socket.wait_for("error")
+            assert error["error_code"] == "invalid_generation_input"
             assert "project" in error["message"]
             assert pool.slot.calls == []
             await socket.incoming.put({"type": "leave"})

@@ -2553,6 +2553,24 @@ export default function Page() {
 
 	// --- Render ---
 
+	const conditioningPanel = generationMode !== "t2va" && !sessionStarted && !sessionExpired ? (
+		<AssetList
+			mode={generationMode}
+			assets={assetLibrary.assets}
+			conditioning={assetLibrary.conditioningAssets}
+			locked={Boolean(loadingAnimation || projectResetPending)}
+			uploading={assetLibrary.uploading}
+			error={assetLibrary.assetError}
+			validationNotice={generationInputError}
+			onUpload={assetLibrary.uploadAssets}
+			onAssign={assetLibrary.assignAsset}
+			onRemove={assetLibrary.removeAsset}
+			onUnselect={assetLibrary.removeConditioning}
+			onMove={assetLibrary.moveConditioning}
+			onMissing={assetLibrary.checkAssetAvailability}
+		/>
+	) : null;
+
 	if (!runtimeReady) {
 		return null;
 	}
@@ -2576,13 +2594,17 @@ export default function Page() {
 				enhancementEnabled={enhancementEnabled as boolean}
 				autoExtensionEnabled={autoExtensionEnabled as boolean}
 				loopGenerationEnabled={loopGenerationEnabled as boolean}
-				canJoinSession={canJoinSession as boolean}
+				canJoinSession={canStartSession}
 				canSubmitContinuation={canSubmitContinuation}
 				editableMode={editableMode as boolean}
 				demoMode={demoMode as boolean}
 				editableCanJoin={editableCanJoin as boolean}
 				curatedPromptLimit={curatedPromptLimit as number}
 				maxCuratedPromptCount={maxCuratedPromptCount as number}
+				generationMode={generationMode}
+				supportedGenerationModes={capabilities.modes}
+				conditioningPanel={conditioningPanel}
+				onGenerationModeChange={changeGenerationMode}
 				onPresetChange={handlePresetSelectionChange}
 				onEnhancementToggle={handleEnhancementToggle}
 				onCuratedPromptLimitChange={handleCuratedPromptLimitChange}
@@ -2872,23 +2894,7 @@ export default function Page() {
 							generationInputsValid={generationInputsValid}
 							capabilityNotice={!generationSupported ? `${generationMode.toUpperCase()} is unavailable on this runtime.` : capabilityNotice}
 							mockRuntime={capabilities.mock}
-							conditioningPanel={generationMode !== "t2va" && !sessionStarted && !sessionExpired ? (
-								<AssetList
-									mode={generationMode}
-									assets={assetLibrary.assets}
-									conditioning={assetLibrary.conditioningAssets}
-									locked={Boolean(loadingAnimation || projectResetPending)}
-									uploading={assetLibrary.uploading}
-									error={assetLibrary.assetError}
-									validationNotice={generationInputError}
-									onUpload={assetLibrary.uploadAssets}
-									onAssign={assetLibrary.assignAsset}
-									onRemove={assetLibrary.removeAsset}
-									onUnselect={assetLibrary.removeConditioning}
-									onMove={assetLibrary.moveConditioning}
-									onMissing={assetLibrary.checkAssetAvailability}
-								/>
-							) : null}
+							conditioningPanel={conditioningPanel}
 							onPresetGenerate={handlePresetGenerate}
 							onContinuationInput={handleLivePromptInput}
 							onContinuationKeydown={handleLivePromptKeydown}

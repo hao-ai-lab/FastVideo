@@ -108,25 +108,6 @@ if ACTIVE_MODEL_ID not in MODEL_REGISTRY:
 # Active model configuration
 MODEL_CONFIG = MODEL_REGISTRY[ACTIVE_MODEL_ID]
 
-# Generation limits
-# Full H3 loads and generates substantially longer than the Preview adapter.
-# This also covers a base/ref pipeline reload inside a retained session.
-SESSION_TIMEOUT_SECONDS = max(
-    60, int(os.getenv("DREAMVERSE_SESSION_TIMEOUT_SECONDS", "7200" if ACTIVE_MODEL_ID == "full-h3" else "300")))
-
-# Frame settings
-NUM_FRAMES = 121
-FRAME_HEIGHT = 1088
-FRAME_WIDTH = 1920
-NUM_INFERENCE_STEPS = 5
-JPEG_QUALITY = 100
-BATCH_SIZE = 3
-
-# Streaming mode:
-# - legacy_jpeg: send frame_batch JSON payloads with base64 JPEGs
-# - av_fmp4: send muxed fMP4 binary chunks over WebSocket
-STREAM_MODE = os.getenv("STREAM_MODE", "av_fmp4").strip().lower()
-
 
 def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
@@ -201,6 +182,27 @@ def _optional_env(*names: str) -> str | None:
         if normalized:
             return normalized
     return None
+
+
+# Generation limits
+# Full H3 loads and generates substantially longer than the Preview adapter.
+# This also covers a base/ref pipeline reload inside a retained session.
+# Values below 60 seconds are floored so a single segment cannot outlast the session.
+SESSION_TIMEOUT_SECONDS = max(
+    60, _env_int("DREAMVERSE_SESSION_TIMEOUT_SECONDS", 7200 if ACTIVE_MODEL_ID == "full-h3" else 300))
+
+# Frame settings
+NUM_FRAMES = 121
+FRAME_HEIGHT = 1088
+FRAME_WIDTH = 1920
+NUM_INFERENCE_STEPS = 5
+JPEG_QUALITY = 100
+BATCH_SIZE = 3
+
+# Streaming mode:
+# - legacy_jpeg: send frame_batch JSON payloads with base64 JPEGs
+# - av_fmp4: send muxed fMP4 binary chunks over WebSocket
+STREAM_MODE = os.getenv("STREAM_MODE", "av_fmp4").strip().lower()
 
 
 DEVTOOLS_ENABLED = _env_bool("FASTVIDEO_ENABLE_DEVTOOLS", False)

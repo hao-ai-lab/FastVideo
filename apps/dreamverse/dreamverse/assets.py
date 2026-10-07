@@ -30,9 +30,11 @@ MIME_TYPES = {
     "video/webm": ("video", ".webm"),
     "audio/mpeg": ("audio", ".mp3"),
     "audio/mp4": ("audio", ".m4a"),
+    "audio/x-m4a": ("audio", ".m4a"),
     "audio/wav": ("audio", ".wav"),
     "audio/x-wav": ("audio", ".wav"),
     "audio/flac": ("audio", ".flac"),
+    "audio/x-flac": ("audio", ".flac"),
     "audio/ogg": ("audio", ".ogg"),
     "audio/webm": ("audio", ".webm"),
 }

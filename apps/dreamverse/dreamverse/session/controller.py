@@ -385,12 +385,12 @@ class SessionController:
                         raise ValueError("Choose conditioning assets when starting a project; legacy initial_image "
                                          "cannot replace generation mode inputs.")
                     if "generation_mode" in payload or "conditioning_assets" in payload:
-                        raise ValueError("Generation mode and assets are locked for this project. Start a new project "
-                                         "to change them.")
+                        raise ValueError("simple_generate cannot change the mode; use project_init_v1.")
                     replace_session_init_image(payload.get("initial_image"))
                 except ValueError as exc:
                     await ws_send_json({
                         "type": "error",
+                        "error_code": "invalid_generation_input",
                         "message": str(exc),
                     })
                     return

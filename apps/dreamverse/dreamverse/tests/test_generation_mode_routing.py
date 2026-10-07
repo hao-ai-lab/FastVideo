@@ -173,6 +173,22 @@ def test_ref2va_pipeline_switch_failure_drops_unloaded_executor(monkeypatch, fas
     assert backend.generator is None
 
 
+def test_failed_pipeline_switch_reloads_on_the_next_step(monkeypatch, fastvideo_api):
+    """A failed base<->ref2va switch must not strand the slot for later steps."""
+    backend = prepared_backend(monkeypatch)
+    fastvideo_api.side_effect = RuntimeError("checkpoint unavailable")
+    with pytest.raises(RuntimeError, match="checkpoint unavailable"):
+        backend.generate_step("prompt", 1, None, True, GenerationInputs("ref2va"))
+
+    fastvideo_api.side_effect = None
+    fastvideo_api.return_value = RecordingGenerator()
+    backend.generate_step("retry", 1, None, True, GenerationInputs("ref2va"))
+
+    assert fastvideo_api.call_count == 2
+    assert backend.pipeline_mode == "ref2va"
+    assert backend.generator is not None
+
+
 def test_mode_cannot_switch_mid_project(monkeypatch, fastvideo_api):
     backend = prepared_backend(monkeypatch)
     with pytest.raises(ValueError, match="middle of a project"):

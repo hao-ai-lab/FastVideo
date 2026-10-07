@@ -805,12 +805,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                              "cannot replace generation mode inputs.")
                         if "generation_mode" in data or "conditioning_assets" in data:
                             raise ValueError(
-                                "Generation mode and assets are locked for this project. Start a new project "
-                                "to change them.")
+                                "simple_generate cannot change the mode; use project_init_v1.")
                         replace_session_image(data.get("initial_image"))
                     except ValueError as exc:
                         await ws_send_json({
                             "type": "error",
+                            "error_code": "invalid_generation_input",
                             "message": str(exc),
                         })
                         continue

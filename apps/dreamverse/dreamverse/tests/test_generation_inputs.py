@@ -154,6 +154,18 @@ def test_ref_rejects_extreme_image_aspect_before_gpu(library):
         ]}, "full-h3")
 
 
+def test_ref_reports_undecodable_image_as_invalid_input(library, monkeypatch, tmp_path):
+    store, _ = library
+    broken = tmp_path / "broken.png"
+    broken.write_bytes(b"not an image")
+    monkeypatch.setattr(store, "get", lambda asset_id: assets.StoredAsset(asset_id, "image", str(broken), "broken.png",
+                                                                         "image/png", 11))
+    with pytest.raises(ValueError, match="could not be decoded"):
+        resolve_generation_inputs({"generation_mode": "ref2va", "conditioning_assets": [
+            {"asset_id": "a" * 32, "role": "reference"}
+        ]}, "full-h3")
+
+
 def test_audio_upload_rejects_surround_sound(library, monkeypatch):
     import json
     _, client = library
@@ -165,6 +177,22 @@ def test_audio_upload_rejects_surround_sound(library, monkeypatch):
     response = client.post("/assets", content=b"surround wav", headers={"Content-Type": "audio/wav"})
     assert response.status_code == 400
     assert "mono or stereo" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("mime,format_name", [("audio/x-m4a", "mov,mp4,m4a,3gp,3g2,mj2"), ("audio/x-flac", "flac")])
+def test_legacy_audio_mime_aliases_are_accepted(library, monkeypatch, mime, format_name):
+    """Browsers report x- variants for the M4A and FLAC formats the docs promise."""
+    import json
+    _, client = library
+    monkeypatch.setattr(assets.shutil, "which", lambda name: "/usr/bin/ffprobe")
+    info = {"format": {"format_name": format_name, "duration": "1"},
+            "streams": [{"codec_type": "audio", "channels": 2}]}
+    monkeypatch.setattr(assets.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(
+        [], 0, stdout=json.dumps(info).encode(), stderr=b""))
+    response = client.post("/assets", content=b"audio bytes", headers={"Content-Type": mime})
+    assert response.status_code == 201, response.text
+    assert response.json()["kind"] == "audio"
+    assert response.json()["mime_type"] == mime
 
 
 @pytest.mark.parametrize("entries", [None, {}, "x", [{"path": "/etc/passwd", "role": "reference"}],

@@ -65,7 +65,8 @@ class MiniMaxH3GenerationBackend:
 
         GPU worker commands are serialized, so a project boundary never swaps
         weights while another request is using them. Keeping one executor also
-        avoids simultaneously retaining two large H3 transformers in VRAM.
+        avoids simultaneously retaining two large H3 transformers in VRAM. A
+        failed load leaves no executor behind so the next step retries it.
         """
         full_checkpoint = bool(self.model_config.get("full_checkpoint", False))
         if pipeline_mode == "ref2va" and not full_checkpoint:
@@ -141,7 +142,13 @@ class MiniMaxH3GenerationBackend:
 
         print(f"[GPU {self.gpu_id}] Loading H3 model: {model_path} ({pipeline_mode})")
         print(f"[GPU {self.gpu_id}] Before model load: {self._gpu_mem()}")
-        self.generator = VideoGenerator.from_config(generator_config)
+        try:
+            self.generator = VideoGenerator.from_config(generator_config)
+        except Exception:
+            # The old executor is already gone; leaving no executor behind lets
+            # the next step retry this load instead of stranding the GPU slot.
+            self.generator = None
+            raise
         self.pipeline_mode = pipeline_mode
         print(f"[GPU {self.gpu_id}] FastH3 loaded: {self._gpu_mem()} (warmup pending)")
 
@@ -239,15 +246,15 @@ class MiniMaxH3GenerationBackend:
         conditioned frame and its matching audio duration are trimmed before
         streaming so adjacent segments do not duplicate media.
         """
-        if self.generator is None:
-            raise RuntimeError("FastH3 generator is not initialized.")
         mode = generation_inputs.mode if generation_inputs is not None else None
         if mode not in (None, "t2va", "fl2va", "ref2va"):
             raise ValueError(f"Unsupported H3 generation mode: {mode!r}.")
         if mode in ("fl2va", "ref2va") and not self.model_config.get("full_checkpoint", False):
             raise ValueError(f"{mode.upper()} requires the full-h3 model profile.")
         pipeline_mode = "ref2va" if mode == "ref2va" else "base"
-        if self.pipeline_mode != pipeline_mode:
+        if self.generator is None or self.pipeline_mode != pipeline_mode:
+            # A failed switch leaves no executor behind; reload here so the
+            # slot recovers on the next step instead of staying broken.
             if segment_idx > 1 and not reset_conditioning:
                 raise ValueError("Generation mode cannot change in the middle of a project.")
             self._load_pipeline(pipeline_mode)
