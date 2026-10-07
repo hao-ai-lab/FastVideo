@@ -359,10 +359,12 @@ def _flash_attn_cute_fp4_forward_fake(
     causal: bool,
 ) -> torch.Tensor:
     del k, sfq, sfk, softmax_scale, causal
-    # q is FP4 packed: shape (batch, seqlen, nheads, headdim/2). Output is in
-    # V's dtype with full headdim.
+    # q is FP4 packed: shape (batch, seqlen, nheads, headdim/2). The
+    # block-scaled kernel always writes a BF16 output with full headdim --
+    # including when V is fp8 e4m3 (pv_mode=fp8), so the fake must not follow
+    # V's dtype.
     batch, seqlen_q, nheads = q.shape[:3]
-    return v.new_empty(batch, seqlen_q, nheads, v.shape[-1])
+    return v.new_empty(batch, seqlen_q, nheads, v.shape[-1], dtype=torch.bfloat16)
 
 
 def flash_attn_fp4_func(
@@ -374,7 +376,9 @@ def flash_attn_fp4_func(
     softmax_scale: float | None = None,
     causal: bool = False,
 ) -> torch.Tensor:
-    """FP4 (NVFP4 block-scaled) flash attention. q/k are FP4-packed; v is BF16."""
+    """FP4 (NVFP4 block-scaled) flash attention. q/k are FP4-packed; v is
+    BF16, or fp8 e4m3 as a plain unscaled cast (no mSFV scale factors and no
+    v_descale -- the kernel's plain-fp8 PV contract). Output is BF16."""
     return torch.ops.fastvideo._flash_attn_cute_fp4_forward(q, k, v, sfq, sfk, softmax_scale, causal)
 
 

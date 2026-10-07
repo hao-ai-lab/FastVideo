@@ -32,7 +32,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-pytest ./fastvideo/tests/performance -vs
+pytest ./fastvideo/tests/performance/test_inference_performance.py -vs
 pytest_rc=$?
 compare_rc=0
 if [ "$pytest_rc" -eq 0 ] || [ "$PERF_UPLOAD_POLICY" = always ]; then
