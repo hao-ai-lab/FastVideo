@@ -17,6 +17,11 @@ class MpsPlatform(Platform):
     device_control_env_var: str = "MPS_VISIBLE_DEVICES"
 
     @classmethod
+    def has_unified_memory(cls, device_id: int = 0) -> bool:
+        # Apple silicon shares one pool between CPU and GPU.
+        return True
+
+    @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability | None:
         raise NotImplementedError
 

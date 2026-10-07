@@ -16,12 +16,53 @@ if(NOT GPU_BACKEND)
     set(GPU_BACKEND "CUDA")
 endif()
 
-if(GPU_BACKEND STREQUAL "ROCM")
-    enable_language(HIP)
+# Compiled extension: AUTO/ON/OFF. On ROCm, AUTO falls back to the Python + Triton
+# package when HIP cannot be configured (#1850: pip-SDK images without hip-lang).
+if(NOT DEFINED FASTVIDEO_KERNEL_BUILD_EXTENSION AND DEFINED ENV{FASTVIDEO_KERNEL_BUILD_EXTENSION})
+    set(FASTVIDEO_KERNEL_BUILD_EXTENSION "$ENV{FASTVIDEO_KERNEL_BUILD_EXTENSION}")
+endif()
+set(FASTVIDEO_KERNEL_BUILD_EXTENSION "AUTO" CACHE STRING "Build the compiled extension: AUTO/ON/OFF")
+set_property(CACHE FASTVIDEO_KERNEL_BUILD_EXTENSION PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${FASTVIDEO_KERNEL_BUILD_EXTENSION}" FASTVIDEO_KERNEL_BUILD_EXTENSION)
+if(NOT FASTVIDEO_KERNEL_BUILD_EXTENSION MATCHES "^(AUTO|ON|OFF)$")
+    message(FATAL_ERROR
+        "fastvideo-kernel: FASTVIDEO_KERNEL_BUILD_EXTENSION must be AUTO, ON or OFF "
+        "(got '${FASTVIDEO_KERNEL_BUILD_EXTENSION}').")
+endif()
+
+set(BUILD_CXX_KERNELS ON)
+if(FASTVIDEO_KERNEL_BUILD_EXTENSION STREQUAL "OFF")
+    set(BUILD_CXX_KERNELS OFF)
+elseif(GPU_BACKEND STREQUAL "ROCM")
+    include(CheckLanguage)
+    check_language(HIP)
+    if(CMAKE_HIP_COMPILER)
+        enable_language(HIP)
+    elseif(FASTVIDEO_KERNEL_BUILD_EXTENSION STREQUAL "ON")
+        message(FATAL_ERROR
+            "fastvideo-kernel: FASTVIDEO_KERNEL_BUILD_EXTENSION=ON, but CMake found no usable HIP "
+            "toolchain (it needs the hip-lang CMake package under ROCM_PATH or CMAKE_HIP_COMPILER). "
+            "Install the ROCm CMake packages, or build the Python + Triton package with "
+            "FASTVIDEO_KERNEL_BUILD_EXTENSION=OFF (build.sh --rocm --python-only).")
+    else()
+        message(STATUS
+            "fastvideo-kernel: no usable HIP toolchain; building the Python + Triton package "
+            "without the compiled extension (FASTVIDEO_KERNEL_BUILD_EXTENSION=AUTO)")
+        set(BUILD_CXX_KERNELS OFF)
+    endif()
 else()
     enable_language(CUDA)
     # Ensure CUDA toolkit targets (CUDA::cudart, CUDA::cuda_driver, etc.) are available.
     find_package(CUDAToolkit REQUIRED)
+endif()
+
+if(NOT BUILD_CXX_KERNELS)
+    message(STATUS "============== fastvideo-kernel build summary ==============")
+    message(STATUS "host / backend:       ${CMAKE_SYSTEM_PROCESSOR} / ${GPU_BACKEND}")
+    message(STATUS "fastvideo_kernel_ops: OFF (Python + Triton package only; FASTVIDEO_KERNEL_BUILD_EXTENSION=${FASTVIDEO_KERNEL_BUILD_EXTENSION})")
+    message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
+    message(STATUS "============================================================")
+    return()
 endif()
 
 # Import common utils if needed, but we keep it simple for now
@@ -329,9 +370,6 @@ else()
     endif()
 endif()
 
-# Always try to build the extension if CUDA is available, but conditionally add sources/flags
-set(BUILD_CXX_KERNELS ON)
-
 # ---------------------------------------------------------------------------
 # Per-arch split for the Blackwell FP4 (attn_qat_infer) build
 # ---------------------------------------------------------------------------
@@ -404,11 +442,11 @@ if(BUILD_CXX_KERNELS)
     # Combined FastVideo Extension
     # Using name 'fastvideo_kernel_ops' to distinguish from the python package namespace
     # ---------------------------------------------------------------------------
-    # VSA block-sparse attention forward, Blackwell (sm_100a) only.
+    # VSA block-sparse attention forward, data-center Blackwell (sm_100a/sm_103a).
     #
-    # NOTE the "a" suffix: -arch=sm_100a is NOT enough -- it emits a plain sm_100 target and
-    # ptxas rejects every tcgen05 / setmaxnreg instruction. The explicit gencode spelling
-    # below is required, and matches the 10.0a entry in TORCH_CUDA_ARCH_LIST.
+    # NOTE the "a" suffix: these kernels use architecture-conditional tcgen05 / setmaxnreg
+    # instructions. Explicit gencode entries are required for both the GB200 (sm_100a) and
+    # B300/GB300 (sm_103a) images. The source body is shared; ptxas specializes each image.
     #
     # Built for 64-token sparse blocks -- FastVideo's default (4,4,4) tiling, so no
     # tile-size change and no top-k granularity change is needed. VSA_BHSD
@@ -419,6 +457,7 @@ if(BUILD_CXX_KERNELS)
     # the cmake variable stays empty, so testing that alone silently skips the kernel and
     # leaves a build that succeeds with the op missing.
     set(ENABLE_VSA_SM100A OFF)
+    set(ENABLE_VSA_SM103A OFF)
     set(_VSA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
     if(NOT _VSA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
         set(_VSA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
@@ -426,13 +465,34 @@ if(BUILD_CXX_KERNELS)
     if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.0a|100a|sm_100a)([; ,]|$)")
         set(ENABLE_VSA_SM100A ON)
     endif()
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.3a|103a|sm_103a)([; ,]|$)")
+        set(ENABLE_VSA_SM103A ON)
+    endif()
+    set(_VSA_FWD_GENCODE "")
+    set(_VSA_FWD_ARCHS "")
     if(ENABLE_VSA_SM100A)
-        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (Blackwell, 64- and 128-token blocks)")
+        list(APPEND _VSA_FWD_GENCODE "-gencode;arch=compute_100a,code=sm_100a")
+        list(APPEND _VSA_FWD_ARCHS "sm_100a")
+    endif()
+    if(ENABLE_VSA_SM103A)
+        list(APPEND _VSA_FWD_GENCODE "-gencode;arch=compute_103a,code=sm_103a")
+        list(APPEND _VSA_FWD_ARCHS "sm_103a")
+    endif()
+    if(_VSA_FWD_GENCODE)
+        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (${_VSA_FWD_ARCHS}; 64- and 128-token blocks)")
         list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_sm100a.cu
                                       csrc/attention/block_sparse_blk128_sm100a.cu)
         set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
                                     csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
-            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BHSD=true")
+            COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
+    endif()
+    # VSA block-sparse attention BACKWARD, 64- and 128-token blocks: the same images as the forward.
+    if(_VSA_FWD_GENCODE)
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_sm100a.cu
+                                      csrc/attention/block_sparse_bwd_blk128_sm100a.cu)
+        set_source_files_properties(csrc/attention/block_sparse_bwd_sm100a.cu
+                                    csrc/attention/block_sparse_bwd_blk128_sm100a.cu PROPERTIES
+            COMPILE_OPTIONS "${_VSA_FWD_GENCODE};-DVSA_BHSD=true")
     endif()
 
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
@@ -450,7 +510,7 @@ if(BUILD_CXX_KERNELS)
 
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
-    if(ENABLE_VSA_SM100A)
+    if(ENABLE_VSA_SM100A OR ENABLE_VSA_SM103A)
         list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM100A)
     endif()
     if(ENABLE_TK_KERNELS)

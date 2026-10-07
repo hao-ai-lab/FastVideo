@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 import contextlib
 import copy
+import json
 import math
 import os
 import pathlib
@@ -28,6 +29,7 @@ logger = init_logger(__name__)
 
 _DEFAULT_VIDEO_FPS = 16
 _MISSING_ARTIFACT = object()
+_MISSING_SUMMARY_VALUE = object()
 
 
 def _sanitize_wandb_config(value: Any) -> Any:
@@ -60,6 +62,19 @@ def _sanitize_wandb_config(value: Any) -> Any:
     if callable(value):
         return getattr(value, "__name__", repr(value))
     return repr(value)
+
+
+def _local_summary_value(value: Any) -> Any:
+    """Return a JSON-safe scalar for the local W&B compatibility summary."""
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Enum):
+        return _local_summary_value(value.value)
+    if isinstance(value, np.generic):
+        return _local_summary_value(value.item())
+    if isinstance(value, torch.Tensor) and value.numel() == 1:
+        return _local_summary_value(value.detach().cpu().item())
+    return _MISSING_SUMMARY_VALUE
 
 
 def _prepare_video_array(data: Any) -> np.ndarray:
@@ -315,6 +330,7 @@ class WandbTracker(BaseTracker):
         pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
 
         self._wandb = wandb
+        self._local_summary: dict[str, Any] = {}
         self._run = wandb.init(
             entity=entity,
             project=experiment_name,
@@ -328,6 +344,10 @@ class WandbTracker(BaseTracker):
         metrics = {**self._timed_metrics, **metrics}
         if metrics:
             self._run.log(metrics, step=step)
+            for key, value in metrics.items():
+                summary_value = _local_summary_value(value)
+                if summary_value is not _MISSING_SUMMARY_VALUE:
+                    self._local_summary[key] = summary_value
         self._timed_metrics = {}
 
     def log_artifacts(self, artifacts: dict[str, Any], step: int) -> None:
@@ -351,7 +371,18 @@ class WandbTracker(BaseTracker):
         )
 
     def finish(self) -> None:
-        self._run.finish()
+        # W&B 0.28 no longer emits the legacy wandb-summary.json file for
+        # offline runs. Preserve that stable local contract for regression
+        # tests and operators without requiring a cloud sync or API key.
+        try:
+            run_dir = getattr(self._run, "dir", None)
+            if run_dir:
+                summary_path = pathlib.Path(run_dir) / "wandb-summary.json"
+                temporary_path = summary_path.with_suffix(".json.tmp")
+                temporary_path.write_text(json.dumps(self._local_summary, sort_keys=True) + "\n", encoding="utf-8")
+                temporary_path.replace(summary_path)
+        finally:
+            self._run.finish()
 
     def video(
         self,

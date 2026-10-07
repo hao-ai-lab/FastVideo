@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { skipWithoutMock } from './helpers';
+import { API_BASE, skipWithoutMock } from './helpers';
 
 /**
  * Create-job flow: open the Create Job modal on /inference, fill the prompt
@@ -10,7 +10,8 @@ import { skipWithoutMock } from './helpers';
 test.describe('create inference job', () => {
   skipWithoutMock();
 
-  test('creates a T2V job and shows it in the queue', async ({ page }) => {
+  test('creates a T2V job and starts it without refreshing', async ({ page, request }) => {
+    await request.put(`${API_BASE}/settings`, { data: { autoStartJob: false } });
     await page.goto('/inference');
 
     // The trigger opens a real menu on click, so this path works for touch,
@@ -38,5 +39,20 @@ test.describe('create inference job', () => {
     // Modal closes and the queue refreshes with the newly created job.
     await expect(dialog).toBeHidden();
     await expect(page.getByText(prompt)).toBeVisible();
+    await expect(page.locator('body')).toHaveCSS('pointer-events', 'auto');
+
+    const card = page.getByRole('article').filter({ hasText: prompt });
+    await expect(card.getByText('pending', { exact: true })).toBeVisible();
+    const started = page.waitForResponse((response) =>
+      response.url().startsWith(`${API_BASE}/jobs/`) &&
+      response.url().endsWith('/start') &&
+      response.request().method() === 'POST',
+    );
+    await card.getByRole('button', { name: 'Start', exact: true }).click();
+    expect((await started).ok()).toBe(true);
+    await expect(card.getByText('running', { exact: true })).toBeVisible();
+
+    await page.getByRole('link', { name: 'Datasets', exact: true }).click();
+    await expect(page).toHaveURL(/\/datasets$/);
   });
 });

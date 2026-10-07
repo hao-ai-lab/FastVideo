@@ -26,6 +26,7 @@ from pathlib import Path
 from fastvideo import VideoGenerator
 from fastvideo.api import (
     CompileConfig,
+    ComponentConfig,
     EngineConfig,
     GenerationRequest,
     GeneratorConfig,
@@ -39,13 +40,22 @@ from fastvideo.api import (
 DEFAULT_MODEL = "FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2"
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+def build_parser(description: str | None = None) -> argparse.ArgumentParser:
+    """Build the shared FastH3 preview CLI used by full and LoRA checkpoints."""
+    parser = argparse.ArgumentParser(description=description or __doc__)
     parser.add_argument("--model-path", default=DEFAULT_MODEL)
     # The HF repo may require authentication while the MiniMax H3 Community
     # License review completes. A local snapshot can be passed here instead.
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3")
+    parser.add_argument("--lazy-module-load",
+                        action=argparse.BooleanOptionalAction,
+                        default=None,
+                        help="load each heavy component on first use and free it after the last stage that "
+                        "needs it, so peak memory is the largest overlapping set instead of the sum of every "
+                        "component. Omit for auto (on for unified-memory devices such as GB10; off on discrete "
+                        "GPUs). Costs a reload per generation; pass --no-lazy-module-load to keep every "
+                        "component resident")
     parser.add_argument("--profile",
                         choices=("all", "strict"),
                         default="all",
@@ -67,6 +77,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         default=True,
                         help="run one excluded request before timing")
     parser.add_argument("--num-gpus", type=int, default=4)
+    parser.add_argument(
+        "--execution-backend",
+        choices=("mp", "ray"),
+        default=None,
+        help="mp for one node; ray for a Ray cluster (two DGX Sparks). "
+        "Default: ray when RAY_ADDRESS is set, otherwise mp",
+    )
     parser.add_argument("--vsa-sparsity",
                         type=float,
                         default=0.9,
@@ -97,6 +114,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         action=argparse.BooleanOptionalAction,
                         default=True,
                         help="round-robin VAE temporal chunks across sequence-parallel ranks")
+    parser.add_argument("--h3-sequential-load",
+                        action=argparse.BooleanOptionalAction,
+                        default=None,
+                        help="encode with Qwen3-VL, release it, then load DiT/VAEs. Default auto: on for "
+                        "unified-memory devices (GB10), off on discrete GPUs")
+    parser.add_argument("--video-decode-backend",
+                        choices=("h3-vae", "taeh3"),
+                        default="h3-vae",
+                        help="h3-vae is the full MiniMax VAE; taeh3 is the fast approximate preview decoder")
+    parser.add_argument("--taeh3-checkpoint", default=None, help="local taeh3.safetensors; unset uses the pinned cache")
     parser.add_argument("--replicated-dit",
                         action=argparse.BooleanOptionalAction,
                         default=True,
@@ -122,7 +149,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         default=None,
                         help='whole-DiT torch.compile mode, e.g. "reduce-overhead"; requires '
                         "--no-inference-torch-compile")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.Namespace:
     if args.repeats < 1:
         parser.error("--repeats must be at least 1")
     if args.num_gpus < 1:
@@ -132,6 +162,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if args.compile_mode is not None and args.inference_torch_compile:
         parser.error("--compile-mode cannot be combined with regional compile; pass --no-inference-torch-compile")
     return args
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = build_parser()
+    return validate_args(parser, parser.parse_args(argv))
+
+
+def _uses_vsa(args: argparse.Namespace) -> bool:
+    """Full FastH3 checkpoints use VSA; LoRA previews may select dense attention."""
+    return bool(getattr(args, "vsa", True))
 
 
 def _h3_fusions_enabled(args: argparse.Namespace) -> bool:
@@ -147,9 +187,10 @@ def profile_environment(args: argparse.Namespace) -> dict[str, str | None]:
     disabled features so a shell's inherited experiment settings cannot
     silently change the advertised profile.
     """
+    use_vsa = _uses_vsa(args)
     return {
-        "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
-        "FASTVIDEO_VSA_SM100A": "1" if args.vsa_kernel == "sm100a" else "0",
+        "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3" if use_vsa else "FLASH_ATTN",
+        "FASTVIDEO_VSA_SM100A": "1" if use_vsa and args.vsa_kernel == "sm100a" else "0",
         "FASTVIDEO_VSA_CUTEDSL": "0",
         # A non-empty output path enables the diagnostic probe.
         "FASTVIDEO_H3_VSA_PROBE": None,
@@ -198,27 +239,50 @@ def validate_profile_dependencies(args: argparse.Namespace) -> None:
         raise RuntimeError(
             "FastH3's FA4 profile requires the pinned flash-attn-4 package. Install it with "
             "`UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"`, or pass --no-fa4.")
-    if args.vsa_kernel == "sm100a" and not _sm100a_kernel_is_installed():
+    if _uses_vsa(args) and args.vsa_kernel == "sm100a" and not _sm100a_kernel_is_installed():
         raise RuntimeError(
             "FastH3's sm100a profile requires fastvideo-kernel 0.3.4 built with the Blackwell VSA extension. "
             "Install this checkout with `UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"` (or run "
             "`cd fastvideo-kernel && ./build.sh`), or pass --vsa-kernel triton.")
 
 
+def _execution_backend(args: argparse.Namespace) -> str:
+    if args.execution_backend is not None:
+        return args.execution_backend
+    return "ray" if os.environ.get("RAY_ADDRESS") else "mp"
+
+
 def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
+    use_vsa = _uses_vsa(args)
     experimental: dict[str, object] = {
-        "attention_backend": "VIDEO_SPARSE_ATTN_H3",
-        "VSA_sparsity": args.vsa_sparsity,
-        "VSA_tile_size": args.vsa_tile_size,
+        "attention_backend": "VIDEO_SPARSE_ATTN_H3" if use_vsa else "FLASH_ATTN",
         "inference_torch_compile": args.inference_torch_compile,
         "vae_parallel_decode": args.parallel_vae,
         "vae_parallel_decode_strategy": "gather",
     }
+    if args.h3_sequential_load is not None:
+        experimental["h3_sequential_load"] = args.h3_sequential_load
+    if args.video_decode_backend != "h3-vae":
+        experimental["video_decode_backend"] = args.video_decode_backend
+    if args.taeh3_checkpoint is not None:
+        experimental["taeh3_checkpoint"] = args.taeh3_checkpoint
+    if use_vsa:
+        experimental.update({
+            "VSA_sparsity": args.vsa_sparsity,
+            "VSA_tile_size": args.vsa_tile_size,
+        })
     return GeneratorConfig(
         model_path=args.model_path,
-        pipeline=PipelineSelection(experimental=experimental),
+        pipeline=PipelineSelection(
+            components=ComponentConfig(
+                lora_path=getattr(args, "lora_path", None),
+                lora_strength=float(getattr(args, "lora_strength", 1.0)),
+            ),
+            experimental=experimental,
+        ),
         engine=EngineConfig(
             num_gpus=args.num_gpus,
+            execution_backend=_execution_backend(args),
             use_fsdp_inference=args.num_gpus > 1 and not args.replicated_dit,
             parallelism=ParallelismConfig(tp_size=1, sp_size=args.num_gpus),
             offload=OffloadConfig(
@@ -227,6 +291,7 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
                 text_encoder=True,
                 vae=True,
                 pin_cpu_memory=args.pin_cpu_memory,
+                lazy_module_load=args.lazy_module_load,
             ),
             compile=CompileConfig(
                 enabled=args.torch_compile,
@@ -289,6 +354,7 @@ def run(args: argparse.Namespace) -> list[float]:
           f"Denoising contract override: {args.steps} sigma points = {args.steps - 1} DiT forwards")
     print("Profile environment: " + " ".join(f"{key}={value if value is not None else '<unset>'}"
                                                   for key, value in environment.items()))
+    print(f"Execution backend: {_execution_backend(args)}")
 
     generator = VideoGenerator.from_config(build_generator_config(args))
     measured_wall_times: list[float] = []
@@ -317,6 +383,11 @@ def run(args: argparse.Namespace) -> list[float]:
             generation_time = getattr(result, "generation_time", None)
             if generation_time is not None:
                 print(f"Generation time: {float(generation_time):.3f}s")
+            # Worker-lifetime allocator high-water mark: torch never resets it
+            # between generations, so it includes model load and every prior run.
+            peak_memory_mb = getattr(result, "peak_memory_mb", None)
+            if peak_memory_mb is not None:
+                print(f"Peak memory: {float(peak_memory_mb):.1f} MB")
             denoise_time = _denoise_seconds(result)
             if denoise_time is not None:
                 measured_denoise_times.append(denoise_time)

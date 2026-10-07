@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""In-framework benchmark of the sm_100a VSA backend at real Wan shapes.
+"""In-framework benchmark of the sm_100a/sm_103a VSA backend at real Wan shapes.
 
 Not the powers-of-two bench grid: this builds the metadata FastVideo actually builds, at the
 deployed latent shapes, and drives the same block_sparse_attn_from_indices entry point the
@@ -39,10 +39,11 @@ def timed(fn, iters=20, warmup=5):
 
 
 def main():
-    if torch.cuda.get_device_capability() != (10, 0):
-        print("not Blackwell; skipping")
+    if torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
+        print("not data-center Blackwell; skipping")
         return
-    print(f"{'case':<8} {'S_pad':>7} {'blocks':>7} {'topk':>5} {'sm100a ms':>10} "
+    arch = "sm103a" if torch.cuda.get_device_capability() == (10, 3) else "sm100a"
+    print(f"{'case':<8} {'S_pad':>7} {'blocks':>7} {'topk':>5} {f'{arch} ms':>10} "
           f"{'triton ms':>10} {'speedup':>8}  selected")
     for label, latent, tile, heads in CASES:
         meta = build_vsa_metadata(latent, tile_size=tile, device="cuda")
@@ -76,7 +77,7 @@ def main():
         tri = timed(lambda: block_sparse_attn_triton(q, k, v, i64, n64, vbs64))
 
         print(f"{label:<8} {S:>7} {nb:>7} {topk:>5} {ours:>10.3f} {tri:>10.3f} "
-              f"{tri / ours:>7.2f}x  {'sm100a' if ok else 'FALLBACK'}")
+              f"{tri / ours:>7.2f}x  {arch if ok else 'FALLBACK'}")
 
 
 if __name__ == "__main__":

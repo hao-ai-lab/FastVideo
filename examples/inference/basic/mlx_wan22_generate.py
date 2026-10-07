@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""End-to-end Wan2.2-TI2V-5B generation on Apple Silicon (MLX DiT + MLX TAEHV).
+"""End-to-end FastMetal-5B-QAD generation on Apple Silicon (MLX DiT + MLX TAEHV).
+
+This is the Wan2.2 TI2V entrypoint. Use FastVideo/FastMetal-5B-QAD:
+
+    hf download FastVideo/FastMetal-5B-QAD --local-dir ./FastMetal-5B-QAD
+    python examples/inference/basic/mlx_wan22_generate.py \\
+      --mlx-checkpoint ./FastMetal-5B-QAD \\
+      --text-encoder-root ./FastMetal-5B-QAD \\
+      --vae-root ./FastMetal-5B-QAD/vae
 
 Pipeline: torch/MPS UMT5 encode (shared with 1.3B) → MLXWan22DiT 3-step DMD
 (warped schedule, flow_shift=5) → MLX TAEHV decode (taew2_2.pth). Fully MLX
 on the heavy DiT + decode path.
-
-    PYTHONPATH=$PWD python examples/inference/basic/mlx_wan22_generate.py \
-      --prompt "A red fox trotting through a snowy pine forest at golden hour" \
-      --output-path video_samples/demo_5b/fox_5b_mlx.mp4
 
 Decoder backends: ``taehv`` (default, MLX, ~seconds), ``taehv-torch`` (parity),
 ``wan-vae`` (full AutoencoderKLWan on MPS, slow).
@@ -30,6 +34,11 @@ from fastvideo.mlx_runtime.prompt_cache import (
     load_prompt_cache,
     save_prompt_cache,
     text_encoder_fingerprint,
+)
+from fastvideo.mlx_runtime.checkpoint_compat import (
+    UnsupportedMLXCheckpointError,
+    raise_if_unsupported_mlx_checkpoint,
+    resolve_mlx_checkpoint,
 )
 from fastvideo.mlx_runtime.rife_interp import aligned_keyframe_count
 
@@ -165,7 +174,9 @@ def main() -> None:
         "--mlx-checkpoint",
         type=Path,
         default=None,
-        help="Pre-quantized MLX DiT checkpoint directory. Rewrapped with Wan2.2 per-token conditioning.",
+        help="Packed FastMetal-5B-QAD MLX DiT directory (mlx_dit.json + mlx_dit.safetensors). "
+        "If omitted, a FastMetal directory passed as --text-encoder-root is used when it "
+        "already contains those files.",
     )
     parser.add_argument("--vae-root", type=Path, default=None)
     parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
@@ -241,6 +252,18 @@ def main() -> None:
     # latent never leaves the grid it was denoised on and the mode is usable.
     if args.refine and args.fast_spatial:
         print("[wan22] --refine takes precedence over --fast-spatial")
+
+    args.mlx_checkpoint = resolve_mlx_checkpoint(args.mlx_checkpoint, args.text_encoder_root)
+    if args.mlx_checkpoint is not None:
+        if args.text_encoder_root is None and (args.mlx_checkpoint / "text_encoder").is_dir():
+            args.text_encoder_root = args.mlx_checkpoint
+        if args.vae_root is None and (args.mlx_checkpoint / "vae").is_dir():
+            args.vae_root = args.mlx_checkpoint / "vae"
+    try:
+        raise_if_unsupported_mlx_checkpoint(args.mlx_checkpoint, args.dit_checkpoint)
+    except UnsupportedMLXCheckpointError as exc:
+        raise SystemExit(str(exc)) from exc
+
     args.text_encoder_root, args.dit_checkpoint, args.dit_config, args.vae_root = _resolve_model_paths(
         text_encoder_root=args.text_encoder_root,
         dit_checkpoint=args.dit_checkpoint,

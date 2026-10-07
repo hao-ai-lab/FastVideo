@@ -79,9 +79,13 @@ The GB10 has **no separate VRAM** — CPU and GPU share one 128 GB LPDDR5X pool
 
 - **`nvidia-smi` reports memory as `[N/A]`** on the GB10, and the system "used"
   figure conflates CPU + GPU + cache, so it's only a soft upper bound — treat the
-  whole 128 GB as one shared budget. For a per-run figure, use FastVideo's own
-  `peak_memory_mb` (reported on the generation result and by the performance
-  benchmark), which is measured inside the worker that runs the model.
+  whole 128 GB as one shared budget. For a worker-measured figure, use FastVideo's
+  own `peak_memory_mb` (reported on the generation result and by the performance
+  benchmark), which is measured inside the worker that runs the model. It is the
+  worker's allocator high-water mark, never reset between generations, so it
+  includes model load and every prior run rather than a single run's delta. The
+  `mp` backend populates it; the Ray backend leaves `peak_memory_mb` unset, so
+  `--execution-backend ray` prints no peak-memory figure.
 - **The 128 GB is a *working-set* ceiling, not storage** — the model cache lives
   on the NVMe (3.7 TB, ample). What has to fit in 128 GB is the weights,
   activations, and KV cache — and, critically, the **VAE decode buffers**, which
@@ -156,8 +160,36 @@ is power-cycled. To avoid it:
 
 - **Builds** (flash-attn, kernel): `nice -n 19`, `MAX_JOBS=2`, `nohup`. Never a
   bare foreground high-parallelism build.
-- Leave `*_cpu_offload` at the example defaults — "CPU" offload is the *same*
-  unified RAM on the GB10, so the win is tiling + sane resolution, not offloading.
+- FastVideo automatically disables DiT layerwise/CPU offload and encoder/VAE CPU
+  offload after each worker binds its GB10 device. Do not force those modes back
+  on: "CPU" offload uses the same unified RAM. Multi-GPU FSDP sharding remains
+  available because it partitions weights without parking them in a separate
+  host pool.
+- **Older MiniMax H3 / FastH3 bf16 weights** need deferred loading on one GB10.
+  The full Qwen3-VL conditioner is tens of gigabytes of BF16. If the DiT and
+  VAEs load while that encoder is still resident, the process can be killed by
+  `earlyoom`. On unified memory, `lazy_module_load` auto-enables and owns that
+  split (encoder, then DiT, then VAE; DiT can drop before decode). Sequential
+  load is the H3-only fallback when lazy is off. Keep deferred loading for
+  those older checkpoints. The trimmed NVFP4 encoder and light VAE in the
+  [V2 resident recipe](#fasth3-v2-nvfp4-on-one-spark) are a different memory
+  profile. Geometry scalars come from checkpoint `config.json`, not live
+  weights. See [Offloading](../../inference/offloading.md).
+- **FastH3 TAEH3** (`--video-decode-backend taeh3`) is an opt-in preview decoder.
+  T2VA never materializes the 9.7 GiB video VAE (DiT still loads after Qwen via
+  sequential start). On this box, alpine 768×1344×124 decoded in **2.4 s** versus
+  **68 s** for the full VAE, and one T2VA generation finished in **224 s**
+  end-to-end. Reconstruction is approximate, not lossless. FL2VA/Ref2VA still
+  need the full VAE to encode references.
+- **Two Sparks, one clip.** Sequence parallel (`sp_size=2`) over the QSFP RoCE
+  link ran one 768×1344×124 FastH3 recipe in **292 s** vs **374–393 s** on
+  one GB10, and a 345-frame (~14.4 s) clip in **587 s**. Other heights, widths,
+  and frame counts are valid. Weights stay replicated, so lazy module load
+  (auto on GB10) is still required on each box. Bring-up and knobs:
+  [Pair two NVIDIA DGX Sparks](spark_pair.md).
+- A worker's SIGTERM log and traceback show where it was interrupted, not why it
+  was selected; confirm the cause in the `earlyoom` service or system logs. A
+  later SIGKILL or kernel OOM kill cannot be caught and reported by Python.
 
 ## Gotchas specific to the GB10
 
@@ -174,6 +206,127 @@ A few things that surprise people on this box (beyond the memory notes above):
 - **Cosmos-2.5** uses a Qwen2.5-VL text encoder; make sure you're on a FastVideo
   build recent enough to include its `transformers`-compatibility handling before
   running it.
+- **MiniMax H3 worker init can look healthy and still die on the first generate**
+  if deferred loading is off (`--no-lazy-module-load` and sequential also off)
+  and encoder, VAE, and DiT load together. On GB10 the log should show
+  `lazy_module_load owns deferral` (or, if lazy is off, sequential
+  `Released MiniMax-H3 text encoder after conditioning` before
+  `Loading MiniMax-H3 denoise modules`).
+
+## FastH3 V2 NVFP4 on one Spark
+
+This recipe uses the full V2 eight-forward transformer, the 50-layer NVFP4
+Qwen3-VL encoder, and the light H3 video VAE. Its configuration keeps all
+three resident on one GB10. This stack fits in the Spark's unified memory;
+benchmark your installed runtime and review the clips before publishing a
+speed claim. The earlier bf16 H3 memory guidance above concerns a larger checkpoint.
+
+Install FastVideo following [the Spark install guide](spark.md). The released
+repositories are complete inference stacks:
+
+| Model | Repository | Packed DiT profile |
+|---|---|---|
+| FastH3 V2 | `FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer` | `h3_dit_vsa` |
+| FastH3 Trim | `FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4` | `h3_dit_vsa` |
+
+Each ships its own trained schedule, NVFP4 transformer and 50-layer NVFP4
+text encoder, lightweight 26-layer video VAE with the INT8-weight overlay,
+and audio VAE. Download the complete repository; the runtime selects these
+components from its model index. The released Trim transformer also packs
+attention and VSA gates, unlike the earlier FFN-only pruned export. Neither
+release requires local checkpoint conversion or a separate encoder download.
+
+```bash
+hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer
+hf download FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4
+```
+
+Keep `fastvideo_inference.json` with the transformer if you stage the stack
+in a local directory. It declares the trained eight-forward ladder and
+video/audio shifts of 10/3. The recipes use `num_inference_steps: 9` for
+nine sigma points and eight DiT forwards.
+
+On GB10 with FlashInfer 0.6.18, FastVideo fences activation quantization before
+releasing its padded input. Without this completion fence, identical H3
+requests produced different DiT latents and occasionally corrupt video.
+The fence applies to `sm_121`; other architectures retain asynchronous execution.
+
+Run `examples/inference/basic/basic_fasth3_spark_v2_nvfp4.yaml` from the
+repository root. It uses 832x480, 124 frames and seed 1234, VSA sparsity 0.8 with
+64-token tiles, and the light H3 VAE through the `h3-vae` decode backend.
+It does not use frame dropping or spatial upscaling.
+
+```bash
+FASTVIDEO_MINIMAX_H3_FUSIONS=all \
+FASTVIDEO_NVFP4_MM_BACKEND=cutlass \
+FASTVIDEO_H3_VAE_TILE_BATCH=1 \
+FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
+FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+FASTVIDEO_STAGE_LOGGING=1 \
+nice -n 19 fastvideo generate \
+  --config examples/inference/basic/basic_fasth3_spark_v2_nvfp4.yaml
+```
+
+The defaults produce a roughly five-second clip at 24 fps. For native 768p,
+set `--request.sampling.width 1344` and `--request.sampling.height 768`,
+keeping 124 frames. For the separate ten-second setting, use 243 frames.
+H3 permits frame counts of `17n+5`; 124 is the nearest legal count above
+five seconds and 243 is the nearest above ten seconds.
+
+For Trim, use `basic_fasth3_spark_pruned_nvfp4.yaml` with the same environment.
+Both recipes keep the encoder, DiT and VAEs resident, disable compilation,
+and use `h3_dit_vsa`. On two Sparks, use the corresponding
+`basic_fasth3_spark_pair_{pruned,v2}_nvfp4.yaml` after following the
+[pair setup guide](spark_pair.md). The pair uses SP2/TP1 and parallel VAE
+gathering, with tile batch 1 on each worker.
+
+For release timing, create one generator per model/resolution. Run one
+untimed ceramics warmup, then two timed ceramics calls and two timed harbor
+calls in that same process, using the exact release prompt strings, seed
+1234 and the settings above. Measure each `generate()` call through finished
+MP4 output and report the median of the two timed calls per prompt. Keep the
+warmup excluded. Record the model revision, code commit, command, environment
+and peak-memory scope with the results. Review every clip's video and audio
+before publishing a quality or speed claim.
+
+The benchmark helper requires a local stack so it can validate the schedule
+before loading. For example:
+
+```bash
+hf download FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer \
+  --local-dir ./FastH3-V2-Consumer
+python examples/inference/basic/benchmark_fasth3_spark_nvfp4.py \
+  --config examples/inference/basic/basic_fasth3_spark_v2_nvfp4.yaml \
+  --model-path ./FastH3-V2-Consumer --frames 124 \
+  --prompts /path/to/benchmark_prompts.json \
+  --output-dir outputs/fasth3_spark_v2_nvfp4/benchmark-124
+```
+
+Set the environment from the generation command above before benchmarking.
+The prompt JSON must contain `latency-ceramics-005` and
+`latency-harbor-005`. Pass `--width 1344 --height 768` for the native 768p
+protocol. Use the Trim repository and config for its corresponding run.
+
+### Released model measurements
+
+The released Trim stack at revision `cae9ceb6feefe77d34a56640782cda3909363f19`
+completed the native 832x480, 124-frame protocol on one Spark, seed 1234.
+The tested code is `6ccdbc761e6b854003f472e39b826c06cb54de60`, using the
+resident recipe above. Medians exclude warmups and cover finished MP4 output.
+
+| Released model | Resolution | One Spark, ceramics / harbor | Two Sparks |
+|---|---|---:|---|
+| FastH3 Trim NVFP4 | 832x480 | 124.090 / 127.519 s | Pending |
+| FastH3 Trim NVFP4 | 1344x768 | Review pending | Pending |
+| FastH3 V2 NVFP4-Consumer | 832x480 | Repeatability review pending | Pending |
+| FastH3 V2 NVFP4-Consumer | 1344x768 | Review pending | Pending |
+
+The completed Trim 480p batch used one extra untimed harbor warmup in the
+same process, six calls total. Both warmups are excluded from the medians.
+Each prompt's three decoded videos and audio streams match exactly, and
+sampled frames are coherent. These checks do not establish BF16 parity,
+speech accuracy or lip sync. Pending cells are not measured substitutes
+from older checkpoints.
 
 ## Reproduce these numbers
 

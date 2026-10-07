@@ -14,13 +14,13 @@ on top — the pipeline prompt-preprocessing stage handles pad-or-trim to
 """
 from __future__ import annotations
 
-import os
 from typing import Iterable
 
 import torch
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, TextEncoderConfig
 from fastvideo.models.encoders.base import TextEncoder
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.platforms import AttentionBackendEnum
 
 
@@ -70,7 +70,7 @@ class T5GemmaEncoderModel(TextEncoder):
             is_encoder_decoder=False,
             dtype=dtype,
         )
-        if os.getenv("FASTVIDEO_ATTENTION_BACKEND") == "TORCH_SDPA":
+        if effective_attention_backend(self.config) == AttentionBackendEnum.TORCH_SDPA:
             if hasattr(model.config, "attn_implementation"):
                 model.config.attn_implementation = "sdpa"
             if hasattr(model.config, "_attn_implementation"):

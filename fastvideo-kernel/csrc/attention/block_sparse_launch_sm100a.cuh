@@ -1,7 +1,7 @@
 #ifndef BLOCK_SPARSE_VSA_LAUNCH_SM100A_CUH
 #define BLOCK_SPARSE_VSA_LAUNCH_SM100A_CUH
 
-// Launch surface for the sm_100a VSA block-sparse FMHA forward.
+// Launch surface for the sm_100a/sm_103a VSA block-sparse FMHA forward.
 //
 // Everything a caller needs: a POD argument struct, a predicate saying whether this build can
 // run those arguments, and one launch entry point. The benchmark in

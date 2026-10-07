@@ -10,6 +10,7 @@ class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8000
     output_dir: str = "outputs/"
+    served_model_name: str | None = None
 
 
 @dataclass
@@ -29,6 +30,12 @@ class OffloadConfig:
     image_encoder: bool = True
     vae: bool = True
     pin_cpu_memory: bool = True
+    # Not a CPU offload: loads each heavy component on first use and frees it
+    # after the last stage that needs it, so peak memory is the largest
+    # overlapping set rather than the sum. Grouped here because it is the same
+    # decision the offload knobs answer, which is how much of the model has to
+    # be resident at once. ``None`` auto-enables on unified-memory devices.
+    lazy_module_load: bool | None = None
 
 
 @dataclass
@@ -69,6 +76,11 @@ class CompileConfig:
 class QuantizationConfig:
     text_encoder_quant: str | None = None
     transformer_quant: str | None = None
+    # Forwarded onto ``NVFP4Config`` when ``transformer_quant`` is ``NVFP4``.
+    # ``h3_dit`` selects the packed MiniMax-H3 attention+FFN export.
+    # ``h3_dit_ffn`` selects a packed FFN-only export (attention stays dense).
+    # ``h3_dit_vsa`` is ``h3_dit`` plus the VSA compression gates.
+    layer_profile: str | None = None
 
 
 @dataclass
@@ -94,6 +106,8 @@ class ComponentConfig:
     vae_weights: str | None = None
     upsampler_weights: str | None = None
     lora_path: str | None = None
+    lora_nickname: str = "default"
+    lora_strength: float = 1.0
     override_pipeline_cls_name: str | None = None
     override_transformer_cls_name: str | None = None
 
@@ -124,6 +138,7 @@ class InputConfig:
     prompt_path: str | None = None
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
+    audio_path: str | list[str] | None = None
     pil_image: Any | None = None
     last_image: Any | None = None
     references: list[Any] | None = None

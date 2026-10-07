@@ -4,6 +4,10 @@
 from __future__ import annotations
 
 import json
+import sys
+from types import ModuleType, SimpleNamespace
+
+import pytest
 
 from fastvideo.mlx_runtime.prompt_enhance import (
     DEFAULT_ENHANCE_SYSTEM_PROMPT,
@@ -12,6 +16,34 @@ from fastvideo.mlx_runtime.prompt_enhance import (
     enhance_result_as_metrics,
     load_or_enhance_prompt,
 )
+
+
+@pytest.mark.parametrize("backend", ["mlx-lm", "auto"])
+def test_enhancement_uses_available_mlx_lm(monkeypatch, backend):
+    """Both backends must reach generation through the sampler-based API."""
+    package = ModuleType("mlx_lm")
+    sampling = ModuleType("mlx_lm.sample_utils")
+    temperatures = []
+    expected_sampler = object()
+    enhanced = "A cat walking on grass in warm evening light."
+
+    def make_sampler(temp):
+        temperatures.append(temp)
+        return expected_sampler
+
+    def generate(model_arg, tokenizer_arg, *, prompt, max_tokens, sampler, verbose):
+        assert sampler is expected_sampler
+        return enhanced
+
+    package.load = lambda path: (object(), SimpleNamespace())
+    package.generate = generate
+    sampling.make_sampler = make_sampler
+    monkeypatch.setitem(sys.modules, "mlx_lm", package)
+    monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sampling)
+    result = enhance_prompt("A cat walking on grass", backend=backend)
+    assert result.backend == "mlx-lm"
+    assert result.enhanced == enhanced
+    assert temperatures == [0.6]
 
 
 def test_template_adds_cinematic_cues_to_thin_prompt() -> None:

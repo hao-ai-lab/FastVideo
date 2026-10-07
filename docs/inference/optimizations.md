@@ -7,7 +7,8 @@ This page describes the various options for speeding up generation times in Fast
     Several options on this page behave differently on the GB10's unified-memory
     hardware — some give little or nothing there. See
     [DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
-    for what actually helps on that platform and why.
+    for what actually helps on that platform and why. Two Sparks, one clip:
+    [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
 
 ## Table of Contents
 
@@ -198,6 +199,11 @@ MMA is numerically correct on both (GB10-verified: cos ~0.98 vs bf16 SDPA).
 sm_121a support needs a CUDA 13 build (`TORCH_CUDA_ARCH_LIST=12.1a`). A runtime
 capability gate falls back to Flash Attention on other GPUs.
 
+For VSA-distilled MiniMax-H3 students, the same kernel has a block-sparse
+forward that runs VSA's 64-token tile selection in FP4
+(`FASTVIDEO_H3_VSA_FP4=1`). See
+[FastH3 NVFP4 on RTX PRO 6000](fasth3_rtx_pro_6000.md).
+
 > **Quality note (stock weights):** on stock Wan-2.1 the FP4-attention output is
 > below bf16 — QAD expects a QAT-distilled checkpoint the model was *trained* to
 > tolerate FP4 attention with. Post-hoc on non-QAT weights, expect a quality
@@ -299,6 +305,9 @@ automatically.
 ### Requirements
 
 - **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- **ROCm**: CDNA4 (MI350X / MI355X, gfx950) runs the FP8 `_scaled_mm` path through
+  hipBLASLt (OCP e4m3fn). MI300X (gfx942) only exposes the `fnuz` FP8 formats and
+  takes the bf16 dequant fallback like a pre-sm89 GPU.
 - No additional packages required beyond the base FastVideo install
 
 ### Usage

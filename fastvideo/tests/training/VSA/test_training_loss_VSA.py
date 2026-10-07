@@ -6,13 +6,12 @@ import json
 from huggingface_hub import snapshot_download
 import torch
 
-# Ensure backend selection happens during import-time initialization
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 # Force VSA to use Triton implementation even on H100 / when CUDA extension is available
 # os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
+import fastvideo.envs as envs
 from fastvideo.training.wan_training_pipeline import main
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
@@ -56,8 +55,6 @@ def run_worker():
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ["WANDB_MODE"] = "online"
-
     data_dir = Path("data/mini_dataset_i2v_VSA")
 
     if not data_dir.exists():
@@ -73,14 +70,19 @@ def test_distributed_training():
     # Run torchrun command
     cmd = ["torchrun", "--nnodes", NUM_NODES, "--nproc_per_node", NUM_GPUS_PER_NODE, str(current_file)]
 
-    process = subprocess.run(cmd, check=True)
+    # The torchrun workers select VSA when the training pipeline initializes attention.
+    with (
+        envs.FASTVIDEO_ATTENTION_BACKEND.override("VIDEO_SPARSE_ATTN"),
+        envs.override_external("WANDB_MODE", "offline"),
+    ):
+        process = subprocess.run(cmd, check=True)
 
     summary_file = 'data/wan_finetune_test_VSA/tracker/wandb/latest-run/files/wandb-summary.json'
 
     device_name = torch.cuda.get_device_name()
     print(f"INFO: device: {device_name}")
-    if "H100" not in device_name:
-        raise ValueError(f"VSA training regression requires H100 GPUs, got: {device_name}")
+    if "H100" not in device_name and "B200" not in device_name:
+        raise ValueError(f"VSA training regression supports H100 and the GB200 Slurm CI target, got: {device_name}")
 
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
     wandb_summary = json.load(open(summary_file))
