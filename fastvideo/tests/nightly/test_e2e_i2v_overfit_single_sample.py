@@ -23,7 +23,9 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_dat
 
 # training
 NUM_GPUS_PER_NODE_TRAINING = "4"
-TRAINING_ENTRY_FILE_PATH = "fastvideo/training/wan_i2v_training_pipeline.py"
+TRAINING_ENTRY_FILE_PATH = "fastvideo/training/runner.py"
+TRAINING_PIPELINE_CLASS = "WanI2VTrainingPipeline"
+TRAINING_PIPELINE_MODULE = "fastvideo.training.wan_i2v_training_pipeline"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
 LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_i2v_prompt_1_sample.json")
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
@@ -110,6 +112,10 @@ def run_training():
         "--nproc_per_node",
         NUM_GPUS_PER_NODE_TRAINING,
         TRAINING_ENTRY_FILE_PATH,
+        "--pipeline-class",
+        TRAINING_PIPELINE_CLASS,
+        "--pipeline-module",
+        TRAINING_PIPELINE_MODULE,
         "--model_path",
         MODEL_PATH,
         "--inference_mode",

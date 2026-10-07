@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from copy import deepcopy
 
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (WanCausalDMDPipeline)
 from fastvideo.training.self_forcing_distillation_pipeline import (SelfForcingDistillationPipeline)
@@ -55,22 +54,17 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
         self.validation_pipeline = validation_pipeline
 
 
-def main(args) -> None:
-    logger.info("Starting Wan self-forcing distillation pipeline...")
-
-    pipeline = WanSelfForcingDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Wan self-forcing distillation pipeline completed")
-
-
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    logger.warning("\n"
+                   "================================================================================\n"
+                   "[DEPRECATED]: Direct execution of this pipeline is deprecated!\n"
+                   "Please use `fastvideo/training/runner.py` instead.\n"
+                   "================================================================================")
+    from fastvideo.training.runner import main
+    from fastvideo.utils import build_parser
+
+    parser = build_parser("WanSelfForcingDistillationPipeline",
+                          "fastvideo.training.wan_self_forcing_distillation_pipeline")
     args = parser.parse_args()
+    args.dit_cpu_offload = False
     main(args)
