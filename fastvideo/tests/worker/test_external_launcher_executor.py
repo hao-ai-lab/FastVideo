@@ -21,6 +21,7 @@ from fastvideo.worker.external_launcher_executor import (
 )
 from fastvideo.worker.gpu_worker import Worker
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
+from fastvideo.worker.uniproc_executor import UniprocExecutor
 
 TORCHRUN_ENV = {
     "RANK": "5",
@@ -170,11 +171,12 @@ def test_resolve_rejects_out_of_bounds_identity(name, value):
         resolve_external_launcher_env(environ)
 
 
-def test_get_class_default_stays_multiproc(env_overrides):
+@pytest.mark.parametrize(("num_gpus", "expected"), [(1, UniprocExecutor), (2, MultiprocExecutor)])
+def test_get_class_default_mp_without_opt_in_stays_local(env_overrides, num_gpus, expected):
     _clear_launcher_env(env_overrides)
-    args = FastVideoArgs(model_path="test")
+    args = FastVideoArgs(model_path="test", num_gpus=num_gpus)
 
-    assert Executor.get_class(args) is MultiprocExecutor
+    assert Executor.get_class(args) is expected
 
 
 def test_get_class_env_flag_selects_external_launcher(env_overrides):
@@ -222,6 +224,14 @@ def test_env_flag_does_not_override_explicit_ray_backend(monkeypatch, env_overri
     args = FastVideoArgs(model_path="test", distributed_executor_backend="ray")
 
     assert Executor.get_class(args) is StubRayExecutor
+
+
+def test_env_flag_does_not_override_explicit_uni_backend(env_overrides):
+    _clear_launcher_env(env_overrides)
+    env_overrides.enter_context(envs.FASTVIDEO_EXTERNAL_LAUNCHER.override(True))
+    args = FastVideoArgs(model_path="test", distributed_executor_backend="uni")
+
+    assert Executor.get_class(args) is UniprocExecutor
 
 
 def test_init_rejects_num_gpus_world_size_mismatch(env_overrides):
@@ -355,6 +365,15 @@ def test_is_output_rank_property():
     assert not executor.is_output_rank
     assert executor.uses_spmd_execution
     assert MultiprocExecutor.__new__(MultiprocExecutor).is_output_rank
+
+
+def test_uniproc_executor_keeps_controller_output_defaults():
+    executor = UniprocExecutor.__new__(UniprocExecutor)
+    executor.shutting_down = True
+
+    assert executor.is_output_rank
+    assert not executor.uses_spmd_execution
+    assert executor.broadcast_from_output_rank("prompt") == "prompt"
 
 
 def test_collective_rpc_rejects_unsupported_timeout():
