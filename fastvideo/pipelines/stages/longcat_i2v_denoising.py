@@ -83,6 +83,9 @@ class LongCatI2VDenoisingStage(LongCatDenoisingStage):
 
         with tqdm(total=num_inference_steps, desc="I2V Denoising") as progress_bar:
             for i, t in enumerate(timesteps):
+                # Stop if interrupted
+                if getattr(self, "interrupt", False):
+                    break
 
                 # 1. Expand latents for CFG
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
