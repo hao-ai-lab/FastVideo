@@ -146,7 +146,7 @@ class CausalWanSelfAttention(nn.Module):
             x = flex_attention(query=padded_roped_query[:, :, head_slice].transpose(2, 1),
                                key=padded_roped_key[:, :, head_slice].transpose(2, 1),
                                value=padded_v[:, :, head_slice].transpose(2, 1),
-                               block_mask=block_mask)[:, :, :-padded_length].transpose(2, 1)
+                               block_mask=block_mask)[:, :, :q.shape[1]].transpose(2, 1)
             if sp_world_size > 1:
                 # Gather per-rank head outputs back to the full head dimension.
                 x = sequence_model_parallel_all_gather(x.contiguous(), dim=2)
