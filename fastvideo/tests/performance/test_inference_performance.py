@@ -17,8 +17,13 @@ from typing import Any
 import torch
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.performance.worker_log_capture import (
+    WorkerLogCapture,
+    format_worker_log_tail,
+)
 from fastvideo.tests.performance.identity import (
     benchmark_identity_from_config,
     build_recipe_from_benchmark_config,
@@ -31,7 +36,6 @@ from fastvideo.tests.performance.identity import (
     software_profile,
     software_profile_id,
 )
-from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
@@ -97,6 +101,28 @@ def _validate_benchmark_config(cfg, path="<memory>"):
     for field in COMMON_OBJECT_FIELDS:
         if field in cfg and not isinstance(cfg[field], Mapping):
             raise ValueError(f"{path}: benchmark config field {field!r} must be an object")
+
+    run_config = cfg.get("run_config")
+    if isinstance(run_config, Mapping):
+        gpu_types = run_config.get("gpu_types")
+        if gpu_types is not None and (
+                not isinstance(gpu_types, (list, tuple))
+                or any(not isinstance(g, str) or not g for g in gpu_types)):
+            raise ValueError(
+                f"{path}: run_config.gpu_types must be a list of non-empty strings")
+        if gpu_types:
+            # The device gate and _get_thresholds both substring-match against
+            # the same device name, so every gpu_types entry needs a matching
+            # thresholds key, plus a default fallback for other devices.
+            thresholds = cfg.get("thresholds")
+            if not isinstance(thresholds, Mapping):
+                raise ValueError(f"{path}: run_config.gpu_types requires a 'thresholds' object")
+            missing_thresholds = [g for g in gpu_types if g not in thresholds]
+            if missing_thresholds:
+                raise ValueError(f"{path}: run_config.gpu_types entries missing thresholds keys: "
+                                 f"{', '.join(missing_thresholds)}")
+            if "default" not in thresholds:
+                raise ValueError(f"{path}: run_config.gpu_types requires a 'default' thresholds block")
 
     schema_version = cfg.get("config_schema_version")
     if schema_version is None:
@@ -175,8 +201,7 @@ def _get_thresholds(cfg):
 def _shutdown_executor(generator):
     if generator is None:
         return
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+    generator.executor.shutdown()
 
 
 def _extract_component_times(result: dict) -> dict[str, float | None]:
@@ -292,6 +317,14 @@ def _write_results(results):
     logger.info("Performance results written to %s", filepath)
 
 
+_WORKER_LOG_DIRNAME = "worker_logs"
+
+
+def _worker_log_dir():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, "results", _WORKER_LOG_DIRNAME)
+
+
 def _backend_name(value) -> str:
     if hasattr(value, "name"):
         return str(value.name)
@@ -383,8 +416,8 @@ def _build_identity_fields(cfg, init_kwargs, prompt, runtime_identity):
     hw_profile = hardware_profile(num_gpus=num_gpus)
     sw_profile = software_profile()
     sw_profile.update({
-        "attention_backend": os.environ.get("FASTVIDEO_ATTENTION_BACKEND") or "auto",
-        "flash_attention_4_enabled": os.environ.get("FASTVIDEO_FA4", "0") != "0",
+        "attention_backend": envs.FASTVIDEO_ATTENTION_BACKEND.get() or "auto",
+        "flash_attention_4_enabled": envs.FASTVIDEO_FA4.get(),
     })
     performance_profile_version = os.environ.get("FASTVIDEO_PERFORMANCE_PROFILE_VERSION")
     if performance_profile_version:
@@ -461,6 +494,7 @@ def _build_result_record(
     runtime_identity: Mapping[str, Any],
     device_name: str,
     timestamp: str | None = None,
+    worker_log_path: str | None = None,
 ) -> dict[str, Any]:
     if not times or not peak_memories:
         raise ValueError("Cannot build a performance result record without measurement runs")
@@ -498,6 +532,8 @@ def _build_result_record(
         "individual_peak_memories_mb": [round(m, 1) for m in peak_memories],
         "thresholds":
         dict(thresholds),
+        "worker_log_path":
+        worker_log_path,
         "regression_thresholds":
         cfg.get("regression_thresholds", {}),
         "commit":
@@ -518,6 +554,21 @@ def _build_result_record(
 
 # -- Test -------------------------------------------------------------------
 
+def _gpu_type_skip_reason(cfg, run_config, device_name):
+    """Return a skip reason if the config restricts itself to GPU types the
+    current device does not match, else None.
+
+    ``run_config.gpu_types`` is an optional list of substrings matched against
+    the CUDA device name, so a hardware-specific config (e.g. a DGX Spark GB10
+    single-GPU workload) does not run on the shared H100/L40S lanes. Configs
+    without ``gpu_types`` run on any device, as before.
+    """
+    gpu_types = run_config.get("gpu_types")
+    if gpu_types and not any(g in device_name for g in gpu_types):
+        return (f"{cfg['benchmark_id']} is restricted to gpu_types={gpu_types}, "
+                f"current device is {device_name!r}")
+    return None
+
 
 def _run_benchmark(cfg):
     run_config = cfg.get("run_config") or {}
@@ -535,6 +586,14 @@ def _run_benchmark(cfg):
     prompt = prompts[0]
 
     num_warmup, num_measure = _validate_run_counts(run_config, cfg["benchmark_id"])
+
+    # Device gating comes after config-shape validation so a gated config's
+    # run counts are still checked on non-matching lanes.
+    skip_reason = _gpu_type_skip_reason(cfg, run_config,
+                                        torch.cuda.get_device_name())
+    if skip_reason:
+        pytest.skip(skip_reason)
+
     thresholds = _get_thresholds(cfg)
 
     # Remap JSON keys to VideoGenerator kwargs
@@ -548,10 +607,19 @@ def _run_benchmark(cfg):
     os.makedirs(output_dir, exist_ok=True)
     gen_kwargs["output_path"] = output_dir
 
+    capture = WorkerLogCapture(
+        _worker_log_dir(),
+        cfg["benchmark_id"],
+        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+    )
     generator = None
     try:
+        # log_queue only goes to from_pretrained: workers keep the handler for
+        # their lifetime, covering model load + warmups + measured runs.
+        # Passing it to generate_video would detach it after the first call.
         generator = VideoGenerator.from_pretrained(
             model_path=model_info["model_path"],
+            log_queue=capture.log_queue,
             **init_kwargs,
         )
         runtime_identity = _runtime_identity_from_generator(generator)
@@ -575,7 +643,12 @@ def _run_benchmark(cfg):
             peak_memories.append(peak_mb)
             all_component_times.append(component_times)
     finally:
+        # Shutdown stops workers producing; close() then drains the queue so
+        # the log file is complete before any assertion reads it back. The
+        # performance CI lane mirrors results/worker_logs/*.log into
+        # PERF_REPORTS_DIR as allowlisted .md files for artifact upload.
         _shutdown_executor(generator)
+        capture.close()
 
     avg_time = sum(times) / len(times)
     max_peak_memory = max(peak_memories)
@@ -594,12 +667,22 @@ def _run_benchmark(cfg):
         prompt=prompt,
         runtime_identity=runtime_identity,
         device_name=device_name,
+        worker_log_path=capture.log_path,
     )
 
     logger.info("Performance results: avg_time=%.2fs, "
                 "max_peak_memory=%.0fMB", avg_time, max_peak_memory)
     _write_results(results)
 
+    try:
+        _assert_thresholds(results, thresholds, device_name, avg_time=avg_time, max_peak_memory=max_peak_memory)
+    except AssertionError:
+        print(format_worker_log_tail(cfg["benchmark_id"], capture.log_path), flush=True)
+        raise
+
+
+def _assert_thresholds(results, thresholds, device_name, avg_time, max_peak_memory):
+    """Gate on the raw measurements: the emitted record stores rounded copies."""
     max_time = thresholds["max_generation_time_s"]
     max_mem = thresholds["max_peak_memory_mb"]
 
@@ -633,12 +716,5 @@ def test_inference_performance(cfg):
     (text encoder, DiT, VAE decode). Assert each against device-aware thresholds.
     """
 
-    original_env = os.environ.get("FASTVIDEO_STAGE_LOGGING")
-    os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
-    try:
+    with envs.FASTVIDEO_STAGE_LOGGING.override(True):
         _run_benchmark(cfg)
-    finally:
-        if original_env is None:
-            os.environ.pop("FASTVIDEO_STAGE_LOGGING", None)
-        else:
-            os.environ["FASTVIDEO_STAGE_LOGGING"] = original_env

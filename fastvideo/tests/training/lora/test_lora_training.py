@@ -1,7 +1,9 @@
 import os
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29514")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29514")
 import sys
 import subprocess
 from pathlib import Path
@@ -18,8 +20,6 @@ NUM_GPUS_PER_NODE = "2"
 
 def test_lora_training():
     """Test the LoRA training setup"""
-    os.environ.setdefault("WANDB_MODE", "offline")
-
     data_dir = Path("data/crush-smol_processed_t2v")
 
     if not data_dir.exists():
@@ -50,7 +50,8 @@ def test_lora_training():
         "--lora_training", "True", "--seed", "42"
     ]
 
-    process = subprocess.run(cmd, check=True)
+    with envs.override_external("WANDB_MODE", "offline"):
+        process = subprocess.run(cmd, check=True)
 
     summary_file = '/workspace/tracker/wandb/latest-run/files/wandb-summary.json'
 

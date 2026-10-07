@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Full-checkpoint Wan parity against Diffusers; requires one CUDA GPU and weights."""
 
-import os
-
 import pytest
 import torch
 from diffusers import WanTransformer3DModel
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -16,8 +15,8 @@ from fastvideo.tests.golden_gate._wan_checkpoint import component_path
 from fastvideo.models.wan.config import WanVideoConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29503")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29503")
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Wan transformer parity requires one CUDA GPU")

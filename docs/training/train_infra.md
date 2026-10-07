@@ -51,7 +51,7 @@ torchrun --nproc_per_node=8 \
 ## Config Format
 
 Every run is defined by a single YAML file with five top-level sections.
-See `examples/train/example.yaml` for a fully-commented reference.
+See `examples/train/configs/example.yaml` for a fully-commented reference.
 
 ### `models` — Role-based model instances
 
@@ -80,8 +80,24 @@ Common model parameters:
 | `trainable` | `true` | Whether the model's parameters require gradients |
 | `disable_custom_init_weights` | `false` | Skip custom weight initialization (use for teacher/critic) |
 | `flow_shift` | `3.0` | Timestep shifting factor |
-| `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"` or `null`) |
+| `enable_gradient_checkpointing_type` | `null` | Gradient checkpointing (`"full"`, `"ops"`, `"block_skip"`, or `null`); a role that leaves it unset uses `training.model`'s value |
 | `attention_backend` | `null` | Optional role-local backend for Wan models (for example `ATTN_QAT_TRAIN`); overrides the process default only while this role's transformer is built |
+
+`full` and `ops` checkpoint the same transformer blocks; layers outside them,
+such as embeddings and the output head, keep their activations under either.
+`full` recomputes every block operation and is the memory-conservative choice.
+`ops` also retains the outputs of fused attention ops that the PyTorch
+dispatcher can see. It can reduce recompute time at the cost of higher
+activation memory, so use it only when the training shape has verified memory
+headroom. `block_skip` currently behaves like `full`, because the modular
+trainer has no setting for its layer interval.
+
+These attention paths have no retainable dispatcher op, so they still
+recompute in full under `ops`: math SDPA, VMoBA, SLA, `ATTN_QAT_TRAIN`, every
+FA3 path, FA4 masked self-attention, FA4 below sm90, and CuTe VSA with 128- or
+256-token blocks (`FASTVIDEO_VSA_CUTEDSL=1`). A run in which a checkpointed
+block retains nothing logs a one-time warning. With sequence parallelism, the
+Ulysses all-to-alls inside each block also run again during recompute.
 
 Which roles are needed depends on the training method:
 
@@ -151,16 +167,24 @@ training:
     project_name: my_project
     run_name: my_run
 
+  performance:
+    enabled: true
+    peak_tflops_per_gpu: null  # optional dense BF16 peak for one GPU
+
   model:
     weighting_scheme: uniform   # uniform, logit_normal, mode
     precondition_outputs: false
     enable_gradient_checkpointing_type: full
+    enable_torch_compile: false
+    torch_compile_kwargs: {}
 
   vsa:
     sparsity: 0.0         # 0.0 = disabled
     decay_rate: 0.0
     decay_interval_steps: 0
 ```
+
+`training.data.training_cfg_rate` enables classifier-free-guidance dropout. For most models the shared dataloader drops text conditioning by zeroing the stored embedding. LTX-2 is the exception: `LTX2Model` performs the drop itself and swaps in the checkpoint preset's unconditional embedding (the preset's `negative_prompt` — empty for the distilled presets, the quality-negative prompt for the base presets), because a zeroed post-connector embedding is not the model's unconditional input. The legacy `LTX2TrainingPipeline` (`fastvideo/training/`) does not implement the drop and rejects `training_cfg_rate > 0`.
 
 `training.data.data_path` can also mix multiple preprocessed datasets by using a mapping from dataset path to repeat count:
 
@@ -176,6 +200,125 @@ The repeat count duplicates that dataset's parquet file list before shuffling/sa
 
 See [Training Trackers](trackers.md) to configure Weights & Biases or SwanLab,
 including SwanLab installation and authentication.
+
+### `torch.compile` for modular training
+
+Set `training.model.enable_torch_compile: true` to compile the repeated DiT
+blocks selected by the model's `_compile_conditions`. Training compilation is
+regional and always uses `fullgraph=True`: activation checkpointing is applied
+first, FSDP establishes the runtime parameter representation, and each selected
+block is then compiled inside its eager checkpoint wrapper. The checkpoint
+control logic, FSDP hooks, and the model-level block loop all remain outside
+the compiled region; checkpoint state-dict names are preserved.
+
+Both forward and backward block calls use the compiled path. Wan modulation is
+kept behind a small opaque operator boundary: this ensures all six modulation
+gradient slices are materialized before they are returned to FSDP instead of
+being fused into an incomplete Inductor output buffer. Eager execution keeps
+the original native PyTorch path. Regional training compile also enables
+Inductor's `emulate_precision_casts` option by default so fused BF16 operators
+retain eager's intermediate rounding points. It can be overridden explicitly
+under `torch_compile_kwargs.options`.
+
+Additional supported `torch.compile` options can be provided under
+`training.model.torch_compile_kwargs`; `fullgraph: false` is rejected because
+it would silently reintroduce partial graphs. For example:
+
+```yaml
+training:
+  model:
+    enable_gradient_checkpointing_type: full
+    enable_torch_compile: true
+    torch_compile_kwargs:
+      dynamic: false
+```
+
+The first step includes Dynamo, AOTAutograd, Inductor, and attention-kernel
+compilation, so compare steady-state steps after warmup as well as total job
+time. Use `TORCH_LOGS=recompiles,graph_breaks` when diagnosing specialization.
+A single initial type specialization can occur when DMD2 first reaches a role
+whose block has a different FSDP/checkpoint wrapper type; repeated recompilation
+in steady state is not expected.
+
+`FLASH_ATTN` does not select FlashAttention-4 merely because FA4 is installed.
+Set `FASTVIDEO_FA4=1` together with a `FLASH_ATTN` role backend to opt in. Set
+`FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` only as a debugging escape hatch when
+an attention implementation cannot participate in a compiled block.
+
+### Training performance metrics
+
+The modular trainer logs low-overhead performance metrics on every optimizer
+step. The Transformer boundary is instrumented separately for each model role,
+so the accounting includes all forwards performed by the selected method:
+
+- bidirectional SFT records its dense or VSA student forward;
+- causal SFT records block-causal attention geometry;
+- streaming/self-forcing records every rollout chunk and KV-cache update;
+- DMD records student, critic, and teacher forwards independently, including
+  repeated rollouts and the conditional/unconditional teacher passes.
+
+The common metrics are:
+
+| Metric | Meaning |
+|--------|---------|
+| `step_time_sec` | Training wall time for one optimizer step, excluding checkpoint and validation callbacks |
+| `perf/steps_per_sec` | Reciprocal of `step_time_sec` |
+| `perf/samples_per_sec` | Configured global samples processed per second, including gradient accumulation and data-parallel replicas |
+| `perf/model_forward_calls` | Actual Transformer invocations during the optimizer step |
+| `perf/causal_chunks` | Block-causal chunks represented by those invocations |
+| `perf/query_latent_frames_per_sec` | Latent query frames processed across all roles and rollouts |
+| `perf/query_tokens_per_sec` | Patch tokens processed across all roles and rollouts |
+| `perf/attention_density` | Effective self-attention pairs divided by dense attention pairs |
+| `perf/estimated_tflops_per_gpu` | Estimated useful model FLOP/s per GPU |
+| `perf/estimated_mfu` | Estimated useful FLOP/s divided by the dense BF16 peak (ratio, not percent) |
+| `perf/peak_tflops_per_gpu` | Dense BF16 peak used for the MFU ratio (configured or inferred) |
+| `perf/role/<role>/*` | Forward count, grad-carrying forward count, causal chunks, and estimated TFLOP/s for one role |
+
+For DMD2, combine these metrics with the existing `update_student` metric to
+separate the expensive generator-update steps from critic-only steps.
+
+`perf/samples_per_sec` uses the configured `train_batch_size`, gradient
+accumulation, and data-parallel replica count. Methods that manage their own
+optimization (for example DiffusionNFT, whose outer step consumes
+`num_batches_per_epoch` dataloader batches) report the throughput of a single
+batch in the denominator, so use the method's own sample counter
+(`nft/num_sampled`) for those runs. The FLOP-derived metrics still aggregate
+every forward the method performs.
+
+MFU is an analytic Transformer-core estimate. Each no-grad forward contributes
+`1F`; a forward whose result carries autograd contributes `3F` (forward plus an
+approximately `2F` backward). Activation-checkpoint recomputation is excluded,
+as expected for model FLOPs utilization. Wan VSA uses the kernel's clamped
+tile-top-k density and includes its gate projection and pooled-attention
+overhead. VMOBA runs are modeled as dense self-attention: the MoBA top-k
+selection is not estimated, so `perf/attention_density` stays at `1.0` and the
+attention-dependent FLOPs are an upper bound. Causal Wan uses the configured
+chunk size, local window, and actual streaming cache position; when
+`local_attn_size` is unset, the modeled window is the transformer's 21-frame
+compatibility cap, and `pipeline.dit_config.sliding_window_num_frames` only
+sizes the streaming KV cache. MatrixGame2's 15-frame compatibility window is
+not modeled, so its attention density is an upper bound. Embedding,
+normalization, optimizer, communication, MatrixGame action modules, and other
+non-core work are not included, so MFU is an estimate rather than a
+hardware-profiler measurement.
+
+`perf/estimated_tflops_per_gpu` and `perf/estimated_mfu` aggregate every role
+(student, teacher, critic, EMA) that ran during the step, so they are not
+directly comparable to a single-model MFU number. Replica scaling assumes
+`world_size = data_parallel x sp_size`; `tp_size > 1` is not modeled and would
+inflate the per-GPU estimates.
+
+Forward counts and wall-clock throughput work for every modular model. The
+FLOP-derived metrics currently require a Wan-style architecture exposing
+`hidden_size`, `ffn_dim`, `num_layers`, and a three-axis `patch_size`; they are
+omitted for other architectures instead of reporting a misleading estimate.
+
+Known NVIDIA accelerators use an inferred dense BF16 peak. Set
+`training.performance.peak_tflops_per_gpu` explicitly for a different board
+form factor or clock. If the device is unknown and no peak is configured, the
+trainer still logs throughput, call counts, attention density, and estimated
+TFLOP/s, but omits `perf/estimated_mfu`. Set `enabled: false` to disable the
+forward hooks and all `perf/*` metrics.
 
 ### `callbacks` — Pluggable hooks
 
@@ -504,6 +647,39 @@ training:
   checkpoint:
     resume_from_checkpoint: outputs/my_run/checkpoint-2000
 ```
+
+### Exporting a checkpoint for inference
+
+A DCP directory is training state, not a pipeline model directory. Export one
+trainable role into a copy of its configured base model, and strictly reload
+the result before inference:
+
+```bash
+python -m fastvideo.train.entrypoint.dcp_to_diffusers \
+  --checkpoint outputs/my_run/checkpoint-2000 \
+  --output-dir outputs/my_run/export-2000 \
+  --role student \
+  --verify
+```
+
+The model plugin selects the physical transformer component. In particular,
+MiniMax H3 Ref2VA exports `transformer_ref/`, while T2VA exports
+`transformer/`. Training LoRA wrappers are merged into native transformer
+weights because the H3 inference pipeline does not load a standalone training
+adapter. The export records this choice in `fastvideo_training_export.json`.
+
+H3 opts into Diffusers' conventional
+`diffusion_pytorch_model.safetensors` naming (or numbered 5 GB shards plus
+`diffusion_pytorch_model.safetensors.index.json`). Existing model plugins keep
+the legacy `model.safetensors` handoff until they opt in, so QAT/KD override
+paths remain compatible.
+
+Export is not a streaming state-dict conversion. Rank 0 temporarily owns the
+live model and a full CPU-gathered state. `--verify` releases the training
+object graph and gathered mapping before strict reload, but the initial gather
+still needs enough CPU or unified memory for both copies plus runtime overhead.
+For a roughly 62 GiB H3 transformer, a 121 GiB unified-memory GB10 is not a
+validated full-export target; use a larger-memory host.
 
 ### Reproducibility
 

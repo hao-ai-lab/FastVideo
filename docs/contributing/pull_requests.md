@@ -67,7 +67,8 @@ filters, and workflow files.
 3. Fix pre-commit failures locally with `pre-commit run --all-files`.
 4. Wait for at least one approving review.
 5. When the PR is approved and ready, comment `/merge`.
-6. `/merge` adds `ready`, waits for cheap checks, and triggers the minimal
+6. `/merge` adds `ready`, directly calls the trusted merge-gate workflow,
+   waits for cheap checks, and triggers the minimal
    path-relevant integration lanes for the PR branch.
 7. If all required checks pass, Mergify squash-merges the PR to `main`.
 8. If the merge gate fails, fix the regression, push again, and re-run
@@ -94,8 +95,9 @@ All supported `/test` names and their `TEST_TYPE` mappings are listed in
 [CI/CD Architecture](ci_architecture.md#slash-commands).
 
 When a direct test succeeds, the aggregate `fastcheck-passed` or
-`full-suite-passed` status is refreshed automatically if all jobs in that tier
-are now green.
+`full-suite-passed` status is refreshed automatically if that tier previously
+failed and all its jobs are now green. A targeted test cannot replace an
+initial Fastcheck or Full Suite run.
 
 ## Troubleshooting
 

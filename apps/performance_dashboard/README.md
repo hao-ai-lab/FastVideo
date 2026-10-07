@@ -89,12 +89,15 @@ Trend charts show metric-specific axes and exact point details on hover/focus:
 - commit SHA
 - run source
 - stored status
+- canonical comparison status and reason
+- baseline status
 - baseline eligibility
 - PR number, branch, and Buildkite URL when present
 
-The latest status table uses the stored JSON `success` value. Recomputed
-baseline context applies each metric's percent and absolute regression floors
-and does not override stored status.
+The latest status table shows the stored JSON `success` value alongside the
+canonical comparison status and reason. Recomputed baseline context applies
+each metric's percent and absolute regression floors and does not override
+either stored result.
 
 ## API
 
@@ -108,7 +111,14 @@ V2 records use the same comparison cohort as CI: `workload_id`, `variant_id`,
 `benchmark_version`, `recipe_fingerprint`, `hardware_profile_id`, and
 `software_profile_id`. `model_id` and `gpu_type` remain display/filter
 metadata, so renaming either does not split history. Legacy records still group
-by `(model_id, gpu_type)`. Dashboard baselines use the latest five previous
-successful, baseline-eligible records in each group. Summary and trend filters
-match the latest display metadata after grouping, while the raw records endpoint
-continues to filter individual records.
+by `(model_id, gpu_type)` under the explicit `Legacy v1` label. Records that
+claim or partially use v2 identity without all required fields are labeled
+`Invalid v2` and remain scoped by model, GPU, and their available identity
+values. Dashboard baselines use the latest five previous successful,
+baseline-eligible records in each group.
+
+Summary rows, trend groups, and trend points expose `cohort_kind`,
+`result_schema_version`, `baseline_status`, `comparison_status`, and
+`comparison_status_reason`. Summary and trend filters match the latest display
+metadata after grouping, while the raw records endpoint continues to filter
+individual records.

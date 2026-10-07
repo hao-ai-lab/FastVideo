@@ -1,6 +1,7 @@
 The reference videos are used as part of e2e SSIM regression tests.
-Wan inference coverage now lives in `test_wan_t2v_similarity.py` and
-`test_wan_i2v_similarity.py` alongside the other model-specific SSIM files.
+Wan inference coverage now lives in `test_wan_t2v_similarity.py`,
+`test_wan_i2v_similarity.py` and `test_wan_ti2v_similarity.py` alongside the
+other model-specific SSIM files.
 These tests compare newly generated videos against references to detect quality
 regressions.
 
@@ -12,7 +13,7 @@ reference layout:
 `<ssim_dir>/<GPU>_reference_videos/...` is still read as fallback.)
 
 Before SSIM tests run, missing reference videos are auto-downloaded from a
-public HF repo (configured by `FASTVIDEO_SSIM_REFERENCE_HF_REPO`, default:
+public HF repo (configured by `FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO`, default:
 `FastVideo/ssim-reference-videos`).
 
 Use the CLI:

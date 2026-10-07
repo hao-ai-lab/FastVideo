@@ -25,6 +25,8 @@ dependencies = [
     # transformers 5.0.0. Floor raised from >=5.0.0 to >=5.15.0 for the public
     # vision interpolation helper (get_vision_interpolation_indices_and_weights)
     # that the MiniMax-H3 Qwen3-VL encoder cross-checks against.
+    # LTX-2.5's packed Gemma 4 unified encoder also requires transformers 5.15.0+
+    # for correct mapping and loading of the Gemma 4 architecture.
     "transformers>=5.15.0",
     # <0.23: tokenizers 0.23 renamed RobertaProcessing's binding args, so
     # transformers' CLIP-style tokenizer loading dies with
@@ -110,7 +112,7 @@ dependencies = [
 prerelease = "allow"
 
 [tool.uv.workspace]
-members = ["apps/dreamverse"]
+members = ["apps/dreamverse", "apps/infinite_livestream"]
 
 [tool.uv.sources]
 # PyPI's aarch64 fastvideo-kernel wheels do not cover the NVIDIA DGX Spark /
@@ -145,6 +147,12 @@ swanlab = [
     "swanlab>=0.6.7",
 ]
 
+mmaudio-train = [
+    "librosa>=0.10.0",
+    "nitrous-ema==0.0.1",
+    "tensordict>=0.6.1",
+]
+
 lint = [
     "pre-commit==4.0.1",
     "types-aiofiles",
@@ -153,7 +161,7 @@ lint = [
 
 test = [
     "av",
-    "openai==3.6.0",  # OpenAI video-client compatibility tests; no cloud requests.
+    "openai==3.6.0",  # OpenAI video-client compatibility tests and the livestream app's moderator/upsampler tests; no cloud requests.
     "pytorch-msssim>=1.0.0",
     "pytest",
     "pandas",
@@ -170,6 +178,21 @@ test = [
 # judge.* metrics (eval-judge) call a remote API and need a key, so they
 # are opt-in and intentionally kept out of the default [eval] set.
 eval-vbench     = ["openai-clip", "pyiqa", "easydict"]
+eval-vqeval = [
+    # MediaPipe is deliberately not declared. VQeval's anatomical-error
+    # detector wants the legacy mp.solutions API, which only exists in
+    # mediapipe 0.10.x, and every 0.10.x pins protobuf<5 (0.10.21:
+    # protobuf<5,>=4.25.3) -- unsatisfiable next to the base
+    # protobuf>=5.28.3 pin above. mediapipe 1.x dropped mp.solutions.
+    # Upstream's artifact_detection wraps its mediapipe import in
+    # try/except and reports zero anatomical errors without it.
+    # cv2 comes from the base opencv-python pin; declaring
+    # opencv-contrib-python here too would install two providers of the
+    # cv2 package (mixed cv2 trees on version skew). Upstream's
+    # cv2.quality BRISQUE path falls back to pyiqa when contrib is absent.
+    "open_clip_torch>=2.24.0",
+    "pyiqa>=0.1.10",
+]
 eval-physics-iq = []
 eval-audio = ["jiwer", "librosa", "pyloudnorm", "hear21passt", "audiobox_aesthetics", "imagebind", "pytorchvideo"]
 eval-judge = ["google-genai"]
@@ -180,7 +203,7 @@ eval = [
     "fastvideo[eval-vbench]", "fastvideo[eval-physics-iq]",
 ]
 eval-fast-decode = ["decord"]
-eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "qwen-omni-utils"]
+eval-full = ["fastvideo[eval]", "fastvideo[eval-audio]", "fastvideo[eval-vqeval]", "qwen-omni-utils"]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
@@ -207,6 +230,14 @@ streaming = [
     "websockets",
 ]
 
+infinite-livestream = [
+    "av>=17,<19",
+    "fastapi>=0.115,<1",
+    "openai>=1.40",
+    "pyyaml>=6.0",
+    "uvicorn[standard]>=0.30,<1",
+]
+
 dreamverse = [
     "uvicorn[standard]>=0.41.0",
     "cerebras-cloud-sdk",
@@ -230,16 +261,19 @@ mlx = [
 
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
+infinite-livestream-server = "infinite_livestream.server_entry:cli"
 dreamverse-server = "dreamverse.server_entry:cli"
 dreamverse-mock-server = "dreamverse.mock_server:cli"
 
 [tool.setuptools.packages.find]
-where = [".", "apps/dreamverse"]
-exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*"]
+where = [".", "apps/dreamverse", "apps/infinite_livestream"]
+exclude = ["assets*", "docker*", "docs", "scripts*", "apps*", "dreamverse.tests*",
+           "infinite_livestream.tests*"]
 
 [tool.setuptools.package-data]
 "fastvideo.entrypoints.openai" = ["static/*.html", "static/*.css", "static/*.js"]
 dreamverse = ["prompts/*.md"]
+infinite_livestream = ["configs/*.yaml", "presets/*.json", "web/*"]
 "fastvideo.third_party.rife_mlx" = ["LICENSE"]
 "fastvideo.third_party.taehv" = ["LICENSE"]
 
@@ -267,7 +301,9 @@ skip = "./data,./wandb,apps/fastvideo_studio/package-lock.json,apps/performance_
 # "tread" matches daVinci-MagiHuman's acronym "TReAD" (Token Routing and
 # Early Drop). codespell lowercases ignore-words entries, so the single
 # lowercase form silences all case variants.
-ignore-words-list = "tread,passt,dout"
+# "padd" is the literal value of Wan2.2-S2V's ``framepack_drop_mode`` in the
+# published checkpoint config; it must be spelled exactly to match.
+ignore-words-list = "tread,passt,dout,padd"
 
 [tool.ruff]
 # Allow lines to be as long as 120.

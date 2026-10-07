@@ -6,16 +6,14 @@ import json
 from huggingface_hub import snapshot_download
 import torch
 
-# Ensure backend selection happens during import-time initialization
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 # Force VSA to use Triton implementation even on H100 / when CUDA extension is available
 # os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
-from fastvideo.training.wan_training_pipeline import main
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.utils import FlexibleArgumentParser
+import fastvideo.envs as envs
+from fastvideo.training.runner import main
+from fastvideo.utils import build_parser
 
 wandb_name = "test_training_loss_VSA"
 reference_wandb_summary_file = "fastvideo/tests/training/VSA/h100_reference_wandb_summary_VSA.json"
@@ -27,12 +25,12 @@ NUM_GPUS_PER_NODE = "2"
 def run_worker():
     """Worker function that will be run on each GPU"""
     # Create and populate args
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    parser = build_parser()
 
     # Set the arguments as they are in finetune_v1_test.sh
     args = parser.parse_args([
+        "--pipeline_class", "WanTrainingPipeline",
+        "--pipeline_module", "fastvideo.training.wan_training_pipeline",
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--data_path",
         "data/mini_dataset_i2v_VSA/combined_parquet_dataset", "--validation_dataset_file",
@@ -49,15 +47,13 @@ def run_worker():
         "--dit_precision", "fp32", "--max_grad_norm", "1.0", "--VSA_decay_rate", "0.01", "--VSA_decay_interval_steps",
         "1", "--VSA_sparsity", "0.9"
     ])
-
+    
     # Call the main training function
     main(args)
 
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ.setdefault("WANDB_MODE", "offline")
-
     data_dir = Path("data/mini_dataset_i2v_VSA")
 
     if not data_dir.exists():
@@ -73,7 +69,12 @@ def test_distributed_training():
     # Run torchrun command
     cmd = ["torchrun", "--nnodes", NUM_NODES, "--nproc_per_node", NUM_GPUS_PER_NODE, str(current_file)]
 
-    process = subprocess.run(cmd, check=True)
+    # The torchrun workers select VSA when the training pipeline initializes attention.
+    with (
+        envs.FASTVIDEO_ATTENTION_BACKEND.override("VIDEO_SPARSE_ATTN"),
+        envs.override_external("WANDB_MODE", "offline"),
+    ):
+        process = subprocess.run(cmd, check=True)
 
     summary_file = 'data/wan_finetune_test_VSA/tracker/wandb/latest-run/files/wandb-summary.json'
 

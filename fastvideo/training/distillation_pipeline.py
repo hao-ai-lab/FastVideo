@@ -1324,7 +1324,7 @@ class DistillationPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
 
-        use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN"
+        use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND.get() == "VIDEO_SPARSE_ATTN"
         for step in range(self.init_steps + 1, self.training_args.max_train_steps + 1):
             if step % 5 == 0:
                 gc.collect()
@@ -1506,7 +1506,7 @@ class DistillationPipeline(TrainingPipeline):
         if self.training_args.use_ema and self.is_ema_ready():
             self.save_ema_weights(self.training_args.output_dir, self.training_args.max_train_steps)
 
-        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR.get():
             logger.info("Stopping profiler...")
             self.profiler_controller.stop()
             logger.info("Profiler stopped.")

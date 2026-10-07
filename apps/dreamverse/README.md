@@ -158,6 +158,40 @@ dreamverse-server --host 0.0.0.0 --port 8009
 The Dreamverse backend defaults to `0.0.0.0:8009` and starts one GPU worker on
 the first visible GPU by default.
 
+### Cosmos Predict2.5 DFD continuation (experimental)
+
+Dreamverse can combine two converted Cosmos Predict2.5 2B packages: the
+distilled Text2World student creates an unconditioned first segment, then the
+Data-Forcing Distillation (DFD) Video2World student conditions each later
+segment on the prior terminal frame. Point the runtime at both local converted
+packages:
+
+```bash
+export DREAMVERSE_MODEL_ID=cosmos25-dfd
+export DREAMVERSE_MODEL_PATH=/path/to/Cosmos-Predict2.5-2B-Distilled-TrigFlow-FastVideo
+export DREAMVERSE_COSMOS25_DFD_MODEL_PATH=/path/to/Cosmos-Predict2.5-2B-DFD-FastVideo
+export ENABLE_TORCH_COMPILE=0
+dreamverse-server --host 0.0.0.0 --port 8009
+```
+
+The backend loads and warms both model roles before reporting ready. Both use
+BF16, Torch SDPA, 704x1280 output, 24 FPS, and four steps. Bootstrap segments
+contain 77 frames. DFD segments contain 81 decoded frames, but Dreamverse drops
+the repeated conditioning frame before streaming, leaving 80 new frames. An
+initial user image selects DFD immediately without treating that first frame as
+a cross-segment overlap.
+
+The profile uses a 30-minute session lease because sequential generation on
+GB10-class hardware can exceed Dreamverse's five-minute default while the GPU
+is still making progress. Deployments can override the lease with
+`FASTVIDEO_SESSION_TIMEOUT_SECONDS`.
+
+Cosmos does not produce audio, so the backend supplies duration-matched silent
+24 kHz audio for the existing browser streaming contract and trims 1,000 audio
+samples with each repeated DFD boundary frame. Runtime LoRA changes are not
+supported. Full segments take roughly 145 seconds on GB10, so this profile is a
+continuation-quality integration rather than a real-time configuration.
+
 ### Check Readiness
 
 In another shell, verify that the backend process is alive:

@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-gpus", type=int, default=4)
     parser.add_argument(
         "--execution-backend",
-        choices=("mp", "ray"),
+        choices=("mp", "uni", "ray"),
         default=None,
         help="mp for one node; ray for a Ray cluster (two DGX Sparks). "
         "Default: ray when RAY_ADDRESS is set, otherwise mp",
@@ -139,10 +139,17 @@ def main() -> None:
             # machine-readable: benchmark harnesses parse this line to separate
             # generation from model-load time (last occurrence = steady state)
             print(f"Generation time: {result.generation_time:.2f}s")
+        # Worker-lifetime allocator high-water mark: torch never resets it
+        # between generations, so it includes model load and every prior run.
+        if result.peak_memory_mb is not None:
+            print(f"Peak memory: {result.peak_memory_mb:.1f} MB")
         for _ in range(args.repeats - 1):
             result = generator.generate(request)
             if result.generation_time is not None:
                 print(f"Generation time: {result.generation_time:.2f}s")
+            # Same worker-lifetime peak as above; it does not reset per repeat.
+            if result.peak_memory_mb is not None:
+                print(f"Peak memory: {result.peak_memory_mb:.1f} MB")
     finally:
         generator.shutdown()
 

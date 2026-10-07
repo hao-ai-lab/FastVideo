@@ -90,6 +90,10 @@ def parse_args() -> argparse.Namespace:
         help=("retain and quantize transformer_blocks.*.attn.to_gate_compress.weight "
               "(required for MLX VSA inference; omitted by dense conversion)"),
     )
+    parser.add_argument("--nvfp4-conditioner-root", type=Path,
+                        help="also cache the released packed encoder in native MLX layout, without requantization")
+    parser.add_argument("--nvfp4-conditioner-out", type=Path,
+                        help="empty encoder-cache output directory; defaults to OUT/nvfp4-encoder")
     return parser.parse_args()
 
 
@@ -143,6 +147,21 @@ def main() -> None:
         gc.collect()
         if hasattr(mx, "clear_cache"):
             mx.clear_cache()
+
+    if args.nvfp4_conditioner_root is not None:
+        from fastvideo.mlx_runtime.minimax_h3_conditioner import (
+            MLX_NVFP4_ENCODER_MANIFEST,
+            export_mlx_h3_nvfp4_encoder,
+        )
+
+        encoder_out = args.nvfp4_conditioner_out or out_base / "nvfp4-encoder"
+        if (encoder_out / MLX_NVFP4_ENCODER_MANIFEST).exists() and (encoder_out / "model.safetensors").exists():
+            print(f"[skip] NVFP4 encoder already cached at {encoder_out}", flush=True)
+        else:
+            started = time.perf_counter()
+            export_mlx_h3_nvfp4_encoder(args.nvfp4_conditioner_root, encoder_out)
+            print(f"[encoder] cached packed NVFP4 encoder in {time.perf_counter() - started:.1f}s at {encoder_out}",
+                  flush=True)
 
 
 if __name__ == "__main__":

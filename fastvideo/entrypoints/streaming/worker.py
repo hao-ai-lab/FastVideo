@@ -50,11 +50,17 @@ def worker_main(
     ``VideoGenerator`` construction + generation happens here, not in
     the parent's event loop.
     """
-    import os
+    import fastvideo.envs as envs
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    envs.set_external("CUDA_VISIBLE_DEVICES", str(gpu_id))
     try:
         from fastvideo import VideoGenerator
+        from fastvideo.worker.executor import reject_external_launcher
+
+        reject_external_launcher(
+            generator_config.engine.execution_backend,
+            entrypoint="the streaming worker",
+        )
 
         generator = VideoGenerator.from_pretrained(config=generator_config)
         if warmup_config.enabled:
