@@ -747,9 +747,8 @@ class VideoGenerator:
     ) -> str:
         """Build a unique, sanitized output file path.
 
-        The file extension is chosen automatically based on the workload type:
-        ``.png`` for image workloads (``t2i``, ``i2i``, …) and ``.mp4`` for
-        video workloads.
+        Image workloads preserve explicit PNG, JPEG, or WebP extensions and
+        otherwise default to ``.png``. Video workloads use ``.mp4``.
 
         - If ``output_path`` already carries the correct extension, treat it
           as a file path.
@@ -759,8 +758,12 @@ class VideoGenerator:
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
         """
+        base_path, extension = os.path.splitext(output_path)
+        extension_lower = extension.lower()
+        is_directory = os.path.isdir(output_path)
         if self._is_image_workload():
-            target_ext = ".png"
+            target_ext = extension_lower if not is_directory and extension_lower in {".png", ".jpg", ".jpeg", ".webp"
+                                                                                     } else ".png"
         elif self._is_audio_workload():
             target_ext = ".wav"
         else:
@@ -773,10 +776,7 @@ class VideoGenerator:
             sanitized = re.sub(r'\s+', ' ', sanitized)
             return sanitized or "output"
 
-        base_path, extension = os.path.splitext(output_path)
-        extension_lower = extension.lower()
-
-        if extension_lower == target_ext:
+        if extension_lower == target_ext and not is_directory:
             output_dir = os.path.dirname(output_path)
             base_name = os.path.basename(base_path)  # filename without extension
             sanitized_base = _sanitize_filename_component(base_name)
