@@ -47,6 +47,28 @@ FastVideo training scripts use several argument groups:
 | `--validation_sampling_steps` | Inference steps for validation |
 | `--validation_guidance_scale` | CFG scale for validation |
 
+## Runner Entry Point
+
+All training launchers go through the generic runner, which resolves the pipeline class from two
+required flags:
+
+| Argument | Description |
+|----------|-------------|
+| `--pipeline-class` | Pipeline class to run, e.g. `WanTrainingPipeline` |
+| `--pipeline-module` | Module that defines the class, e.g. `fastvideo.training.wan_training_pipeline` |
+
+```bash
+torchrun --nnodes 1 --nproc_per_node 4 \
+  fastvideo/training/runner.py \
+  --pipeline-class WanTrainingPipeline \
+  --pipeline-module fastvideo.training.wan_training_pipeline \
+  --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+  --data_path data/crush-smol_processed_t2v/combined_parquet_dataset
+```
+
+Running a pipeline module directly (e.g. `fastvideo/training/wan_training_pipeline.py`) still works
+but prints a deprecation banner.
+
 ## Full Finetuning
 
 Full finetuning updates all model weights. This provides the best quality but requires more GPU memory.
