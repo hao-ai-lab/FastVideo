@@ -41,8 +41,6 @@ def test_writer_records_without_byt5_still_build_a_table() -> None:
     so a record built before these columns existed raises KeyError, while
     ``records_to_table`` (from_pylist) fills them with null.
     """
-    import pyarrow as pa
-
     from fastvideo.dataset.dataloader.parquet_io import records_to_table
 
     secondary = {

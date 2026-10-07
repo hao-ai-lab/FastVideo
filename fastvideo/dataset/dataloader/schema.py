@@ -66,7 +66,9 @@ pyarrow_schema_t2v = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    # Secondary text embedding: ByT5, nullable=True preserves compatibility at the Arrow schema level.
+    # Secondary text embedding: ByT5. Compatibility with writers that predate
+    # these columns comes from records_to_table (from_pylist fills absent keys
+    # with null); nullable=True only permits those nulls.
     pa.field("text_embedding_2_bytes", pa.binary(), nullable=True),
     pa.field(
         "text_embedding_2_shape",

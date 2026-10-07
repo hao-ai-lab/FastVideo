@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Preprocess HunyuanVideo 1.5 overfit data into parquet format."""
+"""Preprocess HunyuanVideo 1.5 overfit data into parquet format.
+
+This script writes both the Qwen (``text_embedding_*``) and the ByT5
+(``text_embedding_2_*``) embeddings. The generic CLI preprocess workflow
+(``PreprocessPipeline_T2V``) only runs the primary text encoder, so
+HunyuanVideo 1.5 data must come from this script to keep glyph conditioning.
+"""
 
 from __future__ import annotations
 
@@ -34,9 +40,9 @@ MAX_HEIGHT = 480
 MAX_WIDTH = 832
 TRAIN_FPS = 16.0
 
-# Overridable so a test can point at its own directories. Without this the
-# only usable paths are the documented recipe's, and anything automated ends up
-# writing over whatever clips and captions a user has prepared there.
+# Overridable via environment variables so a run can point at its own
+# directories instead of the documented recipe's paths. Note that these are
+# read at import time.
 DATA_DIR = os.environ.get("HY15_OVERFIT_DATA_DIR", "data/hunyuan15_overfit")
 OUTPUT_DIR = os.environ.get("HY15_OVERFIT_OUTPUT_DIR", "data/hunyuan15_overfit_preprocessed")
 MODEL_REPO = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
@@ -69,6 +75,9 @@ def load_caption_data() -> list[dict[str, Any]]:
         caption_data = json.load(file)
 
     if MAX_SAMPLES is not None:
+        if len(caption_data) > MAX_SAMPLES:
+            print(f"MAX_SAMPLES={MAX_SAMPLES}: using first {MAX_SAMPLES} "
+                  f"of {len(caption_data)} records from {caption_path}")
         caption_data = caption_data[:MAX_SAMPLES]
 
     if not caption_data:
@@ -279,7 +288,11 @@ def encode_video_latent(
     # DiagonalGaussianDistribution directly.
     latent_dist = (encoded.latent_dist if hasattr(encoded, "latent_dist") else encoded)
 
-    if hasattr(latent_dist, "mode"):
+    if isinstance(latent_dist, torch.Tensor):
+        # Checked first: torch.Tensor.mode is a bound method, so a raw tensor
+        # would otherwise take the .mode() branch.
+        latent = latent_dist
+    elif hasattr(latent_dist, "mode"):
         latent = latent_dist.mode()
     elif hasattr(latent_dist, "mean"):
         latent = latent_dist.mean

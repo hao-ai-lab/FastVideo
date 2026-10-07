@@ -318,6 +318,30 @@ def test_encode_video_latent_accepts_latent_dist_wrapper() -> None:
     )
 
 
+def test_encode_video_latent_accepts_raw_tensor() -> None:
+    """A raw tensor must not be mistaken for a distribution with .mode()."""
+
+    latent = torch.randn(
+        1,
+        32,
+        2,
+        4,
+        4,
+    )
+
+    vae = _FakeVAE(latent)
+
+    result = preprocess.encode_video_latent(
+        vae=vae,
+        video=torch.empty(1),
+    )
+
+    torch.testing.assert_close(
+        result,
+        latent.squeeze(0).float(),
+    )
+
+
 def test_encode_video_latent_falls_back_to_mean() -> None:
     latent = torch.randn(
         1,

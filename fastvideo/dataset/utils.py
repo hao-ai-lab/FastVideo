@@ -60,6 +60,12 @@ def collate_latents_embs_masks(batch_to_process,
                                keys,
                                cfg_rate=0.0,
                                rng=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+    """Collate latents and text embeddings for the iterable-style loader.
+
+    The batch is built from the explicit ``keys`` list, so this path is
+    primary-encoder-only: the secondary ByT5 embedding (``text_embedding_2``)
+    and its mask are not read even when the parquet rows contain them.
+    """
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -189,8 +195,10 @@ def collate_rows_from_parquet_schema(rows,
 
                 tensor_list.append(tensor)
             else:
-                # Handle missing tensor data
-                if tensor_name == "text_embedding_2":
+                # Handle missing tensor data. Text embeddings stay None so the
+                # branch below raises a precise "missing" error instead of
+                # tripping the generic shape check.
+                if tensor_name in ("text_embedding", "text_embedding_2"):
                     tensor_list.append(None)
                 else:
                     tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))

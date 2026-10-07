@@ -6,7 +6,6 @@ from typing import Any
 
 import numpy as np
 import pyarrow.parquet as pq
-import pytest
 import torch
 
 from fastvideo.dataset.dataloader.parquet_io import records_to_table
