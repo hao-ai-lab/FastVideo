@@ -353,6 +353,19 @@ class TestWanPresets:
         family = get_model_family("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
         assert family == "wan"
 
+    def test_more_specific_later_detector_match_keeps_first_and_warns(self, tmp_path, monkeypatch) -> None:
+        """A later detector match that shares more of the path never overrides
+        registration order (test_wan_definitions pins that resolution), so the
+        choice stays ambiguous and still warns."""
+        import fastvideo.registry  # noqa: F401
+        from fastvideo.registry import get_preset_selection
+        warnings = _record_registry_warnings(monkeypatch)
+        model_dir = tmp_path / "lucy-edit-custom"
+        _write_minimal_model_index(model_dir, "WanPipeline")
+        assert get_preset_selection(str(model_dir)) == ("wan_t2v_1_3b", "wan")
+        assert len(warnings) == 1
+        assert "Multiple models matched" in warnings[0][0]
+
 
 # -------------------------------------------------------------------
 # LTX2 preset integration

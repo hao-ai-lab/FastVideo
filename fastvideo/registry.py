@@ -196,9 +196,8 @@ def _pattern_specificity(model_id: str, path_lower: str) -> int:
     """How specifically ``path_lower`` points at ``model_id``: the longest
     substring it shares with any of the model's registered HF paths (short
     names). Unlike plain containment this still scores truncated or
-    re-hyphenated local directory names (e.g. ``ltx-2.3-distilled``), so a
-    dedicated entry is not shadowed by a shorter, more generic alias that
-    merely happens to appear verbatim in the query."""
+    re-hyphenated local directory names (e.g. ``ltx-2.3-distilled``). An
+    entry registered only through detectors scores 0."""
     return max((_longest_common_substring_length(path_lower, get_model_short_name(registered_path.lower()))
                 for registered_path, mapped_id in _MODEL_HF_PATH_TO_NAME.items() if mapped_id == model_id),
                default=0)
@@ -255,19 +254,19 @@ def _get_config_info(
 
     if matched_model_names:
         if len(matched_model_names) > 1:
-            # Most specific entry wins: rank matches by how much of the query
-            # path each entry's registered HF paths cover, so a broad family
-            # detector (e.g. LTX-2 base firing on the shared pipeline class
-            # name) never shadows a dedicated entry (e.g. LTX-2.3 distilled).
-            # Warn only when matches are equally specific (genuine ambiguity);
-            # ties keep registration order.
+            # The first detector match always wins: registration order is the
+            # supported precedence (dedicated entries register before broad
+            # family ones, e.g. LTX-2 distilled before LTX-2 base), even when
+            # a path detector and a class-name detector disagree.
+            # Specificity only decides whether that choice is ambiguous. When
+            # the first match shares more of the query path with its
+            # registered HF paths than every other match does (e.g. an
+            # LTX-2.3 distilled directory that the LTX-2 base detector also
+            # claims through the shared pipeline class name), resolve
+            # silently. Otherwise warn.
             path_lower = model_path.lower()
-            scores = [_pattern_specificity(name, path_lower) for name in matched_model_names]
-            best_score = max(scores)
-            matched_model_names = [
-                name for name, score in zip(matched_model_names, scores, strict=False) if score == best_score
-            ]
-            if len(matched_model_names) > 1:
+            first_score, *other_scores = [_pattern_specificity(name, path_lower) for name in matched_model_names]
+            if first_score <= max(other_scores):
                 logger.warning(
                     "Multiple models matched for path '%s': %s. Using the first matched: '%s'.",
                     model_path,
