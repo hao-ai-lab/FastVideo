@@ -1,0 +1,20 @@
+# Minimum config to instantiate Hunyuan15Model for the loading + forward
+# smoke test. Loads the real HunyuanVideo-1.5 480p T2V checkpoint (~8B)
+# via load_module_from_path. HY1.5 uses dual text encoders (Qwen2.5-VL
+# 3584 + ByT5 1472) and a 32-channel VAE latent space.
+
+models:
+  student:
+    _target_: fastvideo.train.models.hunyuan15.Hunyuan15Model
+    init_from: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
+    trainable: false
+    flow_shift: 5.0
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+pipeline:
+  flow_shift: 5.0
