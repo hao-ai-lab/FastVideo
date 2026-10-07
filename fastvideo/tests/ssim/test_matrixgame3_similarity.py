@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -78,12 +79,12 @@ TEST_IMAGE_PATHS = [
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_matrixgame3_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """
     Test that runs MG3 inference (action conditions auto-generated from seed)
     and compares the output to reference videos using SSIM.
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 

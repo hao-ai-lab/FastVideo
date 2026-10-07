@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Reason1 (Qwen2.5-VL) text encoder."""
 
-import os
 from dataclasses import dataclass
 from collections.abc import Iterable
 
 import torch
 from transformers import AutoProcessor
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders import BaseEncoderOutput, Reason1Config
 from fastvideo.logger import init_logger
 from fastvideo.models.encoders.base import TextEncoder
@@ -89,7 +89,7 @@ class Reason1TextEncoder(TextEncoder):
             trust_remote_code=True,
         )
 
-        weights_override = os.getenv("FASTVIDEO_REASON1_WEIGHTS_PATH")
+        weights_override = envs.FASTVIDEO_REASON1_WEIGHTS_PATH.get()
         if weights_override:
             self.secondary_weights = (_WeightsSource(
                 model_or_path=weights_override,

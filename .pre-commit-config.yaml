@@ -9,7 +9,7 @@ exclude: |
     tests/.*|
     scripts/.*|
     fastvideo/dataset/.*|
-    fastvideo/models/.*|
+    fastvideo/models/(?!wan/(config|vae_config|pipeline_config|definition|__init__)\.py$).*|
     ^apps/dreamverse/web/.*|
     examples/.*|
     \.agents/.*|

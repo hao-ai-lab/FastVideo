@@ -36,7 +36,7 @@ _MODE_FROM_DIMS = {(2, 1): 0, (1, 2): 1}
 
 def is_enabled() -> bool:
     """Whether the fused path is opted in via FASTVIDEO_ULYSSES_A2A."""
-    return envs.FASTVIDEO_ULYSSES_A2A == "auto"
+    return envs.FASTVIDEO_ULYSSES_A2A.get() == "auto"
 
 
 class _FusedUlyssesA2A(torch.autograd.Function):

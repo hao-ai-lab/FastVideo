@@ -7,6 +7,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PLANNER_PATH = REPO_ROOT / ".github/scripts/plan_merge_ci.py"
 SPEC = importlib.util.spec_from_file_location("plan_merge_ci", PLANNER_PATH)
@@ -28,11 +30,25 @@ def test_docs_only_merge_adds_no_gpu_lanes():
     assert plan.encoded_ssim_tests() == "none"
 
 
-def test_model_family_change_selects_focused_golden_and_ssim():
-    plan = PLAN_MERGE_CI.classify_paths(["fastvideo/models/dits/wanvideo.py"])
+@pytest.mark.parametrize("path, goldens", [
+    ("fastvideo/models/dits/wanvideo.py", "test_wan_denoising.py,test_wan_t2v.py"),
+    ("fastvideo/models/wan/transformer.py", "test_wan_denoising.py,test_wan_t2v.py"),
+    ("fastvideo/models/wan/vae.py", "test_wan_vae.py"),
+    ("fastvideo/models/wan/vae_config.py", "test_wan_vae.py"),
+    ("fastvideo/models/vaes/wanvae.py", "test_wan_vae.py"),
+    ("fastvideo/configs/models/vaes/wanvae.py", "test_wan_vae.py"),
+    ("fastvideo/models/wan/causal_transformer.py", "test_wan_causal.py"),
+    ("fastvideo/models/dits/causal_wanvideo.py", "test_wan_causal.py"),
+    ("fastvideo/pipelines/basic/wan/stages/conditioning.py", "test_wan_vae.py"),
+    ("fastvideo/pipelines/basic/wan/stages/causal_denoising.py", "test_wan_causal.py"),
+    ("fastvideo/pipelines/basic/wan/stages/denoising.py", "test_wan_denoising.py,test_wan_t2v.py"),
+    ("fastvideo/pipelines/basic/wan/stages/dmd.py", "test_wan_denoising.py,test_wan_t2v.py"),
+])
+def test_model_family_change_selects_focused_golden_and_ssim(path, goldens):
+    plan = PLAN_MERGE_CI.classify_paths([path])
 
     assert plan.encoded_lanes() == ",golden-gate,ssim,"
-    assert plan.encoded_golden_tests() == "test_wan_t2v.py"
+    assert plan.encoded_golden_tests() == goldens
     assert plan.encoded_ssim_tests() == (
         "test_causal_similarity.py,test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
 
@@ -44,6 +60,50 @@ def test_hunyuan15_change_selects_its_i2v_ssim_test():
     # No HunyuanVideo 1.5 golden test exists yet, so golden coverage stays "all".
     assert plan.encoded_golden_tests() == "all"
     assert plan.encoded_ssim_tests() == "test_hunyuan15_i2v_similarity.py"
+
+
+@pytest.mark.parametrize("path", [
+    "fastvideo/configs/models/dits/wanvideo.py",
+    "fastvideo/models/wan/config.py",
+    "fastvideo/models/wan/__init__.py",
+    "fastvideo/pipelines/basic/wan/wan_pipeline.py",
+])
+def test_wan_shared_config_and_wiring_select_all_wan_gates(path):
+    plan = PLAN_MERGE_CI.classify_paths([path])
+    assert plan.encoded_golden_tests() == "test_wan_causal.py,test_wan_denoising.py,test_wan_t2v.py,test_wan_vae.py"
+
+
+def test_wan_family_relocation_keeps_shared_registry_coverage():
+    plan = PLAN_MERGE_CI.classify_paths([
+        "fastvideo/models/dits/wanvideo.py",
+        "fastvideo/configs/models/dits/wanvideo.py",
+        "fastvideo/models/wan/__init__.py",
+        "fastvideo/models/wan/config.py",
+        "fastvideo/models/wan/transformer.py",
+        "fastvideo/models/vaes/wanvae.py",
+        "fastvideo/configs/models/vaes/wanvae.py",
+        "fastvideo/models/wan/vae.py",
+        "fastvideo/models/wan/vae_config.py",
+        "fastvideo/models/wan/AGENTS.md",
+        "fastvideo/models/registry.py",
+        "fastvideo/AGENTS.md",
+        "fastvideo/models/AGENTS.md",
+        "fastvideo/configs/AGENTS.md",
+        "fastvideo/tests/loader/test_wan_family_imports.py",
+        "fastvideo/tests/vaes/test_wan_vae.py",
+        "fastvideo/tests/vaes/test_wan_vae_compile.py",
+        "fastvideo/tests/contract/test_merge_ci_plan.py",
+        ".pre-commit-config.yaml",
+        "docs/design/overview.md",
+        "docs/inference/architecture.md",
+        "docs/contributing/coding_agents.md",
+    ])
+
+    assert plan.encoded_lanes() == ",golden-gate,ssim,"
+    assert plan.encoded_golden_tests() == "all"
+    assert plan.encoded_ssim_tests() == (
+        "test_causal_similarity.py,test_flux_t2i_similarity.py,"
+        "test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
 
 
 def test_flux2_change_does_not_pull_unrelated_flux1_quality_tests():
@@ -101,8 +161,13 @@ def test_performance_implementation_selects_only_performance_lane():
     assert plan.encoded_lanes() == ",performance,"
 
 
-def test_shared_runtime_change_gets_focused_quality_smoke_not_every_lane():
-    plan = PLAN_MERGE_CI.classify_paths(["fastvideo/registry.py"])
+@pytest.mark.parametrize("path", [
+    "fastvideo/registry.py",
+    "fastvideo/pipelines/stages/denoising.py",
+    "fastvideo/pipelines/stages/causal_denoising.py",
+])
+def test_shared_runtime_change_gets_focused_quality_smoke_not_every_lane(path):
+    plan = PLAN_MERGE_CI.classify_paths([path])
 
     assert plan.encoded_lanes() == ",golden-gate,ssim,"
     assert plan.encoded_golden_tests() == "all"
