@@ -28,11 +28,17 @@ from fastvideo.api.schema import (
 
 class _FakeExecutor:
 
+    is_output_rank = True
+    uses_spmd_execution = False
+
     def set_log_queue(self, q):
         self.log_queue = q
 
     def clear_log_queue(self):
         self.log_queue = None
+
+    def broadcast_from_output_rank(self, value):
+        return value
 
 
 class _FakeVideoGenerator:
@@ -50,6 +56,9 @@ class _FakeVideoGenerator:
         request: GenerationRequest,
     ) -> GenerationResult | list[GenerationResult]:
         return self._result
+
+    def _synchronize_request_prompt(self, request):
+        return request
 
     @staticmethod
     def _wrap_legacy_result(result):

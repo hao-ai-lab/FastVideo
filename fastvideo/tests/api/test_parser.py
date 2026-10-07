@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
+from pathlib import Path
 
 import yaml
 
@@ -73,6 +74,37 @@ def test_parse_config_accepts_existing_typed_instance() -> None:
     )
 
     assert parse_config(RunConfig, typed) is typed
+
+
+def test_parse_config_accepts_external_launcher_backend() -> None:
+    config = parse_config(
+        GeneratorConfig,
+        {
+            "model_path": "/models/minimax-h3",
+            "engine": {
+                "num_gpus": 8,
+                "execution_backend": "external_launcher",
+                "parallelism": {
+                    "sp_size": 8
+                },
+            },
+        },
+    )
+
+    assert config.engine.execution_backend == "external_launcher"
+    assert config.engine.num_gpus == 8
+    assert config.engine.parallelism.sp_size == 8
+
+
+def test_external_launcher_example_is_a_valid_run_config() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    config = load_run_config(repo_root / "examples/inference/basic/minimax_h3_external_launcher.yaml")
+
+    assert config.generator.engine.execution_backend == "external_launcher"
+    assert config.generator.engine.num_gpus == 4
+    assert config.generator.engine.parallelism.sp_size == 4
+    assert config.generator.engine.parallelism.dist_timeout == 600
+    assert config.request.output.return_frames is False
 
 
 def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
