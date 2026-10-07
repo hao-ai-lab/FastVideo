@@ -21,6 +21,7 @@ import tempfile
 import torch
 import torchvision.io
 
+import fastvideo.envs as envs
 from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
@@ -58,12 +59,12 @@ class SceneMetric(BaseMetric):
         from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
 
         # AVoCaDO uses Qwen2.5-Omni — large multimodal model
-        os.environ.setdefault("VIDEO_MAX_PIXELS", str(20070400))  # 512*28*28*50
+        envs.setdefault_external("VIDEO_MAX_PIXELS", str(20070400))  # 512*28*28*50
 
         self._model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
             self._model_path,
             torch_dtype=torch.bfloat16,
-            device_map=str(self.device) if self.device.type == "cuda" else None,
+            device_map=str(self.device) if self.device.type != "cpu" else None,
         )
         self._model.disable_talker()
         self._model.eval()

@@ -8,7 +8,7 @@ A third backend behind the same VSA op as the Triton and CuTe-DSL paths. This mo
 forward: it returns ``(out, lse)`` with ``lse`` in exactly the form
 ``triton_block_sparse_attn_forward`` writes -- ``max(qk * qk_scale) + log2(l)``, ``[B, H, S]``
 fp32 -- so both ``block_sparse_attn_backward_triton`` and the sm_100a CUDA backward
-(``block_sparse_attn_bwd_sm100a``, 64-token blocks, sm_100a devices only) run against it
+(``block_sparse_attn_bwd_sm100a``, 64- and 128-token blocks, sm_100a / sm_103a) run against it
 unchanged.
 
 The extension carries TWO instantiations of the kernel, for 64- and 128-token sparse blocks
@@ -43,9 +43,10 @@ BHSD = True
 
 
 def _block_size(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> int:
+    # A plain int: dynamic-shape torch.compile hands SymInt shapes, which cannot key _FWD_BY_BLOCK.
     num_blocks = variable_block_sizes.numel()
     seqlen = q.shape[2] if BHSD else q.shape[1]
-    return 0 if num_blocks == 0 or seqlen % num_blocks else seqlen // num_blocks
+    return 0 if num_blocks == 0 or seqlen % num_blocks else int(seqlen // num_blocks)
 
 
 def is_supported(q: torch.Tensor, variable_block_sizes: torch.Tensor) -> bool:

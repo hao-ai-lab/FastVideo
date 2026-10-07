@@ -1,3 +1,4 @@
+import fastvideo.envs as envs
 from fastvideo.eval.models import ensure_checkpoint, get_cache_dir
 
 
@@ -14,9 +15,8 @@ def _redirect_third_party_caches() -> None:
     env vars at all; their callsites in metric.py files pass
     ``download_root=str(get_cache_dir() / "<library>")`` directly.
     """
-    import os
     root = get_cache_dir()
-    os.environ.setdefault("TORCH_HOME", str(root / "torch"))
+    envs.setdefault_external("TORCH_HOME", str(root / "torch"))
 
 
 _redirect_third_party_caches()

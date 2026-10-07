@@ -5,10 +5,9 @@ Audio decoding stage for LTX-2 pipelines.
 
 from __future__ import annotations
 
-import os
-
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -55,7 +54,7 @@ class LTX2AudioDecodingStage(PipelineStage):
         self.vocoder = self.vocoder.to(device)
         audio_latents = audio_latents.to(device)
 
-        disable_autocast = os.getenv("LTX2_DISABLE_AUDIO_AUTOCAST", "1") == "1"
+        disable_autocast = envs.FASTVIDEO_LTX2_DISABLE_AUDIO_AUTOCAST.get()
         with torch.no_grad(), torch.autocast(
                 device_type="cuda",
                 dtype=audio_latents.dtype,
