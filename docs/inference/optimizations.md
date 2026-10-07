@@ -7,7 +7,8 @@ This page describes the various options for speeding up generation times in Fast
     Several options on this page behave differently on the GB10's unified-memory
     hardware — some give little or nothing there. See
     [DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
-    for what actually helps on that platform and why.
+    for what actually helps on that platform and why. Two Sparks, one clip:
+    [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
 
 ## Table of Contents
 
@@ -197,6 +198,11 @@ The `attn_qat_infer` kernel hard-gates on **sm_120 (consumer Blackwell / RTX
 5090)**; on other GPUs the backend logs a notice and falls back to Flash
 Attention. See the [Attn-QAT paper](https://arxiv.org/abs/2603.00040).
 
+For VSA-distilled MiniMax-H3 students, the same kernel has a block-sparse
+forward that runs VSA's 64-token tile selection in FP4
+(`FASTVIDEO_H3_VSA_FP4=1`). See
+[FastH3 NVFP4 on RTX PRO 6000](fasth3_rtx_pro_6000.md).
+
 Enable both halves — attention via the env var, linear via `transformer_quant`:
 
 ```python
@@ -293,6 +299,9 @@ automatically.
 ### Requirements
 
 - **GPU**: sm89+ (H100, L40S, RTX 4090, or newer) for hardware FP8 compute
+- **ROCm**: CDNA4 (MI350X / MI355X, gfx950) runs the FP8 `_scaled_mm` path through
+  hipBLASLt (OCP e4m3fn). MI300X (gfx942) only exposes the `fnuz` FP8 formats and
+  takes the bf16 dequant fallback like a pre-sm89 GPU.
 - No additional packages required beyond the base FastVideo install
 
 ### Usage

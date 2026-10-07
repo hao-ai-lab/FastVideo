@@ -443,7 +443,7 @@ def test_serve_subcommand_dispatches_via_typed_config(tmp_path, monkeypatch):
         captured["config"] = config
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir, default_request):
+    def fake_run_server(fastvideo_args, host, port, output_dir, default_request, served_model_name=None):
         captured["fastvideo_args"] = fastvideo_args
         captured["host"] = host
         captured["port"] = port
@@ -482,7 +482,7 @@ def test_serve_subcommand_forwards_default_request(tmp_path, monkeypatch):
     def fake_generator_config_to_fastvideo_args(config):
         return SimpleNamespace(model_path=config.model_path)
 
-    def fake_run_server(fastvideo_args, host, port, output_dir, default_request):
+    def fake_run_server(fastvideo_args, host, port, output_dir, default_request, served_model_name=None):
         captured["default_request"] = default_request
 
     monkeypatch.setattr(

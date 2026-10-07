@@ -10,7 +10,7 @@ checkpoint value.
 
 The tower itself is the Wan-I2V one (this class only switches on the I2V
 knobs ``image_dim``/``added_kv_proj_dim``); why that is the right base is
-explained on ``WanAnimate14BConfig`` in ``configs/pipelines/wan.py``. What
+explained on ``WanAnimate14BConfig`` in ``models/wan/pipeline_config.py``. What
 Animate adds on top:
 
 * ``in_channels = 36 = 16 (noise) + 4 (mask) + 16 (conditional latent)``.
@@ -37,7 +37,7 @@ entry, mirroring how the base ``patch_embedding`` is wrapped in ``.proj``.
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
-from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
+from fastvideo.models.wan.config import WanVideoArchConfig
 from fastvideo.platforms import AttentionBackendEnum
 
 

@@ -16,6 +16,7 @@ import pytest
 import torch
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines.zimage import ZImagePipelineConfig
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
@@ -32,7 +33,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REFERENCE_REVISION = "26f23eda626ffadda020b04ff79488e1d72004cd"
 REFERENCE_REPO = Path(os.getenv("ZIMAGE_REFERENCE_REPO", REPO_ROOT / "Z-Image"))
-MODEL_DIR = Path(os.getenv("ZIMAGE_MODEL_DIR", REPO_ROOT / "official_weights" / "Z-Image"))
+MODEL_DIR = Path(envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.get() if envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.is_set() else
+                 REPO_ROOT / "official_weights" / "Z-Image")
 
 
 class _ConstantTransformer:

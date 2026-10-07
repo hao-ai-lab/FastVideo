@@ -8,8 +8,8 @@
 #
 # Preprocess data first (writes data/ltx2_3_overfit_preprocessed):
 #   CUDA_VISIBLE_DEVICES=0 \
-#   LTX2_OVERFIT_MODEL=FastVideo/LTX-2.3-Distilled-Diffusers \
-#   LTX2_OVERFIT_OUTPUT_DIR=data/ltx2_3_overfit_preprocessed \
+#   FASTVIDEO_TEST_LTX2_OVERFIT_MODEL=FastVideo/LTX-2.3-Distilled-Diffusers \
+#   FASTVIDEO_TEST_LTX2_OVERFIT_OUTPUT_DIR=data/ltx2_3_overfit_preprocessed \
 #   python fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py
 #
 # Run:

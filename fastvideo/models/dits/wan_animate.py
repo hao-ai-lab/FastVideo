@@ -32,15 +32,15 @@ from typing import Any
 import torch
 from torch import nn
 
-import fastvideo.envs as envs
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.configs.models.dits.wan_animate import WanAnimateConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import PatchEmbed
 from fastvideo.models.dits.wan_animate_face import (MotionConv2d, WanAnimateFaceCrossAttention,
                                                     WanAnimateFaceEncoder, WanAnimateMotionEncoder)
-from fastvideo.models.dits.wanvideo import WanTransformer3DModel
-from fastvideo.platforms import current_platform
+from fastvideo.models.wan.transformer import WanTransformer3DModel
+from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 
 class WanAnimateTransformer3DModel(WanTransformer3DModel):
@@ -54,12 +54,14 @@ class WanAnimateTransformer3DModel(WanTransformer3DModel):
     lora_param_names_mapping = WanAnimateConfig().lora_param_names_mapping
 
     def __init__(self, config: WanAnimateConfig, hf_config: dict[str, Any]) -> None:
-        if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+        # Same backend resolution the base __init__ uses to pick its block type.
+        if effective_attention_backend(config) == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             raise ValueError(
                 "Wan-Animate has no VSA checkpoint. The base __init__ would swap in "
                 "WanTransformerBlock_VSA, whose to_gate_compress weights are absent here and get "
-                "silently zero-filled by the loader (fsdp_load ALLOWED_NEW_PARAM_PATTERNS). Unset "
-                "FASTVIDEO_ATTENTION_BACKEND.")
+                "silently zero-filled by the loader (fsdp_load ALLOWED_NEW_PARAM_PATTERNS). Select a "
+                "non-VSA attention backend (unset FASTVIDEO_ATTENTION_BACKEND or the transformer's "
+                "attention_backend).")
         if get_sp_world_size() > 1:
             raise NotImplementedError(
                 "Wan-Animate does not support sequence parallelism yet: the face adapter's "

@@ -27,10 +27,14 @@ tests/local_tests/<family>/
 | Hunyuan GameCraft | T2V / I2V | [`gamecraft/`](./gamecraft/) |
 | GEN3C | T2V | [`gen3c/`](./gen3c/) |
 | Kandinsky-5 | T2V | [`kandinsky5/`](./kandinsky5/) |
+| Kandinsky-6 | TI2VA (T2V/I2V + audio) | [`kandinsky6/`](./kandinsky6/) |
+| Kandinsky-6 SR | V2V (upscale) | [`kandinsky6_sr/README.md`](./kandinsky6_sr/README.md) |
 | LTX-2 | T2V (+ audio) | [`ltx2/`](./ltx2/) |
 | Stable Diffusion 3.5 | T2I | [`sd35/`](./sd35/) |
 | Stable Audio Open 1.0 | T2A | [`stable_audio/`](./stable_audio/) |
-| Wan2.2 | I2V | [`wan22/`](./wan22/) |
+
+Wan2.2 I2V record-schema checks live in the
+[package dataset tests](../../fastvideo/tests/dataset/test_schema_record_creator.py).
 
 ## Running a family
 

@@ -97,13 +97,33 @@ dreamverse-server --port 8009
 dreamverse-mock-server --port 8009
 ```
 
+### Run Dreamverse with FastH3
+
+Select the VSA data-free FastH3 Preview profile when you start the backend:
+
+```bash
+DREAMVERSE_MODEL_ID=fast-h3 dreamverse-server --port 8009
+```
+
+The `fast-h3` profile uses four visible GPUs by default. It loads the `MiniMaxAI/MiniMax-H3` base checkpoint and the
+`vsa-datafree/adapter_model.safetensors` adapter from
+`FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA`. Each request generates a 124-frame, 768×1344 video with
+synchronized audio and five sigma-grid points. Dreamverse uses the last frame of each segment as first-frame
+conditioning for the following segment.
+
+Set `CUDA_VISIBLE_DEVICES` when you need to choose the four physical GPUs:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 DREAMVERSE_MODEL_ID=fast-h3 dreamverse-server --port 8009
+```
+
 > **Expect a slow first boot.** With `torch.compile` and startup warmup enabled
 > (the default), the backend compiles the segment 1 and segment 2 inference
 > paths before it reports ready — this can take **tens of minutes on a cold
 > cache**, regardless of how you deploy (local, server, Docker, or Modal).
 > `/healthz` responds as soon as the process is up; `/readyz` stays `503` until
-> warmup finishes. For a faster, uncompiled startup while testing, set
-> `FASTVIDEO_ENABLE_STARTUP_WARMUP=0` before starting the backend.
+> warmup finishes. To defer compilation until the first generated request while
+> testing, set `FASTVIDEO_ENABLE_STARTUP_WARMUP=0` before starting the backend.
 
 ## Frontend Setup
 
@@ -219,6 +239,7 @@ selection, and mock-server behavior:
 pytest apps/dreamverse/dreamverse/tests/test_config.py \
   apps/dreamverse/dreamverse/tests/test_entrypoints.py \
   apps/dreamverse/dreamverse/tests/test_gpu_pool.py \
+  apps/dreamverse/dreamverse/tests/test_minimax_h3_generation.py \
   apps/dreamverse/dreamverse/tests/test_mock_server.py -q
 ```
 

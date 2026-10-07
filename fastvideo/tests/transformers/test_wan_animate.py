@@ -13,7 +13,7 @@ skip the reference frame, and the per-frame confinement of the face adapter.
 
 The weight-loading tests at the bottom need the real checkpoint::
 
-    export WAN_ANIMATE_MODEL_PATH=/path/to/Wan2.2-Animate-14B-Diffusers
+    export FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR=/path/to/Wan2.2-Animate-14B-Diffusers
 """
 import glob
 import json
@@ -29,11 +29,13 @@ import torch.nn.functional as F
 # The distributed_setup fixture rendezvouses via env:// even for a single
 # GPU. setdefault (not assignment) keeps a launcher-assigned rendezvous
 # intact, which the repo's port-inventory contract test requires.
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29521")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29521")
 
 from fastvideo.configs.models.dits.wan_animate import WanAnimateArchConfig, WanAnimateConfig
-from fastvideo.configs.pipelines.wan import WanAnimate14BConfig
+from fastvideo.models.wan.pipeline_config import WanAnimate14BConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.dits.wan_animate import WanAnimateTransformer3DModel
 from fastvideo.models.dits.wan_animate_face import (FusedLeakyReLU, MotionConv2d, MotionLinear,
@@ -46,7 +48,7 @@ _DEFAULT_ANIMATE_PATH = os.path.join(_REPO_ROOT, "official_weights", "Wan2.2-Ani
 
 
 def _animate_model_path() -> str:
-    return os.environ.get("WAN_ANIMATE_MODEL_PATH", _DEFAULT_ANIMATE_PATH)
+    return envs.FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR.get() or _DEFAULT_ANIMATE_PATH
 
 
 requires_cuda = pytest.mark.skipif(not torch.cuda.is_available(),
@@ -55,7 +57,7 @@ requires_cuda = pytest.mark.skipif(not torch.cuda.is_available(),
 requires_weights = pytest.mark.skipif(
     not glob.glob(os.path.join(_animate_model_path(), "transformer", "*.safetensors")),
     reason=(f"No transformer safetensors under {_animate_model_path()} -- download "
-            "Wan-AI/Wan2.2-Animate-14B-Diffusers or set WAN_ANIMATE_MODEL_PATH"))
+            "Wan-AI/Wan2.2-Animate-14B-Diffusers or set FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR"))
 
 
 # --------------------------------------------------------------------------

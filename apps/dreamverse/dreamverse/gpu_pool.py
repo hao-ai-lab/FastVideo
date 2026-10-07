@@ -12,7 +12,7 @@ from enum import Enum
 from multiprocessing import Process, Queue
 
 from dreamverse.config import (
-    DEFAULT_MODEL_ID,
+    ACTIVE_MODEL_ID,
     DREAMVERSE_SP_SIZE,
     MODEL_REGISTRY,
     STARTUP_WARMUP_ENABLED,
@@ -54,7 +54,7 @@ from dreamverse.worker_ipc import (
 def _parse_requested_gpu_limit() -> int | None:
     raw_value = os.getenv("FASTVIDEO_GPU_COUNT", "").strip().lower()
     if not raw_value:
-        return 1
+        return DREAMVERSE_SP_SIZE
     if raw_value == "all":
         return None
     try:
@@ -164,12 +164,12 @@ def gpu_worker_process(
     os.environ["CUDA_VISIBLE_DEVICES"] = cuda_device
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
-    from dreamverse.video_generation import VideoGenerationWorker
+    from dreamverse.generation_worker import VideoGenerationWorker
 
     worker = VideoGenerationWorker(gpu_id)
 
     def event_loop(first_cmd: Command = None):
-        """Blocking event loop for LTX2; dispatches user commands."""
+        """Block on generation commands after the model is initialized."""
         print(f"[GPU {gpu_id}] Entering event loop")
 
         def handle_command(cmd: Command):
@@ -435,7 +435,7 @@ class GPUSlot:
         self._response_reader_task: asyncio.Task | None = None
         self._active: bool = False
         self._reader_lock: asyncio.Lock | None = None
-        self.current_model_id: str = DEFAULT_MODEL_ID
+        self.current_model_id: str | None = ACTIVE_MODEL_ID
         self.shared_stream_buffer = None
         self.shared_stream_buffer_size = SHARED_STREAM_BUFFER_BYTES
 
@@ -690,7 +690,7 @@ class GPUSlot:
     async def join_user(self, user_id: str, model_id: str = None) -> JoinAck:
         """Add a user to this GPU."""
         if model_id is None:
-            model_id = DEFAULT_MODEL_ID
+            model_id = ACTIVE_MODEL_ID
 
         # Reload model if a different one is requested
         if model_id != self.current_model_id and model_id in MODEL_REGISTRY:
@@ -705,16 +705,23 @@ class GPUSlot:
             self.connected_users.clear()
 
             model_config = MODEL_REGISTRY[model_id]
-            reload_response = await self._send_command(Command(CommandType.RELOAD_MODEL,
-                                                               payload=ReloadModelPayload(model_config=model_config),
-                                                               user_id="__reload__"),
-                                                       timeout=600.0)
+            try:
+                reload_response = await self._send_command(Command(
+                    CommandType.RELOAD_MODEL,
+                    payload=ReloadModelPayload(model_config=model_config),
+                    user_id="__reload__"),
+                                                           timeout=600.0)
+            except Exception:
+                self.current_model_id = None
+                raise
             match reload_response:
                 case ReloadAck():
                     pass
                 case WorkerError(message=msg):
+                    self.current_model_id = None
                     raise RuntimeError(f"Model reload failed: {msg}")
                 case _:
+                    self.current_model_id = None
                     raise RuntimeError(f"Unexpected reload response: "
                                        f"{type(reload_response).__name__}")
 
