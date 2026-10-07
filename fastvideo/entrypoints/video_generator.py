@@ -37,6 +37,7 @@ from fastvideo.api.compat import (
     normalize_generation_request,
     normalize_generator_config,
     request_to_batch_extra,
+    validate_request_batch_extra,
     request_to_pipeline_overrides,
     request_to_sampling_param,
 )
@@ -127,6 +128,35 @@ def _resolve_output_size(
     if pixel_output and samples.ndim == 5:
         return (int(samples.shape[-2]), int(samples.shape[-1]), int(samples.shape[-3]))
     return fallback
+
+
+def _quantize_video_frames_to_uint8(src: torch.Tensor) -> torch.Tensor:
+    """`[b, c, t, h, w]` decoded output -> CPU uint8 `[t, b, c, h, w]`.
+
+    Quantizes on ``src``'s own device (typically CUDA) before the device->host copy: a full fp32 D->H copy scales with
+    resolution x frames x batch, while casting to uint8 first makes the transfer 4x smaller and moves the elementwise
+    work onto the GPU. ``clamp_()`` also fixes a latent overflow bug (VAE output slightly outside [0, 1] wrapped mod
+    256 in the old unclamped cast). Equivalence with a CPU quantize is SSIM-gated, not bit-exact (float->uint8 differs
+    <=1 LSB CPU vs GPU). uint8 input is already quantized by the worker (MiniMax-H3 decode stage) and passes through
+    untouched (see ``pixels_to_uint8``).
+
+    A large DiT run with ``dit_cpu_offload=False`` can leave a GPU with only a few hundred MB free once denoising and
+    decode are done, in a *different* process than the one that allocates ``src`` (the worker keeps the model
+    resident); the tiny elementwise allocation this needs can then be the single straw that OOMs. That failure is
+    recoverable -- the data itself is already on the device (``src`` is IPC-shared, not a fresh allocation) and only
+    needs a device->host copy, which does not need a device allocation -- so on ``torch.cuda.OutOfMemoryError`` this
+    falls back to copying ``src`` to CPU first and quantizing there instead of crashing the whole generation.
+    """
+    try:
+        vid_u8 = pixels_to_uint8(src)
+        return rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
+    except torch.cuda.OutOfMemoryError:
+        logger.warning("GPU out of memory quantizing the decoded video (the DiT/VAE likely still hold the device "
+                       "resident); falling back to a CPU quantize. Pass dit_cpu_offload=True / "
+                       "vae_cpu_offload=True to avoid this, at some speed cost.")
+        src_cpu = src.detach().to("cpu")
+        vid_u8 = pixels_to_uint8(src_cpu if src_cpu.dtype == torch.uint8 else src_cpu.float())
+        return rearrange(vid_u8, "b c t h w -> t b c h w")
 
 
 def _validate_request_stage_overrides(model_path: str, request: GenerationRequest) -> None:
@@ -536,6 +566,8 @@ class VideoGenerator:
         if fastvideo_args is None:
             fastvideo_args = self.fastvideo_args
 
+        validate_request_batch_extra(kwargs, model_path=fastvideo_args.model_path)
+
         # Handle batch processing from text file
         if sampling_param is None:
             sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
@@ -600,15 +632,24 @@ class VideoGenerator:
             return results
 
         # Single prompt generation (original behavior)
+        output_name_hint: str | None = None
         if prompt is None:
             if fastvideo_args.workload_type is WorkloadType.V2A:
                 # Video semantics are sufficient conditioning for V2A models;
                 # model-specific text stages interpret the empty string using
                 # their native tokenizer/empty-prompt contract.
                 prompt = ""
+            elif getattr(fastvideo_args.pipeline_config, "prompt_optional", False):
+                # Video-to-video pipelines without a text tower (Kandinsky6 SR)
+                # are conditioned by the input video alone; name the output
+                # after that video instead of the (empty) prompt.
+                prompt = ""
+                if isinstance(sampling_param.video_path, str) and sampling_param.video_path:
+                    output_name_hint = os.path.splitext(os.path.basename(sampling_param.video_path))[0]
             else:
                 raise ValueError("Either prompt or prompt_txt must be provided")
-        output_path = self._prepare_output_path(sampling_param.output_path, prompt)
+        output_path = self._prepare_output_path(sampling_param.output_path,
+                                                output_name_hint if output_name_hint else prompt)
         kwargs["output_path"] = output_path
         if prompt_embeds is not None:
             kwargs["prompt_embeds"] = prompt_embeds
@@ -816,7 +857,10 @@ class VideoGenerator:
         # *do* ask for the latent samples via ``return_frames=True``.
         # ``skip_pixel_prealloc`` also gates the slow-path warning.
         needs_samples_out = batch.return_frames
-        skip_pixel_prealloc = is_latent_output or not needs_samples_out
+        # ``output_shape_from_input`` pipelines (Kandinsky6 SR) decide the output geometry from the input video, so the
+        # request's height / width / num_frames say nothing about the buffer to pre-allocate.
+        output_shape_from_input = bool(getattr(fastvideo_args.pipeline_config, "output_shape_from_input", False))
+        skip_pixel_prealloc = is_latent_output or not needs_samples_out or output_shape_from_input
         if skip_pixel_prealloc:
             samples = torch.empty(0, device='cpu')
         else:
@@ -895,24 +939,10 @@ class VideoGenerator:
         elif not needs_frame_output:
             frames = None
         else:
-            # Quantize on the source device (typically CUDA) BEFORE the
-            # device->host copy. `samples` above is just the pinned-CPU
-            # mirror of `output_batch.output` (`samples.copy_(output)` or
-            # `output.cpu()`) with no intervening preprocessing, so reading
-            # `output_batch.output` here is the same data. The old path
-            # paid a full fp32 video D->H copy (which scales with
-            # resolution x frames x batch) and then a single-threaded
-            # per-frame CPU *255/cast loop. Casting to uint8 on-device
-            # makes the transfer 4x smaller, ships it in a single copy,
-            # and moves the elementwise work onto the GPU. clamp_() also
-            # fixes a latent overflow bug: VAE output slightly outside
-            # [0, 1] wrapped mod 256 in the old unclamped cast.
-            # (Equivalence is SSIM-gated, not bit-exact: float->uint8
-            # differs <=1 LSB CPU vs GPU.)
-            # uint8 input is already quantized by the worker (MiniMax-H3
-            # decode stage) and passes through untouched.
-            vid_u8 = pixels_to_uint8(output_batch.output)
-            vid_u8 = rearrange(vid_u8, "b c t h w -> t b c h w").cpu()
+            # `samples` above is just the pinned-CPU mirror of `output_batch.output` (`samples.copy_(output)` or
+            # `output.cpu()`) with no intervening preprocessing, so reading `output_batch.output` here is the same
+            # data. See `_quantize_video_frames_to_uint8` for why this quantizes on-device and its OOM fallback.
+            vid_u8 = _quantize_video_frames_to_uint8(output_batch.output)
             frames = [
                 torchvision.utils.make_grid(x, nrow=6).permute(1, 2, 0).squeeze(-1).contiguous().numpy() for x in vid_u8
             ]
@@ -947,6 +977,9 @@ class VideoGenerator:
                 logger.info("Saved image to %s", output_path)
             else:
                 assert frames is not None  # implied by save_to_disk and not audio_only
+                # ``batch`` is the request-side batch. A pipeline that derives the frame rate from its input (Kandinsky6
+                # SR follows the source clip) mutates a worker-side copy, so it reports the rate via ``extra``.
+                save_fps = int(output_batch.extra.get("output_fps") or batch.fps)
                 audio = output_batch.extra.get("audio")
                 audio_sample_rate = output_batch.extra.get("audio_sample_rate")
                 if audio is not None and audio_sample_rate is not None:
@@ -957,7 +990,7 @@ class VideoGenerator:
                     save_ok = self._save_video_with_audio_ffmpeg_pipe(
                         output_path=output_path,
                         frames=frames,
-                        fps=batch.fps,
+                        fps=save_fps,
                         audio=audio,
                         sample_rate=int(audio_sample_rate),
                     )
@@ -966,7 +999,7 @@ class VideoGenerator:
                         save_ok = self._save_video_with_audio_single_pass(
                             output_path=output_path,
                             frames=frames,
-                            fps=batch.fps,
+                            fps=save_fps,
                             audio=audio,
                             sample_rate=int(audio_sample_rate),
                         )
@@ -976,7 +1009,7 @@ class VideoGenerator:
                     else:
                         logger.warning("Single-pass save failed; falling back to two-step save/mux.")
                         save_start = time.perf_counter()
-                        imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                        imageio.mimsave(output_path, frames, fps=save_fps, format="mp4")
                         save_video_time = time.perf_counter() - save_start
                         mux_start = time.perf_counter()
                         mux_ok = self._mux_audio(output_path, audio, int(audio_sample_rate))
@@ -985,7 +1018,7 @@ class VideoGenerator:
                             logger.warning("Audio mux failed; saved video without audio.")
                 else:
                     save_start = time.perf_counter()
-                    imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+                    imageio.mimsave(output_path, frames, fps=save_fps, format="mp4")
                     save_video_time = time.perf_counter() - save_start
                     audio_mux_time = 0.0
                 logger.info("Saved video to %s", output_path)

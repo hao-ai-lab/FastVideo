@@ -14,6 +14,7 @@ from fastvideo.pipelines.stages.denoising import (Cosmos25AutoDenoisingStage, Co
                                                   CosmosDenoisingStage, DenoisingStage)
 from fastvideo.pipelines.stages.sr_denoising import SRDenoisingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
+from fastvideo.pipelines.stages.audio_encoding import AudioEncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGame2ImageEncodingStage,
                                                        MatrixGame2ImageVAEEncodingStage,
                                                        MatrixGame3ImageVAEEncodingStage, RefImageEncodingStage,
@@ -34,6 +35,9 @@ from fastvideo.pipelines.stages.matrixgame3_denoising import MatrixGame3Denoisin
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.kandinsky5 import (Kandinsky5DecodingStage, Kandinsky5DenoisingStage,
                                                    Kandinsky5LatentPreparationStage)
+from fastvideo.pipelines.stages.kandinsky6 import (Kandinsky6AudioDecodingStage, Kandinsky6DecodingStage,
+                                                   Kandinsky6DenoisingStage, Kandinsky6ImageEncodingStage,
+                                                   Kandinsky6LatentPreparationStage)
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.gen3c_stages import (Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
                                                      Gen3CLatentPreparationStage)
@@ -46,6 +50,7 @@ from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitS
 from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
 
 __all__ = [
+    "AudioEncodingStage",
     "PipelineStage",
     "InputValidationStage",
     "TimestepPreparationStage",
@@ -69,6 +74,11 @@ __all__ = [
     "Kandinsky5DecodingStage",
     "Kandinsky5DenoisingStage",
     "Kandinsky5LatentPreparationStage",
+    "Kandinsky6AudioDecodingStage",
+    "Kandinsky6DecodingStage",
+    "Kandinsky6DenoisingStage",
+    "Kandinsky6ImageEncodingStage",
+    "Kandinsky6LatentPreparationStage",
     "GameCraftDenoisingStage",
     "Gen3CCFGPolicyStage",
     "Gen3CConditioningStage",

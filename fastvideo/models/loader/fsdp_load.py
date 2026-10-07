@@ -36,6 +36,54 @@ def _summarize_param_names(names: set[str]) -> str:
     return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
 
 
+def _prequantized_fp8_prefixes(weight_files: list[str]) -> list[str]:
+    """Checkpoint prefixes stored as FP8 W8A8: float8_e4m3fn ``weight`` plus per-channel float32 ``weight_scale``."""
+    from safetensors import safe_open
+
+    fp8_weights: set[str] = set()
+    scales: set[str] = set()
+    for path in weight_files:
+        with safe_open(path, framework="pt", device="cpu") as reader:
+            for key in reader.keys():  # noqa: SIM118
+                if key.endswith(".weight") and reader.get_slice(key).get_dtype() == "F8_E4M3":
+                    fp8_weights.add(key[:-len(".weight")])
+                elif key.endswith(".weight_scale") and reader.get_slice(key).get_dtype() == "F32":
+                    scales.add(key[:-len(".weight_scale")])
+    if fp8_weights - scales:
+        raise ValueError(f"FP8 checkpoint weights without a weight_scale: {sorted(fp8_weights - scales)[:4]}")
+    return sorted(fp8_weights)
+
+
+def _load_prequantized_fp8(model: nn.Module, weight_files: list[str], targets: dict[str, str],
+                           device: torch.device) -> None:
+    """Attach FP8 W8A8 checkpoint tensors to their FP8 linears as ``convert_model_to_fp8`` would (per channel)."""
+    from safetensors import safe_open
+
+    from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
+
+    modules = dict(model.named_modules())
+    wanted = {f"{prefix}.{suffix}" for prefix in targets for suffix in ("weight", "weight_scale")}
+    tensors: dict[str, torch.Tensor] = {}
+    for path in weight_files:
+        with safe_open(path, framework="pt", device="cpu") as reader:
+            for key in wanted.intersection(reader.keys()):
+                tensors[key] = reader.get_tensor(key)
+    for prefix, target in targets.items():
+        module = modules.get(target[:-len(".weight")])
+        quant_method = getattr(module, "quant_method", None)
+        if not isinstance(quant_method, FP8QuantizeMethod):
+            raise RuntimeError(f"Pre-quantized FP8 weight {prefix!r} maps to {target!r}, which is not an FP8 linear; "
+                               "load the checkpoint with an FP8 quant_config covering it.")
+        # The checkpoint scales are per output channel; activations then use per-token scales.
+        quant_method.granularity = "channel"
+        module.register_buffer("_fp8_weight", tensors[f"{prefix}.weight"].to(device).contiguous(), persistent=False)
+        module.register_buffer("_fp8_weight_scale",
+                               tensors[f"{prefix}.weight_scale"].reshape(-1).to(device=device, dtype=torch.float32),
+                               persistent=False)
+        module._parameters.pop("weight", None)
+    logger.info("Loaded %d pre-quantized FP8 linears", len(targets))
+
+
 def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lora_merge: bool = False) -> None:
     """Quantize inference linear weights after checkpoint loading.
 
@@ -75,17 +123,28 @@ def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lor
         convert_model_to_mxfp8,
     )
 
+    # NVFP4 may share a model with FP8 linears (e.g. NVFP4 FFN + FP8 attention); handle that pair before the
+    # per-module walk so the result does not depend on which quantized module comes first.
+    nvfp4_modules = [m for m in model.modules() if isinstance(getattr(m, "quant_method", None), NVFP4QuantizeMethod)]
+    if nvfp4_modules:
+        mixed_fp8 = any(isinstance(getattr(m, "quant_method", None), FP8QuantizeMethod) for m in model.modules())
+        if any(getattr(module, "_nvfp4_weight", None) is not None for module in nvfp4_modules):
+            logger.info("NVFP4 packed export already populated; skipping runtime weight conversion")
+        elif defer_weight_conversion_until_lora_merge:
+            logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
+            return
+        else:
+            logger.info("Converting loaded model weights for NVFP4 linear layers")
+            convert_model_to_nvfp4(model)
+        if mixed_fp8:
+            logger.info("Converting the FP8 linears of a mixed NVFP4/FP8 model")
+            convert_model_to_fp8(model)
+        return
+
     qat_train_attached = 0
     qat_train_skipped = 0
     for mod in model.modules():
         qm = getattr(mod, "quant_method", None)
-        if isinstance(qm, NVFP4QuantizeMethod):
-            if defer_weight_conversion_until_lora_merge:
-                logger.info("Deferring NVFP4 weight conversion until the inference LoRA merge completes")
-                return
-            logger.info("Converting loaded model weights for NVFP4 linear layers")
-            convert_model_to_nvfp4(model)
-            return
         if isinstance(qm, NVFP4QATQuantizeMethod):
             logger.info("Converting loaded model weights for NVFP4-QAT linear layers")
             convert_model_to_fp4(model)
@@ -214,6 +273,22 @@ def maybe_load_fsdp_model(
     """
     _validate_fsdp_inference_quantization(init_params, fsdp_inference)
 
+    from fastvideo.layers.quantization.nvfp4_config import (
+        dense_transformer_safetensors,
+        find_minimax_h3_nvfp4_dit_export,
+        load_minimax_h3_nvfp4_dit_export,
+        nvfp4_linear_weight_param_names,
+    )
+    packed_candidate = find_minimax_h3_nvfp4_dit_export(weight_dir_list)
+    weight_dir_list = dense_transformer_safetensors(weight_dir_list)
+    quant_config = getattr(init_params.get("config"), "quant_config", None)
+    packed_profiles = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
+    packed_nvfp4_export = (packed_candidate
+                           if getattr(quant_config, "layer_profile", None) in packed_profiles else None)
+    if packed_nvfp4_export is not None and lora_path is not None:
+        raise ValueError("Packed MiniMax-H3 NVFP4 DiT export cannot be combined with lora_path; "
+                         "merge the adapter before exporting, or load without the packed file.")
+
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
     mp_policy = MixedPrecisionPolicy(param_dtype, reduce_dtype, output_dtype, cast_forward_inputs=False)
@@ -275,11 +350,19 @@ def maybe_load_fsdp_model(
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
                     pin_cpu_memory=pin_cpu_memory)
 
-    # Host offload is already disabled on unified memory (GB10). Staging the
-    # 35B FastH3 DiT on CPU and then copying to CUDA doubled that working set
-    # and took minutes. Follow cpu_offload: read onto the accelerator.
-    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=cpu_offload)
-    logger.info("Loading transformer weights with to_cpu=%s", cpu_offload)
+    nvfp4_skip_param_names: set[str] = set()
+    if packed_nvfp4_export is not None:
+        nvfp4_skip_param_names = nvfp4_linear_weight_param_names(model)
+        if not nvfp4_skip_param_names:
+            logger.warning(
+                "Found %s next to the transformer shards but no NVFP4 linears; "
+                "ignoring the packed export. Set NVFP4Config(layer_profile='h3_dit').",
+                packed_nvfp4_export,
+            )
+            packed_nvfp4_export = None
+    load_weights_to_cpu = cpu_offload or packed_nvfp4_export is not None
+    weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=load_weights_to_cpu)
+    logger.info("Loading transformer weights with to_cpu=%s", load_weights_to_cpu)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
     dense_lora_patch = DenseLoRAPatch.from_adapter(
         lora_path,
@@ -287,9 +370,6 @@ def maybe_load_fsdp_model(
         strength=lora_strength,
     )
     if dense_lora_patch is not None:
-        # H3's compression gate is created only by the VSA attention backend. Loading a
-        # VSA student under dense attention would otherwise warn about 50 unmatched
-        # replacements and continue with a silently incomplete model.
         model_parameter_names = {name for name, _ in model.named_parameters()}
         missing_vsa_gates = sorted(name for name in dense_lora_patch.replacement_parameters
                                    if "gate_compress" in name and name not in model_parameter_names)
@@ -298,6 +378,22 @@ def maybe_load_fsdp_model(
                 "This LoRA adapter provides MiniMax H3 VSA compression gates, but the selected attention backend "
                 "did not construct them. Use attention_backend='VIDEO_SPARSE_ATTN_H3'. Missing parameters: "
                 + ", ".join(missing_vsa_gates[:3]) + (" ..." if len(missing_vsa_gates) > 3 else ""))
+    skip_param_names = set(nvfp4_skip_param_names)
+    fp8_targets: dict[str, str] = {}
+    # Pre-quantized FP8 checkpoints are an H3 release format; other models load as on main.
+    fp8_prefixes = (_prequantized_fp8_prefixes(weight_dir_list)
+                    if type(model).__name__.startswith("MiniMaxH3") else [])
+    if fp8_prefixes:
+        fp8_targets = {prefix: param_names_mapping_fn(f"{prefix}.weight")[0] for prefix in fp8_prefixes}
+        skip_param_names |= set(fp8_targets.values())
+        fp8_keys = {f"{prefix}.{suffix}" for prefix in fp8_prefixes for suffix in ("weight", "weight_scale")}
+        weight_iterator = ((name, tensor) for name, tensor in weight_iterator if name not in fp8_keys)
+    if envs.FASTVIDEO_H3_ADALN_TABLE.get():
+        # Precomputed AdaLN modulation replaces the per-block projections; never read their weights.
+        skip_param_names |= {name for name, _ in model.named_parameters()
+                             if re.fullmatch(r"transformer_blocks\.\d+\.adaln_proj\.linear\.(weight|bias)", name)}
+        logger.info("Skipping %d AdaLN projection tensors (precomputed modulation tables)",
+                    sum("adaln_proj" in n for n in skip_param_names))
     load_model_from_full_model_state_dict(
         model,
         weight_iterator,
@@ -307,7 +403,12 @@ def maybe_load_fsdp_model(
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
         dense_lora_patch=dense_lora_patch,
+        skip_param_names=skip_param_names or None,
     )
+    if packed_nvfp4_export is not None:
+        load_minimax_h3_nvfp4_dit_export(model, packed_nvfp4_export, device=device)
+    if fp8_targets:
+        _load_prequantized_fp8(model, weight_dir_list, fp8_targets, device=device)
     if hasattr(model, "materialize_non_persistent_buffers"):
         model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
     for n, p in chain(model.named_parameters(), model.named_buffers()):
@@ -585,6 +686,12 @@ def shard_model(
     fully_shard(model, **root_kwargs)
 
 
+def _drop_state_dict_parameter(model: nn.Module, param_name: str) -> None:
+    module_name, _, attr_name = param_name.rpartition(".")
+    module = model.get_submodule(module_name) if module_name else model
+    module.register_parameter(attr_name, None)
+
+
 # TODO(PY): device mesh for cfg parallel
 def load_model_from_full_model_state_dict(
     model: FSDPModule | torch.nn.Module,
@@ -596,6 +703,7 @@ def load_model_from_full_model_state_dict(
     param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
     training_mode: bool = True,
     dense_lora_patch: DenseLoRAPatch | None = None,
+    skip_param_names: set[str] | None = None,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
@@ -634,6 +742,11 @@ def load_model_from_full_model_state_dict(
     # set.
     for target_param_name in list(custom_param_sd):
         full_tensor = custom_param_sd.pop(target_param_name)
+        if skip_param_names and target_param_name in skip_param_names:
+            continue
+        if "::" in target_param_name:
+            logger.warning("Skipping packed NVFP4 export key mixed into dense shards: %s", target_param_name)
+            continue
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
             # Some checkpoints include extra entries that are not part of the
@@ -701,6 +814,13 @@ def load_model_from_full_model_state_dict(
 
     model.reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - set(sharded_sd.keys())
+    skipped_unused = unused_keys & skip_param_names if skip_param_names else set()
+    for skipped_name in skipped_unused:
+        _drop_state_dict_parameter(model, skipped_name)
+    unused_keys -= skipped_unused
+    if skipped_unused:
+        logger.info("Deferred %d NVFP4 linear weights to the packed DiT export (%s)",
+                    len(skipped_unused), _summarize_param_names(skipped_unused))
     if unused_keys:
         # Say which of these the adapter is about to fill in. Reporting all of them as
         # "unloaded" was accurate when zero-init was the only outcome; with an adapter
