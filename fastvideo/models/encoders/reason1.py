@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Reason1 (Qwen2.5-VL) text encoder."""
 
-import os
 from dataclasses import dataclass
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 import torch
 from transformers import AutoProcessor
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders import BaseEncoderOutput, Reason1Config
 from fastvideo.logger import init_logger
 from fastvideo.models.encoders.base import TextEncoder
@@ -21,6 +21,40 @@ from fastvideo.models.encoders.qwen2_5_vl_custom import (
 )
 
 logger = init_logger(__name__)
+
+
+def _normalize_chat_template_ids(tokenizer_output) -> list[int]:
+    """Normalize `apply_chat_template` output to a flat ``list[int]`` of token ids.
+
+    Depending on the transformers version and tokenizer, `apply_chat_template`
+    (with ``tokenize=True``) may return a ``list[int]``, a nested
+    ``list[list[int]]`` (batch dim), a tensor, or a mapping carrying an
+    ``"input_ids"`` field. transformers returns a ``BatchEncoding``, which
+    subclasses ``collections.UserDict`` -- a ``Mapping`` but **not** a ``dict``
+    -- so an ``isinstance(_, dict)`` check silently misses it and the caller
+    would otherwise raise. Match on ``Mapping`` instead: every ``dict`` is a
+    ``Mapping``, so plain-dict and list outputs behave exactly as before.
+    """
+    if isinstance(tokenizer_output, Mapping) and "input_ids" in tokenizer_output:
+        input_ids = tokenizer_output["input_ids"]
+    else:
+        input_ids = tokenizer_output
+    if hasattr(input_ids, "tolist"):
+        input_ids = input_ids.tolist()
+    if isinstance(input_ids, list) and input_ids and isinstance(input_ids[0], list):
+        # A nested list is a batch dimension. We tokenize one conversation at a
+        # time, so batch size 1 is the only shape we can unambiguously flatten;
+        # fail loudly on anything else rather than return a nested list that
+        # violates this helper's flat-``list[int]`` contract downstream.
+        if len(input_ids) != 1:
+            raise RuntimeError(
+                f"Unexpected batched chat_template output: batch={len(input_ids)} "
+                f"type={type(tokenizer_output)}")
+        input_ids = input_ids[0]
+    if not isinstance(input_ids, list):
+        raise RuntimeError(
+            f"Unexpected chat_template output type: {type(tokenizer_output)}")
+    return input_ids
 
 
 @dataclass(frozen=True)
@@ -89,7 +123,7 @@ class Reason1TextEncoder(TextEncoder):
             trust_remote_code=True,
         )
 
-        weights_override = os.getenv("FASTVIDEO_REASON1_WEIGHTS_PATH")
+        weights_override = envs.FASTVIDEO_REASON1_WEIGHTS_PATH.get()
         if weights_override:
             self.secondary_weights = (_WeightsSource(
                 model_or_path=weights_override,
@@ -258,18 +292,7 @@ class Reason1TextEncoder(TextEncoder):
                     add_generation_prompt=False,
                 )
 
-            if isinstance(tokenizer_output, dict) and "input_ids" in tokenizer_output:
-                input_ids = tokenizer_output["input_ids"]
-                if hasattr(input_ids, "tolist"):
-                    input_ids = input_ids.tolist()
-            else:
-                input_ids = tokenizer_output
-                if hasattr(input_ids, "tolist"):
-                    input_ids = input_ids.tolist()
-                if isinstance(input_ids, list) and len(input_ids) == 1 and isinstance(input_ids[0], list):
-                    input_ids = input_ids[0]
-                if not isinstance(input_ids, list):
-                    raise RuntimeError(f"Unexpected chat_template output type: {type(tokenizer_output)}")
+            input_ids = _normalize_chat_template_ids(tokenizer_output)
 
             if self.num_embedding_padding_tokens > len(input_ids):
                 pad_len = self.num_embedding_padding_tokens - len(input_ids)

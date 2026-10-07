@@ -27,7 +27,7 @@ layout) with:
 ```bash
 # from the repo root; reads data/kandinsky5_overfit and writes
 # data/kandinsky5_overfit_preprocessed by default -- override with
-# KANDINSKY5_OVERFIT_DATA_DIR / KANDINSKY5_OVERFIT_OUTPUT_DIR env vars
+# FASTVIDEO_TEST_KANDINSKY5_OVERFIT_DATA_DIR / FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR env vars
 python -m fastvideo.pipelines.preprocess.preprocess_kandinsky5_overfit
 ```
 
@@ -187,7 +187,7 @@ to a supported dense backend while the FP4 linear layers still run.
   `Kandinsky5DMDConfig` override, generating deterministically (fixed
   seed), and comparing MS-SSIM against a committed reference video. The
   test fails (does not skip) if the reference is missing; record it once on
-  a sanctioned GPU box with `KANDINSKY5_E2E_WRITE_REFERENCE=1`, review the
+  a sanctioned GPU box with `FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE=1`, review the
   written video, and commit it (see the test's module docstring). Nightly
   tests are not collected per-PR (`fastvideo/tests/contract/
   test_ci_test_collection.py` allowlists the directory), so run it

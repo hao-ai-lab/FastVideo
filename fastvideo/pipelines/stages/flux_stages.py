@@ -292,6 +292,9 @@ class FluxDenoisingStage(PipelineStage):
         step_extras = self._step_kwargs(self.scheduler.step, batch)
 
         for t in timesteps:
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             t_scalar = t
             if not isinstance(t_scalar, torch.Tensor):
                 t_scalar = torch.tensor([t_scalar], device=device, dtype=torch.float32)
@@ -384,6 +387,13 @@ class FluxDecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if not fastvideo_args.is_output_rank:
+            # Flux decoding has no collectives. Avoid duplicating the VAE
+            # forward and device-to-host pixel copy on SPMD worker ranks whose
+            # result is discarded by the executor.
+            batch.output = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
+            return batch
+
         packed = batch.latents
         if packed is None:
             raise ValueError("latents must be set before FluxDecodingStage")

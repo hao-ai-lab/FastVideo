@@ -9,6 +9,7 @@ import pytest
 import torch
 from PIL import Image
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAEArchConfig, MiniMaxH3AudioVAEConfig
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEArchConfig, MiniMaxH3VideoVAEConfig
 from fastvideo.distributed import get_local_torch_device
@@ -25,9 +26,9 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires 
 
 
 @pytest.fixture
-def stage(distributed_setup, monkeypatch):
+def stage(distributed_setup, env_overrides):
     """Construct finite seeded VAEs with the tiny geometries used in parity tests."""
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
     torch.manual_seed(20260921)
     video_arch = MiniMaxH3VideoVAEArchConfig(
         latent_channels=4,

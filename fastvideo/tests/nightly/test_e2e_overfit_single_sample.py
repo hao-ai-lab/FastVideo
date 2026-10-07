@@ -4,6 +4,7 @@ from huggingface_hub import snapshot_download
 import shutil
 import subprocess
 import sys
+import fastvideo.envs as envs
 from fastvideo.tests.utils import compute_video_ssim_torchvision
 
 # Import the training pipeline
@@ -22,7 +23,9 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_dat
 
 # training
 NUM_GPUS_PER_NODE_TRAINING = "4"
-TRAINING_ENTRY_FILE_PATH = "fastvideo/training/wan_training_pipeline.py"
+TRAINING_ENTRY_FILE_PATH = "fastvideo/training/runner.py"
+TRAINING_PIPELINE_CLASS = "WanTrainingPipeline"
+TRAINING_PIPELINE_MODULE = "fastvideo.training.wan_training_pipeline"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
 LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json")
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
@@ -114,6 +117,10 @@ def run_training():
         "--nproc_per_node",
         NUM_GPUS_PER_NODE_TRAINING,
         TRAINING_ENTRY_FILE_PATH,
+        "--pipeline-class",
+        TRAINING_PIPELINE_CLASS,
+        "--pipeline-module",
+        TRAINING_PIPELINE_MODULE,
         "--model_path",
         MODEL_PATH,
         "--inference_mode",
@@ -197,11 +204,10 @@ def run_training():
 
 
 def test_e2e_overfit_single_sample():
-    os.environ["WANDB_MODE"] = "online"
-
-    download_data()
-    run_preprocessing()
-    run_training()
+    with envs.override_external("WANDB_MODE", "online"):
+        download_data()
+        run_preprocessing()
+        run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")
     print(f"reference_video_file: {reference_video_file}")

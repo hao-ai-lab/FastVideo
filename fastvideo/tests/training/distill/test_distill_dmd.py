@@ -1,20 +1,20 @@
 import os
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29512")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29512")
 import sys
 import subprocess
 from pathlib import Path
 import torch
 import json
 from huggingface_hub import snapshot_download
-from fastvideo.utils import logger
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
-from fastvideo.training.wan_training_pipeline import main
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.utils import FlexibleArgumentParser
-from fastvideo.training.wan_distillation_pipeline import WanDistillationPipeline
+
+from fastvideo.training.runner import main
+from fastvideo.utils import build_parser
 
 wandb_name = "test_distill_dmd"
 
@@ -25,12 +25,12 @@ NUM_GPUS_PER_NODE = "2"
 def run_worker():
     """Worker function that will be run on each GPU"""
     # Create and populate args
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    parser = build_parser()
 
     # Set the arguments as they are in finetune_v1_test.sh
     args = parser.parse_args([
+        "--pipeline_class", "WanDistillationPipeline",
+        "--pipeline_module", "fastvideo.training.wan_distillation_pipeline",
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--real_score_model_path",
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "--fake_score_model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
@@ -48,17 +48,13 @@ def run_worker():
         "--min_timestep_ratio", "0.02", "--max_timestep_ratio", "0.98", "--real_score_guidance_scale", "3.5",
         "--enable_gradient_checkpointing_type", "full"
     ])
+    
     # Call the main training function
-    pipeline = WanDistillationPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
+    main(args)
 
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ["WANDB_MODE"] = "offline"
-
     data_dir = Path("data/crush-smol_processed_t2v")
 
     if not data_dir.exists():
@@ -77,7 +73,8 @@ def test_distributed_training():
         os.environ["MASTER_PORT"],
         str(current_file)
     ]
-    process = subprocess.run(cmd, capture_output=True, text=True)
+    with envs.override_external("WANDB_MODE", "offline"):
+        process = subprocess.run(cmd, capture_output=True, text=True)
 
     # Print stdout and stderr for debugging
     if process.stdout:

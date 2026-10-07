@@ -6,18 +6,16 @@ from pathlib import Path
 current_dir = str(Path(__file__).parent.parent.parent.parent.parent)
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
-os.environ["PYTHONPATH"] = current_dir + ":" + os.environ.get("PYTHONPATH", "")
 
 import subprocess
 import torch
 import json
 from huggingface_hub import snapshot_download
-from fastvideo.utils import logger
+import fastvideo.envs as envs
 # Import the training pipeline
-from fastvideo.training.wan_training_pipeline import main
-from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.utils import FlexibleArgumentParser
-from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
+
+from fastvideo.training.runner import main
+from fastvideo.utils import build_parser
 
 MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_PATH = "data/crush-smol_processed_t2v/training_dataset/worker_1/worker_0/"
@@ -31,19 +29,19 @@ NUM_GPUS_PER_NODE = "2"
 GRAD_ACCUM = "1"
 MASTER_PORT = os.environ.get("MASTER_PORT", "29504")
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", MASTER_PORT)
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", MASTER_PORT)
 
 
 def run_worker():
     """Worker function that will be run on each GPU"""
     # Create and populate args
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    parser = build_parser()
 
     # Set the arguments as they are in finetune_t2v.sh
     args = parser.parse_args([
+        "--pipeline_class", "WanTrainingPipeline",
+        "--pipeline_module", "fastvideo.training.wan_training_pipeline",
         "--model_path",
         MODEL_PATH,
         "--inference_mode",
@@ -122,17 +120,13 @@ def run_worker():
         "--hsdp_shard_dim",
         "1"
     ])
+    
     # Call the main training function
-    pipeline = WanTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
+    main(args)
 
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ.setdefault("WANDB_MODE", "offline")
-
     data_dir = Path("data/crush-smol_processed_t2v")
 
     if not data_dir.exists():
@@ -150,7 +144,10 @@ def test_distributed_training():
         "torchrun", "--nnodes", NUM_NODES, "--nproc_per_node", NUM_GPUS_PER_NODE, "--master_port", MASTER_PORT,
         str(current_file)
     ]
-    process = subprocess.run(cmd, capture_output=True, text=True)
+    # The torchrun workers run this file and import fastvideo from the repository root.
+    worker_pythonpath = current_dir + ":" + os.environ.get("PYTHONPATH", "")
+    with envs.override_external("WANDB_MODE", "offline"), envs.override_external("PYTHONPATH", worker_pythonpath):
+        process = subprocess.run(cmd, capture_output=True, text=True)
 
     # Print stdout and stderr for debugging
     if process.stdout:

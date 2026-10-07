@@ -21,7 +21,7 @@ python examples/inference/basic/basic.py
 ### Apple Silicon (FastMetal-QAD)
 
 Use the MLX runtime with FastMetal-QAD. See the
-[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+[MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
 
 ```bash
 hf download FastVideo/FastMetal-1.3B-QAD --local-dir ./FastMetal-1.3B-QAD
@@ -39,7 +39,7 @@ with
 
 `examples/inference/basic/basic_mps.py` is the older PyTorch MPS demo.
 
-FastH3 Preview T2VA also runs through the native MLX runtime. Convert the DiT
+FastH3 V1 T2VA also runs through the native MLX runtime. Convert the DiT
 to INT8, INT6, or INT4 first, then run:
 
 ```bash
@@ -51,17 +51,21 @@ python examples/inference/basic/mlx_fasth3.py \
   --output-path ./outputs/fasth3_int6.mp4
 ```
 
+FastH3 V2 is a separate checkpoint and script. Convert with
+`--include-vsa` and run `mlx_fasth3_8step.py`. Do not reuse a V1 DiT.
+
 Pass `--fast` for temporal RIFE fast mode and `--fast-spatial` for spatial
 fast mode (reduced-canvas denoise + pixel-space upsample); the two compose.
-VSA is opt-in: convert with `--include-vsa` and pass `--vsa` (see the
-[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/)).
-This MLX entrypoint currently supports T2VA only; FL2VA, Ref2VA, and
+V1 VSA is opt-in: convert with `--include-vsa` and pass `--vsa`. V2
+turns VSA on by default. See the
+[MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
+This MLX entrypoint supports T2VA only; FL2VA, Ref2VA, and
 two-pass refinement remain follow-up work. INT6/INT8/INT4 are
-weight-only; VSA attention activations stay BF16. Dense-only checkpoints keep
-working for dense inference.
+weight-only; VSA attention activations stay BF16. Dense-only V1
+checkpoints keep working for dense inference.
 
 The complete setup and conversion commands are in the
-[Apple Silicon guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mps/).
+[MLX install guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/mlx/).
 
 For an example running DMD+VSA inference:
 ```
@@ -118,7 +122,7 @@ python examples/inference/basic/basic_fasth3.py \
   --warmup-seed 999
 ```
 
-`all` enables the inference-only H3 fusions and regional compile. Both can change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable the H3 fusions while preserving regional compile, or `--profile strict --no-inference-torch-compile` for the eager strict route. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. `--h3-sequential-load` / `--no-h3-sequential-load` override the auto split that releases Qwen3-VL before DiT/VAE load (on by default on GB10, off on discrete GPUs). The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time plus a warmup-excluded median.
+`all` enables the inference-only H3 fusions and regional compile. Both can change floating-point operation order, so this is a report-only performance profile rather than an exact-parity route. Use `--profile strict` to disable the H3 fusions while preserving regional compile, or `--profile strict --no-inference-torch-compile` for the eager strict route. Individual `--no-*` switches are available for portability and attribution; in particular, use `--vsa-kernel triton --no-fa4` if the Blackwell kernels are unavailable. `--h3-sequential-load` / `--no-h3-sequential-load` override the auto split that releases Qwen3-VL before DiT/VAE load (on by default on GB10, off on discrete GPUs). The script preserves the warmup and each measured video under distinct paths, then prints per-request wall time, the worker's peak memory, and a warmup-excluded median. `Peak memory` is the worker's allocator high-water mark: it is never reset between generations, so it includes model load and every prior run, and only rank 0's value is reported. It is populated by the `mp` backend only: the Ray backend leaves `peak_memory_mb` unset, so `--execution-backend ray` prints no `Peak memory` line.
 
 One script covers each validated duration; regional compile is the fastest
 measured DiT route for all three:
@@ -136,6 +140,48 @@ python examples/inference/basic/basic_fasth3.py \
 ```
 
 Pass `--no-inference-torch-compile` to recover the eager sparse-DiT route.
+
+#### Hopper (H100 80 GB)
+
+Hopper has no FA4 and no sm_100a VSA kernel, so the GB200 profile above does
+not apply there. The measured Hopper route keeps the same checkpoint, four
+forwards and 90% VSA sparsity and changes three things: the 64-token VSA path
+runs on the ThunderKittens sm_90a kernel, which fastvideo-kernel picks on sm_90
+whenever it is built with
+`cd fastvideo-kernel && CMAKE_ARGS='-DFASTVIDEO_KERNEL_BUILD_TK=ON' ./build.sh`
+(`--vsa-kernel tk` keeps the sm100a route off and fails early when that
+extension is missing),
+the DiT is FSDP-sharded across the GPUs instead of replicated
+(`--no-replicated-dit`; a replicated 66 GB BF16 DiT does not fit 80 GB), and
+the Qwen3-VL text encoder stays resident as block-scaled FP8 (35.5 GB instead
+of 66.7 GB) rather than being offloaded on every request:
+
+```bash
+python scripts/checkpoint_conversion/quantize_minimax_h3_text_encoder_fp8.py \
+  --source ./FastH3-Preview-v1/text_encoder --output ./FastH3-TextEncoder-FP8
+
+python examples/inference/basic/basic_fasth3.py \
+  --prompt "your prompt" \
+  --num-gpus 4 --no-replicated-dit \
+  --vsa-kernel tk --no-fa4 \
+  --text-encoder-weights ./FastH3-TextEncoder-FP8 \
+  --no-offload-text-encoder --no-offload-vae \
+  --height 544 --width 960 --num-frames 345
+```
+
+`examples/inference/basic/basic_fasth3_h100.yaml` is the same profile for
+`fastvideo generate --config`. Measured points on this route (345 frames,
+24 FPS, stereo audio, warm, loading and compilation excluded):
+
+| GPUs | Resolution | Playback | Generation | Source |
+|---|---|---|---|---|
+| 8x H100 80 GB | 1344x768 | 14.375 s | 13.506 s (13.503 / 13.506 / 13.554) | [hlander-ai/minimax-h3](https://github.com/hlander-ai/minimax-h3) on FastVideo `b2db0c0` with these patches, Triton VSA |
+| 4x H100 80 GB, NVLink | 960x544 | 14.375 s | 12.98-14.02 s over 8 consecutive clips | Windflow streaming worker on FastVideo `b2db0c0` with these patches, TK VSA |
+
+The 4x H100 row was measured through a downstream streaming worker rather than
+this script; `basic_fasth3.py` numbers for that shape will follow in a later
+PR. The FP8 text encoder is a precision change relative to the stock BF16
+encoder; the other two changes are lossless.
 
 ### FastH3 Preview LoRAs
 
@@ -162,6 +208,24 @@ scale and approximates the full student; `0` removes its weight deltas. VSA
 launchers still use sparse attention at strength `0` and require FastVideo's
 tile-64 VSA kernel; the dense launcher selects FA4. Each launcher writes to its
 own variant directory by default so comparison outputs do not collide.
+
+### FastH3 OmniRef PDD (Ref2VA)
+
+[basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py)
+runs a Parallel Decoding Distillation Ref2VA student in eight transformer
+forwards. The export carries only its `transformer_ref`, scheduler configs,
+and `fastvideo_inference.json`; the script links them with the base
+MiniMax-H3 components into one local model directory. Its 128-token VSA tiles
+need the sm_100a/sm_103a kernel:
+
+```bash
+python examples/inference/basic/basic_fasth3_omniref_pdd.py \
+  --model-path <local export directory or Hugging Face repo id> \
+  --video reference.mp4 --image character.png --prompt "your prompt"
+```
+
+See [FastH3 distilled checkpoint schedules](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/inference/fasth3-distilled.md#ref2va-pdd-students)
+for the contract and the reference-video sparsity policy.
 
 ## Basic Walkthrough
 

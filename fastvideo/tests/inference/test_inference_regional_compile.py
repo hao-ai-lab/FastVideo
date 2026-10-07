@@ -28,6 +28,7 @@ import pytest
 import torch
 from torch import nn
 
+import fastvideo.envs as envs
 from fastvideo.attention import layer as attention_layer
 from fastvideo.attention.layer import DistributedAttention
 from fastvideo.models.dits.minimax_h3 import MiniMaxH3Attention, MiniMaxH3Transformer3DModel
@@ -38,6 +39,7 @@ from fastvideo.models.loader.fsdp_load import (
     _prepare_model_for_compile,
     _regional_compile_unsupported_reason,
 )
+from fastvideo.platforms import AttentionBackendEnum
 
 
 def _init_params_for(backend_name: str | None) -> dict:
@@ -45,8 +47,17 @@ def _init_params_for(backend_name: str | None) -> dict:
     return {"config": SimpleNamespace(_resolved_attention_backend=resolved)}
 
 
-def test_legacy_vsa_backend_degrades_to_eager(monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+def _model_with_actual_backend(backend: AttentionBackendEnum) -> nn.Module:
+    attention = DistributedAttention.__new__(DistributedAttention)
+    nn.Module.__init__(attention)
+    attention.backend = backend
+    model = nn.Module()
+    model.add_module("attention", attention)
+    return model
+
+
+def test_legacy_vsa_backend_degrades_to_eager(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
     backend_name = "VIDEO_SPARSE_ATTN"
     reason = _regional_compile_unsupported_reason(_init_params_for(backend_name))
     assert reason is not None
@@ -55,16 +66,16 @@ def test_legacy_vsa_backend_degrades_to_eager(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("backend_name", [None, "TORCH_SDPA"])
-def test_supported_backends_allow_compile(backend_name, monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
-    monkeypatch.delenv("FASTVIDEO_H3_VSA_PROBE", raising=False)
+def test_supported_backends_allow_compile(backend_name, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_PROBE.override(None))
     assert _regional_compile_unsupported_reason(_init_params_for(backend_name)) is None
 
 
-def test_h3_vsa_sm100a_tile64_allows_compile(monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
-    monkeypatch.delenv("FASTVIDEO_H3_VSA_PROBE", raising=False)
-    monkeypatch.setenv("FASTVIDEO_VSA_SM100A", "1")
+def test_h3_vsa_sm100a_tile64_allows_compile(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_PROBE.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
 
     reason = _regional_compile_unsupported_reason(
         _init_params_for("VIDEO_SPARSE_ATTN_H3"),
@@ -75,13 +86,13 @@ def test_h3_vsa_sm100a_tile64_allows_compile(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(("sm100a", "tile_size"), [(False, 64), (True, 256), (True, None)])
-def test_h3_vsa_unsupported_compile_route_degrades_to_eager(sm100a, tile_size, monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
-    monkeypatch.delenv("FASTVIDEO_H3_VSA_PROBE", raising=False)
+def test_h3_vsa_unsupported_compile_route_degrades_to_eager(sm100a, tile_size, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_PROBE.override(None))
     if sm100a:
-        monkeypatch.setenv("FASTVIDEO_VSA_SM100A", "1")
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
     else:
-        monkeypatch.delenv("FASTVIDEO_VSA_SM100A", raising=False)
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
 
     reason = _regional_compile_unsupported_reason(
         _init_params_for("VIDEO_SPARSE_ATTN_H3"),
@@ -92,9 +103,9 @@ def test_h3_vsa_unsupported_compile_route_degrades_to_eager(sm100a, tile_size, m
     assert "eager" in reason
 
 
-def test_h3_vsa_probe_degrades_regional_compile_to_eager(monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
-    monkeypatch.setenv("FASTVIDEO_H3_VSA_PROBE", "/tmp/h3-vsa-probe")
+def test_h3_vsa_probe_degrades_regional_compile_to_eager(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_PROBE.override("/tmp/h3-vsa-probe"))
 
     reason = _regional_compile_unsupported_reason(_init_params_for("VIDEO_SPARSE_ATTN_H3"))
 
@@ -251,16 +262,16 @@ def test_prepared_zero_vsa_gate_still_runs_in_grad_enabled_training() -> None:
     assert attention._gate_compress_active is False
 
 
-def test_attention_compile_escape_hatch_degrades_to_eager(monkeypatch) -> None:
-    monkeypatch.setenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", "1")
+def test_attention_compile_escape_hatch_degrades_to_eager(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(True))
     reason = _regional_compile_unsupported_reason(_init_params_for("TORCH_SDPA"))
     assert reason is not None
     assert "FASTVIDEO_DISABLE_ATTENTION_COMPILE" in reason
 
 
 @pytest.mark.parametrize("fa_version", ["2", "3", "4"])
-def test_dense_flash_attention_inference_allows_compile(fa_version, monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+def test_dense_flash_attention_inference_allows_compile(fa_version, monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
     fake_module = ModuleType("fastvideo.attention.utils.flash_attn_default")
     fake_module.fa_version = fa_version
     monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
@@ -268,8 +279,39 @@ def test_dense_flash_attention_inference_allows_compile(fa_version, monkeypatch)
     assert _regional_compile_unsupported_reason(_init_params_for("FLASH_ATTN")) is None
 
 
-def test_default_attention_dispatch_stays_compiler_disabled(monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", raising=False)
+def test_automatic_flash_attention_fa3_training_degrades_to_eager(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    fake_module = ModuleType("fastvideo.attention.utils.flash_attn_default")
+    fake_module.fa_version = "3"
+    monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
+    model = _model_with_actual_backend(AttentionBackendEnum.FLASH_ATTN)
+
+    reason = _regional_compile_unsupported_reason(
+        _init_params_for(None),
+        model=model,
+        training=True,
+    )
+
+    assert reason is not None
+    assert "flash-attn 3" in reason
+
+
+def test_actual_sdpa_backend_overrides_flash_request_for_fa3_guard(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    fake_module = ModuleType("fastvideo.attention.utils.flash_attn_default")
+    fake_module.fa_version = "3"
+    monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
+    model = _model_with_actual_backend(AttentionBackendEnum.TORCH_SDPA)
+
+    assert _regional_compile_unsupported_reason(
+        _init_params_for("FLASH_ATTN"),
+        model=model,
+        training=True,
+    ) is None
+
+
+def test_default_attention_dispatch_stays_compiler_disabled(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
     disabled_calls: list[str] = []
 
     def _fake_disable(fn):
@@ -297,7 +339,7 @@ def test_default_attention_dispatch_stays_compiler_disabled(monkeypatch) -> None
 
     # Preserve the existing process-wide escape hatch for callers that opt in
     # before constructing their attention modules.
-    monkeypatch.setenv("FASTVIDEO_DISABLE_ATTENTION_COMPILE", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(False))
     explicit = _ToyAttention()
     assert explicit.forward() == "forward"
     assert disabled_calls == ["disabled"]

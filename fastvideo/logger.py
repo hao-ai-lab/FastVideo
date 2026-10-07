@@ -15,11 +15,6 @@ from typing import Any, cast
 
 import fastvideo.envs as envs
 
-FASTVIDEO_CONFIGURE_LOGGING = envs.FASTVIDEO_CONFIGURE_LOGGING
-FASTVIDEO_LOGGING_CONFIG_PATH = envs.FASTVIDEO_LOGGING_CONFIG_PATH
-FASTVIDEO_LOGGING_LEVEL = envs.FASTVIDEO_LOGGING_LEVEL
-FASTVIDEO_LOGGING_PREFIX = envs.FASTVIDEO_LOGGING_PREFIX
-
 RED = '\033[91m'
 GREEN = '\033[92m'
 RESET = '\033[0;0m'
@@ -27,40 +22,43 @@ RESET = '\033[0;0m'
 _warned_local_main_process = False
 _warned_main_process = False
 
-_FORMAT = (f"{FASTVIDEO_LOGGING_PREFIX}%(levelname)s %(asctime)s.%(msecs)03d "
+_FORMAT = ("%(levelname)s %(asctime)s.%(msecs)03d "
            "[%(filename)s:%(lineno)d] %(message)s")
 _DATE_FORMAT = "%m-%d %H:%M:%S"
 
-DEFAULT_LOGGING_CONFIG = {
-    "formatters": {
-        "fastvideo": {
-            "class": "fastvideo.logging_utils.NewLineFormatter",
-            "datefmt": _DATE_FORMAT,
-            "format": _FORMAT,
+
+def _default_logging_config() -> dict[str, Any]:
+    """Build the default logging configuration from FASTVIDEO_LOGGING_PREFIX and FASTVIDEO_LOGGING_LEVEL."""
+    return {
+        "formatters": {
+            "fastvideo": {
+                "class": "fastvideo.logging_utils.NewLineFormatter",
+                "datefmt": _DATE_FORMAT,
+                "format": envs.FASTVIDEO_LOGGING_PREFIX.get() + _FORMAT,
+            },
         },
-    },
-    "handlers": {
-        "fastvideo": {
-            "class": "logging.StreamHandler",
-            "formatter": "fastvideo",
-            "level": FASTVIDEO_LOGGING_LEVEL,
-            "stream": "ext://sys.stdout",
+        "handlers": {
+            "fastvideo": {
+                "class": "logging.StreamHandler",
+                "formatter": "fastvideo",
+                "level": envs.FASTVIDEO_LOGGING_LEVEL.get(),
+                "stream": "ext://sys.stdout",
+            },
         },
-    },
-    "loggers": {
-        "fastvideo": {
+        "loggers": {
+            "fastvideo": {
+                "handlers": ["fastvideo"],
+                "level": "DEBUG",
+                "propagate": False,
+            },
+        },
+        "root": {
             "handlers": ["fastvideo"],
             "level": "DEBUG",
-            "propagate": False,
         },
-    },
-    "root": {
-        "handlers": ["fastvideo"],
-        "level": "DEBUG",
-    },
-    "version": 1,
-    "disable_existing_loggers": False
-}
+        "version": 1,
+        "disable_existing_loggers": False
+    }
 
 
 @lru_cache
@@ -76,7 +74,6 @@ def _print_warning_once(logger: Logger, msg: str) -> None:
     logger.warning(msg, stacklevel=2)
 
 
-# TODO(will): add env variable to control this process-aware logging behavior
 def _info(logger: Logger,
           msg: object,
           *args: Any,
@@ -84,10 +81,10 @@ def _info(logger: Logger,
           local_main_process_only: bool = True,
           **kwargs: Any) -> None:
     """Process-aware INFO level logging function.
-    
-    This function controls logging behavior based on the process rank, allowing for 
+
+    This function controls logging behavior based on the process rank, allowing for
     selective logging from specific processes in a distributed environment.
-    
+
     Args:
         logger: The logger instance to use for logging
         msg: The message format string to log
@@ -96,13 +93,22 @@ def _info(logger: Logger,
         local_main_process_only: If True, only log if this is the local main process (LOCAL_RANK=0)
         **kwargs: Additional keyword arguments to pass to the logger.log method
             - stacklevel: Defaults to 2 to show the original caller's location
-    
+
     Note:
-        - When both main_process_only and local_main_process_only are True, 
+        - When both main_process_only and local_main_process_only are True,
           the message will be logged only if both conditions are met
         - When both are False, the message will be logged from all processes
         - By default, only logs from processes with LOCAL_RANK=0
+        - Setting the FASTVIDEO_LOG_ALL_PROCESSES env variable to 1 overrides the
+          process-aware behavior entirely and logs from every process. The variable
+          is read at call time, so it can be set after importing fastvideo.
     """
+    # Override the process-aware filtering
+    if envs.FASTVIDEO_LOG_ALL_PROCESSES.get():
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
+        return
+
     is_distributed = int(os.environ.get("WORLD_SIZE", 1)) > 1
     try:
         local_rank = int(os.environ["LOCAL_RANK"])
@@ -115,7 +121,8 @@ def _info(logger: Logger,
     is_local_main_process = local_rank == 0
 
     if (main_process_only and is_main_process) or (local_main_process_only and is_local_main_process):
-        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
 
     global _warned_local_main_process, _warned_main_process
 
@@ -137,7 +144,8 @@ def _info(logger: Logger,
             _warned_main_process = True
 
     if not main_process_only and not local_main_process_only:
-        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
 
 
 class _FastvideoLogger(Logger):
@@ -180,20 +188,22 @@ class _FastvideoLogger(Logger):
 
 def _configure_fastvideo_root_logger() -> None:
     logging_config = dict[str, Any]()
+    configure_logging = envs.FASTVIDEO_CONFIGURE_LOGGING.get()
+    logging_config_path = envs.FASTVIDEO_LOGGING_CONFIG_PATH.get()
 
-    if not FASTVIDEO_CONFIGURE_LOGGING and FASTVIDEO_LOGGING_CONFIG_PATH:
+    if not configure_logging and logging_config_path:
         raise RuntimeError("FASTVIDEO_CONFIGURE_LOGGING evaluated to false, but "
                            "FASTVIDEO_LOGGING_CONFIG_PATH was given. FASTVIDEO_LOGGING_CONFIG_PATH "
                            "implies FASTVIDEO_CONFIGURE_LOGGING. Please enable "
                            "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH.")
 
-    if FASTVIDEO_CONFIGURE_LOGGING:
-        logging_config = DEFAULT_LOGGING_CONFIG
+    if configure_logging:
+        logging_config = _default_logging_config()
 
-    if FASTVIDEO_LOGGING_CONFIG_PATH:
-        if not path.exists(FASTVIDEO_LOGGING_CONFIG_PATH):
-            raise RuntimeError("Could not load logging config. File does not exist: %s", FASTVIDEO_LOGGING_CONFIG_PATH)
-        with open(FASTVIDEO_LOGGING_CONFIG_PATH, encoding="utf-8") as file:
+    if logging_config_path:
+        if not path.exists(logging_config_path):
+            raise RuntimeError("Could not load logging config. File does not exist: %s", logging_config_path)
+        with open(logging_config_path, encoding="utf-8") as file:
             custom_config = json.loads(file.read())
 
         if not isinstance(custom_config, dict):
@@ -286,7 +296,7 @@ def enable_trace_function_call(log_file_path: str, root_dir: str | None = None):
     Note that this call is thread-level, any threads calling this function
     will have the trace enabled. Other threads will not be affected.
     """
-    logger.warning("FASTVIDEO_TRACE_FUNCTION is enabled. It will record every"
+    logger.warning("Function-call tracing is enabled. It will record every"
                    " function executed by Python. This will slow down the code. It "
                    "is suggested to be used for debugging hang or crashes only.")
     logger.info("Trace frame log is saved to %s", log_file_path)
