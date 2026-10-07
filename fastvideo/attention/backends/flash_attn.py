@@ -25,6 +25,7 @@ from fastvideo.attention.backends.abstract import (
     AttentionMetadata,
     AttentionMetadataBuilder,
 )
+from fastvideo.attention.backends.attn_qat_infer import _resolve_fa4_pv_mode
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -170,6 +171,16 @@ def _nvfp4_quantize_for_fa4(tensor_4d: torch.Tensor) -> tuple[torch.Tensor, torc
     return torch.ops.fastvideo.nvfp4_quantize_fa4(tensor_4d)
 
 
+# fp8 PV mode (fa4_pv_mode="fp8"): the FA4 kernel's plain-fp8 V contract is a
+# bare elementwise e4m3 cast in the usual (batch, seqlen, nheads, headdim)
+# headdim-contiguous layout -- no mSFV scale-factor tensor and no v_descale
+# (those belong to the block-scaled fp4/mxfp8 PV modes; absent v_descale means
+# an implicit dequant scale of 1.0). The kernel's output stays BF16 whenever
+# block-scaled Q/K are enabled. The cast itself needs no custom-op boundary:
+# a bare `.to(torch.float8_e4m3fn)` traces fullgraph under torch.compile
+# (verified on torch 2.12, CPU/eager, for both FA4-FP4 consumers).
+
+
 class FlashAttentionBackend(AttentionBackend):
     accept_output_buffer: bool = True
 
@@ -267,12 +278,19 @@ class FlashAttentionImpl(AttentionImpl):
         if nvfp4_fa4 is None:
             nvfp4_fa4 = envs.FASTVIDEO_NVFP4_FA4.get()
         self.nvfp4_fa4 = bool(nvfp4_fa4)
+        # PV-mode knob for the FA4-FP4 path. Resolved + validated
+        # unconditionally (shared helper) so a typo fails at construction, not
+        # at the first forward on a Blackwell box, and so the ATTN_QAT_INFER
+        # receipt records this impl's mode too. The default leaves behavior
+        # identical to before the knob; kwargs win over the
+        # FASTVIDEO_FA4_PV_MODE env bridge (same pattern as nvfp4_fa4 above).
+        self.fa4_pv_mode = _resolve_fa4_pv_mode(extra_impl_args)
         if self.nvfp4_fa4:
             cap = torch.cuda.get_device_capability()
             assert cap in [(10, 0), (10, 3)], (f"NVFP4 FA4 requires Blackwell (sm100a/sm103a), got sm{cap[0]}{cap[1]}")
             assert _FA4_FP4_AVAILABLE, ("NVFP4 FA4 requires flash-attention-fp4 (flash_attn.cute). "
                                         "Install via instructions in docs/inference/optimizations.md")
-            logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk only)")
+            logger.info("NVFP4 FA4 enabled for FlashAttentionImpl (quant_qk, pv_mode=%s)", self.fa4_pv_mode)
 
     def forward(
         self,
@@ -398,13 +416,18 @@ class FlashAttentionImpl(AttentionImpl):
         return output
 
     def _forward_nvfp4(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
-        """FP4 flash attention with quantized Q and K, BF16 V."""
+        """FP4 flash attention with quantized Q and K; V in BF16 (default) or
+        fp8 e4m3 per the fa4_pv_mode knob."""
         orig_seqlen_q = query.shape[1]
         orig_seqlen_k = key.shape[1]
 
         # Quantize Q/K to FP4 (internally pads to multiple of 128 for SF layout)
         q_fp4, q_sf = _nvfp4_quantize_for_fa4(query)
         k_fp4, k_sf = _nvfp4_quantize_for_fa4(key)
+
+        # fp8 PV: unscaled e4m3 cast (no mSFV/v_descale); output stays BF16.
+        if self.fa4_pv_mode == "fp8":
+            value = value.to(torch.float8_e4m3fn)
 
         # Pass original seqlen to FA4 — the kernel handles non-multiple-of-128
         # via boundary masking. FP4/SF data is padded to 128-multiple but FA4

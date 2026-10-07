@@ -15,12 +15,34 @@ from __future__ import annotations
 import pytest
 
 import fastvideo.attention.backends.attn_qat_infer as aqi
+import fastvideo.envs as envs
 
 
 def _patch(monkeypatch, *, cap, cutlass, fa4) -> None:
     monkeypatch.setattr(aqi, "_active_capability", lambda: cap)
     monkeypatch.setattr(aqi, "_get_attn_qat_infer", lambda: (lambda *a, **k: None) if cutlass else None)
     monkeypatch.setattr(aqi, "_fa4_fp4_available", lambda: fa4)
+
+
+def _flash_attn_backend():
+    """The FLASH_ATTN backend module, or a skip when it cannot be imported.
+
+    It needs a flash-attention package (FA2/FA3, or FA4 with FASTVIDEO_FA4=1)
+    at import. flash-attn is an optional dependency and the unit lane collects
+    this file, so a missing package skips here like the other FlashAttentionImpl
+    tests instead of turning the lane red.
+    """
+    try:
+        from fastvideo.attention.backends import flash_attn as fa
+    except (ImportError, RuntimeError) as exc:  # FA2/FA3/FA4 probe at import
+        pytest.skip(f"no usable flash-attention package installed ({exc})")
+    return fa
+
+
+def _impl_cls(impl_module: str):
+    if impl_module == "attn_qat_infer":
+        return aqi.AttnQatInferImpl
+    return _flash_attn_backend().FlashAttentionImpl
 
 
 @pytest.mark.parametrize(
@@ -45,11 +67,38 @@ def test_arch_resolution(monkeypatch, cap, cutlass, fa4, expected_kernel) -> Non
 
 def test_receipt_records_fa4_quant_knobs(monkeypatch) -> None:
     _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", "bf16")
     receipt = aqi.attn_qat_infer_receipt()
     assert "arch=sm_100" in receipt
     assert "qk_mode=nvfp4(per-16-e4m3-sf)" in receipt
     assert "pv_mode=bf16" in receipt
     assert "train_sim_mismatch=measured" in receipt
+
+
+@pytest.mark.parametrize("impl_module", ["attn_qat_infer", "flash_attn"])
+def test_receipt_pv_mode_is_derived_from_configured_knob(monkeypatch, impl_module) -> None:
+    """The receipt's pv_mode field derives from the fa4_pv_mode knob recorded
+    at impl construction -- by both consumers, not a literal."""
+    _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", "bf16")
+    monkeypatch.setattr(aqi, "_receipt_logged", False)
+
+    _impl_cls(impl_module)(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5, fa4_pv_mode="fp8")
+    assert "pv_mode=fp8" in aqi.attn_qat_infer_receipt()
+
+
+@pytest.mark.parametrize("impl_module", ["attn_qat_infer", "flash_attn"])
+def test_fa4_pv_mode_typo_fails_at_construction(monkeypatch, impl_module) -> None:
+    """Both knob consumers validate fa4_pv_mode eagerly: a bad value raises at
+    impl construction (CPU-only), never surviving to a GPU forward. An
+    explicit falsy value is validated too, not silently replaced by the
+    env/default fallback."""
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", aqi._configured_fa4_pv_mode)
+    impl_cls = _impl_cls(impl_module)
+
+    for bad in ("fp16", ""):
+        with pytest.raises(ValueError, match="fa4_pv_mode"):
+            impl_cls(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5, fa4_pv_mode=bad)
 
 
 def test_receipt_records_cutlass_scheme(monkeypatch) -> None:
@@ -163,7 +212,7 @@ def test_fa4_quantize_path_is_fullgraph_traceable() -> None:
     the op-backed path must compile and run without a graph break."""
     import torch
 
-    from fastvideo.attention.backends import flash_attn as fa
+    fa = _flash_attn_backend()
 
     _register_fa4_quantize_cpu_kernel()
 
@@ -186,7 +235,7 @@ def test_fa4_quantize_op_fake_matches_real() -> None:
     the non-autograd suites."""
     import torch
 
-    import fastvideo.attention.backends.flash_attn  # noqa: F401  registers the op + fake
+    _flash_attn_backend()  # registers the op + fake
 
     _register_fa4_quantize_cpu_kernel()
 
@@ -198,3 +247,49 @@ def test_fa4_quantize_op_fake_matches_real() -> None:
         (x, ),
         test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
     )
+
+
+def test_fa4_fp8_pv_path_is_fullgraph_traceable(monkeypatch) -> None:
+    """With fa4_pv_mode="fp8" the production _forward_fa4_fp4 body (quantize
+    op + bare V cast + kernel call) must compile fullgraph with no graph break:
+    the cast needs no custom-op boundary of its own."""
+    import torch
+
+    fa = _flash_attn_backend()
+
+    _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", aqi._configured_fa4_pv_mode)
+    _register_fa4_quantize_cpu_kernel()
+
+    def fake_kernel(q, k, v, sfq, sfk, softmax_scale=None, causal=False):
+        # The real kernel emits BF16 with full headdim regardless of V dtype.
+        return v.to(torch.bfloat16)
+
+    # Pre-resolve the route with the real op-backed quantizer and a mocked
+    # kernel entry point (importing the real one needs a CUDA install).
+    monkeypatch.setattr(aqi, "_FA4_ROUTE_OPS", (fa._nvfp4_quantize_for_fa4, fake_kernel))
+
+    impl = aqi.AttnQatInferImpl(num_heads=2, head_size=128, causal=False, softmax_scale=128**-0.5, fa4_pv_mode="fp8")
+    compiled = torch.compile(impl._forward_fa4_fp4, fullgraph=True, backend="eager")
+    x = torch.randn(1, 64, 2, 128, dtype=torch.bfloat16)
+    out = compiled(x, x, x)
+    assert out.shape == x.shape
+    assert out.dtype == torch.bfloat16
+
+
+def test_fa4_pv_mode_env_bridge(monkeypatch, env_overrides) -> None:
+    """The FASTVIDEO_FA4_PV_MODE env bridge is the user-reachable path to the
+    knob (model code constructs attention with fixed literals); explicit
+    kwargs still win over the environment."""
+    import torch  # noqa: F401
+
+    _patch(monkeypatch, cap=(10, 0), cutlass=False, fa4=True)
+    monkeypatch.setattr(aqi, "_configured_fa4_pv_mode", aqi._configured_fa4_pv_mode)
+    env_overrides.enter_context(envs.FASTVIDEO_FA4_PV_MODE.override("fp8"))
+
+    impl = aqi.AttnQatInferImpl(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5)
+    assert impl.fa4_pv_mode == "fp8"
+
+    explicit = aqi.AttnQatInferImpl(num_heads=1, head_size=128, causal=False, softmax_scale=128**-0.5,
+                                    fa4_pv_mode="bf16")
+    assert explicit.fa4_pv_mode == "bf16"
