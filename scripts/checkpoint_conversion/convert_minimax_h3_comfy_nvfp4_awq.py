@@ -55,15 +55,34 @@ WEIGHT_SUFFIXES = (".weight", ".weight_scale", ".weight_scale_2")
 EXPECTED_LAYERS = 50
 ARCH = MiniMaxH3Qwen3VLArchConfig()
 KV_SIZE = ARCH.num_key_value_heads * ARCH.head_dim
+# ``q_proj`` and ``o_proj`` are ``num_attention_heads * head_dim`` wide, not
+# ``hidden_size`` wide: the model builds ``q_proj`` with that output size and
+# ``o_proj`` with that input size (``MiniMaxH3Qwen3VLTextAttention`` in
+# fastvideo/models/encoders/minimax_h3_qwen3_vl.py), 64 * 128 = 8192 for H3.
+Q_SIZE = ARCH.num_attention_heads * ARCH.head_dim
 PROJECTION_SHAPES = {
-    "self_attn.q_proj": (ARCH.hidden_size, ARCH.hidden_size),
+    "self_attn.q_proj": (Q_SIZE, ARCH.hidden_size),
     "self_attn.k_proj": (KV_SIZE, ARCH.hidden_size),
     "self_attn.v_proj": (KV_SIZE, ARCH.hidden_size),
-    "self_attn.o_proj": (ARCH.hidden_size, ARCH.hidden_size),
+    "self_attn.o_proj": (ARCH.hidden_size, Q_SIZE),
     "mlp.gate_proj": (ARCH.intermediate_size, ARCH.hidden_size),
     "mlp.up_proj": (ARCH.intermediate_size, ARCH.hidden_size),
     "mlp.down_proj": (ARCH.hidden_size, ARCH.intermediate_size),
 }
+# Every source key needs a destination that
+# ``MiniMaxH3Qwen3VLConditioner.load_weights`` accepts: a model parameter, the
+# ``lm_head.weight`` it skips, or the omitted final-norm spelling. Anything
+# else dies at load time with ``Unexpected MiniMax-H3 Qwen3-VL checkpoint
+# key``, so it is rejected here before a shard is written.
+LOADER_DESTINATION = re.compile(
+    r"^(?:model\.embed_tokens\.(?:comfy_quant|weight|weight_scale)"
+    r"|model\.layers\.\d+\.(?:" + "|".join(re.escape(name) for name in LANGUAGE_PROJECTIONS) +
+    r")\.(?:comfy_quant|weight|weight_scale|weight_scale_2|pre_quant_scale)"
+    r"|model\.layers\.\d+\.(?:input_layernorm|post_attention_layernorm|self_attn\.(?:q_norm|k_norm))\.weight"
+    r"|model\.norm\.weight"
+    r"|model\.language_model\.norm\.weight"
+    r"|lm_head\.weight"
+    r"|(?:model\.)?visual\..+\.(?:weight|bias))$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,6 +102,12 @@ def fastvideo_name(name: str) -> str:
         return "model.language_model.layers." + name[len("model.layers."):]
     if name.startswith("model.embed_tokens."):
         return "model.language_model.embed_tokens." + name[len("model.embed_tokens."):]
+    if name.startswith("model.norm."):
+        # The truncated conditioner keeps the final norm at ``language_model.norm``
+        # and builds it as ``None``, so the loader only accepts the
+        # ``language_model.norm.weight`` spelling as an omitted key
+        # (``MiniMaxH3Qwen3VLConditioner._is_omitted_checkpoint_key``).
+        return "model.language_model.norm." + name[len("model.norm."):]
     if name.startswith("visual."):
         return "model." + name
     return name
@@ -100,6 +125,12 @@ def decode_marker(tensor: torch.Tensor, name: str) -> dict:
 
 def inspect_source(handle) -> tuple[set[str], set[str]]:
     keys = set(handle.keys())
+    without_destination = sorted(name for name in keys if LOADER_DESTINATION.match(name) is None)
+    if without_destination:
+        raise ValueError(
+            f"Comfy checkpoint key {without_destination[0]} has no FastVideo loader destination; "
+            "MiniMaxH3Qwen3VLConditioner.load_weights would reject it. Extend fastvideo_name or "
+            "record the key as intentionally skipped.")
     quantized: set[str] = set()
     for name in sorted(key for key in keys if key.endswith(COMFY_QUANT_SUFFIX)):
         prefix = name[:-len(COMFY_QUANT_SUFFIX)]
