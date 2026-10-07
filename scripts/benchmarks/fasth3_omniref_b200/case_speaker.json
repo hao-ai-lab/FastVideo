@@ -1,0 +1,10 @@
+{
+  "name": "speaker",
+  "prompt": "Picture 1 walks slowly toward the camera across the living room, smiling, and says, \"Every detail was chosen with care.\" Smooth tracking shot, warm afternoon light, light footsteps on the wooden floor.",
+  "reference": "speaker.png",
+  "reference_sha256": "d38ba6675b5c780be57818aea0109a8f028d09268c3f29bf00f2739167a6c92c",
+  "seed": 413410,
+  "height": 768,
+  "width": 1344,
+  "num_frames": 124
+}

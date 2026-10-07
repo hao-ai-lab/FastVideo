@@ -21,12 +21,19 @@ sequence is split across them (sequence parallelism).
 
 References are ordered. Pass them in order with --image / --video / --audio,
 for example ``--video dance.mp4 --image outfit.png --audio voice.wav``.
+
+``--lossless-accel`` turns on every bit-identical speed-up the pipeline has
+(LOSSLESS_ACCEL_ENV below, plus resident encoders, pinned host memory and the
+sequence-parallel VAE); the output is bitwise the same as without it. It keeps
+the 63 GB Qwen3-VL text encoder resident on every GPU, so it needs about
+125 GB per GPU at four GPUs (B200/B300 class).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -54,6 +61,21 @@ BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae")
 MANIFESTS = ("modular_model_index.json", "model_index.json")
 # Components the composed directory's manifest must declare, besides its transformer_ref.
 MANIFEST_COMPONENTS = ("scheduler", "audio_scheduler", *BASE_COMPONENTS)
+# Bit-identical speed-ups that FastVideo reads from the environment. Workers
+# inherit it, so these must be set before the generator starts.
+LOSSLESS_ACCEL_ENV = {
+    # Fused NVLink Ulysses all-to-all instead of NCCL plus permute copies.
+    "FASTVIDEO_ULYSSES_A2A": "auto",
+    # RoPE, AdaLN modulation / gated residual and SwiGLU kernels that round to
+    # bf16 exactly where the eager ops do (not the FP32 round-once fusions).
+    "FASTVIDEO_MINIMAX_H3_EXACT_KERNELS": "all",
+    # VSA tiles scattered straight into the kernels' heads-first layout.
+    "FASTVIDEO_H3_VSA_HEADS_FIRST_TILE": "1",
+    # VAE spatial tiles split across the sequence-parallel ranks.
+    "FASTVIDEO_H3_VAE_TILE_PARALLEL": "1",
+    # Content-keyed reuse of repeat reference encodes.
+    "FASTVIDEO_H3_REF2VA_MEMO_ENTRIES": "16",
+}
 
 
 class _AppendReference(argparse.Action):
@@ -97,6 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-frames", type=int, default=124)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=1, help="sequence-parallel GPUs (must divide 56 heads)")
+    parser.add_argument("--lossless-accel",
+                        action="store_true",
+                        help="enable every bit-identical speed-up (output unchanged; about 125 GB per GPU)")
     return parser
 
 
@@ -201,7 +226,23 @@ def resolve_model(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     return compose_model_dir(export_dir, base_dir, composed_dir), contract
 
 
-def build_generator_config(model_dir: Path, num_gpus: int) -> GeneratorConfig:
+def apply_lossless_accel_env() -> None:
+    """Set LOSSLESS_ACCEL_ENV, keeping any value already in the environment."""
+    for name, value in LOSSLESS_ACCEL_ENV.items():
+        os.environ.setdefault(name, value)
+
+
+def build_generator_config(model_dir: Path, num_gpus: int, lossless_accel: bool = False) -> GeneratorConfig:
+    if lossless_accel:
+        # Resident encoders skip streaming the 63 GB text encoder (and the
+        # VAEs) from host memory on every clip; pinned buffers copy the
+        # decoded clip at full PCIe speed; the parallel VAE paths reassemble
+        # the serial result exactly.
+        offload = OffloadConfig(dit=False, dit_layerwise=False, text_encoder=False, vae=False, pin_cpu_memory=True)
+        experimental = {"vae_parallel_decode": num_gpus > 1, "vae_parallel_encode": num_gpus > 1}
+    else:
+        offload = OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=True, pin_cpu_memory=False)
+        experimental = {}
     return GeneratorConfig(
         model_path=str(model_dir),
         engine=EngineConfig(
@@ -209,13 +250,14 @@ def build_generator_config(model_dir: Path, num_gpus: int) -> GeneratorConfig:
             # Shard the DiT across the GPUs rather than holding a full copy on each.
             use_fsdp_inference=num_gpus > 1,
             parallelism=ParallelismConfig(tp_size=1, sp_size=num_gpus),
-            offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=True, pin_cpu_memory=False),
+            offload=offload,
         ),
         pipeline=PipelineSelection(
             workload_type="i2v",
             # FastVideo reads the trained fused-block partition and attention
             # settings from the composed directory's fastvideo_inference.json.
             components=ComponentConfig(override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline"),
+            experimental=experimental,
         ),
     )
 
@@ -231,7 +273,9 @@ def main() -> None:
           f"{contract['vsa_tile_size']}-token tiles, reference keep rate {contract['vsa_ref_keep_rate']}")
     references = [MiniMaxH3Reference(source=path, media_type=kind) for kind, path in args.references]
 
-    generator = VideoGenerator.from_config(build_generator_config(model_dir, args.num_gpus))
+    if args.lossless_accel:
+        apply_lossless_accel_env()
+    generator = VideoGenerator.from_config(build_generator_config(model_dir, args.num_gpus, args.lossless_accel))
     try:
         result = generator.generate(
             GenerationRequest(

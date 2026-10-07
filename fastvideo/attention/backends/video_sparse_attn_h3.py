@@ -91,6 +91,8 @@ from fastvideo.attention.backends.video_sparse_attn import (compute_topk, constr
                                                             get_non_pad_index, get_tile_partition_indices,
                                                             scatter_into_tile_buf)
 from fastvideo.attention.backends.video_sparse_attn_h3_probe import probe_enabled, record_probe
+from fastvideo.attention.backends.video_sparse_attn_h3_scatter import (scatter_rows_heads_first,
+                                                                       supports_heads_first_scatter)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -334,6 +336,10 @@ class _MiniMaxH3VSATileBufferHolder:
     def __init__(self) -> None:
         self.buffer: torch.Tensor | None = None
         self.untile_geometry: torch.Tensor | None = None
+        # FASTVIDEO_H3_VSA_HEADS_FIRST_TILE: a [B, H, S_pad, D] buffer whose
+        # transpose is the tile buffer, and the geometry it was written for.
+        self.heads_first_buffer: torch.Tensor | None = None
+        self.heads_first_geometry: torch.Tensor | None = None
 
 
 @dataclass
@@ -669,6 +675,10 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         holder = attn_metadata.tile_buf_holder
         if holder is None:
             raise RuntimeError("VSA-H3 metadata has no builder-owned tile buffer holder")
+        if (not compiling and attn_metadata.tile_elems in _SM100A_TILE_ELEMS
+                and envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.get()
+                and supports_heads_first_scatter(x, attn_metadata.untile_combined_index)):
+            return self._tile_heads_first(x, attn_metadata, holder, kernel_tiles, needs_sm100a_pair)
         buffer_matches = (holder.buffer is not None and holder.buffer.shape == target_shape
                           and holder.buffer.dtype == x.dtype and holder.buffer.device == x.device)
         if buffer_matches and holder.untile_geometry is not attn_metadata.untile_combined_index:
@@ -680,6 +690,29 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # written the last tile as logical data.
             holder.buffer[:, n_tiles * attn_metadata.tile_elems:].zero_()
         return holder.buffer
+
+    @staticmethod
+    def _tile_heads_first(x: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata, holder: _MiniMaxH3VSATileBufferHolder,
+                          kernel_tiles: int, needs_sm100a_pair: bool) -> torch.Tensor:
+        """``tile()`` into a heads-first buffer; returns its ``[B, S_pad, H, D]`` view.
+
+        The 64/128-token kernels transpose the tiled tensor to BHSD and make it
+        contiguous before every call; written heads-first, that copy is free.
+        Same aliasing and zero-padding contract as the BSHD buffer.
+        """
+        n_tiles = attn_metadata.variable_block_sizes.numel()
+        shape = (x.shape[0], x.shape[2], kernel_tiles * attn_metadata.tile_elems, x.shape[3])
+        buffer = holder.heads_first_buffer
+        if buffer is None or buffer.shape != shape or buffer.dtype != x.dtype or buffer.device != x.device:
+            buffer = torch.zeros(shape, device=x.device, dtype=x.dtype)
+        elif holder.heads_first_geometry is not attn_metadata.untile_combined_index:
+            buffer.zero_()
+        scatter_rows_heads_first(x, attn_metadata.untile_combined_index, buffer)
+        holder.heads_first_buffer = buffer
+        holder.heads_first_geometry = attn_metadata.untile_combined_index
+        if needs_sm100a_pair:
+            buffer[:, :, n_tiles * attn_metadata.tile_elems:].zero_()
+        return buffer.transpose(1, 2)
 
     def preprocess_qkv(self, qkv: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         return self.tile(qkv, attn_metadata)
