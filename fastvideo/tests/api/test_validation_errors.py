@@ -40,7 +40,7 @@ def test_missing_required_field_error_includes_path() -> None:
 def test_invalid_literal_error_includes_path() -> None:
     with pytest.raises(
             ConfigValidationError,
-            match=r"generator\.engine\.execution_backend: expected one of \['mp', 'ray'\]",
+            match=r"generator\.engine\.execution_backend: expected one of \['mp', 'ray', 'uni'\]",
     ):
         parse_config(
             RunConfig,
