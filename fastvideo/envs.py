@@ -316,6 +316,12 @@ FASTVIDEO_LOGGING_CONFIG_PATH = EnvStr(None, category="logging", doc="Path to a 
 FASTVIDEO_LOGGING_LEVEL = EnvStr("INFO", category="logging", doc="Default logging level.")
 FASTVIDEO_LOGGING_PREFIX = EnvStr("", category="logging", doc="Prefix prepended to every log message.")
 FASTVIDEO_STAGE_LOGGING = EnvBool(False, category="logging", doc="Log the time that each pipeline stage takes.")
+FASTVIDEO_LOG_ALL_PROCESSES = EnvBool(
+    False,
+    category="logging",
+    doc="logger.info logs from every process, ignoring the default local-main-process filter and the "
+    "main_process_only and local_main_process_only arguments. Read at each call, so it can be set after "
+    "importing fastvideo. Useful for debugging distributed runs.")
 
 # ================== Attention ==================
 
