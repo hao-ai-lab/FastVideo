@@ -73,8 +73,8 @@ class DenoisingStage(PipelineStage):
             dtype=torch.float16,  # TODO(will): hack
             supported_attention_backends=(AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.BSA_ATTN,
                                           AttentionBackendEnum.VMOBA_ATTN, AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA,
-                                          AttentionBackendEnum.SAGE_ATTN_THREE),  # hack
+                                          AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.SAGE_ATTN_THREE,
+                                          AttentionBackendEnum.ATTN_QAT_INFER),  # hack
             # Build metadata for the backend this transformer actually resolved
             # instead of re-deriving it from the environment. The two agreed
             # only when the request arrived via the env var: a request passed as
@@ -228,6 +228,8 @@ class DenoisingStage(PipelineStage):
                 "img_ids": batch.extra.get("flux2_img_ids"),
             },
         )
+
+        animate_kwargs, animate_uncond_kwargs = self._animate_conditioning_kwargs(batch)
 
         # Get latents and embeddings
         latents = batch.latents
@@ -423,6 +425,7 @@ class DenoisingStage(PipelineStage):
                             **dreamx_camera_kwargs,
                             **timesteps_r_kwarg,
                             **flux2_id_kwargs,
+                            **animate_kwargs,
                             **model_kwargs,
                         )
 
@@ -468,6 +471,7 @@ class DenoisingStage(PipelineStage):
                                     **dreamx_camera_kwargs,
                                     **timesteps_r_kwarg,
                                     **flux2_id_kwargs,
+                                    **animate_uncond_kwargs,
                                     **model_kwargs_uncond,
                                 )
                             _cfg_gate_fresh_uncond += 1
@@ -560,6 +564,28 @@ class DenoisingStage(PipelineStage):
             logger.info("Memory after deallocating transformer: %s", torch.mps.current_allocated_memory())
 
         return batch
+
+    def _animate_conditioning_kwargs(self, batch: ForwardBatch) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(conditional, unconditional) kwargs for pose/face-driven models (Wan-Animate).
+
+        Like the other kwarg groups, ``prepare_extra_func_kwargs`` drops every
+        key the transformer's forward does not name, so this is empty -- and a
+        no-op -- for all other models. The unconditional variant keeps the pose
+        and blanks the face crops to -1 (black in the [-1, 1] pixel range),
+        matching diffusers' WanAnimatePipeline (``face * 0 - 1``); note Animate
+        runs with guidance 1.0 by default, so the uncond pass rarely fires.
+        """
+        kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "pose_latents": batch.pose_latents,
+                "face_pixel_values": batch.face_pixel_values,
+            },
+        )
+        uncond_kwargs = dict(kwargs)
+        if uncond_kwargs.get("face_pixel_values") is not None:
+            uncond_kwargs["face_pixel_values"] = torch.full_like(uncond_kwargs["face_pixel_values"], -1.0)
+        return kwargs, uncond_kwargs
 
     def prepare_denoising(self, batch, fastvideo_args, target_dtype) -> DenoisingState:
         """Build request-local state. Family stages specialize latent conditioning."""

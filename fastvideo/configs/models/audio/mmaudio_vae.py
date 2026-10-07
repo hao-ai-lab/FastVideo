@@ -8,11 +8,15 @@ from fastvideo.configs.models.base import ArchConfig, ModelConfig
 
 @dataclass
 class MMAudioVAEArchConfig(ArchConfig):
+    """MMAudio mel-spectrogram VAE architecture.
+
+    ``mode`` is the single source of truth: ``MMAudioVAE`` derives the mel
+    dimension, the latent dimension, and the hidden width from it, so they are
+    not duplicated here.
+    """
+
     architectures: list[str] = field(default_factory=lambda: ["MMAudioVAE"])
     mode: str = "44k"
-    data_dim: int = 128
-    embed_dim: int = 40
-    hidden_dim: int = 512
     need_encoder: bool = False
 
 

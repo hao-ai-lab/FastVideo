@@ -105,6 +105,7 @@ training:
   optimizer:
     learning_rate: 2.0e-6             # default: 0.0
     betas: [0.9, 0.999]              # default: [0.9, 0.999]
+    eps: 1.0e-8                       # default: 1.0e-8
     weight_decay: 0.01                # default: 0.0
     lr_scheduler: constant            # default: "constant"
     lr_warmup_steps: 0                # default: 0
