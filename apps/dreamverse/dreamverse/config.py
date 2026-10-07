@@ -97,6 +97,24 @@ MODEL_REGISTRY = {
         "seed": 1000,
         "full_checkpoint": True,
     },
+    "cosmos25-dfd": {
+        "name": "Cosmos Predict2.5 DFD",
+        "generation_backend": "cosmos25_dfd",
+        "default_sp_size": 1,
+        "model_path": "FastVideo/Cosmos-Predict2.5-2B-Distilled-TrigFlow",
+        "continuation_model_path": "FastVideo/Cosmos-Predict2.5-2B-DFD",
+        "attention_backend": "TORCH_SDPA",
+        "height": 704,
+        "width": 1280,
+        "bootstrap_num_frames": 77,
+        "continuation_num_frames": 81,
+        "fps": 24,
+        "num_inference_steps": 4,
+        "seed": 42,
+        # Six sequential GB10 segments can exceed the legacy five-minute
+        # DreamVerse lease even though the GPU is making progress.
+        "session_timeout_seconds": 1800,
+    },
 }
 
 DEFAULT_MODEL_ID = "fast-ltx2"
@@ -185,11 +203,22 @@ def _optional_env(*names: str) -> str | None:
 
 
 # Generation limits
-# Full H3 loads and generates substantially longer than the Preview adapter.
-# This also covers a base/ref pipeline reload inside a retained session.
+# Slower backends may own a longer default lease. A profile can set
+# ``session_timeout_seconds``; Full H3 loads and generates substantially longer
+# than the Preview adapter, which also covers a base/ref pipeline reload inside a
+# retained session. An explicit environment override remains available for
+# deployment policy: DREAMVERSE_SESSION_TIMEOUT_SECONDS, with
+# FASTVIDEO_SESSION_TIMEOUT_SECONDS accepted as an alias.
 # Values below 60 seconds are floored so a single segment cannot outlast the session.
+_DEFAULT_SESSION_TIMEOUT_SECONDS = cast(
+    int, MODEL_CONFIG.get("session_timeout_seconds", 7200 if ACTIVE_MODEL_ID == "full-h3" else 300))
 SESSION_TIMEOUT_SECONDS = max(
-    60, _env_int("DREAMVERSE_SESSION_TIMEOUT_SECONDS", 7200 if ACTIVE_MODEL_ID == "full-h3" else 300))
+    60,
+    _env_int(
+        "DREAMVERSE_SESSION_TIMEOUT_SECONDS",
+        _env_int("FASTVIDEO_SESSION_TIMEOUT_SECONDS", _DEFAULT_SESSION_TIMEOUT_SECONDS),
+    ),
+)
 
 # Frame settings
 NUM_FRAMES = 121
@@ -216,6 +245,13 @@ if DREAMVERSE_MODEL_PATH:
         **MODEL_CONFIG,
         "model_path": DREAMVERSE_MODEL_PATH,
         "config_model_path": DREAMVERSE_MODEL_PATH,
+    }
+
+DREAMVERSE_COSMOS25_DFD_MODEL_PATH = (os.getenv("DREAMVERSE_COSMOS25_DFD_MODEL_PATH", "").strip() or None)
+if DREAMVERSE_COSMOS25_DFD_MODEL_PATH and MODEL_CONFIG.get("generation_backend") == "cosmos25_dfd":
+    MODEL_CONFIG = {
+        **MODEL_CONFIG,
+        "continuation_model_path": DREAMVERSE_COSMOS25_DFD_MODEL_PATH,
     }
 
 AVAILABLE_LORAS = {
