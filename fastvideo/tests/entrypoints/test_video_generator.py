@@ -663,6 +663,7 @@ def test_generate_single_video_non_output_rank_suppresses_all_user_payloads(tmp_
         broadcast_from_output_rank=lambda value: value,
     )
     sampling = _small_sampling_param(save_video=True, return_frames=True)
+    sampling.return_samples = True
     sampling.return_trajectory_latents = True
     sampling.return_trajectory_decoded = True
 
@@ -676,6 +677,7 @@ def test_generate_single_video_non_output_rank_suppresses_all_user_payloads(tmp_
     batch = captured["batch"]
     assert not batch.save_video
     assert not batch.return_frames
+    assert not batch.return_samples
     assert not batch.return_trajectory_latents
     assert not batch.return_trajectory_decoded
     assert result["samples"] is None
@@ -1228,3 +1230,89 @@ def test_ffmpeg_pipe_preserves_video_duration(tmp_path, env_overrides, audio_sec
     assert int(video["nb_read_frames"]) == frame_count
     assert float(video["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
     assert float(sound["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.uint8])
+def test_return_samples_only_skips_preview_processing(monkeypatch, tmp_path, dtype):
+    output = torch.ones((2, 3, 1, 16, 16), dtype=dtype)
+    generator = _single_video_generator(_single_video_output_batch(output), _single_video_args())
+    monkeypatch.setattr("fastvideo.entrypoints.video_generator.pixels_to_uint8",
+                        lambda *args: pytest.fail("Samples-only requests must not quantize a preview"))
+    monkeypatch.setattr("fastvideo.entrypoints.video_generator.torchvision.utils.make_grid",
+                        lambda *args, **kwargs: pytest.fail("Samples-only requests must not build a preview grid"))
+    sampling = _small_sampling_param()
+    sampling.num_frames = 1
+    sampling.num_videos_per_prompt = 2
+    sampling.return_samples = True
+    result = generator._generate_single_video("samples only", sampling,
+                                             output_path=str(tmp_path / "unused.mp4"))
+    torch.testing.assert_close(result["samples"], output.float() / (255 if dtype == torch.uint8 else 1))
+    assert result["frames"] is None
+    assert result["video_path"] is None
+    assert result["size"] == (16, 16, 1)
+
+
+@pytest.mark.parametrize("return_frames", [False, True])
+def test_input_sized_output_skips_request_pixel_preallocation(monkeypatch, tmp_path, return_frames):
+    output = torch.full((1, 3, 1, 24, 32), 0.5)
+    args = _single_video_args()
+    args.pipeline_config.output_shape_from_input = True
+    generator = _single_video_generator(_single_video_output_batch(output), args)
+    monkeypatch.setattr(
+        video_generator_module, "allocate_cpu_tensor_with_pin_fallback",
+        lambda *args, **kwargs: pytest.fail("Input-sized outputs must not allocate request-sized pixel buffers"))
+    sampling = _small_sampling_param(return_frames=return_frames)
+    sampling.num_frames = 1
+    sampling.return_samples = True
+    result = generator._generate_single_video("input-sized output", sampling,
+                                             output_path=str(tmp_path / "unused.mp4"))
+    torch.testing.assert_close(result["samples"], output)
+    assert result["size"] == (24, 32, 1)
+    if return_frames:
+        assert len(result["frames"]) == 1
+    else:
+        assert result["frames"] is None
+    assert result["video_path"] is None
+
+
+@pytest.mark.parametrize("extension,format_name", [(".png", "PNG"), (".jpg", "JPEG"), (".jpeg", "JPEG"), (".webp", "WEBP")])
+def test_image_output_path_preserves_requested_format(tmp_path, extension, format_name):
+    from PIL import Image
+
+    args = _single_video_args()
+    args.workload_type = WorkloadType.from_string("t2i")
+    generator = _single_video_generator(_single_video_output_batch(torch.zeros(1, 3, 1, 16, 16)), args)
+    target = tmp_path / ("image" + extension)
+    output_path = generator._prepare_output_path(str(target), "a cat")
+    assert output_path == str(target)
+    sampling = _small_sampling_param(save_video=True)
+    sampling.num_frames = 1
+    result = generator._generate_single_video("a cat", sampling, output_path=output_path)
+    assert result["video_path"] == str(target)
+    with Image.open(target) as image:
+        assert image.format == format_name
+        assert image.size == (16, 16)
+
+
+def test_image_output_directory_defaults_to_png(tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = SimpleNamespace(workload_type=WorkloadType.from_string("t2i"))
+    assert generator._prepare_output_path(str(tmp_path), "a cat") == str(tmp_path / "a cat.png")
+
+
+@pytest.mark.parametrize("extension,target_extension,workload", [
+    (".png", ".png", "t2i"), (".jpg", ".png", "t2i"), (".jpeg", ".png", "t2i"),
+    (".webp", ".png", "t2i"), (".JPEG", ".png", "t2i"),
+    (".mp4", ".mp4", "t2v"), (".wav", ".wav", "t2a"),
+])
+def test_existing_image_extension_directory_receives_output(tmp_path, extension, target_extension, workload):
+    generator = _new_video_generator()
+    generator.fastvideo_args = SimpleNamespace(workload_type=WorkloadType.from_string("t2i"))
+    generator.fastvideo_args.workload_type = WorkloadType.from_string(workload)
+    directory = tmp_path / ("renders" + extension)
+    directory.mkdir()
+    existing = directory / ("a cat" + target_extension)
+    existing.write_bytes(b"existing image")
+    result = generator._prepare_output_path(str(directory), "a cat")
+    assert result == str(directory / ("a cat_1" + target_extension))
+    assert existing.read_bytes() == b"existing image"

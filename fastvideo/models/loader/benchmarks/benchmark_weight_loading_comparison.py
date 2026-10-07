@@ -49,12 +49,13 @@ def load_independent(files: list[str], device: str):
 
 def load_broadcast(files: list[str], device: str, node_group, async_op: bool = False):
     """After-PR behavior: rank 0 reads from disk, broadcasts to other ranks."""
-    local_rank = node_group.local_rank
+    # The broadcast source is node-group rank 0, which is not always on CUDA device 0.
+    is_leader = node_group.rank_in_group == 0
     handles = []
     for st_file in files:
         with safe_open(st_file, framework="pt", device=device) as f:
             for name in f.keys():  # noqa: SIM118
-                if local_rank == 0:
+                if is_leader:
                     param = f.get_tensor(name)
                 else:
                     sl = f.get_slice(name)

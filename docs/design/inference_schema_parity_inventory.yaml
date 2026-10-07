@@ -565,6 +565,7 @@ surfaces:
       enable_teacache: request.runtime.enable_teacache
       save_video: request.output.save_video
       return_frames: request.output.return_frames
+      return_samples: request.output.return_samples
       return_trajectory_latents: request.runtime.return_trajectory_latents
       return_trajectory_decoded: request.runtime.return_trajectory_decoded
       continuation_state: request.state

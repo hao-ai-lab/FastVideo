@@ -260,6 +260,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "save_video": True,
                 "return_frames": True,
                 "return_state": False,
+                "return_samples": False,
             },
             "stage_overrides": {},
             "state": None,
