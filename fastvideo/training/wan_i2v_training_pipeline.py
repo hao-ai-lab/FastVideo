@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import sys
 from copy import deepcopy
 from typing import Any
 
@@ -166,22 +165,16 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         return batch
 
 
-def main(args) -> None:
-    logger.info("Starting training pipeline...")
-
-    pipeline = WanI2VTrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
-
-
 if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    logger.warning("\n"
+                   "================================================================================\n"
+                   "[DEPRECATED]: Direct execution of this pipeline is deprecated!\n"
+                   "Please use `fastvideo/training/runner.py` instead.\n"
+                   "================================================================================")
+    from fastvideo.training.runner import main
+    from fastvideo.utils import build_parser
+
+    parser = build_parser("WanI2VTrainingPipeline", "fastvideo.training.wan_i2v_training_pipeline")
     args = parser.parse_args()
     args.dit_cpu_offload = False
     main(args)

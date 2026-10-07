@@ -61,10 +61,13 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | lingbot_video | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbotworld | `FastVideo/LingBot-World-Base-Cam-Diffusers` | I2V | [basic_lingbotworld_base_cam.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_base_cam.py) |
 | lingbotworld2 | `robbyant/lingbot-world-v2-14b-causal-fast` | I2V | [basic_lingbotworld2_causal_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld2_causal_fast.py) |
+| lingbotworld_fast | `FastVideo/LingBot-World-Fast-Diffusers` | I2V | [basic_lingbotworld_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_fast.py) |
 | longcat | `FastVideo/LongCat-Video-T2V-Diffusers` | T2V | [basic_longcat_t2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_t2v.py) |
 | longcat | `FastVideo/LongCat-Video-I2V-Diffusers` | I2V | [basic_longcat_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_i2v.py) |
 | longcat | `FastVideo/LongCat-Video-VC-Diffusers` | — | [basic_longcat_vc.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_vc.py) |
 | ltx2 | `FastVideo/LTX2-Distilled-Diffusers`<br>`FastVideo/LTX2.3-Distilled-Diffusers`<br>`FastVideo/LTX-2.3-Distilled-Diffusers` | T2V | [basic_ltx2_distilled.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_distilled.py) |
+| ltx2 | `FastVideo/LTX-2.5-Distilled-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br>[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
+| ltx2 | `FastVideo/LTX-2.5-Dev-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br>[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
 | ltx2 | `Lightricks/LTX-2.3`<br>`FastVideo/LTX2.3-base`<br>`FastVideo/LTX2.3-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
 | ltx2 | `Lightricks/LTX-2`<br>`FastVideo/LTX2-base`<br>`FastVideo/LTX2-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
 | mmaudio | `FastVideo/MMAudio-large-44k-v2-Diffusers` | V2A, T2A | [basic_mmaudio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mmaudio.py) |
@@ -125,6 +128,11 @@ see [FastH3 distilled checkpoint schedules](fasth3-distilled.md#ref2va-pdd-stude
 and distilled) generate video with audio from text, optionally plus an image (see the [T2IVA guide](kandinsky6.md)); the
 `kandinsky6_sr` IDs upscale an existing video (see the
 [Video SR guide](kandinsky6_sr.md)).
+
+**Note (LTX-2.5)**: T2V and I2V produce synchronized video and audio. The
+official `Lightricks/LTX-2.5` repository uses gated, split component files, so
+it must first be converted to FastVideo's component layout. See the
+[LTX-2.5 inference guide](ltx2_5.md).
 
 **Note (Wan-VACE)**: not currently supported — no VACE pipeline or registered
 model ID exists on `main`

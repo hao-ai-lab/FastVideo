@@ -64,6 +64,13 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
         "lingbotworld2",
         "LingBotWorld2CausalFastTransformer3DModel",
     ),
+    # LingBot-World-Fast ships this class name; its tensor layout is identical
+    # to the LingBot World 2 causal-fast DiT.
+    "CausalLingBotWorldTransformer3DModel": (
+        "dits",
+        "lingbotworld2",
+        "LingBotWorld2CausalFastTransformer3DModel",
+    ),
     "MatrixGame2WanModel": ("dits", "matrixgame2", "MatrixGame2WanModel"),
     "CausalMatrixGame2WanModel": ("dits", "matrixgame2", "CausalMatrixGame2WanModel"),
     # Legacy aliases for older HF model_index.json files
@@ -145,6 +152,7 @@ _SCHEDULERS = {
     "SelfForcingFlowMatchScheduler":
     ("schedulers", "scheduling_self_forcing_flow_match", "SelfForcingFlowMatchScheduler"),
     "RCMScheduler": ("schedulers", "scheduling_rcm", "RCMScheduler"),
+    "HeliosDMDScheduler": ("schedulers", "scheduling_helios_dmd", "HeliosDMDScheduler"),
     "Cosmos25DistilledScheduler": (
         "schedulers",
         "scheduling_cosmos25_distilled",
