@@ -648,6 +648,11 @@ FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
                                      category="performance",
                                      doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
                                      "tile.")
+FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,
+                                          category="performance",
+                                          doc="Entries in each content-keyed MiniMax-H3 memo of reference encodes "
+                                          "(Qwen3-VL Ref2VA presentation, VAE keyframe latents); repeat "
+                                          "references are reused exactly. 0 disables.")
 FASTVIDEO_H3_VAE_TILE_PARALLEL = EnvBool(False,
                                          category="performance",
                                          doc="Split MiniMax-H3 VAE spatial tiles (not only temporal chunks) across "

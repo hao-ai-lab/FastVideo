@@ -14,6 +14,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models import pinned_offload
 from fastvideo.models.vaes.minimax_h3_parallel import encode_pixels_parallel
+from fastvideo.pipelines.basic.minimax_h3.memo import ContentMemo, image_key
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_AUDIO_CHANNELS,
     MINIMAX_H3_KEYFRAME_ENCODE_SEED,
@@ -90,6 +91,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         self.audio_vae = audio_vae
         self.scheduler = scheduler
         self.ref2va = ref2va
+        self._keyframe_memo = ContentMemo()
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -112,6 +114,10 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
     def _encode_keyframe_latents(self, image, device: torch.device) -> torch.Tensor:
         """Encode one keyframe image to normalized latents (fp16 round-trip
         preserved for parity with the seeded references)."""
+        return self._keyframe_memo.get_or_compute((str(device), image_key(image)),
+                                                  lambda: self._encode_keyframe_latents_uncached(image, device))
+
+    def _encode_keyframe_latents_uncached(self, image, device: torch.device) -> torch.Tensor:
         pixels = torch.from_numpy(np.asarray(image).copy()).permute(2, 0, 1)[None, :, None]
         pixels = pixels.to(device=device, dtype=torch.float32).div_(255.0)
         posterior = self.vae.encode_keyframe(self.vae.normalize_pixels(pixels)).latent_dist

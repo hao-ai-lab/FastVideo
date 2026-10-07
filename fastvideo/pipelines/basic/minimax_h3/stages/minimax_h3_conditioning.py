@@ -12,6 +12,7 @@ from torch.distributed.tensor import DTensor
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConditioner
+from fastvideo.pipelines.basic.minimax_h3.memo import ContentMemo, image_key
 from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_IMAGE_PAD_TOKEN,
@@ -113,6 +114,7 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         self.tokenizer = tokenizer
         self.processor = processor
         self.ref2va = ref2va
+        self._ref2va_memo = ContentMemo()
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -201,7 +203,20 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         references = list(batch.references or [])
         if not references or not all(isinstance(item, MiniMaxH3PreparedReference) for item in references):
             raise TypeError("MiniMax-H3 Ref2VA conditioning requires prepared references.")
+        # Video references get their block timestamps assigned while presenting,
+        # so only presentations without a video reference are memoized.
+        if all(reference.media_type != "video"
+               for reference in references) and all(reference.image is not None
+                                                    for reference in references if reference.media_type == "image"):
+            key = (str(device), batch.prompt,
+                   tuple((reference.media_type, bool(reference.has_audio),
+                          image_key(reference.image) if reference.media_type == "image" else None)
+                         for reference in references))
+            return self._ref2va_memo.get_or_compute(key, lambda: self._present_ref2va(batch, references, device))
+        return self._present_ref2va(batch, references, device)
 
+    def _present_ref2va(self, batch: ForwardBatch, references: list[MiniMaxH3PreparedReference],
+                        device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
         merge_area = int(self.processor.image_processor.merge_size)**2
         pixel_values = None
         image_grid_thw = None
