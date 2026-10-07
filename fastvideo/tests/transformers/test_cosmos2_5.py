@@ -17,6 +17,7 @@ COSMOS_PREDICT2_5_PATH = os.path.normpath(COSMOS_PREDICT2_5_PATH)
 if os.path.exists(COSMOS_PREDICT2_5_PATH) and COSMOS_PREDICT2_5_PATH not in sys.path:
     sys.path.insert(0, COSMOS_PREDICT2_5_PATH)
 
+import fastvideo.envs as envs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import skip_if_gated_repo_inaccessible
@@ -33,8 +34,8 @@ if os.path.exists(COSMOS_PREDICT2_5_PATH):
 else:
     logger.warning(f"cosmos-predict2.5 not found at: {COSMOS_PREDICT2_5_PATH}")
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29505")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29505")
 
 # COSMOS 2.5 model path - update this based on the actual HuggingFace model ID
 # The model has subdirectories: base/pre-trained, base/post-trained, auto/multiview, robot/action-cond

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -12,17 +13,19 @@ from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_fasth3.py"
+MINIMAX_EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_minimax_h3_t2v.py"
 
 
-def _load_example():
-    spec = importlib.util.spec_from_file_location("basic_fasth3_contract", EXAMPLE_PATH)
+def _load_example(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-fasth3 = _load_example()
+fasth3 = _load_example("basic_fasth3_contract", EXAMPLE_PATH)
+minimax_h3_t2v = _load_example("basic_minimax_h3_t2v_contract", MINIMAX_EXAMPLE_PATH)
 
 
 def _args(*overrides: str):
@@ -84,6 +87,18 @@ def test_default_all_profile_matches_fastest_contract(tmp_path):
     assert request.sampling.guidance_scale == 1.0
     assert request.sampling.batch_cfg is False
     assert request.output.output_path == str(tmp_path / "result.mp4")
+    assert config.engine.offload.lazy_module_load is None
+
+
+def test_lazy_module_load_is_tri_state():
+    config = fasth3.build_generator_config(_args("--num-gpus", "1"))
+    assert config.engine.offload.lazy_module_load is None
+
+    enabled = fasth3.build_generator_config(_args("--lazy-module-load"))
+    assert enabled.engine.offload.lazy_module_load is True
+
+    disabled = fasth3.build_generator_config(_args("--no-lazy-module-load"))
+    assert disabled.engine.offload.lazy_module_load is False
 
 
 @pytest.mark.parametrize("num_frames", (124, 243, 345))
@@ -127,6 +142,17 @@ def test_strict_profile_changes_only_non_parity_fusions():
     assert all_environment["FASTVIDEO_MINIMAX_H3_FUSIONS"] == "all"
     assert strict_environment["FASTVIDEO_MINIMAX_H3_FUSIONS"] == "0"
     assert fasth3.build_generator_config(all_args) == fasth3.build_generator_config(strict_args)
+
+
+def test_h3_sequential_load_is_opt_in_experimental():
+    default = fasth3.build_generator_config(_args())
+    assert "h3_sequential_load" not in default.pipeline.experimental
+
+    enabled = fasth3.build_generator_config(_args("--h3-sequential-load"))
+    assert enabled.pipeline.experimental["h3_sequential_load"] is True
+
+    disabled = fasth3.build_generator_config(_args("--no-h3-sequential-load"))
+    assert disabled.pipeline.experimental["h3_sequential_load"] is False
 
 
 def test_opt_outs_override_inherited_environment(monkeypatch):
@@ -181,7 +207,8 @@ def test_selected_fast_profile_requires_its_optional_routes(monkeypatch):
     fasth3.validate_profile_dependencies(_args())
 
 
-def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("peak_memory_mb", (42.0, None))
+def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp_path, capsys, peak_memory_mb):
     calls = []
 
     class FakeGenerator:
@@ -193,6 +220,7 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
             return SimpleNamespace(
                 video_path=request.output.output_path,
                 generation_time=1.25,
+                peak_memory_mb=peak_memory_mb,
                 logging_info=SimpleNamespace(stages={"denoising": {"execution_time": 2.5}}),
             )
 
@@ -233,6 +261,108 @@ def test_run_excludes_warmup_and_uses_distinct_measured_outputs(monkeypatch, tmp
     assert f"Warmup output written to: {tmp_path / '_fasth3_warmup.mp4'}" in output
     assert output.count("Output written to:") == 3
     assert output.count("Denoising time: 2.500s") == 3
+    if peak_memory_mb is None:
+        # The Ray backend leaves peak_memory_mb unset: stay silent, never print "None MB".
+        assert "Peak memory:" not in output
+    else:
+        assert output.count("Peak memory: 42.0 MB") == 3
     assert "Measured E2E wall times (n=3, warmup excluded): [6.0, 7.0, 8.0]" in output
     assert "Median E2E wall time: 7.000s" in output
     assert "Median denoising time: 2.500s" in output
+
+
+@pytest.mark.parametrize("peak_memory_mb", (42.0, None))
+def test_minimax_h3_t2v_reports_peak_memory_only_when_present(monkeypatch, tmp_path, capsys, peak_memory_mb):
+    generated = []
+
+    class FakeGenerator:
+
+        def generate(self, request):
+            generated.append(request)
+            return SimpleNamespace(
+                video_path=request.output.output_path,
+                generation_time=1.25,
+                peak_memory_mb=peak_memory_mb,
+            )
+
+        def shutdown(self):
+            pass
+
+    class FakeVideoGenerator:
+
+        @classmethod
+        def from_config(cls, config):
+            return FakeGenerator()
+
+    monkeypatch.setattr(minimax_h3_t2v, "VideoGenerator", FakeVideoGenerator)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["basic_minimax_h3_t2v.py", "--prompt", "a test prompt", "--output",
+         str(tmp_path), "--repeats", "2"],
+    )
+
+    minimax_h3_t2v.main()
+
+    assert len(generated) == 2
+    output = capsys.readouterr().out
+    assert output.count("Output written to:") == 1
+    assert output.count("Generation time: 1.25s") == 2
+    if peak_memory_mb is None:
+        assert "Peak memory:" not in output
+    else:
+        assert output.count("Peak memory: 42.0 MB") == 2
+
+
+def test_taeh3_backend_is_opt_in_experimental():
+    default = fasth3.build_generator_config(_args())
+    taeh3 = fasth3.build_generator_config(_args("--video-decode-backend", "taeh3"))
+
+    assert "video_decode_backend" not in default.pipeline.experimental
+    assert taeh3.pipeline.experimental["video_decode_backend"] == "taeh3"
+
+
+EIGHT_STEP_EXAMPLE_PATH = REPO_ROOT / "examples" / "inference" / "basic" / "basic_fasth3_8step.py"
+
+
+def _load_eight_step_example():
+    import sys
+    sys.path.insert(0, str(EXAMPLE_PATH.parent))
+    try:
+        spec = importlib.util.spec_from_file_location("basic_fasth3_8step_contract", EIGHT_STEP_EXAMPLE_PATH)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.path.remove(str(EXAMPLE_PATH.parent))
+
+
+def test_eight_step_example_pins_public_checkpoint_contract(tmp_path):
+    """The 8-step example selects the public V2 checkpoint and its trained recipe by default
+    without touching the four-forward preview example's defaults."""
+    eight = _load_eight_step_example()
+    args = eight.parse_args(["--prompt", "a test prompt"])
+    assert args.model_path == "FastVideo/FastVideo-FastH3-8-Step-V2"
+    assert args.steps == 9
+    assert args.vsa_sparsity == 0.8
+    assert args.vsa_tile_size == 64
+    assert args.output == "outputs/fasth3_8step"
+    request = fasth3.build_request(args, tmp_path / "result.mp4", args.seed)
+    assert request.sampling.num_inference_steps == 9
+    config = fasth3.build_generator_config(args)
+    assert config.model_path == "FastVideo/FastVideo-FastH3-8-Step-V2"
+    # Other flags still flow through the shared parser.
+    args = eight.parse_args(["--prompt", "p", "--height", "480", "--width", "832", "--model-path", "/local/snap"])
+    assert (args.height, args.width, args.model_path) == (480, 832, "/local/snap")
+    # The preview example is unchanged.
+    preview = _args()
+    assert preview.model_path == fasth3.DEFAULT_MODEL and preview.steps == 5 and preview.vsa_sparsity == 0.9
+
+
+def test_eight_step_example_rejects_other_grids():
+    eight = _load_eight_step_example()
+    with pytest.raises(SystemExit):
+        eight.parse_args(["--prompt", "p", "--steps", "5"])
+    with pytest.raises(SystemExit):
+        eight.parse_args(["--prompt", "p", "--steps", "8"])

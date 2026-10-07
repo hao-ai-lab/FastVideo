@@ -64,6 +64,29 @@ class BaseLayerWithLoRA(nn.Module):
             self.lora_A = None
             self.lora_B = None
 
+    @property
+    def weight(self) -> torch.Tensor:
+        """The wrapped layer's weight.
+
+        Model code reads ``layer.weight`` for perfectly ordinary reasons -- MiniMax H3's
+        AdaLN modulation casts its input with ``self.linear.weight.dtype``, and its
+        ``proj_in`` reads the tensor itself. Wrapping a layer should not change what
+        reading it looks like from outside, and without this the wrap turns those into
+        ``AttributeError`` at the first forward. Forcing every model to be listed in
+        ``lora_target_modules`` around its own attribute access is the wrong fix: the
+        list would have to be maintained against code it does not own, and getting it
+        wrong fails at generation time rather than at load.
+
+        Resolved through ``base_layer`` on each access rather than cached, because
+        merging replaces that module outright.
+        """
+        return self.base_layer.weight
+
+    @property
+    def bias(self) -> torch.Tensor | None:
+        """The wrapped layer's bias, or ``None`` when it has none."""
+        return getattr(self.base_layer, "bias", None)
+
     @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         lora_A = self.lora_A
@@ -80,6 +103,7 @@ class BaseLayerWithLoRA(nn.Module):
                 delta = delta * (
                     self.lora_alpha / self.lora_rank  # type: ignore
                 )  # type: ignore
+            delta = delta * self.lora_strength
             out, output_bias = self.base_layer(x)
             return out + delta, output_bias
         else:

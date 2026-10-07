@@ -6,6 +6,7 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
@@ -13,16 +14,12 @@ from fastvideo.tests.ssim.inference_similarity_utils import (
 from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
+    with_model_path,
 )
 
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
-
-SD35_MODEL_PATH = os.getenv(
-    "SD35_MODEL_DIR",
-    "stabilityai/stable-diffusion-3.5-medium",
-)
 
 device_reference_folder = resolve_device_reference_folder(
     (
@@ -45,9 +42,9 @@ TEST_PROMPTS = [
     "a photo of a cat",
 ]
 
+# The test adds "model_path" from FASTVIDEO_TEST_SD35_MODEL_DIR.
 SD35_PARAMS = {
     "num_gpus": 1,
-    "model_path": SD35_MODEL_PATH,
     "sp_size": 1,
     "tp_size": 1,
     "height": 256,
@@ -60,27 +57,28 @@ SD35_PARAMS = {
     "neg_prompt": "",
 }
 
-_SD35_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(SD35_MODEL_PATH)
-SD35_FULL_QUALITY_PARAMS = {
-    "num_gpus": 1,
-    "model_path": SD35_MODEL_PATH,
-    "sp_size": 1,
-    "tp_size": 1,
-    "height": _SD35_FULL_QUALITY_DEFAULTS.height,
-    "width": _SD35_FULL_QUALITY_DEFAULTS.width,
-    "num_frames": SD35_PARAMS["num_frames"],
-    "fps": _SD35_FULL_QUALITY_DEFAULTS.fps,
-    "num_inference_steps": (_SD35_FULL_QUALITY_DEFAULTS.num_inference_steps),
-    "guidance_scale": _SD35_FULL_QUALITY_DEFAULTS.guidance_scale,
-    "seed": _SD35_FULL_QUALITY_DEFAULTS.seed,
-    "neg_prompt": _SD35_FULL_QUALITY_DEFAULTS.negative_prompt,
-}
+
+def _sd35_full_quality_params(model_path: str) -> dict[str, object]:
+    """Return the full-quality SD3.5 params, taken from the default sampling params of ``model_path``."""
+    full_quality_defaults = SamplingParam.from_pretrained(model_path)
+    return {
+        "num_gpus": 1,
+        "model_path": model_path,
+        "sp_size": 1,
+        "tp_size": 1,
+        "height": full_quality_defaults.height,
+        "width": full_quality_defaults.width,
+        "num_frames": SD35_PARAMS["num_frames"],
+        "fps": full_quality_defaults.fps,
+        "num_inference_steps": (full_quality_defaults.num_inference_steps),
+        "guidance_scale": full_quality_defaults.guidance_scale,
+        "seed": full_quality_defaults.seed,
+        "neg_prompt": full_quality_defaults.negative_prompt,
+    }
+
 
 SD35_MODEL_TO_PARAMS = {
     MODEL_ID: SD35_PARAMS,
-}
-SD35_FULL_QUALITY_MODEL_TO_PARAMS = {
-    MODEL_ID: SD35_FULL_QUALITY_PARAMS,
 }
 
 
@@ -96,9 +94,10 @@ def test_sd35_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
-    is_hf_repo = "/" in SD35_MODEL_PATH and not SD35_MODEL_PATH.startswith("/")
-    if not is_hf_repo and not os.path.isdir(SD35_MODEL_PATH):
-        pytest.skip(f"SD3.5 weights not found at {SD35_MODEL_PATH} (set SD35_MODEL_DIR to override)")
+    sd35_model_path = envs.FASTVIDEO_TEST_SD35_MODEL_DIR.get()
+    is_hf_repo = "/" in sd35_model_path and not sd35_model_path.startswith("/")
+    if not is_hf_repo and not os.path.isdir(sd35_model_path):
+        pytest.skip(f"SD3.5 weights not found at {sd35_model_path} (set FASTVIDEO_TEST_SD35_MODEL_DIR to override)")
 
     run_text_to_video_similarity_test(
         logger=logger,
@@ -107,8 +106,8 @@ def test_sd35_similarity(
         prompt=prompt,
         attention_backend_name=attention_backend_name,
         model_id=model_id,
-        default_params_map=SD35_MODEL_TO_PARAMS,
-        full_quality_params_map=SD35_FULL_QUALITY_MODEL_TO_PARAMS,
+        default_params_map=with_model_path(SD35_MODEL_TO_PARAMS, sd35_model_path),
+        full_quality_params_map={model_id: _sd35_full_quality_params(sd35_model_path)},
         min_acceptable_ssim=0.98,
         init_kwargs_override={
             "workload_type": "t2v",

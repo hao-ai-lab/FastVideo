@@ -36,6 +36,7 @@ def test_serve_config_includes_server_and_default_request_defaults() -> None:
         "host": "0.0.0.0",
         "port": 8000,
         "output_dir": "outputs/",
+        "served_model_name": None,
     }
     assert dumped["default_request"]["sampling"]["fps"] == 24
     assert dumped["default_request"]["runtime"]["enable_teacache"] is False

@@ -19,6 +19,7 @@ from fastvideo.tests.ssim.reference_utils import (
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 4
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of TurboDiffusion and TurboWan support.")
 
 device_name = get_cuda_device_name()
 device_reference_folder = resolve_device_reference_folder(
