@@ -13,12 +13,12 @@ they do not load the 22B transformer or Gemma.
 
 from __future__ import annotations
 
-import os
-
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29527")
-
 import torch
+
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29527")
 
 from fastvideo.train.models.ltx2.ltx2 import LTX2Model, _resolve_unconditional_prompt
 from fastvideo.train.models.wan.wan import WanModel
