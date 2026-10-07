@@ -288,3 +288,9 @@ def test_run_performance_tests_collects_only_benchmark_gate(monkeypatch):
     command = commands[0]
     assert "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs;" in command
     assert "pytest ./fastvideo/tests/performance -vs;" not in command
+
+
+def test_performance_lane_script_collects_only_benchmark_gate():
+    lane_script = (Path(__file__).resolve().parents[3] / ".buildkite/scripts/lanes/performance.sh").read_text()
+    assert "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs" in lane_script
+    assert "pytest ./fastvideo/tests/performance -vs" not in lane_script
