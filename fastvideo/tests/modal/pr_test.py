@@ -88,8 +88,8 @@ ci_env_secret = modal.Secret.from_dict({
         "UV_TORCH_BACKEND": uv_torch_backend_override
     } if uv_torch_backend_override else {}),
     # FA4 is opt-in (FASTVIDEO_FA4). Keep the default enabled for
-    # inference/perf parity; model-load and training lanes that do not exercise
-    # FA4 explicitly set FASTVIDEO_FA4=0 in their command strings below.
+    # inference/perf parity; lanes that do not exercise FA4 explicitly set
+    # FASTVIDEO_FA4=0 in their command strings below.
     # Caller override wins.
     "FASTVIDEO_FA4": os.environ.get("FASTVIDEO_FA4", "1"),
 })
@@ -378,7 +378,7 @@ def run_self_forcing_tests():
 @app.function(gpu="L40S:1", image=image, timeout=900, secrets=[ci_env_secret])
 def run_unit_test():
     run_test(
-        "pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
+        "FASTVIDEO_FA4=0 pytest ./fastvideo/tests/api/ ./fastvideo/tests/contract/ ./fastvideo/tests/dataset/ "
         "./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ ./fastvideo/tests/train/ "
         "./fastvideo/tests/stages/ ./fastvideo/tests/ops/ ./fastvideo/tests/worker/ "
         "./fastvideo/tests/training/test_trackers.py "

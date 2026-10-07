@@ -327,11 +327,20 @@ def test_run_unit_test_collects_modal_cache_runner_tests(monkeypatch):
 
 def test_run_unit_test_collects_the_whole_attention_directory(monkeypatch):
     """Naming individual files under fastvideo/tests/attention/ let new ones
-    land uncovered; collect the directory so that cannot happen silently."""
+    land uncovered; collect the directory -- with the FA2/FA3 legs enabled --
+    so that cannot happen silently."""
     module = _load_pr_test_module(monkeypatch)
     commands = []
     monkeypatch.setattr(module, "run_test", commands.append)
 
     module.run_unit_test()
 
-    assert "./fastvideo/tests/attention/ " in commands[0]
+    assert len(commands) == 1
+    tokens = commands[0].split()
+    # The FA2/FA3 regression files in the directory skip under the FA4
+    # default, so the lane has to opt out for the directory to be real
+    # coverage rather than a nominal collection.
+    assert "FASTVIDEO_FA4=0" in tokens
+    assert "./fastvideo/tests/attention/" in tokens
+    # The per-file entry must be gone, not merely joined by the directory.
+    assert "./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py" not in tokens
