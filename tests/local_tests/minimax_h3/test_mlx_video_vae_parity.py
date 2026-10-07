@@ -11,12 +11,11 @@ Runs in any environment with torch + mlx (CPU is fine):
     pytest tests/local_tests/minimax_h3/test_mlx_video_vae_parity.py -v
 
 The real-weight case activates automatically when the released snapshot is
-present; point MINIMAX_H3_MODEL_ROOT at another checkout otherwise.
+present; point FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT at another checkout otherwise.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +24,7 @@ import pytest
 torch = pytest.importorskip("torch", reason="PyTorch reference needed for video VAE parity")
 mx = pytest.importorskip("mlx.core", reason="MLX needed for video VAE parity")
 
+import fastvideo.envs as envs  # noqa: E402
 from fastvideo.configs.models.vaes.minimax_h3_video import (  # noqa: E402
     MiniMaxH3VideoVAEArchConfig,
     MiniMaxH3VideoVAEConfig,
@@ -228,7 +228,7 @@ def test_tiled_decode_matches_untiled() -> None:
 # Real released weights (bounded tile)
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL_ROOT = Path(os.environ.get("MINIMAX_H3_MODEL_ROOT", Path.home() / "models/FastH3-Preview-v0.2"))
+DEFAULT_MODEL_ROOT = Path(envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get() or Path.home() / "models/FastH3-Preview-v0.2")
 REAL_WEIGHTS_PRESENT = (DEFAULT_MODEL_ROOT / "vae").is_dir() and any(
     (DEFAULT_MODEL_ROOT / "vae").glob("*.safetensors"))
 

@@ -69,6 +69,20 @@ cd fastvideo-kernel
 ./build.sh --rocm
 ```
 
+The compiled extension needs the HIP CMake toolchain (`hip-lang`). Images that install
+ROCm as a pip SDK, such as the `rocm/pytorch` 7.14 images, ship `hipcc` but not that
+package, so `build.sh --rocm` falls back to the Python + Triton package there and says so
+in the configure summary. That package is all the video sparse attention path needs on
+ROCm. To ask for it explicitly, or to fail instead of falling back:
+
+```bash
+./build.sh --rocm --python-only                                    # Python + Triton only
+CMAKE_ARGS="-DFASTVIDEO_KERNEL_BUILD_EXTENSION=ON" ./build.sh --rocm  # error if HIP cannot be configured
+```
+
+`FASTVIDEO_KERNEL_BUILD_EXTENSION` (AUTO/ON/OFF) is also read from the environment by a
+plain `pip install --no-build-isolation .`.
+
 ### Optional: FA4 CuTe block-sparse backend (VSA-128/256 fastpath)
 
 The VSA-128/256 fastpaths (tile volume 128 or 256, on NVIDIA Blackwell / sm_100) route to the
@@ -145,8 +159,11 @@ python benchmarks/benchmark_attn_qat_train.py
 ```
 
 The benchmark reports both conventional attention FLOPs and the extra matrix
-multiplications executed by the QAT straight-through path. Override
-`--peak-tflops` when running on a GPU other than RTX 5090.
+multiplications executed by the QAT straight-through path. It resolves dense
+BF16 peak throughput for the full-GPU variants listed in
+`benchmarks/device_specs.py`. Unknown or partitioned devices still report
+timing and achieved TFLOPS, with MFU shown as `N/A`; pass a positive, finite
+`--peak-tflops` value to report MFU for those devices.
 
 The QAT kernel is entirely Triton and routes by architecture at runtime. SM100
 uses a large-tile forward and split 64x64 backward for the production

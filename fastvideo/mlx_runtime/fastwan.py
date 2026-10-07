@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import statistics
 import time
 from dataclasses import dataclass
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from collections.abc import Callable
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 
 if TYPE_CHECKING:
@@ -326,7 +326,7 @@ def dq_gemm_engaged() -> int:
 
 
 def affine_dq_gemm_min_m() -> int | None:
-    raw = os.environ.get("FASTVIDEO_MLX_DQ_GEMM", "1").strip().lower()
+    raw = envs.FASTVIDEO_MLX_DQ_GEMM.get().strip().lower()
     if raw in {"", "0", "off", "false", "no"}:
         return None
     if raw in {"1", "on", "true", "yes"}:
@@ -400,9 +400,7 @@ def _use_fast_norm() -> bool:
     traffic) and benchmark the speedup.
     H3 uses its own fused RMSNorm default and does not consult this toggle.
     """
-    import os
-
-    return os.environ.get("FASTVIDEO_MLX_FAST_NORM", "0") == "1"
+    return envs.FASTVIDEO_MLX_FAST_NORM.get()
 
 
 def layer_norm(x, weight=None, bias=None, eps: float = 1e-6):
@@ -633,12 +631,12 @@ class MLXWanTransformerBlock:
         k_bh = key.transpose(0, 2, 1, 3)
         v_bh = value.transpose(0, 2, 1, 3)
         scale = self.head_dim**-0.5
-        window = int(os.environ.get("FASTVIDEO_MLX_WINDOW", "0") or "0")
+        window = envs.FASTVIDEO_MLX_WINDOW.get()
         if window > 0:
             from fastvideo.mlx_runtime.windowed_attention import windowed_attention
 
             _warn_windowed_attention_once(window)
-            sink = int(os.environ.get("FASTVIDEO_MLX_WINDOW_SINK", "0") or "0")
+            sink = envs.FASTVIDEO_MLX_WINDOW_SINK.get()
             attn_output = windowed_attention(q_bh, k_bh, v_bh, window=window, sink=sink, scale=scale)
         else:
             attn_output = mx.fast.scaled_dot_product_attention(q_bh, k_bh, v_bh, scale=scale)
@@ -693,7 +691,6 @@ class MLXWanDiT:
         *,
         compile: bool = False,
     ) -> None:
-        import os
 
         self.weights = weights
         self.blocks = blocks
@@ -711,7 +708,7 @@ class MLXWanDiT:
         # good mx.compile target. Off by default so the eager path stays the
         # baseline; enable via constructor or FASTVIDEO_MLX_COMPILE=1 and verify
         # with the benchmark's SSIM ~= 1.0 check.
-        self._enable_compile = compile or os.environ.get("FASTVIDEO_MLX_COMPILE", "0") == "1"
+        self._enable_compile = compile or envs.FASTVIDEO_MLX_COMPILE.get()
         self._compiled_forward: Callable[..., Any] | None = None
         self._compiled_signature: tuple | None = None
 

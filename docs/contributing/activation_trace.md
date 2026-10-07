@@ -30,7 +30,7 @@ FastVideo and the reference model first produce different numbers?"
 | General logging | `init_logger(__name__)` |
 | Per-stage timing | `FASTVIDEO_STAGE_LOGGING` |
 | Profiling kernel timings | `FASTVIDEO_TORCH_PROFILER_DIR` (see [Profiling](profiling.md)) |
-| Function-call tracing | `FASTVIDEO_TRACE_FUNCTION` (heavy) |
+| Function-call tracing | `fastvideo.logger.enable_trace_function_call()` (heavy) |
 
 ## Quickstart
 

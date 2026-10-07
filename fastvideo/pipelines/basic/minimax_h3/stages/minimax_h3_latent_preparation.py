@@ -12,6 +12,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from fastvideo.distributed import get_local_torch_device, get_sp_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models import pinned_offload
 from fastvideo.models.vaes.minimax_h3_parallel import encode_pixels_parallel
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MINIMAX_H3_AUDIO_CHANNELS,
@@ -182,6 +183,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         fastvideo_args: FastVideoArgs,
         device: torch.device,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Encode keyframes while reusing the video VAE's host-weight cache."""
         keyframes = batch.extra.get(MINIMAX_H3_KEYFRAMES_KEY, [])
         if not isinstance(keyframes, list):
             raise TypeError("MiniMax-H3 keyframes must be a list.")
@@ -192,7 +194,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                                "FL2VA keyframes still need --video-decode-backend h3-vae.")
 
         vae_device = get_local_torch_device()
-        self.vae.to(vae_device)
+        pinned_offload.load(self.vae, vae_device, pin=fastvideo_args.pin_cpu_memory)
         try:
             clean_rows: list[torch.Tensor] = []
             for image in keyframes:
@@ -201,7 +203,7 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
                                            h3_dit_patch_size(fastvideo_args)))
         finally:
             if fastvideo_args.vae_cpu_offload:
-                self.vae.to("cpu")
+                pinned_offload.unload(self.vae)
 
         _, _, latent_height, latent_width = _video_geometry(batch)
         shapes = ((1, latent_height, latent_width), ) * len(keyframes)
@@ -227,27 +229,28 @@ class MiniMaxH3LatentPreparationStage(PipelineStage):
         fastvideo_args: FastVideoArgs,
         device: torch.device,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Encode reference media while reusing the video and audio VAE host caches."""
         references = list(batch.references or [])
         if not references or not all(isinstance(item, MiniMaxH3PreparedReference) for item in references):
             raise TypeError("MiniMax-H3 Ref2VA latent preparation requires prepared references.")
 
         vae_device = get_local_torch_device()
-        self.vae.to(vae_device)
+        pinned_offload.load(self.vae, vae_device, pin=fastvideo_args.pin_cpu_memory)
         try:
             video_rows = self._encode_visual_rows(references, vae_device, fastvideo_args)
         finally:
             if fastvideo_args.vae_cpu_offload:
-                self.vae.to("cpu")
+                pinned_offload.unload(self.vae)
 
         audio_rows: list[torch.Tensor] = []
         if any(reference.has_audio for reference in references):
             audio_device = get_local_torch_device()
-            self.audio_vae.to(audio_device)
+            pinned_offload.load(self.audio_vae, audio_device, pin=fastvideo_args.pin_cpu_memory)
             try:
                 audio_rows = self._encode_audio_rows(references, audio_device)
             finally:
                 if fastvideo_args.vae_cpu_offload:
-                    self.audio_vae.to("cpu")
+                    pinned_offload.unload(self.audio_vae)
 
         if not video_rows:
             raise ValueError("MiniMax-H3 Ref2VA requires at least one visual reference.")

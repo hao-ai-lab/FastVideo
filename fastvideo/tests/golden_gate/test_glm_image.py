@@ -10,13 +10,14 @@ returns a TUPLE (hidden_states, encoder_hidden_states) (glm_image.py:502) —
 postprocess cats encoder first along seq, matching the attention layout
 (glm_image.py:343). attn1.to_out is nn.ModuleList so "attn1.to_out.0.*"
 matches natively; only the two ff.net renames apply. The SSIM test pins
-TORCH_SDPA and loads local weights via GLM_IMAGE_MODEL_DIR.
+TORCH_SDPA and loads local weights via FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR.
 """
 
 from __future__ import annotations
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
 
 __all__ = ["distributed_runtime"]
@@ -77,7 +78,7 @@ SPEC = GateSpec(
     # forward returns (hidden_states, encoder_hidden_states); encoder first,
     # like the attention concat layout (glm_image.py:343)
     postprocess=lambda out: torch.cat([out[1], out[0]], dim=1),
-    model_root_env="GLM_IMAGE_MODEL_DIR",
+    model_root=lambda: envs.FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR.get(),
 )
 
 

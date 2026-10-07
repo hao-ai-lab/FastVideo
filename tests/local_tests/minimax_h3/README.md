@@ -45,14 +45,14 @@ PYTHONPATH="${MINIMAX_H3_OFFICIAL_REF_DIR:-$PWD/DiffusersMiniMaxH3}/src:$PWD" py
 ## Checkpoint component parity
 
 ```bash
-export MINIMAX_H3_MODEL_ROOT=/path/to/MiniMax-H3
+export FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT=/path/to/MiniMax-H3
 export MINIMAX_H3_OFFICIAL_REF_DIR=/path/to/DiffusersMiniMaxH3
 
 PYTHONPATH="$MINIMAX_H3_OFFICIAL_REF_DIR/src:$PWD" \
 MINIMAX_H3_RUN_ENCODER_PARITY=1 \
 pytest tests/local_tests/encoders/test_minimax_h3_qwen3_vl_parity.py -v -s
 
-MINIMAX_H3_RUN_NVFP4_PARITY=1 MINIMAX_H3_MODEL_ROOT=/path/to/FastH3 \
+MINIMAX_H3_RUN_NVFP4_PARITY=1 FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT=/path/to/FastH3 \
 MINIMAX_H3_NVFP4_TEXT_ENCODER=/path/to/FastH3-text-encoder-nvfp4 \
 pytest tests/local_tests/minimax_h3/test_minimax_h3_text_encoder_nvfp4_parity.py -s
 
@@ -116,12 +116,12 @@ sum of rank-local maxima, not a simultaneous node peak.
 
 ```bash
 python tests/local_tests/vaes/benchmark_minimax_h3_video_vae_memory.py \
-  --source-root "$PWD" --model-root "$MINIMAX_H3_MODEL_ROOT" \
+  --source-root "$PWD" --model-root "$FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT" \
   --revision-label candidate --operation encode
 
 python -m torch.distributed.run --nproc_per_node=4 \
   tests/local_tests/vaes/benchmark_minimax_h3_video_vae_memory.py \
-  --source-root "$PWD" --model-root "$MINIMAX_H3_MODEL_ROOT" \
+  --source-root "$PWD" --model-root "$FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT" \
   --revision-label candidate-sp4 --operation decode
 ```
 
