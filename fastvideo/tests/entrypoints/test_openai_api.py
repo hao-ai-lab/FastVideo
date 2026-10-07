@@ -4,6 +4,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+from fastapi import HTTPException
 
 from fastvideo.api.parser import parse_config
 from fastvideo.api.schema import GenerationRequest
@@ -149,9 +150,15 @@ class TestImageBuildGenerationKwargs:
         kw = self._build(seed=42)
         assert kw["seed"] == 42
 
-    def test_n_clamped(self):
-        kw = self._build(n=20)
-        assert kw["num_videos_per_prompt"] == 10
+    @pytest.mark.parametrize("n", [0, -1, 11, 20])
+    def test_invalid_n_is_rejected(self, n):
+        with pytest.raises(HTTPException) as error:
+            self._build(n=n)
+        assert error.value.status_code == 400
+
+    @pytest.mark.parametrize("n", [1, 10])
+    def test_valid_n_is_preserved(self, n):
+        assert self._build(n=n)["num_videos_per_prompt"] == n
 
     def test_extension_jpg_default(self):
         kw = self._build()
