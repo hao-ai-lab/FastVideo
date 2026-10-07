@@ -31,6 +31,22 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Wan-Animate driving inputs: paths to the *preprocessed* artifacts the
+    # official preprocessing pipeline produces (src_pose.mp4, src_face.mp4;
+    # replace mode adds src_bg.mp4 + src_mask.mp4). `animate_mode` selects
+    # animation (character on the reference image's background) vs replace
+    # (character composited into the background video).
+    pose_video_path: str | None = None
+    face_video_path: str | None = None
+    background_video_path: str | None = None
+    mask_video_path: str | None = None
+    animate_mode: str | None = None
+
+    # Audio inputs. `audio_path` drives audio-conditioned generation (Wan S2V):
+    # the waveform is encoded and cross-attended to per video frame. Distinct
+    # from the Stable Audio `init_audio` fields below, which seed audio output.
+    audio_path: str | None = None
+
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
@@ -108,6 +124,18 @@ class SamplingParam:
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
 
+    # Helios autoregressive spatial-pyramid sampling.
+    pyramid_num_inference_steps_list: list[int] | None = None
+    history_sizes: list[int] | None = None
+    num_latent_frames_per_chunk: int = 9
+    keep_first_frame: bool = True
+    is_skip_first_chunk: bool = False
+    # Diffusers-signature compatibility only: the pinned Helios-Distilled model
+    # index declares ``is_cfg_zero_star=false``, so neither value changes sampling.
+    use_zero_init: bool = True
+    zero_steps: int = 1
+    is_amplify_first_chunk: bool = False
+
     # TeaCache parameters
     enable_teacache: bool = False
 
@@ -135,6 +163,9 @@ class SamplingParam:
     ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
+    # LTX-2.5 distilled stage 1 uses the official variance-preserving
+    # ancestral Euler update. Older LTX generations remain deterministic.
+    ltx2_use_ancestral_sampler: bool = False
 
     # LTX-2 image / video / continuation conditioning. These flow from
     # generate_video(...) kwargs through ``sampling_param.update(kwargs)``
@@ -377,6 +408,56 @@ class SamplingParam:
             help="Boundary timestep ratio",
         )
         parser.add_argument(
+            "--pyramid-num-inference-steps-list",
+            nargs=3,
+            type=int,
+            default=SamplingParam.pyramid_num_inference_steps_list,
+            help="Denoising steps for the three Helios pyramid stages",
+        )
+        parser.add_argument(
+            "--history-sizes",
+            nargs=3,
+            type=int,
+            default=SamplingParam.history_sizes,
+            help="Long, mid, and short Helios latent history sizes",
+        )
+        parser.add_argument(
+            "--num-latent-frames-per-chunk",
+            type=int,
+            default=SamplingParam.num_latent_frames_per_chunk,
+            help="Helios autoregressive latent frames per chunk",
+        )
+        parser.add_argument(
+            "--keep-first-frame",
+            action=StoreBoolean,
+            default=SamplingParam.keep_first_frame,
+            help="Keep the first Helios latent frame as prefix conditioning",
+        )
+        parser.add_argument(
+            "--is-skip-first-chunk",
+            action=StoreBoolean,
+            default=SamplingParam.is_skip_first_chunk,
+            help="Skip the first Helios autoregressive chunk",
+        )
+        parser.add_argument(
+            "--use-zero-init",
+            action=StoreBoolean,
+            default=SamplingParam.use_zero_init,
+            help="Enable Helios CFG zero initialization when supported",
+        )
+        parser.add_argument(
+            "--zero-steps",
+            type=int,
+            default=SamplingParam.zero_steps,
+            help="Number of Helios CFG zero-initialization steps",
+        )
+        parser.add_argument(
+            "--is-amplify-first-chunk",
+            action=StoreBoolean,
+            default=SamplingParam.is_amplify_first_chunk,
+            help="Use the amplified DMD schedule for the first Helios chunk",
+        )
+        parser.add_argument(
             "--save-video",
             action="store_true",
             default=SamplingParam.save_video,
@@ -405,6 +486,12 @@ class SamplingParam:
             type=str,
             default=SamplingParam.video_path,
             help="Path to input video for video-to-video generation",
+        )
+        parser.add_argument(
+            "--audio-path",
+            type=str,
+            default=SamplingParam.audio_path,
+            help="Path to input audio for speech-driven generation (Wan S2V)",
         )
         parser.add_argument(
             "--refine-from",

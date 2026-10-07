@@ -30,6 +30,7 @@ LEGACY_VARIANTS = (
     ("FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers", "WanT2V720PConfig", "wan_t2v_14b", ("t2v",)),
     ("Wan-AI/Wan2.1-I2V-14B-480P-Diffusers", "WanI2V480PConfig", "wan_i2v_14b_480p", ("i2v",)),
     ("Wan-AI/Wan2.1-I2V-14B-720P-Diffusers", "WanI2V720PConfig", "wan_i2v_14b_720p", ("i2v",)),
+    ("Wan-AI/Wan2.2-Animate-14B-Diffusers", "WanAnimate14BConfig", "wan_animate_14b", ("i2v",)),
     ("weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers", "WanI2V480PConfig", "wan_fun_1_3b_inp", ("i2v",)),
     ("IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers", "WANV2VConfig", "wan_fun_1_3b_control", ()),
     ("FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "FastWan2_1_T2V_480P_Config", "fast_wan_t2v_480p", ("t2v",)),
@@ -44,6 +45,7 @@ LEGACY_VARIANTS = (
     ("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers", "SelfForcingWanT2V480PConfig", "sf_wan_t2v_1_3b", ("t2v",)),
     ("rand0nmr/SFWan2.2-T2V-A14B-Diffusers", "SelfForcingWan2_2_T2V480PConfig", "sf_wan_2_2_t2v_a14b", ("t2v",)),
     ("FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers", "SelfForcingWan2_2_T2V480PConfig", "sf_wan_2_2_i2v_a14b", ("i2v",)),
+    ("FastVideo/Wan2.2-S2V-14B-Diffusers", "WanS2V14BConfig", "wan_s2v_14b", ()),
 )
 
 
@@ -132,6 +134,7 @@ def test_manifest_selection_and_explicit_override_are_not_pinned(monkeypatch, tm
     ("WanT2V720PConfig", 5.0, None, False),
     ("WanI2V480PConfig", 3.0, None, True),
     ("WanI2V720PConfig", 5.0, None, True),
+    ("WanAnimate14BConfig", 5.0, None, True),
     ("WANV2VConfig", 3.0, None, True),
     ("FastWan2_1_T2V_480P_Config", 8.0, [1000, 757, 522], False),
     ("Wan2_2_TI2V_5B_Config", 5.0, None, True),
@@ -141,6 +144,7 @@ def test_manifest_selection_and_explicit_override_are_not_pinned(monkeypatch, tm
     ("Wan2_2_I2V_A14B_Config", 5.0, None, True),
     ("SelfForcingWanT2V480PConfig", 5.0, [1000, 750, 500, 250], False),
     ("SelfForcingWan2_2_T2V480PConfig", 12.0, [1000, 850, 700, 550, 350, 275, 200, 125], True),
+    ("WanS2V14BConfig", 5.0, None, True),
 ])
 def test_component_precision_and_sampling_defaults(config_name, flow_shift, dmd_steps, load_encoder):
     config_cls = getattr(pipeline_config, config_name)

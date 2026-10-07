@@ -23,6 +23,7 @@
 // The per-group context is an ncclDevComm plus a registered symmetric window,
 // both created here from the caller's ncclComm_t.
 
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/extension.h>
@@ -162,13 +163,19 @@ bool ulysses_lsa_covers_group(int64_t comm_ptr, int64_t world_size) {
 //   mode == 0: inp [B, S_local, H, D]        -> out [B, S_global, H_local, D]
 //   mode == 1: inp [B, S_global, H_local, D] -> out [B, S_local, H, D]
 // where H is the *global* head count and H_local = H / world_size.
-void ulysses_a2a(int64_t handle, torch::Tensor inp, torch::Tensor out, int64_t B, int64_t S_local,
-                 int64_t H, int64_t D, int64_t mode) {
+void ulysses_a2a_tuned(int64_t handle, torch::Tensor inp, torch::Tensor out, int64_t B, int64_t S_local,
+                       int64_t H, int64_t D, int64_t mode, int64_t launch_blocks) {
   auto* ctx = reinterpret_cast<UlyssesContext*>(handle);
   TORCH_CHECK(ctx != nullptr, "handle must come from allocate_ulysses_a2a");
 
   const at::cuda::CUDAGuard device_guard(inp.device());
   auto stream = at::cuda::getCurrentCUDAStream();
+  TORCH_CHECK(launch_blocks == 36 || launch_blocks == 144, "Ulysses launch must use 36 or 144 CTAs");
+  if (launch_blocks == 144) {
+    const auto* props = at::cuda::getCurrentDeviceProperties();
+    TORCH_CHECK(props->major == 10 && props->minor == 0 && props->multiProcessorCount >= 144,
+                "144-CTA Ulysses launch requires an sm100 device with at least 144 SMs");
+  }
 
   TORCH_CHECK(inp.is_cuda() && out.is_cuda(), "inp and out must be CUDA tensors");
   TORCH_CHECK(inp.is_contiguous() && out.is_contiguous(), "inp and out must be contiguous");
@@ -204,7 +211,7 @@ void ulysses_a2a(int64_t handle, torch::Tensor inp, torch::Tensor out, int64_t B
 
   const int64_t num_rows = B * static_cast<int64_t>(W) * S_local;
   const int blocks =
-      static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(fi::kMaxBlocks, num_rows)));
+      static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(launch_blocks, num_rows)));
   const int threads = fi::kUlyssesThreads;
 
 #define LAUNCH_ULYSSES_A2A(T, NG, MODE)                                             \
@@ -266,6 +273,12 @@ void ulysses_a2a(int64_t handle, torch::Tensor inp, torch::Tensor out, int64_t B
   TORCH_CHECK(status == cudaSuccess, "ulysses_a2a copy-out failed: ", cudaGetErrorString(status));
 }
 
+// Preserve the original wheel API and its 36-CTA launch policy.
+void ulysses_a2a(int64_t handle, torch::Tensor inp, torch::Tensor out, int64_t B, int64_t S_local,
+                 int64_t H, int64_t D, int64_t mode) {
+  ulysses_a2a_tuned(handle, inp, out, B, S_local, H, D, mode, 36);
+}
+
 void register_ulysses_a2a(pybind11::module_& m) {
   m.def("allocate_ulysses_a2a", &allocate_ulysses_a2a, "allocate a local ulysses a2a window");
   m.def("register_ulysses_a2a_window", &register_ulysses_a2a_window,
@@ -276,4 +289,5 @@ void register_ulysses_a2a(pybind11::module_& m) {
   m.def("ulysses_lsa_covers_group", &ulysses_lsa_covers_group,
         "whether the whole group is load-store accessible");
   m.def("ulysses_a2a", &ulysses_a2a, "fused-transpose Ulysses all-to-all over NVLink");
+  m.def("ulysses_a2a_tuned", &ulysses_a2a_tuned, "Ulysses all-to-all with a collectively agreed CTA count");
 }

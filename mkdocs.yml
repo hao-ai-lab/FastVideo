@@ -187,6 +187,7 @@ nav:
     - FastH3 on RTX PRO 6000: inference/fasth3_rtx_pro_6000.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
+    - LTX-2.5: inference/ltx2_5.md
     - Kandinsky 6 T2IVA: inference/kandinsky6.md
     - Kandinsky 6 Video SR: inference/kandinsky6_sr.md
     - CLI: inference/cli.md
@@ -205,6 +206,7 @@ nav:
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
     - Attn-QAT Training: training/attn_qat.md
+    - HunyuanVideo 1.5 T2V: training/hunyuan15_overfit.md
     - Examples:
       - Training Index: training/examples/examples_training_index.md
       - Wan T2V 1.3B: training/examples/wan_t2v_1.3B.md

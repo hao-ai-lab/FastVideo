@@ -658,6 +658,14 @@ class Kandinsky6AudioDecodingStage(PipelineStage):
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if batch.audio_latents is None:
             return batch
+        if not fastvideo_args.is_output_rank:
+            # Non-output SPMD ranks never return audio. The audio VAE and the
+            # vocoder have no collectives, so skip them and the waveform host
+            # copy instead of discarding the result later.
+            batch.extra.pop("audio", None)
+            batch.extra.pop("audio_sample_rate", None)
+            batch.audio_latents = None
+            return batch
 
         device = get_local_torch_device()
         self.audio_vae = self.audio_vae.to(device)

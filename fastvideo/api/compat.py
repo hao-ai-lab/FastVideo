@@ -299,7 +299,11 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         from fastvideo.layers.quantization import get_quantization_config
         from fastvideo.layers.quantization.nvfp4_config import NVFP4Config
         _resolved_quant_cls = get_quantization_config(quantization.transformer_quant)
-        quant_instance = _resolved_quant_cls()
+        retain_original_weights = quantization.transformer_retain_original_weights
+        if retain_original_weights is not None and quantization.transformer_quant.lower() != "nvfp4":
+            raise ValueError("transformer_retain_original_weights is only supported with transformer_quant='NVFP4'")
+        quant_kwargs = ({} if retain_original_weights is None else {"retain_original_weights": retain_original_weights})
+        quant_instance = _resolved_quant_cls(**quant_kwargs)
         if quantization.layer_profile is not None:
             if not isinstance(quant_instance, NVFP4Config):
                 raise ValueError("engine.quantization.layer_profile is only valid with transformer_quant NVFP4, "

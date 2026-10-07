@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 15,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -363,6 +363,38 @@
       "evidence": "Source-backed",
       "expected_artifact": "MP4 video with synchronized audio under video_samples_kandinsky6_ti2va/",
       "related": ["kandinsky6-ti2va-base", "kandinsky6-vsr-distilled"]
+    },
+    {
+      "id": "kandinsky6-ti2va-lite",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Text or image to video with audio",
+      "label": "Kandinsky 6 Lite TI2VA",
+      "summary": "Generate a five-second, 512x768 video with synchronized audio from text or an image with the 3.2B Lite checkpoint in fifty inference steps and guidance 5.0.",
+      "model": "kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers",
+      "source": "examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "command": "KANDINSKY6_MODEL_PATH=kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers python examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video with synchronized audio under video_samples_kandinsky6_ti2va/",
+      "related": ["kandinsky6-ti2va-lite-piflow", "kandinsky6-ti2va-base"]
+    },
+    {
+      "id": "kandinsky6-ti2va-lite-piflow",
+      "family": "kandinsky6",
+      "stage": "inference",
+      "task": "Distilled text or image to video with audio",
+      "label": "Kandinsky 6 Lite pi-Flow",
+      "summary": "Generate a five-second video with synchronized audio using the 3.2B Lite distilled pi-Flow checkpoint in ten inference steps and guidance 1.0.",
+      "model": "kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers",
+      "source": "examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "command": "KANDINSKY6_MODEL_PATH=kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers python examples/inference/basic/basic_kandinsky6_ti2va.py",
+      "gpu_types": ["NVIDIA"],
+      "hardware": {"platform": "cuda", "gpu_count": 1, "evidence": "source-configured"},
+      "evidence": "Source-backed",
+      "expected_artifact": "MP4 video with synchronized audio under video_samples_kandinsky6_ti2va/",
+      "related": ["kandinsky6-ti2va-lite", "kandinsky6-ti2va-piflow"]
     },
     {
       "id": "kandinsky6-vsr",

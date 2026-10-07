@@ -19,6 +19,7 @@ from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.tests.entrypoints.test_video_generator import (
     _single_video_args, _single_video_generator, _single_video_output_batch, _small_sampling_param,
 )
+from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.entrypoints.openai import image_api
 from fastvideo.entrypoints.openai.stores import AsyncDictStore
 
@@ -31,9 +32,17 @@ from fastvideo.entrypoints.openai.stores import AsyncDictStore
     pytest.param("b64_json", id="b64-json"),
     pytest.param("url", id="url"),
 ])
-def test_image_generation_routes(path, response_format, monkeypatch, tmp_path):
+@pytest.mark.parametrize("output_format", [None, "png", "jpeg", "webp"])
+def test_image_generation_routes(path, response_format, output_format, monkeypatch, tmp_path):
     image_bytes = b"test-image-content"
-    generate = Mock(side_effect=lambda **kwargs: Path(kwargs["output_path"]).write_bytes(image_bytes))
+    generator = VideoGenerator.__new__(VideoGenerator)
+    generator.fastvideo_args = SimpleNamespace(workload_type=WorkloadType.from_string("t2i"))
+
+    def save_image(**kwargs):
+        output_path = generator._prepare_output_path(kwargs["output_path"], kwargs["prompt"])
+        Path(output_path).write_bytes(image_bytes)
+
+    generate = Mock(side_effect=save_image)
 
     async def run_serialized(fn, **kwargs):
         return fn(**kwargs)
@@ -49,7 +58,10 @@ def test_image_generation_routes(path, response_format, monkeypatch, tmp_path):
     app.include_router(image_api.router)
 
     with TestClient(app) as client:
-        response = client.post(path, json={"prompt": "a cat", "response_format": response_format})
+        request = {"prompt": "a cat", "response_format": response_format}
+        if output_format is not None:
+            request["output_format"] = output_format
+        response = client.post(path, json=request)
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["data"][0]["revised_prompt"] == "a cat"
