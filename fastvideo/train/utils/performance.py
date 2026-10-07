@@ -186,15 +186,12 @@ def estimate_transformer_forward(
         kv_cache = kwargs.get("kv_cache")
         if kv_cache is not None:
             current_start = int(kwargs.get("current_start", 0))
-            if local_attn_size >= 0:
-                max_frames = local_attn_size
-            else:
-                # Causal Wan caps the KV window at
-                # GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES (21) frames when
-                # local_attn_size is unset; sliding_window_num_frames only
-                # sizes the streaming KV cache. MatrixGame2's 15-frame
-                # compatibility window is not modeled here.
-                max_frames = 21
+            # Causal Wan caps the KV window at
+            # GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES (21) frames when
+            # local_attn_size is unset; sliding_window_num_frames only
+            # sizes the streaming KV cache. MatrixGame2's 15-frame
+            # compatibility window is not modeled here.
+            max_frames = local_attn_size if local_attn_size >= 0 else 21
             key_tokens = min(current_start + seq_len, max_frames * spatial_tokens)
             attention_pairs = float(seq_len * key_tokens)
             dense_pairs = float(seq_len * (current_start + seq_len))

@@ -712,8 +712,8 @@ class VideoGenerator:
             else:
                 raise ValueError("Either prompt or prompt_txt must be provided")
         output_path = self._run_on_output_rank(
-            lambda: self._prepare_output_path(sampling_param.output_path,
-                                              output_name_hint if output_name_hint else prompt),
+            lambda: self._prepare_output_path(sampling_param.output_path, output_name_hint
+                                              if output_name_hint else prompt),
             description="output-path setup",
         )
         kwargs["output_path"] = output_path

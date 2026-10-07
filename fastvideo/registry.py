@@ -1125,22 +1125,20 @@ def _register_configs() -> None:
     # Cosmos 2.5 DFD V2W (2B). Register before the generic Cosmos 2.5
     # detector so converted directories whose names contain DFD select the
     # fixed four-step I2V preset.
+    def _cosmos25_dfd_detector(path: str) -> bool:
+        # "dfd" is matched in the last path component only (like the
+        # Kandinsky-6 distilled marker above) so a parent directory that
+        # merely contains "dfd" cannot re-label a base Predict2.5 package.
+        path_lower = path.lower()
+        name = path_lower.rstrip("/").rsplit("/", 1)[-1]
+        tokens = ("cosmos25", "cosmos2_5", "cosmos2.5", "cosmos-predict2.5")
+        return "dfd" in name and any(token in path_lower for token in tokens)
+
     register_configs(
         sampling_param_cls=None,
         pipeline_config_cls=Cosmos25Config,
         workload_types=(WorkloadType.I2V, ),
-        model_detectors=[
-            # "dfd" is matched in the last path component only (like the
-            # Kandinsky-6 distilled marker above) so a parent directory that
-            # merely contains "dfd" cannot re-label a base Predict2.5 package.
-            lambda path: "dfd" in path.lower().rstrip("/").rsplit("/", 1)[-1] and any(
-                token in path.lower() for token in (
-                    "cosmos25",
-                    "cosmos2_5",
-                    "cosmos2.5",
-                    "cosmos-predict2.5",
-                )),
-        ],
+        model_detectors=[_cosmos25_dfd_detector],
         model_family="cosmos25",
         default_preset="cosmos25_dfd_v2w_2b",
     )
