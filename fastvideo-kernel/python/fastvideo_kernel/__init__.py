@@ -26,8 +26,7 @@ from fastvideo_kernel.turbodiffusion_ops import (
 )
 
 from fastvideo_kernel.block_sparse_attn_varlen import (
-    block_sparse_attn_varlen,
-)
+    block_sparse_attn_varlen, )
 
 from fastvideo_kernel.vsa_utils import (
     VSA_TILE_SIZE,

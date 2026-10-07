@@ -5,10 +5,14 @@ import os
 if os.environ.get('TRITON_AUTOTUNE_ENBALE', '0') == '1':
     autotune = triton.autotune
 else:
+
     def autotune(*args, **kwargs):
+
         def decorator(func):
             return func
+
         return decorator
+
 
 configs_gating_preset = {
     'default': {
@@ -28,19 +32,34 @@ configs_gating = [
 ]
 
 gating_reevaluate_keys = ["M", "N"] if os.environ.get('TRITON_REEVALUATE_KEY', '0') == '1' else []
+
+
 @autotune(configs_gating, key=gating_reevaluate_keys)
 @triton.jit
 def _attn_fwd_gating(
-    Q, K, Out, 
-    stride_qz, stride_qh, stride_qm, stride_qk, 
-    stride_kz, stride_kh, stride_kn, stride_kk, 
-    stride_oz, stride_oh, stride_om, stride_on, 
-    H, M, N, 
-    HEAD_DIM: tl.constexpr, 
-    BLOCK_M: tl.constexpr, 
-    BLOCK_N: tl.constexpr, 
-    ):
-    
+    Q,
+    K,
+    Out,
+    stride_qz,
+    stride_qh,
+    stride_qm,
+    stride_qk,
+    stride_kz,
+    stride_kh,
+    stride_kn,
+    stride_kk,
+    stride_oz,
+    stride_oh,
+    stride_om,
+    stride_on,
+    H,
+    M,
+    N,
+    HEAD_DIM: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+
     tl.static_assert(BLOCK_N <= HEAD_DIM)
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
@@ -78,28 +97,28 @@ def _attn_fwd_gating(
     )
 
     # load q: it will stay in SRAM throughout
-    q = tl.load(Q_block_ptr, boundary_check=(0,)) 
+    q = tl.load(Q_block_ptr, boundary_check=(0, ))
     for start_n in range(0, N, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
-        k = tl.load(K_block_ptr, boundary_check=(1,))
+        k = tl.load(K_block_ptr, boundary_check=(1, ))
         qk = tl.dot(q, k)
 
         tl.store(O_block_ptr, qk.to(Out.type.element_ty), boundary_check=(0, 1))
-        
+
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         O_block_ptr = tl.advance(O_block_ptr, (0, BLOCK_N))
 
 
 @triton.jit
 def _attn_bwd_preprocess(
-    O, DO,
-    Delta, # output
-    N_CTX,
-    BLOCK_M: tl.constexpr, 
-    HEAD_DIM: tl.constexpr
-    ):
-    
+        O,
+        DO,
+        Delta,  # output
+        N_CTX,
+        BLOCK_M: tl.constexpr,
+        HEAD_DIM: tl.constexpr):
+
     off_m = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)

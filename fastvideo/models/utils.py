@@ -67,8 +67,7 @@ def set_weight_attrs(
     if weight_attrs is None:
         return
     for key, value in weight_attrs.items():
-        assert not hasattr(
-            weight, key), (f"Overwriting existing tensor attribute: {key}")
+        assert not hasattr(weight, key), (f"Overwriting existing tensor attribute: {key}")
 
         # NOTE(woosuk): During weight loading, we often do something like:
         # narrowed_tensor = param.data.narrow(0, offset, len)
@@ -115,9 +114,7 @@ def extract_layer_index(layer_name: str) -> int:
     return int_vals[0]
 
 
-def modulate(x: torch.Tensor,
-             shift: torch.Tensor | None = None,
-             scale: torch.Tensor | None = None) -> torch.Tensor:
+def modulate(x: torch.Tensor, shift: torch.Tensor | None = None, scale: torch.Tensor | None = None) -> torch.Tensor:
     """modulate by shift and scale
 
     Args:
@@ -135,13 +132,10 @@ def modulate(x: torch.Tensor,
     elif scale is None:
         return x + shift.unsqueeze(1)  # type: ignore[union-attr]
     else:
-        return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(
-            1)  # type: ignore[union-attr]
+        return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)  # type: ignore[union-attr]
 
 
-def pred_noise_to_pred_video(pred_noise: torch.Tensor,
-                             noise_input_latent: torch.Tensor,
-                             timestep: torch.Tensor,
+def pred_noise_to_pred_video(pred_noise: torch.Tensor, noise_input_latent: torch.Tensor, timestep: torch.Tensor,
                              scheduler: Any) -> torch.Tensor:
     """
     Convert predicted noise to clean latent.
@@ -175,17 +169,14 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
     noise_input_latent = noise_input_latent.double().to(device)
     sigmas = scheduler.sigmas.double().to(device)
     timesteps = scheduler.timesteps.double().to(device)
-    timestep_id = torch.argmin(
-        (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+    timestep_id = torch.argmin((timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
     sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
     pred_video = noise_input_latent - sigma_t * pred_noise
     return pred_video.to(dtype)
 
-def pred_noise_to_x_bound(pred_noise: torch.Tensor,
-                             noise_input_latent: torch.Tensor,
-                             timestep: torch.Tensor,
-                             boundary_timestep: torch.Tensor,
-                             scheduler: Any) -> torch.Tensor:
+
+def pred_noise_to_x_bound(pred_noise: torch.Tensor, noise_input_latent: torch.Tensor, timestep: torch.Tensor,
+                          boundary_timestep: torch.Tensor, scheduler: Any) -> torch.Tensor:
     """
     Convert predicted noise to clean latent.
 
@@ -219,12 +210,10 @@ def pred_noise_to_x_bound(pred_noise: torch.Tensor,
     noise_input_latent = noise_input_latent.double().to(device)
     sigmas = scheduler.sigmas.double().to(device)
     timesteps = scheduler.timesteps.double().to(device)
-    timestep_id = torch.argmin(
-        (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+    timestep_id = torch.argmin((timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
     sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
 
-    boundary_timestep_id = torch.argmin(
-        (timesteps.unsqueeze(0) - boundary_timestep.unsqueeze(1)).abs(), dim=1)
+    boundary_timestep_id = torch.argmin((timesteps.unsqueeze(0) - boundary_timestep.unsqueeze(1)).abs(), dim=1)
     sigma_t_boundary = sigmas[boundary_timestep_id].reshape(-1, 1, 1, 1)
     pred_video = noise_input_latent - (sigma_t - sigma_t_boundary) * pred_noise
     return pred_video.to(dtype)

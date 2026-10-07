@@ -24,12 +24,10 @@ from torch.testing import assert_close
 from fastvideo.configs.models.dits import ZImageDiTConfig
 from fastvideo.models.dits.zimage import ZImageAttention, ZImageTransformer2DModel, _prepare_attention_mask
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_REF_DIR = Path(os.getenv("ZIMAGE_OFFICIAL_REF_DIR", REPO_ROOT / "Z-Image"))
 OFFICIAL_SRC = OFFICIAL_REF_DIR / "src"
-TRANSFORMER_DIR = Path(
-    os.getenv("ZIMAGE_TRANSFORMER_DIR", REPO_ROOT / "official_weights" / "Z-Image" / "transformer"))
+TRANSFORMER_DIR = Path(os.getenv("ZIMAGE_TRANSFORMER_DIR", REPO_ROOT / "official_weights" / "Z-Image" / "transformer"))
 REFERENCE_REVISION = "26f23eda626ffadda020b04ff79488e1d72004cd"
 HF_REVISION = "f332072aa78be7aecdf3ee76d5c247082da564a6"
 HF_KEY_COUNT = 521
@@ -100,8 +98,7 @@ def reference_transformer_cls():
         ).stdout.strip()
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         pytest.fail(f"Cannot verify Z-Image reference revision: {exc}")
-    assert revision == REFERENCE_REVISION, (
-        f"expected Z-Image reference {REFERENCE_REVISION}, got {revision}")
+    assert revision == REFERENCE_REVISION, (f"expected Z-Image reference {REFERENCE_REVISION}, got {revision}")
 
     module_names = (
         "config",
@@ -142,7 +139,10 @@ def _build_fastvideo(config_values: dict) -> ZImageTransformer2DModel:
     config.update_model_arch(config_values)
     return ZImageTransformer2DModel(
         config=config,
-        hf_config={"_class_name": "ZImageTransformer2DModel", **config_values},
+        hf_config={
+            "_class_name": "ZImageTransformer2DModel",
+            **config_values
+        },
     )
 
 
@@ -317,9 +317,8 @@ def _run_reference_production(reference_transformer_cls, config: dict, inputs: t
 
 @pytest.mark.skipif(
     not _has_real_weights(),
-    reason=(
-        "Pinned Z-Image transformer weights are absent; set ZIMAGE_TRANSFORMER_DIR "
-        f"to Tongyi-MAI/Z-Image-Turbo@{HF_REVISION}/transformer"),
+    reason=("Pinned Z-Image transformer weights are absent; set ZIMAGE_TRANSFORMER_DIR "
+            f"to Tongyi-MAI/Z-Image-Turbo@{HF_REVISION}/transformer"),
 )
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Real-weight Z-Image transformer parity requires CUDA")
 def test_zimage_transformer_production_loader_forward_parity(reference_transformer_cls):

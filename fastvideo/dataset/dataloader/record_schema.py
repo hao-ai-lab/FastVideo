@@ -31,37 +31,21 @@ def basic_t2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
             duration_val = float(batch.num_frames[idx]) / float(batch.fps[idx])
 
         record = {
-            "id":
-            video_name,
-            "vae_latent_bytes":
-            batch.latents[idx].tobytes(),
-            "vae_latent_shape":
-            list(batch.latents[idx].shape),
-            "vae_latent_dtype":
-            str(batch.latents[idx].dtype),
-            "text_embedding_bytes":
-            batch.prompt_embeds[idx].tobytes(),
-            "text_embedding_shape":
-            list(batch.prompt_embeds[idx].shape),
-            "text_embedding_dtype":
-            str(batch.prompt_embeds[idx].dtype),
-            "file_name":
-            video_name,
-            "caption":
-            batch.prompt[idx],
-            "media_type":
-            "video",
-            "width":
-            int(width),
-            "height":
-            int(height),
-            "num_frames":
-            batch.latents[idx].shape[1]
-            if len(batch.latents[idx].shape) > 1 else 0,
-            "duration_sec":
-            duration_val,
-            "fps":
-            fps_val,
+            "id": video_name,
+            "vae_latent_bytes": batch.latents[idx].tobytes(),
+            "vae_latent_shape": list(batch.latents[idx].shape),
+            "vae_latent_dtype": str(batch.latents[idx].dtype),
+            "text_embedding_bytes": batch.prompt_embeds[idx].tobytes(),
+            "text_embedding_shape": list(batch.prompt_embeds[idx].shape),
+            "text_embedding_dtype": str(batch.prompt_embeds[idx].dtype),
+            "file_name": video_name,
+            "caption": batch.prompt[idx],
+            "media_type": "video",
+            "width": int(width),
+            "height": int(height),
+            "num_frames": batch.latents[idx].shape[1] if len(batch.latents[idx].shape) > 1 else 0,
+            "duration_sec": duration_val,
+            "fps": fps_val,
         }
         records.append(record)
 
@@ -73,8 +57,7 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
     records = basic_t2v_record_creator(batch)
 
     if len(batch.image_embeds) > 0:
-        assert len(batch.image_embeds
-                   ) == 1, "image embedding should be a single tensor"
+        assert len(batch.image_embeds) == 1, "image embedding should be a single tensor"
         image_embeds = batch.image_embeds[0]
     else:
         image_embeds = None
@@ -97,12 +80,9 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
 
         if image_latent is not None:
             record.update({
-                "first_frame_latent_bytes":
-                image_latent[idx].tobytes(),
-                "first_frame_latent_shape":
-                list(image_latent[idx].shape),
-                "first_frame_latent_dtype":
-                str(image_latent[idx].dtype),
+                "first_frame_latent_bytes": image_latent[idx].tobytes(),
+                "first_frame_latent_shape": list(image_latent[idx].shape),
+                "first_frame_latent_dtype": str(image_latent[idx].dtype),
             })
         else:
             record.update({
@@ -127,10 +107,8 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
     return records
 
 
-def ode_text_only_record_creator(
-        video_name: str, text_embedding: np.ndarray, caption: str,
-        trajectory_latents: np.ndarray,
-        trajectory_timesteps: np.ndarray) -> dict[str, Any]:
+def ode_text_only_record_creator(video_name: str, text_embedding: np.ndarray, caption: str,
+                                 trajectory_latents: np.ndarray, trajectory_timesteps: np.ndarray) -> dict[str, Any]:
     """Create a text-only ODE trajectory record matching pyarrow_schema_ode_trajectory_text_only.
 
     Args:
@@ -171,8 +149,7 @@ def ode_text_only_record_creator(
     return record
 
 
-def text_only_record_creator(text_name: str, text_embedding: np.ndarray,
-                             caption: str) -> dict[str, Any]:
+def text_only_record_creator(text_name: str, text_embedding: np.ndarray, caption: str) -> dict[str, Any]:
     """Create a text-only record matching pyarrow_schema_text_only.
 
     Args:
@@ -193,16 +170,15 @@ def text_only_record_creator(text_name: str, text_embedding: np.ndarray,
     return record
 
 
-def matrixgame2_ode_record_creator(
-        video_name: str,
-        clip_feature: np.ndarray,
-        first_frame_latent: np.ndarray,
-        trajectory_latents: np.ndarray,
-        trajectory_timesteps: np.ndarray,
-        pil_image: np.ndarray | None = None,
-        keyboard_cond: np.ndarray | None = None,
-        mouse_cond: np.ndarray | None = None,
-        caption: str = "") -> dict[str, Any]:
+def matrixgame2_ode_record_creator(video_name: str,
+                                   clip_feature: np.ndarray,
+                                   first_frame_latent: np.ndarray,
+                                   trajectory_latents: np.ndarray,
+                                   trajectory_timesteps: np.ndarray,
+                                   pil_image: np.ndarray | None = None,
+                                   keyboard_cond: np.ndarray | None = None,
+                                   mouse_cond: np.ndarray | None = None,
+                                   caption: str = "") -> dict[str, Any]:
     """Create a ODE trajectory record matching pyarrow_schema_matrixgame2_ode_trajectory.
 
     Args:

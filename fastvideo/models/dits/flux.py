@@ -66,6 +66,7 @@ class FluxPosEmbed(nn.Module):
 
 
 class FluxCombinedTimestepGuidanceTextProjEmbeddings(nn.Module):
+
     def __init__(self, embedding_dim: int, pooled_projection_dim: int) -> None:
         super().__init__()
         self.time_proj = Timesteps(
@@ -105,6 +106,7 @@ class FluxCombinedTimestepGuidanceTextProjEmbeddings(nn.Module):
 
 
 class FluxAdaLayerNormZeroSingle(nn.Module):
+
     def __init__(self, embedding_dim: int, bias: bool = True) -> None:
         super().__init__()
         self.silu = nn.SiLU()
@@ -149,12 +151,10 @@ class FluxJointAttention(nn.Module):
         self.add_k_proj = ReplicatedLinear(dim, self.inner_dim, bias=True)
         self.add_v_proj = ReplicatedLinear(dim, self.inner_dim, bias=True)
 
-        self.to_out = nn.ModuleList(
-            [
-                ReplicatedLinear(self.inner_dim, dim, bias=True),
-                nn.Dropout(0.0),
-            ]
-        )
+        self.to_out = nn.ModuleList([
+            ReplicatedLinear(self.inner_dim, dim, bias=True),
+            nn.Dropout(0.0),
+        ])
         self.to_add_out = ReplicatedLinear(self.inner_dim, dim, bias=True)
 
         self.attn = DistributedAttention(
@@ -259,6 +259,7 @@ class FluxSingleStreamAttention(nn.Module):
 
 
 class FluxTransformerBlock(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -298,9 +299,8 @@ class FluxTransformerBlock(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         del joint_attention_kwargs
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
-        (norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp) = self.norm1_context(
-            encoder_hidden_states, emb=temb
-        )
+        (norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp,
+         c_gate_mlp) = self.norm1_context(encoder_hidden_states, emb=temb)
 
         attn_output, context_attn_output = self.attn(
             hidden_states=norm_hidden_states,
@@ -330,6 +330,7 @@ class FluxTransformerBlock(nn.Module):
 
 
 class FluxSingleTransformerBlock(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -384,8 +385,8 @@ class FluxTransformer2DModel(BaseDiT):
     """FastVideo FLUX transformer; load Diffusers FLUX safetensors 1:1."""
 
     _fsdp_shard_conditions = [
-        lambda n, m: (n.startswith("transformer_blocks.") or n.startswith("single_transformer_blocks."))
-        and n.split(".")[-1].isdigit(),
+        lambda n, m: (n.startswith("transformer_blocks.") or n.startswith("single_transformer_blocks.")) and n.split(
+            ".")[-1].isdigit(),
     ]
     _compile_conditions = _fsdp_shard_conditions
     # HF weight names already match this module layout (cf. SGLang regex maps).
@@ -426,28 +427,22 @@ class FluxTransformer2DModel(BaseDiT):
         self.context_embedder = ReplicatedLinear(arch.joint_attention_dim, self.inner_dim)
         self.x_embedder = ReplicatedLinear(arch.in_channels, self.inner_dim)
 
-        self.transformer_blocks = nn.ModuleList(
-            [
-                FluxTransformerBlock(
-                    dim=self.inner_dim,
-                    num_attention_heads=arch.num_attention_heads,
-                    attention_head_dim=arch.attention_head_dim,
-                    supported_attention_backends=self._supported_attention_backends,
-                )
-                for _ in range(arch.num_layers)
-            ]
-        )
-        self.single_transformer_blocks = nn.ModuleList(
-            [
-                FluxSingleTransformerBlock(
-                    dim=self.inner_dim,
-                    num_attention_heads=arch.num_attention_heads,
-                    attention_head_dim=arch.attention_head_dim,
-                    supported_attention_backends=self._supported_attention_backends,
-                )
-                for _ in range(arch.num_single_layers)
-            ]
-        )
+        self.transformer_blocks = nn.ModuleList([
+            FluxTransformerBlock(
+                dim=self.inner_dim,
+                num_attention_heads=arch.num_attention_heads,
+                attention_head_dim=arch.attention_head_dim,
+                supported_attention_backends=self._supported_attention_backends,
+            ) for _ in range(arch.num_layers)
+        ])
+        self.single_transformer_blocks = nn.ModuleList([
+            FluxSingleTransformerBlock(
+                dim=self.inner_dim,
+                num_attention_heads=arch.num_attention_heads,
+                attention_head_dim=arch.attention_head_dim,
+                supported_attention_backends=self._supported_attention_backends,
+            ) for _ in range(arch.num_single_layers)
+        ])
 
         self.norm_out = SD3AdaLayerNormContinuous(
             self.inner_dim,
@@ -571,7 +566,7 @@ class FluxTransformer2DModel(BaseDiT):
             output, _ = self.proj_out(hidden_states)
 
             if not return_dict:
-                return (output,)
+                return (output, )
             return FluxTransformer2DModelOutput(sample=output)
 
 

@@ -31,14 +31,12 @@ def generate_merged_validation_json(input_dir, output_file):
         validation_data.append(validation_entry)
 
     # Create the final validation structure
-    validation_json = {
-        "data": validation_data
-    }
+    validation_json = {"data": validation_data}
 
     # Write the validation JSON to the output file
     with open(output_file, "w") as f:
         json.dump(validation_json, f, indent=2)
-    
+
     print(f"Generated validation JSON with {len(validation_data)} entries and saved to {output_file}")
 
 

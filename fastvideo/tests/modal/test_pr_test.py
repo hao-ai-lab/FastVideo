@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+import fastvideo.envs as envs
+
 
 class _FakeImage:
 
@@ -44,6 +46,7 @@ class _FakeSecret:
 class _FakeApp:
 
     def function(self, *_args, **_kwargs):
+
         def decorator(func):
             return func
 
@@ -64,8 +67,7 @@ def _load_pr_test_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "modal", fake_modal)
     monkeypatch.setitem(sys.modules, "modal_image_utils", fake_image_utils)
     module_path = Path(__file__).with_name("pr_test.py")
-    spec = importlib.util.spec_from_file_location(
-        "modal_pr_test_under_test", module_path)
+    spec = importlib.util.spec_from_file_location("modal_pr_test_under_test", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -87,8 +89,7 @@ def test_checkout_repository_retries_clone_and_fetches_pr_ref(monkeypatch):
     monkeypatch.setattr(
         module.shutil,
         "rmtree",
-        lambda path, ignore_errors: cleanup_paths.append(
-            (path, ignore_errors)),
+        lambda path, ignore_errors: cleanup_paths.append((path, ignore_errors)),
     )
     monkeypatch.setattr(module.time, "sleep", sleep_seconds.append)
 
@@ -121,11 +122,26 @@ def test_checkout_repository_retries_clone_and_fetches_pr_ref(monkeypatch):
     ]
     assert sleep_seconds == [5]
     assert [kwargs for _, kwargs in commands] == [
-        {"cwd": "/", "check": False},
-        {"cwd": "/", "check": False},
-        {"cwd": "/tmp/FastVideo", "check": False},
-        {"cwd": "/tmp/FastVideo", "check": False},
-        {"cwd": "/tmp/FastVideo", "check": False},
+        {
+            "cwd": "/",
+            "check": False
+        },
+        {
+            "cwd": "/",
+            "check": False
+        },
+        {
+            "cwd": "/tmp/FastVideo",
+            "check": False
+        },
+        {
+            "cwd": "/tmp/FastVideo",
+            "check": False
+        },
+        {
+            "cwd": "/tmp/FastVideo",
+            "check": False
+        },
     ]
 
     fetch_command = commands[2][0]
@@ -187,8 +203,7 @@ def test_git_retry_exhaustion_is_bounded_and_cleans_each_attempt(monkeypatch):
     monkeypatch.setattr(
         module.shutil,
         "rmtree",
-        lambda path, ignore_errors: cleanup_paths.append(
-            (path, ignore_errors)),
+        lambda path, ignore_errors: cleanup_paths.append((path, ignore_errors)),
     )
     monkeypatch.setattr(module.time, "sleep", sleep_seconds.append)
 
@@ -215,14 +230,12 @@ def test_git_retry_exhaustion_is_bounded_and_cleans_each_attempt(monkeypatch):
         ("https://example.com/repo.git", "0123456789abcdef", "0"),
     ],
 )
-def test_checkout_repository_rejects_invalid_buildkite_values(
-        monkeypatch, git_repo, git_commit, pr_number):
+def test_checkout_repository_rejects_invalid_buildkite_values(monkeypatch, git_repo, git_commit, pr_number):
     module = _load_pr_test_module(monkeypatch)
     monkeypatch.setattr(
         module.subprocess,
         "run",
-        lambda *_args, **_kwargs: pytest.fail(
-            "git must not run for invalid input"),
+        lambda *_args, **_kwargs: pytest.fail("git must not run for invalid input"),
     )
 
     with pytest.raises(RuntimeError):
@@ -236,17 +249,14 @@ def test_checkout_repository_rejects_invalid_buildkite_values(
         (False, ""),
     ],
 )
-def test_run_test_command_composes_valid_post_checkout_shell(
-        monkeypatch, build_kernel, install_command):
+def test_run_test_command_composes_valid_post_checkout_shell(monkeypatch, env_overrides, build_kernel, install_command):
     module = _load_pr_test_module(monkeypatch)
     real_run = subprocess.run
     events = []
 
-    monkeypatch.setenv(
-        "BUILDKITE_REPO", "https://github.com/hao-ai-lab/FastVideo.git")
-    monkeypatch.setenv(
-        "BUILDKITE_COMMIT", "0123456789abcdef0123456789abcdef01234567")
-    monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
+    env_overrides.enter_context(envs.override_external("BUILDKITE_REPO", "https://github.com/hao-ai-lab/FastVideo.git"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_COMMIT", "0123456789abcdef0123456789abcdef01234567"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_PULL_REQUEST", "false"))
     monkeypatch.setattr(
         module,
         "_checkout_repository",
@@ -265,13 +275,114 @@ def test_run_test_command_composes_valid_post_checkout_shell(
         install_command=install_command,
     )
 
-    assert [event for event, _ in events] == ["checkout", "run"]
-    shell_command = events[1][1][-1]
-    assert "cd /FastVideo" in shell_command
-    assert "git clone" not in shell_command
-    assert ("./build.sh" in shell_command) is build_kernel
+    assert [event for event, _ in events] == ["checkout", "run", "run"]
+    setup_command = events[1][1][-1]
+    test_command = events[2][1][-1]
+    assert "cd /FastVideo" in setup_command
+    assert "git clone" not in setup_command
+    assert ("kernel_build_cache.py install" in setup_command) is build_kernel
+    assert "pytest fastvideo/tests/api -q" not in setup_command
+    assert "kernel_build_cache.py install" not in test_command
+    assert "pytest fastvideo/tests/api -q" in test_command
     if install_command:
-        assert install_command in shell_command
+        assert install_command in setup_command
     else:
-        assert "uv pip install -e" not in shell_command
-    real_run(["/bin/bash", "-n"], input=shell_command, text=True, check=True)
+        assert "uv pip install -e" not in setup_command
+    for shell_command in (setup_command, test_command):
+        real_run(["/bin/bash", "-n"], input=shell_command, text=True, check=True)
+
+
+def test_run_test_command_uses_nonshared_kernel_install_before_tests(monkeypatch, env_overrides):
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+
+    def fake_run(args, **_kwargs):
+        commands.append(args[-1])
+        return types.SimpleNamespace(returncode=0)
+
+    env_overrides.enter_context(envs.override_external("BUILDKITE_REPO", "https://example.com/FastVideo.git"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_COMMIT", "0123456789abcdef"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_PULL_REQUEST", "false"))
+    monkeypatch.setattr(module, "_checkout_repository", lambda *_args: None)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    module.run_test_command("pytest fastvideo/tests/api -q", build_kernel=True)
+
+    assert len(commands) == 2
+    setup_command, test_command = commands
+    assert "kernel_build_cache.py install" in setup_command
+    assert "--cache-root" not in setup_command
+    assert "pytest fastvideo/tests/api -q" not in setup_command
+    assert "kernel_build_cache.py install" not in test_command
+    assert "pytest fastvideo/tests/api -q" in test_command
+    assert not hasattr(module, "kernel_cache_vol")
+
+
+def test_run_unit_test_uses_shared_command(monkeypatch):
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_unit_test()
+
+    assert commands == ["bash .buildkite/scripts/unit_test.sh"]
+    unit_command = (Path(__file__).resolve().parents[3] / ".buildkite/scripts/unit_test.sh").read_text()
+    for test_path in (
+            "./fastvideo/tests/modal/test_kernel_build_cache.py",
+            "./fastvideo/tests/modal/test_pr_test.py",
+            "./fastvideo/tests/modal/test_ssim_test.py",
+    ):
+        assert test_path in unit_command
+
+
+def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
+    """Modal and the self-hosted CI runner must execute the same per-lane scripts so
+    their test selections cannot drift (same contract as the unit lane)."""
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    hf_prefix = "export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && "
+    module.run_kernel_tests()
+    module.run_inference_tests_vmoba()
+    module.run_golden_gate_tests()
+    module.run_encoder_tests()
+    module.run_vae_tests()
+    module.run_transformer_tests()
+    module.run_inference_lora_tests()
+    module.run_distill_dmd_tests()
+    module.run_train_framework_tests()
+
+    assert commands == [
+        "bash .buildkite/scripts/lanes/kernel_tests.sh",
+        "bash .buildkite/scripts/lanes/inference_vmoba.sh",
+        hf_prefix + "bash .buildkite/scripts/lanes/golden_gate.sh",
+        hf_prefix + "bash .buildkite/scripts/lanes/encoder.sh",
+        hf_prefix + "bash .buildkite/scripts/lanes/vae.sh",
+        hf_prefix + "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/transformer.sh",
+        "bash .buildkite/scripts/lanes/inference_lora.sh",
+        "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/distillation_dmd.sh",
+        hf_prefix + "FASTVIDEO_FA4=0 bash .buildkite/scripts/lanes/train_framework.sh",
+    ]
+
+    lanes_dir = Path(__file__).resolve().parents[3] / ".buildkite/scripts/lanes"
+    for script, payload in {
+            "kernel_tests.sh": "pytest fastvideo-kernel/tests/ -vs",
+            "inference_vmoba.sh": "python fastvideo/tests/inference/vmoba/test_vmoba_inference.py",
+            "golden_gate.sh": 'exec pytest "$golden_root" -xvs',
+            "encoder.sh": "pytest ./fastvideo/tests/encoders -vs",
+            "vae.sh": "pytest ./fastvideo/tests/vaes -vs",
+            "transformer.sh": "pytest ./fastvideo/tests/transformers -vs",
+            "inference_lora.sh": "pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs",
+            "distillation_dmd.sh": "pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs",
+            "train_framework.sh": "pytest ./fastvideo/tests/train/models ./fastvideo/tests/train/methods -vs",
+            "eval.sh": "pytest ./fastvideo/tests/eval -vs",
+    }.items():
+        assert payload in (lanes_dir / script).read_text(), script
+    assert "golden_root=./fastvideo/tests/golden_gate" in (lanes_dir / "golden_gate.sh").read_text()
+
+    # run_eval_tests goes through run_test_command (custom install extras);
+    # pin its shared script + install command textually.
+    eval_source = (Path(__file__).resolve().parent / "pr_test.py").read_text()
+    assert "bash .buildkite/scripts/lanes/eval.sh" in eval_source
+    assert 'install_command=\'uv pip install -e ".[test,eval-full]"\'' in eval_source

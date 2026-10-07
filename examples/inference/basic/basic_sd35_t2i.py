@@ -7,7 +7,6 @@ import os
 import re
 from typing import List
 
-
 DEFAULT_PROMPTS = [
     "a photo of a cat",
     "a cinematic photo of a red panda wearing a tiny backpack, standing on a rainy neon-lit street at night, shallow depth of field, sharp focus, 35mm, bokeh",
@@ -49,7 +48,9 @@ def _remove_existing_outputs(out_dir: str, filename_base: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run SD3.5 Medium text-to-image with FastVideo VideoGenerator.")
-    p.add_argument("--model-path", default="stabilityai/stable-diffusion-3.5-medium", help="Path to local diffusers-format SD3.5 weights directory.")
+    p.add_argument("--model-path",
+                   default="stabilityai/stable-diffusion-3.5-medium",
+                   help="Path to local diffusers-format SD3.5 weights directory.")
     p.add_argument(
         "--out-dir",
         "--outdir",

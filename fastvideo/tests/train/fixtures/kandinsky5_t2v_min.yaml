@@ -1,0 +1,17 @@
+# Minimum config to instantiate Kandinsky5Model for the loading + forward
+# smoke test. Real Kandinsky-5.0 Lite checkpoint loaded via
+# load_module_from_path.
+
+models:
+  student:
+    _target_: fastvideo.train.models.kandinsky5.Kandinsky5Model
+    init_from: kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers
+    trainable: false
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  dit_precision: bf16
+
+pipeline: {}

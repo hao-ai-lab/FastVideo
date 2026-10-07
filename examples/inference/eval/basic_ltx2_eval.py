@@ -25,19 +25,17 @@ from fastvideo import VideoGenerator
 from fastvideo.eval import Evaluator
 from fastvideo.eval.io import build_eval_kwargs
 
-PROMPT = (
-    "A warm sunny backyard. The camera starts in a tight cinematic close-up "
-    "of a woman and a man in their 30s, facing each other with serious "
-    "expressions. The woman, emotional and dramatic, says softly, \"That's "
-    "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
-    "annoyed: \"Stop being so dramatic, Jess.\" A beat. He glances aside, "
-    "then mutters defensively, \"He's just having fun.\" The camera slowly "
-    "pans right, revealing the grandfather in the garden wearing enormous "
-    "butterfly wings, waving his arms in the air like he's trying to take "
-    "off. He shouts, \"Wheeeew!\" as he flaps his wings with full commitment. "
-    "The woman covers her face, on the verge of tears. The tone is deadpan, "
-    "absurd, and quietly tragic."
-)
+PROMPT = ("A warm sunny backyard. The camera starts in a tight cinematic close-up "
+          "of a woman and a man in their 30s, facing each other with serious "
+          "expressions. The woman, emotional and dramatic, says softly, \"That's "
+          "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
+          "annoyed: \"Stop being so dramatic, Jess.\" A beat. He glances aside, "
+          "then mutters defensively, \"He's just having fun.\" The camera slowly "
+          "pans right, revealing the grandfather in the garden wearing enormous "
+          "butterfly wings, waving his arms in the air like he's trying to take "
+          "off. He shouts, \"Wheeeew!\" as he flaps his wings with full commitment. "
+          "The woman covers her face, on the verge of tears. The tone is deadpan, "
+          "absurd, and quietly tragic.")
 
 # VBench sub-metrics meaningful for an arbitrary text→video sample
 # (just the generated frames, optionally fps + the source prompt).
@@ -45,14 +43,14 @@ PROMPT = (
 # vbench.scene, ...) are excluded — they need prompts built to a
 # specific schema.
 METRICS = [
-    "vbench.aesthetic_quality",       # CLIP + LAION aesthetic head
-    "vbench.subject_consistency",     # DINO frame-to-first cosine
+    "vbench.aesthetic_quality",  # CLIP + LAION aesthetic head
+    "vbench.subject_consistency",  # DINO frame-to-first cosine
     "vbench.background_consistency",  # DINO on background patches
-    "vbench.imaging_quality",         # pyiqa MUSIQ
-    "vbench.temporal_flickering",     # pixel-wise frame deltas
-    "vbench.motion_smoothness",       # AMT frame interpolator residual
-    "vbench.dynamic_degree",          # RAFT optical-flow magnitude (needs fps)
-    "vbench.overall_consistency",     # ViCLIP video↔prompt similarity
+    "vbench.imaging_quality",  # pyiqa MUSIQ
+    "vbench.temporal_flickering",  # pixel-wise frame deltas
+    "vbench.motion_smoothness",  # AMT frame interpolator residual
+    "vbench.dynamic_degree",  # RAFT optical-flow magnitude (needs fps)
+    "vbench.overall_consistency",  # ViCLIP video↔prompt similarity
 ]
 
 

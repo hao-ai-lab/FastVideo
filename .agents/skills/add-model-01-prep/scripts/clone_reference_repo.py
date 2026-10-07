@@ -10,9 +10,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Clone a reference repo for FastVideo parity tests."
-    )
+    parser = argparse.ArgumentParser(description="Clone a reference repo for FastVideo parity tests.")
     parser.add_argument("repo_url", help="Official reference repository URL")
     parser.add_argument("target_dir", help="Directory to clone into")
     parser.add_argument("--branch", help="Branch or tag to clone")
@@ -62,9 +60,7 @@ def gitignore_entry_for(target: Path) -> str:
     try:
         relative = resolved.relative_to(root)
     except ValueError as exc:
-        raise ValueError(
-            "--update-gitignore requires target_dir to be under the current directory"
-        ) from exc
+        raise ValueError("--update-gitignore requires target_dir to be under the current directory") from exc
 
     text = relative.as_posix().rstrip("/")
     return "/" + text + "/"

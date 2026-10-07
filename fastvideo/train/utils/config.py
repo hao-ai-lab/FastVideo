@@ -18,6 +18,7 @@ from fastvideo.train.utils.training_config import (
     DistributedConfig,
     ModelTrainingConfig,
     OptimizerConfig,
+    PerformanceConfig,
     TrackerConfig,
     TrainingLoopConfig,
 )
@@ -282,7 +283,26 @@ def _parse_pipeline_config(
 
     pipeline_config = PipelineConfig.from_kwargs(kwargs)
     _apply_training_dit_arch_overrides(pipeline_config, dit_arch_overrides)
+    _resolve_dit_quant_config(pipeline_config)
     return pipeline_config
+
+
+def _resolve_dit_quant_config(pipeline_config: Any) -> None:
+    """Resolve a string ``pipeline.dit_config.quant_config`` (e.g.
+    ``nvfp4_qat_train``) into its registered QuantizationConfig instance.
+
+    Model construction calls ``quant_config.get_quant_method()`` inside
+    ``LinearBase.__init__``, so a bare YAML string would crash there.
+    This must live in ``_parse_pipeline_config`` (not ``load_run_config``)
+    because ``dcp_to_diffusers`` rebuilds models from a checkpoint's raw
+    config by calling ``_parse_pipeline_config`` directly.
+    """
+    dit_config = getattr(pipeline_config, "dit_config", None)
+    quant = getattr(dit_config, "quant_config", None)
+    if isinstance(quant, str):
+        from fastvideo.layers.quantization import (
+            get_quantization_config, )
+        dit_config.quant_config = get_quantization_config(quant)()
 
 
 def _split_training_dit_arch_overrides(pipeline_raw: Any) -> tuple[Any, dict[str, Any]]:
@@ -320,13 +340,19 @@ def _build_training_config(
     models: dict[str, dict[str, Any]],
     pipeline_config: Any,
 ) -> TrainingConfig:
-    """Build TrainingConfig from nested training: YAML."""
+    """Build ``TrainingConfig`` from the nested ``training`` YAML mapping.
+
+    ``preprocessed_data_type`` selects the dataloader's tensor contract:
+    ``t2v`` carries video and text, ``t2va`` carries synchronized video,
+    audio, and text, and ``text_only`` carries prompt conditioning.
+    """
     d = dict(t.get("distributed", {}) or {})
     da = dict(t.get("data", {}) or {})
     o = dict(t.get("optimizer", {}) or {})
     lo = dict(t.get("loop", {}) or {})
     ck = dict(t.get("checkpoint", {}) or {})
     tr = dict(t.get("tracker", {}) or {})
+    perf = dict(t.get("performance", {}) or {})
     vs = dict(t.get("vsa", {}) or {})
     m = dict(t.get("model", {}) or {})
 
@@ -353,10 +379,19 @@ def _build_training_config(
         data_path = str(raw_data_path)
 
     preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
-    if preprocessed_data_type not in {"t2v", "text_only"}:
+    if preprocessed_data_type not in {"t2v", "t2va", "text_only"}:
         raise ValueError("training.data.preprocessed_data_type must be one of "
-                         "{'t2v', 'text_only'}, got "
+                         "{'t2v', 't2va', 'text_only'}, got "
                          f"{preprocessed_data_type!r}")
+
+    peak_tflops = get_optional_float(
+        perf,
+        "peak_tflops_per_gpu",
+        where="training.performance.peak_tflops_per_gpu",
+    )
+    if peak_tflops is not None and peak_tflops <= 0.0:
+        raise ValueError("training.performance.peak_tflops_per_gpu must be "
+                         f"> 0, got {peak_tflops}")
 
     return TrainingConfig(
         distributed=DistributedConfig(
@@ -404,6 +439,10 @@ def _build_training_config(
             entity=str(tr.get("entity", "") or ""),
             project_name=str(tr.get("project_name", "fastvideo") or "fastvideo"),
             run_name=str(tr.get("run_name", "") or ""),
+        ),
+        performance=PerformanceConfig(
+            enabled=bool(perf.get("enabled", True)),
+            peak_tflops_per_gpu=peak_tflops,
         ),
         vsa_sparsity=float(vs.get("sparsity", 0.0) or 0.0),
         vsa_cache_tile_buf=bool(vs.get("cache_tile_buf", False) or False),

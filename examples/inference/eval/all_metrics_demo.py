@@ -35,13 +35,11 @@ import torch
 # Generation — make one LTX2 video to evaluate.
 # ---------------------------------------------------------------------
 
-PROMPT = (
-    "A warm sunny backyard. The camera starts in a tight cinematic close-up "
-    "of a woman and a man in their 30s, facing each other with serious "
-    "expressions. The woman, emotional and dramatic, says softly, \"That's "
-    "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
-    "annoyed: \"Stop being so dramatic, Jess.\""
-)
+PROMPT = ("A warm sunny backyard. The camera starts in a tight cinematic close-up "
+          "of a woman and a man in their 30s, facing each other with serious "
+          "expressions. The woman, emotional and dramatic, says softly, \"That's "
+          "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
+          "annoyed: \"Stop being so dramatic, Jess.\"")
 
 OUTPUT_PATH = "fastvideo/tests/eval/asset/ltx2.mp4"
 N_DUP = 4  # how many times to duplicate the video for the gen/ref corpora
@@ -77,6 +75,7 @@ def generate_one_ltx2_video() -> str:
 # Eval — the point of the script.  4 lines from "two paths" to results.
 # ---------------------------------------------------------------------
 
+
 def _all_registered_metrics() -> list[str]:
     """Every metric in the registry, sorted.  Combined with
     ``skip_missing_deps=True`` this is the "run everything that works in
@@ -103,8 +102,7 @@ def score_all_metrics(video_path: str) -> None:
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     t_init0 = time.perf_counter()
-    ev = create_evaluator(metrics=_all_registered_metrics(),
-                          device="cuda:0", num_gpus=1, skip_missing_deps=True)
+    ev = create_evaluator(metrics=_all_registered_metrics(), device="cuda:0", num_gpus=1, skip_missing_deps=True)
     t_init1 = time.perf_counter()
     samples = samples_from(video=gen_dir, reference=ref_dir, text_prompt=PROMPT, fps=24.0,
                            extract_audio=True)  # auto-extract audio track from videos

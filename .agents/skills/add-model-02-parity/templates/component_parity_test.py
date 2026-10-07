@@ -18,7 +18,6 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29519")
 os.environ.setdefault("DISABLE_SP", "1")
@@ -35,15 +34,10 @@ FASTVIDEO_CONFIG_CLASS = "<FastVideoConfig>"  # TODO.
 FASTVIDEO_MODEL_MODULE = "fastvideo.models.<bucket>.<module>"  # TODO.
 FASTVIDEO_MODEL_CLASS = "<FastVideoModel>"  # TODO.
 
-OFFICIAL_REF_DIR = Path(
-    os.getenv("<FAMILY_UPPER>_OFFICIAL_REF_DIR", REPO_ROOT / "<ReferenceDir>")
-)
-LOCAL_WEIGHTS_DIR = Path(
-    os.getenv("<FAMILY_UPPER>_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY)
-)
-CONVERTED_WEIGHTS_DIR = Path(
-    os.getenv("<FAMILY_UPPER>_CONVERTED_WEIGHTS_DIR", REPO_ROOT / "converted_weights" / FAMILY)
-)
+OFFICIAL_REF_DIR = Path(os.getenv("<FAMILY_UPPER>_OFFICIAL_REF_DIR", REPO_ROOT / "<ReferenceDir>"))
+LOCAL_WEIGHTS_DIR = Path(os.getenv("<FAMILY_UPPER>_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY))
+CONVERTED_WEIGHTS_DIR = Path(os.getenv("<FAMILY_UPPER>_CONVERTED_WEIGHTS_DIR",
+                                       REPO_ROOT / "converted_weights" / FAMILY))
 
 
 def _resolve_hf_token() -> str | None:
@@ -99,18 +93,14 @@ def _load_official_model(device: torch.device, dtype: torch.dtype) -> torch.nn.M
     model = OfficialClass()  # TODO: pass official config kwargs.
     state_dict = {}  # TODO: load official state dict from LOCAL_WEIGHTS_DIR.
     missing, unexpected = model.load_state_dict(state_dict, strict=True)
-    assert not missing and not unexpected, (
-        f"official load mismatch missing={missing[:5]} unexpected={unexpected[:5]}"
-    )
+    assert not missing and not unexpected, (f"official load mismatch missing={missing[:5]} unexpected={unexpected[:5]}")
     return model.to(device=device, dtype=dtype).eval()
 
 
 def _load_fastvideo_model(device: torch.device, dtype: torch.dtype) -> torch.nn.Module:
     """Load the FastVideo component with the same tensor content."""
     if not CONVERTED_WEIGHTS_DIR.exists() and not LOCAL_WEIGHTS_DIR.exists():
-        pytest.skip(
-            f"No FastVideo loadable weights: {CONVERTED_WEIGHTS_DIR} or {LOCAL_WEIGHTS_DIR}"
-        )
+        pytest.skip(f"No FastVideo loadable weights: {CONVERTED_WEIGHTS_DIR} or {LOCAL_WEIGHTS_DIR}")
 
     # TODO: replace with the bucket-specific FastVideo config/class/loader.
     # DiT examples:
@@ -127,8 +117,7 @@ def _load_fastvideo_model(device: torch.device, dtype: torch.dtype) -> torch.nn.
     state_dict = {}  # TODO: load converted or directly mapped state dict.
     missing, unexpected = model.load_state_dict(state_dict, strict=True)
     assert not missing and not unexpected, (
-        f"FastVideo load mismatch missing={missing[:5]} unexpected={unexpected[:5]}"
-    )
+        f"FastVideo load mismatch missing={missing[:5]} unexpected={unexpected[:5]}")
     return model.to(device=device, dtype=dtype).eval()
 
 
@@ -187,11 +176,9 @@ def test_component_parity():
 
     assert official_out.shape == fastvideo_out.shape
     diff = (official_out - fastvideo_out).abs()
-    print(
-        f"official abs_mean={official_out.abs().mean().item():.6f} "
-        f"fastvideo abs_mean={fastvideo_out.abs().mean().item():.6f} "
-        f"diff_max={diff.max().item():.6f} diff_mean={diff.mean().item():.6f}"
-    )
+    print(f"official abs_mean={official_out.abs().mean().item():.6f} "
+          f"fastvideo abs_mean={fastvideo_out.abs().mean().item():.6f} "
+          f"diff_max={diff.max().item():.6f} diff_mean={diff.mean().item():.6f}")
 
     # TODO: pick tolerance by scope:
     # - single block / same kernel: 1e-4

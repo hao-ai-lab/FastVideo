@@ -25,26 +25,26 @@ from fastvideo.eval.io import load_video
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--video", required=True, help="Path to the generated mp4.")
-    p.add_argument("--reference", default=None,
-                   help="Optional path to a reference mp4 (for paired metrics).")
-    p.add_argument("--metrics", default="common.psnr,common.ssim",
+    p.add_argument("--reference", default=None, help="Optional path to a reference mp4 (for paired metrics).")
+    p.add_argument("--metrics",
+                   default="common.psnr,common.ssim",
                    help="Comma-separated metric names, or a group name like 'vbench'.")
     p.add_argument("--device", default="cuda:0")
-    p.add_argument("--text-prompt", default=None,
+    p.add_argument("--text-prompt",
+                   default=None,
                    help="Text prompt for prompt-aware metrics "
-                        "(vbench.overall_consistency, etc.).")
-    p.add_argument("--fps", type=float, default=None,
+                   "(vbench.overall_consistency, etc.).")
+    p.add_argument("--fps",
+                   type=float,
+                   default=None,
                    help="Frame-rate annotation for fps-aware metrics "
-                        "(vbench.dynamic_degree, etc.).")
+                   "(vbench.dynamic_degree, etc.).")
     args = p.parse_args()
 
-    metrics: list[str] | str = (
-        args.metrics if args.metrics in ("all",)
-        else [m.strip() for m in args.metrics.split(",") if m.strip()]
-    )
+    metrics: list[str] | str = (args.metrics if args.metrics in ("all", ) else
+                                [m.strip() for m in args.metrics.split(",") if m.strip()])
     evaluator = create_evaluator(metrics=metrics, device=args.device)
 
     sample: dict = {"video": load_video(args.video)}
@@ -59,7 +59,10 @@ def main() -> None:
     evaluator.shutdown()
 
     print(json.dumps(
-        {name: r.score for name, r in results.items()},
+        {
+            name: r.score
+            for name, r in results.items()
+        },
         indent=2,
     ))
 

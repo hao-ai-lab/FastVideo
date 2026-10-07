@@ -78,6 +78,8 @@ class ForwardBatch:
     image_path: str | None = None
     image_embeds: list[torch.Tensor] = field(default_factory=list)
     pil_image: torch.Tensor | PIL.Image.Image | None = None
+    last_image: torch.Tensor | PIL.Image.Image | None = None
+    references: list[Any] | None = None
     preprocessed_image: torch.Tensor | None = None
     # Text inputs
     prompt: str | list[str] | None = None
@@ -89,6 +91,12 @@ class ForwardBatch:
     # Video inputs
     video_path: str | None = None
     video_latent: torch.Tensor | None = None
+
+    # Audio-driven inputs (Wan S2V). `audio_embeds` holds the stacked wav2vec2
+    # hidden states [B, num_layers, C_a, T] produced by the audio encoding stage
+    # and consumed by the DiT's audio injector.
+    audio_path: str | None = None
+    audio_embeds: torch.Tensor | None = None
 
     # Refine inputs (LongCat)
     refine_from: str | None = None
@@ -125,10 +133,13 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
+    audio_latents: torch.Tensor | None = None
     lq_latents: torch.Tensor | None = None
     raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
+    # Normalized clean first frame for Wan TI2V and causal-DMD conditioning.
+    first_frame_latent: torch.Tensor | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
@@ -147,8 +158,9 @@ class ForwardBatch:
     camera_trajectory: str | None = None  # Camera trajectory file/identifier
     action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
     action_speed_list: list[float] | None = None  # Speed for each action
-    # Camera control inputs (LingBotWorld)
+    # Camera control inputs (LingBotWorld and LingBotWorld2)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+    action_path: str | None = None  # Directory containing poses.npy and intrinsics.npy
 
     # Camera control inputs (GEN3C)
     trajectory_type: str | None = None
@@ -177,6 +189,7 @@ class ForwardBatch:
     num_inference_steps: int = 50
     num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
+    batch_cfg: bool = False
     guidance_scale_2: float | None = None
     cfg_normalization: bool = False
     cfg_truncation: float | None = 1.0
@@ -289,6 +302,9 @@ class TrainingBatch:
     audio_latents: torch.Tensor | None = None
     audio_noisy_model_input: torch.Tensor | None = None
     audio_timesteps: torch.Tensor | None = None
+    # Audio follows an independent noise schedule, so multimodal supervised
+    # fine-tuning needs its own sigma to reconstruct the clean-audio target.
+    audio_sigmas: torch.Tensor | None = None
     audio_noise: torch.Tensor | None = None
     audio_encoder_hidden_states: torch.Tensor | None = None
     audio_encoder_attention_mask: torch.Tensor | None = None
@@ -309,6 +325,10 @@ class TrainingBatch:
     timesteps: torch.Tensor | None = None
     sigmas: torch.Tensor | None = None
     noise: torch.Tensor | None = None
+
+    # MiniMax H3 reuses the packed row boundaries from batch preparation to
+    # split the transformer's joint sequence back into video and audio outputs.
+    minimax_h3_layout: Any | None = None
 
     attn_metadata_vsa: AttentionMetadata | None = None
     attn_metadata: AttentionMetadata | None = None

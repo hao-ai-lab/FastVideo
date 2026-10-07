@@ -27,8 +27,7 @@ def _minimal_yaml() -> dict[str, Any]:
             },
         },
         "method": {
-            "_target_":
-            "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod",
+            "_target_": "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod",
         },
         "training": {},
     }
@@ -44,8 +43,7 @@ def test_minimal_yaml_loads_happy_path(tmp_path: Path) -> None:
 
     assert isinstance(cfg, RunConfig)
     assert isinstance(cfg.training, TrainingConfig)
-    assert cfg.method["_target_"] == (
-        "fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod")
+    assert cfg.method["_target_"] == ("fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod")
     assert "student" in cfg.models
     assert cfg.callbacks == {}
     # raw retains the original YAML dict for downstream logging.
@@ -82,6 +80,9 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.tracker.trackers == []
     assert t.tracker.project_name == "fastvideo"
     assert t.tracker.run_name == ""
+
+    assert t.performance.enabled is True
+    assert t.performance.peak_tflops_per_gpu is None
 
     assert t.model.weighting_scheme == "uniform"
     assert t.model.precondition_outputs is False
@@ -136,6 +137,10 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "project_name": "myproj",
             "run_name": "myrun",
         },
+        "performance": {
+            "enabled": True,
+            "peak_tflops_per_gpu": 989.5,
+        },
         "vsa": {
             "sparsity": 0.5
         },
@@ -173,6 +178,9 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
 
     assert t.tracker.trackers == ["wandb"]
     assert t.tracker.project_name == "myproj"
+
+    assert t.performance.enabled is True
+    assert t.performance.peak_tflops_per_gpu == pytest.approx(989.5)
 
     assert t.vsa_sparsity == pytest.approx(0.5)
     assert t.model.weighting_scheme == "logit_normal"
@@ -225,6 +233,13 @@ def test_missing_config_file_raises(tmp_path: Path) -> None:
         load_run_config(str(tmp_path / "does_not_exist.yaml"))
 
 
+def test_non_positive_peak_tflops_raises(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["training"] = {"performance": {"peak_tflops_per_gpu": 0}}
+    with pytest.raises(ValueError, match="peak_tflops_per_gpu"):
+        load_run_config(_write_yaml(tmp_path, data))
+
+
 # ---------------------------------------------------------------------------
 # Special parsing
 # ---------------------------------------------------------------------------
@@ -243,6 +258,35 @@ def test_betas_parses_list_and_string_forms(
     data["training"] = {"optimizer": {"betas": betas_value}}
     cfg = load_run_config(_write_yaml(tmp_path, data))
     assert cfg.training.optimizer.betas == expected
+
+
+def test_pipeline_quant_config_resolves_for_load_and_export(tmp_path: Path) -> None:
+    from fastvideo.layers.quantization.nvfp4_qat_train_config import (
+        NVFP4QATTrainConfig, )
+    from fastvideo.train.entrypoint.dcp_to_diffusers import (
+        _run_config_from_raw, )
+
+    data = _minimal_yaml()
+    data["models"]["student"]["init_from"] = ("FastVideo/LTX2-Distilled-Diffusers")
+    data["pipeline"] = {"dit_config": {"quant_config": "nvfp4_qat_train"}}
+
+    cfg = load_run_config(_write_yaml(tmp_path, data))
+    assert isinstance(cfg.training.pipeline_config.dit_config.quant_config, NVFP4QATTrainConfig)
+
+    export_cfg = _run_config_from_raw(cfg.raw)
+    assert isinstance(
+        export_cfg.training.pipeline_config.dit_config.quant_config,
+        NVFP4QATTrainConfig,
+    )
+
+
+def test_pipeline_quant_config_rejects_unknown_name(tmp_path: Path) -> None:
+    data = _minimal_yaml()
+    data["models"]["student"]["init_from"] = ("FastVideo/LTX2-Distilled-Diffusers")
+    data["pipeline"] = {"dit_config": {"quant_config": "not_a_quantization_method"}}
+
+    with pytest.raises(ValueError, match="Invalid quantization method"):
+        load_run_config(_write_yaml(tmp_path, data))
 
 
 def test_data_path_mapping_parses_repeat_counts(tmp_path: Path) -> None:
@@ -347,8 +391,7 @@ def test_callbacks_passed_through_when_present(tmp_path: Path) -> None:
     data = _minimal_yaml()
     data["callbacks"] = {
         "grad_clip": {
-            "_target_":
-            "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
+            "_target_": "fastvideo.train.callbacks.grad_clip.GradNormClipCallback",
             "max_grad_norm": 1.0,
         },
     }

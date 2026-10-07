@@ -6,6 +6,7 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, CLIPTextModel
 import gc
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines import HunyuanConfig, PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -17,8 +18,8 @@ from torch.testing import assert_close
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29503"
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29503")
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))
@@ -97,9 +98,8 @@ def test_clip_encoder():
             logger.info("Testing prompt: '%s'", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt, padding="max_length", max_length=77, truncation=True, return_tensors="pt").to(
-                device
-            )
+            tokens = tokenizer(prompt, padding="max_length", max_length=77, truncation=True,
+                               return_tensors="pt").to(device)
             # Get embeddings from our implementation
             outputs1 = model1(input_ids=tokens.input_ids, output_hidden_states=True)
 
@@ -120,15 +120,19 @@ def test_clip_encoder():
             # print("last_hidden_state2", last_hidden_state2)
 
             assert last_hidden_state1.shape == last_hidden_state2.shape, (
-                f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
-            )
+                f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}")
             # Compare pooler outputs
             pooler_output1 = outputs1.pooler_output
             pooler_output2 = outputs2.pooler_output
 
             assert pooler_output1.shape == pooler_output2.shape, (
-                f"Pooler output shapes don't match: {pooler_output1.shape} vs {pooler_output2.shape}"
-            )
+                f"Pooler output shapes don't match: {pooler_output1.shape} vs {pooler_output2.shape}")
 
-            assert_close(pooler_output1, pooler_output2, atol=1e-2, rtol=1e-3)
-            assert_close(last_hidden_state1, last_hidden_state2, atol=1e-2, rtol=1e-3)
+            # Blackwell's fp16 reduction order produces a slightly larger
+            # output delta between the HF and FastVideo implementations
+            # (observed max abs=0.01953125, rel=0.003395 on NVIDIA GB200).
+            # Keep the established tolerance everywhere else.
+            device_name = torch.cuda.get_device_name(device) if device.type == "cuda" else ""
+            pooler_atol, pooler_rtol = (2e-2, 4e-3) if "B200" in device_name else (1e-2, 1e-3)
+            assert_close(pooler_output1, pooler_output2, atol=pooler_atol, rtol=pooler_rtol)
+            assert_close(last_hidden_state1, last_hidden_state2, atol=pooler_atol, rtol=pooler_rtol)

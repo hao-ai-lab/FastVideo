@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.performance import hf_store
 from fastvideo.tests.performance import compare_baseline
 from fastvideo.tests.performance import seed_baseline
@@ -19,9 +20,9 @@ from fastvideo.performance.metric_policy import resolve_metric_policies
 
 
 @pytest.fixture(autouse=True)
-def _stub_seed_baseline_remote_sync(monkeypatch):
-    monkeypatch.delenv("BUILDKITE_BUILD_ID", raising=False)
-    monkeypatch.delenv("BUILDKITE_JOB_ID", raising=False)
+def _stub_seed_baseline_remote_sync(monkeypatch, env_overrides):
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BUILD_ID", None))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_JOB_ID", None))
 
     def sync(local_dir, *, strict=False, revision=None):
         assert strict is True
@@ -114,7 +115,8 @@ def test_sync_marker_reuse_requires_the_exact_revision(tmp_path):
         "endpoint": hf_store.ENDPOINT,
         "repo_id": hf_store.HF_REPO_ID,
         "revision": "pinned-old-revision",
-    }), encoding="utf-8")
+    }),
+                      encoding="utf-8")
 
     assert hf_store._sync_marker_matches_request(str(marker), "pinned-old-revision") is True
     assert hf_store._sync_marker_matches_request(str(marker), None) is False
@@ -123,29 +125,30 @@ def test_sync_marker_reuse_requires_the_exact_revision(tmp_path):
         "endpoint": "https://different.example",
         "repo_id": hf_store.HF_REPO_ID,
         "revision": "pinned-old-revision",
-    }), encoding="utf-8")
+    }),
+                      encoding="utf-8")
     assert hf_store._sync_marker_matches_request(str(marker), "pinned-old-revision") is False
 
 
-def test_detect_run_source_prefers_explicit_env(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "local")
-    monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "123")
+def test_detect_run_source_prefers_explicit_env(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "local"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_PULL_REQUEST", "123"))
 
     assert compare_baseline._detect_run_source() == "local"
 
 
-def test_detect_run_source_infers_pr(monkeypatch):
-    monkeypatch.delenv("PERF_RUN_SOURCE", raising=False)
-    monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "123")
+def test_detect_run_source_infers_pr(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", None))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_PULL_REQUEST", "123"))
 
     assert compare_baseline._detect_run_source() == "pr"
 
 
-def test_detect_run_source_infers_scheduled_main(monkeypatch):
-    monkeypatch.delenv("PERF_RUN_SOURCE", raising=False)
-    monkeypatch.setenv("BUILDKITE_PULL_REQUEST", "false")
-    monkeypatch.setenv("BUILDKITE_BRANCH", "main")
-    monkeypatch.setenv("TEST_SCOPE", "full")
+def test_detect_run_source_infers_scheduled_main(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", None))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_PULL_REQUEST", "false"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BRANCH", "main"))
+    env_overrides.enter_context(envs.override_external("TEST_SCOPE", "full"))
 
     assert compare_baseline._detect_run_source() == "scheduled_main"
 
@@ -163,13 +166,13 @@ def test_upload_policy_always_uploads_failures(monkeypatch):
     assert compare_baseline._upload_allowed({"success": False}) is True
 
 
-def test_normalized_record_includes_source_metadata(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
-    monkeypatch.setenv("BUILDKITE_BRANCH", "feature/perf")
-    monkeypatch.setenv("TEST_SCOPE", "direct")
-    monkeypatch.setenv("BUILDKITE_BUILD_URL", "https://buildkite.example/build")
-    monkeypatch.setenv("BUILDKITE_BUILD_ID", "build-1")
-    monkeypatch.setenv("BUILDKITE_JOB_ID", "job-1")
+def test_normalized_record_includes_source_metadata(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BRANCH", "feature/perf"))
+    env_overrides.enter_context(envs.override_external("TEST_SCOPE", "direct"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BUILD_URL", "https://buildkite.example/build"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BUILD_ID", "build-1"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_JOB_ID", "job-1"))
 
     record = compare_baseline.normalize_performance_result(_raw_result())
 
@@ -183,8 +186,8 @@ def test_normalized_record_includes_source_metadata(monkeypatch):
     assert record["job_id"] == "job-1"
 
 
-def test_normalized_record_includes_effective_regression_thresholds(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_normalized_record_includes_effective_regression_thresholds(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     raw = _raw_result()
     raw["regression_thresholds"] = {
         "latency": {
@@ -217,20 +220,21 @@ def test_invalid_regression_threshold_container_uses_defaults():
 
 
 def test_boolean_regression_threshold_values_are_ignored():
-    policies = resolve_metric_policies({
-        "latency": {
+    policies = resolve_metric_policies(
+        {"latency": {
             "threshold_percent": True,
             "threshold_absolute": False,
             "gated": "false",
-        }
-    })
+        }})
 
     latency = next(policy for policy in policies if policy.key == "latency")
     assert latency.threshold_percent == 0.08
     assert latency.threshold_absolute == 0.5
     assert latency.gated is False
-def test_normalized_record_preserves_identity_metadata(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+
+
+def test_normalized_record_preserves_identity_metadata(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     raw = _raw_result()
     raw.update({
         "result_schema_version": 2,
@@ -277,13 +281,13 @@ def test_normalized_record_preserves_identity_metadata(monkeypatch):
     assert record["quality_metadata"] == {"quality_status": "canonical"}
 
 
-def test_normalized_record_prefers_raw_v2_provenance(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
-    monkeypatch.setenv("BUILDKITE_BRANCH", "feature/from-env")
-    monkeypatch.setenv("TEST_SCOPE", "direct")
-    monkeypatch.setenv("BUILDKITE_BUILD_URL", "https://buildkite.example/env")
-    monkeypatch.setenv("BUILDKITE_BUILD_ID", "env-build")
-    monkeypatch.setenv("BUILDKITE_JOB_ID", "env-job")
+def test_normalized_record_prefers_raw_v2_provenance(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BRANCH", "feature/from-env"))
+    env_overrides.enter_context(envs.override_external("TEST_SCOPE", "direct"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BUILD_URL", "https://buildkite.example/env"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_BUILD_ID", "env-build"))
+    env_overrides.enter_context(envs.override_external("BUILDKITE_JOB_ID", "env-job"))
     raw = _raw_result()
     raw.update({
         "result_schema_version": 2,
@@ -308,21 +312,21 @@ def test_normalized_record_prefers_raw_v2_provenance(monkeypatch):
     assert record["pr_number"] == ""
 
 
-def test_v1_normalized_record_has_no_result_schema_version(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_v1_normalized_record_has_no_result_schema_version(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
 
     record = compare_baseline.normalize_performance_result(_raw_result())
 
     assert "result_schema_version" not in record
 
 
-def test_main_writes_v1_current_artifact_without_comparison_identity(monkeypatch, tmp_path, capsys):
+def test_main_writes_v1_current_artifact_without_comparison_identity(monkeypatch, env_overrides, tmp_path, capsys):
     results_dir = tmp_path / "results"
     reports_dir = tmp_path / "reports"
     tracking_root = tmp_path / "tracking"
     results_dir.mkdir()
-    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
-    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "scheduled_main"))
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", None))
     raw_result = perf_test._build_result_record(
         cfg={"benchmark_id": "wan-t2v-1.3b-2gpu"},
         model_info={},
@@ -376,8 +380,8 @@ def test_main_writes_v1_current_artifact_without_comparison_identity(monkeypatch
     assert uploaded_records[0]["baseline_eligible"] is False
 
 
-def test_normalized_record_reads_identity_labels_from_recipe(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_normalized_record_reads_identity_labels_from_recipe(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     raw = _raw_result()
     raw["recipe"] = {
         "benchmark": {
@@ -443,10 +447,8 @@ def test_comparison_identity_filters_keep_zero_version():
 def test_baseline_eligibility_only_for_successful_scheduled_main():
     assert compare_baseline._is_baseline_eligible("scheduled_main", True) is True
     assert compare_baseline._is_baseline_eligible("scheduled_main", False) is False
-    assert compare_baseline._is_baseline_eligible(
-        "scheduled_main", True, compare_baseline.STATUS_PASS) is True
-    assert compare_baseline._is_baseline_eligible(
-        "scheduled_main", False, compare_baseline.STATUS_PASS) is False
+    assert compare_baseline._is_baseline_eligible("scheduled_main", True, compare_baseline.STATUS_PASS) is True
+    assert compare_baseline._is_baseline_eligible("scheduled_main", False, compare_baseline.STATUS_PASS) is False
     assert compare_baseline._is_baseline_eligible("pr", True) is False
     assert compare_baseline._is_baseline_eligible("local", True) is False
 
@@ -455,24 +457,18 @@ def test_latency_regression_requires_percent_and_absolute_floors():
     baseline = [{"latency": 10.0}]
     current = {"model_id": "wan", "latency": 10.6}
 
-    percent_only = resolve_metric_policies({
-        "latency": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 0.75,
-        }
-    })
-    absolute_only = resolve_metric_policies({
-        "latency": {
-            "threshold_percent": 0.10,
-            "threshold_absolute": 0.5,
-        }
-    })
-    both = resolve_metric_policies({
-        "latency": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 0.5,
-        }
-    })
+    percent_only = resolve_metric_policies({"latency": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 0.75,
+    }})
+    absolute_only = resolve_metric_policies({"latency": {
+        "threshold_percent": 0.10,
+        "threshold_absolute": 0.5,
+    }})
+    both = resolve_metric_policies({"latency": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 0.5,
+    }})
 
     assert compare_baseline._check_regressions(current, baseline, percent_only) == []
     assert compare_baseline._check_regressions(current, baseline, absolute_only) == []
@@ -485,12 +481,10 @@ def test_latency_regression_requires_percent_and_absolute_floors():
 def test_throughput_regression_uses_higher_is_better_direction():
     baseline = [{"throughput": 10.0}]
     current = {"model_id": "wan", "throughput": 9.0}
-    policies = resolve_metric_policies({
-        "throughput": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 0.5,
-        }
-    })
+    policies = resolve_metric_policies({"throughput": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 0.5,
+    }})
 
     failures = compare_baseline._check_regressions(current, baseline, policies)
 
@@ -501,12 +495,10 @@ def test_throughput_regression_uses_higher_is_better_direction():
 def test_memory_regression_uses_metric_specific_absolute_floor():
     baseline = [{"memory": 10000.0}]
     current = {"model_id": "wan", "memory": 10600.0}
-    policies = resolve_metric_policies({
-        "memory": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 256.0,
-        }
-    })
+    policies = resolve_metric_policies({"memory": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 256.0,
+    }})
 
     failures = compare_baseline._check_regressions(current, baseline, policies)
 
@@ -517,12 +509,10 @@ def test_memory_regression_uses_metric_specific_absolute_floor():
 def test_component_metric_can_gate_independently():
     baseline = [{"dit_time_s": 8.0}]
     current = {"model_id": "wan", "dit_time_s": 8.6}
-    policies = resolve_metric_policies({
-        "dit_time_s": {
-            "threshold_percent": 0.05,
-            "threshold_absolute": 0.25,
-        }
-    })
+    policies = resolve_metric_policies({"dit_time_s": {
+        "threshold_percent": 0.05,
+        "threshold_absolute": 0.25,
+    }})
 
     failures = compare_baseline._check_regressions(current, baseline, policies)
 
@@ -533,13 +523,12 @@ def test_component_metric_can_gate_independently():
 def test_informational_metric_remains_visible_without_failing():
     baseline = [{"throughput": 10.0}]
     current = {"model_id": "wan", "gpu_type": "NVIDIA L40S", "throughput": 8.0}
-    policies = resolve_metric_policies({
-        "throughput": {
+    policies = resolve_metric_policies(
+        {"throughput": {
             "threshold_percent": 0.01,
             "threshold_absolute": 0.01,
             "gated": False,
-        }
-    })
+        }})
 
     row = compare_baseline._build_summary_row(current, baseline, policies, False)
 
@@ -552,8 +541,8 @@ def test_informational_metric_remains_visible_without_failing():
     assert row["failing_metrics"] == []
 
 
-def test_normalized_record_preserves_v2_comparison_identity(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_normalized_record_preserves_v2_comparison_identity(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
 
     record = _v2_record()
 
@@ -565,8 +554,8 @@ def test_normalized_record_preserves_v2_comparison_identity(monkeypatch):
     assert record["software_profile_id"] == "sw-cuda"
 
 
-def test_exact_comparable_baseline_without_regression_reports_pass(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_exact_comparable_baseline_without_regression_reports_pass(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     record = _v2_record()
     baseline_records = [{
         "latency": 10.0,
@@ -588,8 +577,8 @@ def test_exact_comparable_baseline_without_regression_reports_pass(monkeypatch):
     assert "no gated regressions" in reason
 
 
-def test_slower_gated_metric_reports_regression(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_slower_gated_metric_reports_regression(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     record = _v2_record(avg_generation_time_s=11.0)
     baseline_records = [{"latency": 10.0}]
 
@@ -608,8 +597,8 @@ def test_slower_gated_metric_reports_regression(monkeypatch):
     assert reason == failures[0]
 
 
-def test_missing_exact_v2_baseline_reports_calibration_needed(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_missing_exact_v2_baseline_reports_calibration_needed(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     record = _v2_record()
 
     failures, status, reason = compare_baseline._evaluate_record_comparison(
@@ -628,6 +617,7 @@ def test_missing_exact_v2_baseline_reports_calibration_needed(monkeypatch):
 
 def test_seeded_v2_calibration_artifact_enables_next_compare_pass(
     monkeypatch,
+    env_overrides,
     tmp_path,
 ):
     tracking_root = tmp_path / "tracking"
@@ -669,13 +659,13 @@ def test_seeded_v2_calibration_artifact_enables_next_compare_pass(
             timestamp="2026-06-18T00:00:00+00:00",
         ), f)
 
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
     monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
     monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
     monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
-    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", None))
 
     assert compare_baseline.main() == 0
 
@@ -688,8 +678,8 @@ def test_seeded_v2_calibration_artifact_enables_next_compare_pass(
     assert normalized["baseline_eligible"] is False
 
 
-def test_baseline_seed_rejects_non_calibration_sources(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+def test_baseline_seed_rejects_non_calibration_sources(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "scheduled_main"))
     record = _v2_record()
     record.update({
         "comparison_status": compare_baseline.STATUS_PASS,
@@ -738,8 +728,8 @@ def test_baseline_seed_rejects_non_calibration_sources(monkeypatch):
         }, "main-branch full-suite"),
     ],
 )
-def test_baseline_seed_rejects_untrusted_calibration_sources(monkeypatch, overrides, match):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+def test_baseline_seed_rejects_untrusted_calibration_sources(env_overrides, overrides, match):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "scheduled_main"))
     record = _v2_record()
     record.update({
         "comparison_status": compare_baseline.STATUS_CALIBRATION_NEEDED,
@@ -757,8 +747,12 @@ def test_baseline_seed_rejects_untrusted_calibration_sources(monkeypatch, overri
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
-        ({"result_schema_version": 1}, "normalized v2"),
-        ({"baseline_eligible": True}, "baseline_eligible=false"),
+        ({
+            "result_schema_version": 1
+        }, "normalized v2"),
+        ({
+            "baseline_eligible": True
+        }, "baseline_eligible=false"),
     ],
 )
 def test_baseline_seed_rejects_invalid_calibration_schema(overrides, match):
@@ -778,8 +772,8 @@ def test_baseline_seed_rejects_invalid_calibration_schema(overrides, match):
         seed_baseline.build_baseline_seed_record(record, reason="invalid source")
 
 
-def test_baseline_seed_rejects_mixed_exact_identities(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
+def test_baseline_seed_rejects_mixed_exact_identities(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "scheduled_main"))
     first = _v2_record()
     second = _v2_record(variant_id="different-variant")
     for record in (first, second):
@@ -866,14 +860,10 @@ def test_baseline_seed_orders_sources_by_original_timestamp(monkeypatch, tmp_pat
 
     manifest_path = next(staging_root.glob(".seed-reservations/*/manifest"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    prepared = [
-        json.loads(Path(entry["path"]).read_text(encoding="utf-8"))
-        for entry in manifest["prepared_records"]
-    ]
+    prepared = [json.loads(Path(entry["path"]).read_text(encoding="utf-8")) for entry in manifest["prepared_records"]]
     last_five = prepared[-5:]
-    assert [record["baseline_seed_source_timestamp"] for record in last_five] == [
-        f"2026-06-{day:02d}T00:00:00+00:00" for day in range(2, 7)
-    ]
+    assert [record["baseline_seed_source_timestamp"]
+            for record in last_five] == [f"2026-06-{day:02d}T00:00:00+00:00" for day in range(2, 7)]
     assert not tracking_root.exists()
     assert len(list(staging_root.glob(".seed-reservations/*/manifest"))) == 1
 
@@ -898,6 +888,7 @@ def test_baseline_seed_rejects_existing_eligible_identity(monkeypatch, tmp_path)
     })
     tracking_root = tmp_path / "tracking"
     staging_root = tmp_path / "staging"
+
     def sync(local_dir, *, strict=False, revision=None):
         assert strict is True
         assert revision is None
@@ -944,6 +935,7 @@ def test_baseline_seed_rejects_trusted_different_recipe(monkeypatch, tmp_path):
     })
     tracking_root = tmp_path / "tracking"
     staging_root = tmp_path / "staging"
+
     def sync(local_dir, *, strict=False, revision=None):
         assert strict is True
         assert revision is None
@@ -1062,6 +1054,7 @@ def test_baseline_seed_upload_is_one_conditional_commit(monkeypatch, tmp_path):
     calls = {}
 
     class FakeApi:
+
         def __init__(self, token):
             assert token == "hf-test"
 
@@ -1130,6 +1123,7 @@ def test_baseline_seed_upload_rechecks_remote_state(monkeypatch, tmp_path):
         return local_dir
 
     class FakeApi:
+
         def __init__(self, token):
             assert token == "hf-test"
 
@@ -1151,6 +1145,7 @@ def test_baseline_seed_upload_preserves_manifest_on_cas_failure(monkeypatch, tmp
     manifest_path = _prepare_single_seed(tmp_path)
 
     class FakeApi:
+
         def __init__(self, token):
             assert token == "hf-test"
 
@@ -1184,10 +1179,16 @@ def test_baseline_seed_upload_rejects_staged_mutation(tmp_path):
 def test_baseline_seed_orders_invalid_timestamps_last_and_warns(capsys):
     source_paths = ["dated-later", "missing", "malformed", "dated-earlier"]
     records = [
-        {"timestamp": "2026-06-02T00:00:00+00:00"},
+        {
+            "timestamp": "2026-06-02T00:00:00+00:00"
+        },
         {},
-        {"timestamp": "not-a-timestamp"},
-        {"timestamp": "2026-06-01T00:00:00+00:00"},
+        {
+            "timestamp": "not-a-timestamp"
+        },
+        {
+            "timestamp": "2026-06-01T00:00:00+00:00"
+        },
     ]
 
     ordered = seed_baseline._order_sources_by_timestamp(source_paths, records)
@@ -1340,7 +1341,7 @@ def test_baseline_seed_rejects_invalid_measurements_before_persistence(
     else:
         invalid_source[metric] = invalid_value
 
-    sources = (valid_source, invalid_source) if valid_prefix else (invalid_source,)
+    sources = (valid_source, invalid_source) if valid_prefix else (invalid_source, )
     source_paths = []
     for index, source in enumerate(sources, start=1):
         source_path = tmp_path / f"source_{index}.json"
@@ -1416,8 +1417,8 @@ def test_baseline_seed_rejects_inconsistent_batch_before_persistence(
     assert not tracking_root.exists()
 
 
-def test_same_variant_changed_recipe_reports_recipe_mismatch(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_same_variant_changed_recipe_reports_recipe_mismatch(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     record = _v2_record(recipe_fingerprint="recipe-2")
     recipe_mismatch_records = [{
         "recipe_fingerprint": "recipe-1",
@@ -1438,8 +1439,8 @@ def test_same_variant_changed_recipe_reports_recipe_mismatch(monkeypatch):
     assert "recipe-1" in reason
 
 
-def test_same_recipe_calibration_record_does_not_report_recipe_mismatch(monkeypatch):
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+def test_same_recipe_calibration_record_does_not_report_recipe_mismatch(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     record = _v2_record()
 
     assert compare_baseline._recipe_mismatch_records(
@@ -1453,6 +1454,7 @@ def test_same_recipe_calibration_record_does_not_report_recipe_mismatch(monkeypa
 
 def test_main_recipe_mismatch_takes_precedence_over_static_regression(
     monkeypatch,
+    env_overrides,
     tmp_path,
 ):
     tracking_root = tmp_path / "tracking"
@@ -1495,7 +1497,7 @@ def test_main_recipe_mismatch_takes_precedence_over_static_regression(
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
     monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
     monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
-    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", None))
 
     assert compare_baseline.main() == 1
 
@@ -1511,6 +1513,7 @@ def test_main_recipe_mismatch_takes_precedence_over_static_regression(
 
 def test_prior_pr_calibration_record_does_not_report_recipe_mismatch(
     monkeypatch,
+    env_overrides,
     tmp_path,
 ):
     tracking_root = tmp_path / "tracking"
@@ -1546,7 +1549,7 @@ def test_prior_pr_calibration_record_does_not_report_recipe_mismatch(
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
     monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
     monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
-    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", None))
 
     assert compare_baseline.main() == 0
 
@@ -1617,6 +1620,7 @@ def test_v2_identity_lookup_ignores_model_id_and_gpu_display_string(tmp_path):
 
 def test_main_v2_identity_lookup_ignores_model_id_and_gpu_display_string(
     monkeypatch,
+    env_overrides,
     tmp_path,
 ):
     tracking_root = tmp_path / "tracking"
@@ -1645,13 +1649,13 @@ def test_main_v2_identity_lookup_ignores_model_id_and_gpu_display_string(
     with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
         json.dump(_v2_raw_result(), f)
 
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
     monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
     monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
     monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
-    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", None))
 
     assert compare_baseline.main() == 0
 
@@ -1666,6 +1670,7 @@ def test_main_v2_identity_lookup_ignores_model_id_and_gpu_display_string(
 
 def test_scheduled_main_static_regression_does_not_contaminate_passing_record(
     monkeypatch,
+    env_overrides,
     tmp_path,
 ):
     tracking_root = tmp_path / "tracking"
@@ -1723,8 +1728,8 @@ def test_scheduled_main_static_regression_does_not_contaminate_passing_record(
             f,
         )
 
-    monkeypatch.setenv("PERF_RUN_SOURCE", "scheduled_main")
-    monkeypatch.setenv("PERF_PYTEST_RC", "1")
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "scheduled_main"))
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", "1"))
     monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
     monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
@@ -1740,9 +1745,8 @@ def test_scheduled_main_static_regression_does_not_contaminate_passing_record(
         normalized[record["model_id"]] = record
 
     assert normalized["regressed-benchmark"]["comparison_status"] == compare_baseline.STATUS_REGRESSION
-    assert "avg_generation_time_s exceeded fixed threshold" in normalized[
-        "regressed-benchmark"
-    ]["comparison_status_reason"]
+    assert "avg_generation_time_s exceeded fixed threshold" in normalized["regressed-benchmark"][
+        "comparison_status_reason"]
     assert normalized["regressed-benchmark"]["success"] is False
     assert normalized["regressed-benchmark"]["baseline_eligible"] is False
     assert normalized["passing-benchmark"]["comparison_status"] == compare_baseline.STATUS_PASS
@@ -1750,13 +1754,15 @@ def test_scheduled_main_static_regression_does_not_contaminate_passing_record(
     assert normalized["passing-benchmark"]["baseline_eligible"] is True
 
 
-def test_unattributed_performance_pytest_failure_reports_infra_error(monkeypatch):
-    monkeypatch.setenv("PERF_PYTEST_RC", "2")
+def test_unattributed_performance_pytest_failure_reports_infra_error(env_overrides):
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", "2"))
     record = _v2_record()
 
     failures, status, reason = compare_baseline._evaluate_record_comparison(
         record,
-        [{"latency": 10.0}],
+        [{
+            "latency": 10.0
+        }],
         [],
         resolve_metric_policies(None),
         [],
@@ -1768,7 +1774,7 @@ def test_unattributed_performance_pytest_failure_reports_infra_error(monkeypatch
     assert "without an attributable static-threshold regression" in reason
 
 
-def test_main_partial_v2_identity_takes_precedence_over_static_regression(monkeypatch, tmp_path):
+def test_main_partial_v2_identity_takes_precedence_over_static_regression(monkeypatch, env_overrides, tmp_path):
     results_dir = tmp_path / "results"
     reports_dir = tmp_path / "reports"
     tracking_root = tmp_path / "tracking"
@@ -1782,13 +1788,13 @@ def test_main_partial_v2_identity_takes_precedence_over_static_regression(monkey
     with open(results_dir / "perf_current.json", "w", encoding="utf-8") as f:
         json.dump(raw, f)
 
-    monkeypatch.setenv("PERF_RUN_SOURCE", "pr")
+    env_overrides.enter_context(envs.override_external("PERF_RUN_SOURCE", "pr"))
     monkeypatch.setattr(compare_baseline, "TRACKING_ROOT", str(tracking_root))
     monkeypatch.setattr(compare_baseline, "RESULTS_DIR", str(results_dir))
     monkeypatch.setattr(compare_baseline, "PERF_REPORTS_DIR", str(reports_dir))
     monkeypatch.setattr(compare_baseline, "UPLOAD_POLICY", "never")
     monkeypatch.setattr(compare_baseline, "sync_from_hf", lambda local_dir, strict=False: local_dir)
-    monkeypatch.delenv("PERF_PYTEST_RC", raising=False)
+    env_overrides.enter_context(envs.override_external("PERF_PYTEST_RC", None))
 
     assert compare_baseline.main() == 1
 
@@ -1923,8 +1929,8 @@ def test_legacy_record_lookup_still_uses_model_and_gpu(tmp_path):
 
 
 def test_non_pass_status_is_not_baseline_eligible():
-    assert compare_baseline._is_baseline_eligible(
-        "scheduled_main", True, compare_baseline.STATUS_CALIBRATION_NEEDED) is False
+    assert compare_baseline._is_baseline_eligible("scheduled_main", True,
+                                                  compare_baseline.STATUS_CALIBRATION_NEEDED) is False
     assert compare_baseline._is_baseline_eligible("pr", True, compare_baseline.STATUS_PASS) is False
     assert compare_baseline._is_baseline_eligible("local", True, compare_baseline.STATUS_PASS) is False
 

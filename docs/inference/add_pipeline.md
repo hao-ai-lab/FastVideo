@@ -11,7 +11,7 @@ This guide explains how to implement a custom diffusion pipeline in FastVideo, l
 4. **Register Your Pipeline** - Make it discoverable by the framework
 5. **Configure Your Pipeline** - (Coming soon)
 
-Need help? Join our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ).
+Need help? Join our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ).
 
 ## Step 1: Pipeline Modules
 

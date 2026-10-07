@@ -104,5 +104,3 @@ def test_writer_parallel_workers(tmp_path: Path):
     assert len(files) == 4
     total_rows = sum(pq.read_table(str(f)).num_rows for f in files)
     assert total_rows == 40
-
-

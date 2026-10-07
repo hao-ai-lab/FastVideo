@@ -24,7 +24,6 @@ from fastvideo.api.compat import (
     legacy_from_pretrained_to_config,
 )
 
-
 # Mirrors FastVideo-internal/ui/ltx2-streaming/server/gpu_pool.py
 # :lines 233-260 (load_kwargs constructed for VideoGenerator.from_pretrained).
 #
@@ -108,8 +107,7 @@ class TestGpuPoolForwardTranslation:
         assert config.pipeline.components.config_root == "/models/ltx2-distilled/config"
 
     def test_refine_upsampler_routed_to_components(self, config) -> None:
-        assert config.pipeline.components.upsampler_weights == (
-            "/models/ltx2-distilled/spatial_upsampler")
+        assert config.pipeline.components.upsampler_weights == ("/models/ltx2-distilled/spatial_upsampler")
 
     def test_empty_refine_lora_becomes_none(self, config) -> None:
         # gpu_pool passes "" to keep refine LoRA disabled; typed schema
@@ -170,8 +168,7 @@ class TestGpuPoolReverseTranslation:
         assert args_kwargs["ltx2_refine_guidance_scale"] == 1.0
 
     def test_refine_upsampler_path_reemitted(self, args_kwargs) -> None:
-        assert args_kwargs["ltx2_refine_upsampler_path"] == (
-            "/models/ltx2-distilled/spatial_upsampler")
+        assert args_kwargs["ltx2_refine_upsampler_path"] == ("/models/ltx2-distilled/spatial_upsampler")
 
     def test_config_model_path_reemitted(self, args_kwargs) -> None:
         assert args_kwargs["config_model_path"] == "/models/ltx2-distilled/config"
@@ -209,8 +206,7 @@ class TestRefineFlattenCoversAllTypedFields:
     def test_all_fields_reemitted(self, monkeypatch) -> None:
         from fastvideo import fastvideo_args as fva
         from fastvideo.api.compat import (
-            generator_config_to_fastvideo_args,
-        )
+            generator_config_to_fastvideo_args, )
         from fastvideo.api.schema import GeneratorConfig, PipelineSelection
         from fastvideo.pipelines.basic.ltx2.stage_overrides import (
             refine_preset_override_fields,
@@ -240,10 +236,8 @@ class TestRefineFlattenCoversAllTypedFields:
             "image_crf": 18,
             "video_position_offset_sec": 2.5,
         }
-        all_fields = (refine_preset_override_fields()
-                      | refine_stage_override_fields())
-        assert set(refine_payload) == all_fields, (
-            "payload must cover every typed field to exercise the flatten loop")
+        all_fields = (refine_preset_override_fields() | refine_stage_override_fields())
+        assert set(refine_payload) == all_fields, ("payload must cover every typed field to exercise the flatten loop")
 
         config = GeneratorConfig(
             model_path="/models/ltx2",
@@ -279,20 +273,25 @@ class TestCompileExtrasPreserved:
         kwargs = deepcopy(GPU_POOL_LOAD_KWARGS)
         kwargs["torch_compile_kwargs"] = {
             "backend": "inductor",
-            "options": {"triton.cudagraphs": False},
+            "options": {
+                "triton.cudagraphs": False
+            },
             "disable": False,
         }
-        config = legacy_from_pretrained_to_config(
-            "FastVideo/LTX2-Distilled-Diffusers", kwargs)
+        config = legacy_from_pretrained_to_config("FastVideo/LTX2-Distilled-Diffusers", kwargs)
         assert config.engine.compile.backend == "inductor"
         assert config.engine.compile.extras == {
-            "options": {"triton.cudagraphs": False},
+            "options": {
+                "triton.cudagraphs": False
+            },
             "disable": False,
         }
 
         generator_config_to_fastvideo_args(config)
         assert captured["torch_compile_kwargs"] == {
             "backend": "inductor",
-            "options": {"triton.cudagraphs": False},
+            "options": {
+                "triton.cudagraphs": False
+            },
             "disable": False,
         }

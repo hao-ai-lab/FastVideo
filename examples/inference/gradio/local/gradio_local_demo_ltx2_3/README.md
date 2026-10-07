@@ -6,10 +6,6 @@ original single-file version to make each concern independently reviewable.
 The folder name matches the sibling `gradio_local_demo*.py` demos in this
 directory so both flat and packaged demos read consistently.
 
-> **Status: draft.** This package is structurally in place but will not run
-> against the current upstream `fastvideo` package. See *Blocking prereqs*
-> below.
-
 ## Layout
 
 | File | Purpose |
@@ -38,27 +34,21 @@ python -m gradio_local_demo_ltx2_3 --port 7860
 GPU requirement: a single FP4-capable GPU (B200 or comparable) for the
 "real-time 1080p" speed claim. Lower tiers will still run but slower.
 
-## Blocking prereqs (why this draft PR cannot be merged yet)
+## Upstream surfaces the demo relies on
 
-The upstream `fastvideo` package is missing three pieces that the demo
-currently depends on verbatim. Each needs its own upstreaming PR before this
-demo can actually boot:
+Everything the demo needs ships in the upstream `fastvideo` package:
 
-1. **`fastvideo.layers.quantization.fp4_config.FP4Config`** — the demo sets
-   `pipeline_config.dit_config.quant_config = FP4Config()` in `app.py`.
-   Upstream only ships `absmax_fp8.py` and `base_config.py` under
-   `fastvideo/layers/quantization/`.
-2. **LTX-2.3 refine / image-conditioning kwargs on `VideoGenerator`** —
-   `ltx2_refine_enabled`, `ltx2_refine_upsampler_path`, `ltx2_refine_lora_path`,
-   `ltx2_refine_num_inference_steps`, `ltx2_refine_guidance_scale`,
-   `ltx2_refine_add_noise`, `ltx2_images`, `ltx2_image_crf`. Upstream
-   `fastvideo/fastvideo_args.py` currently wires only `ltx2_vae_tiling`.
-   The backing stages (`ltx2_refine.py`, `ltx2_i2v_conditioning.py`) are
-   also missing from `fastvideo/pipelines/stages/`.
-3. **`fastvideo.configs.sample.base.SamplingParam`** — the import path used
-   by this demo. Upstream moved sampling params to
-   `fastvideo.api.sampling_param`. A re-export shim at the old path, or an
-   import update here once the other two prereqs land, will resolve it.
+- **`fastvideo.layers.quantization.nvfp4_config.NVFP4Config`** — the demo sets
+  `pipeline_config.dit_config.quant_config = NVFP4Config()` in `app.py` (same
+  pattern as `examples/inference/basic/basic_ltx2_distilled_fast_profile.py`).
+- **LTX-2.3 refine kwargs on `VideoGenerator`** — `ltx2_refine_enabled`,
+  `ltx2_refine_upsampler_path`, `ltx2_refine_lora_path`,
+  `ltx2_refine_num_inference_steps`, `ltx2_refine_guidance_scale`,
+  `ltx2_refine_add_noise`, and `ltx2_vae_tiling` are wired in
+  `fastvideo/fastvideo_args.py`, backed by
+  `fastvideo/pipelines/basic/ltx2/stages/ltx2_refine.py`.
+- **`SamplingParam`** — imported from the public `fastvideo` package root
+  (`fastvideo.api.sampling_param` under the hood).
 
 ## Environment variables
 

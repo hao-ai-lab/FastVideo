@@ -46,7 +46,11 @@ from fastvideo.models.utils import set_weight_attrs
 logger = logging.getLogger(__name__)
 
 # Wan-style attention + FFN projection layers. Matched as substrings of the
-# layer prefix (e.g. "blocks.0.attn1.to_q" contains "to_q").
+# layer prefix (e.g. "blocks.0.attn1.to_q" contains "to_q"). Wan's "to_q"/
+# "to_k"/"to_v" also substring-match Kandinsky5's "to_query"/"to_key"/
+# "to_value", so only Kandinsky5's out-projection and FFN names (which don't
+# share a substring with Wan's "to_out"/"ffn.fc_in"/"ffn.fc_out") need to be
+# listed explicitly below.
 DEFAULT_FP4_LAYERS = (
     "ffn.fc_in",
     "ffn.fc_out",
@@ -54,6 +58,11 @@ DEFAULT_FP4_LAYERS = (
     "to_k",
     "to_v",
     "to_out",
+    # Kandinsky5
+    "self_attention.out_layer",
+    "cross_attention.out_layer",
+    "feed_forward.mlp.fc_in",
+    "feed_forward.mlp.fc_out",
 )
 
 

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { useDrawerFocus } from '@/hooks/useDrawerFocus';
 import { useResizable } from '@/hooks/useResizable';
 import { downloadJobLog, getJobLogs } from '@/lib/api';
 import type { Job } from '@/lib/types';
@@ -15,13 +16,16 @@ const POLL_INTERVAL_MS = 2000;
 
 export default function JobDetailsSidebar({
   job,
+  isMobile = false,
   onClose,
   onWidthChange,
 }: {
   job: Job;
+  isMobile?: boolean;
   onClose: () => void;
   onWidthChange?: (w: number) => void;
 }) {
+  const drawerRef = useDrawerFocus<HTMLElement>(isMobile);
   const [width, setWidth] = React.useState(360);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -53,8 +57,8 @@ export default function JobDetailsSidebar({
   });
 
   React.useEffect(() => {
-    onWidthChange?.(width);
-  }, [width, onWidthChange]);
+    onWidthChange?.(isMobile ? 0 : width);
+  }, [isMobile, width, onWidthChange]);
 
   // Auto-scroll the console to the bottom whenever new lines land. Runs after
   // commit so scrollHeight reflects the freshly-rendered output.
@@ -137,13 +141,28 @@ export default function JobDetailsSidebar({
 
   return (
     <aside
-      className="fixed bottom-0 right-0 top-[var(--header-height)] z-50 flex max-h-[calc(100vh-var(--header-height))] min-w-[280px] shrink-0 flex-col border-l border-border bg-card"
-      style={{ width, maxWidth: SIDEBAR_MAX_WIDTH }}
+      ref={drawerRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-label="Job details"
+      aria-modal={isMobile || undefined}
+      className="fixed bottom-0 right-0 top-[var(--header-height)] z-50 flex max-h-[calc(100dvh-var(--header-height))] min-w-0 shrink-0 flex-col border-l border-border bg-card md:min-w-[280px]"
+      style={{
+        width: isMobile ? '100%' : width,
+        maxWidth: isMobile ? 'none' : SIDEBAR_MAX_WIDTH,
+      }}
     >
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
-        <h2 className="m-0 text-base font-semibold text-foreground">
-          Job Details
-        </h2>
+        <div className="min-w-0">
+          <h2 className="m-0 text-base font-semibold text-foreground">
+            Job Details
+          </h2>
+          {/* Full job id: keys ~/h3_studio_logs/<id>.log, the output directory
+              and every API route, so make it selectable for copy/paste. */}
+          <code className="mt-0.5 block select-all truncate font-mono text-xs text-muted-foreground">
+            {job.id}
+          </code>
+        </div>
         <div className="flex items-center gap-2">
           <Button
             type="button"
@@ -195,14 +214,14 @@ export default function JobDetailsSidebar({
         </pre>
       </div>
 
-      <div
+      {!isMobile && <div
         role="presentation"
         onMouseDown={onMouseDown}
         className={cn(
           'absolute bottom-0 left-0 top-0 z-[1] w-1.5 cursor-col-resize hover:bg-accent-blue/25',
           isDragging && 'bg-accent-blue/25',
         )}
-      />
+      />}
     </aside>
   );
 }

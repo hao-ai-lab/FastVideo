@@ -1,0 +1,114 @@
+# LTX-2 T2V LoRA fine-tune.
+#
+# Same recipe as fine_tuning/ltx2/t2v.yaml, but only LoRA adapters on the
+# attention projections train — the base weights stay frozen, so
+# training-state checkpoints are adapter-sized instead of ~150GB.
+# See that file's header for prerequisites and placeholder notes.
+#
+# Run:
+#   NUM_GPUS=4 bash examples/train/run.sh \
+#     examples/train/configs/fine_tuning/ltx2/t2v_lora.yaml
+
+models:
+  student:
+    _target_: fastvideo.train.models.ltx2.LTX2Model
+    # Validation settings below (8 steps, guidance 1.0) assume this
+    # distilled checkpoint.
+    init_from: FastVideo/LTX2-Distilled-Diffusers
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    lora:
+      enable: true
+      # rank/alpha and the attention-projection target set follow the
+      # Wan/Hunyuan LoRA recipes; targets match by substring against
+      # module names (LTX-2 blocks name theirs to_q/to_k/to_v/to_out).
+      rank: 16
+      alpha: 32
+      target_modules:
+        - to_q
+        - to_k
+        - to_v
+        - to_out
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    # The 13B video branch needs sharding even with frozen base weights;
+    # 4-way HSDP shard matches the validated LTX-2 runs.
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+
+  data:
+    # REQUIRED: path to your preprocessed dataset.
+    data_path: data/your_dataset_preprocessed
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    # LTX2Model requires 0.0: CFG dropout would zero post-connector
+    # embeddings, which is not the model's unconditional input.
+    training_cfg_rate: 0.0
+    seed: 42
+    # Must match your preprocessed resolution/length.
+    # num_latent_t = (num_frames - 1) / 8 + 1.
+    num_latent_t: 11
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+
+  optimizer:
+    # LoRA-only training usually tolerates a higher LR than full
+    # fine-tuning (the Wan/Hunyuan LoRA recipes use 1.0e-4); tune for
+    # your dataset.
+    learning_rate: 1.0e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    # Workload-dependent: set from your dataset size and target epochs.
+    max_train_steps: 2000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/ltx2_t2v_lora_finetune
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: fastvideo_ltx2
+    run_name: ltx2_t2v_lora_finetune
+
+  model:
+    # LTX2Model.predict_noise converts the DiT's x0 output to velocity,
+    # so the default noise-minus-clean target reproduces the official
+    # unweighted masked-MSE (mask is all-ones for plain T2V).
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.ltx2.ltx2_pipeline.LTX2Pipeline
+    # REQUIRED: prompts to sample during training.
+    dataset_file: data/your_dataset_preprocessed/validation_prompts.json
+    every_steps: 250
+    # 8-step single-pass sampling matches the distilled checkpoint
+    # (validated in the LTX-2 overfit runs).
+    sampling_steps: [8]
+    guidance_scale: 1.0
+    num_frames: 81
+
+# Required so the LTX2T2VConfig pipeline config is resolved from
+# init_from (without a `pipeline:` key the loader falls back to a
+# generic PipelineConfig and the LTX-2 DiT cannot be constructed).
+pipeline: {}

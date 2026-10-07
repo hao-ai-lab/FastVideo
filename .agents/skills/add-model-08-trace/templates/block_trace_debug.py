@@ -24,8 +24,8 @@ from typing import Any
 
 import torch
 
-FAMILY: str = "<family>"       # e.g. "magi_human", "ltx2", "wan"
-COMPONENT: str = "<component>" # e.g. "dit", "vae", "encoder"
+FAMILY: str = "<family>"  # e.g. "magi_human", "ltx2", "wan"
+COMPONENT: str = "<component>"  # e.g. "dit", "vae", "encoder"
 DRILL_LAYER_ENV: str = "<FAMILY>_DEBUG_DRILL_LAYER"
 HYPOTHESIS_ENV: str = "<FAMILY>_DEBUG_PATCH_<HYPOTHESIS>"
 REL_THRESHOLD: float = 0.005  # 0.5% abs_mean drift flags a block as divergent
@@ -94,6 +94,7 @@ def _attach_block_hooks(
     handles: list[Any] = []
 
     def _hook(name: str):
+
         def fn(_module, _inputs, outputs):
             t = outputs[0] if isinstance(outputs, tuple) else outputs
             if not torch.is_tensor(t):
@@ -101,6 +102,7 @@ def _attach_block_hooks(
             log.append({"side": label, **_stat(name, t)})
             if tensors is not None:
                 tensors[name] = t.detach().float().cpu()
+
         return fn
 
     def _pre_hook(name: str):
@@ -114,6 +116,7 @@ def _attach_block_hooks(
             log.append({"side": label, **_stat(key, t)})
             if tensors is not None:
                 tensors[key] = t.detach().float().cpu()
+
         return fn
 
     # TODO: adapt attribute paths to your model. Remove adapter block if absent.
@@ -131,43 +134,21 @@ def _attach_block_hooks(
             # magi-human uses: attention, mlp.pre_norm, mlp.up_gate_proj,
             # mlp.down_proj (pre+post), mlp, attn_post_norm, mlp_post_norm.
             if hasattr(layer, "attention"):
-                handles.append(
-                    layer.attention.register_forward_hook(_hook(f"{tag}.attention"))
-                )
+                handles.append(layer.attention.register_forward_hook(_hook(f"{tag}.attention")))
             if hasattr(layer, "mlp"):
                 mlp = layer.mlp
                 if hasattr(mlp, "pre_norm"):
-                    handles.append(
-                        mlp.pre_norm.register_forward_hook(_hook(f"{tag}.mlp.pre_norm"))
-                    )
+                    handles.append(mlp.pre_norm.register_forward_hook(_hook(f"{tag}.mlp.pre_norm")))
                 if hasattr(mlp, "up_gate_proj"):
-                    handles.append(
-                        mlp.up_gate_proj.register_forward_hook(
-                            _hook(f"{tag}.mlp.up_gate_proj")
-                        )
-                    )
+                    handles.append(mlp.up_gate_proj.register_forward_hook(_hook(f"{tag}.mlp.up_gate_proj")))
                 if hasattr(mlp, "down_proj"):
-                    handles.append(
-                        mlp.down_proj.register_forward_pre_hook(
-                            _pre_hook(f"{tag}.mlp.down_proj")
-                        )
-                    )
-                    handles.append(
-                        mlp.down_proj.register_forward_hook(_hook(f"{tag}.mlp.down_proj"))
-                    )
+                    handles.append(mlp.down_proj.register_forward_pre_hook(_pre_hook(f"{tag}.mlp.down_proj")))
+                    handles.append(mlp.down_proj.register_forward_hook(_hook(f"{tag}.mlp.down_proj")))
                 handles.append(mlp.register_forward_hook(_hook(f"{tag}.mlp")))
             if hasattr(layer, "attn_post_norm"):
-                handles.append(
-                    layer.attn_post_norm.register_forward_hook(
-                        _hook(f"{tag}.attn_post_norm")
-                    )
-                )
+                handles.append(layer.attn_post_norm.register_forward_hook(_hook(f"{tag}.attn_post_norm")))
             if hasattr(layer, "mlp_post_norm"):
-                handles.append(
-                    layer.mlp_post_norm.register_forward_hook(
-                        _hook(f"{tag}.mlp_post_norm")
-                    )
-                )
+                handles.append(layer.mlp_post_norm.register_forward_hook(_hook(f"{tag}.mlp_post_norm")))
     return handles
 
 
@@ -193,11 +174,9 @@ def _write_log(entries: list[dict], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         for e in entries:
-            f.write(
-                f"{e['name']} {e['shape']} "
-                f"{e['abs_mean']:.8f} {e['sum']:.4f} "
-                f"{e['min']:.6f} {e['max']:.6f}\n"
-            )
+            f.write(f"{e['name']} {e['shape']} "
+                    f"{e['abs_mean']:.8f} {e['sum']:.4f} "
+                    f"{e['min']:.6f} {e['max']:.6f}\n")
 
 
 def _sort_key(name: str, drill_layer: int) -> tuple:
@@ -205,9 +184,14 @@ def _sort_key(name: str, drill_layer: int) -> tuple:
         return (0, "")
     if name.startswith(f"L{drill_layer:02d}."):
         sub_order = {
-            "attention": 0, "attn_post_norm": 1, "mlp.pre_norm": 2,
-            "mlp.up_gate_proj": 3, "mlp.down_proj<in>": 4,
-            "mlp.down_proj": 5, "mlp": 6, "mlp_post_norm": 7,
+            "attention": 0,
+            "attn_post_norm": 1,
+            "mlp.pre_norm": 2,
+            "mlp.up_gate_proj": 3,
+            "mlp.down_proj<in>": 4,
+            "mlp.down_proj": 5,
+            "mlp": 6,
+            "mlp_post_norm": 7,
         }.get(name.split(".", 1)[1], 9)
         return (1, f"block[{drill_layer:02d}]", sub_order)
     if name.startswith("block["):
@@ -216,10 +200,8 @@ def _sort_key(name: str, drill_layer: int) -> tuple:
 
 
 def _print_table(by_name: dict[str, dict], drill_layer: int) -> int | None:
-    hdr = (
-        f"{'name':<18} {'up_shape':<22} {'up_absmean':>12} {'fv_absmean':>12} "
-        f"{'absmean_diff':>14} {'rel%':>8} {'up_sum':>14} {'fv_sum':>14} {'sum_diff':>12}"
-    )
+    hdr = (f"{'name':<18} {'up_shape':<22} {'up_absmean':>12} {'fv_absmean':>12} "
+           f"{'absmean_diff':>14} {'rel%':>8} {'up_sum':>14} {'fv_sum':>14} {'sum_diff':>12}")
     print(f"\n{hdr}\n{'-' * len(hdr)}")
     first_div: int | None = None
     for name in sorted(by_name.keys(), key=lambda n: _sort_key(n, drill_layer)):
@@ -235,11 +217,9 @@ def _print_table(by_name: dict[str, dict], drill_layer: int) -> int | None:
             flag = " <<< DIVERGE"
             if first_div is None:
                 first_div = int(name[len("block["):-1])
-        print(
-            f"{name:<18} {str(up['shape']):<22} {up['abs_mean']:>12.6f} "
-            f"{fv['abs_mean']:>12.6f} {am_diff:>14.6f} {am_rel * 100:>7.3f}% "
-            f"{up['sum']:>14.4f} {fv['sum']:>14.4f} {sum_diff:>12.4f}{flag}"
-        )
+        print(f"{name:<18} {str(up['shape']):<22} {up['abs_mean']:>12.6f} "
+              f"{fv['abs_mean']:>12.6f} {am_diff:>14.6f} {am_rel * 100:>7.3f}% "
+              f"{up['sum']:>14.4f} {fv['sum']:>14.4f} {sum_diff:>12.4f}{flag}")
     return first_div
 
 
@@ -255,10 +235,8 @@ def _print_elementwise(up_t: dict[str, torch.Tensor], fv_t: dict[str, torch.Tens
             continue
         diff = (a - b).abs()
         rel = (diff.mean().item() / max(a.abs().mean().item(), 1e-9)) * 100
-        print(
-            f"{name:<30} {str(tuple(a.shape)):<22} "
-            f"{diff.max().item():>12.6f} {diff.mean().item():>12.6f} {rel:>9.4f}%"
-        )
+        print(f"{name:<30} {str(tuple(a.shape)):<22} "
+              f"{diff.max().item():>12.6f} {diff.mean().item():>12.6f} {rel:>9.4f}%")
 
 
 def main() -> None:

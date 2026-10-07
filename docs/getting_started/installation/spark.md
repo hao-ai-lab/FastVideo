@@ -134,8 +134,24 @@ uv pip install "https://github.com/mjun0812/flash-attention-prebuild-wheels/rele
 
 If you hit other issues, please open an issue on our
 [GitHub repository](https://github.com/hao-ai-lab/FastVideo). You can also join
-our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ)
+our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ)
 for additional support.
+
+## Next: performance & tuning
+
+Installed and verified? See [DGX Spark: Performance & Tuning](spark_performance.md)
+for which models are practical on the GB10, what makes them faster, and what
+won't help on this hardware (and why) — so you don't spend a night tuning knobs
+that can't move here.
+
+For the eight-forward FastH3 V2 NVFP4 stack with a trimmed encoder and light
+VAE, use the [one-Spark resident recipe](spark_performance.md#fasth3-v2-nvfp4-on-one-spark).
+
+Two Sparks with QSFP cables: [Pair two NVIDIA DGX Sparks](spark_pair.md) for
+one FastH3 clip across both GPUs (`sp_size=2` over Ray). Copy-paste commands
+for one or two Sparks also live on the
+[MiniMax H3 cookbook](../../cookbook/minimax-h3.md): pick FastH3 V1,
+then NVIDIA DGX Spark, then 1 Spark or 2 Sparks.
 
 ## Development Environment Setup
 

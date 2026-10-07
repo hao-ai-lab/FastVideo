@@ -43,7 +43,7 @@ class PreprocessWorkflow(WorkflowBase):
             training_dataset = build_dataset(preprocess_config, split="train", validator=raw_data_validator)
         except FileNotFoundError as e:
             raise FileNotFoundError(
-                f"Training dataset not found, please use download_dataset.sh to download the dataset first. Error: {e}"
+                f"Training dataset not found, please use the matching download script under examples/datasets/ to download the dataset first. Error: {e}"
             ) from e
 
         # we do not use collate_fn here because we use iterable-style Dataset
