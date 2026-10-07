@@ -233,13 +233,24 @@ def mxfp8_scaled_mm(
 
 
 def _resolve_merged_linear(linear: torch.nn.Module) -> torch.nn.Module:
-    """Return a linear whose weight includes every active inference adapter."""
-    base_layer = getattr(linear, "base_layer", linear)
-    if base_layer is linear:
-        return base_layer
-    if not getattr(linear, "merged", False) and not getattr(linear, "disable_lora", False):
-        raise RuntimeError("MXFP8 feed-forward requires active LoRA weights to be merged before inference.")
-    return base_layer
+    """Return the base linear that owns the packed weight for the active LoRA state.
+
+    The packed MXFP8 buffers are rebuilt after every LoRA merge and unmerge, so the
+    packed weight always reflects the current base weight.
+    """
+    return getattr(linear, "base_layer", linear)
+
+
+def _runtime_lora_delta_pending(linear: torch.nn.Module) -> bool:
+    """Whether *linear* is a LoRA wrapper whose forward adds a runtime adapter delta.
+
+    BaseLayerWithLoRA.forward adds the delta exactly when the adapter is active but not
+    merged into the base weight (fastvideo/layers/lora/linear.py).
+    """
+    if getattr(linear, "base_layer", None) is None:
+        return False
+    return (not getattr(linear, "merged", False) and not getattr(linear, "disable_lora", False)
+            and getattr(linear, "lora_A", None) is not None)
 
 
 def mxfp8_swiglu_feed_forward(
@@ -248,6 +259,15 @@ def mxfp8_swiglu_feed_forward(
     fc_out: torch.nn.Module,
 ) -> torch.Tensor:
     """Run the MiniMax-H3 feed-forward network with MXFP8 GEMMs."""
+    if _runtime_lora_delta_pending(fc_in) or _runtime_lora_delta_pending(fc_out):
+        # An unmerged adapter must keep affecting the output through its runtime delta,
+        # matching BaseLayerWithLoRA.forward and the unfused MiniMaxH3FeedForward branch.
+        # The fused GEMMs below only see the packed base weight, so fall back to the
+        # wrapper path while a delta is pending.
+        preactivation, _ = fc_in(hidden_states)
+        value, gate = preactivation.chunk(2, dim=-1)
+        output, _ = fc_out(value * F.silu(gate))
+        return output
     fc_in_base = _resolve_merged_linear(fc_in)
     fc_out_base = _resolve_merged_linear(fc_out)
     fc_in_method = fc_in_base.quant_method
