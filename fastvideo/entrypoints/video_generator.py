@@ -901,6 +901,7 @@ class VideoGenerator:
         if not self.executor.is_output_rank:
             batch.save_video = False
             batch.return_frames = False
+            batch.return_samples = False
             batch.return_trajectory_latents = False
             batch.return_trajectory_decoded = False
             batch.return_continuation_state = False

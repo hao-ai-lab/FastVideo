@@ -168,6 +168,7 @@ class Worker:
         if not self.fastvideo_args.is_output_rank:
             forward_batch.save_video = False
             forward_batch.return_frames = False
+            forward_batch.return_samples = False
             forward_batch.return_trajectory_latents = False
             forward_batch.return_trajectory_decoded = False
             forward_batch.return_continuation_state = False

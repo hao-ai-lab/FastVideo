@@ -663,6 +663,7 @@ def test_generate_single_video_non_output_rank_suppresses_all_user_payloads(tmp_
         broadcast_from_output_rank=lambda value: value,
     )
     sampling = _small_sampling_param(save_video=True, return_frames=True)
+    sampling.return_samples = True
     sampling.return_trajectory_latents = True
     sampling.return_trajectory_decoded = True
 
@@ -676,6 +677,7 @@ def test_generate_single_video_non_output_rank_suppresses_all_user_payloads(tmp_
     batch = captured["batch"]
     assert not batch.save_video
     assert not batch.return_frames
+    assert not batch.return_samples
     assert not batch.return_trajectory_latents
     assert not batch.return_trajectory_decoded
     assert result["samples"] is None
