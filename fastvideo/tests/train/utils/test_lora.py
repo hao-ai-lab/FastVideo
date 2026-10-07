@@ -8,7 +8,22 @@ from torch.distributed.tensor import DTensor
 
 from fastvideo.train.utils.lora import (
     _make_replicated_lora_parameter,
+    sync_replicated_lora_gradients,
 )
+
+
+class _LoraHolder(nn.Module):
+    """Minimal stand-in for a LoRA-wrapped layer (only lora_A is exercised)."""
+
+    def __init__(self, parameter):
+        super().__init__()
+        self.lora_A = parameter
+
+
+def _sync(parameter):
+    """Run the production post-backward pass over a bare parameter."""
+
+    return sync_replicated_lora_gradients(_LoraHolder(parameter))
 
 
 def _two_rank_replicated_lora_worker(
@@ -58,6 +73,7 @@ def _two_rank_replicated_lora_worker(
 
         # Rank-local gradients [1, 1] and [3, 3] must be averaged before
         # gradient clipping and the optimizer step.
+        _sync(parameter)
         assert isinstance(parameter.grad, DTensor)
         assert torch.equal(
             parameter.grad.to_local(),
@@ -70,6 +86,7 @@ def _two_rank_replicated_lora_worker(
         second_coefficient = 2.0 if rank == 0 else 4.0
         second_loss = (parameter.to_local() * second_coefficient).sum()
         second_loss.backward()
+        _sync(parameter)
         assert torch.equal(
             parameter.grad.to_local(),
             torch.tensor([5.0, 5.0], device=device),
@@ -85,6 +102,29 @@ def _two_rank_replicated_lora_worker(
             torch.empty_like(parameter.to_local())
             for _ in range(2)
         ]
+        dist.all_gather(gathered, parameter.to_local())
+        assert torch.equal(gathered[0], gathered[1])
+
+        # Rank 1's loss skips the parameter entirely, so its autograd hook
+        # never fires. The pass must still join the collective on both ranks
+        # (otherwise rank 0 blocks forever) and zero-fill the absent gradient,
+        # so the replicas keep stepping together.
+        parameter.grad = None
+        if rank == 0:
+            (parameter.to_local() * 4.0).sum().backward()
+        else:
+            (torch.zeros((), device=device, requires_grad=True) * 1.0).sum().backward()
+        if rank == 0:
+            assert parameter.grad is not None
+        else:
+            assert parameter.grad is None
+        _sync(parameter)
+        assert torch.equal(
+            parameter.grad.to_local(),
+            torch.tensor([2.0, 2.0], device=device),
+        )
+
+        optimizer.step()
         dist.all_gather(gathered, parameter.to_local())
         assert torch.equal(gathered[0], gathered[1])
     finally:

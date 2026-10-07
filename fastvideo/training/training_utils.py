@@ -986,6 +986,31 @@ def _get_total_norm(
 
     total_norm = torch.linalg.vector_norm(torch.stack([norm.to(first_device) for norm in norms]), norm_type)
 
+    # The per-tensor norms above come from ``to_local()``, so for DTensor grads
+    # they describe only this rank's shard. Reduce across the mesh so every
+    # rank derives the same clip coefficient: sum the squared norms over sharded
+    # dims (each rank holds a disjoint slice) and average them over replicated
+    # dims (every rank holds the same values).
+    mesh_dims: dict[tuple[int, int], tuple[torch.distributed.device_mesh.DeviceMesh, int, bool]] = {}
+    for tensor in tensors:
+        if not isinstance(tensor, torch.distributed.tensor.DTensor):
+            continue
+        for mesh_dim, placement in enumerate(tensor.placements):
+            if tensor.device_mesh.size(mesh_dim) <= 1:
+                continue
+            key = (id(tensor.device_mesh), mesh_dim)
+            replicate = isinstance(placement, torch.distributed.tensor.Replicate)
+            previous = mesh_dims.get(key)
+            mesh_dims[key] = (tensor.device_mesh, mesh_dim, replicate if previous is None else previous[2] and replicate)
+
+    if mesh_dims and dist.is_available() and dist.is_initialized():
+        accumulated = total_norm.pow(norm_type)
+        for mesh, mesh_dim, replicate in mesh_dims.values():
+            dist.all_reduce(accumulated, group=mesh.get_group(mesh_dim))
+            if replicate:
+                accumulated.div_(mesh.size(mesh_dim))
+        total_norm = accumulated.pow(1.0 / norm_type)
+
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(f"The total norm of order {norm_type} for gradients from "
                            "`parameters` is non-finite, so it cannot be clipped. To disable "

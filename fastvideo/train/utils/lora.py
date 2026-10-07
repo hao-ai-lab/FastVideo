@@ -125,40 +125,60 @@ def _is_excluded_layer(
     return any(excluded in module_name for excluded in excluded_modules)
 
 
-def _register_replicated_gradient_sync(parameter: nn.Parameter, ) -> None:
-    """Average an unmanaged replicated parameter's gradient over its mesh.
-
-    LoRA parameters are attached after ``fully_shard``, so FSDP does not
-    register gradient-reduction hooks for them. ``DTensor.to_local()`` keeps
-    autograd connectivity but preserves the parameter's ``Replicate``
-    placement without inserting a collective. Average the rank-local
-    gradients over every replicated mesh dimension before gradient clipping
-    and the optimizer step.
-    """
-
-    if not isinstance(parameter, DTensor):
-        return
-
-    replicated_dims = [
+def _replicated_dims(parameter: DTensor) -> list[int]:
+    return [
         mesh_dim for mesh_dim, placement in enumerate(parameter.placements)
         if isinstance(placement, Replicate) and parameter.device_mesh.size(mesh_dim) > 1
     ]
-    if not replicated_dims:
-        return
 
-    def sync_gradient(param: torch.Tensor) -> None:
-        grad = param.grad
-        if grad is None:
-            return
-        local_grad = grad.to_local() if isinstance(grad, DTensor) else grad
-        for mesh_dim in replicated_dims:
-            dist.all_reduce(
-                local_grad,
-                group=parameter.device_mesh.get_group(mesh_dim),
-            )
-            local_grad.div_(parameter.device_mesh.size(mesh_dim))
 
-    parameter.register_post_accumulate_grad_hook(sync_gradient)
+def sync_replicated_lora_gradients(transformer: torch.nn.Module) -> int:
+    """Average every replicated LoRA gradient over its mesh, on every rank.
+
+    A per-parameter ``register_post_accumulate_grad_hook`` is not enough: the
+    hook only fires on ranks where that parameter actually received a
+    gradient, so a rank whose loss skipped a layer issues fewer collectives
+    than its peers -- the ranks then pair the wrong tensors together, or hang
+    outright when the totals differ. This pass runs after backward and before
+    clipping/the optimizer step, walks the LoRA parameters in a stable order,
+    and joins the collective on every rank, zero-filling the gradient where the
+    rank contributed none (a rank that skipped the layer contributes exactly
+    zero to the average).
+
+    Returns the number of parameters synchronized.
+    """
+
+    if not dist.is_available() or not dist.is_initialized():
+        return 0
+
+    synced = 0
+    for module in transformer.modules():
+        for attr_name in ("lora_A", "lora_B"):
+            parameter = getattr(module, attr_name, None)
+            if not isinstance(parameter, DTensor) or not parameter.requires_grad:
+                continue
+            replicated_dims = _replicated_dims(parameter)
+            if not replicated_dims:
+                continue
+            grad = parameter.grad
+            if grad is None:
+                local_grad = torch.zeros_like(parameter.to_local())
+                parameter.grad = DTensor.from_local(
+                    local_grad,
+                    device_mesh=parameter.device_mesh,
+                    placements=parameter.placements,
+                    run_check=False,
+                )
+            else:
+                local_grad = grad.to_local() if isinstance(grad, DTensor) else grad
+            for mesh_dim in replicated_dims:
+                dist.all_reduce(
+                    local_grad,
+                    group=parameter.device_mesh.get_group(mesh_dim),
+                )
+                local_grad.div_(parameter.device_mesh.size(mesh_dim))
+            synced += 1
+    return synced
 
 
 def _make_replicated_lora_parameter(
@@ -178,7 +198,6 @@ def _make_replicated_lora_parameter(
         replicated,
         requires_grad=parameter.requires_grad,
     )
-    _register_replicated_gradient_sync(replicated_parameter)
     return replicated_parameter
 
 
