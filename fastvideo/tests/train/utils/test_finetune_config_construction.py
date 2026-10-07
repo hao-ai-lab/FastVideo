@@ -20,6 +20,12 @@ _RECIPE_DIR = _REPO_ROOT / "examples" / "train" / "configs" / "fine_tuning"
 
 _RECIPES = sorted(_RECIPE_DIR.glob("**/*.yaml"))
 
+# Student plugins that build their pipeline config at model init (from a
+# variant or the converted checkpoint) rather than from the recipe's
+# ``pipeline:`` key, e.g. MMAudioModel, whose recipes point init_from at
+# locally converted weights the registry cannot resolve without them.
+_SELF_RESOLVING_STUDENTS = frozenset({"fastvideo.train.models.mmaudio.MMAudioModel"})
+
 
 def _recipe_id(path: Path) -> str:
     return str(path.relative_to(_RECIPE_DIR))
@@ -29,10 +35,11 @@ def _recipe_id(path: Path) -> str:
 def test_fine_tuning_recipe_constructs(recipe: Path) -> None:
     cfg = load_run_config(str(recipe))
 
-    assert cfg.training.pipeline_config is not None, (f"{_recipe_id(recipe)} did not resolve a pipeline config; "
-                                                      "check its `pipeline:` key and init_from registry match")
-
     target = cfg.models["student"]["_target_"]
+    if target not in _SELF_RESOLVING_STUDENTS:
+        assert cfg.training.pipeline_config is not None, (f"{_recipe_id(recipe)} did not resolve a pipeline config; "
+                                                          "check its `pipeline:` key and init_from registry match")
+
     assert isinstance(
         target, str) and target and "." in target, (f"{_recipe_id(recipe)} student _target_ is not importable-shaped: "
                                                     f"{target!r}")
