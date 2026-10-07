@@ -47,6 +47,35 @@ def test_is_minimax_h3_nvfp4_linear_prefix_non_main_ffn_linear(prefix: str) -> N
     assert not nvfp4.is_minimax_h3_nvfp4_linear_prefix(prefix)
 
 
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "transformer_blocks.0.attn.to_q",
+        "transformer_blocks.41.attn.to_out",
+        "minimax_h3.transformer_blocks.12.ff.fc_in",
+        "transformer_blocks.0.attn.to_k",
+        "transformer_blocks.0.attn.to_v",
+        "transformer_blocks.3.ff.fc_out",
+    ],
+)
+def test_is_minimax_h3_nvfp4_dit_linear_prefix_attn_and_ffn(prefix: str) -> None:
+    assert nvfp4.is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "transformer_blocks.0.adaln_proj.linear",
+        "token_refiner.refiner_blocks.0.ff.fc_in",
+        "transformer_blocks.0.attn.to_gate_compress",
+        "proj_in",
+        "transformer_blocks.0.attn.to_q.weight",
+    ],
+)
+def test_is_minimax_h3_nvfp4_dit_linear_prefix_rejects_non_export_linears(prefix: str) -> None:
+    assert not nvfp4.is_minimax_h3_nvfp4_dit_linear_prefix(prefix)
+
+
 def test_nvfp4config_get_quant_method_minimax_h3_feed_forward() -> None:
     if not torch.cuda.is_available():
         pytest.skip("NVFP4QuantizeMethod construction requires CUDA")

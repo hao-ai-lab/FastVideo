@@ -2,6 +2,8 @@ from typing import Any
 
 import torch
 
+from fastvideo.layers.quantization.nvfp4_config import nvfp4_quantize_fenced
+
 try:
     import flashinfer
 except ImportError:
@@ -50,18 +52,9 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
         global_sf_a = _global_sf(x2d)
         global_sf_b = _global_sf(weight_cast)
 
-        a_fp4, a_inv_s = flashinfer_mod.nvfp4_quantize(
-            x2d,
-            global_sf_a,
-            sfLayout=a_sf_layout,
-            do_shuffle=False,
-        )
-        b_fp4, b_inv_s = flashinfer_mod.nvfp4_quantize(
-            weight_cast,
-            global_sf_b,
-            sfLayout=flashinfer_mod.SfLayout.layout_128x4,
-            do_shuffle=False,
-        )
+        # Shared helper: carries the DGX Spark (GB10) ordering fence.
+        a_fp4, a_inv_s = nvfp4_quantize_fenced(x2d, global_sf_a, a_sf_layout.value)
+        b_fp4, b_inv_s = nvfp4_quantize_fenced(weight_cast, global_sf_b, flashinfer_mod.SfLayout.layout_128x4.value)
 
         alpha = 1.0 / (global_sf_a * global_sf_b)
 

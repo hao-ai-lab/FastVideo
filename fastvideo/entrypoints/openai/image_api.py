@@ -10,15 +10,21 @@ import aiofiles
 from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, UploadFile)
 from fastapi.responses import FileResponse
 
-from fastvideo.entrypoints.openai.state import (
-    get_output_dir,
-    get_serving_engine,
-)
 from fastvideo.entrypoints.openai.protocol import (
     ImageGenerationsRequest,
     ImageResponse,
     ImageResponseData,
     generate_request_id,
+)
+from fastvideo.entrypoints.openai.request_adapter import (
+    RequestAdaptationError,
+    validate_served_model_name,
+)
+from fastvideo.entrypoints.openai.state import (
+    get_output_dir,
+    get_served_model_name,
+    get_server_args,
+    get_serving_engine,
 )
 from fastvideo.entrypoints.openai.stores import IMAGE_STORE
 from fastvideo.entrypoints.openai.utils import (
@@ -41,6 +47,16 @@ def _normalize_response_format(value: str | None) -> str:
     if fmt not in _SUPPORTED_RESPONSE_FORMATS:
         raise HTTPException(status_code=400, detail=f"response_format={fmt} is not supported")
     return fmt
+
+
+def _validate_request_model(model: str | None) -> None:
+    """Reject a model id that is not the one this server loaded."""
+    if model is None:
+        return
+    try:
+        validate_served_model_name(model, get_server_args(), get_served_model_name())
+    except RequestAdaptationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 def _build_generation_kwargs(
@@ -99,6 +115,7 @@ def _build_generation_kwargs(
 @router.post("", response_model=ImageResponse)
 async def generations(request: ImageGenerationsRequest):
     resp_format = _normalize_response_format(request.response_format)
+    _validate_request_model(request.model)
 
     request_id = generate_request_id()
     engine = get_serving_engine()
@@ -181,6 +198,7 @@ async def edits(
         enable_teacache: bool | None = Form(False),
 ):
     resp_format = _normalize_response_format(response_format)
+    _validate_request_model(model)
 
     request_id = generate_request_id()
     engine = get_serving_engine()

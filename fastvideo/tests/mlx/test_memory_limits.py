@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.mlx_runtime.memory import add_memory_limit_args, apply_memory_limits, gib_to_bytes
 
 
@@ -48,9 +49,9 @@ def test_gib_to_bytes_rejects_non_positive_values() -> None:
         gib_to_bytes(0)
 
 
-def test_apply_memory_limits_sets_mlx_limits_and_metrics(monkeypatch) -> None:
-    monkeypatch.delenv("PYTORCH_MPS_HIGH_WATERMARK_RATIO", raising=False)
-    monkeypatch.delenv("PYTORCH_MPS_LOW_WATERMARK_RATIO", raising=False)
+def test_apply_memory_limits_sets_mlx_limits_and_metrics(env_overrides) -> None:
+    env_overrides.enter_context(envs.override_external("PYTORCH_MPS_HIGH_WATERMARK_RATIO", None))
+    env_overrides.enter_context(envs.override_external("PYTORCH_MPS_LOW_WATERMARK_RATIO", None))
     fake_mlx = _FakeMLX()
 
     applied = apply_memory_limits(

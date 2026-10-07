@@ -10,6 +10,9 @@
 //
 // The layout is fixed at compile time: VSA_BHSD true -> [B, H, S, 128] (FastVideo's build),
 // false -> [B, S, H, 128] (repo native; the kernel addresses it as [B*S tokens, H, 128]).
+// VSA_BLK128 picks the kernel: false -> 64-token sparse blocks (block_sparse_sm100a_bwd), true ->
+// 128-token (block_sparse_sm100a_blk128_bwd; block_sparse_bwd_blk128_sm100a.cu re-includes this
+// file with it set). The python backend picks by the metadata's block size.
 #include <torch/extension.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -17,7 +20,16 @@
 
 #include <vector>
 
+#ifndef VSA_BLK128
+#define VSA_BLK128 false
+#endif
+#if VSA_BLK128
+#include "block_sparse_bwd_launch_sm100a_blk128.cuh"
+#define BLOCK_SPARSE_SM100A_BWD block_sparse_sm100a_blk128_bwd
+#else
 #include "block_sparse_bwd_launch_sm100a.cuh"
+#define BLOCK_SPARSE_SM100A_BWD block_sparse_sm100a_bwd
+#endif
 
 namespace {
 
@@ -49,7 +61,7 @@ __nv_bfloat16* bf16_ptr(const torch::Tensor& t) {
 }  // namespace
 
 // Returns {dq, dk, dv}: bf16, each with the shape and layout of q, k, v respectively.
-std::vector<torch::Tensor> block_sparse_sm100a_bwd(torch::Tensor grad_o, torch::Tensor q,
+std::vector<torch::Tensor> BLOCK_SPARSE_SM100A_BWD(torch::Tensor grad_o, torch::Tensor q,
                                                    torch::Tensor k, torch::Tensor v,
                                                    torch::Tensor o, torch::Tensor lse,
                                                    torch::Tensor k2q_idx, torch::Tensor k2q_num,
@@ -105,20 +117,23 @@ std::vector<torch::Tensor> block_sparse_sm100a_bwd(torch::Tensor grad_o, torch::
   auto dv = torch::empty_like(v);
 
   // Workspace: torch::empty is enough. The preprocess kernel zeroes dqaccum and fully writes
-  // qt, dot and delta before the main kernel reads them; it also zeroes the dk/dv rows of kv
-  // blocks that no q block selects, so the empty_like outputs above come back fully defined.
+  // delta (and, at 64-token blocks, qt and dot) before the main kernel reads them. The dk/dv rows
+  // of kv blocks that no q block selects are zeroed by the preprocess (64) or by the main kernel
+  // (128), so the empty_like outputs above come back fully defined.
   const auto bytes = q.options().dtype(at::kByte);
   const int b = (int)B, h = (int)H, s = (int)S;
   auto dqaccum = torch::empty({(int64_t)block_sparse_bwd_dqaccum_bytes(b, h, s)}, bytes);
-  auto qt      = torch::empty({(int64_t)block_sparse_bwd_transposed_bytes(b, h, s)}, bytes);
-  auto dot     = torch::empty({(int64_t)block_sparse_bwd_transposed_bytes(b, h, s)}, bytes);
   auto delta   = torch::empty({(int64_t)block_sparse_bwd_delta_bytes(b, h, s)}, bytes);
+#if !VSA_BLK128
+  auto qt  = torch::empty({(int64_t)block_sparse_bwd_transposed_bytes(b, h, s)}, bytes);
+  auto dot = torch::empty({(int64_t)block_sparse_bwd_transposed_bytes(b, h, s)}, bytes);
   torch::Tensor order;
   const bool device_order = num_kv_blocks_per_seq >= ORDER_MIN_KV_BLOCKS;
   if (device_order) {
     order = torch::empty({(int64_t)block_sparse_bwd_order_bytes(b, h, (int)num_kv_blocks_per_seq)},
                          bytes);
   }
+#endif
 
   BlockSparseVsaBwdArgs a{};
   a.q                     = bf16_ptr(q);
@@ -133,12 +148,14 @@ std::vector<torch::Tensor> block_sparse_sm100a_bwd(torch::Tensor grad_o, torch::
   a.k2q_idx               = k2q_idx.data_ptr<int>();
   a.k2q_num               = k2q_num.data_ptr<int>();
   a.variable_block_sizes  = variable_block_sizes.data_ptr<int>();
-  a.workitem_remap        = nullptr;
-  a.order_workspace       = device_order ? reinterpret_cast<int*>(order.data_ptr()) : nullptr;
   a.dqaccum               = reinterpret_cast<dq_accum_t*>(dqaccum.data_ptr());
-  a.qt                    = bf16_ptr(qt);
-  a.dot                   = bf16_ptr(dot);
   a.delta                 = reinterpret_cast<float*>(delta.data_ptr());
+#if !VSA_BLK128
+  a.workitem_remap  = nullptr;
+  a.order_workspace = device_order ? reinterpret_cast<int*>(order.data_ptr()) : nullptr;
+  a.qt              = bf16_ptr(qt);
+  a.dot             = bf16_ptr(dot);
+#endif
   a.batch                 = b;
   a.num_heads             = h;
   a.seqlen                = s;
@@ -149,16 +166,17 @@ std::vector<torch::Tensor> block_sparse_sm100a_bwd(torch::Tensor grad_o, torch::
 
   // Report an unsupported regime loudly rather than returning plausible-looking wrong values.
   TORCH_CHECK(block_sparse_bwd_supported(a) == cudaSuccess,
-              "block_sparse_sm100a_bwd: unsupported configuration -- requires head_dim==", HEAD_DIM,
+              "block_sparse_sm100a_bwd (", BLOCK,
+              "-token blocks): unsupported configuration -- requires head_dim==", HEAD_DIM,
               ", seqlen == num_kv_blocks_per_seq*", BLOCK,
-              " with seqlen % 128 == 0, "
+              " with seqlen % 128 == 0, batch*heads <= 65535, "
               "max_q_blocks >= 1 and a finite sm_scale. Got head_dim=",
               D, " num_kv_blocks_per_seq=", num_kv_blocks_per_seq, " seqlen=", S,
               " max_q_blocks=", max_q_blocks, " sm_scale=", sm_scale);
 
   const cudaError_t err = launch_block_sparse_bwd_sm100a(a, at::cuda::getCurrentCUDAStream());
-  TORCH_CHECK(err == cudaSuccess,
-              "block_sparse_sm100a_bwd launch failed: ", cudaGetErrorString(err));
+  TORCH_CHECK(err == cudaSuccess, "block_sparse_sm100a_bwd (", BLOCK,
+              "-token blocks) launch failed: ", cudaGetErrorString(err));
 
   return {dq, dk, dv};
 }

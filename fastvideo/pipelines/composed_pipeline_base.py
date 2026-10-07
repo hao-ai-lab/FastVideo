@@ -162,7 +162,7 @@ class ComposedPipelineBase(ABC):
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
-        trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
+        trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR.get()
         self.profiler_controller = get_or_create_profiler(trace_dir)
 
         self.local_rank = get_world_group().local_rank
@@ -378,7 +378,7 @@ class ComposedPipelineBase(ABC):
             # The hook manager keeps a strong reference to every module it
             # wraps, so attaching here would materialize the DiT before the
             # first request and pin that instance past any release.
-            if envs.FASTVIDEO_TRACE_ACTIVATIONS:
+            if envs.FASTVIDEO_TRACE_ACTIVATIONS.get():
                 logger.warning("Activation trace is not attached to a deferred transformer; "
                                "turn off lazy_module_load to trace it")
             trace_target = None
@@ -586,6 +586,17 @@ class ComposedPipelineBase(ABC):
                 )
                 continue
             transformers_or_diffusers = module_spec[0]
+            # model_index.json's [library, class] spec is the only place some
+            # checkpoints declare a component's class name at all, when the
+            # component's config.json omits `_class_name`. Stash it so component loaders (which
+            # only see component_model_path, not this spec) can fall back to
+            # it instead of crashing on a KeyError.
+            if len(module_spec) > 1 and module_spec[1] is not None:
+                hints = getattr(fastvideo_args, "_model_index_class_names", None)
+                if hints is None:
+                    hints = {}
+                    fastvideo_args._model_index_class_names = hints
+                hints[module_name] = module_spec[1]
             if transformers_or_diffusers is None:
                 logger.warning("Module %s in model_index.json has null value, removing from required_config_modules",
                                module_name)

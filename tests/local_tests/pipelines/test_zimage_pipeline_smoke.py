@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
@@ -11,7 +10,9 @@ from typing import Any, cast
 import pytest
 import torch
 
-MODEL_DIR_ENV = os.getenv("ZIMAGE_MODEL_DIR")
+import fastvideo.envs as envs
+
+MODEL_DIR_ENV = envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.get() if envs.FASTVIDEO_TEST_ZIMAGE_MODEL_DIR.is_set() else None
 
 
 def test_zimage_typed_surface_preflight() -> None:
@@ -106,7 +107,7 @@ def test_model_download_honors_pinned_revision(monkeypatch: pytest.MonkeyPatch, 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Z-Image load/generate smoke requires CUDA")
 def test_zimage_pipeline_load_generate_smoke() -> None:
     if MODEL_DIR_ENV is None:
-        pytest.skip("Set ZIMAGE_MODEL_DIR to activate the real load/generate smoke")
+        pytest.skip("Set FASTVIDEO_TEST_ZIMAGE_MODEL_DIR to activate the real load/generate smoke")
     model_dir = Path(MODEL_DIR_ENV)
     if not (model_dir / "model_index.json").is_file():
         pytest.skip(f"Z-Image model_index.json not found under {model_dir}")

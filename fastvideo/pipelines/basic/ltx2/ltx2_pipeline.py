@@ -175,36 +175,6 @@ class LTX2Pipeline(LoRAPipeline):
         )
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        # Optional debug-instrumentation env vars. The internal FastVideoArgs
-        # carries debug_model_sums / debug_model_detail toggles; the public
-        # args don't define them yet, so getattr-with-default keeps the
-        # pipeline runnable on both shapes without forcing the public args
-        # to add fields a public consumer wouldn't otherwise touch.
-        if getattr(fastvideo_args, "debug_model_sums", False):
-            os.environ["LTX2_PIPELINE_DEBUG_LOG"] = "1"
-            sums_path = getattr(fastvideo_args, "debug_model_sums_path", None)
-            if sums_path:
-                os.environ["LTX2_PIPELINE_DEBUG_PATH"] = sums_path
-            else:
-                logger.warning("debug_model_sums is enabled but "
-                               "debug_model_sums_path is not set; no model sums "
-                               "will be logged.")
-        else:
-            os.environ.pop("LTX2_PIPELINE_DEBUG_LOG", None)
-            os.environ.pop("LTX2_PIPELINE_DEBUG_PATH", None)
-        if getattr(fastvideo_args, "debug_model_detail", False):
-            os.environ["LTX2_DEBUG_DETAIL"] = "1"
-            detail_path = getattr(fastvideo_args, "debug_model_detail_path", None)
-            if detail_path:
-                os.environ["LTX2_PIPELINE_DEBUG_DETAIL_PATH"] = detail_path
-            else:
-                logger.warning("debug_model_detail is enabled but "
-                               "debug_model_detail_path is not set; no detailed "
-                               "hooks will be logged.")
-        else:
-            os.environ.pop("LTX2_DEBUG_DETAIL", None)
-            os.environ.pop("LTX2_PIPELINE_DEBUG_DETAIL_PATH", None)
-
         tokenizer = self.get_module("tokenizer")
         if tokenizer is not None:
             tokenizer.padding_side = "left"

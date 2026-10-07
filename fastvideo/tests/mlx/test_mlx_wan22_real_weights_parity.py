@@ -11,26 +11,27 @@ t≈900), and asserts allclose. Gated on Metal + local weights so Linux
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+import fastvideo.envs as envs
+
 # The torch reference side brings up FastVideo's single-process distributed
 # environment, which rendezvouses over env://. Match the other torch-backed
 # tests in this repo and provide a local rendezvous before that happens.
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29513")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29513")
 
 mx = pytest.importorskip("mlx.core", reason="MLX is required for the Wan2.2 real-weight parity test")
 
-_ROOT = Path(os.environ.get("FASTVIDEO_WAN22_5B_ROOT", str(Path.home() / "models" / "fastwan22_5b")))
-_CHECKPOINT = _ROOT / "transformer" / "diffusion_pytorch_model.safetensors"
-_CONFIG = _ROOT / "transformer" / "config.json"
-
 _HAS_METAL = bool(getattr(mx, "metal", None) and mx.metal.is_available())
-_HAS_WEIGHTS = _CHECKPOINT.exists() and _CONFIG.exists() and _CHECKPOINT.stat().st_size > 1_000_000_000
+
+
+def _wan22_root() -> Path:
+    return Path(envs.FASTVIDEO_TEST_WAN22_5B_ROOT.get() or str(Path.home() / "models" / "fastwan22_5b"))
+
 
 # The real-weight test loads ~10 GB fp16 weights + activations. Gate on the
 # documented 36 GB requirement unless explicitly opted in.
@@ -41,7 +42,7 @@ def _check_memory_requirement() -> bool:
         bool: `true` if the system has at least 36 GiB of memory or low-memory
         execution is explicitly enabled, `false` otherwise.
     """
-    if os.environ.get("FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY") == "1":
+    if envs.FASTVIDEO_TEST_WAN22_5B_ALLOW_LOW_MEMORY.get():
         return True
     try:
         # On macOS, check unified memory via sysctl.
@@ -63,20 +64,8 @@ def _check_memory_requirement() -> bool:
     return False
 
 
-_HAS_SUFFICIENT_MEMORY = _check_memory_requirement()
-
 pytestmark = [
     pytest.mark.skipif(not _HAS_METAL, reason="Metal required for real 5B fp16 parity"),
-    pytest.mark.skipif(
-        not _HAS_WEIGHTS,
-        reason=f"Wan2.2-5B checkpoint not found/incomplete under {_ROOT} "
-        "(set FASTVIDEO_WAN22_5B_ROOT; expected ~10 GB safetensors)",
-    ),
-    pytest.mark.skipif(
-        not _HAS_SUFFICIENT_MEMORY,
-        reason="Real-weight 5B test requires >= 36 GB unified memory "
-        "(set FASTVIDEO_WAN22_5B_ALLOW_LOW_MEMORY=1 to override)",
-    ),
 ]
 
 
@@ -151,6 +140,15 @@ def test_wan22_real_weights_mlx_matches_torch_per_token_timestep() -> None:
     """
     Verify that the MLX and PyTorch Wan2.2 implementations produce equivalent outputs for per-token timesteps using real checkpoint weights.
     """
+    root = _wan22_root()
+    checkpoint = root / "transformer" / "diffusion_pytorch_model.safetensors"
+    config_path = root / "transformer" / "config.json"
+    if not (checkpoint.exists() and config_path.exists() and checkpoint.stat().st_size > 1_000_000_000):
+        pytest.skip(f"Wan2.2-5B checkpoint not found/incomplete under {root} "
+                    "(set FASTVIDEO_TEST_WAN22_5B_ROOT; expected ~10 GB safetensors)")
+    if not _check_memory_requirement():
+        pytest.skip("Real-weight 5B test requires >= 36 GB unified memory "
+                    "(set FASTVIDEO_TEST_WAN22_5B_ALLOW_LOW_MEMORY=1 to override)")
     import torch
 
     from fastvideo.forward_context import set_forward_context
@@ -158,7 +156,7 @@ def test_wan22_real_weights_mlx_matches_torch_per_token_timestep() -> None:
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
     from examples.inference.basic.mlx_wan_prompt_to_video import make_rotary_embeddings
 
-    config = json.loads(_CONFIG.read_text())
+    config = json.loads(config_path.read_text())
     in_ch = int(config["in_channels"])
     text_dim = int(config["text_dim"])
     # Small latent so activations fit alongside the ~10 GB fp16 weights on 36 GB.
@@ -177,7 +175,7 @@ def test_wan22_real_weights_mlx_matches_torch_per_token_timestep() -> None:
     text_np = (rng.standard_normal((1, 32, text_dim)) * 0.1).astype(np.float32)
 
     # --- torch reference (CPU fp16, same weight dtype as MLX deploy path) ---
-    torch_model = _load_torch_wan22_from_diffusers(_CHECKPOINT, _CONFIG, dtype=torch.float16)
+    torch_model = _load_torch_wan22_from_diffusers(checkpoint, config_path, dtype=torch.float16)
     hidden_t = torch.from_numpy(hidden_np).to(torch.float16)
     text_t = torch.from_numpy(text_np).to(torch.float16)
     with torch.no_grad(), set_forward_context(
@@ -191,7 +189,7 @@ def test_wan22_real_weights_mlx_matches_torch_per_token_timestep() -> None:
     gc.collect()
 
     # --- MLX (fp16 weights, fp16 compute) ---
-    mlx_model = mlx_wan22_dit_from_diffusers_safetensors(_CHECKPOINT, _CONFIG, dtype="fp16")
+    mlx_model = mlx_wan22_dit_from_diffusers_safetensors(checkpoint, config_path, dtype="fp16")
     freqs_cis = make_rotary_embeddings(
         config, latent_frames=frames, latent_height=height, latent_width=width)
     out = mlx_model(
