@@ -223,6 +223,9 @@ class ZImageDenoisingStage(PipelineStage):
         batch_size = latents.shape[0]
 
         for index, timestep_value in enumerate(batch.timesteps):
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             if timestep_value.item() == 0 and index == len(batch.timesteps) - 1:
                 continue
 

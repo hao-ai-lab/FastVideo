@@ -1071,6 +1071,9 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
 
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
+                # Stop if interrupted
+                if getattr(self, "interrupt", False):
+                    break
                 t_val = float(t)
                 if is_conditioned:
                     t_frames = int(latents_4d.shape[1])

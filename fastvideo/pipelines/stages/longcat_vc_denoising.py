@@ -95,6 +95,9 @@ class LongCatVCDenoisingStage(LongCatDenoisingStage):
 
         with tqdm(total=num_inference_steps, desc="VC Denoising") as progress_bar:
             for i, t in enumerate(timesteps):
+                # Stop if interrupted
+                if getattr(self, "interrupt", False):
+                    break
                 step_start = time.time()
 
                 # 1. Expand latents for CFG
