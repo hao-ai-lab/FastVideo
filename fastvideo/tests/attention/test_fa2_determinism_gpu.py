@@ -19,9 +19,9 @@ def mode(enabled):
 def modules():
     if not torch.cuda.is_available():
         pytest.skip("CUDA is required")
+    native = pytest.importorskip("flash_attn.flash_attn_interface")
     from fastvideo.attention.utils import flash_attn_default as default
     from fastvideo.attention.utils import flash_attn_no_pad as masked
-    import flash_attn.flash_attn_interface as native
     if default.fa_version != "2" or masked._FA_VARLEN_VERSION != "2":
         pytest.skip("This hardware acceptance covers FA2 only")
     return default, masked, native
@@ -175,7 +175,6 @@ def test_direct_dropout_keeps_native_saved_rng(modules, route):
 @pytest.mark.parametrize("route", ["default", "qkv", "varlen"])
 def test_strided_inputs_have_correct_fake_gradient_layout(modules, route):
     call, inputs = make_call(modules, route, 64)
-    # Preserve values while changing the physical order of sequence/head axes.
     strided = tuple(x.transpose(1, 2).contiguous().transpose(1, 2) for x in inputs)
     with mode(True):
         eager = run(call, strided, True, True)
