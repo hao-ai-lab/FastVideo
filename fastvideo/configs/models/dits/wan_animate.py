@@ -51,8 +51,13 @@ def _dit_blocks_only(n: str, m) -> bool:
 @dataclass
 class WanAnimateArchConfig(WanVideoArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [_dit_blocks_only])
-    # The face adapter's per-frame attention is implemented on these two only;
-    # notably no VSA -- the checkpoint has no gate weights for VSA blocks.
+    # This tuple governs BOTH the tower's block self-attention (attn1, via the
+    # base WanTransformer3DModel) and the face adapter's per-frame cross-attention
+    # (wan_animate_face.py reads the same tuple), so it is model-wide, not
+    # face-adapter-only. Only FLASH_ATTN/SDPA are wired for the per-frame face
+    # path; notably no VSA -- the checkpoint has no gate weights for VSA blocks
+    # (separately refused in the model __init__). A requested backend outside this
+    # tuple (e.g. SAGE_ATTN) silently falls back to FLASH_ATTN for the whole tower.
     _supported_attention_backends: tuple[AttentionBackendEnum,
                                          ...] = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
 

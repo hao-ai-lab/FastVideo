@@ -147,9 +147,13 @@ class AnimateConditioningLatentsStage(ImageVAEEncodingStage):
 
         [ mask 4ch | cond latent 16ch ] x [ ref (1 frame) | target (T_lat) ]
 
-    Animation mode: the target's cond video is a **black video encoded through
-    the VAE** (VAE(zeros-pixels) != zero latents -- encoding it is load-bearing)
-    and the target mask is all zeros ("generate everything").
+    Animation mode: the target's cond video is a **zeros video encoded through
+    the VAE** -- raw zeros, i.e. mid-gray in the VAE's [-1,1] pixel space (NOT
+    black; the diffusers reference also feeds raw zeros). VAE(zeros) != zero
+    latents, so encoding it is load-bearing and must stay zeros to preserve the
+    checkpoint's conditioning statistics -- do not "fix" it to fill(-1.0) (true
+    black), which would break parity with the reference. The target mask is all
+    zeros ("generate everything").
     Replace mode: the target's cond video is the background video and the mask
     is the *inverted* character mask (input convention: white = generate),
     nearest-downsampled to the latent grid -- 1 on preserved background, 0 in
@@ -176,7 +180,16 @@ class AnimateConditioningLatentsStage(ImageVAEEncodingStage):
         # Diffusers letterboxes the reference (resize_mode="fill", black pad,
         # bilinear); vision_utils.resize has no "fill" mode, so this stretches
         # instead. Identical for the documented input (the official src_ref.png,
-        # already at height x width).
+        # already at height x width). Warn when a non-conforming aspect ratio would
+        # be anamorphically distorted -- identity conditioning changes silently
+        # otherwise.
+        src_w, src_h = batch.pil_image.size
+        if abs(src_w * height - src_h * width) > 0.01 * src_h * width:
+            logger.warning(
+                "Wan-Animate reference image is %dx%d (aspect %.3f) but the target is %dx%d "
+                "(aspect %.3f); the reference is stretched -- not letterboxed -- to the target, "
+                "which distorts identity conditioning. Provide a reference already at the target "
+                "aspect ratio for best results.", src_w, src_h, src_w / src_h, width, height, width / height)
         image = self.preprocess(batch.pil_image, vae_scale_factor=spatial, height=height,
                                 width=width).to(device, dtype=torch.float32).unsqueeze(2)
         ref_latent = _encode_normalized(self, image, fastvideo_args)
