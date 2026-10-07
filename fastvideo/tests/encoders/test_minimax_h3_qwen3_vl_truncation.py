@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import inspect
-import os
 
 import pytest
 import torch
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29513")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29513")
 
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import (
     MiniMaxH3Qwen3VLArchConfig,

@@ -29,7 +29,7 @@ from fastvideo.layers.visual_embedding import (
 )
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.wanvideo import (
+from fastvideo.models.wan.transformer import (
     WanSelfAttention,
     WanI2VCrossAttention,
     WanT2VCrossAttention,

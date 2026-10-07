@@ -1,0 +1,49 @@
+#   FASTVIDEO_ATTENTION_BACKEND=ATTN_QAT_INFER FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
+#     FLASHINFER_CUDA_ARCH_LIST=12.0a FASTVIDEO_STAGE_LOGGING=1 \
+#     fastvideo generate --config examples/inference/basic/basic_compacth3_rtx5090.yaml
+generator:
+  model_path: ./CompactH3
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: h3_dit
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: true
+      vae: false
+      pin_cpu_memory: true
+      lazy_module_load: false
+    compile:
+      enabled: false
+      vae_enabled: false
+  pipeline:
+    experimental:
+      attention_backend: ATTN_QAT_INFER
+      h3_sequential_load: true
+      inference_torch_compile: false
+      vae_parallel_decode: false
+      video_decode_backend: h3-vae
+request:
+  prompt: >-
+    A wide cinematic shot of an alpine meadow at sunrise, pale pink mountain
+    peaks above a blue valley filled with thin morning mist.
+  negative_prompt: ""
+  sampling:
+    seed: 2026
+    height: 480
+    width: 832
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 5
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    output_path: outputs/compacth3_rtx5090/
+    save_video: true
+    return_frames: false

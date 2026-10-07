@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SERVER_ROOT = Path(__file__).resolve().parent
@@ -55,15 +56,33 @@ FRONTEND_STATIC_DIR_CANDIDATES = _resolve_frontend_static_dir_candidates()
 MODEL_REGISTRY = {
     "fast-ltx2": {
         "name": "FastLTX2",
+        "generation_backend": "ltx2",
+        "default_sp_size": 1,
         "model_path": "FastVideo/LTX2-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX2-Distilled-Diffusers",
         "lora_repo": "FastVideo/LTX2-OmniNFT-LoRA",
     },
     "fast-ltx23": {
         "name": "FastLTX23",
+        "generation_backend": "ltx2",
+        "default_sp_size": 1,
         "model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
         "config_model_path": "FastVideo/LTX-2.3-Distilled-Diffusers",
         "lora_repo": "FastVideo/LTX-2.3-OmniNFT-LoRA",
+    },
+    "fast-h3": {
+        "name": "FastH3",
+        "generation_backend": "minimax_h3",
+        "default_sp_size": 4,
+        "model_path": "MiniMaxAI/MiniMax-H3",
+        "adapter_repo": "FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA",
+        "adapter_filename": "vsa-datafree/adapter_model.safetensors",
+        "attention_backend": "VIDEO_SPARSE_ATTN_H3",
+        "height": 768,
+        "width": 1344,
+        "num_frames": 124,
+        "num_inference_steps": 5,
+        "seed": 1000,
     },
 }
 
@@ -171,7 +190,7 @@ def _optional_env(*names: str) -> str | None:
 DEVTOOLS_ENABLED = _env_bool("FASTVIDEO_ENABLE_DEVTOOLS", False)
 PROMPT_SAFETY_ENABLED = _env_bool("FASTVIDEO_ENABLE_PROMPT_SAFETY", False)
 DREAMVERSE_MAX_AUTOTUNE = _env_bool("DREAMVERSE_MAX_AUTOTUNE", True)
-DREAMVERSE_SP_SIZE = max(1, _env_int("DREAMVERSE_SP_SIZE", 1))
+DREAMVERSE_SP_SIZE = max(1, _env_int("DREAMVERSE_SP_SIZE", cast(int, MODEL_CONFIG["default_sp_size"])))
 
 DREAMVERSE_MODEL_PATH = (os.getenv("DREAMVERSE_MODEL_PATH", "").strip() or None)
 if DREAMVERSE_MODEL_PATH:
@@ -213,7 +232,7 @@ def _resolve_lora_spec(spec: str) -> str | None:
     if not spec:
         return None
     if spec.lower() == "omninft":
-        return MODEL_CONFIG.get("lora_repo")
+        return cast(str | None, MODEL_CONFIG.get("lora_repo"))
     if spec.lower() in AVAILABLE_LORAS:
         return AVAILABLE_LORAS[spec.lower()]["repo"]
     return spec

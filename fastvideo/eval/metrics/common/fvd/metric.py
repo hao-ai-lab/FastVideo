@@ -75,13 +75,13 @@ import numpy as np
 import scipy.linalg
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.metrics.common.fvd.extractors import (_BaseExtractor, available_extractors, load_extractor)
 from fastvideo.eval.registry import register
 from fastvideo.eval.types import MetricResult
 
 _MIN_VIDEOS_WARN = 256  # below this FVD is unreliable
-_REF_FEATURES_ENV = "FASTVIDEO_FVD_REF_FEATURES"
 
 
 def _gaussian_params(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -220,7 +220,7 @@ class FVDMetric(BaseMetric):
         # import. Precedence: kwarg > env-var > default.
         if self._cache_path_arg is not None:
             self.cache_path = os.path.expanduser(self._cache_path_arg)
-        elif env_path := os.environ.get(_REF_FEATURES_ENV):
+        elif env_path := envs.FASTVIDEO_FVD_REF_FEATURES.get():
             self.cache_path = os.path.expanduser(env_path)
         else:
             self.cache_path = _default_cache_path(self._extractor_name)

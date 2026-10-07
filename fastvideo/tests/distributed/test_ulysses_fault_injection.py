@@ -41,6 +41,7 @@ FAULT_CASES = [
 
 
 def _worker() -> None:
+    import fastvideo.envs as envs
     from fastvideo.distributed import (
         cleanup_dist_env_and_memory,
         maybe_init_distributed_environment_and_model_parallel,
@@ -52,8 +53,8 @@ def _worker() -> None:
     world = int(os.environ["WORLD_SIZE"])
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
-    fault_rank = int(os.environ["FASTVIDEO_ULYSSES_FAULT_RANK"])
-    fault_stage = os.environ["FASTVIDEO_ULYSSES_FAULT_STAGE"]
+    fault_rank = int(envs.FASTVIDEO_TEST_ULYSSES_FAULT_RANK.get())
+    fault_stage = envs.FASTVIDEO_TEST_ULYSSES_FAULT_STAGE.get()
     torch.cuda.set_device(local_rank)
     device = torch.device(f"cuda:{local_rank}")
 
@@ -65,7 +66,7 @@ def _worker() -> None:
         UlyssesA2AHelper._can_attempt = (  # type: ignore[method-assign]
             lambda self: (False, "injected capability failure"))
     elif rank == fault_rank and fault_stage == "configuration":
-        os.environ["FASTVIDEO_ULYSSES_A2A"] = "off"
+        envs.FASTVIDEO_ULYSSES_A2A.set("off")
 
     maybe_init_distributed_environment_and_model_parallel(1, world)
     communicator = get_sp_group().device_communicator
@@ -168,8 +169,8 @@ def test_rank_local_setup_failure_falls_back_group_wide(world: int, fault_rank: 
     environment = dict(
         os.environ,
         FASTVIDEO_ULYSSES_A2A="auto",
-        FASTVIDEO_ULYSSES_FAULT_RANK=str(fault_rank),
-        FASTVIDEO_ULYSSES_FAULT_STAGE=fault_stage,
+        FASTVIDEO_TEST_ULYSSES_FAULT_RANK=str(fault_rank),
+        FASTVIDEO_TEST_ULYSSES_FAULT_STAGE=fault_stage,
     )
     try:
         process = subprocess.run(

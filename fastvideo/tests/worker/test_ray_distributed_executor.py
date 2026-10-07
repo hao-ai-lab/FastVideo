@@ -36,3 +36,17 @@ def test_ray_log_queue_stays_on_the_driver() -> None:
     executor.clear_log_queue()
     assert executor._log_queue is None
     assert "log_queue" in signature(Executor.set_log_queue).parameters
+
+
+def test_ray_carries_h3_performance_switches() -> None:
+    import fastvideo.envs as envs
+    from fastvideo.worker.ray_env import get_env_vars_to_copy
+
+    with (envs.FASTVIDEO_H3_VAE_TILE_BATCH.override(8),
+          envs.FASTVIDEO_NVFP4_MM_BACKEND.override("cutlass"),
+          envs.FASTVIDEO_VSA_TRITON.override(True)):
+        copied = get_env_vars_to_copy()
+        assert {"FASTVIDEO_H3_VAE_TILE_BATCH", "FASTVIDEO_NVFP4_MM_BACKEND", "FASTVIDEO_VSA_TRITON"} <= copied
+        assert envs.FASTVIDEO_H3_VAE_TILE_BATCH.get() == 8
+        assert envs.FASTVIDEO_NVFP4_MM_BACKEND.get() == "cutlass"
+        assert envs.FASTVIDEO_VSA_TRITON.get() is True
