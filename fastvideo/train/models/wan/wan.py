@@ -154,6 +154,16 @@ class WanModel(ModelBase):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def _dataloader_cfg_rate(self) -> float | None:
+        """CFG-dropout rate the parquet collate should apply.
+
+        ``None`` follows ``data_config.training_cfg_rate`` (the shared
+        zeroing drop). Models that perform CFG dropout themselves —
+        swapping in their unconditional embedding, like LTX2Model —
+        override this to return 0.0 so the two drops do not stack.
+        """
+        return None
+
     def _t2v_parquet_schema(self) -> Any:
         """Parquet schema for the t2v rows this model trains on.
 
@@ -200,6 +210,7 @@ class WanModel(ModelBase):
             training_config.data,
             text_len=int(text_len),
             parquet_schema=parquet_schema,
+            cfg_rate=self._dataloader_cfg_rate(),
         )
         self.start_step = 0
 
