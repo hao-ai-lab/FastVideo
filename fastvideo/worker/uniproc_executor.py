@@ -2,6 +2,7 @@
 """In-process executor: one worker in the current process, no spawn."""
 from __future__ import annotations
 
+import asyncio
 import atexit
 import logging
 import logging.handlers
@@ -31,6 +32,10 @@ class UniprocExecutor(Executor):
     Used when ``num_gpus == 1`` (including the default ``mp`` backend) or when
     ``distributed_executor_backend == "uni"``. Weights load once; no child
     process is spawned.
+
+    Because the worker shares the caller's process there is no ``workers``
+    list and no worker-side SIGINT handler: Ctrl-C reaches the main thread
+    only, so call :meth:`interrupt` to cancel the in-flight forward pass.
     """
 
     def _init_executor(self) -> None:
@@ -61,6 +66,7 @@ class UniprocExecutor(Executor):
         atexit.register(self.shutdown)
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        self._clear_interrupt()
         responses: list[ForwardBatch] = self.collective_rpc("execute_forward",
                                                             kwargs={
                                                                 "forward_batch": forward_batch,
@@ -73,6 +79,25 @@ class UniprocExecutor(Executor):
         output_batch.extra = extra
         return output_batch
 
+    def interrupt(self) -> None:
+        """Request cancellation of the in-flight forward pass (best effort).
+
+        There is no worker process to signal, so flag the in-process pipeline
+        stages whose denoising loop checks ``self.interrupt`` instead. The flag
+        is cleared at the start of the next forward pass.
+        """
+        for stage in self._pipeline_stages():
+            stage.interrupt = True
+
+    def _clear_interrupt(self) -> None:
+        for stage in self._pipeline_stages():
+            stage.interrupt = False
+
+    def _pipeline_stages(self) -> list[Any]:
+        worker = getattr(self, "driver_worker", None)
+        pipeline = getattr(getattr(worker, "worker", None), "pipeline", None)
+        return list(getattr(pipeline, "stages", None) or [])
+
     def execute_streaming_reset(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         responses: list[dict[str, Any]] = self.collective_rpc(
             "execute_streaming_reset",
@@ -84,6 +109,7 @@ class UniprocExecutor(Executor):
         return responses[0]
 
     def execute_streaming_step(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
+        self._clear_interrupt()
         responses: list[ForwardBatch] = self.collective_rpc(
             "execute_streaming_step",
             kwargs={
@@ -94,7 +120,8 @@ class UniprocExecutor(Executor):
         return responses[0]
 
     async def execute_streaming_step_async(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
-        return self.execute_streaming_step(keyboard_action, mouse_action)
+        # The step itself is synchronous; keep the event loop free while it runs.
+        return await asyncio.to_thread(self.execute_streaming_step, keyboard_action, mouse_action)
 
     def execute_streaming_clear(self) -> dict[str, Any]:
         responses: list[dict[str, Any]] = self.collective_rpc("execute_streaming_clear")
@@ -129,7 +156,12 @@ class UniprocExecutor(Executor):
                 raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
 
     def set_log_queue(self, log_queue: Queue | None) -> None:
-        """Forward in-process logs to the given queue."""
+        """Forward in-process logs to the given queue.
+
+        Unlike MultiprocExecutor, the handler is attached to this (driver)
+        process's ``fastvideo`` logger, not to a worker, so driver logs reach
+        the queue as well.
+        """
         self._clear_log_queue_handler()
         self._log_queue = log_queue
         if log_queue is None:
@@ -152,6 +184,11 @@ class UniprocExecutor(Executor):
                        timeout: float | None = None,
                        args: tuple = (),
                        kwargs: dict | None = None) -> list[Any]:
+        """Execute the method on the in-process worker.
+
+        ``timeout`` is accepted for Executor compatibility but ignored: the
+        call runs on the caller's thread, so a hung call blocks indefinitely.
+        """
         del timeout
         kwargs = kwargs or {}
         return [self.driver_worker.execute_method(method, *args, **kwargs)]

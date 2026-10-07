@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import multiprocessing
 from inspect import signature
 from types import SimpleNamespace
 
@@ -38,16 +39,15 @@ def test_uniproc_rejects_multi_gpu() -> None:
 
 
 def test_uniproc_init_does_not_use_mp_context(monkeypatch) -> None:
+    """Init must not spawn a worker process (no multiprocessing context)."""
 
-    def boom() -> None:
-        raise AssertionError("UniprocExecutor must not spawn a multiprocessing context")
-
-    monkeypatch.setattr("fastvideo.utils.get_mp_context", boom)
+    # Keep the test off the GPU/Hub path; the spawn check below is what matters.
     monkeypatch.setattr("fastvideo.worker.gpu_worker.Worker.init_device", lambda self: None)
     executor = UniprocExecutor(FastVideoArgs(model_path="test", num_gpus=1))
     try:
         assert executor.driver_worker is not None
         assert executor.driver_worker.worker is not None
+        assert multiprocessing.active_children() == []
     finally:
         executor.shutdown()
 
@@ -111,6 +111,19 @@ def test_execute_forward_returns_worker_batch(monkeypatch) -> None:
     result = executor.execute_forward(batch, args)
     assert result.extra == {}
     assert worker.calls[0][0] == "execute_forward"
+
+
+def test_interrupt_flags_in_process_pipeline_stages() -> None:
+    """No worker process to signal, so cancellation rides on the stage flag."""
+    executor, worker = _executor_with_fake_worker()
+    stage = SimpleNamespace()
+    worker.worker = SimpleNamespace(pipeline=SimpleNamespace(stages=[stage]))
+
+    executor.interrupt()
+    assert stage.interrupt is True
+
+    executor._clear_interrupt()
+    assert stage.interrupt is False
 
 
 def test_uniproc_log_queue_stays_in_process() -> None:

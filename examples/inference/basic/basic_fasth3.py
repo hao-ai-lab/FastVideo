@@ -79,7 +79,7 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--num-gpus", type=int, default=4)
     parser.add_argument(
         "--execution-backend",
-        choices=("mp", "ray"),
+        choices=("mp", "uni", "ray"),
         default=None,
         help="mp for one node; ray for a Ray cluster (two DGX Sparks). "
         "Default: ray when RAY_ADDRESS is set, otherwise mp",
