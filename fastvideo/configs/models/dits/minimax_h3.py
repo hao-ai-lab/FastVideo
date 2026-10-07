@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
+from fastvideo.layers.pdd import validate_pdd_steps
 from fastvideo.platforms import AttentionBackendEnum
 
 
@@ -59,6 +60,11 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
     norm_eps: float = 1e-5
     qk_norm_eps: float = 1e-5
     final_norm_eps: float = 1e-5
+    # Parallel Decoding Distillation (PDD) students widen both output
+    # projections to this many fine-grid heads (``fastvideo.layers.pdd``).
+    # ``None`` is the released single-head transformer. A PDD export records
+    # the key in its transformer ``config.json``.
+    pdd_steps: int | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -67,6 +73,8 @@ class MiniMaxH3ArchConfig(DiTArchConfig):
         self.patch_size = (self.patch_size[0], self.patch_size[1], self.patch_size[2])
         self.num_channels_latents = self.in_channels
         self.out_channels = self.in_channels
+        if self.pdd_steps is not None:
+            validate_pdd_steps(self.pdd_steps, "MiniMax H3 pdd_steps")
         if self.adaln_rank is not None and not 0 < self.adaln_rank <= self.time_embed_dim:
             raise ValueError(f"MiniMax H3 adaln_rank must be in (0, time_embed_dim={self.time_embed_dim}], "
                              f"got {self.adaln_rank}.")

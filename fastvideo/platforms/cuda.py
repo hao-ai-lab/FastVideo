@@ -171,7 +171,7 @@ class CudaPlatformBase(Platform):
         # TODO(will): maybe come up with a more general interface for local attention
         # if distributed is False, we always try to use Flash attn
 
-        logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
+        logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND.get())
         logger.info("Selected backend: %s", selected_backend)
         if selected_backend == AttentionBackendEnum.SAGE_ATTN:
             try:

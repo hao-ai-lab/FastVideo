@@ -44,7 +44,7 @@ logger = init_logger(__name__)
 # kernels JIT-compile per shape family and can fail at runtime on some
 # arch/shape combinations, so it is never auto-selected just because it is
 # installed.
-if envs.FASTVIDEO_FA4:
+if envs.FASTVIDEO_FA4.get():
     try:
         from fastvideo.attention.utils.flash_attn_cute import flash_attn_func
     except ImportError as e:
