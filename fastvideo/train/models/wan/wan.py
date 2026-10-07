@@ -20,8 +20,6 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler, )
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.train.utils.activation_checkpoint import (
-    apply_activation_checkpointing, )
 from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling,
     get_sigmas,
@@ -34,6 +32,11 @@ from fastvideo.utils import (
 )
 
 from fastvideo.train.models.base import ModelBase
+from fastvideo.train.utils.activation_checkpoint import (
+    apply_activation_checkpointing,
+    is_activation_checkpointed,
+    resolve_checkpointing_type,
+)
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
@@ -82,15 +85,23 @@ class WanModel(ModelBase):
         )
         self._init_from = str(init_from)
 
+        # _load_transformer implementations receive the resolved type and do
+        # not fall back to training.model themselves.
         self.transformer = self._load_transformer(
             init_from=self._init_from,
             trainable=self._trainable,
             disable_custom_init_weights=(disable_custom_init_weights),
-            enable_gradient_checkpointing_type=(enable_gradient_checkpointing_type),
+            enable_gradient_checkpointing_type=resolve_checkpointing_type(
+                enable_gradient_checkpointing_type,
+                training_config,
+            ),
             training_config=training_config,
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=self.attention_backend,
         )
+        # Subclasses override _load_transformer and may wrap a nested module
+        # or skip wrapping, so record what was actually wrapped.
+        self._activation_checkpointing_applied = is_activation_checkpointed(self.transformer)
 
         self.noise_scheduler = (FlowMatchEulerDiscreteScheduler(shift=float(flow_shift)))
 
@@ -125,16 +136,13 @@ class WanModel(ModelBase):
         transformer_override_safetensor: str | None = None,
         attention_backend: AttentionBackendEnum | str | None = None,
     ) -> torch.nn.Module:
-        ckpt_type = (enable_gradient_checkpointing_type or getattr(
-            getattr(training_config, "model", None),
-            "enable_gradient_checkpointing_type",
-            None,
-        ))
+        # Checkpoint the blocks before FSDP wraps them. __init__ already
+        # resolved the type against training.model.
         pre_fsdp_transform = None
-        if trainable and ckpt_type:
+        if trainable and enable_gradient_checkpointing_type:
             pre_fsdp_transform = partial(
                 apply_activation_checkpointing,
-                checkpointing_type=ckpt_type,
+                checkpointing_type=enable_gradient_checkpointing_type,
             )
         transformer = load_module_from_path(
             model_path=init_from,
@@ -155,6 +163,26 @@ class WanModel(ModelBase):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def _dataloader_cfg_rate(self) -> float | None:
+        """CFG-dropout rate the parquet collate should apply.
+
+        ``None`` follows ``data_config.training_cfg_rate`` (the shared
+        zeroing drop). Models that perform CFG dropout themselves —
+        swapping in their unconditional embedding, like LTX2Model —
+        override this to return 0.0 so the two drops do not stack.
+        """
+        return None
+
+    def _t2v_parquet_schema(self) -> Any:
+        """Parquet schema for the t2v rows this model trains on.
+
+        Models whose rows carry extra tensor fields (e.g. HunyuanVideo
+        1.5's second text stream) override this.
+        """
+        from fastvideo.dataset.dataloader.schema import (
+            pyarrow_schema_t2v, )
+        return pyarrow_schema_t2v
+
     def init_preprocessors(self, training_config: TrainingConfig) -> None:
         self.vae = load_module_from_path(
             model_path=str(training_config.model_path),
@@ -168,9 +196,7 @@ class WanModel(ModelBase):
         self._init_timestep_mechanics()
 
         from fastvideo.dataset.dataloader.schema import (
-            pyarrow_schema_t2v,
-            pyarrow_schema_text_only,
-        )
+            pyarrow_schema_text_only, )
         from fastvideo.train.utils.dataloader import (
             build_parquet_t2v_train_dataloader, )
 
@@ -179,7 +205,7 @@ class WanModel(ModelBase):
             "preprocessed_data_type",
             "t2v",
         )).strip().lower()
-        parquet_schema = pyarrow_schema_t2v
+        parquet_schema = self._t2v_parquet_schema()
         if preprocessed_data_type == "text_only":
             parquet_schema = pyarrow_schema_text_only
         elif preprocessed_data_type != "t2v":
@@ -193,6 +219,7 @@ class WanModel(ModelBase):
             training_config.data,
             text_len=int(text_len),
             parquet_schema=parquet_schema,
+            cfg_rate=self._dataloader_cfg_rate(),
         )
         self.start_step = 0
 
