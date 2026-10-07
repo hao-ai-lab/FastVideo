@@ -97,9 +97,11 @@ class Worker:
         # so that each worker uses the correct device
         # Both multiprocessing and Ray pass the worker-local rank explicitly.
         # Ray deliberately excludes LOCAL_RANK from the copied driver
-        # environment and keeps each actor on its raylet's device list (the
-        # executor passes the worker's ordinal in that list), so leaving an
-        # inherited or missing value here would bind every Ray actor to cuda:0.
+        # environment. On NVIDIA GPUs the executor keeps each actor on its
+        # raylet's device list and passes the worker's ordinal in that list;
+        # on other platforms it passes the index in the node's device list.
+        # Leaving an inherited or missing value here would bind every Ray
+        # actor to device 0.
         # The external-launcher executor passes the launcher's LOCAL_RANK too.
         envs.set_external("LOCAL_RANK", str(self.local_rank))
         if self.fastvideo_args.distributed_executor_backend != "external_launcher":
