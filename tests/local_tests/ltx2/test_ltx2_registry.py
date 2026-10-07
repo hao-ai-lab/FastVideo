@@ -130,16 +130,19 @@ def test_ltx23_distilled_local_path_prefers_most_specific_entry(
 def test_ltx2_equally_specific_local_path_still_warns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # No registered HF path appears in this directory name, so the
+    # This directory name shares as much text with the distilled aliases
+    # ("distilled"/"diffusers") as with the base alias ("diffusers"), so the
     # distilled (path match) and base (pipeline-name match) entries are
     # equally specific: genuine ambiguity keeps the warning, and
     # registration order breaks the tie.
     from fastvideo.registry import get_default_preset
 
     warnings = _record_registry_warnings(monkeypatch)
-    model_dir = tmp_path / "ltx2-distilled"
+    model_dir = tmp_path / "ltx2_distilled_diffusers"
     _write_minimal_diffusers_repo(model_dir, "LTX2Pipeline")
 
     assert get_default_preset(str(model_dir)) == "ltx2_distilled"
     assert len(warnings) == 1
     assert "Multiple models matched" in warnings[0][0]
+    # The interpolated path (not just the format string) must be reported.
+    assert str(model_dir) in warnings[0][1]

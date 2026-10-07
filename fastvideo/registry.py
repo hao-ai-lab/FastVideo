@@ -185,11 +185,31 @@ def get_model_short_name(model_id: str) -> str:
     return model_id
 
 
+def _longest_common_substring_length(left: str, right: str) -> int:
+    """Length of the longest substring shared by ``left`` and ``right``."""
+    if not left or not right:
+        return 0
+    previous = [0] * (len(right) + 1)
+    longest = 0
+    for left_char in left:
+        current = [0] * (len(right) + 1)
+        for index, right_char in enumerate(right, start=1):
+            if left_char == right_char:
+                current[index] = previous[index - 1] + 1
+                longest = max(longest, current[index])
+        previous = current
+    return longest
+
+
 def _pattern_specificity(model_id: str, path_lower: str) -> int:
-    """Length of the longest registered HF path (short name) for ``model_id``
-    that appears in ``path_lower``, or 0 when none does."""
-    return max((len(short) for registered_path, mapped_id in _MODEL_HF_PATH_TO_NAME.items()
-                if mapped_id == model_id and (short := get_model_short_name(registered_path.lower())) in path_lower),
+    """How specifically ``path_lower`` points at ``model_id``: the longest
+    substring it shares with any of the model's registered HF paths (short
+    names). Unlike plain containment this still scores truncated or
+    re-hyphenated local directory names (e.g. ``ltx-2.3-distilled``), so a
+    dedicated entry is not shadowed by a shorter, more generic alias that
+    merely happens to appear verbatim in the query."""
+    return max((_longest_common_substring_length(path_lower, get_model_short_name(registered_path.lower()))
+                for registered_path, mapped_id in _MODEL_HF_PATH_TO_NAME.items() if mapped_id == model_id),
                default=0)
 
 
@@ -230,12 +250,12 @@ def _get_config_info(
 
     if matched_model_names:
         if len(matched_model_names) > 1:
-            # Most specific entry wins: rank matches by the longest registered
-            # HF path found in the query path, so a broad family detector
-            # (e.g. LTX-2 base firing on the shared pipeline class name) never
-            # shadows a dedicated entry (e.g. LTX-2.3 distilled). Warn only
-            # when matches are equally specific (genuine ambiguity); ties keep
-            # registration order.
+            # Most specific entry wins: rank matches by how much of the query
+            # path each entry's registered HF paths cover, so a broad family
+            # detector (e.g. LTX-2 base firing on the shared pipeline class
+            # name) never shadows a dedicated entry (e.g. LTX-2.3 distilled).
+            # Warn only when matches are equally specific (genuine ambiguity);
+            # ties keep registration order.
             path_lower = model_path.lower()
             scores = [_pattern_specificity(name, path_lower) for name in matched_model_names]
             best_score = max(scores)
