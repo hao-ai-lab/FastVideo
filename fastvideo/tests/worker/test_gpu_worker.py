@@ -87,6 +87,11 @@ def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypa
     worker = Worker(args, local_rank=3, rank=3, distributed_init_method="env://")
 
     env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
+    # init_device() also writes RANK and WORLD_SIZE for these backends. A leaked
+    # RANK reaches every later child process (the profiler names its per-rank
+    # summary after it).
+    env_overrides.enter_context(envs.override_external("RANK", None))
+    env_overrides.enter_context(envs.override_external("WORLD_SIZE", None))
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_cuda_alike", lambda: True)
     monkeypatch.setattr("fastvideo.platforms.current_platform.is_cuda", lambda: False)
     monkeypatch.setattr(torch.cuda, "set_device", lambda device: events.append(("set_device", device.index)))
