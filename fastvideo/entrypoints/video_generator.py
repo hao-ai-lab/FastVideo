@@ -901,6 +901,7 @@ class VideoGenerator:
         if not self.executor.is_output_rank:
             batch.save_video = False
             batch.return_frames = False
+            batch.return_samples = False
             batch.return_trajectory_latents = False
             batch.return_trajectory_decoded = False
             batch.return_continuation_state = False
@@ -929,17 +930,17 @@ class VideoGenerator:
         is_latent_output = fastvideo_args.output_type == "latent"
         needs_frame_output = batch.return_frames or (batch.save_video and not is_latent_output)
         # A populated ``samples`` has exactly one consumer — the result
-        # dict (``"samples": samples if batch.return_frames else None``).
+        # dict (``"samples": samples if needs_samples_out else None``).
         # Post-decode frame building reads ``output_batch.output``
         # directly (the GPU ``vid_u8`` path), not ``samples``. So when
-        # ``return_frames=False`` the pinned fp32 alloc + D->H copy are
-        # dead weight — the CLI generate flow (``save_video=True``,
+        # neither frames nor samples are requested, the pinned fp32 allocation
+        # and D->H copy are dead weight — the CLI generate flow (``save_video=True``,
         # ``return_frames=False``) hits this on every call.
         # ``output_type == "latent"`` keeps its existing branch (shape
         # mismatch falls through to ``.cpu()`` below) for callers that
         # *do* ask for the latent samples via ``return_frames=True``.
         # ``skip_pixel_prealloc`` also gates the slow-path warning.
-        needs_samples_out = batch.return_frames
+        needs_samples_out = batch.return_frames or batch.return_samples
         # ``output_shape_from_input`` pipelines (Kandinsky6 SR) decide the output geometry from the input video, so the
         # request's height / width / num_frames say nothing about the buffer to pre-allocate.
         output_shape_from_input = bool(getattr(fastvideo_args.pipeline_config, "output_shape_from_input", False))
@@ -978,7 +979,7 @@ class VideoGenerator:
         audio_only = bool(output_batch.extra.get("audio_only"))
         if not needs_samples_out:
             # Nothing downstream reads ``samples`` (the result dict
-            # returns None when ``return_frames=False``); keep the empty
+            # returns None when neither output is requested); keep the empty
             # placeholder allocated above and skip the fp32 D->H copy
             # entirely.
             pass
@@ -1132,7 +1133,7 @@ class VideoGenerator:
 
         result: dict[str, Any] = {
             "prompts": prompt,
-            "samples": samples if batch.return_frames else None,
+            "samples": samples if needs_samples_out else None,
             "frames": frames if batch.return_frames else None,
             # Audio is the primary output for audio workloads — return it
             # whenever the pipeline produced one, regardless of

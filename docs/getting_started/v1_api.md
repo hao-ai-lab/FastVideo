@@ -40,3 +40,11 @@ The following two classes `PipelineConfig` and `SamplingParam` are used to confi
       members:
         - from_pretrained
       heading_level: 4
+
+### Returning samples without previews
+
+Set `OutputConfig(return_samples=True, return_frames=False, save_video=False)`
+to receive the decoded CPU tensor in `GenerationResult.samples` without building
+preview grids or writing media. Pixel samples retain the existing float `[0, 1]`
+contract. `return_frames=True` continues to return both samples and preview frames.
+The legacy sampling/keyword interface accepts the same `return_samples` option.
