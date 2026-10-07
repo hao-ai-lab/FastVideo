@@ -708,6 +708,12 @@ FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR = EnvStr("data/kandinsky5_overfit_p
                                                       category="test",
                                                       doc="Output directory for preprocess_kandinsky5_overfit.py.",
                                                       deprecated_names=("KANDINSKY5_OVERFIT_OUTPUT_DIR", ))
+FASTVIDEO_TEST_HUNYUAN15_OVERFIT_DATA_DIR = EnvStr("data/hunyuan15_overfit",
+                                                   category="test",
+                                                   doc="Raw data directory for preprocess_hunyuan15_overfit.py.")
+FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR = EnvStr("data/hunyuan15_overfit_preprocessed",
+                                                     category="test",
+                                                     doc="Output directory for preprocess_hunyuan15_overfit.py.")
 
 # Switches and paths that only tests read. Each old name stays readable, with a
 # warning, until the next minor release.
