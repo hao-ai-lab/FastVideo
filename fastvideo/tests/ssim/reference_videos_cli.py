@@ -4,12 +4,32 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import os
 import shutil
 import sys
 import tempfile
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+from types import ModuleType
+
+
+def _load_envs_registry() -> ModuleType:
+    """Load fastvideo/envs.py as a standalone module, without importing the fastvideo package.
+
+    Importing fastvideo.envs runs fastvideo/__init__.py, which imports torch and the
+    generation stack. This CLI runs as a plain script that needs only the standard
+    library, so it loads the registry file by path.
+    """
+    registry_path = Path(__file__).resolve().parents[2] / "envs.py"
+    spec = importlib.util.spec_from_file_location("_fastvideo_envs_registry", registry_path)
+    assert spec is not None and spec.loader is not None
+    registry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(registry)
+    return registry
+
+
+envs = _load_envs_registry()
 
 VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
 # Additional artefact types stored under the same reference folders. Latent
@@ -19,9 +39,8 @@ VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv")
 LATENT_EXTENSIONS = (".pt", )
 REFERENCE_EXTENSIONS = VIDEO_EXTENSIONS + LATENT_EXTENSIONS + (".png", )
 HF_TOKEN_ENV_KEYS = ("HF_API_KEY", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN")
-HF_REPO_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO"
-HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_SSIM_REFERENCE_HF_REPO_TYPE"
-BOOTSTRAP_ENV_KEY = "FASTVIDEO_SSIM_BOOTSTRAP_MODE"
+HF_REPO_ENV_KEY = "FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO"
+HF_REPO_TYPE_ENV_KEY = "FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO_TYPE"
 
 DEFAULT_REPO_ID = "FastVideo/ssim-reference-videos"
 DEFAULT_REPO_TYPE = "dataset"
@@ -42,11 +61,11 @@ def _ssim_dir() -> Path:
 
 
 def _default_repo_id() -> str:
-    return os.environ.get(HF_REPO_ENV_KEY, DEFAULT_REPO_ID)
+    return envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO.get()
 
 
 def _default_repo_type() -> str:
-    return os.environ.get(HF_REPO_TYPE_ENV_KEY, DEFAULT_REPO_TYPE)
+    return envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO_TYPE.get()
 
 
 def _iter_reference_files(root: Path) -> Iterable[Path]:

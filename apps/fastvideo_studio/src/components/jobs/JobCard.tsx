@@ -3,11 +3,13 @@
 import * as React from 'react';
 import { Timer } from 'lucide-react';
 
+import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/hooks/useStore';
 import {
   deleteJob,
+  duplicateJob,
   downloadJobVideo,
   startJob,
   stopJob,
@@ -62,6 +64,8 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
   const isSelected = activeJobId === job.id;
 
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [isViewing, setIsViewing] = React.useState(false);
   const [currentTime, setCurrentTime] = React.useState(() => Date.now());
 
   const elapsedTime = computeElapsed(job, currentTime);
@@ -98,6 +102,21 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       onJobUpdated?.();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to stop job');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleDuplicate(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isLoading) return;
+    setIsLoading(true);
+    try {
+      await duplicateJob(job.id);
+      onJobUpdated?.();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to duplicate job');
     } finally {
       setIsLoading(false);
     }
@@ -156,16 +175,23 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
       >
         <span className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-[0.95rem] font-semibold text-foreground">
-            {job.model_id}
+            {job.name?.trim() || job.model_id}
           </span>
           <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>
             {job.status}
           </Badge>
         </span>
         <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm text-muted-foreground">
-          {job.prompt}
+          {job.name?.trim() ? `${job.model_id} · ${job.prompt}` : job.prompt}
         </span>
         <span className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+          {/* Short job id; logs and output dirs are keyed on the full UUID. */}
+          <span
+            className="font-mono text-muted-foreground/80"
+            title={job.id}
+          >
+            {job.id.slice(0, 8)}
+          </span>
           {job.job_type === 'inference' ? (
             <>
               <span>{job.num_frames} frames</span>
@@ -226,6 +252,51 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
               Download Video
             </Button>
           )}
+        {!(
+          job.status === 'pending' ||
+          job.status === 'failed' ||
+          job.status === 'stopped'
+        ) && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsViewing(true);
+            }}
+            disabled={isLoading}
+            title="View this job's configuration"
+          >
+            View
+          </Button>
+        )}
+        {(job.status === 'pending' ||
+          job.status === 'failed' ||
+          job.status === 'stopped') && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsEditing(true);
+            }}
+            disabled={isLoading}
+            title="Edit this job's configuration"
+          >
+            Edit
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleDuplicate}
+          disabled={isLoading}
+          title="Create a new pending job with this configuration"
+        >
+          Duplicate
+        </Button>
         <Button
           size="sm"
           variant="destructive"
@@ -235,6 +306,30 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           Delete
         </Button>
       </div>
+      {isViewing && (
+        <CreateJobModal
+          isOpen
+          readOnly
+          editingJob={job}
+          jobType={(job.job_type ?? 'inference') as never}
+          workloadType={job.workload_type ?? 't2v'}
+          onClose={() => setIsViewing(false)}
+          onSuccess={() => setIsViewing(false)}
+        />
+      )}
+      {isEditing && (
+        <CreateJobModal
+          isOpen
+          editingJob={job}
+          jobType={(job.job_type ?? 'inference') as never}
+          workloadType={job.workload_type ?? 't2v'}
+          onClose={() => setIsEditing(false)}
+          onSuccess={() => {
+            setIsEditing(false);
+            onJobUpdated?.();
+          }}
+        />
+      )}
     </article>
   );
 }

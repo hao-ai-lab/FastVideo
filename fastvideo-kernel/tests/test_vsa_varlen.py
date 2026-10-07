@@ -23,6 +23,20 @@ from fastvideo_kernel.block_sparse_attn import (
 from fastvideo_kernel.block_sparse_attn_varlen import block_sparse_attn_varlen
 
 
+@pytest.fixture(autouse=True)
+def _seed_rng():
+    """Pin the RNG so these cases do not depend on what ran before them.
+
+    Every tensor and every variable block size here comes from the global
+    torch RNG, and the gradient checks use a tight max_rel threshold. Without
+    a seed the inputs shift whenever an earlier test file draws a different
+    number of randoms, which surfaces as an unrelated-looking failure in
+    whichever case happens to land on unlucky data.
+    """
+    torch.manual_seed(0)
+    torch.cuda.manual_seed_all(0)
+
+
 def _reference_per_sequence(
     q_list,
     k_list,

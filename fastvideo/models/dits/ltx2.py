@@ -7,8 +7,6 @@ from dataclasses import dataclass, replace
 from enum import Enum
 import functools
 import math
-import os
-from pathlib import Path
 from typing import Any, Optional, Tuple, Callable
 
 import torch
@@ -17,6 +15,7 @@ from einops import rearrange, repeat
 
 from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.attention.layer import DistributedAttention, LocalAttention
+from fastvideo.attention.selector import effective_attention_backend
 from fastvideo.configs.models.dits import LTX2VideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather,
@@ -644,48 +643,6 @@ def _to_denoised(
     while sigma.ndim < sample.ndim:
         sigma = sigma.unsqueeze(-1)
     return (sample.to(calc_dtype) - velocity.to(calc_dtype) * sigma).to(sample.dtype)
-
-
-def _debug_block_log_line(message: str) -> None:
-    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1":
-        return
-    log_path = os.getenv("LTX2_PIPELINE_DEBUG_PATH", "")
-    if not log_path:
-        return
-    log_dir = os.path.dirname(log_path)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(message + "\n")
-
-
-def _debug_transformer_args(prefix: str, args: "TransformerArgs | None") -> None:
-    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1" or args is None:
-        return
-    pe_cos, pe_sin = args.positional_embeddings
-    cross_cos = None
-    cross_sin = None
-    if args.cross_positional_embeddings is not None:
-        cross_cos, cross_sin = args.cross_positional_embeddings
-    mask = args.context_mask
-    if mask is None:
-        mask_summary = "mask=None"
-    else:
-        finite = torch.isfinite(mask)
-        finite_sum = mask[finite].sum().item() if finite.any() else 0.0
-        mask_summary = (f"mask_min={mask.min().item():.6f} "
-                        f"mask_max={mask.max().item():.6f} "
-                        f"mask_finite_sum={finite_sum:.6f} "
-                        f"mask_finite_count={finite.sum().item()}")
-    _debug_block_log_line(f"{prefix}:x_sum={args.x.float().sum().item():.6f} "
-                          f"context_sum={args.context.float().sum().item():.6f} "
-                          f"t_sum={args.timesteps.float().sum().item():.6f} "
-                          f"emb_sum={args.embedded_timestep.float().sum().item():.6f} "
-                          f"pe_cos_sum={pe_cos.float().sum().item():.6f} "
-                          f"pe_sin_sum={pe_sin.float().sum().item():.6f} "
-                          f"cross_pe_cos_sum={(cross_cos.float().sum().item() if cross_cos is not None else 0.0):.6f} "
-                          f"cross_pe_sin_sum={(cross_sin.float().sum().item() if cross_sin is not None else 0.0):.6f} "
-                          f"{mask_summary}")
 
 
 class LTXRopeType(Enum):
@@ -2262,15 +2219,6 @@ class BasicAVTransformerBlock(torch.nn.Module):
             ax_scaled = _rms_norm_dispatch(ax, eps=self.norm_eps) * (1 + ascale_mlp) + ashift_mlp
             ax = ax + self.audio_ff(ax_scaled) * agate_mlp
 
-        # Debug-only: reading ``self.idx`` (and .item() syncs) here means
-        # enabling this env var re-specializes the compiled graph per block,
-        # defeating the shared-graph regional compilation.
-        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-            video_sum = vx.float().sum().item() if vx is not None else 0.0
-            audio_sum = ax.float().sum().item() if ax is not None else 0.0
-            _debug_block_log_line(f"fastvideo:block={self.idx}:video_sum={video_sum:.6f} "
-                                  f"audio_sum={audio_sum:.6f}")
-
         # Register FSDP2 backward hooks on output tensors (module-level hooks don't
         # fire for dataclass outputs, so we must hook the tensors directly)
         self._register_fsdp_backward_hooks_on_output(vx, ax)
@@ -2680,12 +2628,6 @@ class LTXModel(torch.nn.Module):
             skip_audio_self_attn_blocks: Block indices where audio
                 self-attention is skipped (STG perturbed pass).
         """
-        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-            _debug_block_log_line("fastvideo:patchify_proj"
-                                  f":video_w_sum={self.patchify_proj.weight.float().sum().item():.6f} "
-                                  f"video_b_sum={self.patchify_proj.bias.float().sum().item():.6f} "
-                                  f"audio_w_sum={self.audio_patchify_proj.weight.float().sum().item():.6f} "
-                                  f"audio_b_sum={self.audio_patchify_proj.bias.float().sum().item():.6f}")
         if not self.model_type.is_video_enabled() and video is not None:
             raise ValueError("Video is not enabled for this model")
         if not self.model_type.is_audio_enabled() and audio is not None:
@@ -2693,8 +2635,6 @@ class LTXModel(torch.nn.Module):
 
         video_args = self.video_args_preprocessor.prepare(video) if video is not None else None
         audio_args = self.audio_args_preprocessor.prepare(audio) if audio is not None else None
-        _debug_transformer_args("fastvideo:prep_video", video_args)
-        _debug_transformer_args("fastvideo:prep_audio", audio_args)
         video_out, audio_out = self._process_transformer_blocks(
             video_args,
             audio_args,
@@ -2735,7 +2675,7 @@ class LTX2Transformer3DModel(BaseDiT):
 
         # Get SP world size for distributed attention
         sp_world_size = get_sp_world_size()
-        use_vsa_backend = os.getenv("FASTVIDEO_ATTENTION_BACKEND", "") == "VIDEO_SPARSE_ATTN"
+        use_vsa_backend = effective_attention_backend(config) == AttentionBackendEnum.VIDEO_SPARSE_ATTN
         use_distributed_attention = sp_world_size > 1 or use_vsa_backend
 
         # Validate that attention heads are divisible by SP world size
@@ -2797,62 +2737,6 @@ class LTX2Transformer3DModel(BaseDiT):
         self.hidden_size = arch.num_attention_heads * arch.attention_head_dim
         self.num_attention_heads = arch.num_attention_heads
         self.num_channels_latents = arch.num_channels_latents
-
-        if os.getenv("LTX2_DEBUG_DETAIL", "0") == "1":
-            detail_path = os.getenv("LTX2_PIPELINE_DEBUG_DETAIL_PATH", "")
-            if detail_path:
-                self._attach_debug_detail_hooks(detail_path)
-
-    def _attach_debug_detail_hooks(self, log_path: str) -> None:
-        path = Path(log_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists():
-            path.unlink()
-
-        def _format_sum(tensor: torch.Tensor | None) -> str:
-            if tensor is None:
-                return "None"
-            return f"{tensor.float().sum().item():.6f}"
-
-        def _hook_factory(block_idx: int, name: str):
-
-            def _hook(_module, _inputs, outputs):  # noqa: ANN001
-                out = outputs[0] if isinstance(outputs, tuple) else outputs
-                out_sum = _format_sum(out if torch.is_tensor(out) else None)
-                with path.open("a", encoding="utf-8") as f:
-                    f.write(f"fastvideo:{block_idx}:{name}:out_sum={out_sum}\n")
-
-            return _hook
-
-        for block in self.model.transformer_blocks:
-            idx = block.idx
-            for name in (
-                    "attn1",
-                    "attn2",
-                    "ff",
-                    "audio_attn1",
-                    "audio_attn2",
-                    "audio_ff",
-                    "audio_to_video_attn",
-                    "video_to_audio_attn",
-            ):
-                if hasattr(block, name):
-                    getattr(block, name).register_forward_hook(_hook_factory(idx, name))
-
-        def _output_hook(label: str):
-
-            def _hook(_module, _inputs, outputs):  # noqa: ANN001
-                out = outputs[0] if isinstance(outputs, tuple) else outputs
-                out_sum = _format_sum(out if torch.is_tensor(out) else None)
-                with path.open("a", encoding="utf-8") as f:
-                    f.write(f"fastvideo:output:{label}:out_sum={out_sum}\n")
-
-            return _hook
-
-        if hasattr(self.model, "proj_out"):
-            self.model.proj_out.register_forward_hook(_output_hook("proj_out"))
-        if hasattr(self.model, "audio_proj_out"):
-            self.model.audio_proj_out.register_forward_hook(_output_hook("audio_proj_out"))
 
     def forward(
         self,
@@ -2942,17 +2826,6 @@ class LTX2Transformer3DModel(BaseDiT):
             context_mask=encoder_attention_mask,
             sigma=video_sigma,
         )
-        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-            video_head = latents.flatten()[:8].float().tolist()
-            video_flat = latents.float().flatten()
-            video_checksum = (video_flat * torch.arange(video_flat.numel(), device=video_flat.device)).sum().item()
-            _debug_block_log_line("fastvideo:modality_video"
-                                  f":latent_sum={latents.float().sum().item():.6f} "
-                                  f"latent_shape={tuple(latents.shape)} "
-                                  f"positions_sum={positions.float().sum().item():.6f} "
-                                  f"positions_shape={tuple(positions.shape)} "
-                                  f"latent_head={video_head} "
-                                  f"latent_checksum={video_checksum:.6f}")
 
         # Process audio modality if provided
         audio_modality = None
@@ -2987,17 +2860,6 @@ class LTX2Transformer3DModel(BaseDiT):
                 context_mask=audio_encoder_attention_mask,
                 sigma=audio_sigma,
             )
-            if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-                audio_head = audio_latents.flatten()[:8].float().tolist()
-                audio_flat = audio_latents.float().flatten()
-                audio_checksum = (audio_flat * torch.arange(audio_flat.numel(), device=audio_flat.device)).sum().item()
-                _debug_block_log_line("fastvideo:modality_audio"
-                                      f":latent_sum={audio_latents.float().sum().item():.6f} "
-                                      f"latent_shape={tuple(audio_latents.shape)} "
-                                      f"positions_sum={audio_positions.float().sum().item():.6f} "
-                                      f"positions_shape={tuple(audio_positions.shape)} "
-                                      f"latent_head={audio_head} "
-                                      f"latent_checksum={audio_checksum:.6f}")
 
         # Run transformer with original sequence lengths
         video_out, audio_out = self.model(
