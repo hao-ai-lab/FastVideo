@@ -577,6 +577,11 @@ FASTVIDEO_H3_VSA_FP4 = EnvBool(False,
                                category="attention",
                                doc="Run MiniMax-H3 VSA attention on the block-sparse SageAttention3 FP4 kernel "
                                "(sm_120, no-grad, single sequence-parallel rank).")
+FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
+                                            category="performance",
+                                            doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
+                                            "layout the sparse kernels read, removing their per-call transpose copy "
+                                            "of query, key and value. Bit-identical; no-grad, uncompiled CUDA only.")
 FASTVIDEO_H3_VSA_TILE_FIRST = EnvBool(False,
                                       category="attention",
                                       doc="Single-rank MiniMax-H3 VSA with one tile gather of the block input "
