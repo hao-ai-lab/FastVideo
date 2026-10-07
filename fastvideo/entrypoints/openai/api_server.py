@@ -101,8 +101,10 @@ def create_app(
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
 
+    # The MLX server passes a lightweight args namespace without an executor
+    # backend; only an explicit external-launcher request is rejected here.
     reject_external_launcher(
-        fastvideo_args.distributed_executor_backend,
+        getattr(fastvideo_args, "distributed_executor_backend", None),
         entrypoint="the OpenAI-compatible server",
     )
 
