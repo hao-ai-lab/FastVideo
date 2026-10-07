@@ -102,9 +102,11 @@ def test_wan_family_relocation_keeps_shared_registry_coverage():
 
     assert plan.encoded_lanes() == ",golden-gate,ssim,"
     assert plan.encoded_golden_tests() == "all"
+    # Every Wan-family SSIM file plus the shared-registry smoke (flux t2i).
     assert plan.encoded_ssim_tests() == (
         "test_causal_similarity.py,test_flux_t2i_similarity.py,"
-        "test_wan_i2v_similarity.py,test_wan_t2v_similarity.py")
+        "test_wan_i2v_similarity.py,test_wan_t2v_similarity.py,"
+        "test_wan_ti2v_similarity.py")
 
 
 def test_flux2_change_does_not_pull_unrelated_flux1_quality_tests():
