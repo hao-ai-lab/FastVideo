@@ -157,6 +157,14 @@ WAN_MODEL_DEFINITION_GROUPS = (
             match_any=("sfwan2.2", "sfwan2_2"),
             match_all=("i2v", ),
         ),
+        WanModelDefinition(
+            pipeline_config="WanS2V14BConfig",
+            preset="wan_s2v_14b",
+            sampling="unipc",
+            hf_model_paths=("FastVideo/Wan2.2-S2V-14B-Diffusers", ),
+            workload_types=(),
+            match_any=("s2v", ),
+        ),
     ),
 )
 
