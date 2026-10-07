@@ -7,6 +7,7 @@ import pytest
 import torch
 
 import fastvideo.envs as envs
+import fastvideo.platforms as platforms
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.worker.gpu_worker import Worker, _log_cuda_device_uuid
@@ -23,7 +24,12 @@ def test_worker_threads_dist_timeout_to_distributed_groups(monkeypatch, env_over
     # init_device() writes LOCAL_RANK; restore it after the test.
     env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
     monkeypatch.setattr("fastvideo.worker.gpu_worker.get_local_torch_device", lambda: torch.device("cpu"))
-    monkeypatch.setattr("fastvideo.platforms.current_platform",
+    # Fake the platform behind fastvideo.platforms.current_platform, the seam the
+    # attention-selector tests use. Patching current_platform itself would fetch
+    # it through the module's __getattr__, and monkeypatch's undo would then pin
+    # the real platform as a module attribute that hides every later
+    # _current_platform fake for the rest of the session.
+    monkeypatch.setattr(platforms, "_current_platform",
                         SimpleNamespace(is_mps=lambda: False,
                                         is_cuda_alike=lambda: False,
                                         is_cuda=lambda: False,

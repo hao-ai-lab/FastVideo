@@ -13,11 +13,13 @@ the in-process pieces:
 """
 from __future__ import annotations
 
+import os
 import queue
 import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+import fastvideo.envs as envs
 from fastvideo.api.schema import (
     ContinuationState,
     GeneratorConfig,
@@ -93,7 +95,12 @@ class TestExtractContinuationState:
         assert _extract_continuation_state(object()) is None
 
 
-def test_worker_rejects_external_launcher_before_generator_construction() -> None:
+def test_worker_rejects_external_launcher_before_generator_construction(env_overrides) -> None:
+    # worker_main() pins CUDA_VISIBLE_DEVICES for the worker process it normally
+    # runs in. Here it runs in the pytest process, so restore the test
+    # process's value afterwards.
+    env_overrides.enter_context(envs.override_external("CUDA_VISIBLE_DEVICES",
+                                                       os.environ.get("CUDA_VISIBLE_DEVICES")))
     result_queue: queue.Queue = queue.Queue()
     config = GeneratorConfig(model_path="/models/fake")
     config.engine.execution_backend = "external_launcher"
