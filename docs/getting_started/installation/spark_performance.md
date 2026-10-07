@@ -83,7 +83,9 @@ The GB10 has **no separate VRAM** — CPU and GPU share one 128 GB LPDDR5X pool
   own `peak_memory_mb` (reported on the generation result and by the performance
   benchmark), which is measured inside the worker that runs the model. It is the
   worker's allocator high-water mark, never reset between generations, so it
-  includes model load and every prior run rather than a single run's delta.
+  includes model load and every prior run rather than a single run's delta. The
+  `mp` backend populates it; the Ray backend leaves `peak_memory_mb` unset, so
+  `--execution-backend ray` prints no peak-memory figure.
 - **The 128 GB is a *working-set* ceiling, not storage** — the model cache lives
   on the NVMe (3.7 TB, ample). What has to fit in 128 GB is the weights,
   activations, and KV cache — and, critically, the **VAE decode buffers**, which
