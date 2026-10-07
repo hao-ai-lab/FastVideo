@@ -29,6 +29,7 @@ from dreamverse.av_streaming import (
     generate_stream_id,
     stream_fmp4,
 )
+from dreamverse.generation_inputs import GenerationInputs, pin_generation_inputs, release_generation_inputs
 from dreamverse.worker_ipc import (
     CommandPayload,
     InitAck,
@@ -189,6 +190,7 @@ def gpu_worker_process(
                         segment_idx,
                         image_path=payload.image_path,
                         reset_conditioning=payload.reset_conditioning,
+                        generation_inputs=payload.generation_inputs,
                     )
                     head_trim_frames = step_result.head_trim_frames
                     head_trim_audio_frames = step_result.head_trim_audio_frames
@@ -432,6 +434,7 @@ class GPUSlot:
         self.connected_users: set[str] = set()
         self._pending_futures: dict[str, asyncio.Future] = {}
         self._stream_queues: dict[str, asyncio.Queue] = {}
+        self._step_asset_inputs: dict[str, GenerationInputs] = {}
         self._response_reader_task: asyncio.Task | None = None
         self._active: bool = False
         self._reader_lock: asyncio.Lock | None = None
@@ -663,6 +666,9 @@ class GPUSlot:
                 if isinstance(event, (StepComplete, WarmupComplete)):
                     event.timings["ipc_get_done_ns"] = time.time_ns()
 
+                if isinstance(event, (StepComplete, WorkerError)) and event.user_id is not None:
+                    self._release_step_assets(event.user_id)
+
                 user_id = event.user_id
                 if user_id and user_id in self._pending_futures:
                     future = self._pending_futures.pop(user_id)
@@ -753,6 +759,7 @@ class GPUSlot:
         segment_idx: int = 1,
         image_path: str | None = None,
         reset_conditioning: bool = False,
+        generation_inputs: GenerationInputs | None = None,
     ) -> dict[str, float]:
         """Execute a generation step for a specific user.
 
@@ -766,9 +773,19 @@ class GPUSlot:
             segment_idx=segment_idx,
             image_path=image_path,
             reset_conditioning=bool(reset_conditioning),
+            generation_inputs=generation_inputs,
         )
+        if generation_inputs is not None:
+            if user_id in self._step_asset_inputs:
+                raise RuntimeError("The previous generation is still using this project's assets.")
+            pin_generation_inputs(generation_inputs)
+            self._step_asset_inputs[user_id] = generation_inputs
+        # Pins intentionally survive a waiter timeout/cancellation: the GPU
+        # command keeps running. The response reader releases them when the
+        # worker actually completes (even if that response is now unmatched).
         response = await self._send_command_tagged(Command(CommandType.USER_STEP, payload=payload, user_id=user_id),
                                                    timeout=1800.0)
+        self._release_step_assets(user_id)
         match response:
             case StepComplete(timings=timings):
                 return timings
@@ -777,6 +794,11 @@ class GPUSlot:
             case _:
                 raise RuntimeError(f"Unexpected step response for {user_id[:8]}: "
                                    f"{type(response).__name__}")
+
+    def _release_step_assets(self, user_id: str) -> None:
+        inputs = self._step_asset_inputs.pop(user_id, None)
+        if inputs is not None:
+            release_generation_inputs(inputs)
 
     async def apply_lora_stack(
         self,
@@ -800,7 +822,9 @@ class GPUSlot:
     async def leave_user(self, user_id: str) -> None:
         """Remove a user from this GPU."""
         try:
-            await self._send_command_tagged(Command(CommandType.USER_LEAVE, user_id=user_id), timeout=30.0)
+            response = await self._send_command_tagged(Command(CommandType.USER_LEAVE, user_id=user_id), timeout=30.0)
+            if isinstance(response, LeaveAck):
+                self._release_step_assets(user_id)
         except Exception as e:
             print(f"[GPU {self.gpu_id}] Leave user error: {e}")
         finally:
@@ -836,6 +860,10 @@ class GPUSlot:
                     self.process.join(timeout=1)
                 except Exception:
                     pass
+
+        if self.process is None or not self.process.is_alive():
+            for user_id in list(self._step_asset_inputs):
+                self._release_step_assets(user_id)
 
         for q in (self.command_queue, self.response_queue):
             if q is not None:
