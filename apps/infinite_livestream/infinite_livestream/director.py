@@ -322,8 +322,8 @@ class Director:
                         "author": group.author,
                         "source": group.source,
                         "generated": group.generated,
-                        # Truncated so the whole blob stays well under fast-h3's
-                        # 2000-char metadata cap.
+                        # Truncated so the blob stays small in the app's own
+                        # clip records; no FastVideo schema caps it.
                         "raw_prompt": group.raw_prompt[:400],
                     },
                     ensure_ascii=False,

@@ -115,7 +115,7 @@ async def serve(config: Config) -> None:
     if config.idle_queue_target > 0:
         tasks.append(asyncio.create_task(director.run_idle(), name="idle-filler"))
     else:
-        logger.info("idle filler off (IDLE_QUEUE_TARGET=0)")
+        logger.info("idle filler off (director.idle_queue_target=0)")
 
     logger.info("streaming %dx%d@%dfps, %d idle prompts, chat command %r, page on http://%s:%d", width, height,
                 MODEL_FPS, len(config.idle_prompts), config.chat_command, config.web_host, config.web_port)

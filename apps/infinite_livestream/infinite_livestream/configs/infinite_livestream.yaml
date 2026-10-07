@@ -11,9 +11,9 @@
 inference:
   # The canvas every clip is generated at. 16:9 resolves to 1344x768.
   aspect: "16:9"
-  # The longest clip this checkpoint can make (345 frames at 24 fps). One
+  # The longest clip this checkpoint can make (362 frames at 24 fps). One
   # length everywhere means one compiled shape.
-  clip_seconds: 14.375
+  clip_seconds: 15.083
   # Built clips held in host memory awaiting playout; each holds a full
   # decoded clip, so this is also the memory budget.
   queue_size: 10

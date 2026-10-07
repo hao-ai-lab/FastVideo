@@ -55,11 +55,11 @@ _PROCESS_EXIT_TIMEOUT_S = 2.0
 _WRITER_EXIT_TIMEOUT_S = 2.0
 
 # Writer-queue depth. Not latency -- the pacer governs the rate -- only
-# headroom for the seconds x264 spends starting up. Video gets more because a
-# video entry is a whole raw frame (3.1 MB at 1344x768) against 4 KB of audio,
-# so it is the only queue that ever overflows.
-_QUEUE_SECONDS = 2.0
-_VIDEO_QUEUE_SECONDS = 8.0
+# headroom for the seconds x264 spends starting up. Both pipes take exactly one
+# entry per pacer tick, so a stall fills them at the same rate: equal depths
+# make them shed together, and an entry shed on one pipe and not the other is
+# permanent A/V skew.
+_QUEUE_SECONDS = 8.0
 
 # Let ffmpeg open its encoder before the first frame. Without it the pacer
 # pushes 24 fps of raw frames into a process that is not reading yet, and the
@@ -210,7 +210,7 @@ class HlsSink:
     async def start(self, video: VideoFormat, audio: AudioFormat) -> None:
         self._video = video
         self._audio = audio
-        self._video_writer = _PipeWriter("video", maxsize=int(video.fps * _VIDEO_QUEUE_SECONDS))
+        self._video_writer = _PipeWriter("video", maxsize=int(video.fps * _QUEUE_SECONDS))
         self._audio_writer = _PipeWriter("audio", maxsize=int(video.fps * _QUEUE_SECONDS))
         self._video_writer.start()
         self._audio_writer.start()

@@ -139,6 +139,12 @@ def test_dreamverse_change_relies_on_its_existing_fastcheck_e2e_lane():
     assert plan.encoded_lanes() == ",none,"
 
 
+def test_infinite_livestream_change_relies_on_the_unit_fastcheck_lane():
+    plan = PLAN_MERGE_CI.classify_paths(["apps/infinite_livestream/infinite_livestream/sink.py"])
+
+    assert plan.encoded_lanes() == ",none,"
+
+
 def test_local_only_parity_scaffold_does_not_trigger_unrelated_gpu_lanes():
     plan = PLAN_MERGE_CI.classify_paths(["tests/local_tests/flux/test_flux_dev_component_loaders.py"])
 

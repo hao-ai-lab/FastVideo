@@ -71,7 +71,7 @@ def test_imports_without_a_gpu(module: str) -> None:
         [sys.executable, "-c", probe],
         capture_output=True,
         text=True,
-        cwd=PACKAGE.parents[1],
+        cwd=PACKAGE.parent,
     )
     assert result.returncode == 0, f"{module} failed to import:\n{result.stderr}"
     leaked = result.stdout.strip()

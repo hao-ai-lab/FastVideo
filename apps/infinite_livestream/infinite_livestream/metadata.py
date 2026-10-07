@@ -15,7 +15,8 @@ def clip_view(clip: dict[str, Any]) -> dict[str, Any]:
     """One queue entry, flattened for the page.
 
     Everything here comes from the clip's own `ClipInfo` plus the group tag the
-    director wrote into its metadata, which the model echoes untouched.
+    director wrote into its metadata, which the app's own engine echoes
+    untouched -- FastVideo's `GenerationRequest` has no metadata field.
     """
     tag = parse_group_tag(clip.get("metadata", "")) or {}
     # `prompt` is the upsampler's rewrite; the group tag keeps what the viewer

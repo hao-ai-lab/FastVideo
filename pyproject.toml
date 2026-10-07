@@ -151,6 +151,9 @@ lint = [
 
 test = [
     "av",
+    # The livestream app's tests import `openai` through its moderator and
+    # upsampler, and the unit lane collects them.
+    "openai>=1.40",
     "pytorch-msssim>=1.0.0",
     "pytest",
     "pandas",

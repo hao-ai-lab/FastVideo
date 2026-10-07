@@ -82,7 +82,7 @@ def test_accepted_prompt_reaches_generation_queue(app_config, monkeypatch, scene
             assert all(tag["scenes"] == scene_count and tag["author"] == "ada"
                        and tag["raw_prompt"] == "a lighthouse keeper" and not tag["generated"] for tag in tags)
             if scene_count == 1:
-                assert clips[1]["frames"] == 345, "single scenes must use the maximum clip length"
+                assert clips[1]["frames"] == 362, "single scenes must use the maximum clip length"
             assert [c["clip_id"] for c in web.state.generation] == [c["clip_id"] for c in clips]
             assert all(c["prompt"] == "a lighthouse keeper" for c in web.state.generation[1:-1])
             assert [name for name, _ in provider_calls] == ["moderation", "rewrite"]

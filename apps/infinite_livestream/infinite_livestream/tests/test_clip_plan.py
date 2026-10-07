@@ -33,6 +33,9 @@ def test_constants_match_upstream() -> None:
     assert clip_plan._LATENTS_PER_CHUNK == packing.MINIMAX_H3_LATENTS_PER_CHUNK
     assert clip_plan._MIN_ASPECT == packing.MINIMAX_H3_MIN_ASPECT_RATIO
     assert clip_plan._MAX_ASPECT == packing.MINIMAX_H3_MAX_ASPECT_RATIO
+    # The ceiling is derived rather than a constant, so pin it to upstream's
+    # largest accepted bucket: the cap applies to the aligned frames.
+    assert clip_plan.MAX_FRAMES == packing.MINIMAX_H3_MAX_ALIGNED_FRAMES
 
 
 def test_every_legal_length_round_trips() -> None:
@@ -60,9 +63,9 @@ def test_published_range_is_generatable() -> None:
 
 
 def test_max_frames_respects_the_duration_cap() -> None:
-    """The ceiling is the subtle one: 15.0s aligns up to 362f, which is illegal."""
-    assert clip_plan.MAX_FRAMES == 345
-    assert clip_plan.seconds_for_frames(clip_plan.MAX_FRAMES) <= clip_plan._MAX_DURATION
+    """The ceiling is the subtle one: the cap applies to the aligned bucket."""
+    assert clip_plan.MAX_FRAMES == 362
+    assert clip_plan.seconds_for_frames(clip_plan.MAX_FRAMES) > clip_plan._MAX_DURATION
     assert clip_plan.align_frames(clip_plan.MAX_FRAMES + 1) / clip_plan.FPS > clip_plan._MAX_DURATION
 
 

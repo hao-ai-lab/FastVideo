@@ -27,7 +27,8 @@ FPS = 24
 _FRAMES_PER_CHUNK = 17
 _LATENTS_PER_CHUNK = 5
 
-# The checkpoint's trained duration window, in seconds.
+# The checkpoint's trained duration window, in seconds. The cap applies to the
+# requested length; the aligned bucket it rounds to is what gets generated.
 _MIN_DURATION = 5.0
 _MAX_DURATION = 15.0
 
@@ -52,17 +53,11 @@ def align_frames(frames: int) -> int:
 def _bounds() -> tuple[int, int]:
     """The shortest and longest clip that satisfies both alignment and duration.
 
-    The ceiling is the subtle one: 15.0 s is 360 frames, which aligns *up* to
-    362 (15.083 s) and is then rejected for exceeding the duration cap. So the
-    longest clip this checkpoint will actually generate is 345 frames.
+    The ceiling is the subtle one: the cap applies to the aligned bucket, not to
+    the requested length, so 15.0 s (360 frames) pads *up* to 362 -- 15.083 s of
+    playout -- and that is the longest clip this checkpoint will generate.
     """
-    low = align_frames(int(_MIN_DURATION * FPS))
-    high = low
-    while True:
-        nxt = align_frames(high + 1)
-        if nxt / FPS > _MAX_DURATION:
-            return low, high
-        high = nxt
+    return align_frames(int(_MIN_DURATION * FPS)), align_frames(int(_MAX_DURATION * FPS))
 
 
 MIN_FRAMES, MAX_FRAMES = _bounds()

@@ -159,9 +159,9 @@ API keys and the machine's weights path stay in the environment:
 ## Clip geometry
 
 Clip geometry is fixed by the checkpoint: 24 fps, frame counts of the form
-`17n + 5`, lengths between 5 and 15 seconds, and a 768 pixel short edge.
-`inference.clip_seconds: 14.375` is the longest clip it can produce, at 345
-frames.
+`17n + 5`, a 5 to 15 second duration window, and a 768 pixel short edge.
+`inference.clip_seconds: 15.083` is the longest clip it can produce, at 362
+frames (15.0 s rounds up to the next valid length).
 
 Keeping one clip length means one compiled shape. Setting
 `inference.warmup_lengths: all` warms every legal length instead, which makes
