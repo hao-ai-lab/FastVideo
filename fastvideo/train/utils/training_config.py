@@ -95,9 +95,12 @@ class ModelTrainingConfig:
     precondition_outputs: bool = False
     moba_config: dict = field(default_factory=dict)
     enable_gradient_checkpointing_type: str | None = None
+    # Loader-level regional compile of the repeated DiT blocks.
+    enable_torch_compile: bool = False
     # Compile the model adapter's tensor-only training forward. This is
     # separate from loader-level model compilation and defaults off.
     compile_train_fn: bool = False
+    # torch.compile kwargs shared by both compile options above.
     torch_compile_kwargs: dict = field(default_factory=dict)
 
 

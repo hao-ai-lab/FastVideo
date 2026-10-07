@@ -108,6 +108,10 @@ def _flash_attn_cute_forward(
         softcap=0.0,
         num_splits=1,
         pack_gqa=None,
+        # AOTAutograd executes its compiled forward with detached primals, so
+        # FA4 cannot infer from ``requires_grad`` that backward will need LSE.
+        # Keep the auxiliary tensor explicit in the custom-op contract.
+        return_lse=True,
     )[:2]
     return out, lse
 
@@ -132,9 +136,58 @@ def _flash_attn_cute_setup_context(ctx: torch.autograd.function.FunctionCtx, inp
     q, k, v, softmax_scale, causal, deterministic = inputs
     out, lse = output
     ctx.save_for_backward(q, k, v, out, lse)
+    ctx.mark_non_differentiable(lse)
     ctx.softmax_scale = softmax_scale
     ctx.causal = causal
     ctx.deterministic = deterministic
+
+
+@torch.library.custom_op(
+    "fastvideo::_flash_attn_cute_backward",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _flash_attn_cute_backward_op(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    out: torch.Tensor,
+    grad_out: torch.Tensor,
+    lse: torch.Tensor,
+    softmax_scale: float | None,
+    causal: bool,
+    deterministic: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    return _flash_attn_bwd(
+        q,
+        k,
+        v,
+        out,
+        grad_out,
+        lse,
+        softmax_scale=softmax_scale,
+        causal=causal,
+        softcap=0.0,
+        window_size_left=None,
+        window_size_right=None,
+        deterministic=deterministic,
+    )
+
+
+@torch.library.register_fake("fastvideo::_flash_attn_cute_backward")
+def _flash_attn_cute_backward_fake(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    out: torch.Tensor,
+    grad_out: torch.Tensor,
+    lse: torch.Tensor,
+    softmax_scale: float | None,
+    causal: bool,
+    deterministic: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    del out, grad_out, lse, softmax_scale, causal, deterministic
+    return torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
 
 
 def _flash_attn_cute_backward(
@@ -144,19 +197,16 @@ def _flash_attn_cute_backward(
 ):
     del grad_lse
     q, k, v, out, lse = ctx.saved_tensors
-    dq, dk, dv = _flash_attn_bwd(
+    dq, dk, dv = torch.ops.fastvideo._flash_attn_cute_backward(
         q,
         k,
         v,
         out,
         grad_out,
         lse,
-        softmax_scale=ctx.softmax_scale,
-        causal=ctx.causal,
-        softcap=0.0,
-        window_size_left=None,
-        window_size_right=None,
-        deterministic=ctx.deterministic,
+        ctx.softmax_scale,
+        ctx.causal,
+        ctx.deterministic,
     )
     return dq, dk, dv, None, None, None
 
@@ -200,6 +250,7 @@ def _flash_attn_cute_varlen_forward(
         softcap=0.0,
         num_splits=1,
         pack_gqa=None,
+        return_lse=True,
     )[:2]
     return out, lse
 
@@ -241,11 +292,73 @@ def _flash_attn_cute_varlen_setup_context(ctx: torch.autograd.function.FunctionC
     ) = inputs
     out, lse = output
     ctx.save_for_backward(q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k)
+    ctx.mark_non_differentiable(lse)
     ctx.max_seqlen_q = max_seqlen_q
     ctx.max_seqlen_k = max_seqlen_k
     ctx.softmax_scale = softmax_scale
     ctx.causal = causal
     ctx.deterministic = deterministic
+
+
+@torch.library.custom_op(
+    "fastvideo::_flash_attn_cute_varlen_backward",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _flash_attn_cute_varlen_backward_op(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    out: torch.Tensor,
+    grad_out: torch.Tensor,
+    lse: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    softmax_scale: float | None,
+    causal: bool,
+    deterministic: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    return _flash_attn_bwd(
+        q,
+        k,
+        v,
+        out,
+        grad_out,
+        lse,
+        softmax_scale=softmax_scale,
+        causal=causal,
+        softcap=0.0,
+        window_size_left=None,
+        window_size_right=None,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+        deterministic=deterministic,
+    )
+
+
+@torch.library.register_fake("fastvideo::_flash_attn_cute_varlen_backward")
+def _flash_attn_cute_varlen_backward_fake(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    out: torch.Tensor,
+    grad_out: torch.Tensor,
+    lse: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    cu_seqlens_k: torch.Tensor,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    softmax_scale: float | None,
+    causal: bool,
+    deterministic: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    del out, grad_out, lse, cu_seqlens_q, cu_seqlens_k
+    del max_seqlen_q, max_seqlen_k, softmax_scale, causal, deterministic
+    return torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
 
 
 def _flash_attn_cute_varlen_backward(
@@ -255,23 +368,20 @@ def _flash_attn_cute_varlen_backward(
 ):
     del grad_lse
     q, k, v, out, lse, cu_seqlens_q, cu_seqlens_k = ctx.saved_tensors
-    dq, dk, dv = _flash_attn_bwd(
+    dq, dk, dv = torch.ops.fastvideo._flash_attn_cute_varlen_backward(
         q,
         k,
         v,
         out,
         grad_out,
         lse,
-        softmax_scale=ctx.softmax_scale,
-        causal=ctx.causal,
-        softcap=0.0,
-        window_size_left=None,
-        window_size_right=None,
-        cu_seqlens_q=cu_seqlens_q,
-        cu_seqlens_k=cu_seqlens_k,
-        max_seqlen_q=ctx.max_seqlen_q,
-        max_seqlen_k=ctx.max_seqlen_k,
-        deterministic=ctx.deterministic,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        ctx.max_seqlen_q,
+        ctx.max_seqlen_k,
+        ctx.softmax_scale,
+        ctx.causal,
+        ctx.deterministic,
     )
     return dq, dk, dv, None, None, None, None, None, None, None
 

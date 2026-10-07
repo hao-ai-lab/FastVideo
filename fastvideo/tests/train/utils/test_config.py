@@ -92,6 +92,7 @@ def test_minimal_yaml_applies_all_defaults(tmp_path: Path) -> None:
     assert t.model.weighting_scheme == "uniform"
     assert t.model.precondition_outputs is False
     assert t.model.moba_config == {}
+    assert t.model.enable_torch_compile is False
     assert t.model.compile_train_fn is False
     assert t.model.torch_compile_kwargs == {}
 
@@ -160,6 +161,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
             "logit_mean": 0.5,
             "logit_std": 1.5,
             "precondition_outputs": True,
+            "enable_torch_compile": True,
             "compile_train_fn": True,
             "torch_compile_kwargs": {
                 "backend": "eager",
@@ -205,6 +207,7 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
     assert t.vsa_sparsity == pytest.approx(0.5)
     assert t.model.weighting_scheme == "logit_normal"
     assert t.model.precondition_outputs is True
+    assert t.model.enable_torch_compile is True
     assert t.model.compile_train_fn is True
     assert t.model.torch_compile_kwargs == {
         "backend": "eager",

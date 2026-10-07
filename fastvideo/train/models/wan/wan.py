@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+from functools import partial
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
@@ -135,6 +136,14 @@ class WanModel(ModelBase):
         transformer_override_safetensor: str | None = None,
         attention_backend: AttentionBackendEnum | str | None = None,
     ) -> torch.nn.Module:
+        # Checkpoint the blocks before FSDP wraps them. __init__ already
+        # resolved the type against training.model.
+        pre_fsdp_transform = None
+        if trainable and enable_gradient_checkpointing_type:
+            pre_fsdp_transform = partial(
+                apply_activation_checkpointing,
+                checkpointing_type=enable_gradient_checkpointing_type,
+            )
         transformer = load_module_from_path(
             model_path=init_from,
             module_type="transformer",
@@ -143,12 +152,8 @@ class WanModel(ModelBase):
             override_transformer_cls_name=(self._transformer_cls_name),
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=attention_backend,
+            pre_fsdp_transform=pre_fsdp_transform,
         )
-        if trainable and enable_gradient_checkpointing_type:
-            transformer = apply_activation_checkpointing(
-                transformer,
-                checkpointing_type=enable_gradient_checkpointing_type,
-            )
         if self._enable_lora_if_configured(transformer):
             return transformer
         transformer = apply_trainable(transformer, trainable=trainable)
