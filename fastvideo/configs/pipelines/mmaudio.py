@@ -51,6 +51,8 @@ class MMAudioV2AConfig(PipelineConfig):
     # supports other durations, although quality can drop far away from the
     # eight-second training duration.
     duration_s: float = 8.0
+    # ``None`` means no hard cap; set it to reject requests beyond the
+    # checkpoint's validated maximum.
     max_audio_duration_s: float | None = None
     sampling_rate: int = 44100
     spectrogram_frame_rate: int = 512
@@ -67,6 +69,8 @@ class MMAudioV2AConfig(PipelineConfig):
 
     num_inference_steps: int = 25
     guidance_scale: float = 4.5
+    # Inherited from ``PipelineConfig``; MMAudio decodes audio through its own
+    # stage, so the video-VAE paths that read these are not exercised.
     vae_tiling: bool = False
     vae_sp: bool = False
 
@@ -76,12 +80,10 @@ class MMAudioSmall16kV2AConfig(MMAudioV2AConfig):
     """Official small 16 kHz MMAudio inference configuration."""
 
     dit_config: DiTConfig = field(default_factory=lambda: get_mmaudio_transformer_config("small_16k"))
-    audio_decoder_config: ModelConfig = field(default_factory=lambda: MMAudioVAEConfig(arch_config=MMAudioVAEArchConfig(
-        mode="16k",
-        data_dim=80,
-        embed_dim=20,
-        hidden_dim=384,
-    )))
+    # ``MMAudioVAEArchConfig.mode`` is the single source of truth for the VAE
+    # shapes; ``MMAudioVAE`` re-derives them from it.
+    audio_decoder_config: ModelConfig = field(
+        default_factory=lambda: MMAudioVAEConfig(arch_config=MMAudioVAEArchConfig(mode="16k", )))
     vocoder_config: ModelConfig = field(default_factory=lambda: BigVGANV2Config(arch_config=BigVGANV2ArchConfig(
         sample_rate=16000,
         num_mels=80,

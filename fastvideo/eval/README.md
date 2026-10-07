@@ -114,6 +114,13 @@ pairs. Per-sample attachments (`text_prompt(s)`, `fps`,
 `auxiliary_info`, `extras=`) attach by kwarg; `extract_audio=True` pulls
 audio tracks off video sources for audio metrics.
 
+Samples whose `video` is a path (or a `Video` without frames) are decoded in
+the worker that picks them up. When the caller did not attach `fps`, the pool
+probes the container's frame rate and attaches it as `sample["fps"]` so
+fps-aware metrics see real timing; an explicit `fps` (for example `--fps` on
+`fastvideo eval run`) always wins and skips the probe. Scores recorded before
+this probe existed can therefore shift unless `--fps` is passed.
+
 `evaluate` also accepts a pre-loaded `(T, C, H, W)` tensor or a path
 string under `video` / `reference`. Paths are decoded inside the worker
 that picks up the sample, so peak memory stays bounded by `num_gpus`

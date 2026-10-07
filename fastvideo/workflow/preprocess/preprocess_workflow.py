@@ -118,8 +118,7 @@ class PreprocessWorkflow(WorkflowBase):
             from fastvideo.workflow.preprocess.preprocess_workflow_i2v import (PreprocessWorkflowI2V)
             return cast(PreprocessWorkflow, PreprocessWorkflowI2V)
         elif fastvideo_args.workload_type == WorkloadType.V2A:
-            from fastvideo.workflow.preprocess.preprocess_workflow_v2a import (
-                PreprocessWorkflowV2A)
+            from fastvideo.workflow.preprocess.preprocess_workflow_v2a import (PreprocessWorkflowV2A)
             return cast(PreprocessWorkflow, PreprocessWorkflowV2A)
         else:
             raise ValueError(

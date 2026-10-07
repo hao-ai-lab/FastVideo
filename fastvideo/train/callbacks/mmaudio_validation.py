@@ -40,9 +40,33 @@ def _global_inference_indices(
     ]
 
 
+def _inference_sample_index(
+    global_index: int | None,
+    local_index: int,
+    available: int,
+) -> int:
+    """Wrap an assigned global sample onto a row of this rank's feature batch.
+
+    ``available`` is the per-rank validation batch size, which is usually
+    smaller than the global sample budget.
+    """
+    return (global_index if global_index is not None else local_index) % available
+
+
 def _safe_sample_name(value: str) -> str:
     value = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
     return value or "sample"
+
+
+class _IgnoredComponent:
+    """Placeholder for a required pipeline module that is never dereferenced.
+
+    ``MMAudioPipeline`` requires the CLIP text/vision and Synchformer encoders,
+    but its direct-feature conditioning path returns before touching them.
+    """
+
+    def __repr__(self) -> str:
+        return "<ignored component>"
 
 
 class MMAudioValidationCallback(Callback):
@@ -242,7 +266,7 @@ class MMAudioValidationCallback(Callback):
             return self._pipeline
         from fastvideo.pipelines.basic.mmaudio import MMAudioPipeline
 
-        ignored_component = object()
+        ignored_component = _IgnoredComponent()
         self._pipeline = MMAudioPipeline.from_pretrained(
             self.inference_model_path,
             inference_mode=True,
@@ -264,6 +288,10 @@ class MMAudioValidationCallback(Callback):
             vae_cpu_offload=False,
         )
         self._pipeline.fastvideo_args.pipeline_config = self.training_config.pipeline_config
+        for module_name in ("text_encoder", "tokenizer", "image_encoder", "image_encoder_2"):
+            module = self._pipeline.get_module(module_name)
+            assert isinstance(module,
+                              _IgnoredComponent), (f"MMAudio validation placeholder for {module_name} was not used")
         return self._pipeline
 
     @torch.inference_mode()
@@ -298,7 +326,7 @@ class MMAudioValidationCallback(Callback):
             # Every FSDP rank must execute the same number of forwards. Ranks
             # outside a non-divisible global budget run one padded call but do
             # not save it.
-            sample_index = local_index % available
+            sample_index = _inference_sample_index(global_index, local_index, available)
             output_index = (global_index if global_index is not None else self.inference_num_samples + self._rank)
             batch = ForwardBatch(
                 data_type="video",

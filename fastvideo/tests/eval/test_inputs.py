@@ -57,6 +57,28 @@ def test_samples_from_manifest_rejects_empty_manifest(tmp_path):
         samples_from_manifest(manifest)
 
 
+def test_video_pool_keeps_explicit_fps_over_probe(monkeypatch):
+    frames = torch.zeros(2, 3, 4, 4)
+    probes = []
+
+    def _probe(source):
+        probes.append(source)
+        return 29.97
+
+    monkeypatch.setattr("fastvideo.eval.io.video.probe_video_fps", _probe)
+    monkeypatch.setattr(
+        "fastvideo.eval.io.video.load_video",
+        lambda _source: frames,
+    )
+    video = Video(source="sample.mp4")
+
+    decoded = VideoPool([])._decode({"video": video, "fps": 8.0})
+
+    assert decoded["fps"] == pytest.approx(8.0)
+    assert probes == []
+    assert decoded["video"].frames is frames
+
+
 def test_video_pool_propagates_path_video_fps(monkeypatch):
     frames = torch.zeros(2, 3, 4, 4)
     monkeypatch.setattr(

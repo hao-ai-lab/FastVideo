@@ -68,11 +68,8 @@ class _PipelineRegistry:
         # Existing T2V/I2V integrations retain their exact workload-level
         # lookup. New V2A families may define different feature contracts and
         # therefore use a family-specific preprocessing class.
-        if (workload_type is WorkloadType.V2A
-                and pipeline_name_in_config.endswith("Pipeline")):
-            family_pipeline_name = (
-                pipeline_name_in_config.removesuffix("Pipeline")
-                + "PreprocessPipeline")
+        if (workload_type is WorkloadType.V2A and pipeline_name_in_config.endswith("Pipeline")):
+            family_pipeline_name = (pipeline_name_in_config.removesuffix("Pipeline") + "PreprocessPipeline")
             family_pipeline = pipelines.get(family_pipeline_name)
             if family_pipeline is not None:
                 return family_pipeline
