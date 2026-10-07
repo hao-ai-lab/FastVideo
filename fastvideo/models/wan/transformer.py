@@ -327,7 +327,8 @@ class WanTransformerBlock(nn.Module):
                                                                         eps=eps,
                                                                         elementwise_affine=True,
                                                                         dtype=torch.float32,
-                                                                        compute_dtype=torch.float32)
+                                                                        compute_dtype=torch.float32,
+                                                                        fuse_inference=True)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -351,7 +352,8 @@ class WanTransformerBlock(nn.Module):
                                                                          eps=eps,
                                                                          elementwise_affine=False,
                                                                          dtype=torch.float32,
-                                                                         compute_dtype=torch.float32)
+                                                                         compute_dtype=torch.float32,
+                                                                         fuse_inference=True)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
@@ -416,9 +418,10 @@ class WanTransformerBlock(nn.Module):
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa,
-                                                                         null_shift, null_scale)
+        # Norm-only site: shift/scale=None skips the identity modulation
+        # (normalized * 1.0 + 0) that two full-tensor passes used to compute.
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa, None,
+                                                                         None)
         norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
@@ -486,7 +489,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                                                         eps=eps,
                                                                         elementwise_affine=True,
                                                                         dtype=torch.float32,
-                                                                        compute_dtype=torch.float32)
+                                                                        compute_dtype=torch.float32,
+                                                                        fuse_inference=True)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -510,7 +514,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                                                          eps=eps,
                                                                          elementwise_affine=False,
                                                                          dtype=torch.float32,
-                                                                         compute_dtype=torch.float32)
+                                                                         compute_dtype=torch.float32,
+                                                                         fuse_inference=True)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
@@ -564,9 +569,10 @@ class WanTransformerBlock_VSA(nn.Module):
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa,
-                                                                         null_shift, null_scale)
+        # Norm-only site: shift/scale=None skips the identity modulation
+        # (normalized * 1.0 + 0) that two full-tensor passes used to compute.
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa, None,
+                                                                         None)
         norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
