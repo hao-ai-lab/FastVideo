@@ -1,14 +1,14 @@
 # Local Tests
 
-Local-only parity, smoke, and component tests for FastVideo model ports. They
-compare FastVideo against the official reference implementations and are
-**skipped in CI**; run them locally on a single GPU (or CPU where noted).
+Local-only parity, smoke, component, and developer-facing behavior tests for
+FastVideo. They cover model ports and supporting tooling and are **skipped in
+CI**; run them locally on a single GPU (or CPU where noted).
 
 For the CI-backed test suite, see [`fastvideo/tests/`](../../fastvideo/tests/).
 
 ## Layout
 
-Tests are organized by **model family**, one directory per port. Each family
+Most tests are organized by **model family**, one directory per port. Each family
 directory follows the layout produced by the
 [`add-model-prep`](https://github.com/anthropic-skills/add-model-prep) skill:
 
@@ -35,6 +35,12 @@ tests/local_tests/<family>/
 
 Wan2.2 I2V record-schema checks live in the
 [package dataset tests](../../fastvideo/tests/dataset/test_schema_record_creator.py).
+
+## Other Suites
+
+| Suite | Purpose | Dir |
+|---|---|---|
+| Performance CI behavior | Config, comparison policy, identity, result schema, dashboard, and worker-log capture checks | [`performance/`](./performance/) |
 
 ## Running a family
 

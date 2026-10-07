@@ -140,6 +140,7 @@ class ForwardBatch:
     image_latent: torch.Tensor | None = None
     # Normalized clean first frame for Wan TI2V and causal-DMD conditioning.
     first_frame_latent: torch.Tensor | None = None
+    helios_latent_chunks: list[torch.Tensor] | None = None
 
     # Action control inputs (Matrix-Game)
     mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
@@ -197,6 +198,16 @@ class ForwardBatch:
     eta: float = 0.0
     sigmas: list[float] | None = None
 
+    # Helios autoregressive spatial-pyramid sampling.
+    pyramid_num_inference_steps_list: list[int] | None = None
+    history_sizes: list[int] | None = None
+    num_latent_frames_per_chunk: int = 9
+    keep_first_frame: bool = True
+    is_skip_first_chunk: bool = False
+    use_zero_init: bool = True
+    zero_steps: int = 1
+    is_amplify_first_chunk: bool = False
+
     # TeaCache
     enable_teacache: bool = False
 
@@ -211,6 +222,9 @@ class ForwardBatch:
     ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=list)
     ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
+    # Enabled only by LTX-2.5 distilled presets. The refine stage supplies an
+    # explicit sigma override and therefore remains deterministic.
+    ltx2_use_ancestral_sampler: bool = False
 
     # LTX-2 image / video / continuation conditioning
     ltx2_images: list[tuple[str, int, float]] | None = None

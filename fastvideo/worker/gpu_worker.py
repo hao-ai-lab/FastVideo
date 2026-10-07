@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from datetime import timedelta
+import os
 from typing import Any, cast
 
 import torch
@@ -137,10 +138,24 @@ class Worker:
         # Initialize the distributed environment.
         dist_timeout = (timedelta(
             seconds=self.fastvideo_args.dist_timeout) if self.fastvideo_args.dist_timeout is not None else None)
+        sp_size = self.fastvideo_args.sp_size
+        # Explicit group layouts only for the encoder split; every other run
+        # keeps the default call.
+        group_ranks: dict[str, Any] = {}
+        if getattr(self.fastvideo_args, "h3_encoder_split", False):
+            # MiniMax-H3 component-level pipeline parallel: encoder ranks get
+            # singleton SP groups and never load the DiT/VAEs; the denoise
+            # ranks form the one sequence-parallel group.
+            from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_prepare_split_worker_parallelism
+
+            sp_size, sp_group_ranks, dp_group_ranks = h3_prepare_split_worker_parallelism(
+                self.fastvideo_args, self.rank, int(os.environ["WORLD_SIZE"]))
+            group_ranks = {"sp_group_ranks": sp_group_ranks, "dp_group_ranks": dp_group_ranks}
         maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size,
-                                                              self.fastvideo_args.sp_size,
+                                                              sp_size,
                                                               self.distributed_init_method,
-                                                              timeout=dist_timeout)
+                                                              timeout=dist_timeout,
+                                                              **group_ranks)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
         if envs.FASTVIDEO_MEMORY_REPORT.get() and self.rank == 0:

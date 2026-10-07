@@ -300,6 +300,15 @@ FASTVIDEO_ULYSSES_A2A = EnvChoice(
     doc="Sequence-parallel all-to-all backend. off uses the NCCL path in DistributedAutograd.AllToAll4D. auto uses "
     "the fused NVLink kernel when the group is a load-store accessible mesh of 2, 4, 6, or 8 ranks in eager "
     "execution, and the NCCL path otherwise.")
+# Keep the original long-training transport by default. Opt into bounded
+# chunks after validating the training recipe's activation memory budget.
+FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = EnvChoice(
+    "auto",
+    choices=("auto", "chunked"),
+    category="distributed",
+    doc="Fused Ulysses all-to-all policy for grad-enabled calls whose window exceeds the long-training plane limit. "
+    "auto keeps the original unchunked transport. chunked uses bounded chunks; validate the recipe's activation "
+    "memory first.")
 
 # ================== Logging ==================
 
@@ -345,6 +354,13 @@ FASTVIDEO_NVFP4_FA4 = EnvBool(
     category="attention",
     doc="FlashAttention-4 quantizes Q and K to NVFP4. An explicit nvfp4_fa4 attention implementation argument "
     "takes precedence.")
+FASTVIDEO_FA4_PV_MODE = EnvChoice(
+    "bf16",
+    choices=("bf16", "fp8"),
+    category="attention",
+    doc="V dtype on the NVFP4 FlashAttention-4 path (FLASH_ATTN with nvfp4_fa4, ATTN_QAT_INFER on sm_100a/sm_103a): "
+    "bf16 keeps V in BF16; fp8 casts V to float8 e4m3 without scaling. An explicit fa4_pv_mode attention "
+    "implementation argument takes precedence.")
 FASTVIDEO_DISABLE_ATTENTION_COMPILE = EnvBool(
     True,
     category="attention",
@@ -381,6 +397,18 @@ FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY = EnvStr(
     None,
     category="performance",
     doc="Collective that moves chunks in parallel VAE decode: gather (used when unset) or all_gather.")
+# MiniMax-H3 component-level pipeline parallel: dedicate the first
+# FASTVIDEO_H3_ENCODER_NODES nodes to the Qwen3-VL text encoder so the
+# denoising ranks never load it (720p needs the ~48 GiB headroom on GB10).
+FASTVIDEO_H3_ENCODER_SPLIT = EnvBool(
+    False,
+    category="distributed",
+    doc="MiniMax-H3 runs the Qwen3-VL text encoder on a dedicated group of nodes, so the denoising ranks never "
+    "load it. Same as FastVideoArgs.h3_encoder_split=True.")
+FASTVIDEO_H3_ENCODER_NODES = EnvInt(1,
+                                    category="distributed",
+                                    doc="Number of leading nodes that FASTVIDEO_H3_ENCODER_SPLIT dedicates to the "
+                                    "MiniMax-H3 text encoder. Values below 1 count as 1.")
 # Adapted from the NVlabs/Sana Sol-Engine implementation.
 FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     "",
