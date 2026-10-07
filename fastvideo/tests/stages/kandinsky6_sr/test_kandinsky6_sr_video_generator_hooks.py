@@ -15,10 +15,20 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 
+class _SingleProcessExecutor:
+    """The executor surface VideoGenerator reads for a controller-owned (non-SPMD) run."""
+
+    is_output_rank = True
+    uses_spmd_execution = False
+
+    def broadcast_from_output_rank(self, value):
+        return value
+
+
 def _generator(args: FastVideoArgs, executor=None) -> VideoGenerator:
     generator = VideoGenerator.__new__(VideoGenerator)
     generator.fastvideo_args = args
-    generator.executor = executor
+    generator.executor = executor if executor is not None else _SingleProcessExecutor()
     return generator
 
 
@@ -52,7 +62,7 @@ def test_other_pipelines_still_require_a_prompt(tmp_path):
                                               fastvideo_args=args)
 
 
-class _StubExecutor:
+class _StubExecutor(_SingleProcessExecutor):
 
     def __init__(self, shape):
         self.shape = shape

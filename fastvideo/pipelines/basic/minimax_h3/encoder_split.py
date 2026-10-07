@@ -95,12 +95,16 @@ def h3_is_primary_encoder_worker(fastvideo_args: FastVideoArgs) -> bool:
     return get_world_group().rank == 0
 
 
-def h3_is_output_worker(fastvideo_args: FastVideoArgs) -> bool:
-    """Rank that owns the decoded output: world rank 0 normally, first denoise rank in split."""
-    world_group = get_world_group()
+def h3_output_worker_rank(fastvideo_args: FastVideoArgs) -> int:
+    """World rank that owns the decoded output: world rank 0 normally, first denoise rank in split."""
     if not h3_encoder_split_enabled(fastvideo_args):
-        return world_group.is_first_rank
-    return world_group.rank == h3_encoder_worker_count(fastvideo_args)
+        return get_world_group().first_rank
+    return h3_encoder_worker_count(fastvideo_args)
+
+
+def h3_is_output_worker(fastvideo_args: FastVideoArgs) -> bool:
+    """Whether this rank owns the decoded output (see ``h3_output_worker_rank``)."""
+    return get_world_group().rank == h3_output_worker_rank(fastvideo_args)
 
 
 def h3_prepare_split_worker_parallelism(fastvideo_args: FastVideoArgs, rank: int,
@@ -247,6 +251,7 @@ __all__ = [
     "h3_is_encoder_worker",
     "h3_is_output_worker",
     "h3_is_primary_encoder_worker",
+    "h3_output_worker_rank",
     "h3_prepare_split_worker_parallelism",
     "h3_receive_condition",
 ]
