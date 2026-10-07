@@ -1066,7 +1066,15 @@ class AudioDecoderLoader(ComponentLoader):
             audio_vae.load_state_dict(loaded, strict=True)
             return audio_vae.eval()
 
-        precision = getattr(fastvideo_args.pipeline_config, "audio_decoder_precision", "bf16")
+        # A preprocessing component may carry the MMAudio encoder in addition
+        # to the inference decoder. Feature extraction is defined in fp32 by
+        # the published recipe; do not quantize it to decoder inference dtype.
+        needs_encoder = bool(config.get("need_encoder", False))
+        precision_name = (
+            "audio_encoder_precision" if needs_encoder else
+            "audio_decoder_precision")
+        precision = getattr(fastvideo_args.pipeline_config, precision_name,
+                            "fp32" if needs_encoder else "bf16")
         # MMAudio normalizes its magnitude-preserving convolution weights in
         # fp32 and only then casts the whole feature utility module to bf16.
         # Constructing/loading directly in bf16 quantizes the unnormalized
@@ -1266,6 +1274,14 @@ class TransformerLoader(ComponentLoader):
                            or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25")
         attention_context = (_component_attention_backend_scope(None, component="transformer")
                              if _qat_generator_only else nullcontext())
+        # MiniMax-H3 encoder split: the DiT only exists on the denoise ranks, so
+        # FSDP has to shard over them instead of over the world group.
+        device_mesh = None
+        if (getattr(fastvideo_args, "h3_encoder_split", False)
+                and (fastvideo_args.use_fsdp_inference or fastvideo_args.training_mode)):
+            from fastvideo.pipelines.basic.minimax_h3.encoder_split import h3_denoise_device_mesh
+
+            device_mesh = h3_denoise_device_mesh(fastvideo_args)
         with attention_context:
             # dit_config is what the model is handed and keeps as `self.config`,
             # so recording here makes the decision readable from the loaded
@@ -1302,6 +1318,7 @@ class TransformerLoader(ComponentLoader):
                 cpu_offload=fastvideo_args.dit_cpu_offload,
                 pin_cpu_memory=fastvideo_args.pin_cpu_memory,
                 fsdp_inference=fastvideo_args.use_fsdp_inference,
+                device_mesh=device_mesh,
                 # TODO(will): make these configurable
                 default_dtype=default_dtype,
                 param_dtype=torch.bfloat16,

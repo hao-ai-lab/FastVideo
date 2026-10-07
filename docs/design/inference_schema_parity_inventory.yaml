@@ -82,6 +82,8 @@ surfaces:
       inference_torch_compile: "Regional inference compile opt-in currently carried through PipelineSelection.experimental rather than CompileConfig."
       vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
       h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
+      h3_encoder_split: "MiniMax-H3 Ray-only split that runs the Qwen3-VL text encoder on dedicated nodes and the DiT/VAE on the rest; model-specific optimization not yet represented in the typed public schema."
+      h3_encoder_nodes: "Leading node count that h3_encoder_split reserves for the MiniMax-H3 text encoder; model-specific optimization not yet represented in the typed public schema."
       video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
       taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
@@ -107,6 +109,7 @@ surfaces:
       moba_config: "Derived runtime config loaded from moba_config_path."
       model_paths: "Runtime bookkeeping."
       model_loaded: "Runtime bookkeeping."
+      h3_encoder_workers: "Runtime bookkeeping: MiniMax-H3 encoder-group worker count that the Ray executor derives from h3_encoder_nodes and placement."
 
   pipeline_config_base:
     moved:
@@ -508,6 +511,11 @@ surfaces:
       last_image: request.inputs.last_image
       references: request.inputs.references
       video_path: request.inputs.video_path
+      pose_video_path: request.inputs.pose_video_path
+      face_video_path: request.inputs.face_video_path
+      background_video_path: request.inputs.background_video_path
+      mask_video_path: request.inputs.mask_video_path
+      animate_mode: request.inputs.animate_mode
       latents: request.inputs.latents
       audio_latents: request.inputs.audio_latents
       audio_path: request.inputs.audio_path

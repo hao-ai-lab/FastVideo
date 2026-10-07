@@ -28,6 +28,6 @@ __all__ = [
     "DreamXWorld5BCamPipelineConfig", "DreamXWorld5BARPipelineConfig", "HeliosPipelineConfig", "HYWorldConfig",
     "Kandinsky5T2VConfig", "Kandinsky5I2VConfig", "Kandinsky5DMDConfig", "Kandinsky6TI2VAConfig",
     "Kandinsky6SRPipelineConfig", "LingBotWorld2CausalFastI2V480PConfig", "LingBotWorldFastI2V480PConfig",
-    "LingBotVideoT2VConfig",
-    "MatrixGame2I2V480PConfig", "MatrixGame3I2V720PConfig", "MMAudioV2AConfig", "get_pipeline_config_cls_from_name"
+    "LingBotVideoT2VConfig", "MatrixGame2I2V480PConfig", "MatrixGame3I2V720PConfig", "MMAudioV2AConfig",
+    "get_pipeline_config_cls_from_name"
 ]

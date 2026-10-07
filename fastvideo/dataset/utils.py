@@ -116,6 +116,12 @@ def collate_latents_embs_masks(batch_to_process,
                                keys,
                                cfg_rate=0.0,
                                rng=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+    """Collate latents and text embeddings for the iterable-style loader.
+
+    The batch is built from the explicit ``keys`` list, so this path is
+    primary-encoder-only: the secondary ByT5 embedding (``text_embedding_2``)
+    and its mask are not read even when the parquet rows contain them.
+    """
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -193,6 +199,23 @@ def collate_rows_from_parquet_schema(rows,
             # Only add actual metadata fields, not the shape/dtype helper fields
             metadata_fields.append(field)
 
+    # One CFG dropout decision per row, shared by all of its text streams, so
+    # a sample's Qwen and ByT5 embeddings always drop together. With a
+    # ``_sample_index`` it is a pure function of seed ^ index (resume-safe);
+    # without one it is a single ``rng`` draw per row, taken the first time a
+    # stream of that row needs it, so single-stream batches consume ``rng``
+    # exactly as before while a second stream can no longer draw its own.
+    row_drops: dict[int, bool] = {}
+
+    def _cfg_drop(row_idx: int, row: dict[str, Any]) -> bool:
+        if row_idx not in row_drops:
+            sample_idx = row.get("_sample_index")
+            if sample_idx is not None:
+                row_drops[row_idx] = (random.Random(seed ^ int(sample_idx)).random() < cfg_rate)
+            else:
+                row_drops[row_idx] = ((rng.random() if rng else random.random()) < cfg_rate)
+        return row_drops[row_idx]
+
     # Process each tensor field
     for tensor_name in tensor_fields:
         tensor_list = []
@@ -206,7 +229,18 @@ def collate_rows_from_parquet_schema(rows,
         if (tensor_name == "text_embedding_2" and not any(row.get(bytes_key) is not None for row in rows)):
             continue
 
-        for row in rows:
+        # The primary stream has no such fallback: a row without it would be
+        # collated as zeros and train unconditioned without a word, so name
+        # the rows instead.
+        if tensor_name == "text_embedding":
+            missing = [i for i, row in enumerate(rows) if row.get(bytes_key) is None or row.get(shape_key) is None]
+            if missing:
+                where = ("every row" if len(missing) == len(rows) else f"rows {missing} of {len(rows)}")
+                raise ValueError(f"text_embedding is missing from {where} in this batch; "
+                                 "the schema declares it, so each parquet row must carry "
+                                 "text_embedding_bytes and text_embedding_shape.")
+
+        for row_idx, row in enumerate(rows):
             # Get tensor data from row using the existing helper function pattern
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
@@ -220,15 +254,8 @@ def collate_rows_from_parquet_schema(rows,
                     else:
                         tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
-                    # Deterministic per-sample CFG dropout
-                    # using sample index (resume-safe).
-                    drop = False
-                    if (tensor_name in _TEXT_STREAM_MASKS and cfg_rate > 0):
-                        sample_idx = row.get("_sample_index")
-                        if sample_idx is not None:
-                            drop = (random.Random(seed ^ sample_idx).random() < cfg_rate)
-                        else:
-                            drop = ((rng.random() if rng else random.random()) < cfg_rate)
+                    # Per-row CFG dropout, shared across text streams.
+                    drop = (tensor_name in _TEXT_STREAM_MASKS and cfg_rate > 0 and _cfg_drop(row_idx, row))
                     tensor = _decode_tensor_bytes(
                         bytes_data,
                         shape,
@@ -277,7 +304,7 @@ def collate_rows_from_parquet_schema(rows,
             # Don't filter out None or empty tensors as this breaks batch sizing
             try:
                 batch_data[tensor_name] = torch.stack(tensor_list)
-            except ValueError as e:
+            except (ValueError, RuntimeError) as e:
                 shapes = [t.shape if t is not None and hasattr(t, 'shape') else 'None/Invalid' for t in tensor_list]
                 raise ValueError(f"Failed to stack tensors for field '{tensor_name}'. "
                                  f"Tensor shapes: {shapes}. "

@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fastvideo.train.methods.fine_tuning.dfsft import DiffusionForcingSFTMethod
     from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
+    from fastvideo.train.methods.fine_tuning.flow_matching import FlowMatchingFineTuneMethod
     from fastvideo.train.methods.fine_tuning.tfsft import TeacherForcingSFTMethod
 
 __all__ = [
     "DiffusionForcingSFTMethod",
     "FineTuneMethod",
+    "FlowMatchingFineTuneMethod",
     "TeacherForcingSFTMethod",
 ]
 
@@ -27,6 +29,11 @@ def __getattr__(name: str) -> object:
         from fastvideo.train.methods.fine_tuning.finetune import FineTuneMethod
 
         return FineTuneMethod
+    if name == "FlowMatchingFineTuneMethod":
+        from fastvideo.train.methods.fine_tuning.flow_matching import (
+            FlowMatchingFineTuneMethod, )
+
+        return FlowMatchingFineTuneMethod
     if name == "TeacherForcingSFTMethod":
         from fastvideo.train.methods.fine_tuning.tfsft import (
             TeacherForcingSFTMethod, )

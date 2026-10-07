@@ -147,6 +147,12 @@ swanlab = [
     "swanlab>=0.6.7",
 ]
 
+mmaudio-train = [
+    "librosa>=0.10.0",
+    "nitrous-ema==0.0.1",
+    "tensordict>=0.6.1",
+]
+
 lint = [
     "pre-commit==4.0.1",
     "types-aiofiles",
