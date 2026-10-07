@@ -185,14 +185,14 @@ __global__ void __launch_bounds__(Ktraits::kNWarps * cutlass::NumThreadsPerWarp,
             auto block_coord = work_tile_info.get_block_coord(scheduler_params);
             auto [m_block, bidh, bidb] = block_coord;
 
-            int n_block_max = collective_mainloop.get_n_block_max(mainloop_params, m_block);
-            if (Is_causal && n_block_max <= 0) {  // We exit early and write 0 to gO and -inf to gLSE.
+            int n_block_count = collective_mainloop.get_n_block_count(mainloop_params, m_block, bidh, bidb);
+            if (Is_causal && n_block_count <= 0) {  // We exit early and write 0 to gO and -inf to gLSE.
                 collective_epilogue.store_zero(epilogue_params, threadIdx.x - NumCopyThreads, block_coord);
                 continue;
             }
 
             collective_mainloop.mma(mainloop_params, pipeline_q, pipeline_k, pipeline_v, smem_pipe_read_q, smem_pipe_read_k, smem_pipe_read_v,
-                                    tOrO, softmax_fused, n_block_max, threadIdx.x - NumCopyThreads, work_idx, m_block, shared_storage);
+                                    tOrO, softmax_fused, n_block_count, threadIdx.x - NumCopyThreads, work_idx, m_block, bidh, bidb, shared_storage);
             barrier_o.wait();
             collective_epilogue.mma_store(shared_storage, tiled_mma_pv, tOrO, threadIdx.x - NumCopyThreads); 
             barrier_o.arrive();

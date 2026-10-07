@@ -1,6 +1,6 @@
 """Benchmark the LTX-2 generation pipeline driven by the dreamverse Python SDK path.
 
-Mirrors how ``apps/dreamverse/dreamverse/video_generation.py`` constructs
+Mirrors how ``apps/dreamverse/dreamverse/ltx2_generation.py`` constructs
 ``GeneratorConfig`` and calls ``VideoGenerator.generate()``, then
 captures per-stage timings via the ``FASTVIDEO_STAGE_LOGGING=1`` log
 hooks (same mechanism as ``FastVideo-internal/examples/inference/basic/

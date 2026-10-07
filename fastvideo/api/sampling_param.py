@@ -31,6 +31,11 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Audio inputs. `audio_path` drives audio-conditioned generation (Wan S2V):
+    # the waveform is encoded and cross-attended to per video frame. Distinct
+    # from the Stable Audio `init_audio` fields below, which seed audio output.
+    audio_path: str | None = None
+
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
@@ -190,7 +195,7 @@ class SamplingParam:
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
 
-    def check_sampling_param(self):
+    def check_sampling_param(self) -> None:
         if self.prompt_path and not self.prompt_path.endswith(".txt"):
             raise ValueError("prompt_path must be a txt file")
 
@@ -404,6 +409,12 @@ class SamplingParam:
             type=str,
             default=SamplingParam.video_path,
             help="Path to input video for video-to-video generation",
+        )
+        parser.add_argument(
+            "--audio-path",
+            type=str,
+            default=SamplingParam.audio_path,
+            help="Path to input audio for speech-driven generation (Wan S2V)",
         )
         parser.add_argument(
             "--refine-from",
