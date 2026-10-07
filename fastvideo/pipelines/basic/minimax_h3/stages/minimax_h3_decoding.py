@@ -10,12 +10,14 @@ import torch
 from fastvideo.distributed import get_local_torch_device, get_sp_group, get_world_group, model_parallel_is_initialized
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models import pinned_offload
 from fastvideo.models.vaes.minimax_h3_audio import MiniMaxH3AudioVAE
 from fastvideo.models.vaes.minimax_h3_parallel import DEFAULT_DECODE_GATHER_STRATEGY, decode_to_pixels_parallel
 from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
 from fastvideo.profiler import nvtx_range
 from fastvideo.pipelines.basic.minimax_h3.packing import (
     MiniMaxH3PackedLayout,
+    h3_dit_patch_size,
     unpack_audio_tokens,
     unpatchify_video_tokens,
 )
@@ -24,7 +26,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-from fastvideo.utils import is_pin_memory_available
+from fastvideo.utils import allocate_cpu_tensor_with_pin_fallback
 
 logger = init_logger(__name__)
 
@@ -58,10 +60,9 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
     performance_component_metric = "vae_decode_time_s"
 
-    def __init__(self, vae: AutoencoderKLMiniMaxH3, transformer: Any) -> None:
+    def __init__(self, vae: AutoencoderKLMiniMaxH3 | None) -> None:
         super().__init__()
         self.vae = vae
-        self.transformer = transformer
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -97,10 +98,33 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             latent_height,
             latent_width,
             channels,
-            self.transformer.patch_size,
+            h3_dit_patch_size(fastvideo_args),
         )
         device = get_local_torch_device()
-        self.vae.to(device)
+        backend = getattr(fastvideo_args, "video_decode_backend", "h3-vae")
+        if backend == "taeh3":
+            from fastvideo.models.vaes.minimax_h3_taeh3 import decode_ncthw_latents_taeh3, taeh3_decoded_pixel_shape
+
+            if fastvideo_args.output_type == "latent":
+                batch.output = latents.detach().float().cpu() if is_output_rank else placeholder
+                return batch
+            expected = taeh3_decoded_pixel_shape(tuple(latents.shape))
+            logger.info("MiniMax-H3 video decode: TAEH3 preview (%s -> %s)", tuple(latents.shape), expected)
+            with nvtx_range("minimax_h3.taeh3"):
+                pixels = decode_ncthw_latents_taeh3(
+                    latents,
+                    device=device,
+                    checkpoint_path=getattr(fastvideo_args, "taeh3_checkpoint", None),
+                    chunk_size=int(getattr(fastvideo_args, "taeh3_chunk_size", 5) or 5),
+                )
+            batch.output = pixels.float().cpu() if is_output_rank else placeholder
+            if is_output_rank and tuple(batch.output.shape) != expected:
+                raise RuntimeError(f"TAEH3 wrote {tuple(batch.output.shape)}, expected {expected}.")
+            return batch
+
+        if self.vae is None:
+            raise RuntimeError("MiniMax-H3 full VAE decode requires a loaded video VAE.")
+        pinned_offload.load(self.vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -111,11 +135,10 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
             output = None
             if is_output_rank:
-                output = torch.empty(
+                output = allocate_cpu_tensor_with_pin_fallback(
                     self.vae.decoded_pixel_shape(latents.shape),
-                    device="cpu",
                     dtype=torch.float32,
-                    pin_memory=fastvideo_args.pin_cpu_memory and is_pin_memory_available(),
+                    pin_memory=fastvideo_args.pin_cpu_memory,
                 )
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
@@ -130,11 +153,18 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
                     decode_to_pixels_parallel(self.vae, latents, output, sp_group, strategy=strategy)
                 else:
                     self.vae.decode_to_pixels(latents, output)
+            if is_output_rank and output is not None and output.dtype == torch.float32:
+                # Quantize to uint8 here, before the frames cross the
+                # multiprocess-executor boundary. A 345-frame 1344x768 clip is
+                # 4.27 GB as fp32 and 1.07 GB as uint8, and the main process
+                # cast it to uint8 immediately anyway; the clamp matches the
+                # post-decode handling of VAE output slightly outside [0, 1].
+                output = output.mul_(255).clamp_(0, 255).to(torch.uint8)
             batch.output = output if is_output_rank else placeholder
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
-                self.vae.to("cpu")
+                pinned_offload.unload(self.vae)
 
 
 class MiniMaxH3AudioDecodingStage(PipelineStage):
@@ -177,7 +207,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             layout.num_audio_latents,
         )
         device = get_local_torch_device()
-        self.audio_vae.to(device)
+        pinned_offload.load(self.audio_vae, device, pin=fastvideo_args.pin_cpu_memory)
         try:
             latents = self.audio_vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":
@@ -199,7 +229,7 @@ class MiniMaxH3AudioDecodingStage(PipelineStage):
             return batch
         finally:
             if fastvideo_args.vae_cpu_offload:
-                self.audio_vae.to("cpu")
+                pinned_offload.unload(self.audio_vae)
 
     @staticmethod
     def _clear_runtime(batch: ForwardBatch) -> None:

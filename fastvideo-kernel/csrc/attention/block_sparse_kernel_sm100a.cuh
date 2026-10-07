@@ -1,8 +1,7 @@
-// block_sparse_kernel_sm100a.cuh -- VSA block-sparse FMHA forward (per-q-block top-k), sm_100a.
+// block_sparse_kernel_sm100a.cuh -- VSA block-sparse FMHA forward (per-q-block top-k),
+// data-center Blackwell sm_100a/sm_103a. The filename is retained for API compatibility.
 // Warp-specialized: load / MMA (tcgen05) / softmax / correction / epilogue / scheduler.
 // Writes O and, when asked, the log-sum-exp the backward consumes.
-//
-// Generated (comments stripped). Do not edit by hand.
 #ifndef BLOCK_SPARSE_VSA_KERNEL_SM100A_CUH
 #define BLOCK_SPARSE_VSA_KERNEL_SM100A_CUH
 
@@ -202,15 +201,14 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
     const int* __restrict__ variable_block_sizes,
       float* __restrict__ lse_out) {
 // Multi-arch builds: torch's cmake appends -gencode for EVERY entry of
-// TORCH_CUDA_ARCH_LIST to this TU on top of the pinned compute_100a pass, and
-// tcgen05/setmaxnreg do not exist outside sm_100a -- ptxas rejects the sm_120a
-// (or plain sm_100) pass outright. Keep the body only where it can compile:
-// the host pass (no __CUDA_ARCH__, needed for launch plumbing) and the
-// sm_100a device pass (arch 1000 WITH the family-specific feature set that the
-// "a" suffix defines). Every other device pass gets an empty stub; the Python
-// is_supported() / host launcher never dispatch here off sm_100, so the stub
-// is unreachable at runtime.
-#if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL))
+// TORCH_CUDA_ARCH_LIST to this TU on top of the pinned data-center Blackwell
+// passes. tcgen05/setmaxnreg require an architecture-conditional target, so
+// plain sm_100/sm_103 and consumer sm_120 passes cannot compile this body.
+// Keep it for the host pass (needed for launch plumbing) plus sm_100a/sm_103a;
+// every other device pass gets an unreachable empty stub.
+#if !defined(__CUDA_ARCH__) || \
+    ((__CUDA_ARCH__ == 1000 && defined(__CUDA_ARCH_FEAT_SM100_ALL)) || \
+     (__CUDA_ARCH__ == 1030 && defined(__CUDA_ARCH_FEAT_SM103_ALL)))
 
   const int total_workitems = num_samples * num_heads * packed_mtiles_per_seq;
 
@@ -506,9 +504,11 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
         const uint32_t o_tmem_addr = tmem_base + (uint32_t)(2 * S_COLS + i * O_COLS);
 
         int slot = 0;
+        // Declared outside the loop: with BLK128 only p == 0 initializes it and p == 1 continues
+        // the p == 0 descriptor walk.
+        SmemDescPair desc_bv;
         #pragma unroll
         for (int p = 0; p < V_SUBTILES; ++p) {
-        SmemDescPair desc_bv;
           if (!BLK128 || p == 0) {
             slot = kv_ph.get_stage();
             mbarrier_wait_parity(smem_ptr_u32(&full_bar[slot]), kv_ph.get_phase());
@@ -518,8 +518,6 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
               desc_bv.u64 = desc_v0;
               desc_bv.w.x += (uint32_t)(slot * (int)KV_DESC_DELTA);
             }
-          const uint64_t dbV = desc_kv0 + (uint64_t)slot * KV_DESC_DELTA
-                             + (BLK128 ? (uint64_t)p * (V_BLK_BYTES >> 4) : 0u);
           #pragma unroll
           for (int ki = 0; ki < K_ATOMS_PER_TILE; ++ki) {
             const int a = p * K_ATOMS_PER_TILE + ki;
@@ -1070,7 +1068,7 @@ fmha_context_bf16_gen_kernel(const __grid_constant__ CUtensorMap tmap_q,
   }
   __syncthreads();
   if (warp_id == 0) tcgen05_dealloc<1>(tmem_base, TMEM_TOTAL);
-#endif  // host pass or sm_100a device pass (multi-arch guard; see note at the top of the body)
+#endif  // host pass or sm_100a/sm_103a device pass (see multi-arch note above)
 }
 
 }  // namespace VSA_NAMESPACE

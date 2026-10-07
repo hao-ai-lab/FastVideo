@@ -30,7 +30,7 @@ from dreamverse.session_init_image import cleanup_session_init_image, persist_se
 from dreamverse.worker_ipc import MediaChunk, MediaComplete, MediaInit
 
 from dreamverse.config import (
-    DEFAULT_MODEL_ID,
+    ACTIVE_MODEL_ID,
     GENERATION_SEGMENT_CAP,
     PROMPT_AUTO_SLEEP_MS,
     PROMPT_AUTO_TIMEOUT_MS,
@@ -264,7 +264,7 @@ class SessionController:
             timeout_task = asyncio.create_task(session_timeout())
 
             # Join the engine on this GPU.
-            await slot.join_user(client_id, model_id=DEFAULT_MODEL_ID)
+            await slot.join_user(client_id, model_id=ACTIVE_MODEL_ID)
 
             # Notify client they're connected to a GPU.
             await ws_send_json({

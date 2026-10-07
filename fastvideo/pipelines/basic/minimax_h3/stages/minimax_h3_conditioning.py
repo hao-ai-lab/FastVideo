@@ -261,7 +261,8 @@ class MiniMaxH3ConditioningStage(PipelineStage):
         device = get_local_torch_device()
         first_param = next(self.conditioner.parameters(), None)
         moved_for_forward = (fastvideo_args.text_encoder_cpu_offload and first_param is not None
-                             and not isinstance(first_param, DTensor))
+                             and not isinstance(first_param, DTensor)
+                             and getattr(self.conditioner, "_h3_encoder_layerwise_device", None) is None)
         if moved_for_forward:
             self.conditioner.to(device)
         try:

@@ -30,6 +30,7 @@ import types
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.attention import LocalAttention
 from fastvideo.attention.selector import _cached_get_attn_backend
 from fastvideo.configs.models.dits.kandinsky5 import (
@@ -63,14 +64,14 @@ def _tiny_arch() -> Kandinsky5ArchConfig:
     )
 
 
-def _build_stage_and_spy(monkeypatch):
+def _build_stage_and_spy(monkeypatch, env_overrides):
     """Tiny transformer + real DMD stage on CPU, with every resolved
     backend impl wrapped in a call counter."""
     # Pin the backend so resolution is identical on CPU-only and CUDA
     # machines, and clear the process-wide selector cache keyed on
     # (head_size, dtype, supported_backends) -- NOT on the env var (same
     # defensive pattern as test_kandinsky5_qat_attention_engages.py).
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
     _cached_get_attn_backend.cache_clear()
 
     from fastvideo.models.dits.kandinsky5 import Kandinsky5Transformer3DModel
@@ -131,8 +132,8 @@ def _make_fastvideo_args(arch: Kandinsky5ArchConfig) -> types.SimpleNamespace:
     )
 
 
-def test_dmd_stage_invokes_selected_backend_every_step(monkeypatch):
-    stage, _, arch, backend_calls = _build_stage_and_spy(monkeypatch)
+def test_dmd_stage_invokes_selected_backend_every_step(monkeypatch, env_overrides):
+    stage, _, arch, backend_calls = _build_stage_and_spy(monkeypatch, env_overrides)
     try:
         batch = _make_batch()
 
@@ -152,11 +153,11 @@ def test_dmd_stage_invokes_selected_backend_every_step(monkeypatch):
         _cached_get_attn_backend.cache_clear()
 
 
-def test_raw_transformer_without_context_bypasses_backend(monkeypatch):
+def test_raw_transformer_without_context_bypasses_backend(monkeypatch, env_overrides):
     """Documents the trap the stage wrapper exists to prevent: without a
     forward context the transformer still returns output, but the selected
     backend is never invoked."""
-    stage, transformer, _, backend_calls = _build_stage_and_spy(monkeypatch)
+    stage, transformer, _, backend_calls = _build_stage_and_spy(monkeypatch, env_overrides)
     del stage  # only the spied transformer is needed here
     try:
         with torch.no_grad():
@@ -180,11 +181,11 @@ def test_raw_transformer_without_context_bypasses_backend(monkeypatch):
         _cached_get_attn_backend.cache_clear()
 
 
-def test_dmd_stage_with_context_and_raw_without_share_one_spy(monkeypatch):
+def test_dmd_stage_with_context_and_raw_without_share_one_spy(monkeypatch, env_overrides):
     """Same spy, both paths, one process: proves the counter difference
     between the two tests above is the forward-context wrapper itself,
     not some environmental difference."""
-    stage, transformer, arch, backend_calls = _build_stage_and_spy(monkeypatch)
+    stage, transformer, arch, backend_calls = _build_stage_and_spy(monkeypatch, env_overrides)
     try:
         with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
             transformer(

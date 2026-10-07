@@ -94,8 +94,13 @@ def _build_operation(args, vae, device):
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
     patch_size = MiniMaxH3Config().arch_config.patch_size
-    transformer = SimpleNamespace(patch_size=patch_size)
-    runtime_args = SimpleNamespace(output_type="pil", pin_cpu_memory=False, vae_cpu_offload=True)
+    runtime_args = SimpleNamespace(
+        output_type="pil",
+        pin_cpu_memory=False,
+        vae_cpu_offload=True,
+        vae_parallel_encode=False,
+        pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=patch_size)),
+    )
 
     if args.operation == "encode":
         if int(os.environ.get("WORLD_SIZE", "1")) != 1:
@@ -107,7 +112,6 @@ def _build_operation(args, vae, device):
             dtype=np.uint8,
         )
         stage = MiniMaxH3LatentPreparationStage(
-            transformer=transformer,
             vae=vae,
             audio_vae=None,
             scheduler=None,
@@ -118,7 +122,7 @@ def _build_operation(args, vae, device):
             reference = MiniMaxH3PreparedReference(media_type="video", frames=frames)
             vae.to(device)
             try:
-                return stage._encode_visual_rows([reference], device)[0]
+                return stage._encode_visual_rows([reference], device, runtime_args)[0]
             finally:
                 vae.to("cpu")
 
@@ -139,7 +143,7 @@ def _build_operation(args, vae, device):
     latents = torch.randn(latent_shape, generator=generator, device=device, dtype=torch.float32)
     rows = patchify_video_latents(latents, patch_size)
     layout = _make_layout(rows, latent_shape)
-    stage = MiniMaxH3VideoDecodingStage(vae, transformer)
+    stage = MiniMaxH3VideoDecodingStage(vae)
 
     def run_once():
         batch = ForwardBatch(data_type="video", latents=rows, raw_latent_shape=latent_shape)

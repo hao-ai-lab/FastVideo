@@ -1,15 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Request model for creating a job."""
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
 class CreateJobRequest(BaseModel):
     model_id: str
+    name: str = ""
     prompt: str
     workload_type: str = "t2v"
     job_type: str = "inference"
     image_path: str = ""
+    last_image_path: str = ""
+    references: list[dict[str, Any]] | None = None
     data_path: str = ""
     max_train_steps: int = 1000
     train_batch_size: int = 1
@@ -28,6 +33,7 @@ class CreateJobRequest(BaseModel):
     seed: int = 1024
     num_gpus: int = 1
     dit_cpu_offload: bool = False
+    dit_layerwise_offload: bool = False
     text_encoder_cpu_offload: bool = False
     vae_cpu_offload: bool = False
     image_encoder_cpu_offload: bool = False

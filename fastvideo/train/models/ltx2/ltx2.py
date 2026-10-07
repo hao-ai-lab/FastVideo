@@ -396,7 +396,7 @@ class LTX2Model(WanModel):
                              f"checkpoint's expected text context dim {expected_dim}. "
                              "The parquet was likely preprocessed with a different "
                              "LTX-2 version (2.0 stores 3840-d, 2.3 stores 4096-d); "
-                             "re-run preprocess_ltx2_overfit.py with LTX2_OVERFIT_MODEL "
+                             "re-run preprocess_ltx2_overfit.py with FASTVIDEO_TEST_LTX2_OVERFIT_MODEL "
                              "set to the same checkpoint as models.student.init_from.")
 
     def _update_rope_fps(self, infos: list[dict[str, Any]] | None) -> None:
@@ -525,7 +525,7 @@ class LTX2Model(WanModel):
         return training_batch
 
     def _build_attention_metadata(self, training_batch: TrainingBatch) -> TrainingBatch:
-        if envs.FASTVIDEO_ATTENTION_BACKEND in ("VIDEO_SPARSE_ATTN", "VMOBA_ATTN"):
+        if envs.FASTVIDEO_ATTENTION_BACKEND.get() in ("VIDEO_SPARSE_ATTN", "VMOBA_ATTN"):
             raise NotImplementedError("LTX2Model does not support VSA/VMOBA attention backends")
         training_batch.attn_metadata = None
         return training_batch

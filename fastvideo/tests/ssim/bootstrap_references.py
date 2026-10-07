@@ -7,21 +7,16 @@ from pathlib import Path
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.tests.ssim.reference_utils import get_output_quality_tier
 from fastvideo.tests.ssim.reference_videos_cli import (
-    BOOTSTRAP_ENV_KEY,
-    DEFAULT_REPO_ID,
-    DEFAULT_REPO_TYPE,
-    HF_REPO_ENV_KEY,
-    HF_REPO_TYPE_ENV_KEY,
-    upload_draft_reference_artifact,
-)
+    upload_draft_reference_artifact, )
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def bootstrap_mode_enabled() -> bool:
-    return os.environ.get(BOOTSTRAP_ENV_KEY, "").strip().lower() in TRUE_VALUES
+    return os.environ.get("FASTVIDEO_SSIM_BOOTSTRAP_MODE", "").strip().lower() in TRUE_VALUES
 
 
 def xfail_missing_reference_in_bootstrap_mode(
@@ -38,8 +33,8 @@ def xfail_missing_reference_in_bootstrap_mode(
         raise FileNotFoundError(
             f"SSIM bootstrap mode is enabled, but generated {artifact_kind} artifact is missing: {generated_path}")
 
-    repo_id = os.environ.get(HF_REPO_ENV_KEY, DEFAULT_REPO_ID)
-    repo_type = os.environ.get(HF_REPO_TYPE_ENV_KEY, DEFAULT_REPO_TYPE)
+    repo_id = envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO.get()
+    repo_type = envs.FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO_TYPE.get()
     draft_path = upload_draft_reference_artifact(
         repo_id=repo_id,
         repo_type=repo_type,
