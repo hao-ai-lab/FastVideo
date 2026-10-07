@@ -10,15 +10,21 @@ import aiofiles
 from fastapi import (APIRouter, File, Form, HTTPException, Path, Query, UploadFile)
 from fastapi.responses import FileResponse
 
-from fastvideo.entrypoints.openai.state import (
-    get_output_dir,
-    get_serving_engine,
-)
 from fastvideo.entrypoints.openai.protocol import (
     ImageGenerationsRequest,
     ImageResponse,
     ImageResponseData,
     generate_request_id,
+)
+from fastvideo.entrypoints.openai.request_adapter import (
+    RequestAdaptationError,
+    validate_served_model_name,
+)
+from fastvideo.entrypoints.openai.state import (
+    get_output_dir,
+    get_served_model_name,
+    get_server_args,
+    get_serving_engine,
 )
 from fastvideo.entrypoints.openai.stores import IMAGE_STORE
 from fastvideo.entrypoints.openai.utils import (
@@ -31,6 +37,26 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 router = APIRouter(prefix="/v1/images", tags=["images"])
+
+_SUPPORTED_RESPONSE_FORMATS = frozenset({"b64_json", "url"})
+
+
+def _normalize_response_format(value: str | None) -> str:
+    """Lowercase and validate an OpenAI image response_format value."""
+    fmt = (value or "b64_json").lower()
+    if fmt not in _SUPPORTED_RESPONSE_FORMATS:
+        raise HTTPException(status_code=400, detail=f"response_format={fmt} is not supported")
+    return fmt
+
+
+def _validate_request_model(model: str | None) -> None:
+    """Reject a model id that is not the one this server loaded."""
+    if model is None:
+        return
+    try:
+        validate_served_model_name(model, get_server_args(), get_served_model_name())
+    except RequestAdaptationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 def _build_generation_kwargs(
@@ -85,8 +111,12 @@ def _build_generation_kwargs(
     return kwargs
 
 
+@router.post("/generations", response_model=ImageResponse)
 @router.post("", response_model=ImageResponse)
 async def generations(request: ImageGenerationsRequest):
+    resp_format = _normalize_response_format(request.response_format)
+    _validate_request_model(request.model)
+
     request_id = generate_request_id()
     engine = get_serving_engine()
 
@@ -115,14 +145,13 @@ async def generations(request: ImageGenerationsRequest):
 
     save_file_path = gen_kwargs["output_path"]
 
-    resp_format = (request.response_format or "b64_json").lower()
     if resp_format == "b64_json":
         if not os.path.exists(save_file_path):
             raise HTTPException(status_code=500, detail="Image was not saved to disk")
         async with aiofiles.open(save_file_path, "rb") as f:
             b64_data = base64.b64encode(await f.read()).decode("utf-8")
         data = [ImageResponseData(b64_json=b64_data, revised_prompt=request.prompt)]
-    elif resp_format == "url":
+    else:
         data = [
             ImageResponseData(
                 url=f"/v1/images/{request_id}/content",
@@ -130,8 +159,6 @@ async def generations(request: ImageGenerationsRequest):
                 file_path=os.path.abspath(save_file_path),
             )
         ]
-    else:
-        raise HTTPException(status_code=400, detail=f"response_format={resp_format} is not supported")
 
     await IMAGE_STORE.upsert(
         request_id,
@@ -170,6 +197,9 @@ async def edits(
         num_inference_steps: int | None = Form(None),
         enable_teacache: bool | None = Form(False),
 ):
+    resp_format = _normalize_response_format(response_format)
+    _validate_request_model(model)
+
     request_id = generate_request_id()
     engine = get_serving_engine()
 
@@ -218,7 +248,6 @@ async def edits(
 
     save_file_path = gen_kwargs["output_path"]
 
-    resp_format = (response_format or "b64_json").lower()
     if resp_format == "b64_json":
         async with aiofiles.open(save_file_path, "rb") as f:
             b64_data = base64.b64encode(await f.read()).decode("utf-8")

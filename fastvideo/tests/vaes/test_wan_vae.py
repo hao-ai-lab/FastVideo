@@ -1,21 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Wan VAE encode/decode parity against Diffusers (one CUDA GPU, FP32)."""
 
-import os
-
 import pytest
 import torch
 from diffusers import AutoencoderKLWan
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.models.wan.vae_config import WanVAEConfig
 from fastvideo.tests.golden_gate._wan_checkpoint import component_path
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29503")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29503")
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Wan VAE parity requires one CUDA GPU")

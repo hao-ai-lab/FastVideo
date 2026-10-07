@@ -127,7 +127,7 @@ pytest tests/local_tests/zimage/ -v -s
 |---|---|---|
 | Hardware-free pipeline surface | `pytest tests/local_tests/pipelines/test_zimage_pipeline_smoke.py::test_zimage_typed_surface_preflight -v` | PASS |
 | Hardware-free native stage contract | `pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_native_default_stage_math -v` | PASS |
-| Pinned native full GPU pipeline parity | `ZIMAGE_REFERENCE_REPO=<pinned-clone> ZIMAGE_MODEL_DIR=<pinned-weights> DISABLE_SP=1 pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_pipeline_latents_match_pinned_native_repo -v -s` | PASS on RTX 5090; one-step latents bit-exact (`max=0`, `mean=0`) |
+| Pinned native full GPU pipeline parity | `ZIMAGE_REFERENCE_REPO=<pinned-clone> FASTVIDEO_TEST_ZIMAGE_MODEL_DIR=<pinned-weights> DISABLE_SP=1 pytest tests/local_tests/pipelines/test_zimage_pipeline_parity.py::test_zimage_pipeline_latents_match_pinned_native_repo -v -s` | PASS on RTX 5090; one-step latents bit-exact (`max=0`, `mean=0`) |
 | 8-step 1024x1024 PNG SSIM | `pytest fastvideo/tests/ssim/test_zimage_similarity.py -v -s` | Reviewed L40S PNG uploaded; remote SHA-256 `6c2be648...f7a6`; end-to-end SSIM CI pending |
 
 ## Component contracts

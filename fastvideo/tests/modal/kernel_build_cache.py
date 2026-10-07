@@ -182,8 +182,8 @@ def _torch_metadata() -> dict[str, object]:
         }
 
 
-def _selected_command_metadata(environment_name: str, default_command: str) -> dict[str, str]:
-    raw = os.environ.get(environment_name, "").strip() or default_command
+def _selected_command_metadata(configured_command: str, default_command: str) -> dict[str, str]:
+    raw = configured_command.strip() or default_command
     try:
         command = shlex.split(raw)
     except ValueError as error:
@@ -207,13 +207,13 @@ def _selected_command_metadata(environment_name: str, default_command: str) -> d
 def _compiler_libc_metadata() -> dict[str, object]:
     return {
         "compiler": {
-            "cc": _selected_command_metadata("CC", "cc"),
-            "cxx": _selected_command_metadata("CXX", "c++"),
+            "cc": _selected_command_metadata(os.environ.get("CC", ""), "cc"),
+            "cxx": _selected_command_metadata(os.environ.get("CXX", ""), "c++"),
         },
         "build_tools": {
             "cmake_version": _run_optional(["cmake", "--version"]),
             "ninja_version": _run_optional(["ninja", "--version"]),
-            "linker": _selected_command_metadata("LD", "ld"),
+            "linker": _selected_command_metadata(os.environ.get("LD", ""), "ld"),
         },
         "libc": {
             "platform_libc": list(platform.libc_ver()),
@@ -252,7 +252,7 @@ def _build_metadata(repo_root: Path) -> dict[str, object]:
         "torch": torch_cache_metadata,
         "cuda": {
             "cuda_home": os.environ.get("CUDA_HOME", ""),
-            "nvcc": _selected_command_metadata("CUDACXX", "nvcc"),
+            "nvcc": _selected_command_metadata(os.environ.get("CUDACXX", ""), "nvcc"),
         },
         "abi": _compiler_libc_metadata(),
         "build": cache_key_build,

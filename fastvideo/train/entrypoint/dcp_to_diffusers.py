@@ -33,6 +33,7 @@ import os
 import sys
 from typing import Any
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -45,14 +46,11 @@ def _ensure_distributed() -> None:
     For plain ``python`` we fill in the minimum required vars so
     that ``init_process_group`` succeeds with world_size=1.
     """
-    for key, default in [
-        ("RANK", "0"),
-        ("LOCAL_RANK", "0"),
-        ("WORLD_SIZE", "1"),
-        ("MASTER_ADDR", "127.0.0.1"),
-        ("MASTER_PORT", "29500"),
-    ]:
-        os.environ.setdefault(key, default)
+    envs.setdefault_external("RANK", "0")
+    envs.setdefault_external("LOCAL_RANK", "0")
+    envs.setdefault_external("WORLD_SIZE", "1")
+    envs.setdefault_external("MASTER_ADDR", "127.0.0.1")
+    envs.setdefault_external("MASTER_PORT", "29500")
 
 
 def _save_role_pretrained(
