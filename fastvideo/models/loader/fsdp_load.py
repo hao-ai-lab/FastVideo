@@ -402,8 +402,12 @@ def maybe_load_fsdp_model(
         weight_iterator = ((name, tensor) for name, tensor in weight_iterator if name not in fp8_keys)
     if envs.FASTVIDEO_H3_ADALN_TABLE.get():
         # Precomputed AdaLN modulation replaces the per-block projections; never read their weights.
-        skip_param_names |= {name for name, _ in model.named_parameters()
-                             if re.fullmatch(r"transformer_blocks\.\d+\.adaln_proj\.linear\.(weight|bias)", name)}
+        skip_param_names |= {
+            _strip_checkpoint_wrapper_prefix(name)
+            for name, _ in model.named_parameters()
+            if re.fullmatch(r"transformer_blocks\.\d+\.adaln_proj\.linear\.(weight|bias)",
+                            _strip_checkpoint_wrapper_prefix(name))
+        }
         logger.info("Skipping %d AdaLN projection tensors (precomputed modulation tables)",
                     sum("adaln_proj" in n for n in skip_param_names))
     load_model_from_full_model_state_dict(
