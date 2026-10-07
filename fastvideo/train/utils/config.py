@@ -18,6 +18,7 @@ from fastvideo.train.utils.training_config import (
     DistributedConfig,
     ModelTrainingConfig,
     OptimizerConfig,
+    PerformanceConfig,
     TrackerConfig,
     TrainingLoopConfig,
 )
@@ -351,6 +352,7 @@ def _build_training_config(
     lo = dict(t.get("loop", {}) or {})
     ck = dict(t.get("checkpoint", {}) or {})
     tr = dict(t.get("tracker", {}) or {})
+    perf = dict(t.get("performance", {}) or {})
     vs = dict(t.get("vsa", {}) or {})
     m = dict(t.get("model", {}) or {})
 
@@ -381,6 +383,15 @@ def _build_training_config(
         raise ValueError("training.data.preprocessed_data_type must be one of "
                          "{'t2v', 't2va', 'text_only'}, got "
                          f"{preprocessed_data_type!r}")
+
+    peak_tflops = get_optional_float(
+        perf,
+        "peak_tflops_per_gpu",
+        where="training.performance.peak_tflops_per_gpu",
+    )
+    if peak_tflops is not None and peak_tflops <= 0.0:
+        raise ValueError("training.performance.peak_tflops_per_gpu must be "
+                         f"> 0, got {peak_tflops}")
 
     return TrainingConfig(
         distributed=DistributedConfig(
@@ -428,6 +439,10 @@ def _build_training_config(
             entity=str(tr.get("entity", "") or ""),
             project_name=str(tr.get("project_name", "fastvideo") or "fastvideo"),
             run_name=str(tr.get("run_name", "") or ""),
+        ),
+        performance=PerformanceConfig(
+            enabled=bool(perf.get("enabled", True)),
+            peak_tflops_per_gpu=peak_tflops,
         ),
         vsa_sparsity=float(vs.get("sparsity", 0.0) or 0.0),
         vsa_cache_tile_buf=bool(vs.get("cache_tile_buf", False) or False),

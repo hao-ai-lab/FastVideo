@@ -33,6 +33,7 @@ from dreamverse.config import (
     _resolve_lora_spec,
 )
 from dreamverse.generation_contracts import StepResult
+from dreamverse.generation_inputs import GenerationInputs
 
 # Multi-frame decoded continuation defaults from
 # examples/inference/basic/basic_ltx2_distilled_video_continuation.py.
@@ -454,8 +455,11 @@ class LTX2GenerationBackend:
         segment_idx: int,
         image_path: str | None,
         reset_conditioning: bool,
+        generation_inputs: GenerationInputs | None = None,
     ) -> StepResult:
         """Execute one generation step; snapshot state for the next segment."""
+        if generation_inputs is not None and (generation_inputs.mode not in (None, "t2va") or generation_inputs.assets):
+            raise ValueError("LTX supports text generation only through the generation mode API.")
         timings: dict = {}
 
         prompt = self._inject_style_trigger(prompt)
