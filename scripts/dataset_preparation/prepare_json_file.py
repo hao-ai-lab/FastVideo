@@ -13,9 +13,7 @@ from tqdm import tqdm
 def get_video_info(video_path):
     """Get video information using torchvision."""
     # Read video tensor (T, C, H, W)
-    video_tensor, _, info = torchvision.io.read_video(str(video_path),
-                                                      output_format="TCHW",
-                                                      pts_unit="sec")
+    video_tensor, _, info = torchvision.io.read_video(str(video_path), output_format="TCHW", pts_unit="sec")
 
     num_frames = video_tensor.shape[0]
     height = video_tensor.shape[2]
@@ -39,9 +37,7 @@ def get_video_info(video_path):
     }
 
 
-def prepare_dataset_json(folder_path,
-                         output_name="videos2caption.json",
-                         num_workers=None) -> None:
+def prepare_dataset_json(folder_path, output_name="videos2caption.json", num_workers=None) -> None:
     """Prepare dataset information from a folder containing videos and prompt.txt."""
     folder_path = Path(folder_path)
 
@@ -62,9 +58,7 @@ def prepare_dataset_json(folder_path,
         video_paths = [line.strip() for line in f.readlines() if line.strip()]
 
     if len(prompts) != len(video_paths):
-        raise ValueError(
-            f"Number of prompts ({len(prompts)}) does not match number of videos ({len(video_paths)})"
-        )
+        raise ValueError(f"Number of prompts ({len(prompts)}) does not match number of videos ({len(video_paths)})")
 
     # Prepare arguments for multiprocessing
     process_args = [folder_path / video_path for video_path in video_paths]
@@ -113,22 +107,16 @@ def prepare_dataset_json(folder_path,
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description='Prepare video dataset information in JSON format')
-    parser.add_argument(
-        '--data_folder',
-        type=str,
-        required=True,
-        help='Path to the folder containing videos and prompt.txt')
-    parser.add_argument(
-        '--output',
-        type=str,
-        default='videos2caption.json',
-        help='Name of the output JSON file (default: videos2caption.json)')
-    parser.add_argument('--workers',
-                        type=int,
-                        default=32,
-                        help='Number of worker processes (default: 16)')
+    parser = argparse.ArgumentParser(description='Prepare video dataset information in JSON format')
+    parser.add_argument('--data_folder',
+                        type=str,
+                        required=True,
+                        help='Path to the folder containing videos and prompt.txt')
+    parser.add_argument('--output',
+                        type=str,
+                        default='videos2caption.json',
+                        help='Name of the output JSON file (default: videos2caption.json)')
+    parser.add_argument('--workers', type=int, default=32, help='Number of worker processes (default: 16)')
     return parser.parse_args()
 
 

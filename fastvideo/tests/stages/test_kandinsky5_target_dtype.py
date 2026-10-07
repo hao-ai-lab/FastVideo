@@ -78,9 +78,8 @@ def test_resolve_target_dtype_honors_explicit_fp32_for_plain_transformer():
 
     resolved = stage._resolve_target_dtype(_fastvideo_args("fp32"))
 
-    assert resolved == torch.float32, (
-        "an explicit fp32 pipeline_config must not be silently cast to bf16 for a "
-        "plain (non-FSDP) transformer")
+    assert resolved == torch.float32, ("an explicit fp32 pipeline_config must not be silently cast to bf16 for a "
+                                       "plain (non-FSDP) transformer")
 
 
 def test_resolve_target_dtype_honors_explicit_fp16_for_plain_transformer():
@@ -110,9 +109,8 @@ def test_resolve_target_dtype_fsdp_reads_policy_not_parameter_storage(mixed_prec
 
     resolved = stage._resolve_target_dtype(_fastvideo_args("fp16"))
 
-    assert resolved == torch.bfloat16, (
-        "FSDP compute dtype comes from the MixedPrecisionPolicy param_dtype, not from "
-        "the dtype the parameters happen to be stored in")
+    assert resolved == torch.bfloat16, ("FSDP compute dtype comes from the MixedPrecisionPolicy param_dtype, not from "
+                                        "the dtype the parameters happen to be stored in")
 
 
 def test_resolve_target_dtype_fsdp_follows_a_non_default_policy(mixed_precision_state_reset):

@@ -24,8 +24,8 @@ class _Stub:
         # Register i holds -(i+1) in every channel: distinct from any hidden
         # state below, and distinct from each other, so an assertion can pin
         # not just "a register landed here" but *which* register landed here.
-        self.learnable_registers = -(torch.arange(num_registers, dtype=torch.float32) +
-                                     1.0).unsqueeze(-1).expand(num_registers, hidden).contiguous()
+        self.learnable_registers = -(torch.arange(num_registers, dtype=torch.float32) + 1.0).unsqueeze(-1).expand(
+            num_registers, hidden).contiguous()
 
 
 def _run(hidden_states: torch.Tensor, valid_lengths: list[int], num_registers: int | None = None):
@@ -47,10 +47,8 @@ def test_ragged_batch_left_aligns_each_row_independently() -> None:
     """
     seq_len, hidden = 4, 2
     # Token values encode (row, position) so misplacement is visible.
-    hidden_states = torch.tensor(
-        [[[10.0, 10.0], [11.0, 11.0], [12.0, 12.0], [13.0, 13.0]],
-         [[20.0, 20.0], [21.0, 21.0], [22.0, 22.0], [23.0, 23.0]]],
-    )
+    hidden_states = torch.tensor([[[10.0, 10.0], [11.0, 11.0], [12.0, 12.0], [13.0, 13.0]],
+                                  [[20.0, 20.0], [21.0, 21.0], [22.0, 22.0], [23.0, 23.0]]], )
     out, _ = _run(hidden_states, valid_lengths=[3, 1])
 
     # Row 0's valid tokens are the last 3 (11, 12, 13), left-aligned in order.
@@ -91,10 +89,8 @@ def test_registers_tile_across_the_sequence() -> None:
 
 def test_single_row_matches_ragged_batch_row() -> None:
     """A row's result must not depend on what else is in the batch."""
-    hidden_states = torch.tensor(
-        [[[10.0, 10.0], [11.0, 11.0], [12.0, 12.0], [13.0, 13.0]],
-         [[20.0, 20.0], [21.0, 21.0], [22.0, 22.0], [23.0, 23.0]]],
-    )
+    hidden_states = torch.tensor([[[10.0, 10.0], [11.0, 11.0], [12.0, 12.0], [13.0, 13.0]],
+                                  [[20.0, 20.0], [21.0, 21.0], [22.0, 22.0], [23.0, 23.0]]], )
     batched, _ = _run(hidden_states, valid_lengths=[3, 1])
     alone, _ = _run(hidden_states[1:2], valid_lengths=[1])
     assert torch.equal(batched[1], alone[0])

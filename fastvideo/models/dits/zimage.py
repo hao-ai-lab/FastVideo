@@ -61,8 +61,7 @@ class TimestepEmbedder(nn.Module):
     def timestep_embedding(t: torch.Tensor, dim: int, max_period: int) -> torch.Tensor:
         with torch.amp.autocast("cuda", enabled=False):
             half = dim // 2
-            freqs = torch.exp(
-                -math.log(max_period) * torch.arange(half, dtype=torch.float32, device=t.device) / half)
+            freqs = torch.exp(-math.log(max_period) * torch.arange(half, dtype=torch.float32, device=t.device) / half)
             args = t[:, None].float() * freqs[None]
             embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
             if dim % 2:
@@ -181,8 +180,7 @@ class ZImageTransformerBlock(nn.Module):
         self.ffn_norm2 = RMSNorm(dim, eps=norm_eps)
 
         if modulation:
-            self.adaLN_modulation = nn.ModuleList(
-                [ReplicatedLinear(min(dim, adaln_embed_dim), 4 * dim, bias=True)])
+            self.adaLN_modulation = nn.ModuleList([ReplicatedLinear(min(dim, adaln_embed_dim), 4 * dim, bias=True)])
 
     def forward(
         self,
@@ -193,8 +191,8 @@ class ZImageTransformerBlock(nn.Module):
     ) -> torch.Tensor:
         if self.modulation:
             assert adaln_input is not None
-            scale_msa, gate_msa, scale_mlp, gate_mlp = _linear(
-                self.adaLN_modulation[0], adaln_input).unsqueeze(1).chunk(4, dim=2)
+            scale_msa, gate_msa, scale_mlp, gate_mlp = _linear(self.adaLN_modulation[0],
+                                                               adaln_input).unsqueeze(1).chunk(4, dim=2)
             gate_msa, gate_mlp = gate_msa.tanh(), gate_mlp.tanh()
             scale_msa, scale_mlp = 1.0 + scale_msa, 1.0 + scale_mlp
 
@@ -258,8 +256,7 @@ class RopeEmbedder:
             raise ValueError("RoPE ids must have shape [sequence, number_of_axes]")
         if self.freqs_cis is None:
             self.freqs_cis = [
-                freqs.to(ids.device)
-                for freqs in self.precompute_freqs_cis(self.axes_dims, self.axes_lens, self.theta)
+                freqs.to(ids.device) for freqs in self.precompute_freqs_cis(self.axes_dims, self.axes_lens, self.theta)
             ]
         elif self.freqs_cis[0].device != ids.device:
             self.freqs_cis = [freqs.to(ids.device) for freqs in self.freqs_cis]
@@ -293,12 +290,13 @@ class ZImageTransformer2DModel(BaseDiT):
         self.num_channels_latents = arch.in_channels
 
         self.all_x_embedder = nn.ModuleDict({
-            f"{patch_size}-{f_patch_size}": ReplicatedLinear(
-                f_patch_size * patch_size * patch_size * arch.in_channels, arch.dim, bias=True)
+            f"{patch_size}-{f_patch_size}":
+            ReplicatedLinear(f_patch_size * patch_size * patch_size * arch.in_channels, arch.dim, bias=True)
             for patch_size, f_patch_size in zip(self.all_patch_size, self.all_f_patch_size)
         })
         self.all_final_layer = nn.ModuleDict({
-            f"{patch_size}-{f_patch_size}": FinalLayer(
+            f"{patch_size}-{f_patch_size}":
+            FinalLayer(
                 arch.dim,
                 patch_size * patch_size * f_patch_size * self.out_channels,
                 arch.adaln_embed_dim,
@@ -334,9 +332,8 @@ class ZImageTransformer2DModel(BaseDiT):
         ])
         self.x_pad_token = nn.Parameter(torch.empty((1, arch.dim)))
         self.cap_pad_token = nn.Parameter(torch.empty((1, arch.dim)))
-        self.layers = nn.ModuleList([
-            ZImageTransformerBlock(layer_id, modulation=True, **block_kwargs) for layer_id in range(arch.n_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [ZImageTransformerBlock(layer_id, modulation=True, **block_kwargs) for layer_id in range(arch.n_layers)])
         self.axes_dims = tuple(arch.axes_dims)
         self.axes_lens = tuple(arch.axes_lens)
         self.rope_embedder = RopeEmbedder(arch.rope_theta, self.axes_dims, self.axes_lens)
@@ -386,13 +383,13 @@ class ZImageTransformer2DModel(BaseDiT):
         patch_size: int,
         f_patch_size: int,
     ) -> tuple[
-        list[torch.Tensor],
-        list[torch.Tensor],
-        list[tuple[int, int, int]],
-        list[torch.Tensor],
-        list[torch.Tensor],
-        list[torch.Tensor],
-        list[torch.Tensor],
+            list[torch.Tensor],
+            list[torch.Tensor],
+            list[tuple[int, int, int]],
+            list[torch.Tensor],
+            list[torch.Tensor],
+            list[torch.Tensor],
+            list[torch.Tensor],
     ]:
         patch_height = patch_width = patch_size
         patch_frames = f_patch_size
@@ -452,8 +449,8 @@ class ZImageTransformer2DModel(BaseDiT):
                 device=device,
             ).flatten(0, 2)
             if image_padding:
-                padding_pos_ids = self.create_coordinate_grid((1, 1, 1), device=device).flatten(0, 2).repeat(
-                    image_padding, 1)
+                padding_pos_ids = self.create_coordinate_grid((1, 1, 1),
+                                                              device=device).flatten(0, 2).repeat(image_padding, 1)
                 image_pos_ids.append(torch.cat([original_pos_ids, padding_pos_ids]))
             else:
                 image_pos_ids.append(original_pos_ids)
@@ -462,8 +459,7 @@ class ZImageTransformer2DModel(BaseDiT):
                     torch.zeros(image_length, dtype=torch.bool, device=device),
                     torch.ones(image_padding, dtype=torch.bool, device=device),
                 ]) if image_padding else torch.zeros(image_length, dtype=torch.bool, device=device))
-            image_out.append(
-                torch.cat([image, image[-1:].repeat(image_padding, 1)]) if image_padding else image)
+            image_out.append(torch.cat([image, image[-1:].repeat(image_padding, 1)]) if image_padding else image)
 
         return (
             image_out,
@@ -495,8 +491,7 @@ class ZImageTransformer2DModel(BaseDiT):
     ) -> tuple[list[torch.Tensor], dict]:
         del encoder_hidden_states_image, guidance, kwargs
         if model_parallel_is_initialized() and get_sp_world_size() != 1:
-            raise NotImplementedError(
-                "Z-Image masked SDPA does not support sequence parallelism; run with sp_size=1")
+            raise NotImplementedError("Z-Image masked SDPA does not support sequence parallelism; run with sp_size=1")
         if patch_size not in self.all_patch_size or f_patch_size not in self.all_f_patch_size:
             raise ValueError(f"unsupported patch sizes: spatial={patch_size}, temporal={f_patch_size}")
         if isinstance(hidden_states, torch.Tensor):
@@ -551,10 +546,8 @@ class ZImageTransformer2DModel(BaseDiT):
         unified = []
         unified_freqs_cis = []
         for i, (image_length, cap_length) in enumerate(zip(image_lengths, cap_lengths)):
-            unified.append(
-                torch.cat([hidden_states[i][:image_length], encoder_hidden_states[i][:cap_length]]))
-            unified_freqs_cis.append(
-                torch.cat([image_freqs_cis[i][:image_length], cap_freqs_cis[i][:cap_length]]))
+            unified.append(torch.cat([hidden_states[i][:image_length], encoder_hidden_states[i][:cap_length]]))
+            unified_freqs_cis.append(torch.cat([image_freqs_cis[i][:image_length], cap_freqs_cis[i][:cap_length]]))
         unified_lengths = [image_length + cap_length for image_length, cap_length in zip(image_lengths, cap_lengths)]
         unified = pad_sequence(unified, batch_first=True, padding_value=0.0)
         unified_freqs_cis = pad_sequence(unified_freqs_cis, batch_first=True, padding_value=0.0)

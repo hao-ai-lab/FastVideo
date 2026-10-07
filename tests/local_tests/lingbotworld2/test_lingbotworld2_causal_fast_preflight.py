@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 
-
 ROOT = Path("/mnt/weka/shrd/wm/junda/fv-hub/lingbot-world-v2")
 FASTVIDEO_ROOT = Path(__file__).resolve().parents[3]
 RAW_MODEL_DIR = ROOT / "ckpts" / "lingbot-world-v2-14b-causal-fast"
@@ -45,10 +44,7 @@ def test_lingbotworld2_bundle_declares_native_components() -> None:
 
 def test_lingbotworld2_source_frame_requests_truncate_as_expected() -> None:
     pose_count = int(np.load(ACTION_PATH / "poses.npy").shape[0])
-    effective = {
-        frame_num: _source_effective_frames(frame_num, pose_count)
-        for frame_num in (5, 9, 17, 33, 65)
-    }
+    effective = {frame_num: _source_effective_frames(frame_num, pose_count) for frame_num in (5, 9, 17, 33, 65)}
     assert effective == {
         5: -3,
         9: -3,

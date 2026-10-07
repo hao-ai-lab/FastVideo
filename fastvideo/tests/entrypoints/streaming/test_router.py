@@ -27,19 +27,14 @@ def _registry(
     num_primary: int = 1,
     num_secondary: int = 1,
 ) -> ReplicaRegistry:
-    replicas = [
-        ReplicaEndpoint(
-            url=f"http://primary-{i}:8000",
-            primary=True,
-        )
-        for i in range(num_primary)
-    ] + [
-        ReplicaEndpoint(
-            url=f"http://secondary-{i}:8000",
-            primary=False,
-        )
-        for i in range(num_secondary)
-    ]
+    replicas = [ReplicaEndpoint(
+        url=f"http://primary-{i}:8000",
+        primary=True,
+    ) for i in range(num_primary)
+                ] + [ReplicaEndpoint(
+                    url=f"http://secondary-{i}:8000",
+                    primary=False,
+                ) for i in range(num_secondary)]
     return ReplicaRegistry(replicas)
 
 
@@ -57,12 +52,10 @@ class TestReplicaRegistry:
 
         async def promote():
             primary = reg.primaries()[0]
-            await reg.record_success(
-                primary, recovery_threshold=1, latency_ms=1.0)
+            await reg.record_success(primary, recovery_threshold=1, latency_ms=1.0)
             # Also mark secondary healthy — primary should still win.
             sec = next(r for r in reg.all() if not r.primary)
-            await reg.record_success(
-                sec, recovery_threshold=1, latency_ms=1.0)
+            await reg.record_success(sec, recovery_threshold=1, latency_ms=1.0)
             return reg.select()
 
         pick = asyncio.run(promote())
@@ -77,10 +70,8 @@ class TestReplicaRegistry:
             sec = next(r for r in reg.all() if not r.primary)
             # Fail primary past threshold, succeed secondary.
             for _ in range(3):
-                await reg.record_failure(
-                    primary, failure_threshold=3, reason="mock")
-            await reg.record_success(
-                sec, recovery_threshold=1, latency_ms=1.0)
+                await reg.record_failure(primary, failure_threshold=3, reason="mock")
+            await reg.record_success(sec, recovery_threshold=1, latency_ms=1.0)
             return reg.select()
 
         pick = asyncio.run(run())
@@ -93,11 +84,9 @@ class TestReplicaRegistry:
 
         async def run():
             for _ in range(2):
-                await reg.record_failure(
-                    primary, failure_threshold=3, reason="x")
+                await reg.record_failure(primary, failure_threshold=3, reason="x")
             assert primary.health.status is not ReplicaStatus.UNHEALTHY
-            await reg.record_failure(
-                primary, failure_threshold=3, reason="x")
+            await reg.record_failure(primary, failure_threshold=3, reason="x")
             return primary
 
         result = asyncio.run(run())
@@ -110,12 +99,10 @@ class TestReplicaRegistry:
 
         async def run():
             for _ in range(3):
-                await reg.record_failure(
-                    primary, failure_threshold=3, reason="x")
+                await reg.record_failure(primary, failure_threshold=3, reason="x")
             assert primary.health.status is ReplicaStatus.UNHEALTHY
             for _ in range(2):
-                await reg.record_success(
-                    primary, recovery_threshold=2, latency_ms=5.0)
+                await reg.record_success(primary, recovery_threshold=2, latency_ms=5.0)
             return primary
 
         result = asyncio.run(run())
@@ -127,10 +114,8 @@ class TestReplicaRegistry:
         primary = reg.primaries()[0]
 
         async def run():
-            await reg.record_failure(
-                primary, failure_threshold=10, reason="x")
-            await reg.record_success(
-                primary, recovery_threshold=1, latency_ms=1.0)
+            await reg.record_failure(primary, failure_threshold=10, reason="x")
+            await reg.record_success(primary, recovery_threshold=1, latency_ms=1.0)
             return primary
 
         result = asyncio.run(run())
@@ -161,10 +146,13 @@ class TestHealthCheckLoop:
             return 0.0, "mock failure"
 
         async def run() -> None:
-            task = asyncio.create_task(run_health_check_loop(
-                registry=reg, config=config, stop_event=stop_event,
-                http_get=probe,
-            ))
+            task = asyncio.create_task(
+                run_health_check_loop(
+                    registry=reg,
+                    config=config,
+                    stop_event=stop_event,
+                    http_get=probe,
+                ))
             await asyncio.sleep(0.05)
             stop_event.set()
             await task
@@ -246,7 +234,7 @@ class TestUnknownToHealthyImmediate:
             await reg.record_success(primary, recovery_threshold=2, latency_ms=1.0)
             assert primary.health.status is ReplicaStatus.UNHEALTHY  # 1/2 successes
             await reg.record_success(primary, recovery_threshold=2, latency_ms=1.0)
-            assert primary.health.status is ReplicaStatus.HEALTHY    # 2/2 successes
+            assert primary.health.status is ReplicaStatus.HEALTHY  # 2/2 successes
 
         asyncio.run(run())
 

@@ -44,8 +44,7 @@ class AudioProcessor(nn.Module):
     ) -> torch.Tensor:
         if source_rate == target_rate:
             return waveform
-        resampled = torchaudio.functional.resample(
-            waveform, source_rate, target_rate)
+        resampled = torchaudio.functional.resample(waveform, source_rate, target_rate)
         return resampled.to(device=waveform.device, dtype=waveform.dtype)
 
     def waveform_to_mel(
@@ -53,8 +52,7 @@ class AudioProcessor(nn.Module):
         waveform: torch.Tensor,
         waveform_sample_rate: int,
     ) -> torch.Tensor:
-        waveform = self.resample_waveform(
-            waveform, waveform_sample_rate, self.sample_rate)
+        waveform = self.resample_waveform(waveform, waveform_sample_rate, self.sample_rate)
         mel = self.mel_transform(waveform)
         mel = torch.log(torch.clamp(mel, min=1e-5))
         mel = mel.to(device=waveform.device, dtype=waveform.dtype)

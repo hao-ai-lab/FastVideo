@@ -4,6 +4,7 @@ import logging
 
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 
 _LOGGER_NAME = "fastvideo.tests.test_logger"
@@ -37,38 +38,35 @@ def _info_records(msg: str = "hello %s") -> list[logging.LogRecord]:
 
 
 @pytest.fixture()
-def _non_main_rank(monkeypatch):
-    monkeypatch.setenv("WORLD_SIZE", "2")
-    monkeypatch.setenv("RANK", "1")
-    monkeypatch.setenv("LOCAL_RANK", "1")
-    monkeypatch.delenv("FASTVIDEO_LOG_ALL_PROCESSES", raising=False)
+def _non_main_rank(env_overrides):
+    env_overrides.enter_context(envs.override_external("WORLD_SIZE", "2"))
+    env_overrides.enter_context(envs.override_external("RANK", "1"))
+    env_overrides.enter_context(envs.override_external("LOCAL_RANK", "1"))
+    env_overrides.enter_context(envs.FASTVIDEO_LOG_ALL_PROCESSES.override(None))
 
 
 def test_non_main_rank_is_suppressed_by_default(_non_main_rank):
     assert _info_records() == []
 
 
-def test_log_all_processes_enables_non_main_rank(_non_main_rank, monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_LOG_ALL_PROCESSES", "1")
+def test_log_all_processes_enables_non_main_rank(_non_main_rank, env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_LOG_ALL_PROCESSES.override(True))
     assert len(_info_records()) == 1
 
 
-def test_main_rank_still_logs_when_env_var_unset(monkeypatch):
-    monkeypatch.setenv("WORLD_SIZE", "1")
-    monkeypatch.setenv("RANK", "0")
-    monkeypatch.setenv("LOCAL_RANK", "0")
-    monkeypatch.delenv("FASTVIDEO_LOG_ALL_PROCESSES", raising=False)
+def test_main_rank_still_logs_when_env_var_unset(env_overrides):
+    env_overrides.enter_context(envs.override_external("WORLD_SIZE", "1"))
+    env_overrides.enter_context(envs.override_external("RANK", "0"))
+    env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
+    env_overrides.enter_context(envs.FASTVIDEO_LOG_ALL_PROCESSES.override(None))
     assert len(_info_records()) == 1
 
 
-@pytest.mark.parametrize("log_all_processes", [None, "1"])
-def test_info_once_accepts_stacklevel(monkeypatch, log_all_processes):
-    monkeypatch.setenv("RANK", "0")
-    monkeypatch.setenv("LOCAL_RANK", "0")
-    if log_all_processes is None:
-        monkeypatch.delenv("FASTVIDEO_LOG_ALL_PROCESSES", raising=False)
-    else:
-        monkeypatch.setenv("FASTVIDEO_LOG_ALL_PROCESSES", log_all_processes)
+@pytest.mark.parametrize("log_all_processes", [None, True])
+def test_info_once_accepts_stacklevel(env_overrides, log_all_processes):
+    env_overrides.enter_context(envs.override_external("RANK", "0"))
+    env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
+    env_overrides.enter_context(envs.FASTVIDEO_LOG_ALL_PROCESSES.override(log_all_processes))
 
     logger = init_logger(_LOGGER_NAME)
     handler = _ListHandler()

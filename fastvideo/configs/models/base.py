@@ -36,7 +36,9 @@ class ModelConfig:
     # This is the component-level decision, not a promise about the kernel any
     # single layer ends up running: a layer that does not declare support for
     # this backend still falls back (see ``fastvideo/attention/selector.py``).
-    _resolved_attention_backend: "AttentionBackendEnum | None" = None
+    # Keyword-only: the loader writes this by attribute assignment, so it must not
+    # take a slot in the positional signature that subclasses' fields inherit.
+    _resolved_attention_backend: "AttentionBackendEnum | None" = field(default=None, kw_only=True)
 
     def __getattr__(self, name):
         # Only called if 'name' is not found in ModelConfig directly

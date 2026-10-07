@@ -55,18 +55,13 @@ _inductor.coordinate_descent_tuning = True
 _inductor.coordinate_descent_check_all_directions = True
 _inductor.epilogue_fusion = False  # do not fuse pointwise ops into matmuls
 
-MODEL_ID = os.path.expandvars(
-    os.path.expanduser(
-        os.getenv("LTX23_MODEL_PATH", "FastVideo/LTX-2.3-Distilled-Diffusers")
-    )
-)
+MODEL_ID = os.path.expandvars(os.path.expanduser(os.getenv("LTX23_MODEL_PATH",
+                                                           "FastVideo/LTX-2.3-Distilled-Diffusers")))
 OUTPUT_DIR = Path(os.getenv("LTX23_OUTPUT_DIR", "outputs_video/ltx2_3_nvfp4_t2v"))
-DEFAULT_PROMPT = (
-    "A fashion model takes a slow step forward and shifts her weight, "
-    "the soft fabric of her clothing swaying and rippling with the "
-    "motion, her hair shifting gently, soft even studio lighting on a "
-    "clean light background, elegant slow-motion runway feel."
-)
+DEFAULT_PROMPT = ("A fashion model takes a slow step forward and shifts her weight, "
+                  "the soft fabric of her clothing swaying and rippling with the "
+                  "motion, her hair shifting gently, soft even studio lighting on a "
+                  "clean light background, elegant slow-motion runway feel.")
 PROMPT = os.getenv("LTX23_T2V_PROMPT", DEFAULT_PROMPT)
 
 
@@ -120,10 +115,12 @@ def main() -> None:
 
     common_kwargs = dict(
         prompt=PROMPT,
-        negative_prompt="",      # distilled is CFG-free; no negative needed
-        guidance_scale=1.0,      # CFG=1 for distilled
-        height=1280, width=832,  # portrait runway aspect
-        num_frames=121, fps=24,  # ~5s clip
+        negative_prompt="",  # distilled is CFG-free; no negative needed
+        guidance_scale=1.0,  # CFG=1 for distilled
+        height=1280,
+        width=832,  # portrait runway aspect
+        num_frames=121,
+        fps=24,  # ~5s clip
         # Single-stage 8-step distilled sampling — the validated preset for
         # this checkpoint (no two-stage refine; the NVFP4 deploy contract
         # runs the distilled single-stage recipe).

@@ -94,103 +94,102 @@ def reshape_patch_embedding(tensor: torch.Tensor, target_shape: tuple) -> torch.
 def get_reference_shapes(reference_repo: str) -> dict:
     """Download reference model and get expected shapes for patch_embedding."""
     print(f"Downloading reference model shapes from {reference_repo}...")
-    
+
     # Download just the transformer config and a weight file to get shapes
     local_dir = snapshot_download(
         repo_id=reference_repo,
         allow_patterns=["transformer/config.json", "transformer/diffusion_pytorch_model*.safetensors"],
-        local_dir_use_symlinks=False
-    )
-    
-    # Load the first safetensors file to get shapes    
+        local_dir_use_symlinks=False)
+
+    # Load the first safetensors file to get shapes
     weight_files = glob.glob(os.path.join(local_dir, "transformer", "*.safetensors"))
     shapes = {}
-    
+
     for wf in weight_files:
         with safe_open(wf, framework="pt") as f:
             for key in f.keys():
                 shapes[key] = f.get_tensor(key).shape
-    
+
     return shapes
 
 
 def main():
     parser = argparse.ArgumentParser(description="Convert TurboDiffusion checkpoint to Diffusers format")
-    parser.add_argument("--input_path", type=str, required=True,
-                        help="Path to TurboDiffusion .pth checkpoint")
-    parser.add_argument("--output_dir", type=str, required=True,
-                        help="Output directory for converted safetensors")
-    parser.add_argument("--reference_repo", type=str, default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    parser.add_argument("--input_path", type=str, required=True, help="Path to TurboDiffusion .pth checkpoint")
+    parser.add_argument("--output_dir", type=str, required=True, help="Output directory for converted safetensors")
+    parser.add_argument("--reference_repo",
+                        type=str,
+                        default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
                         help="Reference HF repo to get expected tensor shapes")
-    parser.add_argument("--skip_sla_weights", action="store_true", default=False,
+    parser.add_argument("--skip_sla_weights",
+                        action="store_true",
+                        default=False,
                         help="Skip SLA-specific weights (proj_l) that aren't in base model")
-    
+
     args = parser.parse_args()
-    
+
     # Load TurboDiffusion checkpoint
     print(f"Loading TurboDiffusion checkpoint from {args.input_path}...")
     turbo_state_dict = torch.load(args.input_path, map_location="cpu", weights_only=True)
     print(f"Loaded {len(turbo_state_dict)} keys")
-    
+
     # Get reference shapes for reshaping
     ref_shapes = get_reference_shapes(args.reference_repo)
     print(f"Got {len(ref_shapes)} reference shapes")
-    
+
     # Convert keys and reshape tensors
     converted_state_dict = {}
     skipped_keys = []
-    
+
     for turbo_key, tensor in turbo_state_dict.items():
         # Skip SLA-specific weights if requested
         if args.skip_sla_weights and should_skip_key(turbo_key):
             skipped_keys.append(turbo_key)
             continue
-        
+
         # Convert key name
         new_key = convert_key(turbo_key)
-        
+
         # Reshape patch_embedding if needed
         if "patch_embedding" in new_key and new_key in ref_shapes:
             target_shape = ref_shapes[new_key]
             if tensor.shape != target_shape:
                 print(f"Reshaping {new_key}: {tensor.shape} -> {target_shape}")
                 tensor = reshape_patch_embedding(tensor, target_shape)
-        
+
         # Verify shape matches reference if available
         if new_key in ref_shapes:
             if tensor.shape != ref_shapes[new_key]:
                 print(f"WARNING: Shape mismatch for {new_key}: got {tensor.shape}, expected {ref_shapes[new_key]}")
-        
+
         converted_state_dict[new_key] = tensor
-    
+
     print(f"\nConversion summary:")
     print(f"  Converted: {len(converted_state_dict)} keys")
     print(f"  Skipped (SLA): {len(skipped_keys)} keys")
-    
+
     if skipped_keys:
         print(f"\nSkipped SLA keys (first 5):")
         for k in skipped_keys[:5]:
             print(f"  - {k}")
-    
+
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
     # Save as safetensors
     output_path = os.path.join(args.output_dir, "diffusion_pytorch_model.safetensors")
     print(f"\nSaving to {output_path}...")
     save_file(converted_state_dict, output_path)
-    
+
     # Copy config.json from reference
-    ref_local = snapshot_download(
-        repo_id=args.reference_repo,
-        allow_patterns=["transformer/config.json"],
-        local_dir_use_symlinks=False
-    )
+    ref_local = snapshot_download(repo_id=args.reference_repo,
+                                  allow_patterns=["transformer/config.json"],
+                                  local_dir_use_symlinks=False)
     src_config = os.path.join(ref_local, "transformer", "config.json")
     dst_config = os.path.join(args.output_dir, "config.json")
     shutil.copy(src_config, dst_config)
     print(f"Copied config.json")
-    
+
     print(f"\nDone! Converted weights saved to: {args.output_dir}")
     print(f"\nNext steps:")
     print(f"  1. Use create_hf_repo.py to create a complete diffusers repo:")

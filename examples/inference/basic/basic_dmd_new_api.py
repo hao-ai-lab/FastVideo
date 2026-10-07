@@ -32,11 +32,9 @@ def main():
         ),
         # PR 2 still routes a few advanced inference knobs through the
         # compatibility bridge until they get first-class typed fields.
-        pipeline=PipelineSelection(
-            experimental={
-                "VSA_sparsity": 0.8,
-            },
-        ),
+        pipeline=PipelineSelection(experimental={
+            "VSA_sparsity": 0.8,
+        }, ),
     )
 
     load_start_time = time.perf_counter()
@@ -44,14 +42,12 @@ def main():
     load_end_time = time.perf_counter()
     load_time = load_end_time - load_start_time
 
-    prompt = (
-        "A neon-lit alley in futuristic Tokyo during a heavy rainstorm at night. "
-        "The puddles reflect glowing signs in kanji, advertising ramen, karaoke, "
-        "and VR arcades. A woman in a translucent raincoat walks briskly with an "
-        "LED umbrella. Steam rises from a street food cart, and a cat darts "
-        "across the screen. Raindrops are visible on the camera lens, creating "
-        "a cinematic bokeh effect."
-    )
+    prompt = ("A neon-lit alley in futuristic Tokyo during a heavy rainstorm at night. "
+              "The puddles reflect glowing signs in kanji, advertising ramen, karaoke, "
+              "and VR arcades. A woman in a translucent raincoat walks briskly with an "
+              "LED umbrella. Steam rises from a street food cart, and a cat darts "
+              "across the screen. Raindrops are visible on the camera lens, creating "
+              "a cinematic bokeh effect.")
     request = GenerationRequest(
         prompt=prompt,
         output=OutputConfig(
@@ -66,13 +62,11 @@ def main():
     end_time = time.perf_counter()
     gen_time = end_time - start_time
 
-    prompt2 = (
-        "A majestic lion strides across the golden savanna, its powerful frame "
-        "glistening under the warm afternoon sun. The tall grass ripples gently "
-        "in the breeze, enhancing the lion's commanding presence. The tone is "
-        "vibrant, embodying the raw energy of the wild. Low angle, steady "
-        "tracking shot, cinematic."
-    )
+    prompt2 = ("A majestic lion strides across the golden savanna, its powerful frame "
+               "glistening under the warm afternoon sun. The tall grass ripples gently "
+               "in the breeze, enhancing the lion's commanding presence. The tone is "
+               "vibrant, embodying the raw energy of the wild. Low angle, steady "
+               "tracking shot, cinematic.")
     request2 = GenerationRequest(
         prompt=prompt2,
         output=OutputConfig(
