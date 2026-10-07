@@ -8,12 +8,14 @@ from pathlib import Path
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.tests.ssim.inference_similarity_utils import (
     run_text_to_video_similarity_test, )
 from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
+    with_model_path,
 )
 
 logger = init_logger(__name__)
@@ -22,8 +24,6 @@ REQUIRED_GPUS = 1
 pytestmark = pytest.mark.skip(reason="Disabled pending removal of GLM-Image support.")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / "glm_image"))
-GLM_IMAGE_MODEL_PATH = os.getenv("GLM_IMAGE_MODEL_DIR", str(LOCAL_WEIGHTS_DIR))
 
 device_reference_folder = resolve_device_reference_folder(
     (
@@ -50,9 +50,9 @@ TEST_PROMPTS = [
     "Warm golden light, photorealistic style.",
 ]
 
+# The test adds "model_path" from FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR.
 GLM_IMAGE_PARAMS = {
     "num_gpus": 1,
-    "model_path": GLM_IMAGE_MODEL_PATH,
     "sp_size": 1,
     "tp_size": 1,
     "height": 256,
@@ -67,7 +67,6 @@ GLM_IMAGE_PARAMS = {
 
 GLM_IMAGE_FULL_QUALITY_PARAMS = {
     "num_gpus": 1,
-    "model_path": GLM_IMAGE_MODEL_PATH,
     "sp_size": 1,
     "tp_size": 1,
     "height": 1024,
@@ -88,9 +87,13 @@ GLM_IMAGE_FULL_QUALITY_MODEL_TO_PARAMS = {
 }
 
 
+def _local_weights_dir() -> Path:
+    return Path(envs.FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR.get() or REPO_ROOT / "official_weights" / "glm_image")
+
+
 def _has_weights() -> bool:
     required = ["transformer", "vae", "text_encoder", "vision_language_encoder", "processor", "tokenizer", "scheduler"]
-    return all((LOCAL_WEIGHTS_DIR / r).exists() for r in required)
+    return all((_local_weights_dir() / r).exists() for r in required)
 
 
 def _upstream_glm_image_available() -> bool:
@@ -106,10 +109,6 @@ def _upstream_glm_image_available() -> bool:
     reason="GLM-Image SSIM test requires CUDA",
 )
 @pytest.mark.skipif(
-    not _has_weights(),
-    reason=f"GLM-Image full weights not found at {LOCAL_WEIGHTS_DIR}.",
-)
-@pytest.mark.skipif(
     not _upstream_glm_image_available(),
     reason="GLM-Image needs transformers>=5.0.0rc0 (ships the AR encoder).",
 )
@@ -121,6 +120,10 @@ def test_glm_image_similarity(
     attention_backend_name: str,
     model_id: str,
 ) -> None:
+    if not _has_weights():
+        pytest.skip(f"GLM-Image full weights not found at {_local_weights_dir()}.")
+    model_path = envs.FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR.get() or str(_local_weights_dir())
+
     run_text_to_video_similarity_test(
         logger=logger,
         script_dir=os.path.dirname(os.path.abspath(__file__)),
@@ -128,8 +131,8 @@ def test_glm_image_similarity(
         prompt=prompt,
         attention_backend_name=attention_backend_name,
         model_id=model_id,
-        default_params_map=GLM_IMAGE_MODEL_TO_PARAMS,
-        full_quality_params_map=GLM_IMAGE_FULL_QUALITY_MODEL_TO_PARAMS,
+        default_params_map=with_model_path(GLM_IMAGE_MODEL_TO_PARAMS, model_path),
+        full_quality_params_map=with_model_path(GLM_IMAGE_FULL_QUALITY_MODEL_TO_PARAMS, model_path),
         min_acceptable_ssim=0.98,
         init_kwargs_override={
             "trust_remote_code": True,

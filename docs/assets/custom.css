@@ -1515,7 +1515,8 @@ img {
 
 .cookbook-serving[hidden],
 .cookbook-command[hidden],
-[data-cookbook-python-note][hidden] {
+[data-cookbook-python-note][hidden],
+[data-cookbook-playground-only][hidden] {
     display: none;
 }
 
