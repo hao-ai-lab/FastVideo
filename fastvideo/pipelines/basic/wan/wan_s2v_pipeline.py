@@ -171,6 +171,10 @@ class WanSpeechToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
         batch.num_frames = plan.num_frames
         batch.audio_embeds = audio_embeds
         batch.extra[EXTRA_MOTION_LATENTS] = None
+        # ``plan.num_frames`` is a pixel-frame count, so this cut only bites in
+        # pixel mode: a latent clip is already exactly the generated span (the
+        # decode stage drops the context it prepended, and latent runs are
+        # single-clip by the guard above).
         batch.output = torch.cat(clips, dim=2)[:, :, :plan.num_frames]
         audio = batch.extra.get("audio")
         if audio is not None:

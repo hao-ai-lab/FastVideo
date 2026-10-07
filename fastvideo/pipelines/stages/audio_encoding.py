@@ -45,11 +45,18 @@ def _resample_features(features: torch.Tensor,
                        input_rate: int,
                        output_rate: int,
                        output_len: int | None = None) -> torch.Tensor:
-    """Linearly resample a [layers, T, C] feature stream between frame rates."""
-    features = features.transpose(1, 2)
+    """Linearly resample a [..., T, C] feature stream between frame rates.
+
+    ``F.interpolate`` in linear mode only accepts a 3-D [batch, channels, time]
+    input, so any leading axes are flattened into one and restored afterwards.
+    """
+    leading = features.shape[:-2]
+    channels = features.shape[-1]
+    flat = features.reshape(-1, features.shape[-2], channels).transpose(1, 2)
     if output_len is None:
-        output_len = int(features.shape[2] / float(input_rate) * output_rate)
-    return F.interpolate(features, size=output_len, align_corners=True, mode="linear").transpose(1, 2)
+        output_len = int(flat.shape[2] / float(input_rate) * output_rate)
+    resampled = F.interpolate(flat, size=output_len, align_corners=True, mode="linear")
+    return resampled.transpose(1, 2).reshape(*leading, output_len, channels)
 
 
 class AudioEncodingStage(PipelineStage):
@@ -98,18 +105,18 @@ class AudioEncodingStage(PipelineStage):
     def _bucket_to_frames(self, features: torch.Tensor, num_frames: int, fps: int, window: int = 0) -> torch.Tensor:
         """Pick the audio feature window belonging to each video frame.
 
-        ``features`` is [num_layers, T, C] at REFERENCE_VIDEO_RATE. Frame i takes
+        ``features`` is [B, num_layers, T, C] at REFERENCE_VIDEO_RATE. Frame i takes
         the features around its own timestamp, so frame i attends to the sound
         that happens at frame i -- the alignment the whole model depends on.
         """
-        num_layers, total, dim = features.shape
+        batch, num_layers, total, dim = features.shape
         # Keep the ratio fractional. Video frame i happens at i/fps seconds, which
         # is feature index i * (30 / fps). Rounding that ratio to an integer (30/16
         # -> 1) makes a 5s video read only 2.6s of audio: the video finishes while
         # the speech is half-done, and nothing errors -- the lips just drift.
         step = REFERENCE_VIDEO_RATE / float(fps)
         span = max(1, int(round(step)))
-        silence = features.new_zeros(num_layers, dim * (2 * window + 1))
+        silence = features.new_zeros(batch, num_layers, dim * (2 * window + 1))
         out = []
         for i in range(num_frames):
             centre = int(round(i * step))
@@ -119,8 +126,8 @@ class AudioEncodingStage(PipelineStage):
                 out.append(silence)
                 continue
             idx = [min(max(centre + offset * span, 0), total - 1) for offset in range(-window, window + 1)]
-            out.append(features[:, idx].flatten(start_dim=-2))
-        return torch.stack(out, dim=0).permute(1, 2, 0)  # [num_layers, C, num_frames]
+            out.append(features[:, :, idx].flatten(start_dim=-2))
+        return torch.stack(out, dim=0).permute(1, 2, 3, 0)  # [B, num_layers, C, num_frames]
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         device = self.audio_encoder.device
@@ -133,14 +140,17 @@ class AudioEncodingStage(PipelineStage):
 
         with torch.no_grad():
             outputs = self.audio_encoder(inputs.input_values.to(device), output_hidden_states=True)
-        features = torch.stack(outputs.hidden_states).squeeze(1)  # [num_layers, T, C]
+        # [num_layers, B, T, C] -> [B, num_layers, T, C]. The batch axis has to
+        # stay explicit: ``squeeze(1)`` only drops it while B == 1, and a 4-D
+        # tensor then gets its batch axis read as time by the resampler below.
+        features = torch.stack(outputs.hidden_states).permute(1, 0, 2, 3)
         features = _resample_features(features, WAV2VEC_FEATURE_RATE, REFERENCE_VIDEO_RATE)
 
         assert batch.num_frames is not None and batch.fps is not None
         # The pipeline may generate several clips to cover the track; it says
         # how many frames' worth of audio it wants. Alone, one clip = num_frames.
         audio_frames = batch.extra.get(EXTRA_AUDIO_FRAMES, batch.num_frames)
-        batch.audio_embeds = self._bucket_to_frames(features, audio_frames, batch.fps).unsqueeze(0)
+        batch.audio_embeds = self._bucket_to_frames(features, audio_frames, batch.fps)
         logger.info("Encoded %s -> audio embeds %s", batch.audio_path, tuple(batch.audio_embeds.shape))
         return batch
 

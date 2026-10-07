@@ -124,6 +124,12 @@ def build(source: str, aux_source: str, output: str, link: bool) -> None:
     with open(os.path.join(output, "model_index.json"), "w") as f:
         json.dump(MODEL_INDEX, f, indent=2, sort_keys=True)
 
+    # 5. Nothing from the deliberately-skipped table may have been carried over:
+    # the table is only load-bearing if something checks it.
+    for skipped in SKIPPED_SOURCE_FILES:
+        assert not os.path.exists(os.path.join(output, skipped)), \
+            f"{skipped} is listed in SKIPPED_SOURCE_FILES but was copied into {output}"
+
 
 def validate(output: str) -> None:
     """Every transformer tensor must land on a FastVideo parameter, right shape.

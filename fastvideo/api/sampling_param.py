@@ -411,6 +411,12 @@ class SamplingParam:
             help="Path to input video for video-to-video generation",
         )
         parser.add_argument(
+            "--audio-path",
+            type=str,
+            default=SamplingParam.audio_path,
+            help="Path to input audio for speech-driven generation (Wan S2V)",
+        )
+        parser.add_argument(
             "--refine-from",
             type=str,
             default=SamplingParam.refine_from,

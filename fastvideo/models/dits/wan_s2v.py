@@ -448,6 +448,16 @@ class WanS2VTransformer3DModel(BaseDiT):
             return value
         return list(value) if value.dim() == 5 else [value]
 
+    @staticmethod
+    def _repeat_batch1(value: list[torch.Tensor], batch: int) -> list[torch.Tensor]:
+        """Repeat a batch-1 conditioning list up to ``batch`` samples.
+
+        The reference image, the motion history and the pose conditioning are
+        batch-1 by construction while ``hidden_states`` carries
+        ``num_videos_per_prompt`` samples, so they have to be repeated per sample.
+        """
+        return value * batch if len(value) == 1 and batch > 1 else value
+
     def forward(self, hidden_states: torch.Tensor | list[torch.Tensor],
                 encoder_hidden_states: torch.Tensor | list[torch.Tensor], timestep: torch.Tensor,
                 ref_latents: torch.Tensor | list[torch.Tensor] | None = None,
@@ -500,6 +510,20 @@ class WanS2VTransformer3DModel(BaseDiT):
             # video token relative to the official implementation.
             cond_states = [torch.zeros_like(u) for u in hidden_states]
 
+        # Every conditioning input above is batch-1 by construction (one
+        # reference image, one motion history, one audio track) while
+        # ``hidden_states`` carries ``num_videos_per_prompt`` samples. Repeat them
+        # so each sample is conditioned: the zips below would otherwise truncate
+        # to the shorter list and silently collapse the whole batch to 1, while
+        # ``context``/``audio_emb`` keep their own batch and then mismatch.
+        n_samples = len(hidden_states)
+        ref_latents = self._repeat_batch1(ref_latents, n_samples)
+        motion_latents = self._repeat_batch1(motion_latents, n_samples)
+        if cond_states is not None:
+            cond_states = self._repeat_batch1(cond_states, n_samples)
+        if audio_input.size(0) == 1 and n_samples > 1:
+            audio_input = audio_input.repeat(n_samples, 1, 1, 1)
+
         add_last_motion = int(self.add_last_motion) * add_last_motion
         audio_emb, audio_emb_global = self._embed_audio(audio_input, motion_frames)
         freqs = self.freqs.to(self.patch_embedding.weight.device)
@@ -507,7 +531,7 @@ class WanS2VTransformer3DModel(BaseDiT):
         # 1. video tokens (+ pose conditioning added in patch space)
         x = [self.patch_embedding(u.unsqueeze(0)) for u in hidden_states]
         if cond_states is not None and self.cond_encoder is not None:
-            x = [x_ + self.cond_encoder(c.unsqueeze(0)) for x_, c in zip(x, cond_states, strict=False)]
+            x = [x_ + self.cond_encoder(c.unsqueeze(0)) for x_, c in zip(x, cond_states, strict=True)]
         original_grid_sizes = torch.stack([torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
         x = [u.flatten(2).transpose(1, 2) for u in x]
         video_len = x[0].size(1)
@@ -521,7 +545,7 @@ class WanS2VTransformer3DModel(BaseDiT):
             torch.tensor([REF_TIME_INDEX + 1, h, w]).unsqueeze(0).repeat(bsz, 1),
             torch.tensor([1, h, w]).unsqueeze(0).repeat(bsz, 1),
         ])
-        x = [torch.cat([u, r.flatten(2).transpose(1, 2)], dim=1) for u, r in zip(x, ref, strict=False)]
+        x = [torch.cat([u, r.flatten(2).transpose(1, 2)], dim=1) for u, r in zip(x, ref, strict=True)]
 
         # 3. token-kind mask: 0 video, 1 reference (2 = motion, tagged on append)
         mask = [torch.zeros([1, u.shape[1]], dtype=torch.long, device=u.device) for u in x]

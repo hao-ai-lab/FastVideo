@@ -145,7 +145,8 @@ class S2VDecodingStage(DecodingStage):
     ``[context | generated latents]`` and keeps the trailing ``infer_frames``
     pixels. The context is the previous clip's motion latents when there are
     any, else the reference latent -- and in that first-clip case 3 more
-    warm-up frames are dropped.
+    warm-up frames are dropped. With ``output_type='latent'`` nothing is
+    decoded, so the prepended context is sliced back off instead.
     """
 
     @staticmethod
@@ -169,6 +170,12 @@ class S2VDecodingStage(DecodingStage):
 
         batch.latents = torch.cat([context.to(batch.latents.device, batch.latents.dtype), batch.latents], dim=2)
         batch = super().forward(batch, fastvideo_args)
-        if fastvideo_args.output_type != "latent" and batch.output is not None:
+        if fastvideo_args.output_type == "latent":
+            # No VAE ran, so ``batch.output`` is ``batch.latents`` verbatim and
+            # still carries the prepended context; the pixel-space ``trim``
+            # below has no meaning here. Drop the context frames instead -- the
+            # caller asked for the generated latents.
+            batch.output = batch.output[:, :, context.shape[2]:]
+        elif batch.output is not None:
             batch.output = self.trim(batch.output, infer_frames, first_clip)
         return batch

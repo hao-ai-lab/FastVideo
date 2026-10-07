@@ -423,9 +423,9 @@ def test_missing_audio_or_reference_fails_loudly() -> None:
 def test_audio_bucketing_emits_one_window_per_video_frame() -> None:
     from fastvideo.pipelines.stages.audio_encoding import AudioEncodingStage
     stage = AudioEncodingStage(audio_encoder=None, audio_processor=None)
-    features = torch.randn(25, 100, 32)  # 25 wav2vec2 layers, 100 frames @30fps
+    features = torch.randn(1, 25, 100, 32)  # batch 1, 25 wav2vec2 layers, 100 frames @30fps
     out = stage._bucket_to_frames(features, num_frames=16, fps=16, window=0)
-    assert out.shape == (25, 32, 16)  # [num_layers, C, num_frames]
+    assert out.shape == (1, 25, 32, 16)  # [B, num_layers, C, num_frames]
 
 
 def test_audio_bucketing_pads_silence_past_track_end() -> None:
@@ -435,9 +435,9 @@ def test_audio_bucketing_pads_silence_past_track_end() -> None:
     index past its end."""
     from fastvideo.pipelines.stages.audio_encoding import AudioEncodingStage
     stage = AudioEncodingStage(audio_encoder=None, audio_processor=None)
-    features = torch.randn(2, 4, 8) + 10  # only 4 audio frames available, all far from zero
+    features = torch.randn(1, 2, 4, 8) + 10  # batch 1, only 4 audio frames available, all far from zero
     out = stage._bucket_to_frames(features, num_frames=32, fps=16, window=0)
-    assert out.shape == (2, 8, 32)
+    assert out.shape == (1, 2, 8, 32)
     assert torch.all(out[..., :2] != 0)  # frames 0,1 -> audio frames 0,2 (30/16 ratio)
     assert torch.all(out[..., 3:] == 0)  # frame 3 -> audio frame 6: past the end
 

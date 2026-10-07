@@ -8,14 +8,14 @@ wav2vec2 features into DiT-width tokens, and the audio injector
 transformer blocks.
 
 Shapes below are verified against ``Wan-AI/Wan2.2-S2V-14B``:
-  casual_audio_encoder.weights                        (1, 25, 1, 1)
-  casual_audio_encoder.encoder.conv1_local.conv.w     (5120, 1024, 3)
-  casual_audio_encoder.encoder.conv1_global.conv.w    (1280, 1024, 3)
-  casual_audio_encoder.encoder.conv2.conv.w           (2560, 1280, 3)
-  casual_audio_encoder.encoder.conv3.conv.w           (5120, 2560, 3)
-  casual_audio_encoder.encoder.final_linear.w         (5120, 5120)
-  casual_audio_encoder.encoder.padding_tokens         (1, 1, 1, 5120)
-  audio_injector.injector_adain_layers.N.linear.w     (10240, 5120)
+  casual_audio_encoder.weights                          (1, 25, 1, 1)
+  casual_audio_encoder.encoder.conv1_local.conv.weight  (5120, 1024, 3)
+  casual_audio_encoder.encoder.conv1_global.conv.weight (1280, 1024, 3)
+  casual_audio_encoder.encoder.conv2.conv.weight        (2560, 1280, 3)
+  casual_audio_encoder.encoder.conv3.conv.weight        (5120, 2560, 3)
+  casual_audio_encoder.encoder.final_linear.weight      (5120, 5120)
+  casual_audio_encoder.encoder.padding_tokens           (1, 1, 1, 5120)
+  audio_injector.injector_adain_layers.N.linear.weight  (10240, 5120)
 
 The ``(1, 25, 1, 1)`` layer-weight tensor is load-bearing: 25 == the number of
 hidden states returned by wav2vec2-**large** (24 layers + embeddings). The
