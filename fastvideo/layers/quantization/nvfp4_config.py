@@ -203,9 +203,10 @@ def nvfp4_quantize_fenced(
                                        sfLayout=SfLayout(sf_layout),
                                        do_shuffle=do_shuffle,
                                        enable_pdl=False)
-    # With FlashInfer 0.6.18 on GB10, queued activation quantization
-    # plus GEMM can diverge. Completing quantization while its padded
-    # input is alive prevents the observed intermittent corruption.
+    # With FlashInfer 0.6.18 and 0.7.0 on GB10, queued activation
+    # quantization plus GEMM can diverge: identical seeded H3 requests
+    # produce different latents. Completing each quantization on the
+    # host prevents it, at no measurable denoise cost.
     torch.cuda.current_stream(x.device).synchronize()
     return quantized, scales
 
@@ -329,21 +330,24 @@ def _nvfp4_quantize(
     elif global_sf.device != x.device:
         global_sf = global_sf.to(device=x.device)
     if sf_layout == SfLayout.layout_linear.value:
-        x_for_quant = x
-        logical_rows = x.shape[0]
-    else:
-        # Sequence-parallel can feed either logical rows or row-padded
-        # rows. Normalize to the kernel tile shape for swizzled layouts
-        # so both paths share a stable quantization contract.
-        row_tile = 8 if sf_layout == SfLayout.layout_8x4.value else 128
-        logical_rows = x.shape[0]
-        pad_rows = (-logical_rows) % row_tile
-        x_for_quant = F.pad(x, (0, 0, 0, pad_rows))
-
+        return torch.ops.fastvideo_fp4.nvfp4_quantize(x, global_sf, sf_layout, do_shuffle)
+    # Sequence-parallel can feed either logical rows or row-padded
+    # rows. Normalize to the kernel tile shape for swizzled layouts
+    # so both paths share a stable quantization contract.
+    row_tile = 8 if sf_layout == SfLayout.layout_8x4.value else 128
+    logical_rows = x.shape[0]
+    padded_rows = logical_rows + (-logical_rows) % row_tile
+    if sf_layout == SfLayout.layout_128x4.value:
+        # FlashInfer pads 128x4 scale factors to whole row tiles itself, and
+        # quantizes the logical rows bit for bit like a zero-padded copy, so
+        # skip that copy (a full activation write per linear) when the
+        # returned scales already span the padded tile.
+        quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x, global_sf, sf_layout, do_shuffle)
+        if scales.numel() >= padded_rows * (x.shape[-1] // 16):
+            return quantized, scales
+    x_for_quant = F.pad(x, (0, 0, 0, padded_rows - logical_rows))
     quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x_for_quant, global_sf, sf_layout, do_shuffle)
-    if sf_layout != SfLayout.layout_linear.value:
-        quantized = quantized.narrow(0, 0, logical_rows)
-    return quantized, scales
+    return quantized.narrow(0, 0, logical_rows), scales
 
 
 def _mm_fp4(

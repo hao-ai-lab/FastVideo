@@ -246,10 +246,12 @@ in a local directory. It declares the trained eight-forward ladder and
 video/audio shifts of 10/3. The recipes use `num_inference_steps: 9` for
 nine sigma points and eight DiT forwards.
 
-On GB10 with FlashInfer 0.6.18, FastVideo fences activation quantization before
-releasing its padded input. Without this completion fence, identical H3
-requests produced different DiT latents and occasionally corrupt video.
-The fence applies to `sm_121`; other architectures retain asynchronous execution.
+On GB10 (FlashInfer 0.6.18 and 0.7.0), FastVideo completes each NVFP4
+activation quantization on the host before its GEMM. Without this completion
+fence, identical H3 requests produced different DiT latents and occasionally
+corrupt video. The fence costs no measurable denoise time, because the GPU stays
+saturated. It applies to `sm_121`; other architectures retain asynchronous
+execution.
 
 Run `examples/inference/basic/basic_fasth3_spark_v2_nvfp4.yaml` from the
 repository root. It uses 832x480, 124 frames and seed 1234, VSA sparsity 0.8 with
