@@ -14,6 +14,7 @@ exec pytest \
   ./fastvideo/tests/stages/ \
   ./fastvideo/tests/ops/ \
   ./fastvideo/tests/worker/ \
+  ./fastvideo/tests/training/test_runner.py \
   ./fastvideo/tests/training/test_trackers.py \
   ./fastvideo/tests/attention/test_sdpa_metadata_mask_contract.py \
   ./fastvideo/tests/modal/test_kernel_build_cache.py \

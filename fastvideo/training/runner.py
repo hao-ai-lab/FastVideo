@@ -11,7 +11,11 @@ def main(args) -> None:
     logger.info("Starting training pipeline %s...", args.pipeline_class)
 
     module = importlib.import_module(args.pipeline_module)
-    pipeline_class = getattr(module, args.pipeline_class)
+    pipeline_class = getattr(module, args.pipeline_class, None)
+    if pipeline_class is None:
+        available = sorted(name for name in dir(module) if name.endswith("Pipeline"))
+        raise ValueError(f"Pipeline class '{args.pipeline_class}' not found in module "
+                         f"'{args.pipeline_module}'. Available pipeline classes: {available}")
 
     pipeline = pipeline_class.from_pretrained(args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args

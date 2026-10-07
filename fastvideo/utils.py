@@ -1308,17 +1308,24 @@ def is_pin_memory_available() -> bool:
     return _cached_pin_memory_available(os.getpid())
 
 
-def build_parser() -> FlexibleArgumentParser:
+def build_parser(pipeline_class: str | None = None, pipeline_module: str | None = None) -> FlexibleArgumentParser:
+    """Build the training-runner CLI parser.
+
+    When ``pipeline_class``/``pipeline_module`` are given they become optional defaults,
+    so the deprecated per-pipeline ``__main__`` blocks keep working without the flags.
+    """
     from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 
     parser = FlexibleArgumentParser()
     parser.add_argument("--pipeline-class",
                         type=str,
-                        required=True,
+                        required=pipeline_class is None,
+                        default=pipeline_class,
                         help="Name of the pipeline class to run, e.g., WanTrainingPipeline")
     parser.add_argument("--pipeline-module",
                         type=str,
-                        required=True,
+                        required=pipeline_module is None,
+                        default=pipeline_module,
                         help="Module containing the pipeline class, e.g., fastvideo.training.wan_training_pipeline")
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)
