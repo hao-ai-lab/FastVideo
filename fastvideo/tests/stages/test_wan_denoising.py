@@ -14,8 +14,8 @@ from fastvideo.tests.stages._denoising_fixtures import (
 )
 
 
-def _stage(monkeypatch, model, scheduler, *, second=None, gate="1.0"):
-    _, logger = _patch_denoising_module(monkeypatch, gate)
+def _stage(monkeypatch, env_overrides, model, scheduler, *, second=None, gate="1.0"):
+    _, logger = _patch_denoising_module(monkeypatch, env_overrides, gate)
     from fastvideo.pipelines.basic.wan.stages import denoising
     monkeypatch.setattr(denoising, "get_local_torch_device", lambda: torch.device("cpu"))
     stage = denoising.WanDenoisingStage(model, scheduler, transformer_2=second)
@@ -25,7 +25,7 @@ def _stage(monkeypatch, model, scheduler, *, second=None, gate="1.0"):
 
 @pytest.mark.parametrize("steps", [3, 50])
 @pytest.mark.parametrize("cfg", [False, True])
-def test_wan_all_scheduler_steps_match_explicit_loop(monkeypatch, steps, cfg):
+def test_wan_all_scheduler_steps_match_explicit_loop(monkeypatch, env_overrides, steps, cfg):
     batch = _batch(steps, cfg)
     scheduler = FlowUniPCMultistepScheduler(shift=3.0)
     scheduler.set_timesteps(steps, device="cpu")
@@ -45,7 +45,7 @@ def test_wan_all_scheduler_steps_match_explicit_loop(monkeypatch, steps, cfg):
         trajectory.append(expected)
 
     model = RecordingDenoiser()
-    stage, _ = _stage(monkeypatch, model, scheduler)
+    stage, _ = _stage(monkeypatch, env_overrides, model, scheduler)
     result = stage.forward(batch, _args())
 
     torch.testing.assert_close(result.latents, expected, atol=0, rtol=0)
@@ -55,9 +55,9 @@ def test_wan_all_scheduler_steps_match_explicit_loop(monkeypatch, steps, cfg):
     assert scheduler.step_index == steps
 
 
-def test_wan_expert_boundary_invalidates_cfg_cache(monkeypatch):
+def test_wan_expert_boundary_invalidates_cfg_cache(monkeypatch, env_overrides):
     primary, secondary = RecordingDenoiser(), RecordingDenoiser(offset=0.125)
-    stage, logger = _stage(monkeypatch, primary, TinyScheduler(), second=secondary, gate="0.0")
+    stage, logger = _stage(monkeypatch, env_overrides, primary, TinyScheduler(), second=secondary, gate="0.0")
     args, batch = _args(), _batch()
     args.pipeline_config.dit_config.boundary_ratio = 0.9
     batch.boundary_ratio = 0.5  # Per-request override wins; equality still uses the high-noise expert.
@@ -70,7 +70,7 @@ def test_wan_expert_boundary_invalidates_cfg_cache(monkeypatch):
 
 
 @pytest.mark.parametrize("kind,channels", [("t2v", 2), ("i2v", 4), ("v2v", 6), ("lucy", 4), ("ti2v", 2)])
-def test_wan_conditioning_layout_and_first_frame(monkeypatch, kind, channels):
+def test_wan_conditioning_layout_and_first_frame(monkeypatch, env_overrides, kind, channels):
     args, batch = _args(), _batch(cfg=False)
     model, vae = RecordingDenoiser(), TinyVAE()
     if kind == "i2v":
@@ -81,7 +81,7 @@ def test_wan_conditioning_layout_and_first_frame(monkeypatch, kind, channels):
     args.pipeline_config.ti2v_task = kind == "ti2v"
     if kind == "ti2v":
         batch.pil_image = torch.zeros(1, 3, 1, 16, 32)
-    stage, _ = _stage(monkeypatch, model, TinyScheduler())
+    stage, _ = _stage(monkeypatch, env_overrides, model, TinyScheduler())
     from fastvideo.pipelines.basic.wan.stages import conditioning
     monkeypatch.setattr(conditioning, "get_local_torch_device", lambda: torch.device("cpu"))
     conditioning.WanFirstFrameEncodingStage(vae).forward(batch, args)
@@ -103,9 +103,9 @@ def test_wan_conditioning_layout_and_first_frame(monkeypatch, kind, channels):
         assert vae.encode_calls == 0
 
 
-def test_wan_request_does_not_reuse_previous_cfg_delta(monkeypatch):
+def test_wan_request_does_not_reuse_previous_cfg_delta(monkeypatch, env_overrides):
     model = RecordingDenoiser()
-    stage, _ = _stage(monkeypatch, model, TinyScheduler(), gate="0.0")
+    stage, _ = _stage(monkeypatch, env_overrides, model, TinyScheduler(), gate="0.0")
     first = stage.forward(_batch(), _args()).latents.clone()
     second = stage.forward(_batch(), _args()).latents.clone()
     torch.testing.assert_close(first, second, atol=0, rtol=0)

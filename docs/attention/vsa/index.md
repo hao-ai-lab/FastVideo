@@ -18,8 +18,8 @@ the CUDA `fastvideo-kernel` package:
 - **Dense-only checkpoints** (the default converter) drop the 50 gate
   matrices and keep fused SDPA. They remain valid for dense inference.
 - **VSA-capable checkpoints** retain those gates, quantize them on the same
-  affine grid, and record `vsa.capable` in `mlx_h3_dit.json`. Runtime VSA is
-  still off until you pass `--vsa`.
+  affine grid, and record `vsa.capable` in `mlx_h3_dit.json`. Preview leaves
+  runtime VSA off until you pass `--vsa`. `mlx_fasth3_8step.py` turns it on.
 - **Tile sizes** 64 `(4, 4, 4)` and 256 `(4, 8, 8)`. Prefix keys can be
   `exempt` or `compete`. `--vsa-dense-first-n-steps` and `--vsa-dense-layers`
   force dense SDPA on the selected steps or blocks.
@@ -32,9 +32,12 @@ the CUDA `fastvideo-kernel` package:
   but does not yet match reference video. `--vsa-impl reference` is the same
   as `auto`.
 
-See the [Apple Silicon guide](../../getting_started/installation/mps.md) for
-conversion and `mlx_fasth3.py` flags. Do not enable VSA on a dense-only
-checkpoint; reconvert with `--include-vsa` first.
+See the [MLX install guide](../../getting_started/installation/mlx.md)
+and the [MiniMax H3 cookbook](../../cookbook/minimax-h3.md) for conversion
+and `mlx_fasth3.py` / `mlx_fasth3_8step.py` flags. Do not enable
+VSA on a dense-only checkpoint; reconvert with `--include-vsa` first. V1
+VSA is opt-in. FastH3 V2 converts with `--include-vsa` and turns VSA on
+by default.
 
 H3 uses fused MLX RMSNorm by default, including dense inference. This can
 change BF16 rounding relative to the older explicit normalization path.

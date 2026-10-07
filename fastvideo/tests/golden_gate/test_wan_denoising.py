@@ -7,6 +7,7 @@ per-step tensor reference catches stage/scheduler drift after the block gate.
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import DEFAULT_SEED, distributed_runtime
 from fastvideo.tests.golden_gate._tensor_golden import assert_tensor_golden, deterministic_forward
 from fastvideo.tests.golden_gate._wan_checkpoint import checkpoint_identity, component_path
@@ -53,8 +54,8 @@ def denoising_outputs(device):
             }
 
 
-def test_wan_denoising_golden_gate(distributed_runtime, monkeypatch):
-    monkeypatch.setenv("FASTVIDEO_CFG_GATE_STEP", "1.0")
+def test_wan_denoising_golden_gate(distributed_runtime, env_overrides):
+    env_overrides.enter_context(envs.FASTVIDEO_CFG_GATE_STEP.override(1.0))
     with deterministic_forward("FLASH_ATTN") as device:
         outputs, identity = denoising_outputs(device)
         assert_tensor_golden("wan_denoising", outputs, identity=identity, attention_backend="FLASH_ATTN")

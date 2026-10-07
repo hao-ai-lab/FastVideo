@@ -188,7 +188,7 @@ def load_latent_reference(path: str) -> dict[str, Any]:
     # ``weights_only=False`` is required because the payload is a dict of
     # tensors + plain-Python metadata (slice_spec, prompt, ...). The trust
     # boundary is the controlled HF dataset configured via
-    # FASTVIDEO_SSIM_REFERENCE_HF_REPO (default
+    # FASTVIDEO_TEST_SSIM_REFERENCE_HF_REPO (default
     # FastVideo/ssim-reference-videos), which is org-write-gated.
     payload = torch.load(path, map_location="cpu", weights_only=False)
     fmt = payload.get("format_version") if isinstance(payload, dict) else None

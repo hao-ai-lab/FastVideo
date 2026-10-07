@@ -21,12 +21,16 @@ from fastvideo.mlx_runtime.minimax_h3_pipeline import (  # noqa: E402
     MiniMaxH3MLXPipeline,
     _adaln_schedule_union,
     _center_crop_frames,
+    _configure_metal_memory_limits,
     _default_metal_wired_limit_gib,
     _preflight_media_dependencies,
+    _restore_metal_memory_limit,
+    _restore_metal_wired_limit,
     _validate_checkpoint_step_ladder,
     plan_fast_temporal,
 )
 from fastvideo.mlx_runtime import rife_interp  # noqa: E402
+from fastvideo.mlx_runtime.minimax_h3_vsa import MiniMaxH3VSAConfig  # noqa: E402
 
 
 def test_fast_plan_keeps_full_audio_and_reduces_only_video() -> None:
@@ -39,6 +43,15 @@ def test_fast_plan_keeps_full_audio_and_reduces_only_video() -> None:
     assert video_latent_num_frames(plan.target_frames) == 37
     assert audio_latent_num_frames(plan.target_frames) == 207
     assert plan.video_temporal_scale > 1.0
+
+
+def test_resolve_geometry_accepts_the_aligned_duration_limit() -> None:
+    geometry = MiniMaxH3MLXPipeline.resolve_geometry(768, 1344, 360)
+
+    assert geometry["num_frames"] == 362
+    assert geometry["latent_frame_count"] == 107
+    with pytest.raises(ValueError, match="H3 generates"):
+        MiniMaxH3MLXPipeline.resolve_geometry(768, 1344, 363)
 
 
 def test_fast_layout_stretches_video_positions_without_changing_audio() -> None:
@@ -134,3 +147,154 @@ def test_mux_cleans_temporary_files_after_ffmpeg_failure(tmp_path, monkeypatch: 
 
     assert not output.with_suffix(".tmp.mp4").exists()
     assert not output.with_suffix(".tmp.wav").exists()
+
+
+def test_explicit_wired_limit_uses_wired_api_separately_from_allocator():
+    calls = []
+    fake = SimpleNamespace(
+        metal=SimpleNamespace(device_info=lambda: {"memory_size": 36 * 2**30}),
+        set_memory_limit=lambda size: calls.append(("allocator", size)) or 40 * 2**30,
+        set_wired_limit=lambda size: calls.append(("wired", size)) or 0,
+    )
+    previous_memory, previous_wired = _configure_metal_memory_limits(fake, 27.0)
+    assert calls == [("allocator", 30 * 2**30), ("wired", 27 * 2**30)]
+    assert (previous_memory, previous_wired) == (40 * 2**30, 0)
+    _restore_metal_wired_limit(fake, previous_wired)
+    _restore_metal_memory_limit(fake, previous_memory)
+    assert calls[-2:] == [("wired", 0), ("allocator", 40 * 2**30)]
+
+
+def test_resident_placement_keeps_the_existing_allocator_limit():
+    calls = []
+    fake = SimpleNamespace(
+        set_memory_limit=lambda size: calls.append(("allocator", size)) or 40 * 2**30,
+        set_wired_limit=lambda size: calls.append(("wired", size)) or 0,
+    )
+    assert _configure_metal_memory_limits(fake, 36.0, resident=True) == (None, 0)
+    assert calls == [("wired", 36 * 2**30)]
+
+
+def test_explicit_wired_limit_failure_is_not_silently_ignored():
+    def reject(size):
+        raise ValueError("exceeds system wired limit")
+    fake = SimpleNamespace(set_wired_limit=reject)
+    with pytest.raises(ValueError, match="system wired limit"):
+        _configure_metal_memory_limits(fake, 31.0)
+    with pytest.raises(ValueError, match="finite and positive"):
+        _configure_metal_memory_limits(fake, float("nan"))
+    with pytest.raises(RuntimeError, match="cannot set"):
+        _configure_metal_memory_limits(SimpleNamespace(), 27.0)
+
+
+def test_wired_limit_failure_restores_allocator_limit():
+    calls = []
+
+    def set_memory(size):
+        calls.append(("allocator", size))
+        return 40 * 2**30
+
+    def reject(size):
+        calls.append(("wired", size))
+        raise ValueError("exceeds system wired limit")
+
+    fake = SimpleNamespace(metal=SimpleNamespace(device_info=lambda: {"memory_size": 36 * 2**30}),
+                           set_memory_limit=set_memory,
+                           set_wired_limit=reject)
+    with pytest.raises(ValueError, match="system wired limit"):
+        _configure_metal_memory_limits(fake, 27.0)
+    assert calls == [("allocator", 30 * 2**30), ("wired", 27 * 2**30), ("allocator", 40 * 2**30)]
+
+
+def test_invalid_pipeline_options_do_not_change_process_memory_limits(monkeypatch):
+    calls = []
+    monkeypatch.setattr("fastvideo.mlx_runtime.minimax_h3_pipeline._configure_metal_memory_limits",
+                        lambda *args, **kwargs: calls.append((args, kwargs)))
+    with pytest.raises(ValueError, match="Unknown H3 conditioner mode"):
+        MiniMaxH3MLXPipeline(model_root="missing", mlx_dit_checkpoint="missing", conditioner_mode="invalid",
+                             metal_wired_limit_gib=27.0)
+    assert calls == []
+
+
+def test_explicit_wired_limit_raises_the_allocator_cap():
+    calls = []
+    fake = SimpleNamespace(
+        set_memory_limit=lambda size: calls.append(("allocator", size)) or 40 * 2**30,
+        set_wired_limit=lambda size: calls.append(("wired", size)) or 0,
+    )
+    _configure_metal_memory_limits(fake, 48.0)
+    assert calls == [("allocator", 48 * 2**30), ("wired", 48 * 2**30)]
+
+
+class _StopAfterPrologue(Exception):
+    pass
+
+
+class _FakeAdaLNDiT:
+    patch_size = (1, 2, 2)
+
+    def __init__(self):
+        self.blocks = [{"adaln_proj.linear.weight": np.ones(1)}]
+        self._adaln_cache = None
+        self.vsa_config = MiniMaxH3VSAConfig()
+
+    def precompute_adaln(self, timesteps, *, drop_weights=True):
+        assert all(block["adaln_proj.linear.weight"] is not None for block in self.blocks)
+        self._adaln_cache = SimpleNamespace(timesteps=np.asarray(timesteps, dtype=np.float32))
+        if drop_weights:
+            for block in self.blocks:
+                block["adaln_proj.linear.weight"] = None
+
+    def configure_vsa(self, config):
+        self.vsa_config = config
+
+    def reset_vsa_stats(self):
+        pass
+
+
+def _denoise_prologue(pipeline, monkeypatch, **kwargs):
+    import fastvideo.mlx_runtime.minimax_h3_pipeline as pipeline_mod
+
+    def stop(*_args, **_kwargs):
+        raise _StopAfterPrologue
+
+    monkeypatch.setattr(pipeline_mod, "build_packed_layout", stop)
+    with pytest.raises(_StopAfterPrologue):
+        pipeline.denoise(np.zeros((2, 4), dtype=np.float32), np.zeros(2, dtype=np.int64), height=256, width=256,
+                         num_frames=124, audio_num_frames=124, seed=0, **kwargs)
+
+
+def test_resident_dit_reloads_for_a_new_step_ladder_and_resets_vsa(tmp_path, monkeypatch) -> None:
+    import fastvideo.mlx_runtime.minimax_h3_pipeline as pipeline_mod
+
+    first, reloaded = _FakeAdaLNDiT(), _FakeAdaLNDiT()
+    monkeypatch.setattr(pipeline_mod, "_validate_checkpoint_step_ladder", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline_mod, "_load_resident_dit", lambda _path: reloaded)
+    pipeline = MiniMaxH3MLXPipeline.__new__(MiniMaxH3MLXPipeline)
+    pipeline.resident = True
+    pipeline.model_root = tmp_path
+    pipeline.dit_checkpoint = tmp_path
+    pipeline._resident_components = {"dit": first}
+
+    sparse = MiniMaxH3VSAConfig(enabled=True, sparsity=0.8)
+    _denoise_prologue(pipeline, monkeypatch, num_steps=4, vsa_config=sparse)
+    assert first.vsa_config == sparse
+    _denoise_prologue(pipeline, monkeypatch, num_steps=4)
+    assert pipeline._resident_components["dit"] is first
+    assert first.vsa_config == MiniMaxH3VSAConfig()
+
+    _denoise_prologue(pipeline, monkeypatch, num_steps=8)
+    assert pipeline._resident_components["dit"] is reloaded
+    np.testing.assert_array_equal(reloaded._adaln_cache.timesteps, _adaln_schedule_union(8))
+
+
+def test_caller_dit_with_dropped_adaln_weights_rejects_a_new_ladder(tmp_path, monkeypatch) -> None:
+    import fastvideo.mlx_runtime.minimax_h3_pipeline as pipeline_mod
+
+    monkeypatch.setattr(pipeline_mod, "_validate_checkpoint_step_ladder", lambda *a, **k: None)
+    pipeline = MiniMaxH3MLXPipeline.__new__(MiniMaxH3MLXPipeline)
+    pipeline.model_root = tmp_path
+    dit = _FakeAdaLNDiT()
+    _denoise_prologue(pipeline, monkeypatch, num_steps=4, dit=dit)
+    with pytest.raises(ValueError, match="dropped its AdaLN weights"):
+        pipeline.denoise(np.zeros((2, 4), dtype=np.float32), np.zeros(2, dtype=np.int64), height=256, width=256,
+                         num_frames=124, audio_num_frames=124, seed=0, num_steps=8, dit=dit)
