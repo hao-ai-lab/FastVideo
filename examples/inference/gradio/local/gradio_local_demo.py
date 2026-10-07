@@ -8,15 +8,15 @@ from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from copy import deepcopy
 
-
 MODEL_PATH_MAPPING = {
     "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
     # "FastWan2.2-TI2V-5B-FullAttn": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
 }
 
+
 def create_timing_display(inference_time, total_time, stage_execution_times, num_frames):
     dit_denoising_time = f"{stage_execution_times[5]:.2f}s" if len(stage_execution_times) > 5 else "N/A"
-    
+
     timing_html = f"""
     <div style="margin: 10px 0;">
         <h3 style="text-align: center; margin-bottom: 10px;">⏱️ Timing Breakdown</h3>
@@ -47,7 +47,7 @@ def create_timing_display(inference_time, total_time, stage_execution_times, num
                 <div style="font-size: 18px; color: #0277bd;">{total_time:.2f}s</div>
             </div>
         </div>"""
-    
+
     if inference_time > 0:
         fps = num_frames / inference_time
         timing_html += f"""
@@ -55,8 +55,10 @@ def create_timing_display(inference_time, total_time, stage_execution_times, num
             <span style="font-weight: bold;">Generation Speed: </span>
             <span style="font-size: 18px; color: #6366f1; font-weight: bold;">{fps:.1f} frames/second</span>
         </div>"""
-    
+
     return timing_html + "</div>"
+
+
 def setup_model_environment(model_path: str) -> None:
     if "fullattn" in model_path.lower():
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
@@ -64,10 +66,12 @@ def setup_model_environment(model_path: str) -> None:
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
+
 def load_example_prompts():
+
     def contains_chinese(text):
         return any('\u4e00' <= char <= '\u9fff' for char in text)
-    
+
     def load_from_file(filepath):
         prompts, labels = [], []
         try:
@@ -81,27 +85,28 @@ def load_example_prompts():
         except Exception as e:
             print(f"Warning: Could not read {filepath}: {e}")
         return prompts, labels
-    
+
     examples, example_labels = load_from_file("examples/inference/gradio/local/prompts_final.txt")
-    
+
     if not examples:
-        examples = ["A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background."]
+        examples = [
+            "A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background."
+        ]
         example_labels = ["Crowded rooftop bar at night"]
-    
+
     return examples, example_labels
 
 
 def create_gradio_interface(default_params: dict[str, SamplingParam], generators: dict[str, VideoGenerator]):
-    def generate_video(
-        prompt, negative_prompt, use_negative_prompt, seed, guidance_scale,
-        num_frames, height, width, randomize_seed, model_selection, progress
-    ):
+
+    def generate_video(prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width,
+                       randomize_seed, model_selection, progress):
         model_path = MODEL_PATH_MAPPING.get(model_selection, "FastVideo/FastWan2.1-T2V-1.3B-Diffusers")
         setup_model_environment(model_path)
         try:
             if progress:
                 progress(0.1, desc="Loading model for local inference...")
-            
+
             generator = generators[model_path]
             params = deepcopy(default_params[model_path])
             total_start_time = time.time()
@@ -129,20 +134,25 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             output_dir = "outputs/"
             os.makedirs(output_dir, exist_ok=True)
             start_time = time.time()
-            result = generator.generate_video(prompt=prompt, sampling_param=params, save_video=True, return_frames=False)
+            result = generator.generate_video(prompt=prompt,
+                                              sampling_param=params,
+                                              save_video=True,
+                                              return_frames=False)
             inference_time = time.time() - start_time
             logging_info = result.get("logging_info", None)
             if logging_info:
                 stage_names = logging_info.get_execution_order()
                 stage_execution_times = [
-                    logging_info.get_stage_info(stage_name).get("execution_time", 0.0) 
-                    for stage_name in stage_names
+                    logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names
                 ]
             else:
                 stage_names = []
                 stage_execution_times = []
             total_time = time.time() - total_start_time
-            timing_details=create_timing_display(inference_time=inference_time, total_time=total_time, stage_execution_times=stage_execution_times, num_frames=params.num_frames)
+            timing_details = create_timing_display(inference_time=inference_time,
+                                                   total_time=total_time,
+                                                   stage_execution_times=stage_execution_times,
+                                                   num_frames=params.num_frames)
             safe_prompt = params.prompt[:100].replace(' ', '_').replace('/', '_').replace('\\', '_')
             video_filename = f"{params.prompt[:100]}.mp4"
             output_path = os.path.join(output_dir, video_filename)
@@ -157,7 +167,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             return None, f"Generation failed: {str(e)}", ""
 
     examples, example_labels = load_example_prompts()
-    
+
     theme = gr.themes.Base().set(
         button_primary_background_fill="#2563eb",
         button_primary_background_fill_hover="#1d4ed8",
@@ -165,7 +175,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
         slider_color="#2563eb",
         checkbox_background_color_selected="#2563eb",
     )
-    
+
     def get_default_values(model_name):
         model_path = MODEL_PATH_MAPPING.get(model_name)
         if model_path and model_path in default_params:
@@ -177,7 +187,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                 'guidance_scale': params.guidance_scale,
                 'seed': params.seed,
             }
-        
+
         return {
             'height': 448,
             'width': 832,
@@ -185,9 +195,9 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             'guidance_scale': 3.0,
             'seed': 1024,
         }
-    
+
     initial_values = get_default_values("FastWan2.1-T2V-1.3B")
-    
+
     with gr.Blocks(title="FastWan", theme=theme) as demo:
         gr.Image("assets/full.svg", show_label=False, container=False, height=80)
 
@@ -197,7 +207,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             <p style="font-size: 18px;"> <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | <a href="https://hao-ai-lab.github.io/blogs/fastvideo_post_training/" target="_blank">Blog</a> | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
         </div>
         """)
-        
+
         with gr.Accordion("🎥 What Is FastVideo?", open=False):
             gr.HTML("""
             <div style="padding: 20px; line-height: 1.6;">
@@ -206,24 +216,20 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                 </p>
             </div>
             """)
-        
-        with gr.Row():
-            model_selection = gr.Dropdown(
-                choices=list(MODEL_PATH_MAPPING.keys()),
-                value="FastWan2.1-T2V-1.3B",
-                label="Select Model",
-                interactive=True
-            )
 
         with gr.Row():
-            example_dropdown = gr.Dropdown(
-                choices=example_labels,
-                label="Example Prompts",
-                value=None,
-                interactive=True,
-                allow_custom_value=False
-            )
-        
+            model_selection = gr.Dropdown(choices=list(MODEL_PATH_MAPPING.keys()),
+                                          value="FastWan2.1-T2V-1.3B",
+                                          label="Select Model",
+                                          interactive=True)
+
+        with gr.Row():
+            example_dropdown = gr.Dropdown(choices=example_labels,
+                                           label="Example Prompts",
+                                           value=None,
+                                           interactive=True,
+                                           allow_custom_value=False)
+
         with gr.Row():
             with gr.Column(scale=6):
                 prompt = gr.Text(
@@ -237,7 +243,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                 )
             with gr.Column(scale=1, min_width=120, elem_classes="center-button"):
                 run_button = gr.Button("Run", variant="primary", size="lg")
-        
+
         with gr.Row():
             with gr.Column():
                 error_output = gr.Text(label="Error", visible=False)
@@ -246,38 +252,32 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
         with gr.Row(equal_height=True, elem_classes="main-content-row"):
             with gr.Column(scale=1, elem_classes="advanced-options-column"):
                 with gr.Group():
-                    gr.HTML("<div style='margin: 0 0 15px 0; text-align: center; font-size: 16px;'>Advanced Options</div>")
+                    gr.HTML(
+                        "<div style='margin: 0 0 15px 0; text-align: center; font-size: 16px;'>Advanced Options</div>")
                     with gr.Row():
-                        height = gr.Number(
-                            label="Height",
-                            value=initial_values['height'],
-                            interactive=False,
-                            container=True
-                        )
-                        width = gr.Number(
-                            label="Width",
-                            value=initial_values['width'],
-                            interactive=False,
-                            container=True
-                        )
-                    
+                        height = gr.Number(label="Height",
+                                           value=initial_values['height'],
+                                           interactive=False,
+                                           container=True)
+                        width = gr.Number(label="Width",
+                                          value=initial_values['width'],
+                                          interactive=False,
+                                          container=True)
+
                     with gr.Row():
-                        num_frames = gr.Number(
-                            label="Number of Frames",
-                            value=initial_values['num_frames'],
-                            interactive=False,
-                            container=True
-                        )
+                        num_frames = gr.Number(label="Number of Frames",
+                                               value=initial_values['num_frames'],
+                                               interactive=False,
+                                               container=True)
                         guidance_scale = gr.Slider(
                             label="Guidance Scale",
                             minimum=1,
                             maximum=12,
                             value=initial_values['guidance_scale'],
                         )
-                    
+
                     with gr.Row():
-                        use_negative_prompt = gr.Checkbox(
-                            label="Use negative prompt", value=False)
+                        use_negative_prompt = gr.Checkbox(label="Use negative prompt", value=False)
                         negative_prompt = gr.Text(
                             label="Negative prompt",
                             max_lines=3,
@@ -295,17 +295,15 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                     )
                     randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
                     seed_output = gr.Number(label="Used Seed")
-        
+
             with gr.Column(scale=1, elem_classes="video-column"):
-                result = gr.Video(
-                    label="Generated Video", 
-                    show_label=True,
-                    height=466,
-                    width=600,
-                    container=True,
-                    elem_classes="video-component"
-                )
-        
+                result = gr.Video(label="Generated Video",
+                                  show_label=True,
+                                  height=466,
+                                  width=600,
+                                  container=True,
+                                  elem_classes="video-component")
+
         gr.HTML("""
         <style>
         .center-button {
@@ -436,37 +434,37 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
         }
         </style>
         """)
-        
+
         def on_example_select(example_label):
             if example_label and example_label in example_labels:
                 index = example_labels.index(example_label)
                 return examples[index]
             return ""
-        
+
         example_dropdown.change(
             fn=on_example_select,
             inputs=example_dropdown,
             outputs=prompt,
         )
-        
+
         gr.HTML("""
         <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
             <p style="font-size: 16px; margin: 0;">Note that this demo is meant to showcase FastWan's quality and that under a large number of requests, generation speed may be affected.</p>
         </div>
         """)
-        
+
         use_negative_prompt.change(
             fn=lambda x: gr.update(visible=x),
             inputs=use_negative_prompt,
             outputs=negative_prompt,
         )
-        
+
         def on_model_selection_change(selected_model):
             if not selected_model:
                 selected_model = "FastWan2.1-T2V-1.3B"
-            
+
             model_path = MODEL_PATH_MAPPING.get(selected_model)
-            
+
             if model_path and model_path in default_params:
                 params = default_params[model_path]
                 return (
@@ -476,7 +474,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                     gr.update(value=params.guidance_scale),
                     gr.update(value=params.seed),
                 )
-            
+
             return (
                 gr.update(value=448),
                 gr.update(value=832),
@@ -484,35 +482,34 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
                 gr.update(value=3.0),
                 gr.update(value=1024),
             )
-        
+
         model_selection.change(
             fn=on_model_selection_change,
             inputs=model_selection,
             outputs=[height, width, num_frames, guidance_scale, seed],
         )
-        
+
         def handle_generation(*args, progress=None, request: gr.Request = None):
             model_selection, prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width, randomize_seed = args
-            
-            result_path, seed_or_error, timing_details = generate_video(
-                prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, 
-                num_frames, height, width, randomize_seed, model_selection, progress
-            )
+
+            result_path, seed_or_error, timing_details = generate_video(prompt, negative_prompt, use_negative_prompt,
+                                                                        seed, guidance_scale, num_frames, height, width,
+                                                                        randomize_seed, model_selection, progress)
             if result_path and os.path.exists(result_path):
                 return (
-                    result_path, 
-                    seed_or_error, 
+                    result_path,
+                    seed_or_error,
                     gr.update(visible=False),
                     gr.update(visible=True, value=timing_details),
                 )
             else:
                 return (
-                    None, 
-                    seed_or_error, 
+                    None,
+                    seed_or_error,
                     gr.update(visible=True, value=seed_or_error),
                     gr.update(visible=False),
                 )
-        
+
         run_button.click(
             fn=handle_generation,
             inputs=[
@@ -530,19 +527,18 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             outputs=[result, seed_output, error_output, timing_display],
             concurrency_limit=20,
         )
-    
+
     return demo
 
 
 def main():
     parser = argparse.ArgumentParser(description="FastVideo Gradio Local Demo")
-    parser.add_argument("--t2v_model_paths", type=str,
+    parser.add_argument("--t2v_model_paths",
+                        type=str,
                         default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
                         help="Comma separated list of paths to the T2V model(s)")
-    parser.add_argument("--host", type=str, default="0.0.0.0",
-                        help="Host to bind to")
-    parser.add_argument("--port", type=int, default=7860,
-                        help="Port to bind to")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=7860, help="Port to bind to")
     args = parser.parse_args()
     generators = {}
     default_params = {}
@@ -555,40 +551,36 @@ def main():
     demo = create_gradio_interface(default_params, generators)
     print(f"Starting Gradio frontend at http://{args.host}:{args.port}")
     print(f"T2V Models: {args.t2v_model_paths}")
-    
+
     from fastapi import FastAPI, Request, HTTPException
     from fastapi.responses import HTMLResponse, FileResponse
     import uvicorn
-    
+
     app = FastAPI()
-    
+
     @app.get("/logo.png")
     def get_logo():
-        return FileResponse(
-            "assets/full.svg",
-            media_type="image/svg+xml",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
-    
+        return FileResponse("assets/full.svg",
+                            media_type="image/svg+xml",
+                            headers={
+                                "Cache-Control": "public, max-age=3600",
+                                "Access-Control-Allow-Origin": "*"
+                            })
+
     @app.get("/favicon.ico")
     def get_favicon():
         favicon_path = "assets/icon-simple.svg"
-        
+
         if os.path.exists(favicon_path):
-            return FileResponse(
-                favicon_path, 
-                media_type="image/svg+xml",
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*"
-                }
-            )
+            return FileResponse(favicon_path,
+                                media_type="image/svg+xml",
+                                headers={
+                                    "Cache-Control": "public, max-age=3600",
+                                    "Access-Control-Allow-Origin": "*"
+                                })
         else:
             raise HTTPException(status_code=404, detail="Favicon not found")
-    
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         base_url = str(request.base_url).rstrip('/')
@@ -640,17 +632,16 @@ def main():
         </body>
         </html>
         """
-    
-    app = gr.mount_gradio_app(
-        app, 
-        demo, 
-        path="/gradio",
-        allowed_paths=[os.path.abspath("outputs"), os.path.abspath("fastvideo-logos")]
-    )
-    
+
+    app = gr.mount_gradio_app(app,
+                              demo,
+                              path="/gradio",
+                              allowed_paths=[os.path.abspath("outputs"),
+                                             os.path.abspath("fastvideo-logos")])
+
     uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
-    
-    main() 
+
+    main()

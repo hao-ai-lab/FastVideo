@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
-import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
     AttentionImpl,
@@ -84,18 +84,27 @@ _FA4_INSTALL_HINT = ("install flash-attention-fp4 (branch fp4) from "
 _FA4_PV_MODES = ("bf16", "fp8")
 
 
-# The last configured pv mode; the receipt derives its pv_mode field from
-# this instead of declaring a literal. Impl construction records it.
 def _default_fa4_pv_mode() -> str:
     """Env bridge, mirroring the sibling nvfp4_fa4 pattern: kwargs win, the
     FASTVIDEO_FA4_PV_MODE env var is the user-reachable fallback (model code
     constructs attention with fixed literals, so without this bridge the knob
-    has no user path). Reading it here also makes the resolution-time receipt
-    correct for env-driven runs before any impl is constructed."""
-    return os.environ.get("FASTVIDEO_FA4_PV_MODE", "bf16")
+    has no user path). The registry field restricts the value to
+    _FA4_PV_MODES and defaults to "bf16"."""
+    return envs.FASTVIDEO_FA4_PV_MODE.get()
 
 
-_configured_fa4_pv_mode = _default_fa4_pv_mode()
+# The last configured pv mode; the receipt derives its pv_mode field from
+# this instead of declaring a literal. Impl construction records it. Until an
+# impl is constructed it is None and the receipt reads the env bridge, so the
+# resolution-time receipt is still correct for env-driven runs (the env is
+# read inside functions only, per docs/contributing/env_vars.md).
+_configured_fa4_pv_mode: str | None = None
+
+
+def _current_fa4_pv_mode() -> str:
+    if _configured_fa4_pv_mode is not None:
+        return _configured_fa4_pv_mode
+    return _default_fa4_pv_mode()
 
 
 def validate_fa4_pv_mode(mode: str) -> str:
@@ -181,7 +190,7 @@ def attn_qat_infer_receipt() -> str:
         return f"arch={arch} kernel=fastvideo-kernel-cutlass scheme=sage3-fp4-sm120"
     if kernel == "fa4_fp4":
         return (f"arch={arch} kernel=flash-attention-fp4 qk_mode=nvfp4(per-16-e4m3-sf) "
-                f"pv_mode={_configured_fa4_pv_mode} train_sim_mismatch=measured")
+                f"pv_mode={_current_fa4_pv_mode()} train_sim_mismatch=measured")
     supported = "sm_120a/sm_121a via fastvideo-kernel build.sh; sm_100a/sm_103a via flash-attention-fp4"
     if cap is not None and cap in _FA4_FP4_CAPABILITIES:
         return f"arch={arch} kernel=none (flash_attn.cute not importable -- {_FA4_INSTALL_HINT})"
@@ -232,7 +241,7 @@ def _log_pv_dtype_once(dtype: torch.dtype) -> None:
     if not _pv_dtype_logged:
         _pv_dtype_logged = True
         logger.info("ATTN_QAT_INFER FA4 first forward: observed V dtype=%s (configured pv_mode=%s)", dtype,
-                    _configured_fa4_pv_mode)
+                    _current_fa4_pv_mode())
 
 
 # Dynamo cannot trace `logging.Logger` methods (Unsupported -> graph break,

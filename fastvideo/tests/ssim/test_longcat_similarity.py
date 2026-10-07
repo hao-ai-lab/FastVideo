@@ -19,6 +19,7 @@ import os
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -34,6 +35,7 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of LongCat support.")
 
 # Device-specific reference folder
 device_reference_folder = resolve_device_reference_folder(
@@ -41,6 +43,7 @@ device_reference_folder = resolve_device_reference_folder(
         ("A40", "A40"),
         ("L40S", "L40S"),
         ("H100", "H100"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=get_cuda_device_name(),
@@ -48,13 +51,11 @@ device_reference_folder = resolve_device_reference_folder(
 )
 
 # Common negative prompt from example scripts
-NEGATIVE_PROMPT = (
-    "Bright tones, overexposed, static, blurred details, subtitles, style, works, "
-    "paintings, images, static, overall gray, worst quality, low quality, JPEG compression "
-    "residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, "
-    "deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, "
-    "three legs, many people in the background, walking backwards"
-)
+NEGATIVE_PROMPT = ("Bright tones, overexposed, static, blurred details, subtitles, style, works, "
+                   "paintings, images, static, overall gray, worst quality, low quality, JPEG compression "
+                   "residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, "
+                   "deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, "
+                   "three legs, many people in the background, walking backwards")
 
 # =============================================================================
 # LongCat T2V Parameters (from basic_longcat_t2v.py)
@@ -71,9 +72,7 @@ LONGCAT_T2V_PARAMS = {
     "seed": 42,
     "negative_prompt": NEGATIVE_PROMPT,
 }
-_LONGCAT_T2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    LONGCAT_T2V_PARAMS["model_path"]
-)
+_LONGCAT_T2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(LONGCAT_T2V_PARAMS["model_path"])
 LONGCAT_T2V_FULL_QUALITY_PARAMS = {
     "num_gpus": LONGCAT_T2V_PARAMS["num_gpus"],
     "model_path": LONGCAT_T2V_PARAMS["model_path"],
@@ -102,9 +101,7 @@ LONGCAT_I2V_PARAMS = {
     "seed": 42,
     "negative_prompt": NEGATIVE_PROMPT,
 }
-_LONGCAT_I2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    LONGCAT_I2V_PARAMS["model_path"]
-)
+_LONGCAT_I2V_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(LONGCAT_I2V_PARAMS["model_path"])
 LONGCAT_I2V_FULL_QUALITY_PARAMS = {
     "num_gpus": LONGCAT_I2V_PARAMS["num_gpus"],
     "model_path": LONGCAT_I2V_PARAMS["model_path"],
@@ -134,9 +131,7 @@ LONGCAT_VC_PARAMS = {
     "num_cond_frames": 13,
     "negative_prompt": NEGATIVE_PROMPT,
 }
-_LONGCAT_VC_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    LONGCAT_VC_PARAMS["model_path"]
-)
+_LONGCAT_VC_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(LONGCAT_VC_PARAMS["model_path"])
 LONGCAT_VC_FULL_QUALITY_PARAMS = {
     "num_gpus": LONGCAT_VC_PARAMS["num_gpus"],
     "model_path": LONGCAT_VC_PARAMS["model_path"],
@@ -198,19 +193,19 @@ def _resolve_asset_path(asset_path: str) -> str:
 
 @pytest.mark.parametrize("prompt", T2V_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
-def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
+def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrides):
     """
     Test LongCat T2V inference and compare output to reference videos using SSIM.
     
     Parameters derived from examples/inference/basic/basic_longcat_t2v.py
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     params = select_ssim_params(LONGCAT_T2V_PARAMS, LONGCAT_T2V_FULL_QUALITY_PARAMS)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_id = "LongCat-Video-T2V"
-    
+
     output_dir = build_generated_output_dir(
         script_dir,
         device_reference_folder,
@@ -241,16 +236,12 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
         "negative_prompt": params["negative_prompt"],
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=params["model_path"], **init_kwargs
-    )
+    generator = VideoGenerator.from_pretrained(model_path=params["model_path"], **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
     generator.shutdown()
 
     generated_video_path = os.path.join(output_dir, output_video_name)
-    assert os.path.exists(generated_video_path), (
-        f"Output video was not generated at {generated_video_path}"
-    )
+    assert os.path.exists(generated_video_path), (f"Output video was not generated at {generated_video_path}")
 
     # Find reference video
     reference_folder = build_reference_folder_path(
@@ -260,9 +251,7 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
         ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     reference_video_name = None
     for filename in os.listdir(reference_folder):
@@ -272,46 +261,39 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     if not reference_video_name:
         raise FileNotFoundError(
-            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}"
-        )
+            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
 
     logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
-    ssim_values = compute_video_ssim_torchvision(
-        reference_video_path, generated_video_path, use_ms_ssim=True
-    )
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
 
-    write_ssim_results(
-        output_dir, ssim_values, reference_video_path, generated_video_path,
-        params["num_inference_steps"], prompt
-    )
+    write_ssim_results(output_dir, ssim_values, reference_video_path, generated_video_path,
+                       params["num_inference_steps"], prompt)
 
     min_acceptable_ssim = 0.90
-    assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}"
-    )
+    assert mean_ssim >= min_acceptable_ssim, (f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+                                              f"for {model_id} with backend {ATTENTION_BACKEND}")
 
 
 @pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
-def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
+def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrides):
     """
     Test LongCat I2V inference and compare output to reference videos using SSIM.
     
     Parameters derived from examples/inference/basic/basic_longcat_i2v.py
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     params = select_ssim_params(LONGCAT_I2V_PARAMS, LONGCAT_I2V_FULL_QUALITY_PARAMS)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_id = "LongCat-Video-I2V"
-    
+
     output_dir = build_generated_output_dir(
         script_dir,
         device_reference_folder,
@@ -347,16 +329,12 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
         "negative_prompt": params["negative_prompt"],
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=params["model_path"], **init_kwargs
-    )
+    generator = VideoGenerator.from_pretrained(model_path=params["model_path"], **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
     generator.shutdown()
 
     generated_video_path = os.path.join(output_dir, output_video_name)
-    assert os.path.exists(generated_video_path), (
-        f"Output video was not generated at {generated_video_path}"
-    )
+    assert os.path.exists(generated_video_path), (f"Output video was not generated at {generated_video_path}")
 
     # Find reference video
     reference_folder = build_reference_folder_path(
@@ -366,9 +344,7 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
         ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     reference_video_name = None
     for filename in os.listdir(reference_folder):
@@ -378,46 +354,39 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     if not reference_video_name:
         raise FileNotFoundError(
-            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}"
-        )
+            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
 
     logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
-    ssim_values = compute_video_ssim_torchvision(
-        reference_video_path, generated_video_path, use_ms_ssim=True
-    )
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
 
-    write_ssim_results(
-        output_dir, ssim_values, reference_video_path, generated_video_path,
-        params["num_inference_steps"], prompt
-    )
+    write_ssim_results(output_dir, ssim_values, reference_video_path, generated_video_path,
+                       params["num_inference_steps"], prompt)
 
     min_acceptable_ssim = 0.90
-    assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}"
-    )
+    assert mean_ssim >= min_acceptable_ssim, (f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+                                              f"for {model_id} with backend {ATTENTION_BACKEND}")
 
 
 @pytest.mark.parametrize("prompt", VC_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
-def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
+def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str, env_overrides):
     """
     Test LongCat VC (Video Continuation) inference and compare output to reference videos using SSIM.
     
     Parameters derived from examples/inference/basic/basic_longcat_vc.py
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     params = select_ssim_params(LONGCAT_VC_PARAMS, LONGCAT_VC_FULL_QUALITY_PARAMS)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_id = "LongCat-Video-VC"
-    
+
     output_dir = build_generated_output_dir(
         script_dir,
         device_reference_folder,
@@ -430,7 +399,7 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
     # Get video path for this prompt
     prompt_idx = VC_TEST_PROMPTS.index(prompt)
     video_path = _resolve_asset_path(VC_VIDEO_PATHS[prompt_idx])
-    
+
     if not os.path.exists(video_path):
         pytest.skip(f"Input video not found at {video_path}")
 
@@ -458,16 +427,12 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
         "negative_prompt": params["negative_prompt"],
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=params["model_path"], **init_kwargs
-    )
+    generator = VideoGenerator.from_pretrained(model_path=params["model_path"], **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
     generator.shutdown()
 
     generated_video_path = os.path.join(output_dir, output_video_name)
-    assert os.path.exists(generated_video_path), (
-        f"Output video was not generated at {generated_video_path}"
-    )
+    assert os.path.exists(generated_video_path), (f"Output video was not generated at {generated_video_path}")
 
     # Find reference video
     reference_folder = build_reference_folder_path(
@@ -477,9 +442,7 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
         ATTENTION_BACKEND,
     )
     if not os.path.exists(reference_folder):
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     reference_video_name = None
     for filename in os.listdir(reference_folder):
@@ -489,26 +452,19 @@ def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     if not reference_video_name:
         raise FileNotFoundError(
-            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}"
-        )
+            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
 
     logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
-    ssim_values = compute_video_ssim_torchvision(
-        reference_video_path, generated_video_path, use_ms_ssim=True
-    )
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
 
-    write_ssim_results(
-        output_dir, ssim_values, reference_video_path, generated_video_path,
-        params["num_inference_steps"], prompt
-    )
+    write_ssim_results(output_dir, ssim_values, reference_video_path, generated_video_path,
+                       params["num_inference_steps"], prompt)
 
     min_acceptable_ssim = 0.90
-    assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}"
-    )
+    assert mean_ssim >= min_acceptable_ssim, (f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+                                              f"for {model_id} with backend {ATTENTION_BACKEND}")

@@ -78,23 +78,20 @@ class TestSessionStateMachine:
 class TestSessionManager:
 
     def test_create_assigns_unique_ids(self):
-        mgr = SessionManager(
-            segment_cap=4, session_timeout_seconds=60, max_sessions=2)
+        mgr = SessionManager(segment_cap=4, session_timeout_seconds=60, max_sessions=2)
         a = mgr.create()
         b = mgr.create()
         assert a.id != b.id
         assert len(mgr) == 2
 
     def test_max_sessions_enforced(self):
-        mgr = SessionManager(
-            segment_cap=4, session_timeout_seconds=60, max_sessions=1)
+        mgr = SessionManager(segment_cap=4, session_timeout_seconds=60, max_sessions=1)
         mgr.create()
         with pytest.raises(SessionRejected):
             mgr.create()
 
     def test_close_releases_slot(self):
-        mgr = SessionManager(
-            segment_cap=4, session_timeout_seconds=60, max_sessions=1)
+        mgr = SessionManager(segment_cap=4, session_timeout_seconds=60, max_sessions=1)
         s = mgr.create()
         mgr.close(s.id)
         assert len(mgr) == 0
@@ -102,8 +99,7 @@ class TestSessionManager:
         mgr.create()
 
     def test_reap_timed_out_flags_idle_sessions(self):
-        mgr = SessionManager(
-            segment_cap=4, session_timeout_seconds=1, max_sessions=4)
+        mgr = SessionManager(segment_cap=4, session_timeout_seconds=1, max_sessions=4)
         s = mgr.create()
         s.transition(SessionState.QUEUED)
         s.transition(SessionState.GPU_BINDING)
@@ -113,8 +109,7 @@ class TestSessionManager:
         assert s.id in dead
 
     def test_reap_skips_terminal_states(self):
-        mgr = SessionManager(
-            segment_cap=4, session_timeout_seconds=1, max_sessions=4)
+        mgr = SessionManager(segment_cap=4, session_timeout_seconds=1, max_sessions=4)
         s = mgr.create()
         s.transition(SessionState.QUEUED)
         s.transition(SessionState.ERROR)
@@ -122,8 +117,7 @@ class TestSessionManager:
         assert s.id not in mgr.reap_timed_out()
 
     def test_active_sessions_filter(self):
-        mgr = SessionManager(
-            segment_cap=4, session_timeout_seconds=60, max_sessions=4)
+        mgr = SessionManager(segment_cap=4, session_timeout_seconds=60, max_sessions=4)
         a = mgr.create()
         a.transition(SessionState.QUEUED)
         a.transition(SessionState.GPU_BINDING)

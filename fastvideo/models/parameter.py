@@ -60,8 +60,7 @@ class BasevLLMParameter(Parameter):
         return (cond1 and cond2)
 
     def _assert_and_load(self, loaded_weight: torch.Tensor) -> None:
-        assert (self.data.shape == loaded_weight.shape
-                or self._is_1d_and_scalar(loaded_weight))
+        assert (self.data.shape == loaded_weight.shape or self._is_1d_and_scalar(loaded_weight))
         self.data.copy_(loaded_weight)
 
     def load_column_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
@@ -70,8 +69,7 @@ class BasevLLMParameter(Parameter):
     def load_row_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
         self._assert_and_load(loaded_weight)
 
-    def load_merged_column_weight(self, loaded_weight: torch.Tensor,
-                                  **kwargs) -> None:
+    def load_merged_column_weight(self, loaded_weight: torch.Tensor, **kwargs) -> None:
         self._assert_and_load(loaded_weight)
 
     def load_qkv_weight(self, loaded_weight: torch.Tensor, **kwargs) -> None:
@@ -100,31 +98,25 @@ class _ColumnvLLMParameter(BasevLLMParameter):
     def load_column_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
         tp_rank = get_tp_rank()
         shard_size = self.data.shape[self.output_dim]
-        loaded_weight = loaded_weight.narrow(self.output_dim,
-                                             tp_rank * shard_size, shard_size)
+        loaded_weight = loaded_weight.narrow(self.output_dim, tp_rank * shard_size, shard_size)
         assert self.data.shape == loaded_weight.shape
         self.data.copy_(loaded_weight)
 
-    def load_merged_column_weight(self, loaded_weight: torch.Tensor,
-                                  **kwargs) -> None:
+    def load_merged_column_weight(self, loaded_weight: torch.Tensor, **kwargs) -> None:
 
         shard_offset = kwargs.get("shard_offset")
         shard_size = kwargs.get("shard_size")
         if shard_offset is None or shard_size is None:
             raise ValueError("shard_offset and shard_size must be provided")
-        if isinstance(
-                self, PackedColumnParameter
-                | PackedvLLMParameter) and self.packed_dim == self.output_dim:
-            shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
-                shard_offset=shard_offset, shard_size=shard_size)
+        if isinstance(self, PackedColumnParameter | PackedvLLMParameter) and self.packed_dim == self.output_dim:
+            shard_size, shard_offset = self.adjust_shard_indexes_for_packing(shard_offset=shard_offset,
+                                                                             shard_size=shard_size)
 
         param_data = self.data
 
         tp_rank = get_tp_rank()
-        param_data = param_data.narrow(self.output_dim, shard_offset,
-                                       shard_size)
-        loaded_weight = loaded_weight.narrow(self.output_dim,
-                                             tp_rank * shard_size, shard_size)
+        param_data = param_data.narrow(self.output_dim, shard_offset, shard_size)
+        loaded_weight = loaded_weight.narrow(self.output_dim, tp_rank * shard_size, shard_size)
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
@@ -140,19 +132,15 @@ class _ColumnvLLMParameter(BasevLLMParameter):
         assert shard_id is not None
         assert num_heads is not None
 
-        if isinstance(
-                self, PackedColumnParameter
-                | PackedvLLMParameter) and self.output_dim == self.packed_dim:
-            shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
-                shard_offset=shard_offset, shard_size=shard_size)
+        if isinstance(self, PackedColumnParameter | PackedvLLMParameter) and self.output_dim == self.packed_dim:
+            shard_size, shard_offset = self.adjust_shard_indexes_for_packing(shard_offset=shard_offset,
+                                                                             shard_size=shard_size)
 
         param_data = self.data
         tp_rank = get_tp_rank()
         shard_id = tp_rank if shard_id == "q" else tp_rank // num_heads
-        param_data = param_data.narrow(self.output_dim, shard_offset,
-                                       shard_size)
-        loaded_weight = loaded_weight.narrow(self.output_dim,
-                                             shard_id * shard_size, shard_size)
+        param_data = param_data.narrow(self.output_dim, shard_offset, shard_size)
+        loaded_weight = loaded_weight.narrow(self.output_dim, shard_id * shard_size, shard_size)
 
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
@@ -177,8 +165,7 @@ class RowvLLMParameter(BasevLLMParameter):
     def load_row_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
         tp_rank = get_tp_rank()
         shard_size = self.data.shape[self.input_dim]
-        loaded_weight = loaded_weight.narrow(self.input_dim,
-                                             tp_rank * shard_size, shard_size)
+        loaded_weight = loaded_weight.narrow(self.input_dim, tp_rank * shard_size, shard_size)
 
         if len(loaded_weight.shape) == 0:
             loaded_weight = loaded_weight.reshape(1)
@@ -253,8 +240,7 @@ class PerTensorScaleParameter(BasevLLMParameter):
     def load_column_parallel_weight(self, *args, **kwargs) -> None:
         super().load_row_parallel_weight(*args, **kwargs)
 
-    def _load_into_shard_id(self, loaded_weight: torch.Tensor,
-                            shard_id: str | int, **kwargs):
+    def _load_into_shard_id(self, loaded_weight: torch.Tensor, shard_id: str | int, **kwargs):
         """
         Slice the parameter data based on the shard id for 
         loading.
@@ -281,8 +267,7 @@ class PackedColumnParameter(_ColumnvLLMParameter):
     for more details on the packed properties.
     """
 
-    def __init__(self, packed_factor: int | Fraction, packed_dim: int,
-                 **kwargs):
+    def __init__(self, packed_factor: int | Fraction, packed_dim: int, **kwargs):
         self._packed_factor = packed_factor
         self._packed_dim = packed_dim
         super().__init__(**kwargs)
@@ -295,12 +280,10 @@ class PackedColumnParameter(_ColumnvLLMParameter):
     def packed_factor(self):
         return self._packed_factor
 
-    def adjust_shard_indexes_for_packing(self, shard_size,
-                                         shard_offset) -> tuple[Any, Any]:
-        return _adjust_shard_indexes_for_packing(
-            shard_size=shard_size,
-            shard_offset=shard_offset,
-            packed_factor=self.packed_factor)
+    def adjust_shard_indexes_for_packing(self, shard_size, shard_offset) -> tuple[Any, Any]:
+        return _adjust_shard_indexes_for_packing(shard_size=shard_size,
+                                                 shard_offset=shard_offset,
+                                                 packed_factor=self.packed_factor)
 
 
 class PackedvLLMParameter(ModelWeightParameter):
@@ -314,8 +297,7 @@ class PackedvLLMParameter(ModelWeightParameter):
     by accounting for packing and optionally, marlin tile size.
     """
 
-    def __init__(self, packed_factor: int | Fraction, packed_dim: int,
-                 **kwargs):
+    def __init__(self, packed_factor: int | Fraction, packed_dim: int, **kwargs):
         self._packed_factor = packed_factor
         self._packed_dim = packed_dim
         super().__init__(**kwargs)
@@ -329,10 +311,9 @@ class PackedvLLMParameter(ModelWeightParameter):
         return self._packed_factor
 
     def adjust_shard_indexes_for_packing(self, shard_size, shard_offset):
-        return _adjust_shard_indexes_for_packing(
-            shard_size=shard_size,
-            shard_offset=shard_offset,
-            packed_factor=self.packed_factor)
+        return _adjust_shard_indexes_for_packing(shard_size=shard_size,
+                                                 shard_offset=shard_offset,
+                                                 packed_factor=self.packed_factor)
 
 
 class BlockQuantScaleParameter(_ColumnvLLMParameter, RowvLLMParameter):
@@ -344,8 +325,7 @@ class BlockQuantScaleParameter(_ColumnvLLMParameter, RowvLLMParameter):
     pass
 
 
-def permute_param_layout_(param: BasevLLMParameter, input_dim: int,
-                          output_dim: int, **kwargs) -> BasevLLMParameter:
+def permute_param_layout_(param: BasevLLMParameter, input_dim: int, output_dim: int, **kwargs) -> BasevLLMParameter:
     """
     Permute a parameter's layout to the specified input and output dimensions, 
     useful for forcing the parameter into a known layout, for example, if I need
@@ -379,10 +359,7 @@ def permute_param_layout_(param: BasevLLMParameter, input_dim: int,
     # create permutation from the current layout to the layout with
     # self.input_dim at input_dim and self.output_dim at output_dim preserving
     # other dimensions
-    perm = [
-        i for i in range(param.data.dim())
-        if i not in [curr_input_dim, curr_output_dim]
-    ]
+    perm = [i for i in range(param.data.dim()) if i not in [curr_input_dim, curr_output_dim]]
     perm.insert(input_dim, curr_input_dim)
     perm.insert(output_dim, curr_output_dim)
 
@@ -402,8 +379,7 @@ def permute_param_layout_(param: BasevLLMParameter, input_dim: int,
     return param
 
 
-def _adjust_shard_indexes_for_packing(shard_size, shard_offset,
-                                      packed_factor) -> tuple[Any, Any]:
+def _adjust_shard_indexes_for_packing(shard_size, shard_offset, packed_factor) -> tuple[Any, Any]:
     shard_size = shard_size // packed_factor
     shard_offset = shard_offset // packed_factor
     return shard_size, shard_offset

@@ -64,7 +64,7 @@ def _validate_adapter(adapter: Optional[str]) -> Optional[str]:
     p = Path(adapter).expanduser()
     if not p.exists():
         raise FileNotFoundError(f"Adapter not found: {p}")
-    
+
     # Accept both files and directories (FastVideo expects directories for HF-style adapters)
     if p.is_file():
         if p.suffix != ".safetensors":
@@ -78,7 +78,7 @@ def _validate_adapter(adapter: Optional[str]) -> Optional[str]:
             raise ValueError(f"Adapter directory contains no .safetensors files: {p}")
     else:
         raise ValueError(f"Adapter must be a file or directory: {p}")
-    
+
     return str(p.resolve())
 
 
@@ -151,9 +151,10 @@ def generate_with_model(
     raise FileNotFoundError(f"Video not found at expected path: {expected}")
 
 
-def compute_metrics(output_dir: str, ft_video: str, other_video: str, num_inference_steps: int, prompt: str, compute_ssim: bool, compute_lpips: bool) -> dict:
+def compute_metrics(output_dir: str, ft_video: str, other_video: str, num_inference_steps: int, prompt: str,
+                    compute_ssim: bool, compute_lpips: bool) -> dict:
     results = {}
-    
+
     if compute_ssim:
         try:
             from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results  # type: ignore
@@ -162,40 +163,40 @@ def compute_metrics(output_dir: str, ft_video: str, other_video: str, num_infere
             write_ssim_results(output_dir, ssim_values, ft_video, other_video, num_inference_steps, prompt)
         except Exception as e:
             logger.warning(f"SSIM computation failed: {e}")
-    
+
     if compute_lpips:
         try:
             import torch
             import lpips
             import torchvision.io as tv_io
-            
+
             loss_fn = lpips.LPIPS(net='alex')
-            
+
             # Load videos
             vid1, _, _ = tv_io.read_video(ft_video, pts_unit='sec')
             vid2, _, _ = tv_io.read_video(other_video, pts_unit='sec')
-            
+
             # Normalize to [-1, 1]
             vid1 = (vid1.float() / 127.5 - 1.0).permute(0, 3, 1, 2)  # (T, C, H, W)
             vid2 = (vid2.float() / 127.5 - 1.0).permute(0, 3, 1, 2)
-            
+
             lpips_scores = []
             with torch.no_grad():
                 for frame1, frame2 in zip(vid1, vid2):
                     score = loss_fn(frame1.unsqueeze(0), frame2.unsqueeze(0))
                     lpips_scores.append(float(score.item()))
-            
+
             results["mean_lpips"] = sum(lpips_scores) / len(lpips_scores)
-            
+
             # Write LPIPS results
             import json
             lpips_file = Path(output_dir) / f"steps{num_inference_steps}_{prompt.replace(' ', '_')[:30]}_lpips.json"
             with open(lpips_file, 'w') as f:
                 json.dump({"mean_lpips": results["mean_lpips"], "lpips_per_frame": lpips_scores}, f, indent=2)
-                
+
         except Exception as e:
             logger.warning(f"LPIPS computation failed: {e}")
-    
+
     return results
 
 
@@ -321,7 +322,8 @@ def compare_inference(
     # 3) compute metrics
     results = {}
     if compute_ssim or compute_lpips:
-        results = compute_metrics(output_dir, ft_video, target_video, num_inference_steps, prompt, compute_ssim, compute_lpips)
+        results = compute_metrics(output_dir, ft_video, target_video, num_inference_steps, prompt, compute_ssim,
+                                  compute_lpips)
         if results.get("mean_ssim") is not None:
             logger.info("Mean SSIM: %.4f", results["mean_ssim"])
         if results.get("mean_lpips") is not None:

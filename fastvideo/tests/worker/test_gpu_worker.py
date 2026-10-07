@@ -1,11 +1,75 @@
+import os
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import ForwardBatch
-from fastvideo.worker.gpu_worker import Worker
+from fastvideo.worker.gpu_worker import Worker, _log_cuda_device_uuid
+
+
+def test_cuda_device_uuid_receipt_is_disabled_without_nvtx_profiling(monkeypatch, env_overrides) -> None:
+    """Avoid NVIDIA property access during ordinary worker initialization."""
+    get_device_properties = Mock()
+    env_overrides.enter_context(envs.FASTVIDEO_NVTX_PROFILE.override(False))
+    monkeypatch.setattr(torch.cuda, "get_device_properties", get_device_properties)
+
+    _log_cuda_device_uuid(0, torch.device("cuda:0"))
+
+    get_device_properties.assert_not_called()
+
+
+def test_cuda_device_uuid_receipt_identifies_profiled_worker(monkeypatch, env_overrides) -> None:
+    """Bind one profiled worker rank to its NVIDIA device UUID in logs."""
+    log_info = Mock()
+    env_overrides.enter_context(envs.FASTVIDEO_NVTX_PROFILE.override(True))
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(uuid="device-uuid"))
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.logger.info", log_info)
+
+    _log_cuda_device_uuid(2, torch.device("cuda:0"))
+
+    log_info.assert_called_once_with(
+        "Worker %d CUDA device UUID: GPU-%s",
+        2,
+        "device-uuid",
+        local_main_process_only=False,
+    )
+
+
+@pytest.mark.parametrize("executor_backend", ["mp", "ray"])
+def test_init_device_applies_offload_policy_after_binding_worker_device(monkeypatch, env_overrides,
+                                                                        executor_backend: str) -> None:
+    """The runtime probe must see this worker's device, never driver device 0."""
+    events = []
+    args = FastVideoArgs(model_path="test", num_gpus=1, distributed_executor_backend=executor_backend)
+    args.finalize_device_offload_policy = Mock(side_effect=lambda device_id: events.append(("policy", device_id)))
+    worker = Worker(args, local_rank=3, rank=3, distributed_init_method="env://")
+
+    env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_cuda_alike", lambda: True)
+    monkeypatch.setattr("fastvideo.platforms.current_platform.is_cuda", lambda: False)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda device: events.append(("set_device", device.index)))
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (123, 456))
+    monkeypatch.setattr(
+        "fastvideo.worker.gpu_worker.maybe_init_distributed_environment_and_model_parallel",
+        lambda *args: events.append(("distributed", None)),
+    )
+    monkeypatch.setattr("fastvideo.worker.gpu_worker.build_pipeline", lambda args: events.append(("pipeline", None)))
+
+    worker.init_device()
+
+    assert events == [
+        ("set_device", 3),
+        ("policy", 3),
+        ("distributed", None),
+        ("pipeline", None),
+    ]
+    assert os.environ["LOCAL_RANK"] == "3"
+    assert worker.device == torch.device("cuda:3")
+    assert worker.init_gpu_memory == 123
 
 
 def _worker_returning(output_batch: ForwardBatch) -> Worker:

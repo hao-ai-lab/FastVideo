@@ -27,7 +27,6 @@ from fastvideo.configs.models.vaes.autoencoder_kl import AutoencoderKLVAEConfig
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.models.vaes.autoencoder_kl import AutoencoderKL as FastVideoAutoencoderKL
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ZIMAGE_REPO = REPO_ROOT / "Z-Image"
 ZIMAGE_SRC = REPO_ROOT / "Z-Image" / "src"
@@ -59,8 +58,7 @@ def _require_pinned_reference_module(module_name: str, source_file: Path):
     actual_revision = result.stdout.strip()
     assert actual_revision == ZIMAGE_REFERENCE_REVISION, (
         "Z-Image reference clone is not at the pinned revision: "
-        f"expected {ZIMAGE_REFERENCE_REVISION}, got {actual_revision}"
-    )
+        f"expected {ZIMAGE_REFERENCE_REVISION}, got {actual_revision}")
 
     if str(ZIMAGE_SRC) not in sys.path:
         sys.path.insert(0, str(ZIMAGE_SRC))
@@ -70,9 +68,8 @@ def _require_pinned_reference_module(module_name: str, source_file: Path):
         pytest.fail(f"Cannot import pinned Z-Image module {module_name}: {exc}")
 
     module_file = Path(module.__file__ or "").resolve()
-    assert module_file.is_relative_to(ZIMAGE_SRC.resolve()), (
-        f"{module_name} resolved outside the pinned clone: {module_file}"
-    )
+    assert module_file.is_relative_to(
+        ZIMAGE_SRC.resolve()), (f"{module_name} resolved outside the pinned clone: {module_file}")
     return module
 
 

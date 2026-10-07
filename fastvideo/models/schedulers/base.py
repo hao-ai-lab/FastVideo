@@ -16,9 +16,7 @@ class BaseScheduler(ABC):
 
         for attr in required_attributes:
             if not hasattr(self, attr):
-                raise AttributeError(
-                    f"Subclasses of BaseScheduler must define '{attr}' property"
-                )
+                raise AttributeError(f"Subclasses of BaseScheduler must define '{attr}' property")
 
     @abstractmethod
     def set_shift(self, shift: float) -> None:
@@ -29,7 +27,5 @@ class BaseScheduler(ABC):
         pass
 
     @abstractmethod
-    def scale_model_input(self,
-                          sample: torch.Tensor,
-                          timestep: int | None = None) -> torch.Tensor:
+    def scale_model_input(self, sample: torch.Tensor, timestep: int | None = None) -> torch.Tensor:
         pass

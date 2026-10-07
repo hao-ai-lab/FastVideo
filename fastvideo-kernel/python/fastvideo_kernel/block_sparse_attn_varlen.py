@@ -41,9 +41,7 @@ def _scatter_to_padded(
     for actual in sizes:
         actual = min(actual, src_end - src_pos)
         if actual > 0:
-            dst[:, :, dst_pos:dst_pos + actual, :] = (
-                src[src_pos:src_pos + actual].transpose(0, 1).unsqueeze(0)
-            )
+            dst[:, :, dst_pos:dst_pos + actual, :] = (src[src_pos:src_pos + actual].transpose(0, 1).unsqueeze(0))
         src_pos += actual
         dst_pos += block_size
 
@@ -68,9 +66,7 @@ def _gather_from_padded(
     for actual in sizes:
         actual = min(actual, dst_end - dst_pos)
         if actual > 0:
-            dst[dst_pos:dst_pos + actual] = (
-                src[0, :, src_pos:src_pos + actual, :].transpose(0, 1)
-            )
+            dst[dst_pos:dst_pos + actual] = (src[0, :, src_pos:src_pos + actual, :].transpose(0, 1))
         dst_pos += actual
         src_pos += block_size
 
@@ -131,9 +127,7 @@ def block_sparse_attn_varlen(
         if q_variable_block_sizes_list is not None:
             q_vbs_resolved.append(q_variable_block_sizes_list[i])
         else:
-            q_vbs_resolved.append(
-                torch.full((n_q_blocks,), block_size, dtype=torch.int32)
-            )
+            q_vbs_resolved.append(torch.full((n_q_blocks, ), block_size, dtype=torch.int32))
 
     total_padded_q = sum(padded_q_lens)
     total_padded_kv = sum(padded_kv_lens)
@@ -146,16 +140,31 @@ def block_sparse_attn_varlen(
     kv_offset = 0
     for i in range(num_seqs):
         _scatter_to_padded(
-            q, q_vbs_resolved[i], block_size,
-            q_packed, q_offset, cu_q[i], cu_q[i + 1],
+            q,
+            q_vbs_resolved[i],
+            block_size,
+            q_packed,
+            q_offset,
+            cu_q[i],
+            cu_q[i + 1],
         )
         _scatter_to_padded(
-            k, variable_block_sizes_list[i], block_size,
-            k_packed, kv_offset, cu_kv[i], cu_kv[i + 1],
+            k,
+            variable_block_sizes_list[i],
+            block_size,
+            k_packed,
+            kv_offset,
+            cu_kv[i],
+            cu_kv[i + 1],
         )
         _scatter_to_padded(
-            v, variable_block_sizes_list[i], block_size,
-            v_packed, kv_offset, cu_kv[i], cu_kv[i + 1],
+            v,
+            variable_block_sizes_list[i],
+            block_size,
+            v_packed,
+            kv_offset,
+            cu_kv[i],
+            cu_kv[i + 1],
         )
         q_offset += padded_q_lens[i]
         kv_offset += padded_kv_lens[i]
@@ -164,12 +173,19 @@ def block_sparse_attn_varlen(
     max_kv_per_q = max(t.shape[-1] for t in q2k_idx_list)
 
     global_q2k_idx = torch.zeros(
-        1, num_heads, total_q_blocks, max_kv_per_q,
-        dtype=torch.int32, device=device,
+        1,
+        num_heads,
+        total_q_blocks,
+        max_kv_per_q,
+        dtype=torch.int32,
+        device=device,
     )
     global_q2k_num = torch.zeros(
-        1, num_heads, total_q_blocks,
-        dtype=torch.int32, device=device,
+        1,
+        num_heads,
+        total_q_blocks,
+        dtype=torch.int32,
+        device=device,
     )
     global_vbs_parts = []
 
@@ -191,16 +207,25 @@ def block_sparse_attn_varlen(
     global_vbs = torch.cat(global_vbs_parts, dim=0).to(torch.int32).contiguous()
 
     out_packed, _ = block_sparse_attn_from_indices(
-        q_packed, k_packed, v_packed,
-        global_q2k_idx, global_q2k_num, global_vbs,
+        q_packed,
+        k_packed,
+        v_packed,
+        global_q2k_idx,
+        global_q2k_num,
+        global_vbs,
     )
 
     out = torch.zeros(cu_q[-1], num_heads, head_dim, device=device, dtype=dtype)
     q_offset = 0
     for i in range(num_seqs):
         _gather_from_padded(
-            out_packed, q_vbs_resolved[i], block_size,
-            out, q_offset, cu_q[i], cu_q[i + 1],
+            out_packed,
+            q_vbs_resolved[i],
+            block_size,
+            out,
+            q_offset,
+            cu_q[i],
+            cu_q[i + 1],
         )
         q_offset += padded_q_lens[i]
 

@@ -9,7 +9,7 @@ uv pip install vsa
 
 ### 1. Download dataset:
 ```bash
-bash examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/download_dataset.sh
+bash examples/datasets/crush-smol/download_dataset.sh
 ```
 
 ### 2. Configure and run distillation:

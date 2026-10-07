@@ -66,8 +66,8 @@ def _run_case(
     k = torch.randn(batch, heads, skv, head_dim, device=device, dtype=dtype)
     v = torch.randn(batch, heads, skv, head_dim, device=device, dtype=dtype)
 
-    q_var = torch.full((q_blocks_256,), q_block, dtype=torch.int32, device=device)
-    kv_var = torch.full((kv_blocks_256,), kv_block_logical, dtype=torch.int32, device=device)
+    q_var = torch.full((q_blocks_256, ), q_block, dtype=torch.int32, device=device)
+    kv_var = torch.full((kv_blocks_256, ), kv_block_logical, dtype=torch.int32, device=device)
 
     # Reproduce the compression branch's per-block average so we can pre-compute
     # the top-k mask that the kernel will see and feed it to the dense reference.
@@ -78,21 +78,20 @@ def _run_case(
     k_c = (k_c.float().sum(dim=3) / kv_var.view(1, 1, -1, 1)).to(k.dtype)
     v_c = (v_c.float().sum(dim=3) / kv_var.view(1, 1, -1, 1)).to(v.dtype)
 
-    scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (head_dim ** 0.5)
+    scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / (head_dim**0.5)
     attn = torch.softmax(scores, dim=-1)
     out_c = torch.matmul(attn, v_c)
-    out_c = (
-        out_c.view(batch, heads, q_blocks_256, 1, head_dim)
-        .repeat(1, 1, 1, q_block, 1)
-        .view(batch, heads, sq, head_dim)
-    )
+    out_c = (out_c.view(batch, heads, q_blocks_256, 1, head_dim).repeat(1, 1, 1, q_block,
+                                                                        1).view(batch, heads, sq, head_dim))
     topk_idx = torch.topk(scores, topk_logical, dim=-1).indices
     mask_256 = torch.zeros_like(scores, dtype=torch.bool).scatter_(-1, topk_idx, True)[0]
     full_mask = create_full_mask_from_block_mask(mask_256, q_var, kv_var, device=device)
     out_ref = out_c + _dense_reference(q, k, v, full_mask)
 
     out = video_sparse_attn(
-        q, k, v,
+        q,
+        k,
+        v,
         kv_var,
         q_var,
         topk_logical,
@@ -112,7 +111,11 @@ def test_vsa256_forward_qk_equal() -> None:
     if not torch.cuda.is_available():
         pytest.skip("CUDA is required")
     avg_abs, max_rel = _run_case(
-        heads=8, head_dim=128, q_blocks_256=8, kv_blocks_256=8, topk_logical=2,
+        heads=8,
+        head_dim=128,
+        q_blocks_256=8,
+        kv_blocks_256=8,
+        topk_logical=2,
     )
     print(f"[vsa256 qk_equal] avg_abs={avg_abs:.6e}, max_rel={max_rel:.6e}")
     assert avg_abs < 5e-2
@@ -124,7 +127,11 @@ def test_vsa256_forward_qk_diff() -> None:
     if not torch.cuda.is_available():
         pytest.skip("CUDA is required")
     avg_abs, max_rel = _run_case(
-        heads=8, head_dim=128, q_blocks_256=8, kv_blocks_256=12, topk_logical=2,
+        heads=8,
+        head_dim=128,
+        q_blocks_256=8,
+        kv_blocks_256=12,
+        topk_logical=2,
     )
     print(f"[vsa256 qk_diff] avg_abs={avg_abs:.6e}, max_rel={max_rel:.6e}")
     assert avg_abs < 5e-2

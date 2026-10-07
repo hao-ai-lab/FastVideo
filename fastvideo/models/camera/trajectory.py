@@ -14,7 +14,6 @@ import numpy as np
 import torch
 from packaging import version as pver
 
-
 # Action name -> motion type mapping
 ACTION_DICT = {
     "w": "forward",
@@ -175,9 +174,7 @@ def _action_to_pose_list(action_id: str, value: float = 0.2, duration: int = 33)
     intrinsic = [0.50505, 0.8979, 0.5, 0.5]
 
     motion_type = ACTION_DICT.get(action_id, action_id)
-    positions, rotations, current_pose = _generate_motion_segment(
-        current_pose, motion_type, value, duration
-    )
+    positions, rotations, current_pose = _generate_motion_segment(current_pose, motion_type, value, duration)
     all_positions.extend(positions)
     all_rotations.extend(rotations)
 
@@ -347,9 +344,7 @@ def create_camera_trajectory(
 
     # Convert to w2c matrices
     w2cs = [np.asarray([float(p) for p in pose[7:]]).reshape(3, 4) for pose in poses_parsed]
-    transform_matrix = np.asarray(
-        [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]]
-    ).reshape(4, 4)
+    transform_matrix = np.asarray([[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]]).reshape(4, 4)
     last_row = np.zeros((1, 4))
     last_row[0, -1] = 1.0
     w2cs = [np.concatenate((w2c, last_row), axis=0) for w2c in w2cs]
@@ -365,15 +360,12 @@ def create_camera_trajectory(
     monst3r_h = cam_params[0].cy * 2
     ratio_w, ratio_h = width / monst3r_w, height / monst3r_h
     intrinsics = np.asarray(
-        [
-            [
-                cam_param.fx * ratio_w,
-                cam_param.fy * ratio_h,
-                cam_param.cx * ratio_w,
-                cam_param.cy * ratio_h,
-            ]
-            for cam_param in cam_params
-        ],
+        [[
+            cam_param.fx * ratio_w,
+            cam_param.fy * ratio_h,
+            cam_param.cx * ratio_w,
+            cam_param.cy * ratio_h,
+        ] for cam_param in cam_params],
         dtype=np.float32,
     )
     intrinsics = torch.as_tensor(intrinsics)[None]  # [1, n_frame, 4]

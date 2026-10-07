@@ -36,14 +36,12 @@ from fastvideo.configs.models.encoders import BaseEncoderOutput, LlamaConfig
 from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.activation import SiluAndMul
 from fastvideo.layers.layernorm import RMSNorm
-from fastvideo.layers.linear import (MergedColumnParallelLinear,
-                                     QKVParallelLinear, RowParallelLinear)
+from fastvideo.layers.linear import (MergedColumnParallelLinear, QKVParallelLinear, RowParallelLinear)
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.rotary_embedding import get_rope
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.models.encoders.base import TextEncoder
-from fastvideo.models.loader.weight_utils import (default_weight_loader,
-                                                  maybe_remap_kv_scale_name)
+from fastvideo.models.loader.weight_utils import (default_weight_loader, maybe_remap_kv_scale_name)
 
 
 class LlamaMLP(nn.Module):
@@ -117,8 +115,7 @@ class LlamaAttention(nn.Module):
             assert tp_size % self.total_num_kv_heads == 0
         self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
         # MistralConfig has an optional head_dim introduced by Mistral-Nemo
-        self.head_dim = getattr(config, "head_dim",
-                                self.hidden_size // self.total_num_heads)
+        self.head_dim = getattr(config, "head_dim", self.hidden_size // self.total_num_heads)
         # Phi models introduced a partial_rotary_factor parameter in the config
         partial_rotary_factor = getattr(config, "partial_rotary_factor", 1)
         self.rotary_dim = int(partial_rotary_factor * self.head_dim)
@@ -147,8 +144,7 @@ class LlamaAttention(nn.Module):
         )
 
         is_neox_style = True
-        is_gguf = quant_config and hasattr(
-            quant_config, "get_name") and quant_config.get_name() == "gguf"
+        is_gguf = quant_config and hasattr(quant_config, "get_name") and quant_config.get_name() == "gguf"
         if is_gguf and config.model_type == "llama":
             is_neox_style = False
 
@@ -161,13 +157,12 @@ class LlamaAttention(nn.Module):
             is_neox_style=is_neox_style,
         )
 
-        self.attn = LocalAttention(
-            self.num_heads,
-            self.head_dim,
-            self.num_kv_heads,
-            softmax_scale=self.scaling,
-            causal=True,
-            supported_attention_backends=config._supported_attention_backends)
+        self.attn = LocalAttention(self.num_heads,
+                                   self.head_dim,
+                                   self.num_kv_heads,
+                                   softmax_scale=self.scaling,
+                                   causal=True,
+                                   supported_attention_backends=config._supported_attention_backends)
 
     def forward(
         self,
@@ -190,8 +185,7 @@ class LlamaAttention(nn.Module):
         # import pdb; pdb.set_trace()
         # attn_output = flash_attn_func(q, k, v, softmax_scale=self.scaling, causal=True)
         attn_output = self.attn(q, k, v)
-        attn_output = attn_output.reshape(batch_size, seq_len,
-                                          self.num_heads * self.head_dim)
+        attn_output = attn_output.reshape(batch_size, seq_len, self.num_heads * self.head_dim)
 
         output, _ = self.o_proj(attn_output)
         return output
@@ -209,16 +203,12 @@ class LlamaDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         rope_theta = getattr(config, "rope_theta", 10000)
         rope_scaling = getattr(config, "rope_scaling", None)
-        if rope_scaling is not None and getattr(
-                config, "original_max_position_embeddings", None):
-            rope_scaling["original_max_position_embeddings"] = (
-                config.original_max_position_embeddings)
-        max_position_embeddings = getattr(config, "max_position_embeddings",
-                                          8192)
+        if rope_scaling is not None and getattr(config, "original_max_position_embeddings", None):
+            rope_scaling["original_max_position_embeddings"] = (config.original_max_position_embeddings)
+        max_position_embeddings = getattr(config, "max_position_embeddings", 8192)
         # Support abacusai/Smaug-72B-v0.1 with attention_bias
         # Support internlm/internlm-7b with bias
-        attention_bias = getattr(config, "attention_bias", False) or getattr(
-            config, "bias", False)
+        attention_bias = getattr(config, "attention_bias", False) or getattr(config, "bias", False)
         bias_o_proj = attention_bias
         # support internlm/internlm3-8b with qkv_bias
         if hasattr(config, 'qkv_bias'):
@@ -228,8 +218,7 @@ class LlamaDecoderLayer(nn.Module):
             config=config,
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
-            num_kv_heads=getattr(config, "num_key_value_heads",
-                                 config.num_attention_heads),
+            num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
             rope_theta=rope_theta,
             rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
@@ -246,10 +235,8 @@ class LlamaDecoderLayer(nn.Module):
             bias=getattr(config, "mlp_bias", False),
             prefix=f"{prefix}.mlp",
         )
-        self.input_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
-                                                eps=config.rms_norm_eps)
+        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -262,15 +249,12 @@ class LlamaDecoderLayer(nn.Module):
             residual = hidden_states
             hidden_states = self.input_layernorm(hidden_states)
         else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
+            hidden_states, residual = self.input_layernorm(hidden_states, residual)
 
-        hidden_states = self.self_attn(positions=positions,
-                                       hidden_states=hidden_states)
+        hidden_states = self.self_attn(positions=positions, hidden_states=hidden_states)
 
         # Fully Connected
-        hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
@@ -306,9 +290,7 @@ class LlamaModel(TextEncoder):
         )
 
         self.layers = nn.ModuleList([
-            LlamaDecoderLayer(config=config,
-                              quant_config=config.quant_config,
-                              prefix=f"{config.prefix}.layers.{i}")
+            LlamaDecoderLayer(config=config, quant_config=config.quant_config, prefix=f"{config.prefix}.layers.{i}")
             for i in range(config.num_hidden_layers)
         ])
 
@@ -327,26 +309,19 @@ class LlamaModel(TextEncoder):
         **kwargs,
     ) -> BaseEncoderOutput:
         output_hidden_states = (output_hidden_states
-                                if output_hidden_states is not None else
-                                self.config.output_hidden_states)
+                                if output_hidden_states is not None else self.config.output_hidden_states)
         hidden_states = inputs_embeds if inputs_embeds is not None else self.get_input_embeddings(input_ids)
         residual = None
 
         if position_ids is None:
-            position_ids = torch.arange(
-                0, hidden_states.shape[1],
-                device=hidden_states.device).unsqueeze(0)
+            position_ids = torch.arange(0, hidden_states.shape[1], device=hidden_states.device).unsqueeze(0)
 
-        all_hidden_states: tuple[Any, ...] | None = (
-        ) if output_hidden_states else None
+        all_hidden_states: tuple[Any, ...] | None = () if output_hidden_states else None
         for layer in self.layers:
             if all_hidden_states is not None:
                 # TODO
-                all_hidden_states += (
-                    hidden_states, ) if residual is None else (hidden_states +
-                                                               residual, )
-            hidden_states, residual = layer(position_ids, hidden_states,
-                                            residual)
+                all_hidden_states += (hidden_states, ) if residual is None else (hidden_states + residual, )
+            hidden_states, residual = layer(position_ids, hidden_states, residual)
 
         hidden_states, _ = self.norm(hidden_states, residual)
 
@@ -365,16 +340,14 @@ class LlamaModel(TextEncoder):
 
         return output
 
-    def load_weights(self, weights: Iterable[tuple[str,
-                                                   torch.Tensor]]) -> set[str]:
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
-            if ("rotary_emb.cos_cached" in name
-                    or "rotary_emb.sin_cached" in name):
+            if ("rotary_emb.cos_cached" in name or "rotary_emb.sin_cached" in name):
                 # Models trained using ColossalAI may include these tensors in
                 # the checkpoint. Skip them.
                 continue
@@ -391,8 +364,7 @@ class LlamaModel(TextEncoder):
             #     continue
             if "scale" in name:
                 # Remapping the name of FP8 kv-scale.
-                kv_scale_name: str | None = maybe_remap_kv_scale_name(
-                    name, params_dict)
+                kv_scale_name: str | None = maybe_remap_kv_scale_name(name, params_dict)
                 if kv_scale_name is None:
                     continue
                 else:
@@ -421,11 +393,11 @@ class LlamaModel(TextEncoder):
                     continue
 
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+
 
 # Entry point for model registry
 EntryClass = LlamaModel

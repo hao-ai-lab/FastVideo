@@ -110,10 +110,9 @@ def _path_of(sample: dict, key: str) -> str | None:
 
 
 def _resolve_api_key() -> str:
-    for env in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
-        key = os.environ.get(env)
-        if key:
-            return key.strip()
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if key:
+        return key.strip()
     token = Path("~/.gemini_token").expanduser()
     if token.is_file():
         return token.read_text().strip()

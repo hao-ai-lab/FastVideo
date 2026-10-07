@@ -46,19 +46,15 @@ OUTPUT_PATH = "video_samples"
 # guidance 1.0). Loaded on top of the base Wan2.1 pipeline; pass
 # ``--distilled_model ''`` to run the base weights instead.
 DEFAULT_DISTILLED_MODEL = "FastVideo/FastWan-QAD-1.3B"
-DISTILLED_WEIGHTS_FILE = (
-    "generator_inference_transformer/diffusion_pytorch_model.safetensors"
-)
+DISTILLED_WEIGHTS_FILE = ("generator_inference_transformer/diffusion_pytorch_model.safetensors")
 
 # TAEHV checkpoint for Wan2.1. Clone https://github.com/madebyollin/taehv to get
 # ``taew2_1.pth`` (Wan 2.1 / Wan 2.2-14B / Qwen-Image all use this VAE).
 DEFAULT_TAEHV_CHECKPOINT = "/root/taehv/taew2_1.pth"
 
-PROMPT = (
-    "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-    "wide with interest. The playful yet serene atmosphere is complemented by soft "
-    "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
-)
+PROMPT = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
+          "wide with interest. The playful yet serene atmosphere is complemented by soft "
+          "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
 
 
 class TaehvDecoder:
@@ -69,8 +65,7 @@ class TaehvDecoder:
     needed -- unlike the full Wan VAE path.
     """
 
-    def __init__(self, checkpoint_path: str, device: str = "cuda",
-                 dtype: torch.dtype = torch.float16) -> None:
+    def __init__(self, checkpoint_path: str, device: str = "cuda", dtype: torch.dtype = torch.float16) -> None:
         from taehv import TAEHV  # pip-installed; no sys.path manipulation
         self.device = device
         self.dtype = dtype
@@ -89,8 +84,7 @@ class TaehvDecoder:
         """
         # NCTHW -> NTCHW (TAEHV's expected layout), on the TAEHV device/dtype.
         latents = latents.permute(0, 2, 1, 3, 4).to(self.device, self.dtype)
-        decoded = self.model.decode_video(
-            latents, parallel=True, show_progress_bar=False)
+        decoded = self.model.decode_video(latents, parallel=True, show_progress_bar=False)
         # decoded: [B, T, 3, H, W] in [0, 1]. Take batch 0, vectorize to uint8.
         frames = (decoded[0].clamp(0, 1) * 255).to(torch.uint8)
         return frames.permute(0, 2, 3, 1).cpu().numpy()
@@ -127,10 +121,9 @@ def resolve_taehv_checkpoint(path: str) -> str:
     """Validate the TAEHV checkpoint path, with a helpful error if missing."""
     if os.path.exists(path):
         return path
-    raise FileNotFoundError(
-        f"TAEHV checkpoint not found at {path!r}. Clone the weights with:\n"
-        "    git clone https://github.com/madebyollin/taehv\n"
-        "and pass --taehv_checkpoint <repo>/taew2_1.pth")
+    raise FileNotFoundError(f"TAEHV checkpoint not found at {path!r}. Clone the weights with:\n"
+                            "    git clone https://github.com/madebyollin/taehv\n"
+                            "and pass --taehv_checkpoint <repo>/taew2_1.pth")
 
 
 def build_generator(args: argparse.Namespace) -> VideoGenerator:
@@ -141,7 +134,7 @@ def build_generator(args: argparse.Namespace) -> VideoGenerator:
     pipeline_config = PipelineConfig.from_pretrained(model_id)
     pipeline_config.dit_precision = "bf16"
     pipeline_config.vae_precision = "bf16"
-    pipeline_config.text_encoder_precisions = ("bf16",)
+    pipeline_config.text_encoder_precisions = ("bf16", )
 
     if not args.baseline:
         pipeline_config.dit_config.quant_config = NVFP4QATConfig()
@@ -181,30 +174,30 @@ def build_generator(args: argparse.Namespace) -> VideoGenerator:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="FP4 linear Wan2.1-1.3B with TAEHV decoding benchmark")
-    parser.add_argument("--model", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-                        help="Model path or HuggingFace ID")
-    parser.add_argument("--baseline", action="store_true",
-                        help="Run dense bf16 instead of FP4 linear")
-    parser.add_argument("--no-compile", action="store_true",
-                        help="Disable torch.compile (eager)")
-    parser.add_argument("--taehv", action=argparse.BooleanOptionalAction,
+    parser = argparse.ArgumentParser(description="FP4 linear Wan2.1-1.3B with TAEHV decoding benchmark")
+    parser.add_argument("--model", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers", help="Model path or HuggingFace ID")
+    parser.add_argument("--baseline", action="store_true", help="Run dense bf16 instead of FP4 linear")
+    parser.add_argument("--no-compile", action="store_true", help="Disable torch.compile (eager)")
+    parser.add_argument("--taehv",
+                        action=argparse.BooleanOptionalAction,
                         default=True,
                         help="Decode with TAEHV instead of the full Wan VAE "
-                             "(use --no-taehv for the Wan VAE path)")
-    parser.add_argument("--taehv_checkpoint", default=DEFAULT_TAEHV_CHECKPOINT,
+                        "(use --no-taehv for the Wan VAE path)")
+    parser.add_argument("--taehv_checkpoint",
+                        default=DEFAULT_TAEHV_CHECKPOINT,
                         help="Path to the TAEHV taew2_1.pth checkpoint")
-    parser.add_argument("--distilled_model", default=DEFAULT_DISTILLED_MODEL,
+    parser.add_argument("--distilled_model",
+                        default=DEFAULT_DISTILLED_MODEL,
                         help="HuggingFace ID (or local path) of a distilled "
-                             "transformer checkpoint to load on top of --model. "
-                             "Pass '' to use the base --model weights instead.")
+                        "transformer checkpoint to load on top of --model. "
+                        "Pass '' to use the base --model weights instead.")
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--infer_steps", type=int, default=3)
     parser.add_argument("--guidance_scale", type=float, default=1.0)
-    parser.add_argument("--warmups", type=int, default=5,
-                        help="Warmup runs before timing (default: 5).")
-    parser.add_argument("--benchmark-runs", type=int, default=20,
+    parser.add_argument("--warmups", type=int, default=5, help="Warmup runs before timing (default: 5).")
+    parser.add_argument("--benchmark-runs",
+                        type=int,
+                        default=20,
                         help="Timed runs to collect min/max/mean/std over (default: 20).")
     args = parser.parse_args()
 
@@ -237,11 +230,18 @@ def main() -> None:
     # runs below measure steady-state latency only.
     with silence_request_log():
         for _ in range(args.warmups):
-            warm = generator.generate(request={
-                "prompt": PROMPT,
-                "sampling": {"num_inference_steps": 2, "guidance_scale": args.guidance_scale},
-                "output": {"save_video": False, "return_frames": args.taehv},
-            })
+            warm = generator.generate(
+                request={
+                    "prompt": PROMPT,
+                    "sampling": {
+                        "num_inference_steps": 2,
+                        "guidance_scale": args.guidance_scale
+                    },
+                    "output": {
+                        "save_video": False,
+                        "return_frames": args.taehv
+                    },
+                })
             if args.taehv:
                 taehv.decode(warm.samples)
 
@@ -257,18 +257,19 @@ def main() -> None:
     frames = None
     with silence_request_log():
         for i in range(args.benchmark_runs):
-            result = generator.generate(request={
-                "prompt": PROMPT,
-                "sampling": {
-                    "num_inference_steps": args.infer_steps,
-                    "guidance_scale": args.guidance_scale,
-                },
-                "output": {
-                    "save_video": False,
-                    "return_frames": args.taehv,
-                    "output_path": output_path,
-                },
-            })
+            result = generator.generate(
+                request={
+                    "prompt": PROMPT,
+                    "sampling": {
+                        "num_inference_steps": args.infer_steps,
+                        "guidance_scale": args.guidance_scale,
+                    },
+                    "output": {
+                        "save_video": False,
+                        "return_frames": args.taehv,
+                        "output_path": output_path,
+                    },
+                })
             denoise_elapsed = result.generation_time
             denoise_times.append(denoise_elapsed)
 

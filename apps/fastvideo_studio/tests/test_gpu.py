@@ -74,10 +74,8 @@ def test_snapshot_shapes_devices(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
-def test_snapshot_tolerates_missing_sensors(
-        monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "pynvml",
-                        _make_fake_pynvml(broken_sensors=True))
+def test_snapshot_tolerates_missing_sensors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "pynvml", _make_fake_pynvml(broken_sensors=True))
     snap = gpu_mod.get_gpu_snapshot()
     assert snap["available"] is True
     g = snap["gpus"][0]
@@ -86,8 +84,7 @@ def test_snapshot_tolerates_missing_sensors(
     assert g["power_limit_watts"] is None
 
 
-def test_snapshot_reports_nvml_failure(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_snapshot_reports_nvml_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _make_fake_pynvml()
     fake.nvmlInit = lambda: (_ for _ in ()).throw(_NVMLError("driver gone"))
     monkeypatch.setitem(sys.modules, "pynvml", fake)

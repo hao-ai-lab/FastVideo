@@ -17,6 +17,7 @@ import os
 import torch
 import pytest
 
+import fastvideo.envs as envs
 from fastvideo import VideoGenerator
 from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.logger import init_logger
@@ -26,6 +27,7 @@ from fastvideo.tests.ssim.reference_utils import (
     get_cuda_device_name,
     resolve_device_reference_folder,
     select_ssim_params,
+    with_model_path,
 )
 from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
@@ -36,6 +38,7 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 logger = init_logger(__name__)
 
 REQUIRED_GPUS = 1
+pytestmark = pytest.mark.skip(reason="Disabled pending removal of HunyuanGameCraft support.")
 
 # ---------------------------------------------------------------------------
 # Device-dependent reference folder
@@ -46,6 +49,7 @@ device_reference_folder = resolve_device_reference_folder(
         ("L40S", "L40S"),
         ("A100", "A100"),
         ("H100", "H100"),
+        ("GB200", "GB200"),
         ("H200", "H200"),
     ),
     device_name=get_cuda_device_name(),
@@ -69,15 +73,10 @@ def _shutdown_executor(generator: VideoGenerator | None) -> None:
 # ---------------------------------------------------------------------------
 # Model parameters
 # ---------------------------------------------------------------------------
-# Same as basic_gamecraft.py: default HF path; set GAMECRAFT_MODEL_PATH for local weights.
-_GAMECRAFT_MODEL_PATH = os.environ.get(
-    "GAMECRAFT_MODEL_PATH",
-    "FastVideo/HunyuanGameCraft-Diffusers",
-)
-
+# Same as basic_gamecraft.py: default HF path; set FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH for local weights.
+# The tests add "model_path" from FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH.
 GAMECRAFT_T2V_PARAMS = {
     "num_gpus": 1,
-    "model_path": _GAMECRAFT_MODEL_PATH,
     "height": 480,
     "width": 832,
     "num_frames": 33,
@@ -89,46 +88,45 @@ GAMECRAFT_T2V_PARAMS = {
     "negative_prompt": "",
 }
 
-_GAMECRAFT_FULL_QUALITY_DEFAULTS = SamplingParam.from_pretrained(
-    _GAMECRAFT_MODEL_PATH)
-GAMECRAFT_T2V_FULL_QUALITY_PARAMS = {
-    "num_gpus": GAMECRAFT_T2V_PARAMS["num_gpus"],
-    "model_path": GAMECRAFT_T2V_PARAMS["model_path"],
-    "height": _GAMECRAFT_FULL_QUALITY_DEFAULTS.height,
-    "width": _GAMECRAFT_FULL_QUALITY_DEFAULTS.width,
-    "num_frames": GAMECRAFT_T2V_PARAMS["num_frames"],  # default num_frames: 33
-    "num_inference_steps": _GAMECRAFT_FULL_QUALITY_DEFAULTS.num_inference_steps,
-    "guidance_scale": _GAMECRAFT_FULL_QUALITY_DEFAULTS.guidance_scale,
-    "seed": _GAMECRAFT_FULL_QUALITY_DEFAULTS.seed,
-    "action": GAMECRAFT_T2V_PARAMS["action"],
-    "action_speed": GAMECRAFT_T2V_PARAMS["action_speed"],
-    "negative_prompt": _GAMECRAFT_FULL_QUALITY_DEFAULTS.negative_prompt,
-}
+
+def _gamecraft_t2v_full_quality_params(model_path: str) -> dict[str, object]:
+    """Return the full-quality T2V params, taken from the default sampling params of ``model_path``."""
+    full_quality_defaults = SamplingParam.from_pretrained(model_path)
+    return {
+        "num_gpus": GAMECRAFT_T2V_PARAMS["num_gpus"],
+        "model_path": model_path,
+        "height": full_quality_defaults.height,
+        "width": full_quality_defaults.width,
+        "num_frames": GAMECRAFT_T2V_PARAMS["num_frames"],  # default num_frames: 33
+        "num_inference_steps": full_quality_defaults.num_inference_steps,
+        "guidance_scale": full_quality_defaults.guidance_scale,
+        "seed": full_quality_defaults.seed,
+        "action": GAMECRAFT_T2V_PARAMS["action"],
+        "action_speed": GAMECRAFT_T2V_PARAMS["action_speed"],
+        "negative_prompt": full_quality_defaults.negative_prompt,
+    }
+
 
 GAMECRAFT_I2V_PARAMS = {
     **GAMECRAFT_T2V_PARAMS,
-    "image_path": (
-        "https://huggingface.co/datasets/huggingface/documentation-images/"
-        "resolve/main/diffusers/astronaut.jpg"
-    ),
+    "image_path": ("https://huggingface.co/datasets/huggingface/documentation-images/"
+                   "resolve/main/diffusers/astronaut.jpg"),
 }
-GAMECRAFT_I2V_FULL_QUALITY_PARAMS = {
-    **GAMECRAFT_T2V_FULL_QUALITY_PARAMS,
-    "image_path": GAMECRAFT_I2V_PARAMS["image_path"],
-}
+
+
+def _gamecraft_i2v_full_quality_params(model_path: str) -> dict[str, object]:
+    return {
+        **_gamecraft_t2v_full_quality_params(model_path),
+        "image_path": GAMECRAFT_I2V_PARAMS["image_path"],
+    }
+
 
 MODEL_TO_PARAMS = {
     "HunyuanGameCraft-T2V": GAMECRAFT_T2V_PARAMS,
 }
-FULL_QUALITY_MODEL_TO_PARAMS = {
-    "HunyuanGameCraft-T2V": GAMECRAFT_T2V_FULL_QUALITY_PARAMS,
-}
 
 I2V_MODEL_TO_PARAMS = {
     "HunyuanGameCraft-I2V": GAMECRAFT_I2V_PARAMS,
-}
-FULL_QUALITY_I2V_MODEL_TO_PARAMS = {
-    "HunyuanGameCraft-I2V": GAMECRAFT_I2V_FULL_QUALITY_PARAMS,
 }
 
 TEST_PROMPTS = [
@@ -147,9 +145,9 @@ I2V_TEST_PROMPTS = [
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """Generate a T2V video with GameCraft and compare to reference via SSIM."""
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = build_generated_output_dir(
@@ -162,9 +160,10 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     os.makedirs(output_dir, exist_ok=True)
 
+    model_path = envs.FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH.get()
     params_map = select_ssim_params(
-        MODEL_TO_PARAMS,
-        FULL_QUALITY_MODEL_TO_PARAMS,
+        with_model_path(MODEL_TO_PARAMS, model_path),
+        {model_id: _gamecraft_t2v_full_quality_params(model_path)},
     )
     BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
@@ -204,16 +203,12 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     generator: VideoGenerator | None = None
     try:
-        generator = VideoGenerator.from_pretrained(
-            model_path=BASE_PARAMS["model_path"], **init_kwargs
-        )
+        generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
         generator.generate_video(prompt, **generation_kwargs)
     finally:
         _shutdown_executor(generator)
 
-    assert os.path.exists(output_dir), (
-        f"Output video was not generated at {output_dir}"
-    )
+    assert os.path.exists(output_dir), (f"Output video was not generated at {output_dir}")
 
     # Compare to reference
     reference_folder = build_reference_folder_path(
@@ -225,9 +220,7 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     reference_video_name = None
     for filename in os.listdir(reference_folder):
@@ -236,21 +229,15 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
             break
 
     if not reference_video_name:
-        logger.error(
-            f"Reference video not found for prompt: {prompt} "
-            f"with backend: {ATTENTION_BACKEND}"
-        )
+        logger.error(f"Reference video not found for prompt: {prompt} "
+                     f"with backend: {ATTENTION_BACKEND}")
         raise FileNotFoundError("Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)
 
-    logger.info(
-        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
-    )
-    ssim_values = compute_video_ssim_torchvision(
-        reference_video_path, generated_video_path, use_ms_ssim=True
-    )
+    logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
@@ -269,10 +256,8 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
         logger.error("Failed to write SSIM results to file")
 
     min_acceptable_ssim = 0.93
-    assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}"
-    )
+    assert mean_ssim >= min_acceptable_ssim, (f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+                                              f"for {model_id} with backend {ATTENTION_BACKEND}")
 
 
 # ---------------------------------------------------------------------------
@@ -283,9 +268,9 @@ def test_gamecraft_t2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 @pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(I2V_MODEL_TO_PARAMS.keys()))
-def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
+def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id, env_overrides):
     """Generate an I2V video with GameCraft and compare to reference via SSIM."""
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override(ATTENTION_BACKEND))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = build_generated_output_dir(
@@ -298,9 +283,10 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     os.makedirs(output_dir, exist_ok=True)
 
+    model_path = envs.FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH.get()
     params_map = select_ssim_params(
-        I2V_MODEL_TO_PARAMS,
-        FULL_QUALITY_I2V_MODEL_TO_PARAMS,
+        with_model_path(I2V_MODEL_TO_PARAMS, model_path),
+        {model_id: _gamecraft_i2v_full_quality_params(model_path)},
     )
     BASE_PARAMS = params_map[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
@@ -341,16 +327,12 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     generator: VideoGenerator | None = None
     try:
-        generator = VideoGenerator.from_pretrained(
-            model_path=BASE_PARAMS["model_path"], **init_kwargs
-        )
+        generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
         generator.generate_video(prompt, **generation_kwargs)
     finally:
         _shutdown_executor(generator)
 
-    assert os.path.exists(output_dir), (
-        f"Output video was not generated at {output_dir}"
-    )
+    assert os.path.exists(output_dir), (f"Output video was not generated at {output_dir}")
 
     # Compare to reference
     reference_folder = build_reference_folder_path(
@@ -362,9 +344,7 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}"
-        )
+        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
 
     reference_video_name = None
     for filename in os.listdir(reference_folder):
@@ -373,21 +353,15 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
             break
 
     if not reference_video_name:
-        logger.error(
-            f"Reference video not found for prompt: {prompt} "
-            f"with backend: {ATTENTION_BACKEND}"
-        )
+        logger.error(f"Reference video not found for prompt: {prompt} "
+                     f"with backend: {ATTENTION_BACKEND}")
         raise FileNotFoundError("Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)
 
-    logger.info(
-        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
-    )
-    ssim_values = compute_video_ssim_torchvision(
-        reference_video_path, generated_video_path, use_ms_ssim=True
-    )
+    logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
+    ssim_values = compute_video_ssim_torchvision(reference_video_path, generated_video_path, use_ms_ssim=True)
 
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
@@ -406,7 +380,5 @@ def test_gamecraft_i2v_similarity(prompt, ATTENTION_BACKEND, model_id):
         logger.error("Failed to write SSIM results to file")
 
     min_acceptable_ssim = 0.93
-    assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}"
-    )
+    assert mean_ssim >= min_acceptable_ssim, (f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+                                              f"for {model_id} with backend {ATTENTION_BACKEND}")

@@ -17,7 +17,6 @@ import pytest
 import torch
 from torch import nn
 
-
 MODEL_DIR = Path(os.getenv("FLUX2_MODEL_DIR", ""))
 FULL_MODEL_DIR = Path(os.getenv("FLUX2_FULL_MODEL_DIR", ""))
 FULL_HEIGHT = int(os.getenv("FLUX2_FULL_HEIGHT", "128"))
@@ -27,12 +26,10 @@ FULL_GUIDANCE_SCALE = float(os.getenv("FLUX2_FULL_GUIDANCE_SCALE", "4.0"))
 FULL_MAX_SEQUENCE_LENGTH = int(os.getenv("FLUX2_FULL_MAX_SEQUENCE_LENGTH", "64"))
 FULL_NUM_GPUS = int(os.getenv("FLUX2_FULL_NUM_GPUS", "2"))
 FULL_TP_SIZE = int(os.getenv("FLUX2_FULL_TP_SIZE", str(FULL_NUM_GPUS)))
-FULL_SP_SIZE = int(
-    os.getenv(
-        "FLUX2_FULL_SP_SIZE",
-        "1" if FULL_NUM_GPUS > 1 else str(FULL_NUM_GPUS),
-    )
-)
+FULL_SP_SIZE = int(os.getenv(
+    "FLUX2_FULL_SP_SIZE",
+    "1" if FULL_NUM_GPUS > 1 else str(FULL_NUM_GPUS),
+))
 requires_flux2_runtime = pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="Flux2 pipeline imports require the CUDA/kernel runtime",
@@ -56,9 +53,7 @@ def test_flux2_full_typed_surface_preflight() -> None:
     assert Flux2Pipeline.__name__ == "Flux2Pipeline"
     assert EntryClass is Flux2Pipeline
 
-    default_preset, model_family = registry.get_preset_selection(
-        "black-forest-labs/FLUX.2-dev"
-    )
+    default_preset, model_family = registry.get_preset_selection("black-forest-labs/FLUX.2-dev")
     assert model_family == "flux2"
     assert default_preset == "flux2_dev"
 
@@ -84,9 +79,7 @@ def test_flux2_full_typed_surface_preflight() -> None:
     assert cfg.flux2_text_encoder_type == "mistral3"
     assert cfg.text_encoder_out_layers == (10, 20, 30)
     assert isinstance(cfg.text_encoder_configs[0], Mistral3TextConfig)
-    model_cls, arch = ModelRegistry.resolve_model_cls(
-        "Mistral3ForConditionalGeneration"
-    )
+    model_cls, arch = ModelRegistry.resolve_model_cls("Mistral3ForConditionalGeneration")
     assert arch == "Mistral3ForConditionalGeneration"
     assert model_cls.__name__ == "Mistral3ForConditionalGeneration"
 
@@ -153,8 +146,7 @@ def test_flux2_full_text_stage_uses_mistral3_format_and_embedded_guidance() -> N
     """Full Flux2 text encoding uses Mistral3 formatting and disables generic CFG."""
     from fastvideo.configs.pipelines.flux_2 import Flux2PipelineConfig
     from fastvideo.pipelines.basic.flux_2.flux_2_text_encoding import (
-        Flux2TextEncodingStage,
-    )
+        Flux2TextEncodingStage, )
     from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
     processor = _FakeFlux2Processor()
@@ -200,9 +192,7 @@ def test_flux2_klein_typed_surface_preflight() -> None:
     assert Flux2KleinPipeline.__name__ == "Flux2KleinPipeline"
     assert EntryClass is Flux2KleinPipeline
 
-    default_preset, model_family = registry.get_preset_selection(
-        "black-forest-labs/FLUX.2-klein-4B"
-    )
+    default_preset, model_family = registry.get_preset_selection("black-forest-labs/FLUX.2-klein-4B")
     assert model_family == "flux2"
     assert default_preset == "flux2_klein_4b"
 
@@ -287,10 +277,8 @@ def test_flux2_full_pipeline_load_generate_smoke() -> None:
     if not FULL_MODEL_DIR.exists():
         pytest.skip("Set FLUX2_FULL_MODEL_DIR to activate Flux2 full load/generate smoke")
     if torch.cuda.device_count() < FULL_NUM_GPUS:
-        pytest.skip(
-            f"Flux2 full load/generate smoke requires {FULL_NUM_GPUS} CUDA devices; "
-            f"found {torch.cuda.device_count()}"
-        )
+        pytest.skip(f"Flux2 full load/generate smoke requires {FULL_NUM_GPUS} CUDA devices; "
+                    f"found {torch.cuda.device_count()}")
 
     from fastvideo import VideoGenerator
 

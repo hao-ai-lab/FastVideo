@@ -14,7 +14,6 @@ from fastapi import WebSocketDisconnect
 from PIL import Image
 import pytest
 
-
 os.environ.setdefault("CEREBRAS_API_KEY", "dummy")
 os.environ.setdefault("GROQ_API_KEY", "dummy")
 
@@ -30,6 +29,7 @@ pytestmark = pytest.mark.gpu
 
 
 class _FakeSessionLogger:
+
     def __init__(self):
         self.events: list[dict[str, object]] = []
 
@@ -50,6 +50,7 @@ class _FakeSessionLogger:
 
 
 class _FakeWebSocket:
+
     def __init__(self, messages: list[tuple[float, dict[str, object]]]):
         self._messages = messages
         self._index = 0
@@ -79,6 +80,7 @@ class _FakeWebSocket:
 
 
 class _FakeSlot:
+
     def __init__(self, step_delay_s: float = 0.0):
         self.shared_stream_buffer = None
         self._stream_queues: dict[str, asyncio.Queue] = {}
@@ -112,32 +114,36 @@ class _FakeSlot:
             "reset_conditioning": reset_conditioning,
         })
         queue = self._stream_queues[client_id]
-        await queue.put(MediaInit(
-            user_id=client_id,
-            segment_idx=segment_idx,
-            stream_id=f"stream-{segment_idx}",
-            mime='video/mp4; codecs="avc1.640028,mp4a.40.2"',
-            uses_shared_buffer=False,
-        ))
-        await queue.put(MediaChunk(
-            user_id=client_id,
-            segment_idx=segment_idx,
-            stream_id=f"stream-{segment_idx}",
-            chunk=b"abc123",
-            uses_shared_buffer=False,
-        ))
-        await queue.put(MediaComplete(
-            user_id=client_id,
-            segment_idx=segment_idx,
-            stream_id=f"stream-{segment_idx}",
-            chunks=1,
-        ))
+        await queue.put(
+            MediaInit(
+                user_id=client_id,
+                segment_idx=segment_idx,
+                stream_id=f"stream-{segment_idx}",
+                mime='video/mp4; codecs="avc1.640028,mp4a.40.2"',
+                uses_shared_buffer=False,
+            ))
+        await queue.put(
+            MediaChunk(
+                user_id=client_id,
+                segment_idx=segment_idx,
+                stream_id=f"stream-{segment_idx}",
+                chunk=b"abc123",
+                uses_shared_buffer=False,
+            ))
+        await queue.put(
+            MediaComplete(
+                user_id=client_id,
+                segment_idx=segment_idx,
+                stream_id=f"stream-{segment_idx}",
+                chunks=1,
+            ))
         if self._step_delay_s > 0:
             await asyncio.sleep(self._step_delay_s)
         return {"e2e_latency_ms": 10.0}
 
 
 class _FakeGPUPool:
+
     def __init__(self, step_delay_s: float = 0.0):
         self._slot = _FakeSlot(step_delay_s=step_delay_s)
 
@@ -165,6 +171,7 @@ def _make_png_data_url() -> str:
 
 
 class _FakePromptEnhancer:
+
     def set_provider(self, provider: object, preferred_model: object = None):
         del provider, preferred_model
         return {
@@ -246,14 +253,13 @@ class _FakePromptEnhancer:
             latency_ms=23.0,
             rollout_id="rewrite_rollout",
             rollout_label="Rewrite Rollout",
-            raw_response_text=(
-                '{"id":"rewrite_rollout","label":"Rewrite Rollout",'
-                '"segment_prompts":["rewrite a","rewrite b"]}'
-            ),
+            raw_response_text=('{"id":"rewrite_rollout","label":"Rewrite Rollout",'
+                               '"segment_prompts":["rewrite a","rewrite b"]}'),
         )
 
 
 class _FallbackPromptEnhancer(_FakePromptEnhancer):
+
     async def enhance_prompt(
         self,
         raw_prompt: str,
@@ -285,6 +291,7 @@ class _FallbackPromptEnhancer(_FakePromptEnhancer):
 
 
 class _UnsafeEnhancedPromptEnhancer(_FakePromptEnhancer):
+
     async def enhance_prompt(
         self,
         raw_prompt: str,
@@ -316,11 +323,11 @@ class _UnsafeEnhancedPromptEnhancer(_FakePromptEnhancer):
 
 
 class _FakePromptSafetyFilter:
+
     def __init__(self, blocked_prompts: dict[str, str]):
         self._blocked_prompts = {
             str(prompt).strip(): str(error)
-            for prompt, error in blocked_prompts.items()
-            if str(prompt).strip()
+            for prompt, error in blocked_prompts.items() if str(prompt).strip()
         }
 
     def get_prompt_safety_error(self, prompt: str) -> str | None:
@@ -334,9 +341,7 @@ class _FakePromptSafetyFilter:
         return None
 
 
-def test_session_event_logger_initializes_hostname_folder_and_utc_filename(
-    tmp_path,
-):
+def test_session_event_logger_initializes_hostname_folder_and_utc_filename(tmp_path, ):
     logger = SessionEventLogger(tmp_path)
     assert logger.directory == tmp_path / socket.gethostname()
     assert logger.directory.is_dir()
@@ -376,29 +381,32 @@ def test_websocket_flow_emits_required_session_events():
         runtime.prompt_enhancer = _FakePromptEnhancer()
         runtime.session_event_logger = fake_logger
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "curated_prompts": ["segment one prompt"],
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (0.01, {"type": "append_prompt", "prompt": "make it rainy"}),
-                (
-                    0.01,
-                    {
-                        "type": "rewrite_seed_prompts",
-                        "rewrite_instruction": "more dramatic",
-                    },
-                ),
-                (0.30, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "curated_prompts": ["segment one prompt"],
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (0.01, {
+                "type": "append_prompt",
+                "prompt": "make it rainy"
+            }),
+            (
+                0.01,
+                {
+                    "type": "rewrite_seed_prompts",
+                    "rewrite_instruction": "more dramatic",
+                },
+            ),
+            (0.30, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
@@ -409,20 +417,12 @@ def test_websocket_flow_emits_required_session_events():
         assert "segment_start" in event_names
         assert "segment_complete" in event_names
 
-        rewrite_events = [
-            event
-            for event in fake_logger.events
-            if event["event"] == "rewrite_done"
-        ]
+        rewrite_events = [event for event in fake_logger.events if event["event"] == "rewrite_done"]
         rewrite_kinds = {event.get("kind") for event in rewrite_events}
         assert "seed_rewrite" in rewrite_kinds
         assert "enhance_prompt" in rewrite_kinds
 
-        segment_complete = next(
-            event
-            for event in fake_logger.events
-            if event["event"] == "segment_complete"
-        )
+        segment_complete = next(event for event in fake_logger.events if event["event"] == "segment_complete")
         latency = segment_complete.get("latency_ms")
         assert isinstance(latency, dict)
         assert set(latency.keys()) == {
@@ -452,38 +452,38 @@ def test_simple_generate_reuses_session_and_resets_conditioning():
         runtime.session_event_logger = fake_logger
         runtime.prompt_safety_filter = None
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "simple_prompt_1",
-                        "curated_prompts": ["a selected prompt"],
-                        "single_clip_mode": True,
-                        "enhancement_enabled": False,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "simple_prompt_1",
+                    "curated_prompts": ["a selected prompt"],
+                    "single_clip_mode": True,
+                    "enhancement_enabled": False,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (
+                0.01,
+                {
+                    "type": "simple_generate",
+                    "preset_id": "simple_custom_prompt",
+                    "prompt_id": "simple_custom_prompt",
+                    "prompt": "a fresh custom prompt",
+                    "enhancement_enabled": True,
+                    "initial_image": {
+                        "name": "frame.png",
+                        "mime_type": "image/png",
+                        "data_url": _make_png_data_url(),
                     },
-                ),
-                (
-                    0.01,
-                    {
-                        "type": "simple_generate",
-                        "preset_id": "simple_custom_prompt",
-                        "prompt_id": "simple_custom_prompt",
-                        "prompt": "a fresh custom prompt",
-                        "enhancement_enabled": True,
-                        "initial_image": {
-                            "name": "frame.png",
-                            "mime_type": "image/png",
-                            "data_url": _make_png_data_url(),
-                        },
-                    },
-                ),
-                (0.50, {"type": "leave"}),
-            ]
-        )
+                },
+            ),
+            (0.50, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
@@ -498,38 +498,17 @@ def test_simple_generate_reuses_session_and_resets_conditioning():
         event_names = [event["event"] for event in fake_logger.events]
         assert "simple_generate" in event_names
 
-        stream_start_events = [
-            payload
-            for payload in ws.sent_json
-            if payload.get("type") == "ltx2_stream_start"
-        ]
+        stream_start_events = [payload for payload in ws.sent_json if payload.get("type") == "ltx2_stream_start"]
         assert len(stream_start_events) == 2
-        assert all(
-            payload.get("generation_segment_cap") == 0
-            for payload in stream_start_events
-        )
-        stream_complete_events = [
-            payload
-            for payload in ws.sent_json
-            if payload.get("type") == "ltx2_stream_complete"
-        ]
+        assert all(payload.get("generation_segment_cap") == 0 for payload in stream_start_events)
+        stream_complete_events = [payload for payload in ws.sent_json if payload.get("type") == "ltx2_stream_complete"]
         assert len(stream_complete_events) == 2
-        assert "prompt_sources_blocked" not in [
-            payload.get("type") for payload in ws.sent_json
-        ]
+        assert "prompt_sources_blocked" not in [payload.get("type") for payload in ws.sent_json]
 
-        segment_start_events = [
-            payload
-            for payload in ws.sent_json
-            if payload.get("type") == "ltx2_segment_start"
-        ]
+        segment_start_events = [payload for payload in ws.sent_json if payload.get("type") == "ltx2_segment_start"]
         assert [payload["segment_idx"] for payload in segment_start_events] == [1, 1]
 
-        step_complete_events = [
-            payload
-            for payload in ws.sent_json
-            if payload.get("type") == "step_complete"
-        ]
+        step_complete_events = [payload for payload in ws.sent_json if payload.get("type") == "step_complete"]
         assert len(step_complete_events) == 2
         assert all(
             set(payload.get("latency_ms", {}).keys()) == {
@@ -537,9 +516,7 @@ def test_simple_generate_reuses_session_and_resets_conditioning():
                 "worker_e2e",
                 "main_user_step",
                 "overhead",
-            }
-            for payload in step_complete_events
-        )
+            } for payload in step_complete_events)
     finally:
         runtime.gpu_pool = old_gpu_pool
         runtime.prompt_enhancer = old_prompt_enhancer
@@ -562,46 +539,42 @@ def test_single5s_ignores_global_segment_cap():
         runtime.prompt_safety_filter = None
         session_controller.GENERATION_SEGMENT_CAP = 1
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "simple_prompt_1",
-                        "curated_prompts": ["a selected prompt"],
-                        "single_clip_mode": True,
-                        "enhancement_enabled": False,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (
-                    0.01,
-                    {
-                        "type": "simple_generate",
-                        "preset_id": "simple_custom_prompt",
-                        "prompt_id": "simple_custom_prompt",
-                        "prompt": "a fresh custom prompt",
-                        "enhancement_enabled": True,
-                        "initial_image": None,
-                    },
-                ),
-                (0.50, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "simple_prompt_1",
+                    "curated_prompts": ["a selected prompt"],
+                    "single_clip_mode": True,
+                    "enhancement_enabled": False,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (
+                0.01,
+                {
+                    "type": "simple_generate",
+                    "preset_id": "simple_custom_prompt",
+                    "prompt_id": "simple_custom_prompt",
+                    "prompt": "a fresh custom prompt",
+                    "enhancement_enabled": True,
+                    "initial_image": None,
+                },
+            ),
+            (0.50, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
         assert [call["segment_idx"] for call in fake_pool._slot.calls] == [1, 1]
         assert all(
-            payload.get("generation_segment_cap") == 0
-            for payload in ws.sent_json
-            if payload.get("type") == "ltx2_stream_start"
-        )
-        assert "generation_cap_reached" not in [
-            payload.get("type") for payload in ws.sent_json
-        ]
+            payload.get("generation_segment_cap") == 0 for payload in ws.sent_json
+            if payload.get("type") == "ltx2_stream_start")
+        assert "generation_cap_reached" not in [payload.get("type") for payload in ws.sent_json]
     finally:
         runtime.gpu_pool = old_gpu_pool
         runtime.prompt_enhancer = old_prompt_enhancer
@@ -625,29 +598,29 @@ def test_regular_segment_cap_completes_stream_and_allows_rewrite_rollout_restart
         runtime.prompt_safety_filter = None
         session_controller.GENERATION_SEGMENT_CAP = 1
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "test_preset",
-                        "curated_prompts": ["segment one prompt"],
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (
-                    0.20,
-                    {
-                        "type": "rewrite_seed_prompts",
-                        "rewrite_instruction": "start a new rollout",
-                    },
-                ),
-                (0.50, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "test_preset",
+                    "curated_prompts": ["segment one prompt"],
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (
+                0.20,
+                {
+                    "type": "rewrite_seed_prompts",
+                    "rewrite_instruction": "start a new rollout",
+                },
+            ),
+            (0.50, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
@@ -682,32 +655,32 @@ def test_rewrite_during_active_segment_restarts_from_rewritten_seed_window():
         runtime.session_event_logger = fake_logger
         runtime.prompt_safety_filter = None
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "test_preset",
-                        "curated_prompts": [
-                            "segment one prompt",
-                            "segment two prompt",
-                        ],
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (
-                    0.01,
-                    {
-                        "type": "rewrite_seed_prompts",
-                        "rewrite_instruction": "restart from rewrite",
-                    },
-                ),
-                (0.45, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "test_preset",
+                    "curated_prompts": [
+                        "segment one prompt",
+                        "segment two prompt",
+                    ],
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (
+                0.01,
+                {
+                    "type": "rewrite_seed_prompts",
+                    "rewrite_instruction": "restart from rewrite",
+                },
+            ),
+            (0.45, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
@@ -715,23 +688,13 @@ def test_rewrite_during_active_segment_restarts_from_rewritten_seed_window():
             "segment one prompt",
             "rewrite a",
         ]
-        assert all(
-            call["prompt"] != "segment two prompt"
-            for call in fake_pool._slot.calls[1:]
-        )
+        assert all(call["prompt"] != "segment two prompt" for call in fake_pool._slot.calls[1:])
         assert fake_pool._slot.calls[1]["segment_idx"] == 1
         assert fake_pool._slot.calls[1]["reset_conditioning"] is True
 
-        reset_events = [
-            payload
-            for payload in ws.sent_json
-            if payload.get("type") == "seed_prompts_reset_applied"
-        ]
+        reset_events = [payload for payload in ws.sent_json if payload.get("type") == "seed_prompts_reset_applied"]
         assert reset_events
-        assert any(
-            payload.get("reason") == "rewrite_during_generation"
-            for payload in reset_events
-        )
+        assert any(payload.get("reason") == "rewrite_during_generation" for payload in reset_events)
     finally:
         runtime.gpu_pool = old_gpu_pool
         runtime.prompt_enhancer = old_prompt_enhancer
@@ -740,7 +703,9 @@ def test_rewrite_during_active_segment_restarts_from_rewritten_seed_window():
 
 
 def test_initial_custom_rollout_prompt_generates_seed_window_before_streaming():
+
     class _InitialRolloutPromptEnhancer(_FakePromptEnhancer):
+
         def __init__(self):
             self.rewrite_calls: list[dict[str, object]] = []
 
@@ -783,11 +748,9 @@ def test_initial_custom_rollout_prompt_generates_seed_window_before_streaming():
                 latency_ms=23.0,
                 rollout_id=preset_id or "custom_editable",
                 rollout_label=preset_label or "Custom rollout",
-                raw_response_text=(
-                    '{"id":"custom_editable","label":"Custom rollout",'
-                    '"segment_prompts":["rewrite 1","rewrite 2","rewrite 3",'
-                    '"rewrite 4","rewrite 5","rewrite 6"]}'
-                ),
+                raw_response_text=('{"id":"custom_editable","label":"Custom rollout",'
+                                   '"segment_prompts":["rewrite 1","rewrite 2","rewrite 3",'
+                                   '"rewrite 4","rewrite 5","rewrite 6"]}'),
             )
 
     old_gpu_pool = runtime.gpu_pool
@@ -803,27 +766,27 @@ def test_initial_custom_rollout_prompt_generates_seed_window_before_streaming():
         runtime.session_event_logger = fake_logger
         runtime.prompt_safety_filter = None
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "custom_editable",
-                        "preset_label": "Custom rollout",
-                        "curated_prompts": [],
-                        "initial_rollout_prompt": "A moonbase corridor thriller with flooding",
-                        "rewrite_model": "gpt-4.1-mini",
-                        "rewrite_temperature": 0.4,
-                        "rewrite_window_system_prompt": "Session-specific rewrite prompt",
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (0.20, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "custom_editable",
+                    "preset_label": "Custom rollout",
+                    "curated_prompts": [],
+                    "initial_rollout_prompt": "A moonbase corridor thriller with flooding",
+                    "rewrite_model": "gpt-4.1-mini",
+                    "rewrite_temperature": 0.4,
+                    "rewrite_window_system_prompt": "Session-specific rewrite prompt",
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (0.20, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
@@ -856,7 +819,9 @@ def test_initial_custom_rollout_prompt_generates_seed_window_before_streaming():
 
 
 def test_initial_custom_rollout_prompt_uses_dedicated_user_prompt_by_default():
+
     class _InitialRolloutPromptEnhancer(_FakePromptEnhancer):
+
         def __init__(self):
             self.rewrite_calls: list[dict[str, object]] = []
 
@@ -898,11 +863,9 @@ def test_initial_custom_rollout_prompt_uses_dedicated_user_prompt_by_default():
                 latency_ms=23.0,
                 rollout_id=preset_id or "custom_editable",
                 rollout_label=preset_label or "Custom rollout",
-                raw_response_text=(
-                    '{"id":"custom_editable","label":"Custom rollout",'
-                    '"segment_prompts":["rewrite 1","rewrite 2","rewrite 3",'
-                    '"rewrite 4","rewrite 5","rewrite 6"]}'
-                ),
+                raw_response_text=('{"id":"custom_editable","label":"Custom rollout",'
+                                   '"segment_prompts":["rewrite 1","rewrite 2","rewrite 3",'
+                                   '"rewrite 4","rewrite 5","rewrite 6"]}'),
             )
 
     old_gpu_pool = runtime.gpu_pool
@@ -918,35 +881,32 @@ def test_initial_custom_rollout_prompt_uses_dedicated_user_prompt_by_default():
         runtime.session_event_logger = fake_logger
         runtime.prompt_safety_filter = None
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "custom_editable",
-                        "preset_label": "Custom rollout",
-                        "curated_prompts": [],
-                        "initial_rollout_prompt": "A moonbase corridor thriller with flooding",
-                        "rewrite_model": "gpt-4.1-mini",
-                        "rewrite_temperature": 0.4,
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (0.20, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "custom_editable",
+                    "preset_label": "Custom rollout",
+                    "curated_prompts": [],
+                    "initial_rollout_prompt": "A moonbase corridor thriller with flooding",
+                    "rewrite_model": "gpt-4.1-mini",
+                    "rewrite_temperature": 0.4,
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (0.20, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
         assert len(fake_enhancer.rewrite_calls) == 1
         assert fake_enhancer.rewrite_calls[0]["snapshot_prompts"] == []
-        assert (
-            fake_enhancer.rewrite_calls[0]["system_prompt_override"]
-            == "new rollout rewrite system prompt"
-        )
+        assert (fake_enhancer.rewrite_calls[0]["system_prompt_override"] == "new rollout rewrite system prompt")
     finally:
         runtime.gpu_pool = old_gpu_pool
         runtime.prompt_enhancer = old_prompt_enhancer
@@ -955,7 +915,9 @@ def test_initial_custom_rollout_prompt_uses_dedicated_user_prompt_by_default():
 
 
 def test_initial_custom_rollout_prompt_prefers_session_specific_user_prompt():
+
     class _InitialRolloutPromptEnhancer(_FakePromptEnhancer):
+
         def __init__(self):
             self.rewrite_calls: list[dict[str, object]] = []
 
@@ -997,11 +959,9 @@ def test_initial_custom_rollout_prompt_prefers_session_specific_user_prompt():
                 latency_ms=23.0,
                 rollout_id=preset_id or "custom_editable",
                 rollout_label=preset_label or "Custom rollout",
-                raw_response_text=(
-                    '{"id":"custom_editable","label":"Custom rollout",'
-                    '"segment_prompts":["rewrite 1","rewrite 2","rewrite 3",'
-                    '"rewrite 4","rewrite 5","rewrite 6"]}'
-                ),
+                raw_response_text=('{"id":"custom_editable","label":"Custom rollout",'
+                                   '"segment_prompts":["rewrite 1","rewrite 2","rewrite 3",'
+                                   '"rewrite 4","rewrite 5","rewrite 6"]}'),
             )
 
     old_gpu_pool = runtime.gpu_pool
@@ -1017,28 +977,28 @@ def test_initial_custom_rollout_prompt_prefers_session_specific_user_prompt():
         runtime.session_event_logger = fake_logger
         runtime.prompt_safety_filter = None
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "custom_editable",
-                        "preset_label": "Custom rollout",
-                        "curated_prompts": [],
-                        "initial_rollout_prompt": "A moonbase corridor thriller with flooding",
-                        "rewrite_model": "gpt-4.1-mini",
-                        "rewrite_temperature": 0.4,
-                        "rewrite_window_system_prompt": "Window rewrite prompt",
-                        "rewrite_user_system_prompt": "User rewrite prompt",
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (0.20, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "custom_editable",
+                    "preset_label": "Custom rollout",
+                    "curated_prompts": [],
+                    "initial_rollout_prompt": "A moonbase corridor thriller with flooding",
+                    "rewrite_model": "gpt-4.1-mini",
+                    "rewrite_temperature": 0.4,
+                    "rewrite_window_system_prompt": "Window rewrite prompt",
+                    "rewrite_user_system_prompt": "User rewrite prompt",
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (0.20, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
@@ -1067,51 +1027,40 @@ def test_single5s_raw_prompt_block_prevents_generation():
             "blocked raw prompt": "Test raw prompt blocked.",
         })
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "simple_custom_prompt",
-                        "curated_prompts": [],
-                        "single_clip_mode": True,
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (
-                    0.01,
-                    {
-                        "type": "append_prompt",
-                        "prompt_id": "simple_custom_prompt",
-                        "prompt": "blocked raw prompt",
-                    },
-                ),
-                (0.20, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "simple_custom_prompt",
+                    "curated_prompts": [],
+                    "single_clip_mode": True,
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (
+                0.01,
+                {
+                    "type": "append_prompt",
+                    "prompt_id": "simple_custom_prompt",
+                    "prompt": "blocked raw prompt",
+                },
+            ),
+            (0.20, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
         assert fake_pool._slot.calls == []
-        assert {
-            payload["type"] for payload in ws.sent_json
-        }.isdisjoint({"ltx2_segment_start", "ltx2_segment_complete"})
-        error_payloads = [
-            payload for payload in ws.sent_json if payload.get("type") == "error"
-        ]
-        assert any(
-            payload.get("message") == "Test raw prompt blocked."
-            for payload in error_payloads
-        )
+        assert {payload["type"] for payload in ws.sent_json}.isdisjoint({"ltx2_segment_start", "ltx2_segment_complete"})
+        error_payloads = [payload for payload in ws.sent_json if payload.get("type") == "error"]
+        assert any(payload.get("message") == "Test raw prompt blocked." for payload in error_payloads)
 
-        prompt_blocked_events = [
-            event
-            for event in fake_logger.events
-            if event["event"] == "prompt_blocked"
-        ]
+        prompt_blocked_events = [event for event in fake_logger.events if event["event"] == "prompt_blocked"]
         assert len(prompt_blocked_events) == 1
         assert prompt_blocked_events[0]["kind"] == "user_raw"
         assert prompt_blocked_events[0]["raw_prompt"] == "blocked raw prompt"
@@ -1136,62 +1085,48 @@ def test_single5s_enhanced_prompt_block_prevents_generation():
         runtime.prompt_enhancer = _UnsafeEnhancedPromptEnhancer()
         runtime.session_event_logger = fake_logger
         runtime.prompt_safety_filter = _FakePromptSafetyFilter({
-            "unsafe enhanced prompt": "Test enhanced prompt blocked.",
+            "unsafe enhanced prompt":
+            "Test enhanced prompt blocked.",
         })
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "simple_custom_prompt",
-                        "curated_prompts": [],
-                        "single_clip_mode": True,
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (
-                    0.01,
-                    {
-                        "type": "append_prompt",
-                        "prompt_id": "simple_custom_prompt",
-                        "prompt": "safe raw prompt",
-                    },
-                ),
-                (0.20, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "simple_custom_prompt",
+                    "curated_prompts": [],
+                    "single_clip_mode": True,
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (
+                0.01,
+                {
+                    "type": "append_prompt",
+                    "prompt_id": "simple_custom_prompt",
+                    "prompt": "safe raw prompt",
+                },
+            ),
+            (0.20, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
         assert fake_pool._slot.calls == []
-        assert {
-            payload["type"] for payload in ws.sent_json
-        }.isdisjoint({"ltx2_segment_start", "ltx2_segment_complete"})
-        error_payloads = [
-            payload for payload in ws.sent_json if payload.get("type") == "error"
-        ]
-        assert any(
-            payload.get("message") == "Test enhanced prompt blocked."
-            for payload in error_payloads
-        )
+        assert {payload["type"] for payload in ws.sent_json}.isdisjoint({"ltx2_segment_start", "ltx2_segment_complete"})
+        error_payloads = [payload for payload in ws.sent_json if payload.get("type") == "error"]
+        assert any(payload.get("message") == "Test enhanced prompt blocked." for payload in error_payloads)
 
-        rewrite_events = [
-            event
-            for event in fake_logger.events
-            if event["event"] == "rewrite_done"
-        ]
+        rewrite_events = [event for event in fake_logger.events if event["event"] == "rewrite_done"]
         assert len(rewrite_events) == 1
         assert rewrite_events[0]["kind"] == "enhance_prompt"
 
-        prompt_blocked_events = [
-            event
-            for event in fake_logger.events
-            if event["event"] == "prompt_blocked"
-        ]
+        prompt_blocked_events = [event for event in fake_logger.events if event["event"] == "prompt_blocked"]
         assert len(prompt_blocked_events) == 1
         assert prompt_blocked_events[0]["kind"] == "user_enhanced"
         assert prompt_blocked_events[0]["output_prompt"] == "unsafe enhanced prompt"
@@ -1216,57 +1151,44 @@ def test_single5s_enhancement_fallback_does_not_start_generation():
         runtime.session_event_logger = fake_logger
         runtime.prompt_safety_filter = None
 
-        ws = _FakeWebSocket(
-            [
-                (
-                    0.0,
-                    {
-                        "type": "session_init_v2",
-                        "preset_id": "simple_custom_prompt",
-                        "curated_prompts": [],
-                        "single_clip_mode": True,
-                        "enhancement_enabled": True,
-                        "auto_extension_enabled": False,
-                        "loop_generation_enabled": False,
-                    },
-                ),
-                (
-                    0.01,
-                    {
-                        "type": "append_prompt",
-                        "prompt_id": "simple_custom_prompt",
-                        "prompt": "prompt that times out",
-                    },
-                ),
-                (0.20, {"type": "leave"}),
-            ]
-        )
+        ws = _FakeWebSocket([
+            (
+                0.0,
+                {
+                    "type": "session_init_v2",
+                    "preset_id": "simple_custom_prompt",
+                    "curated_prompts": [],
+                    "single_clip_mode": True,
+                    "enhancement_enabled": True,
+                    "auto_extension_enabled": False,
+                    "loop_generation_enabled": False,
+                },
+            ),
+            (
+                0.01,
+                {
+                    "type": "append_prompt",
+                    "prompt_id": "simple_custom_prompt",
+                    "prompt": "prompt that times out",
+                },
+            ),
+            (0.20, {
+                "type": "leave"
+            }),
+        ])
 
         asyncio.run(server_main.websocket_endpoint(ws))
 
         assert fake_pool._slot.calls == []
-        assert {
-            payload["type"] for payload in ws.sent_json
-        }.isdisjoint({"ltx2_segment_start", "ltx2_segment_complete"})
+        assert {payload["type"] for payload in ws.sent_json}.isdisjoint({"ltx2_segment_start", "ltx2_segment_complete"})
 
-        fallback_payloads = [
-            payload
-            for payload in ws.sent_json
-            if payload.get("type") == "prompt_fallback_used"
-        ]
+        fallback_payloads = [payload for payload in ws.sent_json if payload.get("type") == "prompt_fallback_used"]
         assert len(fallback_payloads) == 1
         assert fallback_payloads[0]["prompt_id"] == "simple_custom_prompt"
-        assert (
-            fallback_payloads[0]["error"]
-            == PROMPT_EXTENSION_FAILURE_USER_MESSAGE
-        )
+        assert (fallback_payloads[0]["error"] == PROMPT_EXTENSION_FAILURE_USER_MESSAGE)
         assert fallback_payloads[0]["source"] == "user_enhancement_failed"
 
-        rewrite_events = [
-            event
-            for event in fake_logger.events
-            if event["event"] == "rewrite_done"
-        ]
+        rewrite_events = [event for event in fake_logger.events if event["event"] == "rewrite_done"]
         assert len(rewrite_events) == 1
         assert rewrite_events[0]["kind"] == "enhance_prompt"
         assert all(event["event"] != "segment_start" for event in fake_logger.events)

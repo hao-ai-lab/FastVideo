@@ -38,9 +38,7 @@ from fastvideo.pipelines.basic.ltx2.continuation import (
 def _make_typed_state() -> LTX2ContinuationState:
     return LTX2ContinuationState(
         segment_index=3,
-        video_frames=[
-            (np.ones((64, 64, 3), dtype=np.uint8) * (i * 10)) for i in range(4)
-        ],
+        video_frames=[(np.ones((64, 64, 3), dtype=np.uint8) * (i * 10)) for i in range(4)],
         video_conditioning_frame_idx=9,
         video_conditioning_strength=0.75,
         audio_latents=torch.randn(1, 4, 16, 64, dtype=torch.float32),
@@ -65,17 +63,12 @@ class TestRoundTrip:
         envelope = original.to_continuation_state()
         restored = LTX2ContinuationState.from_continuation_state(envelope)
         assert restored.segment_index == original.segment_index
-        assert restored.video_conditioning_frame_idx == (
-            original.video_conditioning_frame_idx)
-        assert restored.video_conditioning_strength == (
-            original.video_conditioning_strength)
+        assert restored.video_conditioning_frame_idx == (original.video_conditioning_frame_idx)
+        assert restored.video_conditioning_strength == (original.video_conditioning_strength)
         assert restored.audio_sample_rate == original.audio_sample_rate
-        assert restored.audio_conditioning_num_frames == (
-            original.audio_conditioning_num_frames)
-        assert restored.audio_conditioning_strength == (
-            original.audio_conditioning_strength)
-        assert restored.video_position_offset_sec == (
-            original.video_position_offset_sec)
+        assert restored.audio_conditioning_num_frames == (original.audio_conditioning_num_frames)
+        assert restored.audio_conditioning_strength == (original.audio_conditioning_strength)
+        assert restored.video_position_offset_sec == (original.video_position_offset_sec)
         assert restored.metadata == original.metadata
 
     def test_inline_roundtrip_preserves_video_frames(self):
@@ -84,8 +77,7 @@ class TestRoundTrip:
         restored = LTX2ContinuationState.from_continuation_state(envelope)
         assert restored.video_frames is not None
         assert len(restored.video_frames) == len(original.video_frames)
-        for before, after in zip(original.video_frames,
-                                  restored.video_frames):
+        for before, after in zip(original.video_frames, restored.video_frames):
             np.testing.assert_array_equal(before, after)
 
     def test_inline_roundtrip_preserves_audio_latents(self):
@@ -93,11 +85,9 @@ class TestRoundTrip:
         envelope = original.to_continuation_state()
         restored = LTX2ContinuationState.from_continuation_state(envelope)
         assert restored.audio_latents is not None
-        assert tuple(restored.audio_latents.shape) == tuple(
-            original.audio_latents.shape)
+        assert tuple(restored.audio_latents.shape) == tuple(original.audio_latents.shape)
         assert restored.audio_latents.dtype == original.audio_latents.dtype
-        torch.testing.assert_close(
-            restored.audio_latents, original.audio_latents)
+        torch.testing.assert_close(restored.audio_latents, original.audio_latents)
 
     def test_payload_is_json_serializable(self):
         envelope = _make_typed_state().to_continuation_state()
@@ -122,8 +112,7 @@ class TestRoundTrip:
         restored = LTX2ContinuationState.from_continuation_state(envelope)
         assert restored.audio_latents is not None
         assert restored.audio_latents.dtype == torch.bfloat16
-        torch.testing.assert_close(
-            restored.audio_latents, state.audio_latents)
+        torch.testing.assert_close(restored.audio_latents, state.audio_latents)
 
 
 class TestBlobIndirection:
@@ -149,12 +138,10 @@ class TestBlobIndirection:
             blob_store=blob_store,
             inline_threshold_bytes=0,
         )
-        restored = LTX2ContinuationState.from_continuation_state(
-            envelope, blob_store=blob_store)
+        restored = LTX2ContinuationState.from_continuation_state(envelope, blob_store=blob_store)
         assert restored.video_frames is not None
         assert len(restored.video_frames) == len(original.video_frames)
-        torch.testing.assert_close(
-            restored.audio_latents, original.audio_latents)
+        torch.testing.assert_close(restored.audio_latents, original.audio_latents)
 
     def test_blob_id_held_when_store_unavailable(self):
         """Deserializing without a blob store preserves the blob id so
@@ -197,14 +184,11 @@ class TestValidation:
             kind=LTX2_CONTINUATION_KIND,
             payload={"schema_version": 999},
         )
-        with pytest.raises(ValueError,
-                            match="Unsupported LTX-2 continuation schema"):
+        with pytest.raises(ValueError, match="Unsupported LTX-2 continuation schema"):
             LTX2ContinuationState.from_continuation_state(envelope)
 
     def test_non_png_frame_rejected(self):
-        state = LTX2ContinuationState(
-            video_frames=[np.ones((64, 64, 3), dtype=np.float32)],
-        )
+        state = LTX2ContinuationState(video_frames=[np.ones((64, 64, 3), dtype=np.float32)], )
         with pytest.raises(ValueError, match="uint8 HxWx3"):
             state.to_continuation_state()
 
@@ -232,14 +216,12 @@ class TestCompatLayerWireUp:
     def test_unknown_kind_rejected_at_boundary(self):
         from fastvideo.api.compat import _validate_continuation_state
         with pytest.raises(ValueError, match="Unknown ContinuationState kind"):
-            _validate_continuation_state(
-                ContinuationState(kind="mystery.v1", payload={}))
+            _validate_continuation_state(ContinuationState(kind="mystery.v1", payload={}))
 
     def test_empty_kind_rejected_at_boundary(self):
         from fastvideo.api.compat import _validate_continuation_state
         with pytest.raises(ValueError, match="non-empty string"):
-            _validate_continuation_state(
-                ContinuationState(kind="", payload={}))
+            _validate_continuation_state(ContinuationState(kind="", payload={}))
 
     def test_output_return_state_flag(self):
         request = GenerationRequest(

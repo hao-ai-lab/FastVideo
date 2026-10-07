@@ -23,7 +23,6 @@ from pathlib import Path
 import torch
 from safetensors.torch import save_file
 
-
 # Mapping from official GameCraft naming to FastVideo naming
 # GameCraft weights are already close to FastVideo format, but need minor adjustments
 PARAM_NAME_MAP: dict[str, str] = {
@@ -32,45 +31,46 @@ PARAM_NAME_MAP: dict[str, str] = {
     r"^(.*)\.img_mlp\.fc2\.(.*)$": r"\1.img_mlp.fc_out.\2",
     r"^(.*)\.txt_mlp\.fc1\.(.*)$": r"\1.txt_mlp.fc_in.\2",
     r"^(.*)\.txt_mlp\.fc2\.(.*)$": r"\1.txt_mlp.fc_out.\2",
-    
+
     # Single block MLP naming
     r"^single_blocks\.(\d+)\.mlp\.fc1\.(.*)$": r"single_blocks.\1.mlp.fc_in.\2",
     r"^single_blocks\.(\d+)\.mlp\.fc2\.(.*)$": r"single_blocks.\1.mlp.fc_out.\2",
-    
+
     # Token refiner naming - rename individual_token_refiner.blocks to refiner_blocks
     # This is applied first, then subsequent mappings handle the sub-components
     r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.(.*)$": r"txt_in.refiner_blocks.\1.\2",
-    
+
     # Vector in naming
     r"^vector_in\.in_layer\.(.*)$": r"vector_in.fc_in.\1",
     r"^vector_in\.out_layer\.(.*)$": r"vector_in.fc_out.\1",
-    
+
     # Time embedder naming
     r"^time_in\.mlp\.0\.(.*)$": r"time_in.mlp.fc_in.\1",
     r"^time_in\.mlp\.2\.(.*)$": r"time_in.mlp.fc_out.\1",
-    
+
     # Guidance embedder naming (if present)
     r"^guidance_in\.mlp\.0\.(.*)$": r"guidance_in.mlp.fc_in.\1",
     r"^guidance_in\.mlp\.2\.(.*)$": r"guidance_in.mlp.fc_out.\1",
-    
+
     # Final layer adaLN modulation
     r"^final_layer\.adaLN_modulation\.1\.(.*)$": r"final_layer.adaLN_modulation.linear.\1",
-    
+
     # Text in c_embedder (context embedder) naming
     r"^txt_in\.c_embedder\.linear_1\.(.*)$": r"txt_in.c_embedder.fc_in.\1",
     r"^txt_in\.c_embedder\.linear_2\.(.*)$": r"txt_in.c_embedder.fc_out.\1",
-    
+
     # Text in t_embedder (time embedder) naming
     r"^txt_in\.t_embedder\.mlp\.0\.(.*)$": r"txt_in.t_embedder.mlp.fc_in.\1",
     r"^txt_in\.t_embedder\.mlp\.2\.(.*)$": r"txt_in.t_embedder.mlp.fc_out.\1",
-    
+
     # Refiner block MLP naming - need to match the actual checkpoint names
     r"^txt_in\.refiner_blocks\.(\d+)\.mlp\.fc1\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
     r"^txt_in\.refiner_blocks\.(\d+)\.mlp\.fc2\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
-    
+
     # Refiner block adaLN modulation naming - matches .adaLN_modulation.1.weight/bias
-    r"^txt_in\.refiner_blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$": r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
-    
+    r"^txt_in\.refiner_blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$":
+    r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
+
     # Camera net - keep as-is (already correct)
     # r"^camera_net\.(.*)$": r"camera_net.\1",
 }
@@ -95,7 +95,7 @@ def apply_mapping(key: str) -> str:
 def load_deepspeed_checkpoint(path: Path) -> dict[str, torch.Tensor]:
     """Load weights from a DeepSpeed checkpoint file."""
     checkpoint = torch.load(path, map_location="cpu")
-    
+
     if "module" in checkpoint:
         state_dict = checkpoint["module"]
     elif "state_dict" in checkpoint:
@@ -104,10 +104,10 @@ def load_deepspeed_checkpoint(path: Path) -> dict[str, torch.Tensor]:
         state_dict = checkpoint["model"]
     else:
         state_dict = checkpoint
-    
+
     if not isinstance(state_dict, dict):
         raise TypeError(f"Expected dict state_dict, got {type(state_dict)}")
-    
+
     return state_dict
 
 
@@ -125,14 +125,14 @@ def convert_weights(
     """
     print(f"Loading checkpoint from {input_path}")
     state_dict = load_deepspeed_checkpoint(input_path)
-    
+
     print(f"Found {len(state_dict)} parameters")
-    
+
     # Convert weights
     converted_state_dict: OrderedDict[str, torch.Tensor] = OrderedDict()
     renamed_count = 0
     unchanged_count = 0
-    
+
     for key, value in state_dict.items():
         new_key = apply_mapping(key)
         if new_key != key:
@@ -142,18 +142,18 @@ def convert_weights(
         else:
             unchanged_count += 1
         converted_state_dict[new_key] = value
-    
+
     print(f"Renamed {renamed_count} parameters, {unchanged_count} unchanged")
-    
+
     # Create output directory structure
     transformer_dir = output_dir / "transformer"
     transformer_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Save as safetensors
     output_path = transformer_dir / "diffusion_pytorch_model.safetensors"
     print(f"Saving converted weights to {output_path}")
     save_file(converted_state_dict, str(output_path))
-    
+
     # Save config if requested
     if save_config:
         config = {
@@ -179,13 +179,13 @@ def convert_weights(
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
         print(f"Saved config to {config_path}")
-    
+
     # Verify camera_net weights
     camera_keys = [k for k in converted_state_dict.keys() if "camera_net" in k]
     print(f"\nCamera net weights ({len(camera_keys)}):")
     for k in camera_keys:
         print(f"  {k}: {converted_state_dict[k].shape}")
-    
+
     # Verify img_in weights (should be 33 channels)
     if "img_in.proj.weight" in converted_state_dict:
         img_in_shape = converted_state_dict["img_in.proj.weight"].shape
@@ -196,7 +196,7 @@ def convert_weights(
             print(f"  WARNING: Expected {expected_in_channels} input channels, got {actual_in_channels}")
         else:
             print(f"  OK: 33 input channels (16 latent + 16 gt_latent + 1 mask)")
-    
+
     return {
         "total": len(converted_state_dict),
         "renamed": renamed_count,
@@ -205,48 +205,33 @@ def convert_weights(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Convert Hunyuan-GameCraft-1.0 weights to FastVideo format."
-    )
-    parser.add_argument(
-        "--input",
-        type=str,
-        required=True,
-        help="Path to official GameCraft checkpoint (mp_rank_00_model_states.pt)"
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="official_weights/hunyuan-gamecraft",
-        help="Output directory for converted weights"
-    )
-    parser.add_argument(
-        "--no-config",
-        action="store_true",
-        help="Don't save config.json"
-    )
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Print all renamed parameters"
-    )
-    
+    parser = argparse.ArgumentParser(description="Convert Hunyuan-GameCraft-1.0 weights to FastVideo format.")
+    parser.add_argument("--input",
+                        type=str,
+                        required=True,
+                        help="Path to official GameCraft checkpoint (mp_rank_00_model_states.pt)")
+    parser.add_argument("--output",
+                        type=str,
+                        default="official_weights/hunyuan-gamecraft",
+                        help="Output directory for converted weights")
+    parser.add_argument("--no-config", action="store_true", help="Don't save config.json")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print all renamed parameters")
+
     args = parser.parse_args()
-    
+
     input_path = Path(args.input)
     output_dir = Path(args.output)
-    
+
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
-    
+
     stats = convert_weights(
         input_path=input_path,
         output_dir=output_dir,
         save_config=not args.no_config,
         verbose=args.verbose,
     )
-    
+
     print(f"\nConversion complete!")
     print(f"  Total parameters: {stats['total']}")
     print(f"  Renamed: {stats['renamed']}")

@@ -44,8 +44,7 @@ _VAE_CFG_FILE = "vae_model_config.json"
 def _stable_audio_tools_available() -> bool:
     try:
         from stable_audio_tools.models.factory import (  # noqa: F401
-            create_model_from_config,
-        )
+            create_model_from_config, )
         return True
     except Exception:
         return False
@@ -57,10 +56,8 @@ def _load_official_vae(device: torch.device):
     """
     from huggingface_hub import hf_hub_download
 
-    cfg_path = hf_hub_download(repo_id=_SA_AUDIO_ID, filename=_VAE_CFG_FILE,
-                               token=resolve_hf_token())
-    ckpt_path = hf_hub_download(repo_id=_SA_AUDIO_ID, filename=_VAE_CKPT_FILE,
-                                token=resolve_hf_token())
+    cfg_path = hf_hub_download(repo_id=_SA_AUDIO_ID, filename=_VAE_CFG_FILE, token=resolve_hf_token())
+    ckpt_path = hf_hub_download(repo_id=_SA_AUDIO_ID, filename=_VAE_CKPT_FILE, token=resolve_hf_token())
     with open(cfg_path) as f:
         vcfg = json.load(f)
 
@@ -73,8 +70,7 @@ def _load_official_vae(device: torch.device):
     state = {k[len(pref):] if k.startswith(pref) else k: v for k, v in state.items()}
     missing, unexpected = vae.load_state_dict(state, strict=True)
     assert not missing and not unexpected, (
-        f"official VAE state_dict mismatch — missing={missing[:3]} unexpected={unexpected[:3]}"
-    )
+        f"official VAE state_dict mismatch — missing={missing[:3]} unexpected={unexpected[:3]}")
     return vae.to(device).eval()
 
 
@@ -107,29 +103,28 @@ def test_oobleck_vae_decode_official_parity():
 
     from fastvideo.models.vaes.oobleck import OobleckVAE
     fv_vae = OobleckVAE.from_pretrained(
-        _SA_AUDIO_ID, subfolder="vae", torch_dtype=torch.float32,
+        _SA_AUDIO_ID,
+        subfolder="vae",
+        torch_dtype=torch.float32,
     ).to(device).eval()
 
     torch.manual_seed(0)
     latent = torch.randn(
         (1, fv_vae.decoder_input_channels, 8),
-        dtype=torch.float32, device=device,
+        dtype=torch.float32,
+        device=device,
     )
 
     with torch.inference_mode():
         off_out = off_vae.decode(latent).detach().float().cpu()
         fv_out = fv_vae.decode(latent).sample.detach().float().cpu()
 
-    print(
-        f"off shape={tuple(off_out.shape)} "
-        f"abs_mean={off_out.abs().mean().item():.6f} "
-        f"range=[{off_out.min().item():.4f}, {off_out.max().item():.4f}]"
-    )
-    print(
-        f"fv  shape={tuple(fv_out.shape)} "
-        f"abs_mean={fv_out.abs().mean().item():.6f} "
-        f"range=[{fv_out.min().item():.4f}, {fv_out.max().item():.4f}]"
-    )
+    print(f"off shape={tuple(off_out.shape)} "
+          f"abs_mean={off_out.abs().mean().item():.6f} "
+          f"range=[{off_out.min().item():.4f}, {off_out.max().item():.4f}]")
+    print(f"fv  shape={tuple(fv_out.shape)} "
+          f"abs_mean={fv_out.abs().mean().item():.6f} "
+          f"range=[{fv_out.min().item():.4f}, {fv_out.max().item():.4f}]")
     diff = (off_out - fv_out).abs()
     print(f"diff max={diff.max().item():.6e} mean={diff.mean().item():.6e}")
 
@@ -160,13 +155,16 @@ def test_oobleck_vae_encode_official_parity():
 
     from fastvideo.models.vaes.oobleck import OobleckVAE
     fv_vae = OobleckVAE.from_pretrained(
-        _SA_AUDIO_ID, subfolder="vae", torch_dtype=torch.float32,
+        _SA_AUDIO_ID,
+        subfolder="vae",
+        torch_dtype=torch.float32,
     ).to(device).eval()
 
     torch.manual_seed(1)
     waveform = torch.randn(
         (1, fv_vae.audio_channels, 44100),
-        dtype=torch.float32, device=device,
+        dtype=torch.float32,
+        device=device,
     )
     # Round to a multiple of hop_length so encode aligns.
     n = (waveform.shape[-1] // fv_vae.hop_length) * fv_vae.hop_length
@@ -182,12 +180,8 @@ def test_oobleck_vae_encode_official_parity():
     fv_mean_cpu = fv_mean.detach().float().cpu()
 
     diff = (off_mean_cpu - fv_mean_cpu).abs()
-    print(
-        f"off_mean shape={tuple(off_mean_cpu.shape)} abs_mean={off_mean_cpu.abs().mean().item():.6f}"
-    )
-    print(
-        f"fv_mean  shape={tuple(fv_mean_cpu.shape)} abs_mean={fv_mean_cpu.abs().mean().item():.6f}"
-    )
+    print(f"off_mean shape={tuple(off_mean_cpu.shape)} abs_mean={off_mean_cpu.abs().mean().item():.6f}")
+    print(f"fv_mean  shape={tuple(fv_mean_cpu.shape)} abs_mean={fv_mean_cpu.abs().mean().item():.6f}")
     print(f"diff max={diff.max().item():.6e} mean={diff.mean().item():.6e}")
 
     assert off_mean_cpu.shape == fv_mean_cpu.shape
@@ -207,7 +201,9 @@ def test_oobleck_vae_round_trip_sanity():
 
     from fastvideo.models.vaes.oobleck import OobleckVAE
     fv_vae = OobleckVAE.from_pretrained(
-        _SA_AUDIO_ID, subfolder="vae", torch_dtype=torch.float32,
+        _SA_AUDIO_ID,
+        subfolder="vae",
+        torch_dtype=torch.float32,
     ).to(device).eval()
 
     torch.manual_seed(2)
@@ -222,21 +218,13 @@ def test_oobleck_vae_round_trip_sanity():
         latent = fv_vae.encode(waveform).mode()
         recon = fv_vae.decode(latent).sample
 
-    assert recon.shape == waveform.shape, (
-        f"round-trip shape mismatch: in={waveform.shape} out={recon.shape}"
-    )
+    assert recon.shape == waveform.shape, (f"round-trip shape mismatch: in={waveform.shape} out={recon.shape}")
     assert torch.isfinite(recon).all(), "round-trip produced non-finite values"
-    assert recon.abs().max().item() < 5.0, (
-        f"round-trip output magnitude {recon.abs().max().item():.3f} > 5.0"
-    )
+    assert recon.abs().max().item() < 5.0, (f"round-trip output magnitude {recon.abs().max().item():.3f} > 5.0")
 
     in_rms = waveform.float().pow(2).mean().sqrt().item()
     out_rms = recon.float().pow(2).mean().sqrt().item()
     rms_ratio = out_rms / max(in_rms, 1e-6)
-    print(
-        f"round-trip in_rms={in_rms:.4f} out_rms={out_rms:.4f} "
-        f"ratio={rms_ratio:.3f}"
-    )
-    assert 0.3 < rms_ratio < 3.0, (
-        f"round-trip RMS ratio {rms_ratio:.3f} outside sanity band [0.3, 3.0]"
-    )
+    print(f"round-trip in_rms={in_rms:.4f} out_rms={out_rms:.4f} "
+          f"ratio={rms_ratio:.3f}")
+    assert 0.3 < rms_ratio < 3.0, (f"round-trip RMS ratio {rms_ratio:.3f} outside sanity band [0.3, 3.0]")

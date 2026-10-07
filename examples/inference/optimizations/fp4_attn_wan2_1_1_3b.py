@@ -24,12 +24,9 @@ OUTPUT_PATH = "video_samples"
 
 def main():
     parser = argparse.ArgumentParser(description="FP4 FA4 video generation benchmark")
-    parser.add_argument("--nvfp4_fa4", action="store_true",
-                        help="Enable NVFP4 FP4 quantized QK flash attention")
-    parser.add_argument("--model", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-                        help="Model path or HuggingFace ID")
-    parser.add_argument("--compile", action="store_true",
-                        help="Enable torch.compile for DIT")
+    parser.add_argument("--nvfp4_fa4", action="store_true", help="Enable NVFP4 FP4 quantized QK flash attention")
+    parser.add_argument("--model", default="Wan-AI/Wan2.1-T2V-1.3B-Diffusers", help="Model path or HuggingFace ID")
+    parser.add_argument("--compile", action="store_true", help="Enable torch.compile for DIT")
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--infer_steps", type=int, default=50)
     args = parser.parse_args()
@@ -51,24 +48,35 @@ def main():
         enable_torch_compile=args.compile,
     )
 
-    prompt = (
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-        "wide with interest. The playful yet serene atmosphere is complemented by soft "
-        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
-    )
+    prompt = ("A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
+              "wide with interest. The playful yet serene atmosphere is complemented by soft "
+              "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
 
     n_warmup = 2 if args.compile else 1
     for i in range(n_warmup):
-        generator.generate(request={"prompt": prompt, "sampling": {"num_inference_steps": 2},
-                                    "output": {"save_video": False}})
+        generator.generate(request={
+            "prompt": prompt,
+            "sampling": {
+                "num_inference_steps": 2
+            },
+            "output": {
+                "save_video": False
+            }
+        })
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     start = time.time()
-    generator.generate(request={
-        "prompt": prompt,
-        "sampling": {"num_inference_steps": args.infer_steps},
-        "output": {"save_video": True, "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")},
-    })
+    generator.generate(
+        request={
+            "prompt": prompt,
+            "sampling": {
+                "num_inference_steps": args.infer_steps
+            },
+            "output": {
+                "save_video": True,
+                "output_path": os.path.join(OUTPUT_PATH, f"raccoon_{mode}.mp4")
+            },
+        })
     elapsed = time.time() - start
     print(f"[{mode.upper()}] {args.infer_steps} steps in {elapsed:.2f}s "
           f"({args.infer_steps / elapsed:.2f} it/s)")
