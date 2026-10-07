@@ -56,10 +56,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     output_dir: str = app.state.output_dir
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
 
-    reject_external_launcher(
-        args.distributed_executor_backend,
-        entrypoint="the OpenAI-compatible server",
-    )
     logger.info("Loading model from %s ...", args.model_path)
     generator = VideoGenerator.from_fastvideo_args(args)
     logger.info("Model loaded successfully.")

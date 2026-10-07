@@ -35,13 +35,6 @@ from fastvideo.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
 
-_NON_OUTPUT_EXTRA_KEYS = frozenset({
-    "audio",
-    "audio_sample_rate",
-    "decoded_audio",
-    "ltx2_audio_latents",
-})
-
 
 @dataclass(frozen=True)
 class ExternalLauncherEnv:
@@ -257,21 +250,14 @@ class ExternalLauncherExecutor(Executor):
 
     def execute_forward(self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         self._bind_worker_device()
+        # Worker.execute_forward already strips non-output-rank payloads; this
+        # executor only stamps the peak-memory reading and rebuilds the batch.
         output_batch = self.worker.execute_forward(forward_batch, fastvideo_args)
 
         logging_info = output_batch.logging_info if envs.FASTVIDEO_STAGE_LOGGING else None
         extra = output_batch.extra or {}
         if torch.cuda.is_available():
             extra["peak_memory_mb"] = torch.cuda.max_memory_allocated() / (1024 * 1024)
-        if not self.is_output_rank:
-            for key in _NON_OUTPUT_EXTRA_KEYS:
-                extra.pop(key, None)
-            output_batch.output = torch.empty(0, device="cpu")
-            output_batch.latents = None
-            output_batch.audio_latents = None
-            output_batch.trajectory_latents = None
-            output_batch.trajectory_timesteps = None
-            output_batch.trajectory_decoded = None
 
         return ForwardBatch(
             data_type=forward_batch.data_type,

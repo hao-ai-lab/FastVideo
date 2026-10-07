@@ -7,6 +7,7 @@ import argparse
 from datetime import timedelta
 import os
 import time
+from types import SimpleNamespace
 
 import torch
 
@@ -19,6 +20,7 @@ from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.platforms.cpu import CpuPlatform
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.worker.gpu_worker import Worker
 
 
 class _SmokeWorkerWrapper:
@@ -58,8 +60,12 @@ class _SmokeWorkerWrapper:
         raise ValueError(f"unsupported smoke method: {method}")
 
     def execute_forward(self, forward_batch, fastvideo_args):
-        del fastvideo_args
-        return forward_batch
+        # WorkerWrapperBase delegates to Worker.execute_forward, which owns the
+        # non-output-rank payload stripping; reuse it with a pass-through pipeline.
+        worker = Worker.__new__(Worker)
+        worker.fastvideo_args = fastvideo_args
+        worker.pipeline = SimpleNamespace(forward=lambda batch, args: batch)
+        return worker.execute_forward(forward_batch, fastvideo_args)
 
     def shutdown(self):
         if self._shutdown:
