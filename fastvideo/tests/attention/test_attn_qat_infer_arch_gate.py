@@ -28,13 +28,15 @@ def _flash_attn_backend():
     """The FLASH_ATTN backend module, or a skip when it cannot be imported.
 
     It needs a flash-attention package (FA2/FA3, or FA4 with FASTVIDEO_FA4=1)
-    at import, like the other FlashAttentionImpl tests that skip without one.
+    at import. flash-attn is an optional dependency and the unit lane collects
+    this file, so a missing package skips here like the other FlashAttentionImpl
+    tests instead of turning the lane red.
     """
-    return pytest.importorskip(
-        "fastvideo.attention.backends.flash_attn",
-        reason="no usable flash-attention package installed",
-        exc_type=ImportError,
-    )
+    try:
+        from fastvideo.attention.backends import flash_attn as fa
+    except (ImportError, RuntimeError) as exc:  # FA2/FA3/FA4 probe at import
+        pytest.skip(f"no usable flash-attention package installed ({exc})")
+    return fa
 
 
 def _impl_cls(impl_module: str):
@@ -210,7 +212,7 @@ def test_fa4_quantize_path_is_fullgraph_traceable() -> None:
     the op-backed path must compile and run without a graph break."""
     import torch
 
-    from fastvideo.attention.backends import flash_attn as fa
+    fa = _flash_attn_backend()
 
     _register_fa4_quantize_cpu_kernel()
 
@@ -233,7 +235,7 @@ def test_fa4_quantize_op_fake_matches_real() -> None:
     the non-autograd suites."""
     import torch
 
-    import fastvideo.attention.backends.flash_attn  # noqa: F401  registers the op + fake
+    _flash_attn_backend()  # registers the op + fake
 
     _register_fa4_quantize_cpu_kernel()
 
