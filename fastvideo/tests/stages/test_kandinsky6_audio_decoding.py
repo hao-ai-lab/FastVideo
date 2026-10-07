@@ -177,6 +177,7 @@ def test_audio_decoding_stage_calls_vae_decode_then_vocoder_in_sequence(cpu_devi
     audio_latents = torch.ones(1, A_LEN, 40) * 4.0  # [B, A, D]; scaling_factor=2.0 -> latents=2.0
     batch = types.SimpleNamespace(audio_latents=audio_latents, extra={})
     fastvideo_args = types.SimpleNamespace(vae_cpu_offload=False,
+                                           is_output_rank=True,
                                            pipeline_config=types.SimpleNamespace())
 
     out = stage.forward(batch, fastvideo_args)

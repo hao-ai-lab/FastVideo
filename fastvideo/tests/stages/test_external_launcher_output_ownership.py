@@ -13,6 +13,8 @@ from fastvideo.pipelines.basic.magi_human.stages.audio_decoding import MagiHuman
 from fastvideo.pipelines.basic.mmaudio.stages import MMAudioDecodingStage
 from fastvideo.pipelines.basic.stable_audio.stages.decoding import StableAudioDecodingStage
 from fastvideo.pipelines.stages.flux_stages import FluxDecodingStage
+from fastvideo.pipelines.stages.kandinsky6 import Kandinsky6AudioDecodingStage
+from fastvideo.pipelines.stages.kandinsky6_sr import Kandinsky6SRDecodingStage
 from fastvideo.pipelines.stages.sd35_conditioning import SD35DecodingStage
 
 
@@ -117,3 +119,40 @@ def test_image_decoder_non_output_rank_skips_vae_and_host_payload(stage_cls):
     assert result.output is not None
     assert result.output.device.type == "cpu"
     assert result.output.shape == (0, 3, 0, 0, 0)
+
+
+def test_kandinsky6_non_output_rank_skips_audio_vae_and_vocoder():
+    audio_vae = Mock()
+    vocoder = Mock()
+    stage = Kandinsky6AudioDecodingStage(audio_vae, vocoder)
+    batch = ForwardBatch(
+        data_type="video",
+        audio_latents=torch.ones(1, 2, 3),
+        extra={
+            "audio": torch.ones(1),
+            "audio_sample_rate": 44100,
+        },
+    )
+
+    result = stage.forward(batch, _non_output_args())
+
+    audio_vae.to.assert_not_called()
+    vocoder.to.assert_not_called()
+    assert result.audio_latents is None
+    assert "audio" not in result.extra
+    assert "audio_sample_rate" not in result.extra
+
+
+def test_kandinsky6_sr_non_output_rank_skips_kvae_decode_and_host_payload():
+    vae = Mock()
+    stage = Kandinsky6SRDecodingStage(vae, Mock())
+    batch = ForwardBatch(data_type="video", latents=torch.ones(2, 3, 4, 4, 8))
+
+    result = stage.forward(batch, _non_output_args())
+
+    vae.to.assert_not_called()
+    vae.decode.assert_not_called()
+    assert result.output is not None
+    assert result.output.device.type == "cpu"
+    assert result.output.shape == (0, 3, 0, 0, 0)
+    assert result.latents is None
