@@ -765,6 +765,12 @@ class VideoGenerator:
         **kwargs,
     ) -> dict[str, Any]:
         """Internal method for single video generation"""
+        # Generation boundary: drop any stale cancellation left over from a
+        # previous run so it can never silently skip this one, and open the
+        # window in which executor.interrupt() is honored.
+        begin_generation = getattr(self.executor, "begin_generation", None)
+        if begin_generation is not None:
+            begin_generation()
         if fastvideo_args is None:
             fastvideo_args = self.fastvideo_args
 
@@ -874,7 +880,21 @@ class VideoGenerator:
             samples = allocate_cpu_tensor_with_pin_fallback(
                 (latent_batch_size, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width),
                 pin_memory=fastvideo_args.pin_cpu_memory)
-        thread.join()
+        try:
+            thread.join()
+        except BaseException:  # noqa: BLE001
+            # Ctrl-C lands in the main thread while the in-process forward pass
+            # keeps running in `execute_forward_thread`; flag the pipeline so the
+            # denoise loop stops instead of running to completion. No-op for
+            # executors without an interrupt hook (e.g. MultiprocExecutor, whose
+            # worker processes already receive SIGINT directly).
+            try:
+                interrupt = getattr(self.executor, "interrupt", None)
+                if interrupt is not None:
+                    interrupt()
+            except Exception:
+                logger.debug("executor.interrupt() failed while aborting forward thread", exc_info=True)
+            raise
 
         if thread_error["error"] is not None:
             raise RuntimeError("Forward execution thread failed.\n"

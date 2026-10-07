@@ -222,6 +222,7 @@ FAMILY_COVERAGE = (
             "test_causal_similarity.py",
             "test_wan_i2v_similarity.py",
             "test_wan_t2v_similarity.py",
+            "test_wan_ti2v_similarity.py",
         ),
     ),
     FamilyCoverage(
@@ -522,6 +523,10 @@ def classify_paths(paths: list[str]) -> MergePlan:
         if path.startswith("apps/dreamverse/"):
             # DreamVerse is already one of the six automatic Fastcheck lanes.
             plan.reasons.append(f"covered by automatic DreamVerse Fastcheck: {path}")
+            continue
+        if path.startswith("apps/infinite_livestream/"):
+            # The app's CPU-only tests run in the automatic unit Fastcheck lane.
+            plan.reasons.append(f"covered by automatic unit Fastcheck: {path}")
             continue
         if path.startswith("fastvideo/tests/"):
             # The automatic unit/component Fastcheck lanes own the remaining

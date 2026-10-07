@@ -35,6 +35,7 @@ try:
         resolve_metric_policies,
         serialize_metric_thresholds,
     )
+    from fastvideo.tests.performance.worker_log_capture import format_worker_log_tail
 except ImportError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     if repo_root not in sys.path:
@@ -52,6 +53,7 @@ except ImportError:
         resolve_metric_policies,
         serialize_metric_thresholds,
     )
+    from fastvideo.tests.performance.worker_log_capture import format_worker_log_tail
 
 RESULTS_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -602,6 +604,7 @@ def main() -> int:
     unattributed_pytest_failure = performance_pytest_failed and not any(static_threshold_failures)
 
     all_failures: list[str] = []
+    regression_records: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
 
     if persist_tracking:
@@ -670,6 +673,8 @@ def main() -> int:
         record["baseline_eligible"] = (identity_filters is not None and _is_baseline_eligible(
             record["run_source"], record["success"], comparison_status))
         all_failures.extend(failures)
+        if comparison_status == STATUS_REGRESSION:
+            regression_records.append(raw)
 
         print(f"{record['model_id']} comparison status: "
               f"{comparison_status} - {comparison_status_reason}")
@@ -693,6 +698,11 @@ def main() -> int:
         print("Performance regression check failed:")
         for item in all_failures:
             print(f"  - {item}")
+        for raw in regression_records:
+            print(format_worker_log_tail(
+                raw.get("benchmark_id", "unknown"),
+                raw.get("worker_log_path"),
+            ))
         return 1
 
     print("Performance baseline comparison passed")
