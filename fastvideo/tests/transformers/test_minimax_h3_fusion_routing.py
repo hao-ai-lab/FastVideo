@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.platforms import AttentionBackendEnum
 
 
@@ -135,7 +136,7 @@ def test_swiglu_fusion_stays_on_eager_path_with_grad(monkeypatch: pytest.MonkeyP
 
 
 def test_all_minimax_h3_fusions_match_one_eager_block_under_fa4(
-    monkeypatch: pytest.MonkeyPatch,
+    env_overrides,
 ) -> None:
     """Exercise the real block wiring without loading any H3 checkpoint."""
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
@@ -145,13 +146,13 @@ def test_all_minimax_h3_fusions_match_one_eager_block_under_fa4(
     if "fa4" not in getattr(flash_attn, "__version__", "").lower():
         pytest.skip("the focused integration test requires the FA4 environment")
 
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "FLASH_ATTN")
-    monkeypatch.setenv("FASTVIDEO_FA4", "1")
-    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
-    monkeypatch.setenv("MASTER_PORT", "29573")
-    monkeypatch.setenv("RANK", "0")
-    monkeypatch.setenv("WORLD_SIZE", "1")
-    monkeypatch.setenv("LOCAL_RANK", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("FLASH_ATTN"))
+    env_overrides.enter_context(envs.FASTVIDEO_FA4.override(True))
+    env_overrides.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29573"))
+    env_overrides.enter_context(envs.override_external("RANK", "0"))
+    env_overrides.enter_context(envs.override_external("WORLD_SIZE", "1"))
+    env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
 
     from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
     from fastvideo.forward_context import set_forward_context
@@ -223,7 +224,7 @@ def test_all_minimax_h3_fusions_match_one_eager_block_under_fa4(
         cleanup_dist_env_and_memory()
 
 
-def test_minimax_h3_fusions_engage_on_cuda_inference(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_minimax_h3_fusions_engage_on_cuda_inference(monkeypatch: pytest.MonkeyPatch, env_overrides) -> None:
     """Pin the positive side of the routing guard.
 
     The parity test above still passes if ``_can_run_minimax_h3_fusion``
@@ -238,12 +239,12 @@ def test_minimax_h3_fusions_engage_on_cuda_inference(monkeypatch: pytest.MonkeyP
         pytest.skip("BF16 CUDA is required")
     pytest.importorskip("triton")
 
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
-    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
-    monkeypatch.setenv("MASTER_PORT", "29574")
-    monkeypatch.setenv("RANK", "0")
-    monkeypatch.setenv("WORLD_SIZE", "1")
-    monkeypatch.setenv("LOCAL_RANK", "0")
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
+    env_overrides.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29574"))
+    env_overrides.enter_context(envs.override_external("RANK", "0"))
+    env_overrides.enter_context(envs.override_external("WORLD_SIZE", "1"))
+    env_overrides.enter_context(envs.override_external("LOCAL_RANK", "0"))
 
     import fastvideo.models.dits.minimax_h3 as h3
     from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel

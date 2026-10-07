@@ -9,6 +9,7 @@ import VideoPlayer from '../VideoPlayer';
 import RewriteInspector from '../rewrite/RewriteInspector';
 import DevtoolsComposer from './DevtoolsComposer';
 import DevtoolsDrawer from './DevtoolsDrawer';
+import { DEFAULT_GENERATION_MODE, GENERATION_MODES, type GenerationMode } from '@/lib/generationMode';
 
 interface DevtoolsShellProps {
   connected?: boolean;
@@ -29,6 +30,11 @@ interface DevtoolsShellProps {
   editableCanJoin?: boolean;
   curatedPromptLimit?: number;
   maxCuratedPromptCount?: number;
+
+  generationMode?: GenerationMode;
+  supportedGenerationModes?: readonly GenerationMode[];
+  conditioningPanel?: React.ReactNode;
+  onGenerationModeChange?: (mode: GenerationMode) => void;
 
   onPresetChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void;
   onEnhancementToggle?: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -136,6 +142,11 @@ export default function DevtoolsShell({
   editableCanJoin = false,
   curatedPromptLimit = 0,
   maxCuratedPromptCount = 0,
+
+  generationMode = DEFAULT_GENERATION_MODE,
+  supportedGenerationModes = GENERATION_MODES.map((mode) => mode.id),
+  conditioningPanel,
+  onGenerationModeChange = () => {},
 
   onPresetChange = () => {},
   onEnhancementToggle = () => {},
@@ -287,6 +298,10 @@ export default function DevtoolsShell({
           loopGenerationEnabled={loopGenerationEnabled}
           curatedPromptLimit={curatedPromptLimit}
           maxCuratedPromptCount={maxCuratedPromptCount}
+          generationMode={generationMode}
+          supportedGenerationModes={supportedGenerationModes}
+          conditioningPanel={conditioningPanel}
+          onGenerationModeChange={onGenerationModeChange}
           rewriteWindowMode={livePromptRewriteMode}
           rewritingSeedPrompts={rewritingSeedPrompts}
           autoExtensionTimeoutHint={autoExtensionTimeoutHint}

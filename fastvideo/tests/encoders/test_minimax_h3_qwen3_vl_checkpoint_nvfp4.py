@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 import torch
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29515")
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29515")
 
 import fastvideo.models.encoders.minimax_h3_checkpoint_nvfp4 as h3_nvfp4
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import (
@@ -275,9 +276,13 @@ def test_runtime_preflight_gates_device_capability_parallelism_and_flashinfer(mo
     with pytest.raises(RuntimeError, match="requires a CUDA device"):
         config.validate_runtime(torch.device("cpu"))
 
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 9))
-    with pytest.raises(RuntimeError, match="sm100 or newer"):
+    monkeypatch.setattr(h3_nvfp4, "get_tp_world_size", lambda: 1)
+    # Below sm100 there is no FP4 GEMM: sm80+ de-quantizes each linear to bf16, older GPUs are refused.
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (7, 5))
+    with pytest.raises(RuntimeError, match="sm80"):
         config.validate_runtime(torch.device("cuda"))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 9))
+    config.validate_runtime(torch.device("cuda"))
 
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (12, 1))
     monkeypatch.setattr(h3_nvfp4, "get_tp_world_size", lambda: 2)
@@ -403,6 +408,7 @@ def test_apply_flattens_quantizes_and_restores_the_leading_dims(distributed_setu
         receipt.update(alpha=alpha, weight_packed=weight_packed, weight_scale=weight_scale)
         return torch.zeros(x_fp4.shape[0], weight_packed.shape[0], dtype=torch.bfloat16)
 
+    monkeypatch.setattr(h3_nvfp4, "_fp4_gemm_supported", lambda device: True)
     monkeypatch.setattr(h3_nvfp4, "_quantize_activation_nvfp4", fake_quantize)
     monkeypatch.setattr(h3_nvfp4, "_nvfp4_linear", fake_linear)
     output = MiniMaxH3SerializedNVFP4LinearMethod._apply_finalized(layer, torch.ones(1, 5, 128), layer.bias)
@@ -432,11 +438,44 @@ def test_apply_uses_awq_pre_quant_scale_before_activation_quantization(distribut
     def fake_linear(x_fp4, x_scale, weight_packed, weight_scale, alpha):
         return torch.zeros(x_fp4.shape[0], weight_packed.shape[0], dtype=torch.bfloat16)
 
+    monkeypatch.setattr(h3_nvfp4, "_fp4_gemm_supported", lambda device: True)
     monkeypatch.setattr(h3_nvfp4, "_quantize_activation_nvfp4", fake_quantize)
     monkeypatch.setattr(h3_nvfp4, "_nvfp4_linear", fake_linear)
     MiniMaxH3SerializedNVFP4LinearMethod._apply_finalized(layer, torch.ones(3, 128), None)
 
     assert torch.equal(seen["x"], torch.full((3, 128), 2.0, dtype=torch.bfloat16))
+
+
+def test_apply_without_fp4_gemm_matches_the_dequantized_linear(distributed_setup, monkeypatch) -> None:
+    """Pre-Blackwell GPUs expand the packed weight to bf16 for the call; the result is x @ W_deq.T + b."""
+    config = MiniMaxH3SerializedNVFP4Config.from_config(_checkpoint_quantization_config())
+    layer = _language_linear(config, bias=True)
+    _fill_loaded(layer, global_scale=4.0)
+    layer.quant_method.process_weights_after_loading(layer)
+    layer.bias.data.fill_(3.0)
+    monkeypatch.setattr(h3_nvfp4, "_fp4_gemm_supported", lambda device: False)
+    x = torch.randn(1, 5, 128, dtype=torch.bfloat16)
+    output = MiniMaxH3SerializedNVFP4LinearMethod._apply_finalized(layer, x, layer.bias)
+
+    weight = h3_nvfp4.dequantize_serialized_nvfp4(layer.weight_packed, layer.weight_scale, 4.0, torch.bfloat16)
+    # 0x11 packs two E2M1 codes of 0.5; E4M3 block scale 1; global scale 4 -> every weight is 0.125.
+    assert torch.equal(weight, torch.full_like(weight, 0.125))
+    torch.testing.assert_close(output, torch.nn.functional.linear(x, weight, layer.bias.to(torch.bfloat16)))
+
+
+def test_apply_without_fp4_gemm_applies_the_awq_pre_quant_scale(distributed_setup, monkeypatch) -> None:
+    """The de-quantized fallback scales the activation too: the stored weight is the AWQ-smoothed one."""
+    config = MiniMaxH3SerializedNVFP4Config.from_config(_checkpoint_quantization_config(pre_quant_scale=True))
+    layer = _language_linear(config)
+    _fill_loaded(layer, global_scale=4.0)
+    layer.pre_quant_scale.data.fill_(2.0)
+    layer.quant_method.process_weights_after_loading(layer)
+    monkeypatch.setattr(h3_nvfp4, "_fp4_gemm_supported", lambda device: False)
+    x = torch.randn(1, 5, 128, dtype=torch.bfloat16)
+    output = MiniMaxH3SerializedNVFP4LinearMethod._apply_finalized(layer, x, None)
+
+    weight = h3_nvfp4.dequantize_serialized_nvfp4(layer.weight_packed, layer.weight_scale, 4.0, torch.bfloat16)
+    torch.testing.assert_close(output, torch.nn.functional.linear(x * 2.0, weight))
 
 
 def _tiny_conditioner_config(keep_bf16: tuple[str, ...] = ("mlp.down_proj", )) -> MiniMaxH3Qwen3VLConfig:

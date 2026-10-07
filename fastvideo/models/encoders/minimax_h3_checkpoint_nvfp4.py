@@ -48,6 +48,8 @@ import torch
 from torch import nn
 from torch.nn.parameter import Parameter
 
+import fastvideo.envs as envs
+
 from fastvideo.distributed import get_tp_world_size
 from fastvideo.layers.linear import LinearBase, LinearMethodBase
 from fastvideo.layers.quantization.base_config import QuantizationConfig
@@ -59,6 +61,9 @@ from fastvideo.layers.quantization.nvfp4_config import (
     _require_flashinfer,
 )
 from fastvideo.models.utils import set_weight_attrs
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 NVFP4_GROUP_SIZE = 16
 NVFP4_SCALE_LAYOUT = "128x4"
@@ -190,6 +195,38 @@ def _nvfp4_linear(
     )
 
 
+_E2M1_VALUES = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0)
+
+
+def _fp4_gemm_supported(device: torch.device) -> bool:
+    """FP4 tensor-core GEMMs exist on Blackwell (sm_100 / sm_120) and newer."""
+    return torch.cuda.is_available() and torch.cuda.get_device_capability(device)[0] >= 10
+
+
+def unswizzle_128x4_scales(scale: torch.Tensor, rows: int, cols: int) -> torch.Tensor:
+    """FlashInfer ``layout_128x4`` block scales -> row-major ``[rows, cols]`` (E4M3 bytes).
+
+    The swizzled buffer holds the padded matrix ``[ceil(rows/128)*128, ceil(cols/4)*4]`` as
+    ``(row_tile, col_tile, row % 32, (row // 32) % 4, col % 4)``.
+    """
+    pad_rows, pad_cols = -(-rows // 128) * 128, -(-cols // 4) * 4
+    tiles = scale.reshape(-1)[:pad_rows * pad_cols].view(pad_rows // 128, pad_cols // 4, 32, 4, 4)
+    return tiles.permute(0, 3, 2, 1, 4).reshape(pad_rows, pad_cols)[:rows, :cols]
+
+
+def dequantize_serialized_nvfp4(weight_packed: torch.Tensor, weight_scale: torch.Tensor, global_scale: float,
+                                dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
+    """Packed E2M1 ``[out, in // 2]`` + swizzled E4M3 scales -> dense ``[out, in]`` weight."""
+    out_features, in_features = weight_packed.shape[0], weight_packed.shape[1] * 2
+    lut = torch.tensor(_E2M1_VALUES, device=weight_packed.device, dtype=torch.float32)
+    packed = weight_packed.view(torch.uint8)
+    values = torch.stack((lut[(packed & 0x0F).long()], lut[(packed >> 4).long()]), dim=-1).reshape(
+        out_features, in_features)
+    scales = unswizzle_128x4_scales(weight_scale.view(torch.uint8), out_features, in_features // NVFP4_GROUP_SIZE)
+    scales = scales.view(torch.float8_e4m3fn).float().repeat_interleave(NVFP4_GROUP_SIZE, dim=1)
+    return (values * scales / global_scale).to(dtype)
+
+
 class MiniMaxH3SerializedNVFP4Config(QuantizationConfig):
     """Serialized 16-group NVFP4 contract for the H3 text encoder.
 
@@ -279,15 +316,20 @@ class MiniMaxH3SerializedNVFP4Config(QuantizationConfig):
             raise RuntimeError(f"MiniMax-H3 serialized NVFP4 requires a CUDA device; got {device.type!r}")
         capability = torch.cuda.get_device_capability(device)
         capability_number = capability[0] * 10 + capability[1]
-        if capability_number < self.get_min_capability():
-            raise RuntimeError("MiniMax-H3 serialized NVFP4 requires GPU capability "
-                               f"sm{self.get_min_capability()} or newer, got sm{capability_number}")
-        if capability[0] not in (10, 12):
-            raise RuntimeError("MiniMax-H3 serialized NVFP4 runs FlashInfer's Blackwell FP4 GEMM; "
-                               f"got unsupported sm{capability_number}")
         if get_tp_world_size() > 1:
             raise NotImplementedError("MiniMax-H3 serialized NVFP4 supports a single GPU: packed FP4 columns and "
                                       "128x4 swizzled scale rows cannot be narrowed per tensor-parallel rank")
+        if capability_number < self.get_min_capability():
+            if capability_number < 80:
+                raise RuntimeError("MiniMax-H3 serialized NVFP4 needs bf16 compute (sm80+) for its de-quantized "
+                                   f"fallback, got sm{capability_number}")
+            logger.warning(
+                "MiniMax-H3 serialized NVFP4 on sm%d: no FP4 GEMM, each linear de-quantizes its weight to bf16 "
+                "per call", capability_number)
+            return
+        if capability[0] not in (10, 12):
+            raise RuntimeError("MiniMax-H3 serialized NVFP4 runs FlashInfer's Blackwell FP4 GEMM; "
+                               f"got unsupported sm{capability_number}")
         sf_layout, _, _ = _require_flashinfer()
         if not hasattr(sf_layout, "layout_128x4"):
             raise RuntimeError("The installed flashinfer has no SfLayout.layout_128x4; MiniMax-H3 serialized NVFP4 "
@@ -396,6 +438,11 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
         # ``mm_fp4`` folds both global scales into one multiplier. Activations use a
         # unit global scale, so the multiplier is the inverse weight global scale.
         device = weight_scale.device
+        # Serialized weights are immutable between post-load hooks. Keeping the
+        # validated scalar on the host avoids a CUDA synchronization per linear
+        # on the BF16 fallback used by consumer GPUs.
+        layer._nvfp4_dequant_global_scale = global_scale
+        layer._nvfp4_fused_dequant = envs.FASTVIDEO_H3_ENCODER_FUSED_DEQUANT.get()
         layer.register_buffer("_nvfp4_alpha", torch.tensor(1.0 / global_scale, dtype=torch.float32, device=device),
                               persistent=False)
         layer.register_buffer("_nvfp4_x_global_scale", torch.ones((), dtype=torch.float32, device=device),
@@ -404,14 +451,31 @@ class MiniMaxH3SerializedNVFP4LinearMethod(LinearMethodBase):
     @staticmethod
     def _apply_finalized(layer: torch.nn.Module, x: torch.Tensor, bias: torch.Tensor | None) -> torch.Tensor:
         x = _coerce_fp4_input_dtype(x)
+        # AWQ smoothing scales the activation for both paths below: the stored
+        # weight is the smoothed one whether it runs as FP4 or is de-quantized.
         if getattr(layer, "pre_quant_scale", None) is not None:
             x = x * layer.pre_quant_scale.to(device=x.device, dtype=x.dtype)
+        if not _fp4_gemm_supported(layer.weight_packed.device):
+            # Pre-Blackwell GPUs have no FP4 GEMM: expand this layer's weight to bf16 for the one call.
+            # The encoder runs once per request, so the transient weight is cheaper than keeping a bf16 copy.
+            dequantize = dequantize_serialized_nvfp4
+            if layer._nvfp4_fused_dequant:
+                from fastvideo.layers.quantization.nvfp4_dequant import dequantize_nvfp4_cuda
+                dequantize = dequantize_nvfp4_cuda
+            weight = dequantize(layer.weight_packed, layer.weight_scale, layer._nvfp4_dequant_global_scale, x.dtype)
+            return torch.nn.functional.linear(x, weight, None if bias is None else bias.to(x.dtype))
         original_shape = x.shape
         if x.numel() == 0:
             # An empty prompt has nothing to quantize; the FP4 kernels are not defined for zero rows.
             return x.new_zeros(*original_shape[:-1], layer.output_size_per_partition, dtype=torch.bfloat16)
-        x_fp4, x_scale = _quantize_activation_nvfp4(x.reshape(-1, original_shape[-1]), layer._nvfp4_x_global_scale)
-        output = _nvfp4_linear(x_fp4, x_scale, layer.weight_packed, layer.weight_scale, layer._nvfp4_alpha)
+        x_global_scale, alpha = layer._nvfp4_x_global_scale, layer._nvfp4_alpha
+        if alpha.device != layer.weight_packed.device:
+            # A streamed encoder layer is finalized on the host and only its packed weights visit the GPU;
+            # FlashInfer requires the scalars on the GEMM's device.
+            x_global_scale = x_global_scale.to(layer.weight_packed.device, non_blocking=True)
+            alpha = alpha.to(layer.weight_packed.device, non_blocking=True)
+        x_fp4, x_scale = _quantize_activation_nvfp4(x.reshape(-1, original_shape[-1]), x_global_scale)
+        output = _nvfp4_linear(x_fp4, x_scale, layer.weight_packed, layer.weight_scale, alpha)
         if bias is not None:
             # The GEMM emits bf16; keep it that way whatever dtype the bias was built in.
             output = output + bias.to(output.dtype)

@@ -41,8 +41,8 @@ class RecordingUniPC(FlowUniPCMultistepScheduler):
         return super().set_timesteps(*args, **kwargs)
 
 
-def test_causal_standard_resets_scheduler_per_block_and_caches_per_request(monkeypatch):
-    _patch_denoising_module(monkeypatch, "1.0")
+def test_causal_standard_resets_scheduler_per_block_and_caches_per_request(monkeypatch, env_overrides):
+    _patch_denoising_module(monkeypatch, env_overrides, "1.0")
     from fastvideo.pipelines.basic.wan.stages import causal_denoising
     monkeypatch.setattr(causal_denoising, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(causal_denoising, "set_forward_context", lambda **kwargs: nullcontext())

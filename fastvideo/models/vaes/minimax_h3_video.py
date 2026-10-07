@@ -15,6 +15,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+import fastvideo.envs as envs
+
 from fastvideo.attention import get_attn_backend
 from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
 from fastvideo.platforms import AttentionBackendEnum
@@ -300,6 +302,7 @@ class MiniMaxH3VideoAttention(nn.Module):
         self.heads = heads
         self.dim_head = dim_head
         self.use_bias = bias
+        self._share_int8_qkv = envs.FASTVIDEO_H3_VAE_INT8_SHARED_QKV.get()
         inner_dim = heads * dim_head
         self.norm_q = nn.RMSNorm(dim_head, eps=eps, elementwise_affine=False)
         self.norm_k = nn.RMSNorm(dim_head, eps=eps, elementwise_affine=False)
@@ -339,9 +342,13 @@ class MiniMaxH3VideoAttention(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """Apply dense self-attention to one spatial VAE token sequence."""
-        query = self.to_q(hidden_states).unflatten(2, (self.heads, -1))
-        key = self.to_k(hidden_states).unflatten(2, (self.heads, -1))
-        value = self.to_v(hidden_states).unflatten(2, (self.heads, -1))
+        if self._share_int8_qkv and not torch.is_grad_enabled() and not torch.compiler.is_compiling():
+            from fastvideo.models.vaes.minimax_h3_int8_convrot import shared_int8_projections
+            projections = shared_int8_projections((self.to_q, self.to_k, self.to_v), hidden_states)
+        else:
+            projections = tuple(layer(hidden_states) for layer in (self.to_q, self.to_k, self.to_v))
+        query, key, value = (projection.unflatten(2, (self.heads, -1)) for projection in projections)
+        del projections
 
         query = self.norm_q(query.float()).to(query.dtype)
         key = self.norm_k(key.float()).to(key.dtype)
@@ -520,6 +527,11 @@ class MiniMaxH3VideoViTDecoder3d(nn.Module):
             height * patch_size,
             width * patch_size,
         )
+
+
+def _tile_batch_size() -> int:
+    """Spatial tiles decoded per decoder call (``FASTVIDEO_H3_VAE_TILE_BATCH``, default 1 = per tile)."""
+    return max(1, envs.FASTVIDEO_H3_VAE_TILE_BATCH.get())
 
 
 def _is_minimax_h3_video_vae_decoder(name: str, submodule: nn.Module) -> bool:
@@ -817,10 +829,31 @@ class AutoencoderKLMiniMaxH3(nn.Module):
 
             ratio = self.spatial_compression_ratio
             rows = []
+            if _tile_batch_size() > 1 and len(set(y_lengths)) == 1 and len(set(x_lengths)) == 1:
+                # Every tile of the grid has one shape, and the ViT decoder
+                # treats batch entries independently: decode the grid in a few
+                # large calls instead of one small call per tile.
+                with nvtx_range("minimax_h3.vae.decode_clip.decode_tile_batches"):
+                    latent_tiles = [
+                        z[..., y_position // ratio:(y_position + y_length) // ratio,
+                          x_position // ratio:(x_position + x_length) // ratio]
+                        for y_position, y_length in zip(y_indices, y_lengths)
+                        for x_position, x_length in zip(x_indices, x_lengths)
+                    ]
+                    decoded: list[torch.Tensor] = []
+                    per_call = _tile_batch_size()
+                    for start in range(0, len(latent_tiles), per_call):
+                        batch = torch.cat(latent_tiles[start:start + per_call], dim=0)
+                        # Clone before retaining: under the reduce-overhead compile the decoder output lives in
+                        # a CUDA-graph pool that the next batch's replay overwrites.
+                        out = self.decoder(self._project_decoder_tile(batch)).clone()
+                        decoded.extend(out.split(z.shape[0], dim=0))
+                    columns = len(x_indices)
+                    rows = [decoded[index:index + columns] for index in range(0, len(decoded), columns)]
             # The eager tile driver owns NVTX so each marker remains outside
             # the compiled decoder graph.
             with nvtx_range("minimax_h3.vae.decode_clip.decode_tiles"):
-                for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths)):
+                for row_index, (y_position, y_length) in enumerate(zip(y_indices, y_lengths) if not rows else ()):
                     row = []
                     for column_index, (x_position, x_length) in enumerate(zip(x_indices, x_lengths)):
                         with nvtx_range(f"minimax_h3.vae.decode_clip.tile.{row_index}.{column_index}"):
