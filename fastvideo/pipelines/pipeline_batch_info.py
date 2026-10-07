@@ -92,6 +92,20 @@ class ForwardBatch:
     video_path: str | None = None
     video_latent: torch.Tensor | None = None
 
+    # Wan-Animate inputs: paths to the *preprocessed* driving artifacts (the
+    # official wan/modules/animate/preprocess outputs), and the tensors the
+    # animate stages derive from them. background/mask are replace-mode only.
+    pose_video_path: str | None = None
+    face_video_path: str | None = None
+    background_video_path: str | None = None
+    mask_video_path: str | None = None
+    # None -> "animation"; normalised in AnimateConditioningLatentsStage. (The
+    # batch is built from SamplingParam with Nones included, so a non-None
+    # default here would never survive.)
+    animate_mode: str | None = None
+    pose_latents: torch.Tensor | None = None
+    face_pixel_values: torch.Tensor | None = None
+
     # Audio-driven inputs (Wan S2V). `audio_embeds` holds the stacked wav2vec2
     # hidden states [B, num_layers, C_a, T] produced by the audio encoding stage
     # and consumed by the DiT's audio injector.
@@ -339,6 +353,7 @@ class TrainingBatch:
     timesteps: torch.Tensor | None = None
     sigmas: torch.Tensor | None = None
     noise: torch.Tensor | None = None
+    training_target: torch.Tensor | None = None
 
     # MiniMax H3 reuses the packed row boundaries from batch preparation to
     # split the transformer's joint sequence back into video and audio outputs.

@@ -657,8 +657,11 @@ def verify_model_config_and_directory(
     else:
         # Full snapshots keep the historical invariant that transformer/ is
         # present and every active manifest component exists locally.
+        # Explicitly marked offline preprocessor trees contain only frozen
+        # encoders and avoid duplicating a DiT that will never be loaded.
         transformer_dir = os.path.join(model_path, "transformer")
-        if not os.path.exists(transformer_dir):
+        preprocessor_only = config.get("_fastvideo_preprocessor_only") is True
+        if not preprocessor_only and not os.path.exists(transformer_dir):
             raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
     # Diffusers convention: component entries start with [library, class].
