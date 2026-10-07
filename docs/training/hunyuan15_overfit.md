@@ -5,10 +5,10 @@ FastVideo's modular training stack: preprocessing one clip, running a
 single-GPU overfit to verify the pipeline end to end, and scaling out to
 full-parameter multi-GPU fine-tuning.
 
-The preprocessing step below relies on the HY1.5 data-side pipeline — the
-dual text-embedding parquet schema, its collate path, and
-`preprocess_hunyuan15_overfit.py` — which ships separately. Training itself
-only needs the parquet that step produces.
+Preprocessing runs `preprocess_hunyuan15_overfit.py`, which encodes both
+text streams (Qwen2.5-VL and the ByT5 glyph encoder) into the dual-text
+parquet schema the training plugin reads. Training itself only needs the
+parquet that step produces.
 
 ## What you need
 
@@ -78,6 +78,11 @@ Expected output:
 Wrote 1 records to data/hunyuan15_overfit_preprocessed/data_00000.parquet
 ```
 
+The script reads `data/hunyuan15_overfit` and writes to
+`data/hunyuan15_overfit_preprocessed`. To use other directories, set
+`FASTVIDEO_TEST_HUNYUAN15_OVERFIT_DATA_DIR` and
+`FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR`.
+
 A `(0, 1472)` ByT5 shape is normal and expected: ByT5 only receives the
 glyph text extracted from quotes in the caption, so most captions produce
 zero tokens. The training plugin trims and forwards that zero-length
@@ -144,8 +149,9 @@ full-parameter training across 8 GPUs with FSDP. Full-parameter training
 does not fit one 80GB card:
 
 It reads `data/hunyuan15_preprocessed` (and its `validation_prompts.json`),
-not the overfit directory above — either preprocess into that path or pass
-`--training.data.data_path` and `--callbacks.validation.dataset_file`.
+not the overfit directory above — either preprocess into that path (set
+`FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR=data/hunyuan15_preprocessed`) or
+pass `--training.data.data_path` and `--callbacks.validation.dataset_file`.
 
 | | bf16 |
 |---|---|
