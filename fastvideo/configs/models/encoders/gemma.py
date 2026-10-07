@@ -30,6 +30,7 @@ class LTX2GemmaArchConfig(TextEncoderArchConfig):
     num_attention_heads: int = 30
     text_len: int = 1024
     pad_token_id: int = 0
+    bos_token_id: int = 2
     eos_token_id: int = 2
 
     gemma_model_path: str = ""
@@ -58,6 +59,7 @@ class LTX2GemmaArchConfig(TextEncoderArchConfig):
     connector_rope_type: str = "split"
     connector_double_precision_rope: bool = False
     connector_apply_gated_attention: bool = False
+    connector_ff_bias: bool = True
     connector_num_learnable_registers: int | None = 128
 
     _fsdp_shard_conditions: list = field(
