@@ -83,6 +83,9 @@ class DreamXWorldARCausalDenoisingStage(DenoisingStage):
                 camera_block = self._slice_camera(y_camera, start, current_num_frames)
 
                 for idx, current_timestep in enumerate(timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     timestep = torch.full(
                         (latents.shape[0], current_num_frames * frame_seq_length),
                         int(current_timestep.item()),
