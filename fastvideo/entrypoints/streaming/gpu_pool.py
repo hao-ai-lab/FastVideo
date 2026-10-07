@@ -336,8 +336,8 @@ class SubprocessGpuPool(GpuPool):
         )
         # mp.Queue.put can block if the underlying pipe buffer is full;
         # offload to a thread so the event loop keeps serving other
-        # sessions. If the put itself fails, drop the pending entry so
-        # _drain_results doesn't dangle a future forever.
+        # sessions. A cancelled caller cannot stop the executor thread or
+        # generation, so detach its pending entry and discard late replies.
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(
@@ -348,10 +348,10 @@ class SubprocessGpuPool(GpuPool):
                     "request": request
                 },
             )
-        except Exception:
+            return await asyncio.wrap_future(future)
+        finally:
             self._pending.pop(job_id, None)
-            raise
-        return await asyncio.wrap_future(future)
+            future.cancel()
 
     async def release(self, session_id: str) -> None:
         async with self._lock:
@@ -418,7 +418,12 @@ class SubprocessGpuPool(GpuPool):
                 if job_id is None:
                     continue
                 pending = self._pending.pop(job_id, None)
-                if pending is None:
+                # wrap_future can cancel the source future before run()'s
+                # finally block gets its turn on the event loop, and an
+                # abandoned job's late reply can arrive after run() already
+                # popped its entry. Either way there is no live waiter.
+                if pending is None or pending.future.done():
+                    logger.debug("pool: worker %s dropping reply for job %s", handle.worker_id, job_id)
                     continue
                 if msg.get("kind") == "error":
                     pending.future.set_exception(RuntimeError(msg["error"]))

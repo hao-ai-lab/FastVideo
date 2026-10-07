@@ -15,6 +15,7 @@ import pytest
 
 mx = pytest.importorskip("mlx.core")
 
+import fastvideo.envs as envs
 from fastvideo.mlx_runtime import minimax_h3 as h3
 from fastvideo.mlx_runtime import minimax_h3_vsa as vsa
 from fastvideo.mlx_runtime import minimax_h3_vsa_simd as simd
@@ -121,12 +122,12 @@ def test_configuration_is_transactional_and_invalidates_geometry():
 
 
 @pytest.fixture
-def tiny_h3_model(monkeypatch, request):
+def tiny_h3_model(env_overrides, request):
     from fastvideo.tests.mlx.tiny_h3 import build_hf_config, build_tiny_h3_config, build_torch_model
     from fastvideo.tests.mlx.tiny_h3 import mlx_dit_from_torch_model
 
-    monkeypatch.setenv("MASTER_ADDR", "localhost")
-    monkeypatch.setenv("MASTER_PORT", "29513")
+    env_overrides.enter_context(envs.override_external("MASTER_ADDR", "localhost"))
+    env_overrides.enter_context(envs.override_external("MASTER_PORT", "29513"))
     request.getfixturevalue("distributed_setup")
     return mlx_dit_from_torch_model(build_torch_model(), build_hf_config(build_tiny_h3_config()))
 
@@ -165,7 +166,8 @@ def test_dense_generate_ignores_unused_vsa_parameters(tmp_path, monkeypatch):
     pipeline = object.__new__(pipeline_mod.MiniMaxH3MLXPipeline)
     pipeline.video_decode_backend = "h3-vae"
     pipeline.dit_checkpoint = tmp_path
-    monkeypatch.setattr(pipeline_mod, "_validate_checkpoint_step_ladder", lambda *a: None)
+    pipeline.model_root = tmp_path
+    monkeypatch.setattr(pipeline_mod, "_validate_checkpoint_step_ladder", lambda *a, **k: None)
     def stop_at_media_preflight(**kwargs):
         raise RuntimeError("reached media preflight")
     monkeypatch.setattr(pipeline_mod, "_preflight_media_dependencies", stop_at_media_preflight)
@@ -260,6 +262,26 @@ def test_no_metal_probe_is_cached(monkeypatch):
     assert not simd.simd_kernel_available()
 
 
+def test_m1_simd_falls_back_before_compilation(monkeypatch):
+    monkeypatch.setattr(simd, "_SIMD_KERNEL", None)
+    monkeypatch.setattr(simd, "_SIMD_KERNEL_ERROR", None)
+    monkeypatch.setattr(mx.metal, "is_available", lambda: True)
+    monkeypatch.setattr(mx.metal, "device_info", lambda: {"device_name": "Apple M1"})
+    monkeypatch.setattr(mx.fast, "metal_kernel", lambda **kwargs: pytest.fail("M1 must not compile SIMD VSA"))
+    assert not simd.simd_kernel_available()
+    assert "BF16 parity is unvalidated" in simd.simd_kernel_error()
+
+
+def test_small_virtual_metal_simd_falls_back_before_compilation(monkeypatch):
+    monkeypatch.setattr(simd, "_SIMD_KERNEL", None)
+    monkeypatch.setattr(simd, "_SIMD_KERNEL_ERROR", None)
+    monkeypatch.setattr(mx.metal, "is_available", lambda: True)
+    monkeypatch.setattr(mx.metal, "device_info", lambda: {"device_name": "Virtual GPU", "memory_size": 7 * 2**30})
+    monkeypatch.setattr(mx.fast, "metal_kernel", lambda **kwargs: pytest.fail("small GPU must not compile SIMD VSA"))
+    assert not simd.simd_kernel_available()
+    assert "8 GiB Metal devices" in simd.simd_kernel_error()
+
+
 def _require_metal():
     if not mx.metal.is_available() or mx.default_device() != mx.gpu:
         pytest.skip("requires actual Metal execution")
@@ -320,10 +342,48 @@ def test_converter_continues_past_mismatched_existing_format(tmp_path, monkeypat
     (existing / h3.H3_MANIFEST_FILENAME).write_text(json.dumps({"vsa": {"capable": False}}))
     (existing / h3.H3_WEIGHTS_FILENAME).write_bytes(b"existing")
     monkeypatch.setattr(converter, "parse_args", lambda: argparse.Namespace(
-        formats="int8 int6", out=tmp_path, model_root="unused", include_vsa=True))
+        formats="int8 int6", out=tmp_path, model_root="unused", include_vsa=True,
+        nvfp4_conditioner_root=None, nvfp4_conditioner_out=None))
     monkeypatch.setattr(converter, "mlx_h3_dit_from_diffusers_safetensors", lambda *a, **k: _dit())
     saved = []
     monkeypatch.setattr(converter, "save_mlx_h3_checkpoint", lambda model, path: saved.append(path.name))
     converter.main()
     assert saved == ["int6"]
     assert (existing / h3.H3_WEIGHTS_FILENAME).read_bytes() == b"existing"
+
+
+def test_converter_rerun_skips_published_encoder_cache(tmp_path, monkeypatch):
+    path = Path(__file__).resolve().parents[3] / "scripts/checkpoint_conversion/convert_minimax_h3_mlx.py"
+    spec = importlib.util.spec_from_file_location("h3_converter_encoder_rerun", path)
+    converter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(converter)
+    from fastvideo.mlx_runtime import minimax_h3_conditioner as conditioner
+
+    existing = tmp_path / "int8"
+    existing.mkdir()
+    (existing / h3.H3_MANIFEST_FILENAME).write_text(json.dumps({"vsa": {"capable": False}}))
+    (existing / h3.H3_WEIGHTS_FILENAME).write_bytes(b"existing")
+    encoder = tmp_path / "nvfp4-encoder"
+    encoder.mkdir()
+    (encoder / conditioner.MLX_NVFP4_ENCODER_MANIFEST).write_text("{}")
+    (encoder / "model.safetensors").write_bytes(b"cached")
+    monkeypatch.setattr(converter, "parse_args", lambda: argparse.Namespace(
+        formats="int8", out=tmp_path, model_root="unused", include_vsa=False,
+        nvfp4_conditioner_root=tmp_path / "packed", nvfp4_conditioner_out=None))
+    exported = []
+    monkeypatch.setattr(conditioner, "export_mlx_h3_nvfp4_encoder", lambda *args: exported.append(args))
+    converter.main()
+    assert exported == []
+    assert (encoder / "model.safetensors").read_bytes() == b"cached"
+
+
+@pytest.mark.parametrize("memory_gib,budget_mib", [(16, 256), (32, 256), (64, 512), (128, 1024), (512, 2048)])
+def test_reference_gather_budget_scales_with_unified_memory(monkeypatch, memory_gib, budget_mib):
+    info = lambda: {"memory_size": memory_gib * 2**30}  # noqa: E731
+    monkeypatch.setattr(mx, "device_info", info, raising=False)
+    monkeypatch.setattr(mx.metal, "device_info", info)
+    vsa._reference_gather_target_bytes.cache_clear()
+    try:
+        assert vsa._reference_gather_target_bytes() == budget_mib * 2**20
+    finally:
+        vsa._reference_gather_target_bytes.cache_clear()

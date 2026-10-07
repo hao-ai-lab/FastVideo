@@ -2,7 +2,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
@@ -11,6 +11,11 @@ from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.utils import update_config_from_args
 from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean, shallow_asdict
+
+if TYPE_CHECKING:
+    from fastvideo.api.sampling_param import SamplingParam
+    from fastvideo.api.schema import GenerationRequest
+    from fastvideo.fastvideo_args import FastVideoArgs
 
 logger = init_logger(__name__)
 
@@ -280,6 +285,25 @@ class PipelineConfig:
             raise ValueError(
                 f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
             )
+
+    def resolve_checkpoint_settings(self, fastvideo_args: "FastVideoArgs") -> None:
+        """Apply the run settings that the checkpoint at ``fastvideo_args.model_path`` fixes.
+
+        ``FastVideoArgs.__post_init__`` calls this once in the main process, before
+        argument validation and before any weights load. Most checkpoints fix no
+        run settings, so the base implementation does nothing.
+        """
+
+    def apply_request_constraints(self, request: "GenerationRequest",
+                                  sampling_param: "SamplingParam") -> "SamplingParam":
+        """Apply this model's constraints on a generation request to its sampling parameters.
+
+        ``sampling_param`` holds the preset defaults with the request's explicit
+        fields applied. A model sets the values it fixes when the request leaves
+        them unset, and raises when the request sets a value it does not accept.
+        The base PipelineConfig accepts every request unchanged.
+        """
+        return sampling_param
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)

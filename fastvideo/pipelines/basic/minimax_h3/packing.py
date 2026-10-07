@@ -89,6 +89,14 @@ class MiniMaxH3PackedLayout:
     latent_height: int
     latent_width: int
     num_audio_latents: int
+    # Per-reference conditioning spans in packed order (Ref2VA only; empty
+    # elsewhere): (kind, row_count, latent_shape) covering exactly the rows
+    # between the text tokens and the target audio. kind is "audio", "image",
+    # or "video"; latent_shape is the reference's raw latent (frames, height,
+    # width) for visual kinds and (0, 0, 0) for audio. A video reference with
+    # sound contributes two entries, its audio rows first. VSA-H3 uses them to
+    # tile (and sparsify) reference-video regions in place.
+    reference_segments: tuple[tuple[str, int, tuple[int, int, int]], ...] = ()
 
 
 def resolve_canvas_size(aspect_width: float, aspect_height: float) -> tuple[int, int]:
@@ -116,6 +124,13 @@ def align_num_frames(num_frames: int) -> int:
     while num_frames % MINIMAX_H3_FRAMES_PER_CHUNK != MINIMAX_H3_LATENTS_PER_CHUNK:
         num_frames += 1
     return num_frames
+
+
+# Duration limits are seconds; requests are validated against the aligned buckets
+# they map to. The 15-second target (360 frames) pads to 362 on the causal-VAE
+# grid, so 362 is the largest accepted bucket.
+MINIMAX_H3_MIN_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MIN_DURATION * MINIMAX_H3_FPS))
+MINIMAX_H3_MAX_ALIGNED_FRAMES = align_num_frames(int(MINIMAX_H3_MAX_DURATION * MINIMAX_H3_FPS))
 
 
 def video_latent_num_frames(num_frames: int) -> int:
@@ -388,10 +403,13 @@ def build_ref2va_packed_sequence(
 
     video_indices: list[torch.Tensor] = []
     audio_indices: list[torch.Tensor] = []
+    reference_segments: list[tuple[str, int, tuple[int, int, int]]] = []
     cursor = num_text_tokens
     rotary_time = float(num_text_tokens)
     for reference, visual_row_count in zip(references, visual_row_counts, strict=True):
+        visual_latent_shape = (reference.num_latent_frames, reference.latent_height, reference.latent_width)
         if reference.media_type == "image":
+            reference_segments.append(("image", visual_row_count, visual_latent_shape))
             rows = slice(cursor, cursor + visual_row_count)
             cursor = rows.stop
             video_indices.append(torch.arange(rows.start, rows.stop))
@@ -406,6 +424,7 @@ def build_ref2va_packed_sequence(
             rotary_time += 1.0
         elif reference.media_type == "audio":
             count = reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS
+            reference_segments.append(("audio", count, (0, 0, 0)))
             rows = slice(cursor, cursor + count)
             cursor = rows.stop
             audio_indices.append(torch.arange(rows.start, rows.stop))
@@ -413,6 +432,9 @@ def build_ref2va_packed_sequence(
             rotary_time += float(reference.num_audio_latents)
         elif reference.media_type == "video":
             audio_count = reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS if reference.has_audio else 0
+            if audio_count:
+                reference_segments.append(("audio", audio_count, (0, 0, 0)))
+            reference_segments.append(("video", visual_row_count, visual_latent_shape))
             audio_rows = slice(cursor, cursor + audio_count)
             video_rows = slice(audio_rows.stop, audio_rows.stop + visual_row_count)
             cursor = video_rows.stop
@@ -476,6 +498,7 @@ def build_ref2va_packed_sequence(
         latent_height=latent_height,
         latent_width=latent_width,
         num_audio_latents=num_audio_latents,
+        reference_segments=tuple(reference_segments),
     )
 
 
