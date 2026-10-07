@@ -120,3 +120,40 @@ def test_build_generator_config_multi_gpu_shards_dit(tmp_path, num_gpus, sharded
     assert config.engine.use_fsdp_inference is sharded
     assert config.engine.parallelism.sp_size == num_gpus
     assert config.pipeline.components.override_pipeline_cls_name == "MiniMaxH3Ref2VAModularPipeline"
+
+
+def test_default_config_offloads_the_encoders(tmp_path):
+    offload = example.build_generator_config(tmp_path, 4).engine.offload
+    assert (offload.text_encoder, offload.vae, offload.pin_cpu_memory) == (True, True, False)
+
+
+@pytest.mark.parametrize("num_gpus", [1, 4])
+def test_lossless_accel_config(tmp_path, num_gpus):
+    config = example.build_generator_config(tmp_path, num_gpus, lossless_accel=True)
+    offload = config.engine.offload
+    assert (offload.text_encoder, offload.vae, offload.pin_cpu_memory) == (False, False, True)
+    assert config.pipeline.experimental == {
+        "vae_parallel_decode": num_gpus > 1,
+        "vae_parallel_encode": num_gpus > 1,
+    }
+
+
+def test_lossless_accel_env_names_registered_flags_and_keeps_user_values(monkeypatch):
+    from fastvideo import envs
+
+    for name, value in example.LOSSLESS_ACCEL_ENV.items():
+        assert name in envs.environment_variables
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("FASTVIDEO_ULYSSES_A2A", "off")
+    example.apply_lossless_accel_env()
+    assert envs.FASTVIDEO_ULYSSES_A2A.get() == "off"
+    assert envs.FASTVIDEO_MINIMAX_H3_EXACT_KERNELS.get() == "all"
+    assert envs.FASTVIDEO_H3_VSA_HEADS_FIRST_TILE.get() is True
+    assert envs.FASTVIDEO_H3_VAE_TILE_PARALLEL.get() is True
+    assert envs.FASTVIDEO_H3_REF2VA_MEMO_ENTRIES.get() == 16
+
+
+def test_lossless_accel_flag_parses():
+    argv = ["--model-path", "m", "--prompt", "p", "--image", "a.png"]
+    assert example.parse_args(argv).lossless_accel is False
+    assert example.parse_args([*argv, "--lossless-accel"]).lossless_accel is True
