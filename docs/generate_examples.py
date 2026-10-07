@@ -43,6 +43,7 @@ COOKBOOK_FAMILIES = {
     "hunyuan",
     "cosmos",
     "kandinsky5",
+    "kandinsky6",
     "flux",
     "glm_image",
     "zimage",

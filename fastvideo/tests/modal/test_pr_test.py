@@ -335,6 +335,30 @@ def test_run_unit_test_uses_shared_command(monkeypatch):
         assert test_path in unit_command
 
 
+def test_run_unit_test_collects_the_whole_attention_directory(monkeypatch):
+    """Naming individual files under fastvideo/tests/attention/ let new ones
+    land uncovered; collect the directory -- with the FA2/FA3 legs enabled --
+    so that cannot happen silently."""
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_unit_test()
+
+    # Modal and the Slurm runner both execute the shared script, so the
+    # selection is asserted on the script itself.
+    assert commands == ["bash .buildkite/scripts/unit_test.sh"]
+    unit_script = (Path(__file__).resolve().parents[3] / ".buildkite/scripts/unit_test.sh").read_text()
+    tokens = unit_script.split()
+    # The FA2/FA3 regression files in the directory skip under the FA4
+    # default, so the lane has to opt out for the directory to be real
+    # coverage rather than a nominal collection.
+    assert "FASTVIDEO_FA4=0" in tokens
+    assert "./fastvideo/tests/attention/" in tokens
+    # The per-file entries must be gone, not merely joined by the directory.
+    assert not [token for token in tokens if token.startswith("./fastvideo/tests/attention/test_")]
+
+
 def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
     """Modal and the self-hosted CI runner must execute the same per-lane scripts so
     their test selections cannot drift (same contract as the unit lane)."""
@@ -386,3 +410,22 @@ def test_wave1_lane_functions_use_shared_scripts(monkeypatch):
     eval_source = (Path(__file__).resolve().parent / "pr_test.py").read_text()
     assert "bash .buildkite/scripts/lanes/eval.sh" in eval_source
     assert 'install_command=\'uv pip install -e ".[test,eval-full]"\'' in eval_source
+
+
+def test_run_performance_tests_collects_only_benchmark_gate(monkeypatch):
+    module = _load_pr_test_module(monkeypatch)
+    commands = []
+    monkeypatch.setattr(module, "run_test", commands.append)
+
+    module.run_performance_tests()
+
+    assert len(commands) == 1
+    command = commands[0]
+    assert "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs;" in command
+    assert "pytest ./fastvideo/tests/performance -vs;" not in command
+
+
+def test_performance_lane_script_collects_only_benchmark_gate():
+    lane_script = (Path(__file__).resolve().parents[3] / ".buildkite/scripts/lanes/performance.sh").read_text()
+    assert "pytest ./fastvideo/tests/performance/test_inference_performance.py -vs" in lane_script
+    assert "pytest ./fastvideo/tests/performance -vs" not in lane_script

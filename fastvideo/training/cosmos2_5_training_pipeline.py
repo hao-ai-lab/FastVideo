@@ -133,22 +133,16 @@ class Cosmos25TrainingPipeline(TrainingPipeline):
 # Entry point (mirrors wan_training_pipeline.py)
 # ---------------------------------------------------------------------------
 
-
-def main(args) -> None:
-    logger.info("Starting Cosmos 2.5 training pipeline...")
-    pipeline = Cosmos25TrainingPipeline.from_pretrained(args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
-
-
 if __name__ == "__main__":
-    from fastvideo.fastvideo_args import TrainingArgs
-    from fastvideo.utils import FlexibleArgumentParser
+    logger.warning("\n"
+                   "================================================================================\n"
+                   "[DEPRECATED]: Direct execution of this pipeline is deprecated!\n"
+                   "Please use `fastvideo/training/runner.py` instead.\n"
+                   "================================================================================")
+    from fastvideo.training.runner import main
+    from fastvideo.utils import build_parser
 
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+    parser = build_parser("Cosmos25TrainingPipeline", "fastvideo.training.cosmos2_5_training_pipeline")
     args = parser.parse_args()
     args.dit_cpu_offload = False
     main(args)

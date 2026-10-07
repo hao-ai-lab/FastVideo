@@ -22,6 +22,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     build_row_timesteps,
 )
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
+from fastvideo.pipelines.basic.minimax_h3.vsa_guard import refuse_zero_initialized_h3_vsa
+from fastvideo.pipelines.lazy_module import is_lazy_module
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -191,6 +193,10 @@ class MiniMaxH3DenoisingStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Denoise the packed H3 video and audio streams over one shared schedule."""
+        transformer = self.transformer
+        if is_lazy_module(transformer):
+            transformer.materialize()
+        refuse_zero_initialized_h3_vsa(transformer)
         layout = batch.extra.get(MINIMAX_H3_LAYOUT_KEY)
         if not isinstance(layout, MiniMaxH3PackedLayout):
             raise ValueError("MiniMax-H3 packed layout is missing before denoising.")
@@ -291,6 +297,9 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             with profiler_region("inference_denoising"), nvtx_range("minimax_h3.dit"):
                 for index, (video_timestep,
                             audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps, strict=True)):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
                     attn_metadata = None
                     if vsa_metadata_builder is not None:

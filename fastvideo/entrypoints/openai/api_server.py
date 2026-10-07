@@ -24,6 +24,7 @@ from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.registry import get_preset_selection
+from fastvideo.worker.executor import reject_external_launcher
 
 logger = init_logger(__name__)
 
@@ -99,6 +100,11 @@ def create_app(
     runtime: str = "cuda",
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
+
+    reject_external_launcher(
+        fastvideo_args.distributed_executor_backend,
+        entrypoint="the OpenAI-compatible server",
+    )
 
     app = FastAPI(
         title="FastVideo OpenAI-Compatible API",
