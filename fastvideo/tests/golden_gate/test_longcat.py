@@ -16,8 +16,10 @@ plain tensor, so no postprocess. Backend FLASH_ATTN per the ssim test
 
 from __future__ import annotations
 
+
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import GateSpec, distributed_runtime, run_gate
 
 __all__ = ["distributed_runtime"]
@@ -69,7 +71,7 @@ SPEC = GateSpec(
     prefix_template="blocks.{N}.",
     renames=(),
     attention_backend="FLASH_ATTN",
-    model_root_env="LONGCAT_MODEL_ROOT",
+    model_root=lambda: envs.FASTVIDEO_TEST_LONGCAT_MODEL_ROOT.get(),
     weight_file="model.safetensors",  # single 54.3 GB fp32 file, no index.json
 )
 

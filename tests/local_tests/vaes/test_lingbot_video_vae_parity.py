@@ -18,8 +18,8 @@ from diffusers import AutoencoderKLWan as OfficialAutoencoderKLWan
 from safetensors.torch import load_file
 from torch.testing import assert_close
 
-from fastvideo.configs.models.vaes.wanvae import WanVAEConfig
-from fastvideo.models.vaes.wanvae import AutoencoderKLWan as FastVideoAutoencoderKLWan
+from fastvideo.models.wan.vae import AutoencoderKLWan as FastVideoAutoencoderKLWan
+from fastvideo.models.wan.vae_config import WanVAEConfig
 from tests.local_tests.lingbot_video.hf_assets import (
     FASTVIDEO_DENSE,
     OFFICIAL_DENSE,
