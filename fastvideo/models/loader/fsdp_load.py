@@ -36,10 +36,14 @@ def _summarize_param_names(names: set[str]) -> str:
     return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
 
 
-def _should_stage_transformer_weights_on_cpu(*, cpu_offload: bool, use_fsdp: bool,
+def _should_stage_transformer_weights_on_cpu(*, cpu_offload: bool, fsdp_inference: bool,
                                              has_unified_memory: bool) -> bool:
-    """Keep full FSDP source tensors off discrete GPUs while shards materialize."""
-    return cpu_offload or (use_fsdp and not has_unified_memory)
+    """Keep full FSDP-inference source tensors off discrete GPUs while shards materialize.
+
+    FSDP training keeps its historical ``cpu_offload``-only staging, so this
+    change stays scoped to the inference path.
+    """
+    return cpu_offload or (fsdp_inference and not has_unified_memory)
 
 
 def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lora_merge: bool = False) -> None:
@@ -282,16 +286,16 @@ def maybe_load_fsdp_model(
                     pin_cpu_memory=pin_cpu_memory)
 
     has_unified_memory = False
-    if use_fsdp and not cpu_offload:
+    if fsdp_inference and not cpu_offload:
         device_index = device.index if device.index is not None else 0
         has_unified_memory = current_platform.has_unified_memory(device_index)
     # GPU-direct avoids duplicating the host working set on unified-memory
-    # devices. Discrete FSDP must stage the full source tensors on CPU while
-    # each rank materializes its shard, or the full checkpoint and shards peak
-    # together on the accelerator.
+    # devices. Discrete FSDP inference must stage the full source tensors on CPU
+    # while each rank materializes its shard, or the full checkpoint and shards
+    # peak together on the accelerator. Training keeps GPU-direct loading.
     stage_weights_on_cpu = _should_stage_transformer_weights_on_cpu(
         cpu_offload=cpu_offload,
-        use_fsdp=use_fsdp,
+        fsdp_inference=fsdp_inference,
         has_unified_memory=has_unified_memory,
     )
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=stage_weights_on_cpu)

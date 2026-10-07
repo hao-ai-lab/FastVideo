@@ -43,6 +43,9 @@ class HeliosArchConfig(DiTArchConfig):
     guidance_cross_attn: bool = True
     zero_history_timestep: bool = True
     has_multi_term_memory_patch: bool = True
+    # Both fields are currently no-ops: ``__post_init__`` rejects the
+    # ``is_amplify_history=True`` variant, so the DiT never builds
+    # ``history_key_scale`` and ``history_scale_mode`` never selects a branch.
     is_amplify_history: bool = False
     history_scale_mode: str = "per_head"
 

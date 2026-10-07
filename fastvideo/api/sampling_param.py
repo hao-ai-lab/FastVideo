@@ -114,6 +114,8 @@ class SamplingParam:
     num_latent_frames_per_chunk: int = 9
     keep_first_frame: bool = True
     is_skip_first_chunk: bool = False
+    # Diffusers-signature compatibility only: the pinned Helios-Distilled model
+    # index declares ``is_cfg_zero_star=false``, so neither value changes sampling.
     use_zero_init: bool = True
     zero_steps: int = 1
     is_amplify_first_chunk: bool = False

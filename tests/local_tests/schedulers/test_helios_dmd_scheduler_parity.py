@@ -9,6 +9,7 @@ shift, first-chunk amplification, and both branches of the DMD step.
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -43,8 +44,13 @@ def _fastvideo_scheduler_class():
 
 def _make_pair():
     kwargs = _scheduler_kwargs()
+    # The official class declares fewer keys than the FastVideo port and has no
+    # ``**kwargs``, so a checkpoint shipping the extra shift keys must be
+    # filtered for it while the port still receives them.
+    official_keys = inspect.signature(OfficialHeliosDMDScheduler.__init__).parameters
+    official_kwargs = {key: value for key, value in kwargs.items() if key in official_keys}
     return (
-        OfficialHeliosDMDScheduler(**kwargs),
+        OfficialHeliosDMDScheduler(**official_kwargs),
         _fastvideo_scheduler_class()(**kwargs),
     )
 
@@ -56,6 +62,43 @@ def test_helios_dmd_scheduler_resolves_through_production_registry():
 
     assert architecture == "HeliosDMDScheduler"
     assert scheduler_cls is _fastvideo_scheduler_class()
+
+
+def test_helios_dmd_scheduler_registers_shift_config_used_for_mu():
+    """``HeliosPyramidDenoisingStage`` derives ``mu`` from these config keys.
+
+    They must survive ``register_to_config``; otherwise a checkpoint-provided
+    shift schedule is swallowed by ``**kwargs`` and silently replaced by the
+    literals, so the dynamic-shift timesteps diverge from the official class.
+    """
+    from fastvideo.pipelines.basic.helios.pipeline_utils import calculate_shift
+
+    kwargs = _scheduler_kwargs()
+    official, fastvideo = _make_pair()
+    for name, default in (
+        ("base_image_seq_len", 256),
+        ("max_image_seq_len", 4096),
+        ("base_shift", 0.5),
+        ("max_shift", 1.15),
+    ):
+        assert getattr(fastvideo.config, name) == getattr(official.config, name, kwargs.get(name, default))
+
+    # The mu the pipeline feeds to set_timesteps must come from the registered
+    # config, not from the literals.
+    mu = calculate_shift(
+        2176,
+        fastvideo.config.base_image_seq_len,
+        fastvideo.config.max_image_seq_len,
+        fastvideo.config.base_shift,
+        fastvideo.config.max_shift,
+    )
+    assert mu == calculate_shift(
+        2176,
+        kwargs.get("base_image_seq_len", 256),
+        kwargs.get("max_image_seq_len", 4096),
+        kwargs.get("base_shift", 0.5),
+        kwargs.get("max_shift", 1.15),
+    )
 
 
 @pytest.mark.parametrize("stage_index", [0, 1, 2])

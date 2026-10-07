@@ -192,6 +192,9 @@ publication requires separate upload approval, which this PR does not have.
 - The dedicated pyramid stage is required by the official nine-frame
   autoregressive chunks, three spatial levels, history geometry, block-noise
   covariance, stage-local DMD schedules, and chunk decode contract.
+- The discrete-GPU checkpoint-staging change in the shared loader is scoped to
+  FSDP *inference*; FSDP training keeps its previous `cpu_offload`-only
+  staging, so training runs are unaffected.
 - `use_zero_init` and `zero_steps` remain in the public call surface for
   Diffusers signature compatibility. The pinned Distilled model declares
   `is_cfg_zero_star=false`, so both official and FastVideo standard-CFG paths

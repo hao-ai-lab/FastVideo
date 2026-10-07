@@ -112,6 +112,22 @@ def test_pixel_frame_count_matches_official_chunk_decode_contract() -> None:
     assert get_generated_pixel_frames(264, 4) == 261
 
 
+def test_multi_chunk_trim_keeps_every_requested_frame() -> None:
+    """Exact chunk multiples must not lose trailing frames to double alignment.
+
+    Each chunk decodes to a complete pixel chunk, so re-applying
+    ``get_generated_pixel_frames`` to the concatenated pixel count drops trailing
+    frames for exact chunk multiples (66 -> 65, 132 -> 129, 264 -> 261); the trim
+    must only clamp to the request.
+    """
+    helpers = _helpers()
+    pixel_frames_per_chunk = (9 - 1) * 4 + 1
+    for num_frames in (66, 132, 264):
+        decoded_frames = helpers["num_chunks"](num_frames, 9, 4) * pixel_frames_per_chunk
+        assert min(num_frames, decoded_frames) == num_frames
+        assert helpers["generated_frames"](decoded_frames, 4) < num_frames
+
+
 def test_pyramid_shift_stays_linear_between_official_endpoints() -> None:
     calculate_shift = _helpers()["calculate_shift"]
 

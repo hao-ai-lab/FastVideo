@@ -164,7 +164,7 @@ def test_weights_still_land_in_the_model() -> None:
 
 
 @pytest.mark.parametrize(
-    ("cpu_offload", "use_fsdp", "has_unified_memory", "expected"),
+    ("cpu_offload", "fsdp_inference", "has_unified_memory", "expected"),
     [
         (True, False, False, True),
         (True, True, True, True),
@@ -176,12 +176,13 @@ def test_weights_still_land_in_the_model() -> None:
 )
 def test_transformer_checkpoint_staging_policy(
     cpu_offload: bool,
-    use_fsdp: bool,
+    fsdp_inference: bool,
     has_unified_memory: bool,
     expected: bool,
 ) -> None:
+    """FSDP inference stages on CPU for discrete GPUs; training keeps ``cpu_offload``."""
     assert fsdp_load._should_stage_transformer_weights_on_cpu(
         cpu_offload=cpu_offload,
-        use_fsdp=use_fsdp,
+        fsdp_inference=fsdp_inference,
         has_unified_memory=has_unified_memory,
     ) is expected

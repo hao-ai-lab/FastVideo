@@ -18,7 +18,6 @@ from fastvideo.pipelines.basic.helios.pipeline_utils import (
     build_helios_frame_indices,
     calculate_shift,
     downsample_to_pyramid_base,
-    get_generated_pixel_frames,
     get_num_latent_chunks,
     sample_block_noise,
 )
@@ -378,15 +377,17 @@ class HeliosChunkDecodingStage(DecodingStage):
         latent_chunks = batch.helios_latent_chunks
         if not isinstance(latent_chunks, list) or not latent_chunks:
             raise ValueError("Helios decoding requires non-empty helios_latent_chunks")
-        decoded_chunks = [self.decode(chunk, fastvideo_args) for chunk in latent_chunks]
+        # The DMD scheduler returns the bf16 model dtype; denormalize in fp32 like
+        # the official pipeline, which casts to vae.dtype before decoding.
+        decoded_chunks = [self.decode(chunk.float(), fastvideo_args) for chunk in latent_chunks]
         frames = torch.cat(decoded_chunks, dim=2)
 
-        temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
         assert isinstance(batch.num_frames, int)
-        generated_frames = min(
-            batch.num_frames,
-            get_generated_pixel_frames(frames.shape[2], temporal_scale),
-        )
+        # Each chunk decodes to a complete pixel chunk, so the concatenated
+        # frames already end on the official 1-mod-temporal-scale boundary;
+        # re-aligning them would drop trailing frames for exact 33-frame chunk
+        # multiples (66 -> 65, 264 -> 261).
+        generated_frames = min(batch.num_frames, frames.shape[2])
         batch.output = frames[:, :, :generated_frames].detach().to(dtype=torch.float32, device="cpu")
         batch.latents = None
         batch.helios_latent_chunks = None
@@ -404,6 +405,5 @@ __all__ = [
     "calculate_shift",
     "downsample_to_pyramid_base",
     "get_num_latent_chunks",
-    "get_generated_pixel_frames",
     "sample_block_noise",
 ]

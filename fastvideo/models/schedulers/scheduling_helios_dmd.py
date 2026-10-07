@@ -56,6 +56,13 @@ class HeliosDMDScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         use_flow_sigmas: bool = True,
         use_dynamic_shifting: bool = False,
         time_shift_type: Literal["exponential", "linear"] = "linear",
+        # Read off ``self.config`` by ``HeliosPyramidDenoisingStage`` to derive
+        # ``mu``; they must be declared here or checkpoint values are swallowed
+        # by ``**kwargs`` and replaced by these defaults.
+        base_image_seq_len: int = 256,
+        max_image_seq_len: int = 4096,
+        base_shift: float = 0.5,
+        max_shift: float = 1.15,
         scheduler_type: str = "dmd",
         _diffusers_version: str | None = None,
         **kwargs,
