@@ -1231,7 +1231,7 @@ class Cosmos25DistilledT2WDenoisingStage(Cosmos25DenoisingStage):
         else:
             fps_tensor = torch.as_tensor(batch.fps, device=latents.device, dtype=target_dtype).reshape(-1)
             if fps_tensor.numel() != 1:
-                # The Cosmos25 RoPE builds one batch-independent (T*H*W, D) table
+                # The Cosmos25 RoPE builds one batch-independent (T * H * W, D) table
                 # (see cosmos2_5.py), so the DiT consumes a single shared fps
                 # value per forward pass, never one value per sample.
                 if not torch.equal(fps_tensor, fps_tensor[:1].expand_as(fps_tensor)):
@@ -1355,7 +1355,7 @@ class Cosmos25DFDV2WDenoisingStage(Cosmos25DenoisingStage):
         fps_value = 24 if batch.fps is None else batch.fps
         fps_tensor = torch.as_tensor(fps_value, device=state.device, dtype=torch.float32).reshape(-1)
         if fps_tensor.numel() != 1:
-            # The Cosmos25 RoPE builds one batch-independent (T*H*W, D) table
+            # The Cosmos25 RoPE builds one batch-independent (T * H * W, D) table
             # (see cosmos2_5.py), so the DiT consumes a single shared fps
             # value per forward pass, never one value per sample.
             if not torch.equal(fps_tensor, fps_tensor[:1].expand_as(fps_tensor)):

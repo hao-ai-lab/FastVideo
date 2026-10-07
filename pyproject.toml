@@ -105,6 +105,8 @@ dependencies = [
 
     # Job Runner
     "fastapi>=0.129.0",
+    "orjson>=3.9.0",  # fastapi ORJSONResponse in the OpenAI-compatible server
+    "python-multipart>=0.0.18",  # fastapi Form/UploadFile parsing
     "uvicorn>=0.41.0"
 ]
 
