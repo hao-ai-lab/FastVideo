@@ -321,6 +321,8 @@ def _unversioned_mmaudio_detector(*, mode: str) -> Callable[[str], bool]:
         return ("16k" in normalized) if mode == "16k" else ("16k" not in normalized)
 
     return detector
+
+
 def _register_wan_configs(definitions: tuple[WanModelDefinition, ...]) -> None:
     for definition in definitions:
         register_configs(
