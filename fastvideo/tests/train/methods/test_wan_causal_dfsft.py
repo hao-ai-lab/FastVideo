@@ -13,10 +13,10 @@ in the fixture) and is the natural training counterpart of the
 
 from __future__ import annotations
 
-import os
+import fastvideo.envs as envs
 
-os.environ.setdefault("MASTER_ADDR", "localhost")
-os.environ.setdefault("MASTER_PORT", "29517")
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29517")
 
 from pathlib import Path
 
@@ -68,7 +68,7 @@ def test_wan_causal_dfsft_single_train_step(monkeypatch: pytest.MonkeyPatch) -> 
     # ``single_train_step``, so the parquet train dataloader that
     # ``init_preprocessors`` builds is never iterated.  Stub it out so
     # construction does not require a real ``training.data.data_path``:
-    # the minimal fixture deliberately omits one, and the Modal CI job
+    # the minimal fixture deliberately omits one, and the Slurm CI worker
     # mounts model weights rather than a parquet dataset.
     monkeypatch.setattr(
         "fastvideo.train.utils.dataloader."

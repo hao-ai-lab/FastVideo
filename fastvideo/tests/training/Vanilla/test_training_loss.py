@@ -1,7 +1,9 @@
 import os
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29512"
+import fastvideo.envs as envs
+
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29512")
 import sys
 import subprocess
 from pathlib import Path
@@ -58,8 +60,6 @@ def run_worker():
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ["WANDB_MODE"] = "online"
-
     data_dir = Path("data/crush-smol_processed_t2v")
 
     if not data_dir.exists():
@@ -78,7 +78,8 @@ def test_distributed_training():
         os.environ["MASTER_PORT"],
         str(current_file)
     ]
-    process = subprocess.run(cmd, capture_output=True, text=True)
+    with envs.override_external("WANDB_MODE", "offline"):
+        process = subprocess.run(cmd, capture_output=True, text=True)
 
     # Print stdout and stderr for debugging
     if process.stdout:
@@ -99,6 +100,11 @@ def test_distributed_training():
     elif "L40S" in device_name:
         reference_wandb_summary_file = l40s_reference_wandb_summary_file
     elif "H200" in device_name:
+        reference_wandb_summary_file = h200_reference_wandb_summary_file
+    elif "B200" in device_name:
+        # GB200 is the Slurm CI target. Use the closest high-memory baseline;
+        # correctness fields remain gated while the generous timing bounds
+        # intentionally absorb hardware throughput differences.
         reference_wandb_summary_file = h200_reference_wandb_summary_file
     else:
         raise ValueError(f"Unknown device: {device_name}")

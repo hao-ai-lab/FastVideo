@@ -5,6 +5,9 @@ The test compares the exact Transformers base model used by the official
 pipeline with FastVideo's production ``TextEncoderLoader`` path.  It covers
 the three numerical branches the H3 pipelines exercise: text-only tokens,
 image features, and video features.
+
+The production encoder returns only the selected layer-50 hidden state, which
+is compared bit-exactly with the same state from the official full stack.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import torch
 from PIL import Image
 from torch.testing import assert_close
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders.minimax_h3_qwen3_vl import MiniMaxH3Qwen3VLConfig
 from fastvideo.distributed import cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel
 from fastvideo.models.loader.component_loader import TextEncoderLoader
@@ -35,9 +39,9 @@ def _require_assets() -> tuple[torch.device, Path]:
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         pytest.fail("MiniMax-H3 Qwen3-VL parity requires a bf16-capable CUDA GPU", pytrace=False)
 
-    model_root = os.environ.get("MINIMAX_H3_MODEL_ROOT")
+    model_root = envs.FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT.get()
     if not model_root:
-        pytest.fail("set MINIMAX_H3_MODEL_ROOT to the downloaded MiniMax-H3 checkpoint", pytrace=False)
+        pytest.fail("set FASTVIDEO_TEST_MINIMAX_H3_MODEL_ROOT to the downloaded MiniMax-H3 checkpoint", pytrace=False)
     root = Path(model_root)
     required = (root / "text_encoder", root / "tokenizer", root / "processor")
     missing = [str(path) for path in required if not path.is_dir()]
@@ -146,13 +150,13 @@ def _make_cases(root: Path) -> dict[str, dict[str, torch.Tensor]]:
     return cases
 
 
-def _run_cases(
+def _run_reference_cases(
     model: torch.nn.Module,
     cases: dict[str, dict[str, torch.Tensor]],
     device: torch.device,
-) -> dict[str, tuple[torch.Tensor, ...]]:
+) -> dict[str, torch.Tensor]:
     dtype = next(model.parameters()).dtype
-    outputs: dict[str, tuple[torch.Tensor, ...]] = {}
+    outputs: dict[str, torch.Tensor] = {}
     for name, case in cases.items():
         inputs = {
             key: value.to(device=device, dtype=dtype if key.startswith("pixel_values") else value.dtype)
@@ -166,7 +170,28 @@ def _run_cases(
             )
         assert result.hidden_states is not None
         assert len(result.hidden_states) > MINIMAX_H3_TEXT_ENCODER_LAYER
-        outputs[name] = tuple(hidden_state.detach().cpu() for hidden_state in result.hidden_states)
+        outputs[name] = result.hidden_states[MINIMAX_H3_TEXT_ENCODER_LAYER][0].detach().cpu()
+    return outputs
+
+
+def _run_production_cases(
+    model: torch.nn.Module,
+    cases: dict[str, dict[str, torch.Tensor]],
+    device: torch.device,
+) -> dict[str, torch.Tensor]:
+    dtype = next(model.parameters()).dtype
+    outputs: dict[str, torch.Tensor] = {}
+    for name, case in cases.items():
+        inputs = {
+            key: value.to(device=device, dtype=dtype if key.startswith("pixel_values") else value.dtype)
+            for key, value in case.items()
+            if key not in {"attention_mask", "mm_token_type_ids"}
+        }
+        inputs["input_ids"] = inputs["input_ids"][0]
+        with torch.inference_mode():
+            result = model(**inputs)
+        assert result.ndim == 2
+        outputs[name] = result.detach().cpu()
     return outputs
 
 
@@ -211,21 +236,25 @@ def test_minimax_h3_qwen3_vl_parity() -> None:
     assert not load_errors, f"Official Qwen3-VL checkpoint did not load strictly: {load_errors}"
     official = official_full.model.eval().to(device)
     del official_full
-    expected = _run_cases(official, cases, device)
+    expected = _run_reference_cases(official, cases, device)
     del official
     _reclaim_vram()
 
     production = TextEncoderLoader().load(str(root / "text_encoder"), _production_loader_args())
     assert getattr(production, "_fastvideo_input_device", device) == device
-    actual = _run_cases(production, cases, device)
+    actual = _run_production_cases(production, cases, device)
 
     assert actual.keys() == expected.keys()
     for name in expected:
-        assert len(actual[name]) == len(expected[name])
-        for layer, (result, reference) in enumerate(zip(actual[name], expected[name], strict=True)):
-            assert_close(result, reference, atol=0.0, rtol=0.0, msg=lambda message: f"{name} layer {layer}: {message}")
-        result = actual[name][MINIMAX_H3_TEXT_ENCODER_LAYER]
-        reference = expected[name][MINIMAX_H3_TEXT_ENCODER_LAYER]
+        result = actual[name]
+        reference = expected[name]
+        assert_close(
+            result,
+            reference,
+            atol=0.0,
+            rtol=0.0,
+            msg=lambda message: f"{name} layer {MINIMAX_H3_TEXT_ENCODER_LAYER}: {message}",
+        )
         drift = (result.float() - reference.float()).abs()
         print(
             f"{name}: max_abs={drift.max().item():.8f} mean_abs={drift.mean().item():.8f}",

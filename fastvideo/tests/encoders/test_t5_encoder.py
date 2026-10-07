@@ -8,6 +8,7 @@ from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel, T5EncoderModel
 
+import fastvideo.envs as envs
 from fastvideo.configs.pipelines import CosmosConfig, PipelineConfig, WanT2V480PConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -19,8 +20,8 @@ from fastvideo.configs.models.encoders import T5Config, T5LargeConfig
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29503"
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29503")
 
 
 @pytest.fixture

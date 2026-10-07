@@ -392,8 +392,15 @@ class MiniMaxH3AudioBigVGANDecoder(nn.Module):
         return torch.clamp(hidden_states, min=-1.0, max=1.0)
 
 
+def _is_minimax_h3_audio_vae_decoder(name: str, submodule: nn.Module) -> bool:
+    """Select the audio decoder that serves the H3 VAE ``decode`` path."""
+    return name == "decoder" and isinstance(submodule, MiniMaxH3AudioBigVGANDecoder)
+
+
 class MiniMaxH3AudioVAE(nn.Module):
     """DAC encoder plus BigVGAN decoder for mono 32 kHz waveforms."""
+
+    _compile_conditions = [_is_minimax_h3_audio_vae_decoder]
 
     def __init__(self, config: MiniMaxH3AudioVAEConfig):
         super().__init__()

@@ -4,6 +4,7 @@ from huggingface_hub import snapshot_download
 import shutil
 import subprocess
 import sys
+import fastvideo.envs as envs
 from fastvideo.tests.utils import compute_video_ssim_torchvision
 
 # Import the training pipeline
@@ -192,11 +193,10 @@ def run_training():
 
 
 def test_e2e_overfit_single_sample():
-    os.environ["WANDB_MODE"] = "online"
-
-    download_data()
-    run_preprocessing()
-    run_training()
+    with envs.override_external("WANDB_MODE", "online"):
+        download_data()
+        run_preprocessing()
+        run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")
     print(f"reference_video_file: {reference_video_file}")

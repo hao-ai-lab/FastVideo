@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
+import fastvideo.envs as envs
 from fastvideo.hooks.activation_trace import (
     attach_activation_trace,
     detach_activation_trace,
@@ -50,8 +51,8 @@ def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def test_attach_activation_trace_off_returns_none(monkeypatch) -> None:
-    monkeypatch.delenv("FASTVIDEO_TRACE_ACTIVATIONS", raising=False)
+def test_attach_activation_trace_off_returns_none(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_ACTIVATIONS.override(None))
     model = ToyModel()
 
     manager = attach_activation_trace(model)
@@ -62,12 +63,12 @@ def test_attach_activation_trace_off_returns_none(monkeypatch) -> None:
 
 
 def test_attach_activation_trace_on_respects_layer_filter(
-    monkeypatch,
+    env_overrides,
     tmp_path,
 ) -> None:
-    monkeypatch.setenv("FASTVIDEO_TRACE_ACTIVATIONS", "1")
-    monkeypatch.setenv("FASTVIDEO_TRACE_LAYERS", r"block\.0.*")
-    monkeypatch.setenv("FASTVIDEO_TRACE_OUTPUT", str(tmp_path / "trace.jsonl"))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_ACTIVATIONS.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_LAYERS.override(r"block\.0.*"))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_OUTPUT.override(str(tmp_path / "trace.jsonl")))
     model = ToyModel()
 
     manager = attach_activation_trace(model)
@@ -81,12 +82,12 @@ def test_attach_activation_trace_on_respects_layer_filter(
         detach_activation_trace(manager)
 
 
-def test_activation_trace_writes_configured_stats(monkeypatch, tmp_path) -> None:
+def test_activation_trace_writes_configured_stats(env_overrides, tmp_path) -> None:
     path = tmp_path / "trace.jsonl"
-    monkeypatch.setenv("FASTVIDEO_TRACE_ACTIVATIONS", "1")
-    monkeypatch.setenv("FASTVIDEO_TRACE_LAYERS", r"block\.0")
-    monkeypatch.setenv("FASTVIDEO_TRACE_STATS", "abs_mean,sum,shape,dtype")
-    monkeypatch.setenv("FASTVIDEO_TRACE_OUTPUT", str(path))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_ACTIVATIONS.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_LAYERS.override(r"block\.0"))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_STATS.override("abs_mean,sum,shape,dtype"))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_OUTPUT.override(str(path)))
     model = ToyModel()
     manager = attach_activation_trace(model)
 
@@ -107,12 +108,12 @@ def test_activation_trace_writes_configured_stats(monkeypatch, tmp_path) -> None
     assert record["dtype"] == "torch.float32"
 
 
-def test_activation_trace_step_filter(monkeypatch, tmp_path) -> None:
+def test_activation_trace_step_filter(env_overrides, tmp_path) -> None:
     path = tmp_path / "trace.jsonl"
-    monkeypatch.setenv("FASTVIDEO_TRACE_ACTIVATIONS", "1")
-    monkeypatch.setenv("FASTVIDEO_TRACE_LAYERS", r"block\.0")
-    monkeypatch.setenv("FASTVIDEO_TRACE_OUTPUT", str(path))
-    monkeypatch.setenv("FASTVIDEO_TRACE_STEPS", "0,2")
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_ACTIVATIONS.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_LAYERS.override(r"block\.0"))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_OUTPUT.override(str(path)))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_STEPS.override("0,2"))
     model = ToyModel()
     manager = attach_activation_trace(model)
 
@@ -126,11 +127,11 @@ def test_activation_trace_step_filter(monkeypatch, tmp_path) -> None:
     assert [record["step"] for record in _read_jsonl(path)] == [0, 2]
 
 
-def test_activation_trace_flattens_tuple_outputs(monkeypatch, tmp_path) -> None:
+def test_activation_trace_flattens_tuple_outputs(env_overrides, tmp_path) -> None:
     path = tmp_path / "trace.jsonl"
-    monkeypatch.setenv("FASTVIDEO_TRACE_ACTIVATIONS", "1")
-    monkeypatch.setenv("FASTVIDEO_TRACE_LAYERS", "tuple$")
-    monkeypatch.setenv("FASTVIDEO_TRACE_OUTPUT", str(path))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_ACTIVATIONS.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_LAYERS.override("tuple$"))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_OUTPUT.override(str(path)))
     model = TupleOutputModel()
     manager = attach_activation_trace(model)
 
@@ -143,10 +144,10 @@ def test_activation_trace_flattens_tuple_outputs(monkeypatch, tmp_path) -> None:
     assert [record["tensor"] for record in records] == ["out[0]", "out[1]"]
 
 
-def test_detach_activation_trace_removes_hooks(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("FASTVIDEO_TRACE_ACTIVATIONS", "1")
-    monkeypatch.setenv("FASTVIDEO_TRACE_LAYERS", r"block\.0")
-    monkeypatch.setenv("FASTVIDEO_TRACE_OUTPUT", str(tmp_path / "trace.jsonl"))
+def test_detach_activation_trace_removes_hooks(env_overrides, tmp_path) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_ACTIVATIONS.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_LAYERS.override(r"block\.0"))
+    env_overrides.enter_context(envs.FASTVIDEO_TRACE_OUTPUT.override(str(tmp_path / "trace.jsonl")))
     model = ToyModel()
     manager = attach_activation_trace(model)
 

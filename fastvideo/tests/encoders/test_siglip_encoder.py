@@ -3,7 +3,6 @@
 
 import gc
 import json
-import os
 
 import pytest
 import torch
@@ -13,6 +12,7 @@ from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import SiglipVisionModel as HFSiglipVisionModel
 
+import fastvideo.envs as envs
 from fastvideo.configs.models.encoders import SiglipVisionConfig
 from fastvideo.configs.models.encoders.siglip import SiglipVisionArchConfig
 from fastvideo.forward_context import set_forward_context
@@ -20,8 +20,8 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29505"
+envs.setdefault_external("MASTER_ADDR", "localhost")
+envs.setdefault_external("MASTER_PORT", "29505")
 
 # HYWorld model path - SigLIP image encoder
 MODEL_ID = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v"
