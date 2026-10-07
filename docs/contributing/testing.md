@@ -32,18 +32,56 @@ failure before starting heavier dependent checks:
 4. Run full-quality renders or broad suites when required by the change, an
    explicit request, or CI policy, rather than on every edit.
 
-A golden must cover the component being changed. Wan's existing golden checks
-transformer block 0; it does not cover the VAE. Until a Wan VAE golden exists,
-use its focused encode/decode parity test. Keep independent-reference parity
-and end-to-end coverage for changes outside a golden's tested boundary.
+A golden must cover the component being changed. Wan has four small gates:
+
+| Gate | Boundary |
+|---|---|
+| `test_wan_t2v.py` | Dense transformer block 0 |
+| `test_wan_vae.py` | FP32 encode, BF16 decode, streaming, and cache reset |
+| `test_wan_causal.py` | Real block weights, cache append/rewrite, and sink eviction |
+| `test_wan_denoising.py` | Three real 1.3B DiT/UniPC steps with fixed prompt embeddings |
+
+These use an immutable Wan checkpoint revision and only download the required
+component. The trajectory gate needs no tokenizer, text encoder, VAE, or video
+reference. Weight-free stage tests also exercise every step of a 50-step UniPC
+loop, CFG caching, expert switching, conditioning layouts, and DMD RNG order.
+These checks do not replace independent Diffusers parity or end-to-end SSIM.
 
 Use the golden's matching GPU, dtype, backend, and runtime. A missing reference
 or environment mismatch is not a pass. Do not replace a reference with the
 candidate output just to clear a failure. For a relocation, the unchanged
 parent is the baseline; two imports of the same class are not numerical proof.
 
-This is the developer iteration order, not a change to required CI checks or
-their scheduling. See [CI/CD Architecture](ci_architecture.md) for current policy.
+The VAE and transformer CI lanes run their Wan component goldens first.
+Selected integration lanes wait for the golden lane in merge/full builds.
+See [CI/CD Architecture](ci_architecture.md) for direct-rerun and skip semantics.
+
+For Wan, one command enforces the local ordering and stops on failure:
+
+The initial contracts include `tests/api/test_wan_definitions.py`: all registered
+Wan aliases, local-manifest detector precedence, sampling/precision defaults,
+config isolation, and legacy serialized-config compatibility. These require no
+weights or Hub access; the current package import still needs its prepared
+runtime environment.
+
+```bash
+bash scripts/validate_wan.sh vae           # contracts, then the VAE golden
+bash scripts/validate_wan.sh dense parity  # contracts, goldens, Diffusers parity
+bash scripts/validate_wan.sh all default   # then focused T2V/I2V/causal SSIM
+```
+
+The second argument is an upper validation tier, not a reference override.
+Supply the GPU/backend/runtime and SSIM model/tier settings that match the
+reference. The script never updates references. Causal component coverage is
+a block-cache fingerprint, not independent full causal-pipeline parity.
+
+New named-tensor gates write a missing output to `*.candidate.pt` and fail;
+running candidate code again cannot turn it into an approved reference. Seed
+from unchanged, pushed source, verify two independent processes bit-for-bit,
+then review and publish only the new reference files. Preserve the baseline
+source SHA, test recipe SHA, checkpoint revision, runtime, and comparison
+receipt with the run artifacts. Never overwrite an existing video reference
+as a side effect of adding a tensor gate.
 
 Examples of focused checks:
 

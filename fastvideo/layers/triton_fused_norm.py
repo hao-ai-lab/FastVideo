@@ -147,7 +147,7 @@ def fused_path_supported(
     norm: torch.nn.Module,
 ) -> bool:
     """Cheap eligibility check; any False falls back to the eager path."""
-    if not _HAS_TRITON or envs.FASTVIDEO_DISABLE_FUSED_NORM:
+    if not _HAS_TRITON or envs.FASTVIDEO_DISABLE_FUSED_NORM.get():
         return False
     if torch.is_grad_enabled():
         return False

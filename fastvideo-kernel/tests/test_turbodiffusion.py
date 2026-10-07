@@ -26,6 +26,14 @@ def rms_norm_ref(x, w, eps=1e-6):
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 class TestTurboDiffusion:
 
+    def test_quant_invalid_dtype_names_int8_operation(self):
+        if turbodiffusion_ops.quant_cuda is None:
+            pytest.skip("quant_cuda not available")
+
+        x = torch.ones((16, 128), dtype=torch.float32, device="cuda")
+        with pytest.raises(RuntimeError, match=r"Unsupported input data type for quant_cuda \(int8 quantization\)\."):
+            turbodiffusion_ops.quant_cuda(x, None, None)
+
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
     @pytest.mark.parametrize("shape", [(16, 128), (32, 256), (1, 1024)])
     def test_quant_correctness(self, dtype, shape):

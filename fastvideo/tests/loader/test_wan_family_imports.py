@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from fastvideo.models.wan import config, transformer, vae, vae_config
+from fastvideo.models.wan import causal_transformer, config, transformer, vae, vae_config
 
 TRANSFORMER_EXPORTS = (
     "EntryClass",
@@ -46,6 +46,13 @@ def test_legacy_transformer_exports_are_the_canonical_objects():
     for name in TRANSFORMER_EXPORTS:
         assert getattr(legacy, name) is getattr(transformer, name)
     assert legacy.EntryClass is transformer.WanTransformer3DModel
+
+
+def test_legacy_causal_transformer_exports_are_the_canonical_objects():
+    legacy = importlib.import_module("fastvideo.models.dits.causal_wanvideo")
+    for name in legacy.__all__:
+        assert getattr(legacy, name) is getattr(causal_transformer, name)
+    assert legacy.EntryClass is causal_transformer.CausalWanTransformer3DModel
 
 
 def test_legacy_and_aggregate_config_exports_are_the_canonical_objects():
@@ -131,6 +138,7 @@ def test_downstream_wan_consumers_import(module_name):
 
 @pytest.mark.parametrize("module_name, architecture", [
     ("transformer", "WanTransformer3DModel"),
+    ("causal_transformer", "CausalWanTransformer3DModel"),
     ("vae", "AutoencoderKLWan"),
 ])
 def test_registry_discovers_and_loads_the_canonical_wan_class(module_name, architecture, caplog):
@@ -151,6 +159,8 @@ def test_registry_discovers_and_loads_the_canonical_wan_class(module_name, archi
 @pytest.mark.parametrize("first_module", [
     "fastvideo.models.wan.config",
     "fastvideo.models.wan.transformer",
+    "fastvideo.models.wan.causal_transformer",
+    "fastvideo.models.dits.causal_wanvideo",
     "fastvideo.configs.models.dits.wanvideo",
     "fastvideo.models.dits.wanvideo",
     "fastvideo.models.wan.vae_config",

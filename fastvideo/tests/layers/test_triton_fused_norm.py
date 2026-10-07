@@ -164,9 +164,9 @@ def test_grad_enabled_falls_back_to_eager():
 
 
 @cuda_only
-def test_env_kill_switch(monkeypatch):
+def test_env_kill_switch(env_overrides):
     import fastvideo.envs as envs
-    monkeypatch.setattr(envs, "FASTVIDEO_DISABLE_FUSED_NORM", True)
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_FUSED_NORM.override(True))
     _, fused = _make_modules(elementwise_affine=True)
     residual, x = _inputs(torch.bfloat16, seed=6)
     gate = torch.randn(1, 1, H, device="cuda", dtype=torch.float32)

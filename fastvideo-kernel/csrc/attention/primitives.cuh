@@ -1,8 +1,6 @@
 // primitives.cuh -- device primitives for the sm_100a/sm_103a VSA block-sparse attention
 // forward: tcgen05 (alloc / mma / ld / st / commit / wait / fence), TMA load / store /
 // tensormap, mbarrier, cluster launch control, setmaxnreg, fast math, and the FMHA helpers.
-//
-// Generated and pruned to what the kernel reaches -- do not edit by hand.
 #pragma once
 #include <cstdint>
 #include <cstdio>
@@ -218,8 +216,8 @@ template <int CLUSTER_SHAPE_M, int CLUSTER_SHAPE_N, ClcRasterOrder ORDER>
 __device__ __forceinline__
 ClcTileInfo clc_parse_response(uint32_t resp_smem_addr) {
   uint32_t d0, d1, d2, d3;
-  fence_proxy_async_shared_cta();
   clc_load_response(resp_smem_addr, d0, d1, d2, d3);
+  fence_proxy_async_shared_cta();
   const int  ctaid_x = static_cast<int>(d0);
   const int  ctaid_y = static_cast<int>(d1 & 0xFFFFu);
   const bool valid   = (d2 & 1u) != 0u;
@@ -251,6 +249,7 @@ ClcTileInfo clc_fetch_next_tile(
       __cvta_generic_to_shared(&clc_response[clc_cons_stage * 4]));
   ClcTileInfo t = clc_parse_response<
       CLUSTER_SHAPE_M, CLUSTER_SHAPE_N, ORDER>(resp_addr);
+  __syncwarp();
   if (do_release) {
     uint32_t empty_local = static_cast<uint32_t>(
         __cvta_generic_to_shared(&clc_empty_bar[clc_cons_stage]));
@@ -873,4 +872,142 @@ uint32_t smem_ptr_u32(const void* ptr) {
 __device__ __forceinline__
 void sts_f32(uint32_t smem_addr, float val) {
   asm volatile("st.shared.f32 [%0], %1;" :: "r"(smem_addr), "f"(val) : "memory");
+}
+
+__device__ __forceinline__ void tcgen05_mma_ws_f16_ss_1sm_predicated(
+    uint32_t issue, uint32_t tmem_d, uint64_t desc_a, uint64_t desc_b,
+    uint32_t idesc, bool enable_input_d) {
+  asm volatile(
+      "{\n\t"
+      ".reg .pred p, q;\n\t"
+      "setp.ne.b32 q, %0, 0;\n\t"
+      "setp.ne.b32 p, %5, 0;\n\t"
+      "@q tcgen05.mma.ws.cta_group::1.kind::f16 "
+      "[%1], %2, %3, %4, p, 0;\n\t"
+      "}\n"
+      :: "r"(issue), "r"(tmem_d), "l"(desc_a), "l"(desc_b),
+         "r"(idesc), "r"(enable_input_d ? 1u : 0u));
+}
+
+__device__ __forceinline__ void tcgen05_mma_ws_f16_ts_1sm_predicated(
+    uint32_t issue, uint32_t tmem_d, uint32_t tmem_a, uint64_t desc_b,
+    uint32_t idesc, bool enable_input_d) {
+  asm volatile(
+      "{\n\t"
+      ".reg .pred p, q;\n\t"
+      "setp.ne.b32 q, %0, 0;\n\t"
+      "setp.ne.b32 p, %5, 0;\n\t"
+      "@q tcgen05.mma.ws.cta_group::1.kind::f16 "
+      "[%1], [%2], %3, %4, p, 0;\n\t"
+      "}\n"
+      :: "r"(issue), "r"(tmem_d), "r"(tmem_a), "l"(desc_b),
+         "r"(idesc), "r"(enable_input_d ? 1u : 0u));
+}
+
+__device__ __forceinline__ void tcgen05_wait_ld() {
+  asm volatile("tcgen05.wait::ld.sync.aligned;\n" ::: "memory");
+}
+
+__device__ __forceinline__
+void cpasync_bulk_load_mbarrier(uint32_t smem_dst, const void* gmem_src,
+                                uint32_t bytes, uint32_t mbar_smem) {
+  asm volatile(
+      "cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes"
+      " [%0], [%1], %2, [%3];\n"
+      :: "r"(smem_dst), "l"(gmem_src), "r"(bytes), "r"(mbar_smem)
+      : "memory");
+}
+
+__device__ __forceinline__
+void cpasync_reduce_bulk_add_f32(float* global_dst, uint32_t smem_src,
+                                uint32_t bytes) {
+  asm volatile(
+      "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.f32"
+      " [%0], [%1], %2;\n"
+      :: "l"(global_dst), "r"(smem_src), "r"(bytes)
+      : "memory");
+}
+
+__device__ __forceinline__
+void cpasync_reduce_bulk_add_f16(uint16_t* global_dst, uint32_t smem_src,
+                                uint32_t bytes) {
+  asm volatile(
+      "cp.reduce.async.bulk.global.shared::cta.bulk_group.add.noftz.f16"
+      " [%0], [%1], %2;\n"
+      :: "l"(global_dst), "r"(smem_src), "r"(bytes)
+      : "memory");
+}
+
+__device__ __forceinline__
+void cpasync_reduce_bulk_add_f32_l2hint(float* global_dst, uint32_t smem_src,
+                                       uint32_t bytes, uint64_t cache_policy) {
+  asm volatile(
+      "cp.reduce.async.bulk.global.shared::cta.bulk_group.L2::cache_hint.add.f32"
+      " [%0], [%1], %2, %3;\n"
+      :: "l"(global_dst), "r"(smem_src), "r"(bytes), "l"(cache_policy)
+      : "memory");
+}
+
+__device__ __forceinline__
+void cpasync_reduce_bulk_add_f16_l2hint(uint16_t* global_dst, uint32_t smem_src,
+                                       uint32_t bytes, uint64_t cache_policy) {
+  asm volatile(
+      "cp.reduce.async.bulk.global.shared::cta.bulk_group.L2::cache_hint.add.noftz.f16"
+      " [%0], [%1], %2, %3;\n"
+      :: "l"(global_dst), "r"(smem_src), "r"(bytes), "l"(cache_policy)
+      : "memory");
+}
+
+__device__ __forceinline__ void smem_desc_add_lo(uint64_t& d, uint32_t inc) {
+  asm volatile("{\n\t"
+      ".reg .b32 lo, hi;\n\t"
+      "mov.b64 {lo, hi}, %0;\n\t"
+      "add.u32 lo, lo, %1;\n\t"
+      "mov.b64 %0, {lo, hi};\n\t"
+      "}" : "+l"(d) : "r"(inc));
+}
+
+__device__ __forceinline__
+uint32_t cvt_f32x2_to_f16x2(float a, float b) {
+  uint32_t r;
+  asm volatile("cvt.rn.f16x2.f32 %0, %2, %1;\n"
+               : "=r"(r) : "f"(a), "f"(b));
+  return r;
+}
+
+__device__ __forceinline__
+uint64_t make_l2cache_policy_fractional_evict_last_unchanged(float fraction_f32) {
+  uint64_t policy;
+  asm("createpolicy.fractional.L2::evict_last.L2::evict_unchanged.b64"
+      " %0, %1;\n"
+      : "=l"(policy)
+      : "f"(fraction_f32));
+  return policy;
+}
+
+__device__ __forceinline__
+void cp_async_cg_16(uint32_t smem_dst, const void* gmem_src) {
+  asm volatile("cp.async.cg.shared.global [%0], [%1], 16;\n"
+               :: "r"(smem_dst), "l"(gmem_src) : "memory");
+}
+
+__device__ __forceinline__
+void cp_async_commit_group() {
+  asm volatile("cp.async.commit_group;\n" ::: "memory");
+}
+
+template <int N>
+__device__ __forceinline__
+void cp_async_wait_group() {
+  asm volatile("cp.async.wait_group %0;\n" :: "n"(N) : "memory");
+}
+
+__device__ __forceinline__
+void griddepcontrol_wait() {
+  asm volatile("griddepcontrol.wait;\n" ::: "memory");
+}
+
+__device__ __forceinline__
+void griddepcontrol_launch_dependents() {
+  asm volatile("griddepcontrol.launch_dependents;\n" ::: "memory");
 }

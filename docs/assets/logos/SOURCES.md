@@ -11,7 +11,7 @@ plain typographic tile instead — that tile is a UI placeholder, not a logo.
 | `ltx.webp` | [Official Lightricks Hugging Face organization avatar](https://huggingface.co/Lightricks) | LTX family card and page header |
 | `tencent-hunyuan.webp` | [Official Tencent Hunyuan Hugging Face organization avatar](https://huggingface.co/Tencent-Hunyuan) | Hunyuan and GameCraft cards, Hunyuan page header |
 | `nvidia.webp` | [Official NVIDIA Hugging Face organization avatar](https://huggingface.co/nvidia) | Cosmos and GEN3C cards, Cosmos page header |
-| `kandinsky.webp` | [Official Kandinsky Lab Hugging Face organization avatar](https://huggingface.co/kandinskylab) | Kandinsky 5 family card and page header |
+| `kandinsky.webp` | [Official Kandinsky Lab Hugging Face organization avatar](https://huggingface.co/kandinskylab) | Kandinsky 5 and Kandinsky 6 cards and page headers |
 | `black-forest-labs.webp` | [Official Black Forest Labs Hugging Face organization avatar](https://huggingface.co/black-forest-labs) | FLUX family card and page header |
 | `minimax.webp` | [Official MiniMax Hugging Face organization avatar](https://huggingface.co/MiniMaxAI) | MiniMax H3 family card and page header |
 | `tongyi.webp` | [Official Tongyi MAI Hugging Face organization avatar](https://huggingface.co/Tongyi-MAI) | Z-Image family card and page header |

@@ -475,14 +475,17 @@ FastVideo integration.
    - Text encoder: `fastvideo/models/encoders/t5.py`
 
 2. Parity test the core components.
+   - Start with `bash scripts/validate_wan.sh all`: contracts and tiny goldens.
    - Example tests: `fastvideo/tests/transformers/test_wanvideo.py`,
      `fastvideo/tests/vaes/test_wan_vae.py`,
      `fastvideo/tests/encoders/test_t5_encoder.py`
 
 3. Pipeline wiring.
    - Pipeline: `fastvideo/pipelines/basic/wan/wan_pipeline.py`
-   - Pipeline config: `fastvideo/configs/pipelines/wan.py`
-   - Sampling defaults: `fastvideo/pipelines/basic/wan/profiles.py`
+   - Denoising and first-frame preparation: `fastvideo/pipelines/basic/wan/stages/`
+   - Variant definitions: `fastvideo/models/wan/definition.py`
+   - Pipeline config: `fastvideo/models/wan/pipeline_config.py`
+   - Sampling defaults: `fastvideo/pipelines/basic/wan/presets.py`
 
 4. Minimal example.
    - Script: `examples/inference/basic/basic.py`

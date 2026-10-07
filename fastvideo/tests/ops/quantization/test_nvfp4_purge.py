@@ -114,6 +114,27 @@ def test_apply_out_dim_survives_purge(monkeypatch) -> None:
     assert out.shape == (2, 3, 8)
 
 
+def test_convert_refuses_fsdp_sharded_bf16_purge(monkeypatch) -> None:
+    import torch.distributed.tensor as tdt
+
+    class DummyDTensor:
+        def __init__(self, data: torch.Tensor) -> None:
+            self._data = data
+
+        def to_local(self) -> torch.Tensor:
+            return self._data
+
+        def float(self) -> torch.Tensor:
+            return self._data.float()
+
+    monkeypatch.setattr(tdt, "DTensor", DummyDTensor)
+    model = _model(retain=False)
+    del model.always_fp4._parameters["weight"]
+    object.__setattr__(model.always_fp4, "weight", DummyDTensor(torch.randn(8, 16, dtype=torch.bfloat16)))
+    with pytest.raises(RuntimeError, match="FSDP-sharded"):
+        nv.convert_model_to_nvfp4(model)
+
+
 def test_dense_path_after_purge_raises_with_flag_named(monkeypatch) -> None:
     """Defensive guard: convert never purges dense-capable layers anymore,
     but a hand-purged module hitting the dense path must fail loudly."""

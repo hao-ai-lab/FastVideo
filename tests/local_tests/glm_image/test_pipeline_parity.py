@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 import torch
 
+import fastvideo.envs as envs
+
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29519")
 os.environ.setdefault("DISABLE_SP", "1")
@@ -15,7 +17,8 @@ os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAMILY = "glm_image"
-LOCAL_WEIGHTS_DIR = Path(os.getenv("GLM_IMAGE_LOCAL_WEIGHTS_DIR", REPO_ROOT / "official_weights" / FAMILY))
+LOCAL_WEIGHTS_DIR = Path(envs.FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR.get() or
+                         REPO_ROOT / "official_weights" / FAMILY)
 TRANSFORMER_DIR = LOCAL_WEIGHTS_DIR / "transformer"
 
 

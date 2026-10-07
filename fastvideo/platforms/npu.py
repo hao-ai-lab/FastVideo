@@ -66,8 +66,8 @@ class NPUPlatform(Platform):
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None, head_size: int,
                              dtype: torch.dtype) -> str:
-        logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
-        if envs.FASTVIDEO_ATTENTION_BACKEND != "TORCH_SDPA":
+        logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND.get())
+        if envs.FASTVIDEO_ATTENTION_BACKEND.get() != "TORCH_SDPA":
             logger.info("Ascend NPU only supports the Torch SDPA backend.")
         else:
             logger.info("Using Torch SDPA backend.")
