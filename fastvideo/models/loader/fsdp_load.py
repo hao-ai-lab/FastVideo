@@ -36,6 +36,16 @@ def _summarize_param_names(names: set[str]) -> str:
     return ", ".join(f"{family} x{count}" if count > 1 else family for family, count in sorted(families.items()))
 
 
+def _should_stage_transformer_weights_on_cpu(*, cpu_offload: bool, fsdp_inference: bool,
+                                             has_unified_memory: bool) -> bool:
+    """Keep full FSDP-inference source tensors off discrete GPUs while shards materialize.
+
+    FSDP training keeps its historical ``cpu_offload``-only staging, so this
+    change stays scoped to the inference path.
+    """
+    return cpu_offload or (fsdp_inference and not has_unified_memory)
+
+
 def _prequantized_fp8_prefixes(weight_files: list[str]) -> list[str]:
     """Checkpoint prefixes stored as FP8 W8A8: float8_e4m3fn ``weight`` plus per-channel float32 ``weight_scale``."""
     from safetensors import safe_open
@@ -260,6 +270,7 @@ def maybe_load_fsdp_model(
     inference_vsa_tile_size: int | None = None,
     lora_path: str | None = None,
     lora_strength: float = 1.0,
+    pre_fsdp_model_transform: Callable[[nn.Module], None] | None = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -270,6 +281,10 @@ def maybe_load_fsdp_model(
     ``LoRAPipeline``. Passing it here is what lets an adapter contribute a parameter the
     base checkpoint does not contain, which has to happen while the tensor is still
     unsharded.
+
+    ``pre_fsdp_model_transform`` runs on the meta model before its sharding topology
+    is established and before checkpoint weights are loaded. Training uses it to
+    install adapter parameters that must participate in FSDP from the outset.
     """
     _validate_fsdp_inference_quantization(init_params, fsdp_inference)
 
@@ -303,6 +318,10 @@ def maybe_load_fsdp_model(
     logger.info("Loading model with default_dtype: %s", default_dtype)
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
+
+    if pre_fsdp_model_transform is not None:
+        logger.info("Applying pre-FSDP model transform to %s", type(model).__name__)
+        pre_fsdp_model_transform(model)
 
     dtype_selector = getattr(model, "_get_parameter_dtype", None)
     has_mixed_parameter_dtypes = callable(dtype_selector) and any(
@@ -360,7 +379,20 @@ def maybe_load_fsdp_model(
                 packed_nvfp4_export,
             )
             packed_nvfp4_export = None
-    load_weights_to_cpu = cpu_offload or packed_nvfp4_export is not None
+    has_unified_memory = False
+    if fsdp_inference and not cpu_offload:
+        device_index = device.index if device.index is not None else 0
+        has_unified_memory = current_platform.has_unified_memory(device_index)
+    # GPU-direct avoids duplicating the host working set on unified-memory
+    # devices. Discrete FSDP inference must stage the full source tensors on CPU
+    # while each rank materializes its shard, or the full checkpoint and shards
+    # peak together on the accelerator. Training keeps GPU-direct loading.
+    # A packed NVFP4 export is always staged on CPU.
+    load_weights_to_cpu = _should_stage_transformer_weights_on_cpu(
+        cpu_offload=cpu_offload,
+        fsdp_inference=fsdp_inference,
+        has_unified_memory=has_unified_memory,
+    ) or packed_nvfp4_export is not None
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=load_weights_to_cpu)
     logger.info("Loading transformer weights with to_cpu=%s", load_weights_to_cpu)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
@@ -740,6 +772,16 @@ def load_model_from_full_model_state_dict(
     sharded_sd = {}
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
                                                                            param_names_mapping)  # type: ignore
+    checkpoint_key_aliases = getattr(model, "_fastvideo_checkpoint_key_aliases", {})
+    if checkpoint_key_aliases:
+        for original_name, transformed_name in checkpoint_key_aliases.items():
+            if original_name not in custom_param_sd:
+                continue
+            if transformed_name in custom_param_sd:
+                raise ValueError(f"Checkpoint transform maps multiple tensors to {transformed_name!r}")
+            custom_param_sd[transformed_name] = custom_param_sd.pop(original_name)
+            reverse_param_names_mapping[transformed_name] = reverse_param_names_mapping.pop(original_name)
+
     # Drain rather than iterate. Production safetensors values may retain
     # memory-mapped shard storage, while mapped or merged parameters can own
     # ordinary allocations. Keeping the dict retains all of that source
@@ -827,59 +869,58 @@ def load_model_from_full_model_state_dict(
     if skipped_unused:
         logger.info("Deferred %d NVFP4 linear weights to the packed DiT export (%s)",
                     len(skipped_unused), _summarize_param_names(skipped_unused))
-    if unused_keys:
-        # Say which of these the adapter is about to fill in. Reporting all of them as
-        # "unloaded" was accurate when zero-init was the only outcome; with an adapter
-        # supplying real values it reads as a problem that is not one. Names are
-        # summarized because a 50-layer model prints 50 near-identical lines otherwise.
-        from_adapter = ({key for key in unused_keys if dense_lora_patch.provides(key)} if dense_lora_patch is not None
-                        else set())
-        zero_init = unused_keys - from_adapter
-        if from_adapter:
-            logger.info("Parameters absent from the checkpoint and supplied by the LoRA adapter: %d (%s)",
-                        len(from_adapter), _summarize_param_names(from_adapter))
-        if zero_init:
-            logger.warning("Found unloaded parameters in meta state dict, zero-initializing: %d (%s)", len(zero_init),
-                           _summarize_param_names(zero_init))
 
     # List of allowed parameter name patterns
     ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l"]  # Can be extended as needed
-    for new_param_name in unused_keys:
+    missing_parameter_initializer = getattr(model, "_fastvideo_missing_parameter_initializer", None)
+    initialized_from_adapter: set[str] = set()
+    initialized_from_model: set[str] = set()
+    zero_initialized: set[str] = set()
+    for new_param_name in sorted(unused_keys):
         # An adapter that ships the parameter outright both supplies the value and
         # authorizes it: the allowlist exists to catch a checkpoint silently missing a
         # weight, which is not the case when something deliberately provides one.
         adapter_value = (dense_lora_patch.replacement_for(new_param_name) if dense_lora_patch is not None else None)
-        if adapter_value is None and not any(pattern in new_param_name for pattern in ALLOWED_NEW_PARAM_PATTERNS):
-            logger.error("Unsupported new parameter: %s. Allowed patterns: %s", new_param_name,
-                         ALLOWED_NEW_PARAM_PATTERNS)
-            raise ValueError(f"New parameter '{new_param_name}' is not supported. "
-                             f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed.")
         meta_sharded_param = meta_sd.get(new_param_name)
+        if meta_sharded_param is None:
+            raise RuntimeError(f"Missing meta state for unloaded parameter {new_param_name!r}")
         target_dtype = param_dtype
         dtype_selector = getattr(model, "_get_parameter_dtype", None)
         if callable(dtype_selector):
             target_dtype = dtype_selector(new_param_name, param_dtype)
-        if adapter_value is not None:
-            if tuple(adapter_value.shape) != tuple(meta_sharded_param.shape):
-                raise ValueError(f"LoRA replacement for {new_param_name} has shape {tuple(adapter_value.shape)}, "
-                                 f"but the parameter is {tuple(meta_sharded_param.shape)}")
-            full_tensor = adapter_value.to(device=device, dtype=target_dtype)
-            if not hasattr(meta_sharded_param, "device_mesh"):
-                sharded_tensor = full_tensor
-            else:
-                sharded_tensor = distribute_tensor(
-                    full_tensor,
-                    meta_sharded_param.device_mesh,
-                    meta_sharded_param.placements,
-                )
-                if cpu_offload:
-                    sharded_tensor = sharded_tensor.cpu()
-        elif not hasattr(meta_sharded_param, "device_mesh"):
-            # Initialize with zeros
-            sharded_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=target_dtype)
+
+        initialized_tensor = adapter_value
+        if initialized_tensor is not None:
+            initialized_from_adapter.add(new_param_name)
+        elif callable(missing_parameter_initializer):
+            initialized_tensor = missing_parameter_initializer(
+                new_param_name,
+                meta_sharded_param.shape,
+                target_dtype,
+            )
+            if initialized_tensor is not None:
+                initialized_from_model.add(new_param_name)
+
+        if initialized_tensor is None and not any(pattern in new_param_name for pattern in ALLOWED_NEW_PARAM_PATTERNS):
+            logger.error("Unsupported new parameter: %s. Allowed patterns: %s", new_param_name,
+                         ALLOWED_NEW_PARAM_PATTERNS)
+            raise ValueError(f"New parameter '{new_param_name}' is not supported. "
+                             f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed.")
+        if initialized_tensor is None:
+            initialized_tensor = torch.zeros(tuple(meta_sharded_param.shape), device="cpu", dtype=target_dtype)
+            zero_initialized.add(new_param_name)
         else:
-            # Initialize with zeros and distribute
-            full_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=target_dtype)
+            if tuple(initialized_tensor.shape) != tuple(meta_sharded_param.shape):
+                if adapter_value is not None:
+                    raise ValueError(f"LoRA replacement for {new_param_name} has shape {tuple(initialized_tensor.shape)}, "
+                                     f"but the parameter is {tuple(meta_sharded_param.shape)}")
+                raise ValueError(f"Initializer returned shape {tuple(initialized_tensor.shape)} for {new_param_name!r}; "
+                                 f"expected {tuple(meta_sharded_param.shape)}")
+            initialized_tensor = initialized_tensor.to(dtype=target_dtype)
+        if not hasattr(meta_sharded_param, "device_mesh"):
+            sharded_tensor = initialized_tensor.to(device=device)
+        else:
+            full_tensor = initialized_tensor.to(device=device)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,
@@ -888,6 +929,16 @@ def load_model_from_full_model_state_dict(
             if cpu_offload:
                 sharded_tensor = sharded_tensor.cpu()
         sharded_sd[new_param_name] = nn.Parameter(sharded_tensor)
+
+    if initialized_from_adapter:
+        logger.info("Parameters absent from the checkpoint and supplied by the LoRA adapter: %d (%s)",
+                    len(initialized_from_adapter), _summarize_param_names(initialized_from_adapter))
+    if initialized_from_model:
+        logger.info("Parameters absent from the checkpoint and supplied by the model initializer: %d (%s)",
+                    len(initialized_from_model), _summarize_param_names(initialized_from_model))
+    if zero_initialized:
+        logger.warning("Found unloaded parameters in meta state dict, zero-initializing: %d (%s)",
+                       len(zero_initialized), _summarize_param_names(zero_initialized))
 
     if dense_lora_patch is not None:
         dense_lora_patch.report_unapplied()
