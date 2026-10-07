@@ -297,6 +297,9 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             with profiler_region("inference_denoising"), nvtx_range("minimax_h3.dit"):
                 for index, (video_timestep,
                             audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps, strict=True)):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
                     attn_metadata = None
                     if vsa_metadata_builder is not None:
