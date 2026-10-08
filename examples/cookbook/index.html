@@ -1,18 +1,23 @@
-# Serving configuration builder
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FastVideo cookbook design demo</title>
+  <!-- TODO(cookbook-ui): Local PR-review page; remove when the final UI replaces it. -->
+  <style>
+    :root { --md-default-fg-color--lighter: #cbd5e1; --md-default-fg-color--light: #64748b; --md-typeset-a-color: #b91c1c; }
+    * { box-sizing: border-box; }
+    body { max-width: 1100px; margin: auto; padding: 24px; color: #1e293b; background: #fff; font: 16px/1.5 system-ui, sans-serif; }
+    a { color: #2563eb; }
+    h1 { font-size: 30px; }
+    .admonition { padding: 12px 18px; background: #eff6ff; border-left: 4px solid #3b82f6; }
+    .admonition-title { font-weight: 700; }
+    pre { padding: 16px; background: #f1f5f9; font-size: 14px; }
+    input, select, textarea, button { font: inherit; }
+    details { border: 1px solid #cbd5e1; border-radius: 4px; }
+    summary { padding: 10px 16px; background: #eff6ff; cursor: pointer; font-weight: 600; }
 
-!!! note "Design demonstration"
-
-    This page demonstrates recipe authoring and the shared JavaScript API to communicate the cookbook design.
-    Final cookbook UI design and implementation belong to a separate follow-up.
-    **TODO(cookbook-ui):** Replace this presentation while retaining the recipe catalog and shared API.
-
-Choose a model and one of its maintained deployments, then adjust its reviewed controls.
-The downloaded YAML preserves **every explicit baseline setting**, including settings hidden from this form.
-Omitted fields are shown as inherited; the editor does not pretend to resolve runtime defaults.
-Reset restores the baseline. Browser validation checks declared field constraints.
-This demo does not start a server or load model weights.
-
-<style>
 .config-builder-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; padding: 1rem; }
 .config-builder-selectors { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
 .config-builder-section { margin: .5rem 0; }
@@ -26,9 +31,28 @@ This demo does not start a server or load model weights.
 [data-config-builder] button:disabled { opacity: .5; }
 [data-config-builder] pre { max-height: 32rem; overflow: auto; }
 [data-config-error] { color: var(--md-typeset-a-color); }
-</style>
 
-<div data-config-builder data-metadata="../../assets/cookbook-config/index.json">
+  </style>
+</head>
+<body>
+<h1>Serving configuration builder</h1>
+<div class="admonition note">
+<p class="admonition-title">Design demonstration</p>
+<p>This page demonstrates recipe authoring and the shared JavaScript API to communicate the cookbook design.
+Final cookbook UI design and implementation belong to a separate follow-up.
+<strong>TODO(cookbook-ui):</strong> Replace this presentation while retaining the recipe catalog and shared API.</p>
+</div>
+<p>Choose a model and one of its maintained deployments, then adjust its reviewed controls.
+The downloaded YAML preserves <strong>every explicit baseline setting</strong>, including settings hidden from this form.
+Omitted fields are shown as inherited; the editor does not pretend to resolve runtime defaults.
+Reset restores the baseline. Browser validation checks declared field constraints.
+This demo does not start a server or load model weights.</p>
+<p>GPU count and parallelism are editable when listed in the recipe's controls.
+Parallel degree limits follow the selected GPU count. Correct invalid combinations
+before copying or downloading; the editor preserves your values while you edit.</p>
+
+
+<div data-config-builder data-metadata="../../docs/assets/cookbook-config/index.json" data-documentation-index="https://haoailab.com/FastVideo/assets/cookbook-config/index.json">
   <div class="config-builder-selectors">
     <label class="config-builder-field"><strong>Model</strong><select data-config-model-picker aria-label="Model" disabled></select></label>
     <label class="config-builder-field"><strong>Deployment</strong><select data-config-deployment-picker aria-label="Deployment" disabled></select></label>
@@ -69,3 +93,12 @@ This demo does not start a server or load model weights.
   </div>
   <p data-config-request-note hidden>Request defaults apply when a client omits those values. Explicit client request values take precedence.</p>
 </div>
+
+  <script src="../../docs/assets/cookbook-validator.js"></script>
+  <script src="../../docs/assets/cookbook-config.js"></script>
+  <script src="cookbook-demo.js"></script>
+  <script>
+    FastVideoCookbookDemo.mount(document.querySelector("[data-config-builder]"));
+  </script>
+</body>
+</html>

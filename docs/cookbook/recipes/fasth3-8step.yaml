@@ -12,6 +12,8 @@ deployments:
       - 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"'
     controls:
       - server
+      - generator.engine.num_gpus
+      - generator.engine.parallelism
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
       - default_request.sampling.num_frames

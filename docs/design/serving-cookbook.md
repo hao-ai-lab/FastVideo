@@ -2,9 +2,10 @@
 
 Existing configuration schemas describe accepted fields; native examples provide
 recommended values. The cookbook combines them with curated model/deployment
-choices, selected controls and optional Markdown guidance. It remains a static
-site: Python prepares metadata at build time; a shared JavaScript API resolves
-edits locally and emits YAML and commands.
+choices, selected controls and optional Markdown guidance. Python prepares static
+JSON metadata; a shared JavaScript API resolves edits locally and emits YAML and
+commands. The temporary preview is a standalone
+local page; production website integration belongs to the final UI follow-up.
 
 ## Sources and delivery
 
@@ -15,7 +16,7 @@ edits locally and emits YAML and commands.
 | Runtime Python/Pydantic definitions | Public field metadata and native configuration validation |
 | `docs/cookbook_config.py` | Validate, expand selected fields and publish static catalogs |
 | `docs/assets/cookbook-config.js` | Load metadata, expose option values, resolve YAML and commands |
-| `docs/assets/cookbook-demo.js` | Temporary form, download buttons and guide links |
+| `examples/cookbook/cookbook-demo.js` | Temporary form, download buttons and guide links |
 
 See the [contributor guide](../contributing/cookbook_configuration.md) for manifest
 syntax. Every deployment in one model file references the same native model ID.
@@ -56,13 +57,16 @@ The framework-independent core exposes four functions through
 | --- | --- |
 | `loadIndex(url, {signal, fetcher} = {})` | `{models, url}`; URL context for resolving catalog links |
 | `loadDeployment(indexContext, deploymentId, {signal, fetcher} = {})` | The selected complete catalog |
-| `getOptions(catalog, config = catalog.base_config)` | `[{path, schema, value}]` for the declared controls |
+| `getOptions(catalog, config = catalog.base_config, edits = {})` | `[{path, schema, value}]` for the declared controls, with GPU-dependent degree limits |
 | `resolveConfig(catalog, edits = {})` | `config`, `yaml`, `command`, `clientRequest`, `clientCommand`, and optional `websocketUrl` |
 
 `fetcher` is optional dependency injection for tests; `signal` supports canceling
 obsolete requests. `getOptions` returns `undefined` for an inherited value;
 `null`, `false` and `0` remain explicit. `schema.default` is informational and
 must not populate missing values. Edits map expanded field paths to new values.
+The optional `edits` argument previews current values and dependent limits even
+while a configuration is incomplete or invalid. `resolveConfig` remains the
+validation boundary before displaying or downloading output.
 
 For direct browser use, load the bundled validator before resolving edits:
 
@@ -72,7 +76,7 @@ For direct browser use, load the bundled validator before resolving edits:
 ```
 
 Adjust asset URLs for the site's deployment prefix. Loading metadata and reading
-options do not require the validator; `resolveConfig` does. The demo bootstrap
+options do not require the validator; `resolveConfig` does. The standalone demo HTML
 loads these dependencies in order. CommonJS consumers load the bundled validator
 through the core module's internal `require`.
 
@@ -85,9 +89,10 @@ const result = api.resolveConfig(catalog, {"server.port": 9000});
 // Render fields and result.yaml/result.command in the chosen UI framework.
 ```
 
-The core does not mount UI, manipulate guide HTML or execute commands. A small
-page-only bootstrap loads dependencies and mounts the replaceable demo. The demo
-owns Model/Deployment selectors, cancellation and stale-response checks, error
+The core does not mount UI, manipulate guide HTML or execute commands.
+`examples/cookbook/index.html` loads the validator, core and demo scripts and
+mounts the replaceable demo directly; it needs no MkDocs build or global loader.
+The demo owns Model/Deployment selectors, cancellation and stale-response checks, error
 states, copying/downloads and ordinary guide links. Loading a new catalog disables
 old outputs and resets edits. Only active catalog/validator state is retained.
 
@@ -105,8 +110,12 @@ siblings; arrays replace whole values. Missing and explicit null differ. The
 runtime still resolves checkpoint-dependent, hardware-dependent and request
 fallback values; the cookbook does not simulate those decisions.
 
-Browser validation checks the selected fields against their exported constraints.
-It does not reproduce arbitrary Python validators, cross-field runtime checks or
+Browser validation checks selected fields against their exported constraints and
+validates GPU count against the configured TP, SP and HSDP degrees. Positive
+degrees must be at most the GPU count and divide it evenly; the native automatic
+`-1` values remain available. `getOptions` returns GPU-dependent numeric limits
+for future UIs, while the shared resolver rejects invalid combinations without
+changing user values. It does not reproduce arbitrary model/FSDP validators or
 hardware compatibility. Reset discards edits by resolving the baseline again.
 
 Selectors are positive leaves or non-nullable declared namespaces. Expansion
@@ -114,6 +123,11 @@ follows declaration order and rejects any protected/opaque/unsupported child,
 duplicate or overlap. Arrays are leaves; maps and nullable objects are not
 expandable. Namespace selection opts into future public fields. No implicit
 controls, add/hide rules or model-specific JavaScript are introduced.
+
+**TODO(cookbook-experimental):** Entries in `experimental` and other
+`dict[str, Any]` maps have no declared per-key field metadata. They remain
+unsupported as editable controls until a typed declaration or metadata adapter
+is available. Their existing baseline values still survive every download.
 
 ## Runtime boundaries and examples
 
@@ -141,13 +155,15 @@ omitted where there is no suitable existing page.
 
 ## Guides and checks
 
-MkDocs renders optional guide pages. Catalogs carry their URLs, not Markdown.
-The demo links to the guide without fetching or transforming its HTML. Guide
-text remains baseline reference material; generated instructions reflect edits.
+Catalogs carry optional guide URLs, not Markdown. The local demo resolves these
+links against the existing published documentation, without fetching or
+transforming guide HTML. Guide text remains baseline reference material;
+generated instructions reflect edits.
 
-CI generates catalogs before MkDocs and checks catalog/guide URLs in the built
-site. Focused Python/Node tests cover native validation, baseline preservation,
-explicit/inherited values, environment quoting, public API behavior, runtime
+The production documentation workflow is unchanged. Catalog export, the local
+preview and focused tests are developer commands for this design PR. Tests cover
+native validation, baseline preservation, explicit/inherited values,
+environment quoting, public API behavior, runtime
 commands and selection races. Fixture-based JS unit tests need only Node;
 generated-catalog and native-parser integration tests use the CPU Python
 environment and generate temporary assets. No weights, server startup or GPU

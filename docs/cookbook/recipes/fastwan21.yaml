@@ -10,6 +10,8 @@ deployments:
       FASTVIDEO_ATTENTION_BACKEND: "VIDEO_SPARSE_ATTN"
     controls:
       - server
+      - generator.engine.num_gpus
+      - generator.engine.parallelism
       - generator.engine.offload.dit_layerwise
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae

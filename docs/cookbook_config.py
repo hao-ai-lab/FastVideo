@@ -2,8 +2,9 @@
 
 Each model manifest offers deployments with a native serving YAML and an
 explicit list of editable fields. The complete baseline is preserved; public
-Python declarations supply metadata only for those controls. Export validates native parsing and serving
-translation without loading weights. JSON files are generated docs assets.
+Python declarations supply metadata only for those controls. Export validates
+native parsing and serving translation without loading weights. JSON files are
+generated metadata for consumers.
 
 FastVideo imports stay inside export helpers because importing its package also
 initializes PyTorch/backend dependencies; ordinary docs tooling need not do so.
@@ -19,7 +20,7 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
-from urllib.parse import quote, unquote
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPES_DIR = ROOT / "docs/cookbook/recipes"
@@ -27,17 +28,16 @@ OUTPUT_DIR = ROOT / "docs/assets/cookbook-config"
 JS_SAFE_INTEGER = 2**53 - 1
 SCHEMA_DATA = {"default", "examples", "enum", "const"}
 RUNTIME_IDS = {"fastvideo-cuda-rest", "fastvideo-mlx-rest", "fastvideo-cuda-streaming"}
-# These fields change identity/topology or are rejected/overridden by the REST adapter.
+# Not editable as cookbook controls; values already in the baseline are preserved.
 UNSUPPORTED_CONTROLS = {
-    "generator.pipeline.preset",
-    "generator.pipeline.preset_version",
-    "generator.pipeline.components.vae_weights",
-    "generator.model_path",
-    "generator.pipeline.workload_type",
-    "generator.engine.num_gpus",
-    "default_request.output.save_video",
-    "default_request.output.return_frames",
-    "default_request.output.output_path",
+    "generator.pipeline.preset",  # Compatibility adapter rejects non-null preset selections.
+    "generator.pipeline.preset_version",  # Compatibility adapter rejects non-null preset versions.
+    "generator.pipeline.components.vae_weights",  # Compatibility adapter rejects non-null VAE weight overrides.
+    "generator.model_path",  # Fixed by model selection; changing it could invalidate the recipe.
+    "generator.pipeline.workload_type",  # Fixed by deployment; determines T2V/I2V client instructions.
+    "default_request.output.save_video",  # Server-managed: True for REST, False for streaming.
+    "default_request.output.return_frames",  # Server-managed: False for REST, True for streaming.
+    "default_request.output.output_path",  # REST assigns a per-request path under server.output_dir.
 }
 
 
@@ -212,7 +212,10 @@ def load_recipes(recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> list[dic
 
 def _control_schema(schema: dict[str, Any], path: str) -> dict[str, Any]:
     """Resolve only typed public leaves; opaque experimental maps stay in the baseline."""
-    if path in UNSUPPORTED_CONTROLS or path.startswith("generator.engine.parallelism.") or not re.fullmatch(
+    # TODO(cookbook-experimental): dict[str, Any] maps lack typed key metadata.
+    # Preserve experimental values in the baseline; add a native typed contract
+    # or reviewed metadata adapter before exposing them as editable controls.
+    if path in UNSUPPORTED_CONTROLS or not re.fullmatch(
             r"(?:generator|server|default_request)(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+", path):
         raise ValueError(f"Unsupported serving control: {path}")
     field = schema
@@ -282,7 +285,7 @@ def _runtime_metadata(runtime_id: str) -> tuple[Any, dict[str, Any], dict[str, A
 
     runtime: dict[str, Any]
     if runtime_id in {"fastvideo-cuda-rest", "fastvideo-cuda-streaming"}:
-        from fastvideo.api.schema import ServeConfig, ServerConfig
+        from fastvideo.api.schema import EngineConfig, ServeConfig, ServerConfig
 
         config_type = ServeConfig
         server = ServerConfig()
@@ -293,6 +296,14 @@ def _runtime_metadata(runtime_id: str) -> tuple[Any, dict[str, Any], dict[str, A
             "interface": "websocket" if runtime_id == "fastvideo-cuda-streaming" else "rest",
             "launch_argv": ["fastvideo", "serve", "--config", "config.yaml"],
             "install_url": "https://haoailab.com/FastVideo/getting_started/installation/",
+        }
+        engine = EngineConfig()
+        runtime["topology_defaults"] = {
+            "num_gpus": engine.num_gpus,
+            **{
+                name: getattr(engine.parallelism, name)
+                for name in ("tp_size", "sp_size", "hsdp_replicate_dim", "hsdp_shard_dim")
+            },
         }
     else:
         from fastvideo.entrypoints.openai.mlx_server import MLXServeConfig, MLXServerConfig
@@ -461,42 +472,11 @@ def export_catalogs(output_dir: Path = OUTPUT_DIR,
     return index
 
 
-def check_site(site_dir: Path, recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> None:
-    """Check generated catalogs survive the documentation build."""
-    output_dir = site_dir / "assets/cookbook-config"
-    index = json.loads((output_dir / "index.json").read_text(encoding="utf-8"))
-    recipes = load_recipes(recipes_dir, root)
-    expected_models = list(dict.fromkeys(recipe["model_key"] for recipe in recipes))
-    if [model["id"] for model in index["models"]] != expected_models:
-        raise ValueError("Built cookbook models do not match recipe manifests")
-    deployments = [deployment for model in index["models"] for deployment in model["deployments"]]
-    if [deployment["id"] for deployment in deployments] != [recipe["id"] for recipe in recipes]:
-        raise ValueError("Built cookbook index does not match recipe manifests")
-    for recipe, source in zip(deployments, recipes, strict=True):
-        if recipe["catalog_url"] != _catalog_url(recipe["id"]):
-            raise ValueError(f"Unexpected catalog URL for recipe: {recipe['id']}")
-        catalog = json.loads((output_dir / recipe["catalog_url"]).read_text(encoding="utf-8"))
-        if catalog["id"] != recipe["id"] or not {"base_config", "controls", "runtime"} <= catalog.keys():
-            raise ValueError(f"Invalid built catalog for recipe: {recipe['id']}")
-        guide = _guide_link(source.get("guide"), root)
-        if catalog.get("guide") != guide:
-            raise ValueError(f"Built guide link differs from manifest: {recipe['id']}")
-        if guide:
-            page = unquote(guide["url"][len("../../"):])
-            if not (site_dir / page / "index.html").is_file():
-                raise ValueError(f"Guide page missing from built site: {page}")
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipes-dir", type=Path, default=RECIPES_DIR)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
-    parser.add_argument("--check-site", type=Path, help="Verify a built site instead of generating catalogs.")
     args = parser.parse_args()
     sys.path.insert(0, str(ROOT))
-    if args.check_site:
-        check_site(args.check_site, args.recipes_dir)
-        print("Built cookbook catalogs verified.")
-    else:
-        export_catalogs(args.output_dir, args.recipes_dir)
-        print(args.output_dir / "index.json")
+    export_catalogs(args.output_dir, args.recipes_dir)
+    print(args.output_dir / "index.json")

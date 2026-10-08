@@ -217,3 +217,34 @@ def test_i2v_native_baseline_and_sample_require_an_image(tmp_path):
     assert body["model"] == "wan21-i2v-14b"
     assert "http://127.0.0.1:9002/v1/videos/sync" in result["clientCommand"]
     VideoGenerationRequest(**body)
+
+
+@pytest.mark.parametrize("parallelism", [2, -1])
+def test_fasth3_gpu_and_parallelism_edits_round_trip_native_config(tmp_path, parallelism):
+    output = tmp_path / "catalogs"
+    index = export_catalogs(output_dir=output)
+    model = next(model for model in index["models"] if model["id"] == "fasth3-8step")
+    deployment = next(item for item in model["deployments"] if item["runtime"] == "fastvideo-cuda-rest")
+    catalog = json.loads((output / deployment["catalog_url"]).read_text())
+    result = resolve_in_browser(catalog, {
+        "generator.engine.num_gpus": 2,
+        "generator.engine.parallelism.sp_size": parallelism,
+    })
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(result["yaml"])
+    parser = FlexibleArgumentParser()
+    subcommand = ServeSubcommand()
+    subcommand.subparser_init(parser.add_subparsers(dest="subparser"))
+    args, unknown = parser.parse_known_args(["serve", "--config", str(config_path)])
+    args._unknown = unknown
+    subcommand.validate(args)
+    native = build_serve_config(args, unknown)
+    translated = generator_config_to_fastvideo_args(native.generator)
+    assert native.generator.engine.num_gpus == 2
+    assert native.generator.engine.parallelism.sp_size == parallelism
+    assert translated.num_gpus == 2
+    assert translated.sp_size == 2
+    assert translated.tp_size == 1
+    assert native.generator.engine.use_fsdp_inference is False
+    assert result["config"]["generator"]["pipeline"] == catalog["base_config"]["generator"]["pipeline"]
+    assert resolve_in_browser(catalog, {})["config"] == catalog["base_config"]

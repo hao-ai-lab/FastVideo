@@ -86,7 +86,6 @@ def test_bad_manifests_fail_clearly(tmp_path, updates, message):
     "server.missing", "generator.model_path", "generator.pipeline.preset", "generator.pipeline.preset_version",
     "generator.pipeline.components.vae_weights", "generator.pipeline.workload_type", "streaming.warmup.enabled",
     "generator.pipeline.experimental.VSA_sparsity", "generator.engine",
-    "generator.engine.num_gpus", "generator.engine.parallelism.sp_size",
     "default_request.output.save_video", "default_request.output.return_frames", "default_request.output.output_path", "server.__proto__.polluted",
 ])
 def test_controls_need_typed_metadata_and_cannot_change_identity_or_runtime(tmp_path, path):
@@ -119,7 +118,7 @@ def test_another_registered_model_uses_the_same_builder(tmp_path):
     assert result["workload"] == "i2v"
 
 
-def test_export_order_manifest_urls_pruning_and_site_validation(tmp_path):
+def test_export_order_manifest_urls_and_pruning(tmp_path):
     recipes, _, _ = fixture_recipe(tmp_path)
     manifest = yaml.safe_load((recipes / "example.yaml").read_text())
     manifest["deployments"]["cuda-rest"]["config"] = "examples/serving/another.yaml"
@@ -135,17 +134,12 @@ def test_export_order_manifest_urls_pruning_and_site_validation(tmp_path):
         assert catalog["id"] == row["id"]
         assert "base_config" not in row
     assert json.loads((output / "recipes/example/cuda-rest.json").read_text()) == cookbook_config.build_catalogs(recipes, tmp_path)[1]
-    cookbook_config.check_site(tmp_path / "site", recipes, tmp_path)
     marker = output / "keep.txt"
     marker.write_text("not an exporter file")
     (recipes / "another.yaml").unlink()
     cookbook_config.export_catalogs(output, recipes, tmp_path)
     assert not (output / "recipes/another/cuda-rest.json").exists()
     assert marker.exists()
-    cookbook_config.check_site(tmp_path / "site", recipes, tmp_path)
-    (output / "recipes/example/cuda-rest.json").unlink()
-    with pytest.raises(FileNotFoundError):
-        cookbook_config.check_site(tmp_path / "site", recipes, tmp_path)
 
 
 def test_failed_export_preserves_previous_files(tmp_path):
@@ -221,16 +215,6 @@ def test_markdown_guide_is_a_page_reference_not_another_renderer(tmp_path):
     assert catalog["guide"] == {"url": "../../cookbook/guides/example/"}
     assert catalog["base_config"] == baseline
     assert guide.read_text() == markdown
-    with pytest.raises(ValueError, match="Guide page missing"):
-        cookbook_config.check_site(site, recipes, tmp_path)
-    built = site / "cookbook/guides/example/index.html"
-    built.parent.mkdir(parents=True, exist_ok=True)
-    built.write_text("<h1>Example guide</h1>")
-    cookbook_config.check_site(site, recipes, tmp_path)
-    catalog["guide"]["url"] = "../../wrong/"
-    (output / "recipes/example/cuda-rest.json").write_text(json.dumps(catalog))
-    with pytest.raises(ValueError, match="differs from manifest"):
-        cookbook_config.check_site(site, recipes, tmp_path)
 
 
 @pytest.mark.parametrize("guide", ["../private.md", "/tmp/private.md", "docs/missing.md", "examples/serving/config.yaml"])
@@ -283,9 +267,8 @@ def test_namespaces_expand_all_leaves_in_manifest_then_declaration_order(tmp_pat
 
 
 @pytest.mark.parametrize("selector, offending", [
-    ("generator.engine", "generator.engine.num_gpus"),
+    ("generator.engine", "generator.engine.compile.extras"),
     ("generator.engine.compile", "generator.engine.compile.extras"),
-    ("generator.engine.parallelism", "generator.engine.parallelism.tp_size"),
     ("default_request.output", "default_request.output.output_path"),
     ("generator.engine.quantization", "generator.engine.quantization"),
 ])
@@ -323,6 +306,54 @@ def test_arrays_stay_leaves_and_empty_or_unknown_namespaces_fail():
     schema["properties"]["server"]["properties"] = {}
     with pytest.raises(ValueError, match="use narrower selectors"):
         cookbook_config._expand_controls(schema, ["server"])
+
+
+def test_explicit_empty_controls_remains_empty(tmp_path):
+    recipes, baseline, _ = fixture_recipe(tmp_path, controls=[])
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert result["controls"] == []
+    assert result["base_config"] == baseline
+
+
+def test_controls_are_required_instead_of_exposing_fields_implicitly(tmp_path):
+    recipes, _, _ = fixture_recipe(tmp_path)
+    manifest_path = recipes / "example.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    del manifest["deployments"]["cuda-rest"]["controls"]
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    with pytest.raises(ValueError, match="expected.*controls"):
+        cookbook_config.load_recipes(recipes, tmp_path)
+
+
+def test_gpu_and_parallelism_namespace_are_editable_without_changing_baseline(tmp_path):
+    from fastvideo.api.schema import EngineConfig
+
+    recipes, baseline, _ = fixture_recipe(tmp_path, controls=[
+        "generator.engine.num_gpus", "generator.engine.parallelism", "server",
+    ])
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    fields = {control["path"]: control["schema"] for control in result["controls"]}
+    assert list(fields) == [
+        "generator.engine.num_gpus", "generator.engine.parallelism.tp_size",
+        "generator.engine.parallelism.sp_size", "generator.engine.parallelism.hsdp_replicate_dim",
+        "generator.engine.parallelism.hsdp_shard_dim", "generator.engine.parallelism.dist_timeout",
+        "server.host", "server.port", "server.output_dir", "server.served_model_name",
+    ]
+    assert fields["generator.engine.num_gpus"]["type"] == "integer"
+    assert fields["generator.engine.parallelism.tp_size"]["default"] == -1
+    assert fields["generator.engine.parallelism.sp_size"]["default"] == -1
+    assert fields["generator.engine.parallelism.dist_timeout"]["anyOf"][1] == {"type": "null"}
+    engine = EngineConfig()
+    assert result["runtime"]["topology_defaults"] == {
+        "num_gpus": engine.num_gpus,
+        "tp_size": engine.parallelism.tp_size,
+        "sp_size": engine.parallelism.sp_size,
+        "hsdp_replicate_dim": engine.parallelism.hsdp_replicate_dim,
+        "hsdp_shard_dim": engine.parallelism.hsdp_shard_dim,
+    }
+    assert result["base_config"] == baseline
+    assert result["base_config"]["generator"]["pipeline"]["experimental"] == (
+        baseline["generator"]["pipeline"]["experimental"])
 
 
 def fixture_mlx_deployment(tmp_path):

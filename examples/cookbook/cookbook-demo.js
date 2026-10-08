@@ -3,7 +3,7 @@
   "use strict";
 
   const cookbook = typeof module !== "undefined" && module.exports ?
-    require("./cookbook-config.js") : scope.FastVideoConfigCookbook;
+    require("../../docs/assets/cookbook-config.js") : scope.FastVideoConfigCookbook;
   const pathParts = (path) => path.split(".");
 
   /** The demo discards obsolete catalog responses when its selection changes. */
@@ -33,6 +33,8 @@
       "generator.engine.compile.enabled": "Compile transformer", "generator.engine.offload.vae": "Offload VAE",
       "generator.engine.offload.dit_layerwise": "Offload transformer layers",
       "generator.engine.offload.text_encoder": "Offload text encoder",
+      "generator.engine.num_gpus": "GPU count", "generator.engine.parallelism.tp_size": "Tensor parallel size",
+      "generator.engine.parallelism.sp_size": "Sequence parallel size",
       "default_request.sampling.num_frames": "Frames", "default_request.sampling.height": "Height",
       "default_request.sampling.width": "Width", "default_request.sampling.fps": "FPS",
       "default_request.sampling.seed": "Seed",
@@ -65,6 +67,23 @@
     const clientGuide = root.querySelector("[data-config-client-guide]");
     let catalog, resolved, selections = {};
     const inputErrors = new Map();
+    const fieldInputs = new Map();
+
+    function updateControlLimits() {
+      // Preview limits even when a GPU edit temporarily invalidates an existing parallel degree.
+      for (const { path, schema } of cookbook.getOptions(catalog, catalog.base_config, selections)) {
+        const input = fieldInputs.get(path);
+        if (input?.type !== "number") continue;
+        const branches = schema.anyOf || schema.oneOf || [schema];
+        const nonNull = branches.filter((item) => item.type !== "null");
+        const basic = nonNull.length === 1 ? nonNull[0] : schema;
+        for (const [property, keyword] of [["min", "minimum"], ["max", "maximum"]]) {
+          const bound = schema[keyword] ?? basic[keyword];
+          if (bound === undefined) input.removeAttribute(property);
+          else input[property] = bound;
+        }
+      }
+    }
 
     function clearMetadata() {
       requirementsSection.hidden = true;
@@ -90,6 +109,7 @@
     function render() {
       status.textContent = "";
       try {
+        updateControlLimits();
         if (inputErrors.size) throw new Error([...inputErrors.values()].join("; "));
         resolved = cookbook.resolveConfig(catalog, selections);
         error.textContent = "";
@@ -116,6 +136,7 @@
 
     function renderControls() {
       controls.replaceChildren();
+      fieldInputs.clear();
       const sections = new Map();
       for (const control of cookbook.getOptions(catalog)) {
         const { path, schema: field, value } = control;
@@ -212,6 +233,7 @@
         }
         input.dataset.configPath = pointer;
         input.setAttribute("aria-label", path);
+        fieldInputs.set(path, input);
         const initial = document.createElement("small");
         initial.textContent = value === undefined ? "Inherited / unset" : `Recipe value: ${JSON.stringify(value)}`;
         row.prepend(title, address);
@@ -227,7 +249,7 @@
 
     try {
       const index = await cookbook.loadIndex(root.dataset.metadata);
-      const indexUrl = index.url;
+      const indexUrl = root.dataset.documentationIndex || index.url;
       if (!index.models.length) throw new Error("No models are published");
       for (const model of index.models) {
         const option = document.createElement("option");
@@ -247,6 +269,7 @@
           selections = {};
           inputErrors.clear();
           controls.replaceChildren();
+          fieldInputs.clear();
           clearMetadata();
           reset.disabled = true;
           invalidate("");

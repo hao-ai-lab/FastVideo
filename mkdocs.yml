@@ -9,6 +9,7 @@ exclude_docs: |
   README.md
   generate_examples.py
   cookbook_config.py
+  assets/cookbook-config/
   cookbook/recipes/*.yaml
   cookbook/recipes/*.yml
   package.json
@@ -167,8 +168,6 @@ nav:
   - Cookbook:
     - Overview: cookbook/index.md
     - H3 server and playground: cookbook/openai-api.md
-    # TODO(cookbook-ui): Remove this demo entry when the new UI replaces its page.
-    - Config builder example: cookbook/config-builder.md
     - Video:
       - MiniMax H3: cookbook/minimax-h3.md
       - Wan: cookbook/wan.md
@@ -275,5 +274,3 @@ extra_css:
 extra_javascript:
   - assets/copy-page.js
   - assets/cookbook.js
-  # TODO(cookbook-ui): Replace the demo; keep its reusable data API independent of this loader.
-  - assets/cookbook-loader.js

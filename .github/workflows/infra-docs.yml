@@ -10,21 +10,6 @@ on:
       - 'mkdocs.yml'
       - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
-      - 'requirements-cookbook.in'
-      - 'requirements-cookbook.txt'
-      - 'pyproject.toml'
-      - 'fastvideo/api/*.py'
-      - 'fastvideo/entrypoints/openai/mlx_server.py'
-      - 'fastvideo/entrypoints/openai/protocol.py'
-      - 'fastvideo/entrypoints/openai/request_adapter.py'
-      - 'fastvideo/registry.py'
-      - 'fastvideo/fastvideo_args.py'
-      - 'fastvideo/configs/**'
-      - 'fastvideo/models/**/*config.py'
-      - 'fastvideo/models/**/definition.py'
-      - 'fastvideo/pipelines/basic/**/presets.py'
-      - 'fastvideo/pipelines/basic/**/pipeline_configs.py'
-      - 'tests/local_tests/test_cookbook*'
       - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
   pull_request:
@@ -36,21 +21,6 @@ on:
       - 'mkdocs.yml'
       - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
-      - 'requirements-cookbook.in'
-      - 'requirements-cookbook.txt'
-      - 'pyproject.toml'
-      - 'fastvideo/api/*.py'
-      - 'fastvideo/entrypoints/openai/mlx_server.py'
-      - 'fastvideo/entrypoints/openai/protocol.py'
-      - 'fastvideo/entrypoints/openai/request_adapter.py'
-      - 'fastvideo/registry.py'
-      - 'fastvideo/fastvideo_args.py'
-      - 'fastvideo/configs/**'
-      - 'fastvideo/models/**/*config.py'
-      - 'fastvideo/models/**/definition.py'
-      - 'fastvideo/pipelines/basic/**/presets.py'
-      - 'fastvideo/pipelines/basic/**/pipeline_configs.py'
-      - 'tests/local_tests/test_cookbook*'
       - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
 
@@ -77,39 +47,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Check cookbook JS units
-        run: node --test tests/local_tests/test_cookbook_config.mjs tests/local_tests/test_cookbook_demo.mjs
-
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
       - name: Install dependencies
-        # Import configuration declarations using CPU wheels; no full FastVideo
-        # installation, GPU kernels or model weights are needed for this build.
-        run: >-
-          uv pip install --system --torch-backend=cpu
-          -r requirements-mkdocs.txt -r requirements-cookbook.txt
-
-      - name: Check cookbook integration
-        env:
-          HF_HUB_OFFLINE: '1'
-        run: |
-          python -m pytest tests/local_tests/test_cookbook_config_metadata.py tests/local_tests/test_cookbook_config_roundtrip.py -q
-          node --test tests/local_tests/test_cookbook_config_integration.mjs
+        run: uv pip install --system -r requirements-mkdocs.txt
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
       - name: Build documentation
-        run: |
-          python docs/cookbook_config.py
-          mkdocs build --clean
-          python docs/cookbook_config.py --check-site site
+        run: mkdocs build
 
       - name: Check docs links
         run: python scripts/check_docs_links.py

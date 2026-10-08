@@ -7,13 +7,13 @@
 #   --python-platform x86_64-manylinux_2_28 --python-version 3.12 \
 #   --torch-backend=cpu --prerelease=disallow
 
-# The docs job installs both locks in one environment.
+# Keep shared package versions compatible with the documentation environment.
 -c requirements-mkdocs.txt
 
 # Exporter and cookbook manifests.
 pydantic>=2.11,<3
 PyYAML>=6.0.1
-# Focused CPU metadata and generated-configuration checks in the docs workflow.
+# Local metadata and generated-configuration checks.
 pytest>=8,<10
 
 # Native MLX serving configuration lives beside its server entrypoint. Creating

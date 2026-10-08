@@ -34,6 +34,19 @@ function catalog() {
 }
 const field = (data, path) => data.controls.find((control) => control.path === path).schema;
 
+function topologyCatalog() {
+  const data = catalog();
+  data.runtime.topology_defaults = { num_gpus: 1, tp_size: -1, sp_size: -1,
+    hsdp_replicate_dim: 1, hsdp_shard_dim: -1 };
+  Object.assign(data.base_config.generator.engine, { num_gpus: 4, use_fsdp_inference: false,
+    parallelism: { tp_size: 1, sp_size: 4 } });
+  for (const path of ["generator.engine.num_gpus", ...Object.keys(data.runtime.topology_defaults)
+    .filter((key) => key !== "num_gpus").map((key) => `generator.engine.parallelism.${key}`)]) {
+    data.controls.push({ path, schema: { type: "integer" } });
+  }
+  return data;
+}
+
 test("core exposes only reusable functions and importing it has no DOM or fetch side effects", () => {
   const context = {
     document: new Proxy({}, { get: () => assert.fail("Core must not read the DOM") }),
@@ -208,4 +221,55 @@ test("caller edits, catalog and resolved configuration do not share nested value
   data.base_config.generator.pipeline.experimental.hidden.push(2);
   assert.equal(JSON.stringify(result.config), resultBefore);
   assert.deepEqual(data.base_config.default_request.prompt, [{ text: "Baseline", tags: ["baseline"] }]);
+});
+
+test("GPU edits require compatible concrete degrees without silently clamping topology or FSDP", () => {
+  const data = topologyCatalog(), before = JSON.stringify(data);
+  assert.throws(() => resolveConfig(data, { "generator.engine.num_gpus": 2 }), /sp_size.*at most num_gpus \(2\)/);
+  const valid = resolveConfig(data, { "generator.engine.num_gpus": 2,
+    "generator.engine.parallelism.sp_size": 2, "generator.engine.parallelism.tp_size": 2 });
+  assert.equal(valid.config.generator.engine.num_gpus, 2);
+  assert.deepEqual(valid.config.generator.engine.parallelism, { tp_size: 2, sp_size: 2 });
+  assert.equal(valid.config.generator.engine.use_fsdp_inference, false);
+  for (const value of [0, -2, 1.5, 3, 8]) {
+    assert.throws(() => resolveConfig(data, { "generator.engine.parallelism.tp_size": value }), /tp_size/);
+  }
+  for (const value of [0, -1, 1.5]) {
+    assert.throws(() => resolveConfig(data, { "generator.engine.num_gpus": value }), /num_gpus/);
+  }
+  assert.equal(JSON.stringify(data), before);
+});
+
+test("native -1 degree sentinels and omitted topology defaults remain inherited", () => {
+  const data = topologyCatalog();
+  const edits = Object.fromEntries(["tp_size", "sp_size", "hsdp_shard_dim"]
+    .map((key) => [`generator.engine.parallelism.${key}`, -1]));
+  const result = resolveConfig(data, { ...edits, "generator.engine.num_gpus": 2 });
+  assert.equal(result.config.generator.engine.parallelism.tp_size, -1);
+  assert.equal(result.config.generator.engine.parallelism.sp_size, -1);
+  assert.equal(result.config.generator.engine.parallelism.hsdp_shard_dim, -1);
+  assert.throws(() => resolveConfig(data, { "generator.engine.parallelism.hsdp_replicate_dim": -1 }), /positive integer/);
+  delete data.base_config.generator.engine.num_gpus;
+  delete data.base_config.generator.engine.parallelism;
+  assert.deepEqual(resolveConfig(data).config, data.base_config);
+});
+
+test("getOptions previews GPU-dependent limits without requiring a complete valid edit or mutating inputs", () => {
+  const data = topologyCatalog(), before = JSON.stringify(data), edits = { "generator.engine.num_gpus": 2 };
+  const option = (options, path) => options.find((item) => item.path === path);
+  const initial = getOptions(data), preview = getOptions(data, data.base_config, edits);
+  const path = "generator.engine.parallelism.sp_size";
+  assert.equal(option(initial, path).schema.maximum, 4);
+  assert.equal(option(preview, path).schema.maximum, 2);
+  assert.equal(option(preview, path).value, 4);
+  assert.equal(option(preview, path).schema.minimum, -1);
+  assert.match(option(preview, path).schema.description, /divide num_gpus evenly/);
+  assert.equal(option(preview, "generator.engine.parallelism.hsdp_replicate_dim").schema.minimum, 1);
+  assert.ok(Number.isNaN(option(getOptions(data, data.base_config,
+    { "generator.engine.num_gpus": NaN }), "generator.engine.num_gpus").value));
+  assert.equal(JSON.stringify(data), before);
+  assert.deepEqual(edits, { "generator.engine.num_gpus": 2 });
+  delete data.runtime.topology_defaults;
+  assert.equal(option(getOptions(data), path).schema.maximum, undefined);
+  assert.equal(resolveConfig(data, { "generator.engine.num_gpus": 2 }).config.generator.engine.num_gpus, 2);
 });

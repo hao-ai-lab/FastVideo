@@ -6,7 +6,9 @@
   "use strict";
 
   const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
-  const clone = (value) => JSON.parse(JSON.stringify(value));
+  const clone = (value) => Array.isArray(value) ? value.map(clone) :
+    value !== null && typeof value === "object" ?
+      Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)])) : value;
 
   const pathParts = (path) => path.split(".");
 
@@ -60,6 +62,54 @@
 
   function getValue(config, path) {
     return pathParts(path).reduce((value, key) => value?.[key], config);
+  }
+
+  const topologyPrefix = "generator.engine.parallelism.";
+  const topologyDegrees = ["tp_size", "sp_size", "hsdp_replicate_dim", "hsdp_shard_dim"];
+  const autoDegrees = new Set(["tp_size", "sp_size", "hsdp_shard_dim"]);
+
+  function topologyValues(catalog, config) {
+    const defaults = catalog.runtime.topology_defaults;
+    if (!defaults) return null; // MLX has no distributed CUDA topology contract.
+    const engine = config.generator?.engine;
+    return { ...defaults, ...engine?.parallelism,
+      num_gpus: engine?.num_gpus === undefined ? defaults.num_gpus : engine.num_gpus };
+  }
+
+  /** Match inference auto sentinels and distributed group divisibility without changing user values. */
+  function validateTopology(catalog, config) {
+    const topology = topologyValues(catalog, config);
+    if (!topology) return;
+    const gpuCount = topology.num_gpus;
+    if (!Number.isInteger(gpuCount) || gpuCount < 1) {
+      throw new Error("generator.engine.num_gpus must be a positive integer");
+    }
+    for (const key of topologyDegrees) {
+      const degree = topology[key], path = `${topologyPrefix}${key}`;
+      if (degree === -1 && autoDegrees.has(key)) continue;
+      if (!Number.isInteger(degree) || degree < 1) {
+        throw new Error(`${path} must be a positive integer${autoDegrees.has(key) ? " or -1 (automatic)" : ""}`);
+      }
+      if (degree > gpuCount || gpuCount % degree !== 0) {
+        throw new Error(`${path} must be at most num_gpus (${gpuCount}) and divide num_gpus evenly`);
+      }
+    }
+  }
+
+  function applySelections(catalog, config, selections, validate = false) {
+    if (!selections || typeof selections !== "object" || Array.isArray(selections)) {
+      throw new Error("Selections must be a field-to-value object");
+    }
+    const controls = new Map(catalog.controls.map((control) => [control.path, control]));
+    for (const [path, value] of Object.entries(selections)) {
+      const control = controls.get(path);
+      if (!control) throw new Error(`Field is not an editable recipe control: ${path}`);
+      if (validate) {
+        try { validateConfig(control.schema, value); }
+        catch (failure) { throw new Error(`${path}: ${failure.message}`); }
+      }
+      setPath(config, path, clone(value));
+    }
   }
 
   function validateConfig(schema, config) {
@@ -140,22 +190,16 @@
    * Example: {"server.port": 9000} changes only the recipe port; hidden VSA settings remain.
    */
   function resolveConfig(catalog, selections = {}) {
-    if (!selections || typeof selections !== "object" || Array.isArray(selections)) {
-      throw new Error("Selections must be a field-to-value object");
-    }
     const config = clone(catalog.base_config);
-    const controls = new Map(catalog.controls.map((control) => [control.path, control]));
-    for (const [path, value] of Object.entries(selections)) {
-      const control = controls.get(path);
-      if (!control) throw new Error(`Field is not an editable recipe control: ${path}`);
-      try { validateConfig(control.schema, value); }
-      catch (failure) { throw new Error(`${path}: ${failure.message}`); }
-      setPath(config, path, clone(value));
-    }
+    applySelections(catalog, config, selections, true);
     for (const control of catalog.controls) {
       const value = getValue(config, control.path);
-      if (value !== undefined) validateConfig(control.schema, value);
+      if (value !== undefined) {
+        try { validateConfig(control.schema, value); }
+        catch (failure) { throw new Error(`${control.path}: ${failure.message}`); }
+      }
     }
+    validateTopology(catalog, config);
     const argv = [...catalog.runtime.launch_argv];
     const environment = Object.entries(catalog.env).map(([key, value]) => `${key}=${shellQuote(value)}`);
     const sample = sampleRequest(catalog, config);
@@ -167,11 +211,32 @@
     };
   }
 
-  /** Return every enabled control, preserving undefined (inherited) versus explicit null/false/zero. */
-  function getOptions(catalog, config = catalog.base_config) {
+  /**
+   * Return metadata/current values, including degree limits derived from the selected GPU count.
+   * Optional edits preview incomplete configurations without validation; resolveConfig validates output.
+   * Neither previews nor declared defaults insert inherited fields into saved configuration.
+   */
+  function getOptions(catalog, config = catalog.base_config, selections = {}) {
+    const preview = clone(config);
+    applySelections(catalog, preview, selections);
+    const topology = topologyValues(catalog, preview);
     return catalog.controls.map(({ path, schema }) => {
-      const value = getValue(config, path);
-      return { path, schema: clone(schema), value: value === undefined ? undefined : clone(value) };
+      const field = clone(schema), value = getValue(preview, path);
+      const key = path.startsWith(topologyPrefix) ? path.slice(topologyPrefix.length) : null;
+      if (topology && topologyDegrees.includes(key)) {
+        field.minimum = Math.max(field.minimum ?? -Infinity, autoDegrees.has(key) ? -1 : 1);
+        if (Number.isInteger(topology.num_gpus) && topology.num_gpus > 0) {
+          field.maximum = Math.min(field.maximum ?? Infinity, topology.num_gpus);
+        }
+        const rule = { not: { const: 0 } };
+        if (autoDegrees.has(key)) field.allOf = [...(field.allOf || []), rule];
+        field.description = [field.description,
+          `Positive values must divide num_gpus evenly${autoDegrees.has(key) ? "; -1 selects automatic sizing" : ""}.`]
+          .filter(Boolean).join(" ");
+      } else if (topology && path === "generator.engine.num_gpus") {
+        field.minimum = Math.max(field.minimum ?? -Infinity, 1);
+      }
+      return { path, schema: field, value: value === undefined ? undefined : clone(value) };
     });
   }
 

@@ -7,7 +7,7 @@
  * Values come from the native baseline and explicit edits; validation never inserts defaults or changes data.
  *
  * Run `npm run build:validator --prefix docs` after editing this file or the
- * pinned dependencies. MkDocs ships the resulting self-contained asset, with no
+ * pinned dependencies. The result is a self-contained browser asset, with no
  * CDN or Node requirement for readers.
  */
 import Ajv2020 from "ajv/dist/2020.js";

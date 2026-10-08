@@ -1,4 +1,4 @@
-/** Bundle the pinned Ajv validator once; regular docs builds consume the committed asset. */
+/** Bundle the pinned Ajv validator for the local demo and other browser consumers. */
 import { build } from "esbuild";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";

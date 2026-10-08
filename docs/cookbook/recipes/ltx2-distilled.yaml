@@ -13,6 +13,8 @@ deployments:
     controls:
       - server.host
       - server.port
+      - generator.engine.num_gpus
+      - generator.engine.parallelism
       - default_request.sampling.num_frames
       - default_request.sampling.height
       - default_request.sampling.width

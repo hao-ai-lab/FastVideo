@@ -28,6 +28,8 @@ deployments:
       FASTVIDEO_ATTENTION_BACKEND: VIDEO_SPARSE_ATTN
     controls:
       - server
+      - generator.engine.num_gpus
+      - generator.engine.parallelism
       - generator.engine.compile.enabled
       - default_request.sampling.num_frames
 ```
@@ -79,10 +81,23 @@ There is no implicit list, `add` or `hide`. Namespaces opt into future public
 children; use exact leaves for a stable surface.
 
 Types and declared constraints come from the selected runtime. Existence in a
-schema does not prove every combination is meaningful. Keep coupled topology
-or sampling choices fixed unless reviewed: FastWan's three steps and DMD
-schedule belong together. Hidden experimental values stay in the output. MLX's
-untyped `default_request` stays hidden rather than borrowing an HTTP schema.
+schema does not prove every combination is meaningful. GPU count can be selected
+with `generator.engine.num_gpus`; `generator.engine.parallelism` expands TP, SP,
+HSDP dimensions and the distributed timeout into ordinary controls. The shared
+JavaScript API limits parallel degrees to the selected GPU count and checks
+divisibility. TP, SP and HSDP shard size retain the native `-1` automatic value.
+Invalid combinations block output until corrected; the editor does not silently
+change the recipe's topology or FSDP policy. Model-specific and other native
+cross-field checks still apply when the server starts.
+
+Keep coupled sampling choices fixed unless reviewed: FastWan's three steps and
+DMD schedule belong together. Hidden experimental values stay in the output.
+MLX's untyped `default_request` stays hidden rather than borrowing an HTTP schema.
+
+**TODO(cookbook-experimental):** `experimental` and other `dict[str, Any]` fields
+do not declare the types or choices of their individual keys. Editable controls
+for those entries are currently unsupported. Add a typed declaration or a
+metadata adapter later; existing values are preserved in the baseline/download.
 
 Copy necessary installation or usage notes from the referenced serving example
 or existing runbook into `requirements`, with a source comment. Do not add a
@@ -112,10 +127,10 @@ Run from the repository root:
 
 ```bash
 python docs/cookbook_config.py
-mkdocs serve
+python -m http.server 8195 --bind 127.0.0.1
 ```
 
-Open `/cookbook/config-builder/` and choose Model, then Deployment. Check the
+Open `http://127.0.0.1:8195/examples/cookbook/` and choose Model, then Deployment. Check the
 unchanged download against the full baseline; edit controls and reset, ensuring
 hidden settings survive. Inherited means omitted, not a resolved default;
 explicit `false`, `0` and allowed `null` stay explicit. Check launch environment,
@@ -126,8 +141,6 @@ response alone does not establish generation readiness or output.
 python -m pytest tests/local_tests/test_cookbook_config_metadata.py tests/local_tests/test_cookbook_config_roundtrip.py
 node --test tests/local_tests/test_cookbook_config.mjs tests/local_tests/test_cookbook_demo.mjs
 node --test tests/local_tests/test_cookbook_config_integration.mjs
-mkdocs build
-python docs/cookbook_config.py --check-site site
 pre-commit run --files docs/cookbook/recipes/fastwan21.yaml
 ```
 
@@ -136,6 +149,8 @@ tests and the integration Node file require the CPU configuration environment.
 Browser validation checks selected field constraints, not every native runtime
 or cross-field rule. Include other edited files in pre-commit and add checks for unusual
 requirements. Generated catalogs under `docs/assets/cookbook-config/` are ignored
-build output: regenerate after source changes, never hand-edit or commit them.
+local output: regenerate after source changes, never hand-edit or commit them.
+The demo is outside MkDocs; the production docs workflow does not generate or
+publish these catalogs. Final UI integration is a separate change.
 Validation loads no weights or GPU inference. See the [design](../design/serving-cookbook.md)
 for the data/API contract; this demo does not promise every runtime field is editable.

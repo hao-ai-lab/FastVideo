@@ -90,7 +90,10 @@ test("streaming offers a health check and effective WebSocket endpoint without a
   assert.deepEqual(initial.config, data.base_config);
   assert.equal(data.runtime.client_guide_url, "../../design/server_contracts/streaming/");
   assert.deepEqual(data.controls.map((item) => item.path), [
-    "server.host", "server.port", "default_request.sampling.num_frames",
+    "server.host", "server.port", "generator.engine.num_gpus",
+    "generator.engine.parallelism.tp_size", "generator.engine.parallelism.sp_size",
+    "generator.engine.parallelism.hsdp_replicate_dim", "generator.engine.parallelism.hsdp_shard_dim",
+    "generator.engine.parallelism.dist_timeout", "default_request.sampling.num_frames",
     "default_request.sampling.height", "default_request.sampling.width",
   ]);
   for (const [host, clientHost] of [["0.0.0.0", "127.0.0.1"], ["::", "[::1]"], ["[::]", "[::1]"],
@@ -119,12 +122,35 @@ test("every generated recipe resolves without edits and baseline defaults win", 
   assert.equal(result.config.default_request.sampling.num_inference_steps, 3);
   assert.deepEqual(data.controls.map((control) => control.path), [
     "server.host", "server.port", "server.output_dir", "server.served_model_name",
+    "generator.engine.num_gpus", "generator.engine.parallelism.tp_size", "generator.engine.parallelism.sp_size",
+    "generator.engine.parallelism.hsdp_replicate_dim", "generator.engine.parallelism.hsdp_shard_dim",
+    "generator.engine.parallelism.dist_timeout",
     "generator.engine.offload.dit_layerwise", "generator.engine.offload.text_encoder", "generator.engine.offload.vae",
     "generator.engine.compile.enabled", "default_request.sampling.num_frames", "default_request.sampling.height",
     "default_request.sampling.width", "default_request.sampling.fps", "default_request.sampling.seed",
   ]);
   assert.match(result.command, /FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN/);
 
+});
+
+test("GPU and namespace-selected parallelism controls validate complete edits", () => {
+  const data = catalogs.get("fasth3-8step/cuda-rest");
+  const paths = new Set(data.controls.map((control) => control.path));
+  for (const path of ["generator.engine.num_gpus", "generator.engine.parallelism.tp_size",
+    "generator.engine.parallelism.sp_size", "generator.engine.parallelism.hsdp_replicate_dim",
+    "generator.engine.parallelism.hsdp_shard_dim", "generator.engine.parallelism.dist_timeout"]) {
+    assert.ok(paths.has(path), path);
+  }
+  assert.throws(() => resolveConfig(data, { "generator.engine.num_gpus": 2 }), /sp_size.*num_gpus/);
+  const result = resolveConfig(data, {
+    "generator.engine.num_gpus": 2, "generator.engine.parallelism.sp_size": 2,
+  });
+  assert.equal(result.config.generator.engine.num_gpus, 2);
+  assert.equal(result.config.generator.engine.parallelism.sp_size, 2);
+  assert.equal(result.config.generator.engine.parallelism.tp_size, 1);
+  assert.equal(result.config.generator.engine.use_fsdp_inference, false);
+  assert.deepEqual(result.config.generator.pipeline, data.base_config.generator.pipeline);
+  assert.deepEqual(resolveConfig(data).config, data.base_config);
 });
 
 test("expanded server controls edit as ordinary leaves and reset preserves the native baseline", () => {

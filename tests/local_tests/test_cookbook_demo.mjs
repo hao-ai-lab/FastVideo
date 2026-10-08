@@ -5,7 +5,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 const require = createRequire(import.meta.url);
-const { createCatalogLoader } = require("../../docs/assets/cookbook-demo.js");
+const { createCatalogLoader } = require("../../examples/cookbook/cookbook-demo.js");
 
 function demoData() {
   const definitions = [
@@ -62,16 +62,17 @@ class Element {
   trigger(event) { return this.listeners.get(event)?.(); }
 }
 
-async function browserFixture() {
+async function browserFixture(customize = () => {}, documentationIndex) {
   const { index, catalogs } = demoData();
+  customize(catalogs);
   const nodes = new Map(), requests = [], urls = [], failures = new Set();
   const node = (selector) => {
     if (!nodes.has(selector)) nodes.set(selector, new Element());
     return nodes.get(selector);
   };
   const root = new Element();
-  root.dataset.initialized = "true"; // The page bootstrap owns this flag before mount is called.
   root.dataset.metadata = "https://example.test/project/assets/cookbook-config/index.json";
+  if (documentationIndex) root.dataset.documentationIndex = documentationIndex;
   root.querySelector = node;
   const copyButtons = ["yaml", "command", "clientCommand"].map((name) => {
     const button = new Element("button"); button.dataset.configCopy = name; return button;
@@ -91,8 +92,8 @@ async function browserFixture() {
   };
   const context = { document, fetch, URL, AbortController, setTimeout,
     FastVideoSchema: require("../../docs/assets/cookbook-validator.js") };
-  for (const file of ["cookbook-config.js", "cookbook-demo.js"]) {
-    runInNewContext(readFileSync(new URL(`../../docs/assets/${file}`, import.meta.url), "utf8"), context);
+  for (const file of ["docs/assets/cookbook-config.js", "examples/cookbook/cookbook-demo.js"]) {
+    runInNewContext(readFileSync(new URL(`../../${file}`, import.meta.url), "utf8"), context);
   }
   assert.deepEqual(Object.keys(context.FastVideoCookbookDemo), ["mount"]);
   assert.equal(requests.length, 0, "Demo import must not mount automatically");
@@ -104,6 +105,16 @@ async function browserFixture() {
   const control = (path) => descendants(element("controls")).find((item) => item.dataset.configPath === path);
   return { element, control, requests, urls, failures, code: (name) => node(`[data-config-code="${name}"]`).textContent };
 }
+
+test("local demo keeps catalog requests local and links to published runbooks", async () => {
+  const { element, urls } = await browserFixture(undefined,
+    "https://docs.example.test/FastVideo/assets/cookbook-config/index.json");
+  assert.equal(element("guide").href, "https://docs.example.test/FastVideo/cookbook/guides/alpha-serving/");
+  element("model-picker").value = "stream";
+  await element("model-picker").trigger("change");
+  assert.equal(element("client-guide").href, "https://docs.example.test/FastVideo/design/server_contracts/streaming/");
+  assert.ok(urls.every((url) => url.startsWith("https://example.test/project/assets/cookbook-config/")));
+});
 
 test("model and deployment selectors reset edits, update runtime guidance and clear failed deployment data", async () => {
   const { element, control, requests, urls, failures, code } = await browserFixture();
@@ -198,6 +209,36 @@ test("streaming UI updates its endpoint and clears protocol details when returni
   assert.equal(element("websocket-url").textContent, "");
   assert.equal(element("client-guide").href, undefined);
 });
+
+test("GPU edits update degree bounds in place while invalid topology waits for the user to fix it", async () => {
+  const { control, element, code } = await browserFixture((catalogs) => {
+    const data = catalogs.get("alpha/cuda-rest");
+    data.runtime.topology_defaults = { num_gpus: 1, tp_size: -1, sp_size: -1,
+      hsdp_replicate_dim: 1, hsdp_shard_dim: -1 };
+    data.base_config.generator.engine = { num_gpus: 4, parallelism: { tp_size: 1, sp_size: 4 } };
+    for (const path of ["generator.engine.num_gpus", "generator.engine.parallelism.tp_size",
+      "generator.engine.parallelism.sp_size"]) data.controls.push({ path, schema: { type: "integer" } });
+  });
+  const gpu = control("generator.engine.num_gpus"), sp = control("generator.engine.parallelism.sp_size");
+  assert.equal(sp.max, 4);
+  assert.equal(sp.min, -1);
+  gpu.value = "2";
+  gpu.trigger("input");
+  assert.equal(control("generator.engine.parallelism.sp_size"), sp, "An edit must retain existing DOM input/focus");
+  assert.equal(sp.value, 4, "Invalid degrees must not be silently clamped");
+  assert.equal(sp.max, 2);
+  assert.equal(element("output").hidden, true);
+  assert.match(element("error").textContent, /sp_size.*num_gpus \(2\)/);
+  sp.value = "2";
+  sp.trigger("input");
+  assert.equal(element("output").hidden, false);
+  assert.match(code("yaml"), /num_gpus: 2/);
+  assert.match(code("yaml"), /sp_size: 2/);
+  element("reset").trigger("click");
+  assert.equal(control("generator.engine.parallelism.sp_size").max, 4);
+  assert.equal(control("generator.engine.parallelism.sp_size").value, 4);
+});
+
 
 function deferred() {
   let resolve, reject;
