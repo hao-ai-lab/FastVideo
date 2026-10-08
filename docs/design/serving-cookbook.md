@@ -5,7 +5,8 @@ recommended values. The cookbook combines them with curated model/deployment
 choices, selected controls and optional Markdown guidance. Python prepares static
 JSON metadata; a shared JavaScript API resolves edits locally and emits YAML and
 commands. The temporary preview is a standalone
-local page; production website integration belongs to the final UI follow-up.
+local page; the final UI is a separate follow-up. The static catalogs and reusable
+JavaScript API are published with the docs independently of that preview.
 
 ## Sources and delivery
 
@@ -30,6 +31,19 @@ The exporter writes ignored build output:
 docs/assets/cookbook-config/index.json
 docs/assets/cookbook-config/recipes/<model-key>/<deployment-key>.json
 ```
+
+The GitHub docs workflow exports these catalogs in a separate `cookbook_metadata`
+job using the CPU dependencies in `requirements-cookbook.txt`. It uploads the
+`cookbook-metadata` artifact; the dependent `build` job downloads it into
+`docs/assets/cookbook-config/`, installs only `requirements-mkdocs.txt`, and runs
+`mkdocs build`. The same-workflow artifact keeps export and build on the same
+source revision. Export failures block deployment, and MkDocs includes the
+Git-ignored JSON in the published static site. No runtime server is required.
+
+Local `mkdocs build` and `mkdocs serve` need only MkDocs dependencies and do not
+regenerate metadata. For complete local cookbook assets or the standalone demo,
+run `python docs/cookbook_config.py` explicitly in the CPU configuration
+environment first, and rerun it when sources change.
 
 The small index contains no configurations or schemas:
 
@@ -160,9 +174,8 @@ links against the existing published documentation, without fetching or
 transforming guide HTML. Guide text remains baseline reference material;
 generated instructions reflect edits.
 
-The production documentation workflow is unchanged. Catalog export, the local
-preview and focused tests are developer commands for this design PR. Tests cover
-native validation, baseline preservation, explicit/inherited values,
+Catalog export also runs independently for the local preview and focused tests.
+Tests cover native validation, baseline preservation, explicit/inherited values,
 environment quoting, public API behavior, runtime
 commands and selection races. Fixture-based JS unit tests need only Node;
 generated-catalog and native-parser integration tests use the CPU Python

@@ -4,10 +4,13 @@ Each model manifest offers deployments with a native serving YAML and an
 explicit list of editable fields. The complete baseline is preserved; public
 Python declarations supply metadata only for those controls. Export validates
 native parsing and serving translation without loading weights. JSON files are
-generated metadata for consumers.
+generated metadata for consumers. CI runs this exporter in a separate CPU job
+and passes its JSON to the docs job. MkDocs copies the prepared files into the
+site; it does not run the exporter. The demo UI remains local-only.
 
 FastVideo imports stay inside export helpers because importing its package also
-initializes PyTorch/backend dependencies; ordinary docs tooling need not do so.
+initializes PyTorch/backend dependencies. Ordinary documentation builds do not
+need those dependencies; local cookbook previews run this script explicitly.
 """
 
 from __future__ import annotations
@@ -421,6 +424,15 @@ def _catalog_url(recipe_id: str) -> str:
     return f"recipes/{recipe_id}.json"
 
 
+def _write_document(path: Path, document: str) -> None:
+    """Replace changed JSON atomically without touching unchanged artifacts."""
+    if path.is_file() and path.read_text(encoding="utf-8") == document:
+        return
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(document, encoding="utf-8")
+    temporary.replace(path)
+
+
 def export_catalogs(output_dir: Path = OUTPUT_DIR,
                     recipes_dir: Path = RECIPES_DIR,
                     root: Path = ROOT) -> dict[str, Any]:
@@ -456,13 +468,8 @@ def export_catalogs(output_dir: Path = OUTPUT_DIR,
         if path.parent.is_symlink():
             raise ValueError("Generated model catalog directories must not be symlinks")
         path.parent.mkdir(exist_ok=True)
-        temporary = path.with_suffix(".json.tmp")
-        temporary.write_text(document, encoding="utf-8")
-        temporary.replace(path)
-    manifest = output_dir / "index.json"
-    temporary = manifest.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    temporary.replace(manifest)
+        _write_document(path, document)
+    _write_document(output_dir / "index.json", json.dumps(index, indent=2, ensure_ascii=False) + "\n")
     # Prune only this exporter's current model/deployment layout.
     for path in (output_dir / "recipes").glob("*/*.json"):
         relative = path.relative_to(output_dir).as_posix()

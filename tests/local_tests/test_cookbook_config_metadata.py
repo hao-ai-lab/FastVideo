@@ -2,6 +2,7 @@
 
 import copy
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -151,6 +152,26 @@ def test_failed_export_preserves_previous_files(tmp_path):
     with pytest.raises(ValueError):
         cookbook_config.export_catalogs(output, recipes, tmp_path)
     assert {path: path.read_bytes() for path in output.rglob("*.json")} == before
+
+
+def test_unchanged_export_does_not_rewrite_files(tmp_path):
+    recipes, baseline, config = fixture_recipe(tmp_path)
+    output = tmp_path / "output"
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    paths = list(output.rglob("*.json"))
+    for path in paths:
+        os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    before = {path: path.stat().st_mtime_ns for path in paths}
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    assert {path: path.stat().st_mtime_ns for path in paths} == before
+
+    baseline["server"]["port"] = 9001
+    config.write_text(yaml.safe_dump(baseline))
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    catalog = output / "recipes/example/cuda-rest.json"
+    assert json.loads(catalog.read_text())["base_config"]["server"]["port"] == 9001
+    assert catalog.stat().st_mtime_ns != before[catalog]
+    assert (output / "index.json").stat().st_mtime_ns == before[output / "index.json"]
 
 
 def test_duplicate_ids_and_empty_recipe_directory(tmp_path):

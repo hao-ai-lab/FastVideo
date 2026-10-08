@@ -9,7 +9,6 @@ exclude_docs: |
   README.md
   generate_examples.py
   cookbook_config.py
-  assets/cookbook-config/
   cookbook/recipes/*.yaml
   cookbook/recipes/*.yml
   package.json

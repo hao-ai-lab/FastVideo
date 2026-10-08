@@ -149,8 +149,19 @@ tests and the integration Node file require the CPU configuration environment.
 Browser validation checks selected field constraints, not every native runtime
 or cross-field rule. Include other edited files in pre-commit and add checks for unusual
 requirements. Generated catalogs under `docs/assets/cookbook-config/` are ignored
-local output: regenerate after source changes, never hand-edit or commit them.
-The demo is outside MkDocs; the production docs workflow does not generate or
-publish these catalogs. Final UI integration is a separate change.
+by Git: never hand-edit or commit them. `mkdocs build` and `mkdocs serve` need only
+the MkDocs dependencies and include any generated catalogs already present;
+they do not regenerate metadata. Run the explicit export in the CPU configuration
+environment before a local cookbook preview, and rerun it after source changes.
+
+In `.github/workflows/infra-docs.yml`, the `cookbook_metadata` job installs
+`requirements-cookbook.txt`, exports the catalogs, and uploads the
+`cookbook-metadata` artifact. The dependent `build` job installs only
+`requirements-mkdocs.txt`, downloads that artifact into
+`docs/assets/cookbook-config/`, and builds the site. The artifact comes from the
+same source revision and workflow run; an export failure blocks deployment.
+The demo stays local under `examples/cookbook/` and outside MkDocs. Final UI
+integration is a separate change.
+
 Validation loads no weights or GPU inference. See the [design](../design/serving-cookbook.md)
 for the data/API contract; this demo does not promise every runtime field is editable.
