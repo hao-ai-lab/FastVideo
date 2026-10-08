@@ -19,7 +19,15 @@ deployments:
       - generator.engine.parallelism
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
+      - generator.pipeline.experimental.flow_shift
       - default_request.sampling.num_frames
       - default_request.sampling.height
       - default_request.sampling.width
       - default_request.sampling.seed
+    overrides:
+      # WanT2V480PConfig declares flow_shift in fastvideo/models/wan/pipeline_config.py.
+      # A complete local schema enables the new path only because controls selects it.
+      generator.pipeline.experimental.flow_shift:
+        title: Flow shift
+        type: number
+        description: Wan scheduler time shift; the serving baseline recommends 3.0.

@@ -369,3 +369,14 @@ test("active HTTP, network, malformed JSON and model mismatch failures clear rea
     assert.equal(updates.at(-1).catalog.id, "B");
   }
 });
+
+
+test("authored schema title and description reach the replaceable demo", async () => {
+  const { element } = await browserFixture((catalogs) => {
+    const control = catalogs.get("alpha/cuda-rest").controls.find((item) => item.path === "server.port");
+    control.schema.title = "Custom listener port";
+    control.schema.description = "A recipe-specific description.";
+  });
+  assert.match(element("controls").textContent, /Custom listener port/);
+  assert.match(element("controls").textContent, /A recipe-specific description/);
+});

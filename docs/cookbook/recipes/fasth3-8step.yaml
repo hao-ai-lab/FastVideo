@@ -37,3 +37,8 @@ deployments:
       - generator.prompt_cache_dir
       - generator.vae_dtype
       - generator.vsa_sparsity
+    overrides:
+      generator.vae_dtype:
+        # Keep MLXGeneratorConfig's enum/default; customize only its explanation.
+        title: VAE precision
+        description: Precision used by the native MLX VAE; the serving baseline uses fp32.

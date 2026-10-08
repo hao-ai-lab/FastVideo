@@ -10,17 +10,6 @@ on:
       - 'mkdocs.yml'
       - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
-      - 'requirements-cookbook.in'
-      - 'requirements-cookbook.txt'
-      # Configuration and serving definitions consumed by the cookbook exporter.
-      - 'fastvideo/api/**'
-      - 'fastvideo/configs/**'
-      - 'fastvideo/registry.py'
-      - 'fastvideo/fastvideo_args.py'
-      - 'fastvideo/models/wan/*config.py'
-      - 'fastvideo/models/wan/definition.py'
-      - 'fastvideo/pipelines/basic/**/*.py'
-      - 'fastvideo/entrypoints/**/*.py'
       - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
   pull_request:
@@ -32,17 +21,6 @@ on:
       - 'mkdocs.yml'
       - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
-      - 'requirements-cookbook.in'
-      - 'requirements-cookbook.txt'
-      # Configuration and serving definitions consumed by the cookbook exporter.
-      - 'fastvideo/api/**'
-      - 'fastvideo/configs/**'
-      - 'fastvideo/registry.py'
-      - 'fastvideo/fastvideo_args.py'
-      - 'fastvideo/models/wan/*config.py'
-      - 'fastvideo/models/wan/definition.py'
-      - 'fastvideo/pipelines/basic/**/*.py'
-      - 'fastvideo/entrypoints/**/*.py'
       - 'scripts/check_docs_links.py'
       - '.github/workflows/infra-docs.yml'
 
@@ -56,37 +34,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  cookbook_metadata:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Install CPU metadata dependencies
-        run: uv pip install --system -r requirements-cookbook.txt --torch-backend=cpu
-
-      - name: Generate cookbook metadata
-        run: python docs/cookbook_config.py
-
-      - name: Upload cookbook metadata
-        uses: actions/upload-artifact@v4
-        with:
-          name: cookbook-metadata
-          path: docs/assets/cookbook-config/
-          if-no-files-found: error
-
   build:
-    needs: cookbook_metadata
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -108,12 +56,18 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      # Download from this workflow run so catalogs match the checked-out source.
-      - name: Download cookbook metadata
-        uses: actions/download-artifact@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          name: cookbook-metadata
-          path: docs/assets/cookbook-config/
+          node-version: '22'
+
+      - name: Install cookbook dependencies
+        run: npm ci --prefix docs
+
+      - name: Validate and generate cookbook catalogs
+        run: |
+          npm run test:cookbook --prefix docs
+          npm run build:catalog --prefix docs
 
       - name: Build documentation
         run: mkdocs build

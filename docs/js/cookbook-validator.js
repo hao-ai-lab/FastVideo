@@ -1,7 +1,7 @@
 /**
  * The cookbook's standard JSON Schema validator, shared by browser and Node tests.
  *
- * Ajv's 2020 class matches Pydantic's exported schema dialect. Compilation and
+ * Ajv validates the authored JSON Schema 2020-12 field definitions. Compilation and
  * validation implement JSON Schema keywords, including nested objects, enums,
  * exclusive bounds, and if/then dependencies. No FastVideo rules live here.
  * Values come from the native baseline and explicit edits; validation never inserts defaults or changes data.

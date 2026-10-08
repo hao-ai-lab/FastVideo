@@ -1,0 +1,196 @@
+# Authored control metadata. These standard JSON Schema fragments describe the
+# available fields; deployment.controls selects which ones appear in a recipe.
+# Config values come from the native baseline, not these informational defaults.
+# CUDA declarations follow fastvideo/api/schema.py; MLX declarations follow
+# fastvideo/entrypoints/openai/mlx_server.py. Integer bounds preserve JS precision.
+options:
+  server.host:
+    title: Host
+    type: string
+    default: 0.0.0.0
+  server.port:
+    title: Port
+    type: integer
+    default: 8000
+    minimum: -9007199254740991
+    maximum: 9007199254740991
+  server.output_dir:
+    title: Output Dir
+    type: string
+    default: outputs/
+  server.served_model_name:
+    # CUDA permits null; MLX requires a nonempty string. Each runtime completes it.
+    title: Served Model Name
+
+runtimes:
+  fastvideo-cuda-rest:
+    metadata:
+      id: fastvideo-cuda-rest
+      label: CUDA REST
+      backend: cuda
+      interface: rest
+      launch_argv: &cuda_launch [fastvideo, serve, --config, config.yaml]
+      install_url: https://haoailab.com/FastVideo/getting_started/installation/
+      topology_defaults: &cuda_topology
+        num_gpus: 1
+        tp_size: -1
+        sp_size: -1
+        hsdp_replicate_dim: 1
+        hsdp_shard_dim: -1
+      server_defaults: &cuda_server
+        host: 0.0.0.0
+        port: 8000
+        served_model_name: null
+    workloads: [t2v, i2v]
+    options: &cuda_options
+      server.served_model_name:
+        anyOf:
+          - type: string
+          - type: "null"
+        default: null
+      generator.engine.num_gpus:
+        title: Num Gpus
+        type: integer
+        default: 1
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      generator.engine.parallelism.tp_size:
+        title: Tp Size
+        type: integer
+        default: -1
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      generator.engine.parallelism.sp_size:
+        title: Sp Size
+        type: integer
+        default: -1
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      generator.engine.parallelism.hsdp_replicate_dim:
+        title: Hsdp Replicate Dim
+        type: integer
+        default: 1
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      generator.engine.parallelism.hsdp_shard_dim:
+        title: Hsdp Shard Dim
+        type: integer
+        default: -1
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      generator.engine.parallelism.dist_timeout:
+        title: Dist Timeout
+        anyOf:
+          - type: integer
+            minimum: -9007199254740991
+            maximum: 9007199254740991
+          - type: "null"
+        default: null
+      generator.engine.offload.dit_layerwise:
+        title: Dit Layerwise
+        type: boolean
+        default: true
+      generator.engine.offload.text_encoder:
+        title: Text Encoder
+        type: boolean
+        default: true
+      generator.engine.offload.vae:
+        title: Vae
+        type: boolean
+        default: true
+      generator.engine.compile.enabled:
+        title: Enabled
+        type: boolean
+        default: false
+      default_request.sampling.num_frames:
+        title: Num Frames
+        type: integer
+        default: 125
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      default_request.sampling.height:
+        title: Height
+        type: integer
+        default: 720
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      default_request.sampling.width:
+        title: Width
+        type: integer
+        default: 1280
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      default_request.sampling.fps:
+        title: Fps
+        type: integer
+        default: 24
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+      default_request.sampling.seed:
+        title: Seed
+        type: integer
+        default: 1024
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+
+  fastvideo-mlx-rest:
+    metadata:
+      id: fastvideo-mlx-rest
+      label: MLX REST
+      backend: mlx
+      interface: rest
+      hardware_label: Apple Silicon
+      launch_argv: [python, -m, fastvideo.entrypoints.openai.mlx_server, --config, config.yaml]
+      install_url: https://haoailab.com/FastVideo/getting_started/installation/mlx/
+      server_defaults:
+        host: 127.0.0.1
+        port: 8000
+        served_model_name: fasth3
+    workloads: [t2v]
+    options:
+      server.host:
+        default: 127.0.0.1
+      server.port:
+        minimum: 1
+        maximum: 65535
+      server.output_dir:
+        default: outputs/mlx_fasth3
+      server.served_model_name:
+        type: string
+        minLength: 1
+        default: fasth3
+      generator.model_root:
+        title: Model Root
+        type: string
+      generator.mlx_checkpoint:
+        title: Mlx Checkpoint
+        type: string
+      generator.prompt_cache_dir:
+        title: Prompt Cache Dir
+        type: string
+        default: outputs/h3_prompt_cache
+      generator.vae_dtype:
+        title: Vae Dtype
+        type: string
+        enum: [fp32, fp16, bf16]
+        default: fp32
+      generator.vsa_sparsity:
+        title: Vsa Sparsity
+        type: number
+        minimum: 0.0
+        exclusiveMaximum: 1.0
+        default: 0.9
+
+  fastvideo-cuda-streaming:
+    metadata:
+      id: fastvideo-cuda-streaming
+      label: CUDA streaming
+      backend: cuda
+      interface: websocket
+      launch_argv: *cuda_launch
+      install_url: https://haoailab.com/FastVideo/getting_started/installation/
+      topology_defaults: *cuda_topology
+      client_guide_url: ../../design/server_contracts/streaming/
+      server_defaults: *cuda_server
+    workloads: [t2v]
+    options: *cuda_options

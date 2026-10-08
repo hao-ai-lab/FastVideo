@@ -1,9 +1,10 @@
 # Adding a model deployment
 
-The cookbook combines public Python/Pydantic field metadata, a native serving
-YAML as the recommended configuration, and a small manifest selecting the
-options to expose. One shared builder generates YAML and launch instructions;
-ordinary model additions require no custom JavaScript.
+The cookbook combines authored JSON Schemas in `docs/cookbook/options.yaml`, a
+native serving YAML as the recommended configuration, and a small model manifest
+selecting the options to expose. The Node builder generates static catalogs;
+the shared JavaScript API generates YAML and launch instructions. Ordinary model
+additions require no custom JavaScript or runtime imports.
 
 ## 1. Reference a native baseline
 
@@ -37,7 +38,7 @@ deployments:
 | Level | Required | Optional |
 | --- | --- | --- |
 | Model | `title`, nonempty `deployments` | `summary`, `guide` |
-| Deployment | `runtime`, `workload`, `config`, `controls` | `label`, `summary`, `guide`, `env`, `requirements` |
+| Deployment | `runtime`, `workload`, `config`, `controls` | `label`, `summary`, `guide`, `env`, `requirements`, `overrides` |
 
 `config` and `guide` are repository-relative paths. `label` defaults to the
 runtime label; use it to distinguish deployments using the same runtime.
@@ -68,20 +69,23 @@ mlx-rest:
 | `fastvideo-mlx-rest` | `MLXServeConfig`; FastH3 T2V with prepared local checkpoints |
 | `fastvideo-cuda-streaming` | `ServeConfig` with an active streaming block; LTX2 Distilled WebSocket serving |
 
-`workload` is one demonstrated `t2v` or `i2v` route accepted by that runtime.
-These examples are not every model/backend combination. A genuinely new runtime
-needs one shared adapter and tests before contributors can select it.
+`workload` is one authored `t2v` or `i2v` route listed for the runtime in
+`options.yaml`. These examples are not every model/backend combination. A new
+runtime needs shared runtime metadata, option definitions and tests; a new
+launch protocol also needs support in the JavaScript API.
 
-Controls are an explicit ordered list; `[]` is valid. Select a typed leaf or
-non-nullable declared namespace such as `server`. Namespaces expand all children
-in declaration order; arrays stay leaves. Unsupported or opaque descendants,
-unknown paths, duplicates and overlaps such as `server` plus `server.port` fail
-rather than silently disappearing. Nullable objects and maps cannot be expanded.
-There is no implicit list, `add` or `hide`. Namespaces opt into future public
-children; use exact leaves for a stable surface.
+Controls are an explicit ordered list; `[]` is valid. Select a declared option
+path or a namespace prefix such as `server`. A namespace expands matching
+catalog entries in their declaration order; it does not expand `properties`
+inside an option's schema. Unknown paths, duplicates and overlaps such as
+`server` plus `server.port` fail rather than silently disappearing. There is no
+implicit list, `add` or `hide`. Namespaces opt into future matching options;
+use exact paths for a stable surface.
 
-Types and declared constraints come from the selected runtime. Existence in a
-schema does not prove every combination is meaningful. GPU count can be selected
+Types and constraints are curated by the option author, who must keep them
+aligned with native configuration definitions and supported usage. The build
+does not import Python schemas or perform registry/admission checks. Existence
+in an authored schema does not prove runtime support. GPU count can be selected
 with `generator.engine.num_gpus`; `generator.engine.parallelism` expands TP, SP,
 HSDP dimensions and the distributed timeout into ordinary controls. The shared
 JavaScript API limits parallel degrees to the selected GPU count and checks
@@ -94,10 +98,36 @@ Keep coupled sampling choices fixed unless reviewed: FastWan's three steps and
 DMD schedule belong together. Hidden experimental values stay in the output.
 MLX's untyped `default_request` stays hidden rather than borrowing an HTTP schema.
 
-**TODO(cookbook-experimental):** `experimental` and other `dict[str, Any]` fields
-do not declare the types or choices of their individual keys. Editable controls
-for those entries are currently unsupported. Add a typed declaration or a
-metadata adapter later; existing values are preserved in the baseline/download.
+### Shared options and model overrides
+
+The root `options` map in `docs/cookbook/options.yaml` maps canonical paths, such
+as `server.port`, to JSON Schemas. The root `runtimes` map gives each runtime its
+`metadata`, allowed `workloads`, and an `options` map of schema overrides or
+additions. Each option schema is self-contained; `$ref` is unsupported. Each
+deployment can provide its own `overrides` map using those same canonical paths.
+The order is:
+
+```text
+common options -> runtime options -> deployment.overrides
+```
+
+Objects, including schema `properties`, merge recursively. Arrays such as `enum`
+replace the previous array; omitted keys inherit. Explicit `false`, `0` and
+`null` remain explicit where the schema permits them. This is a Hydra-like merge,
+with no Hydra dependency, interpolation, defaults list or sweeps.
+
+An override may change annotations or constraints but must retain an existing
+shared option's path and type. Keep constraints mutually consistent; enum values
+and default annotations must satisfy the resulting schema. To add a model-local
+option, give it a complete schema in `overrides` and select its path in
+`controls`. Overrides never enable controls by themselves. The ordered controls
+list remains the only selection mechanism, including namespace expansion.
+
+Schema `default` is informational. The displayed and saved values always come
+from the native baseline plus user edits; missing values remain inherited. An
+override of `default` does not insert or replace a YAML value. Keep hidden
+baseline settings intact, including experimental entries. An untyped map key
+needs an explicitly authored schema before it can become an editable control.
 
 Copy necessary installation or usage notes from the referenced serving example
 or existing runbook into `requirements`, with a source comment. Do not add a
@@ -121,12 +151,13 @@ command and WebSocket URL, not a REST generation request.
 
 ## 4. Generate and validate
 
-Use the CPU environment from the
+Use the Node dependencies from the
 [docs setup guide](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/README.md).
 Run from the repository root:
 
 ```bash
-python docs/cookbook_config.py
+npm ci --prefix docs
+node docs/build-cookbook-config.mjs
 python -m http.server 8195 --bind 127.0.0.1
 ```
 
@@ -138,30 +169,33 @@ client port/alias, the I2V image reference and optional guide. Streaming's healt
 response alone does not establish generation readiness or output.
 
 ```bash
-python -m pytest tests/local_tests/test_cookbook_config_metadata.py tests/local_tests/test_cookbook_config_roundtrip.py
 node --test tests/local_tests/test_cookbook_config.mjs tests/local_tests/test_cookbook_demo.mjs
+node --test tests/local_tests/test_cookbook_config_metadata.mjs
 node --test tests/local_tests/test_cookbook_config_integration.mjs
 pre-commit run --files docs/cookbook/recipes/fastwan21.yaml
 ```
 
-The first Node command runs fixture-based unit tests without Python. The Python
-tests and the integration Node file require the CPU configuration environment.
-Browser validation checks selected field constraints, not every native runtime
-or cross-field rule. Include other edited files in pre-commit and add checks for unusual
-requirements. Generated catalogs under `docs/assets/cookbook-config/` are ignored
-by Git: never hand-edit or commit them. `mkdocs build` and `mkdocs serve` need only
-the MkDocs dependencies and include any generated catalogs already present;
-they do not regenerate metadata. Run the explicit export in the CPU configuration
-environment before a local cookbook preview, and rerun it after source changes.
+Catalog and browser tests run in Node. Independently, use a FastVideo Python
+configuration environment to check downloaded YAML against native parsers:
 
-In `.github/workflows/infra-docs.yml`, the `cookbook_metadata` job installs
-`requirements-cookbook.txt`, exports the catalogs, and uploads the
-`cookbook-metadata` artifact. The dependent `build` job installs only
-`requirements-mkdocs.txt`, downloads that artifact into
-`docs/assets/cookbook-config/`, and builds the site. The artifact comes from the
-same source revision and workflow run; an export failure blocks deployment.
-The demo stays local under `examples/cookbook/` and outside MkDocs. Final UI
-integration is a separate change.
+```bash
+python -m pytest tests/local_tests/test_cookbook_config_roundtrip.py
+```
 
-Validation loads no weights or GPU inference. See the [design](../design/serving-cookbook.md)
-for the data/API contract; this demo does not promise every runtime field is editable.
+Native round-trip checks stay outside the docs build. They help detect drift in
+authored schemas and baselines but do not prove server startup, runtime success
+or GPU compatibility. Browser validation checks selected field constraints, not
+every native cross-field rule. Include other edited files in pre-commit and add
+checks for unusual requirements.
+
+Generated catalogs under `docs/assets/cookbook-config/` are ignored by Git:
+never hand-edit or commit them. `mkdocs build` and `mkdocs serve` include generated
+catalogs without regenerating them; rerun the Node build after source changes.
+The normal `.github/workflows/infra-docs.yml` docs job installs only Node and
+MkDocs dependencies, generates catalogs, and builds the static site. Invalid
+metadata blocks deployment. `options.yaml` and recipe manifests are source-only
+and excluded from the site.
+
+The demo stays local under `examples/cookbook/`, outside MkDocs, until the final
+UI replaces it. No weights or GPU inference are needed for these checks. See the
+[design](../design/serving-cookbook.md) for the data/API contract.

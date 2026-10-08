@@ -1,21 +1,23 @@
 # Serving cookbook design
 
-Existing configuration schemas describe accepted fields; native examples provide
-recommended values. The cookbook combines them with curated model/deployment
-choices, selected controls and optional Markdown guidance. Python prepares static
-JSON metadata; a shared JavaScript API resolves edits locally and emits YAML and
-commands. The temporary preview is a standalone
-local page; the final UI is a separate follow-up. The static catalogs and reusable
-JavaScript API are published with the docs independently of that preview.
+Authored option schemas describe the cookbook's selectable fields; native
+examples provide recommended values. The cookbook combines them with curated
+model/deployment choices, selected controls and optional Markdown guidance.
+A Node build prepares static JSON metadata without importing the model runtime;
+a shared JavaScript API resolves edits locally and emits YAML and commands.
+The temporary preview is a standalone local page to remove when the final UI
+replaces it. The static catalogs and reusable JavaScript API are published with
+the docs independently of that preview.
 
 ## Sources and delivery
 
 | Source | Responsibility |
 | --- | --- |
 | `examples/serving/*.yaml` | Complete explicit baseline values, including hidden settings |
-| `docs/cookbook/recipes/<model-key>.yaml` | Model title and deployments: runtime, workload, baseline, controls, environment, requirements and optional guide |
-| Runtime Python/Pydantic definitions | Public field metadata and native configuration validation |
-| `docs/cookbook_config.py` | Validate, expand selected fields and publish static catalogs |
+| `docs/cookbook/options.yaml` | Authored common schemas, runtime metadata, workloads and runtime option overrides |
+| `docs/cookbook/recipes/<model-key>.yaml` | Model title and deployments: runtime, workload, baseline, controls, schema overrides, environment, requirements and optional guide |
+| `docs/build-cookbook-config.mjs` | Validate authored metadata, merge schema overrides, expand selected paths and publish static catalogs |
+| Runtime Python/Pydantic definitions | Native behavior and independent round-trip checks; no docs-build imports |
 | `docs/assets/cookbook-config.js` | Load metadata, expose option values, resolve YAML and commands |
 | `examples/cookbook/cookbook-demo.js` | Temporary form, download buttons and guide links |
 
@@ -32,18 +34,17 @@ docs/assets/cookbook-config/index.json
 docs/assets/cookbook-config/recipes/<model-key>/<deployment-key>.json
 ```
 
-The GitHub docs workflow exports these catalogs in a separate `cookbook_metadata`
-job using the CPU dependencies in `requirements-cookbook.txt`. It uploads the
-`cookbook-metadata` artifact; the dependent `build` job downloads it into
-`docs/assets/cookbook-config/`, installs only `requirements-mkdocs.txt`, and runs
-`mkdocs build`. The same-workflow artifact keeps export and build on the same
-source revision. Export failures block deployment, and MkDocs includes the
-Git-ignored JSON in the published static site. No runtime server is required.
+The normal GitHub docs job installs `requirements-mkdocs.txt` and runs
+`npm ci --prefix docs`, cookbook tests, `npm run build:catalog --prefix docs`,
+and `mkdocs build`. Invalid metadata stops the build. No FastVideo configuration
+imports, runtime packages or separate metadata job are required. MkDocs includes
+the Git-ignored JSON in the published static site, while source-only
+`options.yaml` and recipe manifests remain excluded. No runtime server is involved.
 
-Local `mkdocs build` and `mkdocs serve` need only MkDocs dependencies and do not
-regenerate metadata. For complete local cookbook assets or the standalone demo,
-run `python docs/cookbook_config.py` explicitly in the CPU configuration
-environment first, and rerun it when sources change.
+For local assets, run `npm ci --prefix docs` and
+`npm run build:catalog --prefix docs` before building the docs or opening the
+standalone demo. `mkdocs build` and `mkdocs serve` do not regenerate catalogs;
+rerun the Node build when shared options, manifests or baseline YAML change.
 
 The small index contains no configurations or schemas:
 
@@ -61,6 +62,45 @@ flat leaf paths. Model files are ordered by filename; deployment and selector
 order follow the manifest. The browser fetches only the selected catalog.
 Relative catalog, guide and runtime client-guide URLs resolve against the index
 URL. `loadDeployment` returns catalog metadata without rewriting those links.
+
+## Authored schemas and composition
+
+`options.yaml` has a root `options` map from flat canonical paths to
+self-contained JSON Schemas. Its root `runtimes` map associates each runtime ID
+with `metadata`, declared `workloads`, and an `options` map of schema overrides
+or additions. A deployment's `overrides` map uses the same canonical paths.
+Schema precedence is common options, then runtime options, then deployment
+overrides.
+
+Objects, including nested schema properties, merge recursively; arrays replace
+whole arrays. Omitted keys inherit, and explicit `false`, `0` and allowed `null`
+remain explicit. The merge is Hydra-like; there is no Hydra dependency,
+interpolation, defaults list or sweep behavior. Existing shared paths retain
+their type identity. The builder rejects inconsistent constraints, invalid enum
+values and defaults, and schema `$ref` references. New model-local paths need
+complete schemas in `overrides` and an explicit selection in `controls`.
+
+The ordered `controls` list is independent of schema composition: an override
+alone never enables an option. An exact path selects one declared option;
+a namespace expands prefix-matching catalog entries in declaration order.
+It does not expand properties inside one option schema. Duplicate or overlapping
+selections and unknown paths fail. Namespace selection also includes future
+matching options; exact paths keep the selected surface stable.
+
+Types, ranges and annotations are an author-maintained contract. The Node build
+checks that contract's internal consistency, without querying the runtime
+registry or performing model admission checks. Authors must review native
+definitions when adding or changing options. JSON Schema `default` remains an
+annotation: schema merging never changes the baseline or inserts missing YAML
+values.
+
+Compared with [PR #1912](https://github.com/hao-ai-lab/FastVideo/pull/1912), this
+alternative keeps the same UI, JavaScript API, native baselines and lazy
+per-deployment JSON contract. The metadata authority changes from exported
+Python/Pydantic definitions to authored YAML schemas, so docs builds need only
+Node and MkDocs dependencies. That removes runtime imports from publication but
+makes schema drift an explicit maintenance responsibility, checked separately
+against native parsers.
 
 ## Shared JavaScript API
 
@@ -132,20 +172,14 @@ for future UIs, while the shared resolver rejects invalid combinations without
 changing user values. It does not reproduce arbitrary model/FSDP validators or
 hardware compatibility. Reset discards edits by resolving the baseline again.
 
-Selectors are positive leaves or non-nullable declared namespaces. Expansion
-follows declaration order and rejects any protected/opaque/unsupported child,
-duplicate or overlap. Arrays are leaves; maps and nullable objects are not
-expandable. Namespace selection opts into future public fields. No implicit
-controls, add/hide rules or model-specific JavaScript are introduced.
-
-**TODO(cookbook-experimental):** Entries in `experimental` and other
-`dict[str, Any]` maps have no declared per-key field metadata. They remain
-unsupported as editable controls until a typed declaration or metadata adapter
-is available. Their existing baseline values still survive every download.
+Entries in `experimental` and other untyped maps can become controls only with
+explicitly authored schemas and control selection. Existing hidden values still
+survive every download. No implicit controls, add/hide rules or model-specific
+JavaScript are introduced.
 
 ## Runtime boundaries and examples
 
-| Runtime | Native validation and launch |
+| Runtime | Native contract and launch |
 | --- | --- |
 | `fastvideo-cuda-rest` | `ServeConfig` + serving translation; `fastvideo serve --config config.yaml`; rejects active streaming |
 | `fastvideo-mlx-rest` | `MLXServeConfig`; `python -m fastvideo.entrypoints.openai.mlx_server --config config.yaml` |
@@ -153,8 +187,9 @@ is available. Their existing baseline values still survive every download.
 
 The four models demonstrate five deployments: FastWan CUDA T2V, FastH3 CUDA and
 MLX T2V, Wan2.1 CUDA I2V, and LTX2 CUDA streaming. This is not a complete capability
-matrix. MLX uses its native typed fields; its untyped request-default map stays
-hidden. Streaming exports metadata without importing execution modules.
+matrix. MLX's curated options follow its native fields; its untyped
+request-default map stays hidden. All catalog generation runs without importing
+runtime modules. The table describes native contracts, not build-time validation.
 
 REST client examples use effective host, port and model alias; I2V includes an
 image reference. Wildcard hosts become loopback client addresses. Streaming
@@ -174,11 +209,12 @@ links against the existing published documentation, without fetching or
 transforming guide HTML. Guide text remains baseline reference material;
 generated instructions reflect edits.
 
-Catalog export also runs independently for the local preview and focused tests.
-Tests cover native validation, baseline preservation, explicit/inherited values,
-environment quoting, public API behavior, runtime
-commands and selection races. Fixture-based JS unit tests need only Node;
-generated-catalog and native-parser integration tests use the CPU Python
-environment and generate temporary assets. No weights, server startup or GPU
-inference are required. A new runtime needs one shared
-adapter and tests; ordinary deployment additions remain data-only.
+Catalog generation and browser checks need only Node. They cover authored schema
+validation and composition, baseline preservation, explicit/inherited values,
+environment quoting, public API behavior, launch commands and selection races.
+Independent Python round-trip tests check generated YAML against native parsers
+in a FastVideo configuration environment; they stay outside the docs build.
+These checks help detect drift but do not prove server startup, runtime success
+or GPU compatibility. No weights or GPU inference are required. A new runtime
+needs metadata, option schemas and tests, plus JavaScript support if it adds a
+launch protocol; ordinary deployment additions remain data-only.

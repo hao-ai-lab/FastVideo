@@ -14,7 +14,6 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from docs.cookbook_config import export_catalogs
 from fastvideo.api.compat import explicit_request_updates, generator_config_to_fastvideo_args
 from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
@@ -23,6 +22,18 @@ from fastvideo.entrypoints.openai.request_adapter import build_generation_reques
 from fastvideo.utils import FlexibleArgumentParser
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def export_catalogs(output_dir, recipes_dir=None):
+    """Generate authored catalogs independently, then check them with native Python."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for cookbook metadata generation")
+    command = [node, str(ROOT / "docs/build-cookbook-config.mjs"), "--output-dir", str(output_dir)]
+    if recipes_dir is not None:
+        command += ["--recipes-dir", str(recipes_dir)]
+    subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+    return json.loads((output_dir / "index.json").read_text())
 
 
 @pytest.fixture(scope="module")
@@ -115,13 +126,18 @@ def test_sample_request_uses_alias_and_inherits_baseline_but_client_values_win(c
 
 def test_nullable_and_zero_edit_remain_explicit_through_native_parser(catalog, tmp_path):
     # Synthetic presentation extension uses real public field definitions, not a model-specific renderer.
-    from docs.cookbook_config import build_catalogs
     recipes = tmp_path / "recipes"
     recipes.mkdir()
     manifest = yaml.safe_load((ROOT / "docs/cookbook/recipes/fastwan21.yaml").read_text())
     manifest["deployments"]["cuda-rest"]["controls"] += ["generator.pipeline.vae_tiling", "default_request.sampling.guidance_scale"]
+    manifest["deployments"]["cuda-rest"]["overrides"] = {
+        "generator.pipeline.vae_tiling": {"anyOf": [{"type": "boolean"}, {"type": "null"}], "default": None},
+        "default_request.sampling.guidance_scale": {"type": "number"},
+    }
     (recipes / "nullable-example.yaml").write_text(yaml.safe_dump(manifest))
-    extended = build_catalogs(recipes)[0]
+    output = tmp_path / "catalogs"
+    index = export_catalogs(output, recipes)
+    extended = json.loads((output / index["models"][0]["deployments"][0]["catalog_url"]).read_text())
     result = resolve_in_browser(extended, {"generator.pipeline.vae_tiling": None,
                                             "default_request.sampling.guidance_scale": 0.0})
     config = parse_download(result, extended, tmp_path)
@@ -207,7 +223,7 @@ def test_i2v_native_baseline_and_sample_require_an_image(tmp_path):
     index = export_catalogs(output_dir=output)
     model = next(model for model in index["models"] if model["id"] == "wan21-i2v")
     catalog = json.loads((output / model["deployments"][0]["catalog_url"]).read_text())
-    result = resolve_in_browser(catalog, {"server.port": 9002})
+    result = resolve_in_browser(catalog, {"server.port": 9002, "generator.pipeline.experimental.flow_shift": 4.0})
     native_yaml = yaml.safe_load((ROOT / "examples/serving/openai_wan21_i2v_14b.yaml").read_text())
     assert resolve_in_browser(catalog, {})["config"] == native_yaml
     assert result["config"]["generator"]["engine"] == native_yaml["generator"]["engine"]
@@ -217,6 +233,12 @@ def test_i2v_native_baseline_and_sample_require_an_image(tmp_path):
     assert body["model"] == "wan21-i2v-14b"
     assert "http://127.0.0.1:9002/v1/videos/sync" in result["clientCommand"]
     VideoGenerationRequest(**body)
+    # The model-local authored option maps to a real pipeline setting.
+    from fastvideo.api.parser import parse_config
+    from fastvideo.api.schema import ServeConfig
+    parsed = parse_config(ServeConfig, yaml.safe_load(result["yaml"]))
+    translated = generator_config_to_fastvideo_args(parsed.generator)
+    assert translated.pipeline_config.flow_shift == 4.0
 
 
 @pytest.mark.parametrize("parallelism", [2, -1])

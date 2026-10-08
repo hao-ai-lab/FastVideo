@@ -1,6 +1,6 @@
-/** Integration contract: native Python export -> reusable browser resolver. Requires the cookbook Python environment. */
+/** Integration contract: authored YAML catalog -> reusable browser resolver. Node only. */
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -14,10 +14,8 @@ const { resolveConfig } = require("../../docs/assets/cookbook-config.js");
 function exportedCatalogs() {
   const root = fileURLToPath(new URL("../../", import.meta.url));
   const output = mkdtempSync(join(tmpdir(), "fastvideo-cookbook-recipes-"));
-  const localPython = join(root, ".venv/bin/python");
-  const python = process.env.PYTHON || (existsSync(localPython) ? localPython : "python3");
   try {
-    const result = spawnSync(python, ["docs/cookbook_config.py", "--output-dir", output], { cwd: root, encoding: "utf8" });
+    const result = spawnSync(process.execPath, ["docs/build-cookbook-config.mjs", "--output-dir", output], { cwd: root, encoding: "utf8" });
     assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
     const index = JSON.parse(readFileSync(join(output, "index.json"), "utf8"));
     const catalogs = new Map(index.models.flatMap((model) => model.deployments).map((recipe) => [recipe.id,

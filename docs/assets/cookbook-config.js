@@ -1,6 +1,6 @@
 /**
  * Reusable recipe data and configuration helpers. No DOM access or automatic initialization.
- * Native baselines and manifest-selected JSON Schema controls come from the Python exporter.
+ * Native baselines and manifest-selected JSON Schema controls come from the authored YAML catalog.
  */
 ((scope) => {
   "use strict";

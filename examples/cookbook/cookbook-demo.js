@@ -43,7 +43,7 @@
       "generator.vsa_sparsity": "VSA sparsity",
     };
     const groups = { server: "Server", generator: "Resources", default_request: "Request defaults" };
-    return { label: labels[control.path] || parts.at(-1).replace(/_/g, " "), group: groups[parts[0]] };
+    return { label: control.schema?.title || labels[control.path] || parts.at(-1).replace(/_/g, " "), group: groups[parts[0]] };
   }
 
   function guideUrl(catalog, indexUrl) {
