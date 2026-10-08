@@ -99,10 +99,8 @@ troubleshooting; link native YAML instead of copying it. See the
 [FastWan guide](../cookbook/guides/fastwan21-serving.md) and
 [Wan I2V guide](../cookbook/guides/wan21-i2v-serving.md).
 
-MkDocs renders the page. The demo displays its article inline plus a standalone
-link; relative links/media retain their destinations and nested interactive
-builders are omitted. Guide text describes the baseline, while generated
-commands track edits. A guide-load failure does not block downloads. Streaming
+MkDocs renders the page, and the demo provides a normal guide link. Guide text
+describes the baseline, while generated commands track edits. Streaming
 uses its [protocol guide](../design/server_contracts/streaming.md), a health/liveness
 command and WebSocket URL, not a REST generation request.
 
@@ -126,13 +124,17 @@ response alone does not establish generation readiness or output.
 
 ```bash
 python -m pytest tests/local_tests/test_cookbook_config_metadata.py tests/local_tests/test_cookbook_config_roundtrip.py
-node --test tests/local_tests/test_cookbook_config.mjs
+node --test tests/local_tests/test_cookbook_config.mjs tests/local_tests/test_cookbook_demo.mjs
+node --test tests/local_tests/test_cookbook_config_integration.mjs
 mkdocs build
 python docs/cookbook_config.py --check-site site
 pre-commit run --files docs/cookbook/recipes/fastwan21.yaml
 ```
 
-Include other edited files in pre-commit and add focused checks for unusual
+The first Node command runs fixture-based unit tests without Python. The Python
+tests and the integration Node file require the CPU configuration environment.
+Browser validation checks selected field constraints, not every native runtime
+or cross-field rule. Include other edited files in pre-commit and add checks for unusual
 requirements. Generated catalogs under `docs/assets/cookbook-config/` are ignored
 build output: regenerate after source changes, never hand-edit or commit them.
 Validation loads no weights or GPU inference. See the [design](../design/serving-cookbook.md)

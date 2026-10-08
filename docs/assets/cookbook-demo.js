@@ -25,68 +25,6 @@
     };
   }
 
-  /** Guide loading is independent of configuration validation and never retains an obsolete page. */
-  function createGuideLoader(indexUrl, onChange, fetcher = (...args) => scope.fetch(...args)) {
-    let generation = 0, controller;
-    return async (path) => {
-      const token = ++generation;
-      controller?.abort();
-      if (!path) { onChange({ state: "empty" }); return; }
-      controller = new AbortController();
-      const url = new URL(path, indexUrl).href;
-      onChange({ state: "loading", url });
-      try {
-        const response = await fetcher(url, { signal: controller.signal });
-        if (token !== generation) return;
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const html = await response.text();
-        if (token !== generation) return;
-        onChange({ state: "ready", url: response.url || url, html });
-      } catch (failure) {
-        if (token === generation) onChange({ state: "error", url, message: failure.message });
-      }
-    };
-  }
-
-  /** Reuse trusted MkDocs article markup, excluding page chrome and interactive cookbook widgets. */
-  function extractGuideArticle(html, pageUrl, prefix) {
-    const article = new DOMParser().parseFromString(html, "text/html").querySelector("article.md-content__inner");
-    if (!article) throw new Error("The guide page has no documentation article.");
-    article.querySelectorAll("script, style, .md-content__button, .md-source-file, .md-clipboard, #copy-page-button, [data-cookbook], [data-config-builder]")
-      .forEach((node) => node.remove());
-    for (const node of article.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
-      const heading = article.ownerDocument.createElement(`h${Math.min(Number(node.tagName.slice(1)) + 2, 6)}`);
-      for (const attribute of node.attributes) heading.setAttribute(attribute.name, attribute.value);
-      heading.append(...node.childNodes);
-      node.replaceWith(heading);
-    }
-    const ids = new Map();
-    for (const node of [article, ...article.querySelectorAll("[id]")]) {
-      if (!node.id) continue;
-      ids.set(node.id, `${prefix}${node.id}`);
-      node.id = ids.get(node.id);
-    }
-    const page = new URL(pageUrl);
-    for (const node of article.querySelectorAll("[href], [src]")) {
-      for (const attribute of ["href", "src"]) {
-        if (!node.hasAttribute(attribute)) continue;
-        const url = new URL(node.getAttribute(attribute), page);
-        const id = decodeURIComponent(url.hash.slice(1));
-        const local = attribute === "href" && url.origin === page.origin && url.pathname === page.pathname &&
-          url.search === page.search && ids.has(id);
-        node.setAttribute(attribute, local ? `#${ids.get(id)}` : url.href);
-      }
-    }
-    for (const node of article.querySelectorAll("*")) {
-      for (const attribute of ["for", "aria-labelledby", "aria-describedby", "aria-controls", "headers"]) {
-        if (node.hasAttribute(attribute)) node.setAttribute(attribute,
-          node.getAttribute(attribute).split(/\s+/).map((id) => ids.get(id) || id).join(" "));
-      }
-      if (node.matches('input[type="radio"][name]')) node.name = `${prefix}${node.name}`;
-    }
-    return article;
-  }
-
   function controlPresentation(control) {
     const parts = pathParts(control.path);
     const labels = {
@@ -111,7 +49,6 @@
   }
 
   // TODO(cookbook-ui): Replace this demo DOM adapter; keep schema selection and YAML generation.
-  let guideSequence = 0;
   async function mount(root) {
     const status = root.querySelector("[data-config-status]");
     const error = root.querySelector("[data-config-error]");
@@ -123,17 +60,13 @@
     const reset = root.querySelector("[data-config-reset]");
     const requirementsSection = root.querySelector("[data-config-requirements-section]");
     const guide = root.querySelector("[data-config-guide]");
-    const guideSection = root.querySelector("[data-config-guide-section]");
-    const guideStatus = root.querySelector("[data-config-guide-status]");
-    const guideBody = root.querySelector("[data-config-guide-body]");
     const streamingClient = root.querySelector("[data-config-streaming-client]");
     const websocketUrl = root.querySelector("[data-config-websocket-url]");
     const clientGuide = root.querySelector("[data-config-client-guide]");
-    let catalog, resolved, loadGuide, selections = {};
+    let catalog, resolved, selections = {};
     const inputErrors = new Map();
 
     function clearMetadata() {
-      loadGuide?.(null);
       requirementsSection.hidden = true;
       root.querySelector("[data-config-requirements]").replaceChildren();
       guide.hidden = true;
@@ -295,18 +228,6 @@
     try {
       const index = await cookbook.loadIndex(root.dataset.metadata);
       const indexUrl = index.url;
-      loadGuide = createGuideLoader(indexUrl, (update) => {
-        guideSection.hidden = update.state === "empty";
-        guideBody.replaceChildren();
-        guideStatus.textContent = "";
-        if (update.url) guide.href = update.url;
-        if (update.state === "loading") guideStatus.textContent = "Loading serving guide…";
-        else if (update.state === "ready") {
-          guideBody.append(extractGuideArticle(update.html, update.url, `config-guide-${++guideSequence}-`));
-        } else if (update.state === "error") {
-          guideStatus.textContent = `Could not display the guide (${update.message}). Open the standalone guide instead.`;
-        }
-      });
       if (!index.models.length) throw new Error("No models are published");
       for (const model of index.models) {
         const option = document.createElement("option");
@@ -341,7 +262,6 @@
           const guideHref = guideUrl(catalog, indexUrl);
           guide.hidden = !guideHref;
           if (guideHref) guide.href = guideHref;
-          loadGuide(catalog.guide?.url);
           if (catalog.runtime.client_guide_url) {
             clientGuide.href = new URL(catalog.runtime.client_guide_url, indexUrl).href;
           }
@@ -410,7 +330,7 @@
   }
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { mount, createCatalogLoader, createGuideLoader };
+    module.exports = { mount, createCatalogLoader };
   }
   scope.FastVideoCookbookDemo = { mount };
 })(typeof globalThis !== "undefined" ? globalThis : window);

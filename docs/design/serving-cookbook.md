@@ -15,7 +15,7 @@ edits locally and emits YAML and commands.
 | Runtime Python/Pydantic definitions | Public field metadata and native configuration validation |
 | `docs/cookbook_config.py` | Validate, expand selected fields and publish static catalogs |
 | `docs/assets/cookbook-config.js` | Load metadata, expose option values, resolve YAML and commands |
-| `docs/assets/cookbook-demo.js` | Temporary rendering and inline-guide behavior |
+| `docs/assets/cookbook-demo.js` | Temporary form, download buttons and guide links |
 
 See the [contributor guide](../contributing/cookbook_configuration.md) for manifest
 syntax. Every deployment in one model file references the same native model ID.
@@ -64,6 +64,18 @@ obsolete requests. `getOptions` returns `undefined` for an inherited value;
 `null`, `false` and `0` remain explicit. `schema.default` is informational and
 must not populate missing values. Edits map expanded field paths to new values.
 
+For direct browser use, load the bundled validator before resolving edits:
+
+```html
+<script src="/assets/cookbook-validator.js"></script>
+<script src="/assets/cookbook-config.js"></script>
+```
+
+Adjust asset URLs for the site's deployment prefix. Loading metadata and reading
+options do not require the validator; `resolveConfig` does. The demo bootstrap
+loads these dependencies in order. CommonJS consumers load the bundled validator
+through the core module's internal `require`.
+
 ```javascript
 const api = FastVideoConfigCookbook;
 const index = await api.loadIndex(indexUrl);
@@ -76,9 +88,8 @@ const result = api.resolveConfig(catalog, {"server.port": 9000});
 The core does not mount UI, manipulate guide HTML or execute commands. A small
 page-only bootstrap loads dependencies and mounts the replaceable demo. The demo
 owns Model/Deployment selectors, cancellation and stale-response checks, error
-states, copying/downloads and inline guides. Loading a new catalog disables old
-outputs and resets edits. Guide loading is independent: failure leaves the form
-usable. Only active catalog/validator state is retained.
+states, copying/downloads and ordinary guide links. Loading a new catalog disables
+old outputs and resets edits. Only active catalog/validator state is retained.
 
 ## Configuration invariants
 
@@ -93,6 +104,10 @@ Hidden values survive; formatting/comments need not. Exact-path edits preserve
 siblings; arrays replace whole values. Missing and explicit null differ. The
 runtime still resolves checkpoint-dependent, hardware-dependent and request
 fallback values; the cookbook does not simulate those decisions.
+
+Browser validation checks the selected fields against their exported constraints.
+It does not reproduce arbitrary Python validators, cross-field runtime checks or
+hardware compatibility. Reset discards edits by resolving the baseline again.
 
 Selectors are positive leaves or non-nullable declared namespaces. Expansion
 follows declaration order and rejects any protected/opaque/unsupported child,
@@ -122,13 +137,14 @@ The baseline retains actual GPU topology and deployment requirements.
 ## Guides and checks
 
 MkDocs renders optional guide pages. Catalogs carry their URLs, not Markdown.
-The temporary demo displays the article inline with a standalone link, rewrites
-relative links/media and omits nested builders. Guide text remains baseline
-reference material; generated instructions reflect edits.
+The demo links to the guide without fetching or transforming its HTML. Guide
+text remains baseline reference material; generated instructions reflect edits.
 
 CI generates catalogs before MkDocs and checks catalog/guide URLs in the built
 site. Focused Python/Node tests cover native validation, baseline preservation,
 explicit/inherited values, environment quoting, public API behavior, runtime
-commands and selection races. Tests generate temporary assets. No weights,
-server startup or GPU inference are required. A new runtime needs one shared
+commands and selection races. Fixture-based JS unit tests need only Node;
+generated-catalog and native-parser integration tests use the CPU Python
+environment and generate temporary assets. No weights, server startup or GPU
+inference are required. A new runtime needs one shared
 adapter and tests; ordinary deployment additions remain data-only.

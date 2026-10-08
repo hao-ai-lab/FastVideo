@@ -1,6 +1,6 @@
 title: FastH3 8-Step V2
 summary: Distilled text-to-video serving with CUDA or native Apple Silicon MLX.
-guide: docs/cookbook/openai-api.md
+guide: docs/cookbook/guides/fasth3-8step-serving.md
 
 deployments:
   cuda-rest:

@@ -82,6 +82,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Check cookbook JS units
+        run: node --test tests/local_tests/test_cookbook_config.mjs tests/local_tests/test_cookbook_demo.mjs
+
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
@@ -92,12 +95,12 @@ jobs:
           uv pip install --system --torch-backend=cpu
           -r requirements-mkdocs.txt -r requirements-cookbook.txt
 
-      - name: Check cookbook contracts
+      - name: Check cookbook integration
         env:
           HF_HUB_OFFLINE: '1'
         run: |
           python -m pytest tests/local_tests/test_cookbook_config_metadata.py tests/local_tests/test_cookbook_config_roundtrip.py -q
-          node --test tests/local_tests/test_cookbook*.mjs
+          node --test tests/local_tests/test_cookbook_config_integration.mjs
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

@@ -5,7 +5,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 const require = createRequire(import.meta.url);
-const { createCatalogLoader, createGuideLoader } = require("../../docs/assets/cookbook-demo.js");
+const { createCatalogLoader } = require("../../docs/assets/cookbook-demo.js");
 
 function demoData() {
   const definitions = [
@@ -27,7 +27,7 @@ function demoData() {
     const data = {
       id, model: { id: modelId, key, title: key }, deployment: { id: deploymentId, label },
       workload, summary: "Example recipe", source_config: "examples/example.yaml", env: {}, requirements: [], controls,
-      guide: { url: `../../cookbook/guides/${key}-serving/` },
+      guide: backend === "mlx" ? null : { url: `../../cookbook/guides/${key}-serving/` },
       runtime: { backend, interface: interfaceName, label, install_url: "https://example.test/install/",
         server_defaults: { host: "0.0.0.0", port: 8000 },
         launch_argv: backend === "mlx" ? ["python", "-m", "fastvideo.entrypoints.openai.mlx_server", "--config", "config.yaml"] :
@@ -64,7 +64,7 @@ class Element {
 
 async function browserFixture() {
   const { index, catalogs } = demoData();
-  const nodes = new Map(), requests = [], failures = new Set();
+  const nodes = new Map(), requests = [], urls = [], failures = new Set();
   const node = (selector) => {
     if (!nodes.has(selector)) nodes.set(selector, new Element());
     return nodes.get(selector);
@@ -80,9 +80,9 @@ async function browserFixture() {
     [...copyButtons, node("[data-config-download]")] : copyButtons;
   const document = { readyState: "complete", querySelectorAll: () => [root], createElement: (tag) => new Element(tag) };
   const fetch = async (url) => {
+    urls.push(url);
     if (url === root.dataset.metadata) return { ok: true, url, json: async () => index };
-    // Documentation availability is deliberately independent of the working catalog/configuration fixture.
-    if (!url.includes("/recipes/")) return { ok: false, status: 503 };
+    assert.ok(url.includes("/recipes/"), "Demo must not fetch guide pages");
     const id = url.split("/recipes/")[1]?.replace(/\.json$/, "");
     requests.push(id);
     if (failures.has(id)) throw new Error("Deployment unavailable");
@@ -102,19 +102,23 @@ async function browserFixture() {
   const descendants = (parent) => parent.children.flatMap((child) => typeof child === "string" ? [] :
     [child, ...descendants(child)]);
   const control = (path) => descendants(element("controls")).find((item) => item.dataset.configPath === path);
-  return { element, control, requests, failures, code: (name) => node(`[data-config-code="${name}"]`).textContent };
+  return { element, control, requests, urls, failures, code: (name) => node(`[data-config-code="${name}"]`).textContent };
 }
 
 test("model and deployment selectors reset edits, update runtime guidance and clear failed deployment data", async () => {
-  const { element, control, requests, failures, code } = await browserFixture();
+  const { element, control, requests, urls, failures, code } = await browserFixture();
   assert.deepEqual(element("model-picker").children.map((item) => item.value),
     ["alpha", "image", "stream"]);
   assert.deepEqual(element("deployment-picker").children.map((item) => item.value),
     ["alpha/cuda-rest", "alpha/mlx-rest"]);
   assert.deepEqual(requests, ["alpha/cuda-rest"]);
   assert.equal(element("output").hidden, false);
-  assert.equal(element("guide-section").hidden, false);
-  assert.match(element("guide-status").textContent, /Could not display the guide.*503/);
+  assert.equal(element("guide").hidden, false);
+  assert.equal(element("guide").href, "https://example.test/project/cookbook/guides/alpha-serving/");
+  assert.deepEqual(urls, [
+    "https://example.test/project/assets/cookbook-config/index.json",
+    "https://example.test/project/assets/cookbook-config/recipes/alpha/cuda-rest.json",
+  ]);
   control("server.port").value = "9001";
   control("server.port").trigger("input");
   assert.match(code("yaml"), /port: 9001/);
@@ -124,12 +128,13 @@ test("model and deployment selectors reset edits, update runtime guidance and cl
   assert.match(code("command"), /python -m fastvideo.entrypoints.openai.mlx_server/);
   assert.equal(element("install").textContent, "MLX REST installation guide");
   assert.equal(element("topology").textContent, "Hardware family: Apple Silicon.");
+  assert.equal(element("guide").hidden, true);
+  assert.equal(element("guide").href, undefined);
   assert.equal(control("default_request.sampling.num_frames"), undefined);
   control("generator.vsa_sparsity").value = "1";
   control("generator.vsa_sparsity").trigger("input");
   assert.equal(element("output").hidden, true);
   assert.match(element("error").textContent, /must be < 1/);
-  assert.equal(element("guide-section").hidden, false);
   control("generator.vsa_sparsity").value = "0.5";
   control("generator.vsa_sparsity").trigger("input");
   control("generator.vae_dtype").value = "2";
@@ -156,6 +161,7 @@ test("model and deployment selectors reset edits, update runtime guidance and cl
   assert.equal(element("guide").href, undefined);
   assert.equal(element("controls").children.length, 0);
   assert.match(element("error").textContent, /Deployment unavailable/);
+  assert.ok(urls.every((url) => url.endsWith("/index.json") || url.includes("/recipes/")));
 });
 
 test("streaming UI updates its endpoint and clears protocol details when returning to REST or failing", async () => {
@@ -198,83 +204,6 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-
-function guideLoaderFixture() {
-  const requests = [], updates = [];
-  const load = createGuideLoader("https://example.test/project/assets/cookbook-config/index.json",
-    (update) => updates.push(update), (url, options) => {
-      const request = { ...deferred(), url, signal: options.signal };
-      requests.push(request);
-      return request.promise;
-    });
-  return { load, requests, updates };
-}
-
-const guideResponse = (html = "<article>Guide</article>") => ({ ok: true, text: async () => html });
-
-test("guide loader resolves relative paths under the project prefix and reports the final response URL", async () => {
-  const { load, requests, updates } = guideLoaderFixture();
-  const first = load("../../cookbook/guides/example/");
-  assert.equal(requests[0].url, "https://example.test/project/cookbook/guides/example/");
-  assert.equal(updates.at(-1).state, "loading");
-  requests[0].resolve({ ...guideResponse(), url: "https://example.test/project/cookbook/guides/redirected/" });
-  await first;
-  assert.equal(updates.at(-1).url, "https://example.test/project/cookbook/guides/redirected/");
-  assert.equal(updates.at(-1).html, "<article>Guide</article>");
-  const repeat = load("../../cookbook/guides/example/");
-  assert.equal(requests.length, 2);
-  requests[1].resolve(guideResponse());
-  await repeat;
-});
-
-test("guide loader aborts switched requests and ignores obsolete responses before parsing", async () => {
-  const { load, requests, updates } = guideLoaderFixture();
-  const first = load("first/"), second = load("second/");
-  assert.equal(requests[0].signal.aborted, true);
-  requests[1].resolve(guideResponse("Current guide"));
-  await second;
-  requests[0].resolve({ ok: true, text: () => assert.fail("Obsolete guide must not be parsed") });
-  await first;
-  assert.deepEqual(updates.map((item) => item.state), ["loading", "loading", "ready"]);
-  assert.equal(updates.at(-1).html, "Current guide");
-});
-
-test("clearing a guide invalidates pending body completion or failure and handles absent guides", async () => {
-  for (const reject of [false, true]) {
-    const { load, requests, updates } = guideLoaderFixture();
-    await load(null);
-    assert.equal(requests.length, 0);
-    const body = deferred(), parsing = deferred(), pending = load("guide/");
-    requests[0].resolve({ ok: true, text: () => { parsing.resolve(); return body.promise; } });
-    await parsing.promise;
-    await load(null);
-    assert.equal(requests[0].signal.aborted, true);
-    if (reject) body.reject(new Error("Obsolete guide body"));
-    else body.resolve("Obsolete guide");
-    await pending;
-    assert.deepEqual(updates.map((item) => item.state), ["empty", "loading", "empty"]);
-  }
-});
-
-test("guide failures retain a source URL and allow later successful loads", async () => {
-  for (const fail of [
-    (request) => request.resolve({ ok: false, status: 404 }),
-    (request) => request.reject(new Error("Network unavailable")),
-    (request) => request.resolve({ ok: true, text: async () => { throw new Error("Unreadable guide"); } }),
-  ]) {
-    const { load, requests, updates } = guideLoaderFixture();
-    const first = load("../../cookbook/guide/");
-    fail(requests[0]);
-    await first;
-    assert.equal(updates.at(-1).state, "error");
-    assert.equal(updates.at(-1).url, "https://example.test/project/cookbook/guide/");
-    assert.ok(updates.at(-1).message);
-    const retry = load("../../cookbook/guide/");
-    requests[1].resolve(guideResponse());
-    await retry;
-    assert.equal(updates.at(-1).state, "ready");
-  }
-});
 
 function loaderFixture() {
   const requests = [], updates = [];

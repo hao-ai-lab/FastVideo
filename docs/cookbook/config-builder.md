@@ -21,8 +21,6 @@ This demo does not start a server or load model weights.
 [data-config-builder] button { padding: .4rem .7rem; border: 1px solid var(--md-default-fg-color--lighter); border-radius: .2rem; }
 [data-config-builder] button:disabled { opacity: .5; }
 [data-config-builder] pre { max-height: 32rem; overflow: auto; }
-.config-builder-guide { margin-top: 2rem; border-top: 1px solid var(--md-default-fg-color--lighter); }
-.config-builder-guide .md-content__inner { margin: 0; padding: 0; }
 [data-config-error] { color: var(--md-typeset-a-color); }
 </style>
 
@@ -33,7 +31,7 @@ This demo does not start a server or load model weights.
   </div>
   <p><strong data-config-model>Loading available models…</strong></p>
   <p data-config-summary></p>
-  <p class="config-builder-links"><a data-config-source>View the native recipe configuration</a></p>
+  <p class="config-builder-links"><a data-config-source>View the native recipe configuration</a> <a data-config-guide hidden>Read serving guide</a></p>
   <section data-config-requirements-section hidden>
     <h2>Deployment requirements</h2>
     <p data-config-topology></p>
@@ -66,11 +64,4 @@ This demo does not start a server or load model weights.
     </div>
   </div>
   <p data-config-request-note hidden>Request defaults apply when a client omits those values. Explicit client request values take precedence.</p>
-  <section class="config-builder-guide" data-config-guide-section hidden>
-    <h2>Serving guide</h2>
-    <p>The guide describes the recipe baseline. The generated configuration and commands above reflect your current selections.</p>
-    <p><a data-config-guide hidden>Open standalone guide</a></p>
-    <p data-config-guide-status role="status" aria-live="polite"></p>
-    <div data-config-guide-body></div>
-  </section>
 </div>

@@ -32,8 +32,8 @@ shows a health/liveness check and WebSocket endpoint, not a REST generation requ
 
 `docs/assets/cookbook-config.js` provides the shared loading, option and YAML
 generation API. `cookbook-demo.js` and its page-only bootstrap are temporary
-presentation code; optional guides are ordinary MkDocs pages displayed inline
-by that demo. See the [design](design/serving-cookbook.md) for the API contract.
+presentation code; optional guides are linked ordinary MkDocs pages.
+See the [design](design/serving-cookbook.md) for the API contract.
 
 `requirements-cookbook.txt` supplies the configuration import dependencies.
 CPU PyTorch is sufficient; generating the catalogs does not load model weights

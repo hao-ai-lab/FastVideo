@@ -150,7 +150,7 @@
       if (!control) throw new Error(`Field is not an editable recipe control: ${path}`);
       try { validateConfig(control.schema, value); }
       catch (failure) { throw new Error(`${path}: ${failure.message}`); }
-      setPath(config, path, value);
+      setPath(config, path, clone(value));
     }
     for (const control of catalog.controls) {
       const value = getValue(config, control.path);
