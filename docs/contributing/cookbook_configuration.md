@@ -1,96 +1,243 @@
-# Extending cookbook configuration metadata
+# Adding a model deployment
 
-Keep option definitions beside FastVideo's existing Python configuration code.
-The cookbook exporter turns those declarations into JSON Schema for the browser;
-contributors should not duplicate them in per-model cookbook YAML or edit
-generated files under `docs/assets/cookbook-config/` by hand.
+Each model has one manifest under `docs/cookbook/recipes/`. Its `deployments`
+mapping lists the maintained ways to serve that model. Users select Model, then
+Deployment. Adding a deployment for an existing runtime uses native
+configuration and YAML metadata; it does not require model-specific JavaScript.
 
-`docs/cookbook/config-builder-models.yaml` selects the registered model IDs
-published in the builder and their dropdown order. Generation writes a small
-`index.json` and one complete catalog under `models/` for each selected ID. The
-browser fetches the selected catalog when needed. These assets are generated
-before the docs build and are not committed; the YAML contains no field types,
-defaults or constraints.
+The current adapters support CUDA video REST, native FastH3 MLX REST and CUDA
+WebSocket streaming. Their existence does not make every model/backend/workload
+combination valid. The builder UI remains a temporary demo of the shared
+configuration and command generation.
 
-## Choose the existing owner
+## 1. Choose a native baseline
 
-| Information to add | Python owner | Current exporter support |
-|---|---|---|
-| A common serving field, type or numeric bound | The relevant dataclass in `fastvideo/api/schema.py` | Exported through `TypeAdapter(ServeConfig)`. Applies to every model using that field. |
-| A public pipeline option specific to a model or family | Its registered pipeline config class and existing `add_cli_args()` declarations | Legacy options under `generator.pipeline.experimental` export field metadata, defaults and CLI choices. |
-| A model's sampling default, such as frame count | Its existing preset in `fastvideo/pipelines/basic/<family>/presets.py` | Defaults override the common schema defaults. Registered sampling-class defaults are the fallback when no preset is selected. |
-| A model-specific bound on a shared field, or a rule about supported combinations | The model or family's Python declarations | Requires a shared exporter extension; see below. |
+Reuse a maintained file under `examples/serving/`, or add one for a new
+supported setup. It must identify `generator.model_path`; all deployments in
+one model manifest must reference the same model identity. Keep every explicit
+setting needed for the launch in this native YAML, not duplicated in the
+manifest. Hidden values remain in the downloaded file; omitted values remain
+inherited.
 
-For Wan, pipeline declarations live in
-`fastvideo/models/wan/pipeline_config.py`, while sampling defaults live in
-`fastvideo/pipelines/basic/wan/presets.py`. Put a restriction on the narrowest
-applicable class: changing a base class can affect all its subclasses.
+Choose the runtime matching the file:
 
-## Add a numeric bound
+| Runtime | Baseline and available controls |
+| --- | --- |
+| `fastvideo-cuda-rest` | Native `ServeConfig`; reviewed typed public fields, no active streaming block |
+| `fastvideo-mlx-rest` | Native `MLXServeConfig`; typed server and generator fields |
+| `fastvideo-cuda-streaming` | Native `ServeConfig` with an active `streaming` block; reviewed host, port, frames and resolution controls |
 
-For an already public experimental pipeline option, keep its type and default
-and add verified bounds with standard dataclass field metadata. This illustrative
-field has a supported range of zero through one:
+MLX currently supports the FastH3 models listed in its native schema. Its
+`default_request` is untyped: required values stay in the baseline and are not
+exposed as controls by borrowing HTTP-schema definitions. Check each baseline's
+comments for conversion prerequisites, environment settings and local paths.
 
-```python
-from dataclasses import field
+The maintained examples cover distinct workflows:
 
-custom_gain: float = field(
-    default=0.5,
-    metadata={"ge": 0.0, "le": 1.0},
-)
+| Model manifest | Native baseline | Workflow |
+| --- | --- | --- |
+| `fastwan21.yaml` | `openai_fastwan21_1_3b.yaml` | One-GPU CUDA T2V REST |
+| `fasth3-8step.yaml` | `openai_fasth3_8step.yaml` and `mlx_fasth3_8step.yaml` | CUDA and MLX T2V REST |
+| `wan21-i2v.yaml` | `openai_wan21_i2v_14b.yaml` | Two-GPU CUDA I2V REST, requires an image reference |
+| `ltx2-distilled.yaml` | `streaming_demo.yaml` | CUDA WebSocket streaming |
+
+These baselines live under `examples/serving/`. H3's registry includes I2V, but
+this cookbook uses the maintained Wan baseline for its I2V example; absence of
+an H3 I2V recipe is not a declaration that H3 cannot do I2V.
+
+## 2. Create or extend the model manifest
+
+Use a stable lowercase hyphenated filename such as `fastwan21.yaml`. Its stem
+is the model key. Add deployments as lowercase hyphenated mapping keys:
+
+```yaml
+# docs/cookbook/recipes/fastwan21.yaml
+title: FastWan2.1 1.3B
+summary: Distilled text-to-video serving with sparse attention.
+guide: docs/cookbook/guides/fastwan21-serving.md
+
+deployments:
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    workload: t2v
+    config: examples/serving/openai_fastwan21_1_3b.yaml
+    env:
+      FASTVIDEO_ATTENTION_BACKEND: VIDEO_SPARSE_ATTN
+    controls:
+      - server
+      - generator.engine.offload.dit_layerwise
+      - generator.engine.offload.text_encoder
+      - generator.engine.offload.vae
+      - generator.engine.compile.enabled
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.fps
+      - default_request.sampling.seed
 ```
 
-The exporter produces `type: number`, `default: 0.5`, `minimum: 0.0` and
-`maximum: 1.0`. The demo renders a numeric input and Ajv validates its value.
-For a new pipeline option, also expose it through the existing public CLI
-declaration and ensure the runtime consumes it. Adding an arbitrary dataclass
-attribute alone does not make a working public option.
+The model requires `title` and nonempty `deployments`. Model-level `summary` and
+`guide` are optional. Each deployment requires `runtime`, `workload`, `config`
+and `controls`; optional keys are `label`, `summary`, `guide`, `env`,
+`requirements` and `hardware`. Unknown keys are errors. Only `summary` and `guide` fall back from
+the model. Controls, environment and requirements have no inheritance.
 
-For categorical options, keep the Python annotation and CLI `choices`
-consistent: the current experimental-option exporter takes its enum choices
-from the CLI declaration. Its help text also supplies the displayed description.
-Preserve `None` when it means automatic selection. A recommended or tested value
-is not evidence of a hard supported bound.
+- `config`: repository-relative path to native serving YAML.
+- `label`: optional deployment-picker text; defaults to the runtime label.
+  Use it to distinguish two setups with the same runtime.
+- `workload`: one demonstrated workload (`t2v` or `i2v`) accepted by that runtime;
+  it selects the client guidance, not the model's full capabilities.
+- `env`: optional mapping of environment names to strings; quote numeric values.
+- `requirements`: optional list of plain-text setup notes or documentation URLs.
+- `guide`: optional repository-relative Markdown path under `docs/`.
 
-## Extensions still needed
+There is no separate model list. Adding the manifest publishes a model;
+adding another deployment publishes an additional choice under that model.
+For example, FastH3 8-Step V2 can use two real native baselines:
 
-The current exporter does **not** extract model-specific sampling ranges from
-presets or sampling classes; it extracts their defaults only. It also copies
-only the model default when a legacy pipeline argument maps to an existing typed
-serving path. Extra constraints on that pipeline declaration are not yet merged.
+```yaml
+# docs/cookbook/recipes/fasth3-8step.yaml
+title: FastH3 8-Step V2
+deployments:
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    workload: t2v
+    config: examples/serving/openai_fasth3_8step.yaml
+    controls:
+      - server
+      - generator.engine.compile.enabled
+  mlx-rest:
+    runtime: fastvideo-mlx-rest
+    workload: t2v
+    config: examples/serving/mlx_fasth3_8step.yaml
+    requirements:
+      - Prepare the MLX checkpoint with VSA and set your local model paths.
+    controls:
+      - server
+      - generator.model_root
+      - generator.mlx_checkpoint
+      - generator.prompt_cache_dir
+      - generator.vae_dtype
+      - generator.vsa_sparsity
+```
 
-For those cases, extend the existing Python declaration and the shared exporter
-once to carry the constraint to the appropriate serving schema path. Then each
-model can supply its own metadata through the same mechanism. Do not put range
-objects into a preset's `defaults` mapping: the runtime expects values there.
-Field applicability and cross-field rules likewise need explicit declarations;
-the exporter cannot infer them from inheritance or arbitrary Python validators.
+This demonstrates a supported H3 runtime, not a promised FastWan MLX route.
+The adapter supplies the different launch command, installation guide and field
+metadata. A genuinely new runtime needs one shared adapter and its tests before
+contributors can select it in manifests.
 
-## Runtime impact and verification
+For LTX2 streaming, use `runtime: fastvideo-cuda-streaming`, `workload: t2v`
+and the native `streaming_demo.yaml`. Its baseline requires NVFP4-compatible
+compute capability >= 10.0, `flashinfer-python`, FFmpeg with `libx264` and the
+FastVideo `streaming` extra. Record those prerequisites under `requirements`.
+Expose `server.host`, `server.port`, `default_request.sampling.num_frames`,
+`height` and `width` (each with the full sampling path). Keep the remaining
+streaming and generation settings in the baseline.
 
-Adding `ge` or `le` metadata while preserving the type and default does not, by
-itself, change ordinary dataclass construction or FastVideo's native config
-parser. It changes exported browser validation. Pydantic validation consumers
-can enforce the metadata, but the native parser does not currently enforce those
-bounds. If the server must reject the same values, add or reuse runtime validation
-deliberately and test it separately.
+Preserving the baseline's warmup, prompt, safety and pool fields does not mean
+the bare serving entrypoint activates the corresponding DreamVerse integrations.
+`CEREBRAS_API_KEY` is not required for this bare launch. Use
+`docs/design/server_contracts/streaming.md` as the deployment's protocol guide.
+The generated client section is a health/liveness check, the WebSocket endpoint
+and that guide, rather than a REST generation command or a standalone client.
+The health response alone does not establish generation readiness or output.
 
-Changing defaults, types, CLI choices or runtime validators can change existing
-behavior. Treat those as API changes, even when motivated by the cookbook.
+## 3. Select meaningful controls
 
-After changing a declaration:
+`controls` is an explicit ordered list; `[]` is allowed. There are no implicit
+controls, `add` or `hide`. Types and declared constraints come from the selected
+runtime's public definitions; shared frontend code supplies labels and widgets.
 
-1. Add a focused case in `tests/local_tests/test_cookbook_config_metadata.py`
-   for the model's exported type, default and constraints.
-2. Regenerate the catalogs from the repository root with
-   `python docs/cookbook_config.py`, then run `mkdocs serve` or `mkdocs build`.
-   The [docs setup instructions](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/README.md) include the CPU dependencies for
-   generation; a full FastVideo inference installation is unnecessary.
-3. Run the metadata tests, `test_cookbook_config_roundtrip.py`, and
-   `node --test tests/local_tests/test_cookbook_config.mjs`; check valid and
-   invalid selections in the demo. Run runtime tests if behavior changed.
+Select an exact leaf or a non-nullable declared object namespace. `server`
+expands to four server fields, giving the FastWan example thirteen controls.
+Descendants follow declaration order; selectors follow manifest order. Arrays
+are leaves. Every child of a namespace must be editable: protected, opaque or
+unsupported descendants fail generation rather than disappearing silently.
+Unknown paths, duplicates and overlaps such as `server` plus `server.port` are
+errors. Nullable objects and free-form maps cannot be expanded. Namespace
+selection opts into future public fields beneath it; use exact leaves for a
+stable control surface.
 
-The shared browser code should not need model-specific branches. UI labels and
-layout stay in the frontend; hardware capacity estimation remains separate from
-configuration constraints.
+Do not expose coupled settings independently. FastWan's three steps and DMD
+timesteps belong together, so the example does not select the whole sampling
+group. GPU count may require parallelism changes. Schema acceptance alone does
+not establish that an option works for every model or combination. Experimental
+settings remain preserved without automatically becoming editable controls.
+
+## 4. Optional hardware evidence and guide
+
+Hardware records belong to a deployment. Reference exact IDs from the shared
+`docs/cookbook/hardware.yaml` inventory; add missing hardware facts there once.
+Only explicitly listed devices appear for that deployment. Omitting the map
+shows no hardware rows and supplies no evidence. Example deployment fragment:
+
+```yaml
+hardware:
+  nvidia-h100-sxm-80gb:
+    status: unverified
+```
+
+Use `verified` only with an HTTPS `evidence_url` recording a successful serving
+run of this baseline. Use `unsupported` with a concrete `reason`. Other listed
+records are unverified. Unknown inventory IDs or record keys are errors. Rated
+memory is a device fact, not a claim that this configuration fits.
+
+Evidence must identify GPU SKU/count, native config, environment, code/software
+versions, workload and successful server output. Parser tests or direct Python
+inference do not establish REST or WebSocket serving verification. User edits are custom and
+unverified; baseline evidence keeps its original scope. Hardware rows do not
+select or tune the configuration.
+
+An optional guide explains prerequisites, launch, client workflow and relevant
+troubleshooting. Put shared background at model level and override `guide` for
+a deployment when needed. MkDocs renders it normally; the catalog contains its
+compiled link, not a Markdown body. The [FastWan guide](../cookbook/guides/fastwan21-serving.md)
+and [H3 server/client guide](../cookbook/openai-api.md) illustrate useful content.
+
+## 5. Generate, preview and check
+
+Use the CPU documentation environment in the
+[documentation setup guide](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/README.md).
+From the repository root:
+
+```bash
+python docs/cookbook_config.py
+mkdocs serve
+```
+
+Open `/cookbook/config-builder/`. Model manifests are ordered by filename;
+deployments retain their mapping order. The exporter writes a model index and
+complete catalogs at `docs/assets/cookbook-config/recipes/<model-key>/<deployment-key>.json`.
+These are gitignored build output. Regenerate after changing manifests, native
+baselines, hardware metadata or public configuration definitions.
+
+Check both selectors and each deployment's instructions. With no edits,
+downloaded YAML must preserve the complete baseline, including hidden fields.
+Change each exposed control and confirm unrelated values survive. Reset must
+restore the selected deployment. Absent values show Inherited; explicit `false`,
+`0` and allowed `null` must not disappear. Switching deployment must load its own
+baseline, controls and launch instructions. Verify REST sample port/alias and
+the I2V image reference, or the streaming health-check and WebSocket URLs as
+appropriate. Check required environment, guide URLs and hardware-evidence scope.
+
+Run the focused checks and project hooks:
+
+```bash
+python -m pytest tests/local_tests/test_cookbook_config_metadata.py tests/local_tests/test_cookbook_config_roundtrip.py
+node --test tests/local_tests/test_cookbook_config.mjs
+mkdocs build
+python docs/cookbook_config.py --check-site site
+pre-commit run --files docs/cookbook/recipes/fastwan21.yaml docs/cookbook/recipes/fasth3-8step.yaml
+```
+
+Include other edited manifests and any new baseline, guide or inventory file
+in pre-commit. Add focused
+parser/adapter round trips for unusual requirements and reviewed controls.
+Generation validates configuration without loading weights or starting CUDA or
+MLX inference or importing streaming execution modules; actual serving evidence
+remains separate. If field metadata is
+missing, improve the existing public declaration and shared exporter rather
+than duplicating its type/range in the manifest. Runtime default or validation
+changes still need their own compatibility review.
+
+See the [design](../design/serving-cookbook.md) for the generated-data contract.

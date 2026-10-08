@@ -1,0 +1,20 @@
+title: LTX2 Distilled
+summary: Incremental video delivery over the native streaming WebSocket interface.
+guide: docs/design/server_contracts/streaming.md
+
+deployments:
+  cuda-streaming:
+    runtime: fastvideo-cuda-streaming
+    workload: t2v
+    config: examples/serving/streaming_demo.yaml
+    requirements:
+      - Install FastVideo with the streaming extra and ffmpeg with libx264 support.
+      - This native baseline uses NVFP4 quantization; it requires flashinfer-python and a compatible CUDA GPU with compute capability 10.0 or newer.
+      - Use a client implementing the linked streaming protocol. The command below checks server health only; it does not generate a video.
+      - Hidden prompt, safety and pool settings are preserved from the Dreamverse baseline; the bare streaming server does not activate those integrations.
+    controls:
+      - server.host
+      - server.port
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width

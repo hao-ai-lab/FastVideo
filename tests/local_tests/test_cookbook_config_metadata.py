@@ -1,435 +1,560 @@
-"""Serving schema fidelity and registry-driven metadata export; no model weights."""
+"""Recipe authoring and metadata delivery checks; no weights or GPU inference."""
 
 import copy
-import dataclasses
-import hashlib
 import json
 import subprocess
-import sys
-from enum import Enum
-from unittest.mock import patch
+from pathlib import Path
 
 import pytest
 import yaml
-from pydantic import BaseModel, Field, TypeAdapter
 
 from docs import cookbook_config
-from fastvideo.api.schema import ServeConfig
 
-WAN = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
-IMAGE = "Tongyi-MAI/Z-Image-Turbo"
+MODEL = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers"
 
 
-def leaf(schema, path):
-    for key in path.split("."):
-        schema = schema["properties"][key]
-    return schema
+def fixture_recipe(tmp_path, **updates):
+    hardware_path = tmp_path / cookbook_config.HARDWARE_FILE
+    hardware_path.parent.mkdir(parents=True, exist_ok=True)
+    hardware_path.write_text((cookbook_config.ROOT / cookbook_config.HARDWARE_FILE).read_text())
+    baseline = yaml.safe_load((cookbook_config.ROOT / "examples/serving/openai_fastwan21_1_3b.yaml").read_text())
+    config_path = tmp_path / "examples/serving/config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(yaml.safe_dump(baseline))
+    recipes_dir = tmp_path / "recipes"
+    recipes_dir.mkdir(exist_ok=True)
+    manifest = {
+        "runtime": "fastvideo-cuda-rest", "workload": "t2v",
+        "config": "examples/serving/config.yaml",
+        "controls": ["server.port", "generator.engine.compile.enabled", "default_request.sampling.num_frames"],
+        "env": {"FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN"},
+    }
+    manifest.update(updates)
+    (recipes_dir / "example.yaml").write_text(yaml.safe_dump({"title": "Example", "deployments": {"cuda-rest": manifest}}, sort_keys=False))
+    return recipes_dir, baseline, config_path
 
 
-@pytest.fixture(scope="module")
-def catalog():
-    return cookbook_config.build_catalog(WAN)
+def test_manifest_controls_select_fields_without_filtering_baseline(tmp_path):
+    recipes, baseline, _ = fixture_recipe(tmp_path)
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert result["base_config"] == baseline
+    assert result["base_config"]["generator"]["pipeline"]["experimental"]["dmd_denoising_steps"] == [1000, 757, 522]
+    assert result["model"] == {"id": MODEL, "key": "example", "title": "Example"}
+    assert result["deployment"] == {"id": "cuda-rest", "label": "CUDA REST"}
+    assert [control["path"] for control in result["controls"]] == [
+        "server.port", "generator.engine.compile.enabled", "default_request.sampling.num_frames"]
+    assert result["controls"][0]["schema"]["type"] == "integer"
+    assert result["controls"][1]["schema"]["type"] == "boolean"
+    assert result["runtime"]["server_defaults"] == {"host": "0.0.0.0", "port": 8000, "served_model_name": None}
+    assert result["env"]["FASTVIDEO_ATTENTION_BACKEND"] == "VIDEO_SPARSE_ATTN"
+    assert "schema" not in result
 
 
-def selection_file(tmp_path, model_ids):
-    path = tmp_path / "models.yaml"
-    path.write_text(yaml.safe_dump({"models": model_ids}), encoding="utf-8")
-    return path
+def test_inherited_defaults_only_describe_controls_and_never_expand_baseline(tmp_path):
+    recipes, baseline, config = fixture_recipe(tmp_path, controls=["default_request.sampling.num_frames", "server.port"])
+    del baseline["default_request"]
+    del baseline["server"]
+    config.write_text(yaml.safe_dump(baseline))
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert result["base_config"] == baseline
+    assert "default_request" not in result["base_config"]
+    assert result["controls"][0]["schema"]["default"] == 125
+    assert result["controls"][1]["schema"]["default"] == 8000
+    assert result["controls"][0]["schema"]["minimum"] == -cookbook_config.JS_SAFE_INTEGER
+    assert "multipleOf" not in result["controls"][0]["schema"]
 
 
-@pytest.mark.parametrize("model_id,frames,width", [(WAN, 121, 1280), (IMAGE, 1, 1024)])
-def test_model_id_selects_registered_defaults(model_id, frames, width):
-    catalog = cookbook_config.build_catalog(model_id)
-    schema = catalog["schema"]
-    assert catalog["model"]["id"] == model_id
-    assert leaf(schema, "generator.model_path")["const"] == model_id
-    assert leaf(schema, "default_request.sampling.num_frames")["default"] == frames
-    assert leaf(schema, "default_request.sampling.width")["default"] == width
-
-
-def test_catalog_keeps_every_serving_property_type_and_null(catalog):
-    native = TypeAdapter(ServeConfig).json_schema()
-    expanded = cookbook_config._inline_references(native, native)
-    actual = catalog["schema"]
-
-    def compare(expected, exported):
-        if not isinstance(expected, dict):
-            return
-        # Model presets and pipeline declarations may override defaults, while
-        # the serving field types and nullable branches remain intact.
-        for key in ("type", "required", "enum", "const"):
-            if key in expected:
-                assert exported[key] == expected[key]
-        if "anyOf" in expected:
-            assert len(expected["anyOf"]) == len(exported["anyOf"])
-            for left, right in zip(expected["anyOf"], exported["anyOf"]):
-                compare(left, right)
-        if "properties" in expected:
-            assert exported["properties"].keys() == expected["properties"].keys()
-            for key, value in expected["properties"].items():
-                compare(value, exported["properties"][key])
-
-    compare(expanded, actual)
-    assert leaf(actual, "generator.engine.offload.lazy_module_load")["default"] is None
-    assert leaf(actual, "generator.pipeline.vae_tiling")["anyOf"] == [{"type": "boolean"}, {"type": "null"}]
-    assert leaf(actual, "server.served_model_name")["default"] is None
-    assert leaf(actual, "default_request.output.return_frames")["default"] is True
-    assert "requests" not in catalog
-
-
-def test_http_bounds_are_not_serving_constraints(catalog):
-    schema = catalog["schema"]
-    guidance = leaf(schema, "default_request.sampling.guidance_scale")
-    assert "minimum" not in guidance and "maximum" not in guidance
-    steps = leaf(schema, "default_request.sampling.num_inference_steps")
-    assert steps["maximum"] == cookbook_config.JS_SAFE_INTEGER
-    frames = leaf(schema, "default_request.sampling.num_frames")
-    assert frames["minimum"] == -cookbook_config.JS_SAFE_INTEGER
-    assert "multipleOf" not in frames
-    assert "pattern" not in leaf(schema, "server.host")
-
-
-def test_pipeline_options_come_from_public_declarations():
-    schema = cookbook_config.build_catalog(WAN)["schema"]
-    assert leaf(schema, "generator.pipeline.vae_tiling")["default"] is False
-    options = leaf(schema, "generator.pipeline.experimental")["properties"]
-    assert options["flow_shift"]["default"] == 5.0
-    assert {part["type"] for part in options["flow_shift"]["anyOf"]} == {"number", "null"}
-    assert options["dit_precision"]["enum"] == ["fp32", "fp16", "bf16"]
-    assert options["text_encoder_precisions"]["default"] == ["fp32"]
-    assert "vae_config.load_encoder" in options
-    assert "postprocess_text_funcs" not in options
-    assert "precision" not in options  # Not a declared public pipeline argument.
-
-
-def test_selection_file_keeps_requested_order(tmp_path):
-    path = selection_file(tmp_path, [IMAGE, WAN])
-    assert cookbook_config.load_model_ids(path) == [IMAGE, WAN]
-
-
-def test_default_selection_is_explicit_and_registered():
-    from fastvideo.registry import get_registered_models_with_workloads
-
-    selected = cookbook_config.load_model_ids()
-    registered = {row["id"] for row in get_registered_models_with_workloads() if row["workload_types"]}
-    assert selected
-    assert set(selected) <= registered
-    assert len(selected) == len(set(selected))
-
-
-@pytest.mark.parametrize("source", [
-    "",
-    "[]",
-    "{}",
-    "models: []",
-    "models: one-model",
-    "models: [null]",
-    "models: [42]",
-    'models: [""]',
-    'models: ["   "]',
-    "models: [Test/Model, Test/Model]",
+@pytest.mark.parametrize("updates, message", [
+    ({"runtime": "mlx"}, "unsupported runtime"),
+    ({"workload": "streaming"}, "unsupported workload"),
+    ({"workload": "t2i"}, "unsupported workload"),
+    ({"controls": {"add": ["server.port"]}}, "explicit list"),
+    ({"controls": ["server.port", "server.port"]}, "duplicate control"),
+    ({"controls": [1]}, "explicit list"),
+    ({"env": {"BAD-NAME": "1"}}, "environment names"),
+    ({"env": {"VALUE": True}}, "environment names"),
+    ({"requirements": "install"}, "list of text"),
+    ({"unknown": 1}, "expected"),
+    ({"config": "../secret.yaml"}, "under examples/serving"),
 ])
-def test_selection_file_rejects_invalid_structure_and_ids(tmp_path, source):
-    path = tmp_path / "invalid.yaml"
-    path.write_text(source, encoding="utf-8")
-    with pytest.raises(ValueError):
-        cookbook_config.load_model_ids(path)
+def test_bad_manifests_fail_clearly(tmp_path, updates, message):
+    recipes, _, _ = fixture_recipe(tmp_path, **updates)
+    with pytest.raises(ValueError, match=message):
+        cookbook_config.load_recipes(recipes, tmp_path)
 
 
-def test_export_contains_only_selected_complete_catalogs_in_order(tmp_path):
-    path = selection_file(tmp_path, [IMAGE, WAN])
-    output = tmp_path / "assets"
-    index = cookbook_config.export_catalogs(output_dir=output, models_file=path)
+@pytest.mark.parametrize("path", [
+    "server.missing", "generator.model_path", "generator.pipeline.preset", "generator.pipeline.preset_version",
+    "generator.pipeline.components.vae_weights", "generator.pipeline.workload_type", "streaming.warmup.enabled",
+    "generator.pipeline.experimental.VSA_sparsity", "generator.engine",
+    "generator.engine.num_gpus", "generator.engine.parallelism.sp_size",
+    "default_request.output.save_video", "default_request.output.return_frames", "default_request.output.output_path", "server.__proto__.polluted",
+])
+def test_controls_need_typed_metadata_and_cannot_change_identity_or_runtime(tmp_path, path):
+    recipes, _, _ = fixture_recipe(tmp_path, controls=[path])
+    with pytest.raises(ValueError, match="control|metadata"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
 
+
+@pytest.mark.parametrize("mutation, message", [
+    (lambda raw: raw.update(streaming={}), "streaming"),
+    (lambda raw: raw["generator"].update(model_path="Unknown/Model"), "unknown registered model"),
+    (lambda raw: raw["generator"]["pipeline"].update(preset="unimplemented"), "compatibility adapter"),
+    (lambda raw: raw["generator"]["engine"].update(num_gpus="two"), "num_gpus"),
+    (lambda raw: raw["generator"]["engine"]["parallelism"].update(sp_size=3), "divisible"),
+    (lambda raw: raw["generator"]["pipeline"].update(workload_type="i2v"), "disagrees"),
+])
+def test_baseline_passes_native_parser_and_serving_adapter(tmp_path, mutation, message):
+    recipes, baseline, config = fixture_recipe(tmp_path)
+    mutation(baseline)
+    config.write_text(yaml.safe_dump(baseline))
+    with pytest.raises((ValueError, NotImplementedError, AssertionError), match=message):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_another_registered_model_uses_the_same_builder(tmp_path):
+    recipes, _, config = fixture_recipe(tmp_path, workload="i2v")
+    config.write_text((cookbook_config.ROOT / "examples/serving/openai_wan22_ti2v_5b.yaml").read_text())
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert result["model"]["id"] == "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+    assert result["workload"] == "i2v"
+
+
+def test_export_order_manifest_urls_pruning_and_site_validation(tmp_path):
+    recipes, _, _ = fixture_recipe(tmp_path)
+    manifest = yaml.safe_load((recipes / "example.yaml").read_text())
+    manifest["deployments"]["cuda-rest"]["config"] = "examples/serving/another.yaml"
+    (tmp_path / "examples/serving/another.yaml").write_text(
+        (cookbook_config.ROOT / "examples/serving/openai_fasth3_8step.yaml").read_text())
+    (recipes / "another.yaml").write_text(yaml.safe_dump(manifest))
+    output = tmp_path / "site/assets/cookbook-config"
+    index = cookbook_config.export_catalogs(output, recipes, tmp_path)
+    assert [row["id"] for row in index["models"]] == ["another", "example"]
     assert set(index) == {"models"}
-    assert [row["id"] for row in index["models"]] == [IMAGE, WAN]
-    assert json.loads((output / "index.json").read_text()) == index
-    expected_files = {"index.json"}
-    for row, frames in zip(index["models"], [1, 121]):
-        assert set(row) == {"id", "label", "workload_types", "catalog_url"}
-        assert row["label"] and row["workload_types"]
-        digest = hashlib.sha256(row["id"].encode("utf-8")).hexdigest()
-        assert row["catalog_url"] == f"models/{digest}.json"
-        expected_files.add(row["catalog_url"])
+    for row in [deployment for model in index["models"] for deployment in model["deployments"]]:
         catalog = json.loads((output / row["catalog_url"]).read_text())
-        assert catalog == cookbook_config.build_catalog(row["id"])
-        assert set(catalog) == {"model", "runtime", "schema"}
-        assert leaf(catalog["schema"], "default_request.sampling.num_frames")["default"] == frames
-    assert {str(path.relative_to(output)) for path in output.rglob("*.json")} == expected_files
+        assert catalog["id"] == row["id"]
+        assert "base_config" not in row
+    assert json.loads((output / "recipes/example/cuda-rest.json").read_text()) == cookbook_config.build_catalogs(recipes, tmp_path)[1]
+    cookbook_config.check_site(tmp_path / "site", recipes, tmp_path)
+    marker = output / "keep.txt"
+    marker.write_text("not an exporter file")
+    (recipes / "another.yaml").unlink()
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    assert not (output / "recipes/another/cuda-rest.json").exists()
+    assert marker.exists()
+    cookbook_config.check_site(tmp_path / "site", recipes, tmp_path)
+    (output / "recipes/example/cuda-rest.json").unlink()
+    with pytest.raises(FileNotFoundError):
+        cookbook_config.check_site(tmp_path / "site", recipes, tmp_path)
 
 
-def test_selected_catalogs_share_discovery_and_pipeline_schema(monkeypatch):
-    import fastvideo.registry as registry
-
-    aliases = ["FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers", "FastVideo/FastWan2.2-TI2V-5B-Diffusers"]
-    assert registry.get_pipeline_config_cls_from_name(aliases[0]) is registry.get_pipeline_config_cls_from_name(aliases[1])
-    original_schema = TypeAdapter.json_schema
-    serving_schemas = []
-
-    def record_schema(adapter, *args, **kwargs):
-        if adapter._type is ServeConfig:
-            serving_schemas.append(adapter)
-        return original_schema(adapter, *args, **kwargs)
-
-    monkeypatch.setattr(TypeAdapter, "json_schema", record_schema)
-    with patch.object(registry, "get_registered_models_with_workloads",
-                      wraps=registry.get_registered_models_with_workloads) as discover:
-        with patch.object(cookbook_config, "_pipeline_overlay", wraps=cookbook_config._pipeline_overlay) as pipeline:
-            catalogs = cookbook_config.build_catalogs(aliases)
-
-    assert [catalog["model"]["id"] for catalog in catalogs] == aliases
-    assert discover.call_count == 1
-    assert len(serving_schemas) == 1
-    assert pipeline.call_count == 1
-
-
-def test_export_removes_only_stale_owned_model_files(tmp_path):
-    path = selection_file(tmp_path, [WAN, IMAGE])
-    output = tmp_path / "assets"
-    original = cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    stale = output / original["models"][1]["catalog_url"]
-    unrelated = [output / "notes.json", output / "models" / "custom.json", output / "models" / "notes.txt",
-                 output / "models" / "nested" / stale.name]
-    for file in unrelated:
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text("keep me", encoding="utf-8")
-
-    selection_file(tmp_path, [WAN])
-    current = cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    assert [row["id"] for row in current["models"]] == [WAN]
-    assert not stale.exists()
-    assert all(file.read_text() == "keep me" for file in unrelated)
-
-
-@pytest.mark.parametrize("model_ids", [[WAN, WAN], [WAN, "Unknown/Model"]])
-def test_bad_selection_preserves_existing_assets(tmp_path, model_ids):
-    path = selection_file(tmp_path, [WAN, IMAGE])
-    output = tmp_path / "assets"
-    cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    before = {file.relative_to(output): file.read_bytes() for file in output.rglob("*") if file.is_file()}
-    selection_file(tmp_path, model_ids)
-
+def test_failed_export_preserves_previous_files(tmp_path):
+    recipes, _, _ = fixture_recipe(tmp_path)
+    output = tmp_path / "output"
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    before = {path: path.read_bytes() for path in output.rglob("*.json")}
+    (recipes / "broken.yaml").write_text("title: incomplete")
     with pytest.raises(ValueError):
-        cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    assert {file.relative_to(output): file.read_bytes() for file in output.rglob("*") if file.is_file()} == before
+        cookbook_config.export_catalogs(output, recipes, tmp_path)
+    assert {path: path.read_bytes() for path in output.rglob("*.json")} == before
 
 
-def test_failed_catalog_composition_preserves_existing_assets(tmp_path, monkeypatch):
-    path = selection_file(tmp_path, [WAN, IMAGE])
-    output = tmp_path / "assets"
-    cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    before = {file.relative_to(output): file.read_bytes() for file in output.rglob("*") if file.is_file()}
-    original = cookbook_config._model_overlay
-
-    def fail_second_model(model, shared):
-        if model["id"] == IMAGE:
-            raise ValueError("Unexportable model metadata")
-        return original(model, shared)
-
-    monkeypatch.setattr(cookbook_config, "_model_overlay", fail_second_model)
-    with pytest.raises(ValueError, match="Unexportable model metadata"):
-        cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    assert {file.relative_to(output): file.read_bytes() for file in output.rglob("*") if file.is_file()} == before
+def test_duplicate_ids_and_empty_recipe_directory(tmp_path):
+    recipes, _, _ = fixture_recipe(tmp_path)
+    (recipes / "example.yml").write_text((recipes / "example.yaml").read_text())
+    with pytest.raises(ValueError, match="duplicate recipe ID"):
+        cookbook_config.load_recipes(recipes, tmp_path)
+    (recipes / "example.yml").unlink()
+    (recipes / "example.yaml").unlink()
+    with pytest.raises(ValueError, match="No serving recipe"):
+        cookbook_config.load_recipes(recipes, tmp_path)
 
 
-def test_default_output_is_gitignored():
-    paths = [cookbook_config.OUTPUT_DIR / "index.json", cookbook_config.OUTPUT_DIR / "models" / "example.json"]
-    completed = subprocess.run(["git", "check-ignore", "--no-index", *map(str, paths)],
-                               cwd=cookbook_config.ROOT, check=True, capture_output=True, text=True)
-    assert set(completed.stdout.splitlines()) == {str(path) for path in paths}
-
-
-def test_new_registration_and_option_need_no_exporter_allowlist(monkeypatch, tmp_path):
+def test_exports_require_no_http_schema_or_model_download(monkeypatch, tmp_path):
     import fastvideo.registry as registry
-    from fastvideo.configs.pipelines.base import PipelineConfig
-    from fastvideo.fastvideo_args import WorkloadType
-
-    @dataclasses.dataclass
-    class NewPipeline(PipelineConfig):
-        custom_gain: float = dataclasses.field(default=0.5, metadata={"gt": 0, "lt": 1})
-        custom_mode: str | None = "fast"
-        custom_modes: list[str] | None = None
-
-        @staticmethod
-        def add_cli_args(parser, prefix=""):
-            PipelineConfig.add_cli_args(parser, prefix)
-            parser.add_argument("--custom-gain", type=float)
-            parser.add_argument("--custom-mode", choices=["fast", "quality"])
-            parser.add_argument("--custom-modes", choices=["fast", "quality"], nargs="+")
-            return parser
-
-    monkeypatch.setattr(registry, "_CONFIG_REGISTRY", dict(registry._CONFIG_REGISTRY))
-    monkeypatch.setattr(registry, "_MODEL_HF_PATH_TO_NAME", dict(registry._MODEL_HF_PATH_TO_NAME))
-    aliases = ["Test/New-Registered-Model", "Test/New/Registered-Model", "Test_New/Registered-Model"]
-    registry.register_configs(None, NewPipeline, (WorkloadType.T2V,), hf_model_paths=aliases)
-    catalog = cookbook_config.build_catalog(aliases[0])
-    gain = leaf(catalog["schema"], "generator.pipeline.experimental.custom_gain")
-    assert gain["default"] == 0.5
-    assert (gain["exclusiveMinimum"], gain["exclusiveMaximum"]) == (0, 1)
-    mode = leaf(catalog["schema"], "generator.pipeline.experimental.custom_mode")
-    assert mode["default"] == "fast"
-    assert mode["anyOf"] == [{"type": "string", "enum": ["fast", "quality"]}, {"type": "null"}]
-    modes = leaf(catalog["schema"], "generator.pipeline.experimental.custom_modes")
-    assert modes["default"] is None
-    assert modes["anyOf"][0]["items"]["enum"] == ["fast", "quality"]
-    assert modes["anyOf"][1] == {"type": "null"}
-
-    path = selection_file(tmp_path, aliases)
-    output = tmp_path / "assets"
-    index = cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    urls = {row["id"]: row["catalog_url"] for row in index["models"]}
-    assert len(set(urls.values())) == len(aliases)
-    for model_id, url in urls.items():
-        assert url == f"models/{hashlib.sha256(model_id.encode('utf-8')).hexdigest()}.json"
-        exported = json.loads((output / url).read_text())
-        assert exported["model"]["id"] == model_id
-        assert leaf(exported["schema"], "generator.pipeline.experimental.custom_gain") == gain
-    contents = {url: (output / url).read_bytes() for url in urls.values()}
-
-    selection_file(tmp_path, list(reversed(aliases)))
-    reordered = cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    assert [row["id"] for row in reordered["models"]] == list(reversed(aliases))
-    assert {row["id"]: row["catalog_url"] for row in reordered["models"]} == urls
-    assert {url: (output / url).read_bytes() for url in urls.values()} == contents
+    from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
+    def forbidden(*args, **kwargs):
+        pytest.fail("Exporter used HTTP schema generation or downloaded checkpoint metadata")
+    monkeypatch.setattr(VideoGenerationRequest, "model_json_schema", forbidden)
+    monkeypatch.setattr(registry, "maybe_download_model_index", forbidden)
+    recipes, _, _ = fixture_recipe(tmp_path)
+    cookbook_config.build_catalogs(recipes, tmp_path)
 
 
-class Mode(str, Enum):
-    FAST = "fast"
-    QUALITY = "quality"
-
-
-class Fixture(BaseModel):
-    mode: Mode = Mode.FAST
-    amount: float | None = Field(default=None, gt=0, lt=1, multiple_of=0.05)
-
-
-def test_reference_expansion_preserves_annotations_nulls_and_input():
-    document = Fixture.model_json_schema()
-    document["properties"]["mode"]["title"] = "Mode override"
-    before = copy.deepcopy(document)
-    expanded = cookbook_config._inline_references(document, document)
-    assert document == before
-    mode = expanded["properties"]["mode"]
-    assert mode["enum"] == ["fast", "quality"]
-    assert mode["title"] == "Mode override" and mode["default"] == "fast"
-    amount = expanded["properties"]["amount"]
-    assert amount["default"] is None
-    assert amount["anyOf"][1] == {"type": "null"}
-    assert amount["anyOf"][0]["exclusiveMaximum"] == 1
-
-
-@pytest.mark.parametrize("document", [
-    {"$ref": "https://example.com/schema"},
-    {"$defs": {"Loop": {"$ref": "#/$defs/Loop"}}, "$ref": "#/$defs/Loop"},
-    {
-        "$defs": {"Node": {"type": "object", "properties": {"child": {"$ref": "#/$defs/Node"}}}},
-        "$ref": "#/$defs/Node",
-    },
-])
-def test_remote_and_cyclic_expansion_rejected(document):
-    with pytest.raises(ValueError):
-        cookbook_config._inline_references(document, document)
-
-
-def test_prepare_does_not_rewrite_default_objects_or_open_maps():
-    payload = {"type": "integer", "$ref": "this is literal data"}
-    source = {"type": "object", "properties": {
-        "map": {"type": "object", "additionalProperties": True, "default": payload},
-        "count": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": None},
-    }}
+def test_local_schema_refs_annotations_null_and_nonmutation():
+    source = {"$defs": {"Field": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": None}},
+              "properties": {"value": {"$ref": "#/$defs/Field", "description": "An optional value"}}}
     before = copy.deepcopy(source)
-    expanded = cookbook_config._inline_references(source, source)
-    actual = cookbook_config._prepare_schema(expanded)
-    assert actual["additionalProperties"] is False
-    assert actual["properties"]["map"]["additionalProperties"] is True
-    assert actual["properties"]["map"]["default"] == payload
-    assert actual["properties"]["count"]["default"] is None
+    result = cookbook_config._inline_references(source, source)
+    assert result["properties"]["value"] == {
+        "anyOf": [{"type": "integer"}, {"type": "null"}], "default": None, "description": "An optional value"}
     assert source == before
+    assert cookbook_config._prepare_schema(result)["properties"]["value"]["default"] is None
+    for schema in [{"$ref": "https://example.com/schema"}, {"$defs": {"X": {"$ref": "#/$defs/X"}}, "$ref": "#/$defs/X"}]:
+        with pytest.raises(ValueError):
+            cookbook_config._inline_references(schema, schema)
 
 
-def test_unknown_model_fails_without_network_lookup(monkeypatch):
-    import fastvideo.registry as registry
-
-    def unexpected(*args, **kwargs):
-        pytest.fail("Unknown IDs must not trigger checkpoint lookup")
-
-    monkeypatch.setattr(registry, "get_pipeline_config_cls_from_name", unexpected)
-    with pytest.raises(ValueError, match="no registered serving workload"):
-        cookbook_config.build_catalog("Unknown/Model")
+def test_literal_schema_data_is_not_rewritten():
+    field = {"type": "object", "additionalProperties": True, "default": {"$ref": "literal", "type": "integer"}}
+    assert cookbook_config._prepare_schema(field) == field
+    assert cookbook_config._inline_references(field, field) == field
 
 
-@pytest.mark.parametrize("model_ids", [[WAN, WAN], [WAN, "Unknown/Model"]])
-def test_batch_rejects_invalid_ids_before_pipeline_or_network_lookup(monkeypatch, model_ids):
-    import fastvideo.registry as registry
-
-    def unexpected(*args, **kwargs):
-        pytest.fail("Invalid selections must fail before pipeline or checkpoint lookup")
-
-    monkeypatch.setattr(registry, "get_pipeline_config_cls_from_name", unexpected)
-    monkeypatch.setattr(registry, "maybe_download_model_index", unexpected)
-    with pytest.raises(ValueError):
-        cookbook_config.build_catalogs(model_ids)
+def test_default_generated_files_are_ignored():
+    paths = [cookbook_config.OUTPUT_DIR / "index.json", cookbook_config.OUTPUT_DIR / "recipes/example/cuda-rest.json"]
+    result = subprocess.run(["git", "check-ignore", "--no-index", *map(str, paths)], cwd=cookbook_config.ROOT,
+                            check=True, capture_output=True, text=True)
+    assert set(result.stdout.splitlines()) == set(map(str, paths))
 
 
-def test_export_does_not_use_http_schema_or_load_model_index(monkeypatch):
-    import fastvideo.registry as registry
-    from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest, ImageGenerationsRequest
-
-    def unexpected(*args, **kwargs):
-        pytest.fail("Export must stay on configuration metadata")
-
-    monkeypatch.setattr(VideoGenerationRequest, "model_json_schema", unexpected)
-    monkeypatch.setattr(ImageGenerationsRequest, "model_json_schema", unexpected)
-    monkeypatch.setattr(registry, "maybe_download_model_index", unexpected)
-    assert cookbook_config.build_catalog(WAN)["model"]["id"] == WAN
+def test_unlisted_hardware_is_not_implicitly_published(tmp_path):
+    recipes, baseline, _ = fixture_recipe(tmp_path)
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert result["base_config"] == baseline
+    assert result["hardware"] == []
+    assert result["guide"] is None
 
 
-def test_module_import_needs_no_runtime_dependencies():
-    script = (
-        "import sys; from docs import cookbook_config; "
-        "assert 'fastvideo' not in sys.modules and 'torch' not in sys.modules"
-    )
-    subprocess.run([sys.executable, "-S", "-c", script],
-                   cwd=cookbook_config.ROOT, check=True, capture_output=True, text=True)
+def test_hardware_evidence_is_joined_without_changing_configuration(tmp_path):
+    records = {
+        "nvidia-h100-sxm-80gb": {"status": "verified", "evidence_url": "https://example.org/serving-run"},
+        "nvidia-rtx-4090": {"status": "unsupported", "reason": "Documented failure of this test fixture"},
+    }
+    recipes, baseline, _ = fixture_recipe(tmp_path, hardware=records)
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert result["base_config"] == baseline
+    assert result["hardware"][0]["evidence_url"] == records["nvidia-h100-sxm-80gb"]["evidence_url"]
+    assert result["hardware"][1]["reason"] == records["nvidia-rtx-4090"]["reason"]
+    assert "memory_gb" not in records["nvidia-h100-sxm-80gb"]
 
 
-def test_cli_exports_selection_to_requested_directory(tmp_path):
-    path = selection_file(tmp_path, [IMAGE])
-    output = tmp_path / "generated assets"
-    subprocess.run([sys.executable, str(cookbook_config.ROOT / "docs/cookbook_config.py"),
-                    "--models-file", str(path), "--output-dir", str(output)],
-                   cwd=tmp_path, check=True, capture_output=True, text=True)
-    index = json.loads((output / "index.json").read_text())
-    assert [row["id"] for row in index["models"]] == [IMAGE]
-    catalog = json.loads((output / index["models"][0]["catalog_url"]).read_text())
-    assert catalog == cookbook_config.build_catalog(IMAGE)
+@pytest.mark.parametrize("records, message", [
+    ({"unknown-gpu": {"status": "verified"}}, "hardware ID"),
+    ({"nvidia-h100-sxm-80gb": {"status": "verified"}}, "requires serving-test"),
+    ({"nvidia-h100-sxm-80gb": {"status": "unsupported"}}, "requires a reason"),
+    ({"nvidia-h100-sxm-80gb": {"status": "maybe"}}, "verification status"),
+    ({"nvidia-h100-sxm-80gb": {"status": "verified", "evidence_url": "javascript:alert(1)"}}, "HTTPS"),
+    ({"nvidia-h100-sxm-80gb": {"status": "unverified", "reason": ""}}, "nonempty text"),
+    ({"nvidia-h100-sxm-80gb": "verified"}, "hardware record"),
+    ([], "hardware must be a mapping"),
+])
+def test_invalid_hardware_evidence_is_rejected(tmp_path, records, message):
+    recipes, _, _ = fixture_recipe(tmp_path, hardware=records)
+    with pytest.raises(ValueError, match=message):
+        cookbook_config.build_catalogs(recipes, tmp_path)
 
 
-@pytest.mark.parametrize("failure", [None, "missing", "wrong-id", "missing-schema", "wrong-url", "wrong-order"])
-def test_built_site_check_detects_missing_or_mismatched_catalogs(tmp_path, failure):
-    path = selection_file(tmp_path, [WAN, IMAGE])
+@pytest.mark.parametrize("memory", [0, -1, True, float("inf"), "80GB"])
+def test_hardware_inventory_requires_numeric_rated_capacity(tmp_path, memory):
+    fixture_recipe(tmp_path)
+    path = tmp_path / cookbook_config.HARDWARE_FILE
+    raw = yaml.safe_load(path.read_text())
+    raw["gpus"]["nvidia-h100-sxm-80gb"]["memory_gb"] = memory
+    path.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError, match="positive finite"):
+        cookbook_config.load_hardware(tmp_path)
+
+
+def test_markdown_guide_is_a_page_reference_not_another_renderer(tmp_path):
+    guide = tmp_path / "docs/cookbook/guides/example.md"
+    guide.parent.mkdir(parents=True, exist_ok=True)
+    markdown = '# Example "guide"\n\n```bash\nfastvideo serve --config config.yaml\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n'
+    guide.write_text(markdown)
+    recipes, baseline, _ = fixture_recipe(tmp_path, guide="docs/cookbook/guides/example.md")
     site = tmp_path / "site"
     output = site / "assets/cookbook-config"
-    index = cookbook_config.export_catalogs(output_dir=output, models_file=path)
-    catalog_path = output / index["models"][0]["catalog_url"]
-    if failure == "missing":
-        catalog_path.unlink()
-    elif failure in {"wrong-id", "missing-schema"}:
-        catalog = json.loads(catalog_path.read_text())
-        if failure == "wrong-id":
-            catalog["model"]["id"] = IMAGE
-        else:
-            del catalog["schema"]
-        catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
-    elif failure in {"wrong-url", "wrong-order"}:
-        if failure == "wrong-url":
-            index["models"][0]["catalog_url"] = "../unrelated.json"
-        else:
-            index["models"].reverse()
-        (output / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    catalog = json.loads((output / "recipes/example/cuda-rest.json").read_text())
+    assert catalog["guide"] == {"url": "../../cookbook/guides/example/"}
+    assert catalog["base_config"] == baseline
+    assert guide.read_text() == markdown
+    with pytest.raises(ValueError, match="Guide page missing"):
+        cookbook_config.check_site(site, recipes, tmp_path)
+    built = site / "cookbook/guides/example/index.html"
+    built.parent.mkdir(parents=True, exist_ok=True)
+    built.write_text("<h1>Example guide</h1>")
+    cookbook_config.check_site(site, recipes, tmp_path)
+    catalog["guide"]["url"] = "../../wrong/"
+    (output / "recipes/example/cuda-rest.json").write_text(json.dumps(catalog))
+    with pytest.raises(ValueError, match="differs from manifest"):
+        cookbook_config.check_site(site, recipes, tmp_path)
 
-    if failure is None:
-        cookbook_config.check_site(site, models_file=path)
-    else:
-        with pytest.raises((ValueError, FileNotFoundError)):
-            cookbook_config.check_site(site, models_file=path)
+
+@pytest.mark.parametrize("guide", ["../private.md", "/tmp/private.md", "docs/missing.md", "docs/cookbook/hardware.yaml"])
+def test_guides_are_existing_markdown_files_inside_docs(tmp_path, guide):
+    recipes, _, _ = fixture_recipe(tmp_path, guide=guide)
+    with pytest.raises(ValueError, match="guide must"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_index_markdown_guide_uses_its_directory_url(tmp_path):
+    guide = tmp_path / "docs/cookbook/guides/index.md"
+    guide.parent.mkdir(parents=True)
+    guide.write_text("# Guides\n")
+    assert cookbook_config._guide_link("docs/cookbook/guides/index.md", tmp_path) == {"url": "../../cookbook/guides/"}
+
+
+def test_import_does_not_initialize_fastvideo():
+    result = subprocess.run(["python3", "-S", "-c", "import docs.cookbook_config, sys; assert 'fastvideo' not in sys.modules"],
+                            cwd=cookbook_config.ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_hidden_unsafe_integer_is_rejected_before_browser_rounding(tmp_path):
+    recipes, baseline, config = fixture_recipe(tmp_path)
+    baseline["default_request"]["sampling"]["seed"] = 2**63 - 1
+    config.write_text(yaml.safe_dump(baseline))
+    with pytest.raises(ValueError, match="browser-safe range"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_namespaces_expand_all_leaves_in_manifest_then_declaration_order(tmp_path):
+    recipes, baseline, _ = fixture_recipe(tmp_path, controls=[
+        "default_request.sampling.num_frames", "server", "generator.engine.offload",
+        "generator.engine.compile.enabled",
+    ])
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert [control["path"] for control in result["controls"]] == [
+        "default_request.sampling.num_frames",
+        "server.host", "server.port", "server.output_dir", "server.served_model_name",
+        "generator.engine.offload.dit", "generator.engine.offload.dit_layerwise",
+        "generator.engine.offload.text_encoder", "generator.engine.offload.image_encoder",
+        "generator.engine.offload.vae", "generator.engine.offload.pin_cpu_memory",
+        "generator.engine.offload.lazy_module_load", "generator.engine.compile.enabled",
+    ]
+    assert result["base_config"] == baseline
+    # Expansion selects controls, never projects or expands the native baseline.
+    assert result["base_config"]["generator"]["pipeline"]["experimental"] == baseline["generator"]["pipeline"]["experimental"]
+    lazy = next(control for control in result["controls"] if control["path"].endswith("lazy_module_load"))
+    assert lazy["schema"]["anyOf"] == [{"type": "boolean"}, {"type": "null"}]
+
+
+@pytest.mark.parametrize("selector, offending", [
+    ("generator.engine", "generator.engine.num_gpus"),
+    ("generator.engine.compile", "generator.engine.compile.extras"),
+    ("generator.engine.parallelism", "generator.engine.parallelism.tp_size"),
+    ("default_request.output", "default_request.output.output_path"),
+    ("generator.engine.quantization", "generator.engine.quantization"),
+])
+def test_namespace_rejects_any_unsupported_descendant_instead_of_filtering(tmp_path, selector, offending):
+    recipes, _, _ = fixture_recipe(tmp_path, controls=[selector])
+    with pytest.raises(ValueError) as failure:
+        cookbook_config.build_catalogs(recipes, tmp_path)
+    message = str(failure.value)
+    assert f"Control selector '{selector}'" in message
+    assert f"unsupported field '{offending}'" in message
+    assert "use narrower selectors" in message
+
+
+@pytest.mark.parametrize("selectors", [
+    ["server", "server.port"], ["server.port", "server"],
+    ["generator.engine.offload", "generator.engine.offload.vae"],
+])
+def test_overlapping_selectors_are_rejected_in_both_orders(tmp_path, selectors):
+    recipes, _, _ = fixture_recipe(tmp_path, controls=selectors)
+    with pytest.raises(ValueError, match="Overlapping control selector.*already enabled"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_arrays_stay_leaves_and_empty_or_unknown_namespaces_fail():
+    schema = {"properties": {"server": {"type": "object", "properties": {
+        "values": {"type": "array", "items": {"type": "string"}},
+    }}}}
+    before = copy.deepcopy(schema)
+    result = cookbook_config._expand_controls(schema, ["server"])
+    assert result == [{"path": "server.values", "schema": {"type": "array", "items": {"type": "string"}}}]
+    result[0]["schema"]["items"]["type"] = "integer"
+    assert schema == before
+    with pytest.raises(ValueError, match="No public field metadata"):
+        cookbook_config._expand_controls(schema, ["server.unknown"])
+    schema["properties"]["server"]["properties"] = {}
+    with pytest.raises(ValueError, match="use narrower selectors"):
+        cookbook_config._expand_controls(schema, ["server"])
+
+
+def fixture_mlx_deployment(tmp_path):
+    recipes, _, _ = fixture_recipe(tmp_path)
+    manifest_path = recipes / "example.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    baseline = yaml.safe_load((cookbook_config.ROOT / "examples/serving/mlx_fasth3_8step.yaml").read_text())
+    config = tmp_path / "examples/serving/mlx.yaml"
+    config.write_text(yaml.safe_dump(baseline))
+    manifest["deployments"] = {"mlx-rest": {
+        "runtime": "fastvideo-mlx-rest", "workload": "t2v", "config": "examples/serving/mlx.yaml",
+        "controls": ["server", "generator.model_root", "generator.mlx_checkpoint", "generator.vae_dtype",
+                     "generator.vsa", "generator.vsa_sparsity", "generator.vsa_tile_size"],
+    }}
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    return recipes, baseline, config
+
+
+def test_mlx_controls_reuse_native_types_and_preserve_checkpoint_paths(tmp_path, monkeypatch):
+    from fastvideo.entrypoints.openai import mlx_server
+    import fastvideo.registry as registry
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Metadata export must not load models, query the Hub, or borrow HTTP schemas")
+
+    monkeypatch.setattr(mlx_server, "MLXH3Generator", forbidden)
+    monkeypatch.setattr(mlx_server.VideoGenerationRequest, "model_json_schema", forbidden)
+    monkeypatch.setattr(registry, "maybe_download_model_index", forbidden)
+    recipes, baseline, config = fixture_mlx_deployment(tmp_path)
+    output = tmp_path / "must-not-be-created"
+    baseline["server"]["output_dir"] = str(output)
+    del baseline["server"]["served_model_name"]
+    config.write_text(yaml.safe_dump(baseline))
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert not output.exists()
+    assert result["base_config"] == baseline
+    assert result["base_config"]["generator"]["mlx_checkpoint"] == "./FastH3-8-Step-V2-MLX/int8"
+    assert result["runtime"]["server_defaults"]["served_model_name"] == "fasth3"
+    assert "served_model_name" not in result["base_config"]["server"]
+    assert result["runtime"]["backend"] == "mlx"
+    assert result["runtime"]["interface"] == "rest"
+    assert result["runtime"]["hardware_label"] == "Apple Silicon"
+    assert result["runtime"]["launch_argv"] == [
+        "python", "-m", "fastvideo.entrypoints.openai.mlx_server", "--config", "config.yaml"]
+    fields = {item["path"]: item["schema"] for item in result["controls"]}
+    assert fields["generator.vae_dtype"]["enum"] == ["fp32", "fp16", "bf16"]
+    assert fields["generator.vsa_sparsity"]["minimum"] == 0
+    assert fields["generator.vsa_sparsity"]["exclusiveMaximum"] == 1
+    assert fields["generator.vsa_tile_size"]["enum"] == [64, 256]
+    assert fields["server.port"]["minimum"] == 1
+    assert fields["server.port"]["maximum"] == 65535
+    assert fields["generator.vsa"]["type"] == "boolean"
+
+
+@pytest.mark.parametrize("field, value, message", [
+    ("num_inference_steps", 3, "sigma points"),
+    ("guidance_scale", 2, "guidance_scale=1"),
+    ("seed", -1, "seed must be"),
+])
+def test_mlx_baseline_uses_native_serving_admission(tmp_path, field, value, message):
+    recipes, baseline, config = fixture_mlx_deployment(tmp_path)
+    baseline["default_request"]["sampling"][field] = value
+    config.write_text(yaml.safe_dump(baseline))
+    with pytest.raises(ValueError, match=message):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+@pytest.mark.parametrize("path", ["generator.model_path", "generator.engine.offload.vae",
+                                  "default_request.sampling.num_frames", "runtime"])
+def test_mlx_does_not_advertise_cuda_or_opaque_request_fields(tmp_path, path):
+    recipes, _, _ = fixture_mlx_deployment(tmp_path)
+    manifest_path = recipes / "example.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["deployments"]["mlx-rest"]["controls"] = [path]
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    with pytest.raises(ValueError, match="control|metadata"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_deployments_share_identity_but_not_baselines_or_controls(tmp_path):
+    recipes, baseline, _ = fixture_mlx_deployment(tmp_path)
+    cuda_path = tmp_path / "examples/serving/cuda.yaml"
+    cuda_path.write_text((cookbook_config.ROOT / "examples/serving/openai_fasth3_8step.yaml").read_text())
+    manifest_path = recipes / "example.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["summary"] = "Model overview"
+    guide = tmp_path / "docs/guide.md"
+    guide.write_text("# Model guide\n")
+    manifest["guide"] = "docs/guide.md"
+    manifest["deployments"]["cuda-rest"] = {
+        "label": "CUDA workstation", "runtime": "fastvideo-cuda-rest", "workload": "t2v",
+        "config": "examples/serving/cuda.yaml", "controls": ["server.port"],
+        "env": {"CUDA_VISIBLE_DEVICES": "0"}, "summary": "CUDA-specific summary",
+    }
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    catalogs = cookbook_config.build_catalogs(recipes, tmp_path)
+    assert [item["id"] for item in catalogs] == ["example/mlx-rest", "example/cuda-rest"]
+    assert len({item["model"]["id"] for item in catalogs}) == 1
+    assert catalogs[0]["summary"] == "Model overview"
+    assert catalogs[1]["summary"] == "CUDA-specific summary"
+    assert catalogs[0]["guide"] == catalogs[1]["guide"] == {"url": "../../guide/"}
+    assert catalogs[0]["env"] == {}
+    assert catalogs[1]["env"] == {"CUDA_VISIBLE_DEVICES": "0"}
+    assert catalogs[0]["base_config"] == baseline
+    assert len(catalogs[1]["controls"]) == 1
+    assert catalogs[1]["deployment"]["label"] == "CUDA workstation"
+    output = tmp_path / "output"
+    index = cookbook_config.export_catalogs(output, recipes, tmp_path)
+    assert [row["id"] for row in index["models"][0]["deployments"]] == [
+        "example/mlx-rest", "example/cuda-rest"]
+    assert index["models"][0]["deployments"][1]["label"] == "CUDA workstation"
+    assert all((output / row["catalog_url"]).is_file() for row in index["models"][0]["deployments"])
+    del manifest["deployments"]["mlx-rest"]
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    assert not (output / "recipes/example/mlx-rest.json").exists()
+    assert (output / "recipes/example/cuda-rest.json").exists()
+
+
+def test_one_model_manifest_rejects_deployments_for_different_models(tmp_path):
+    recipes, _, _ = fixture_mlx_deployment(tmp_path)
+    manifest_path = recipes / "example.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["deployments"]["cuda-rest"] = {
+        "runtime": "fastvideo-cuda-rest", "workload": "t2v", "config": "examples/serving/config.yaml",
+        "controls": [],
+    }
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    with pytest.raises(ValueError, match="same model_path"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_hardware_record_must_match_the_selected_backend(tmp_path):
+    recipes, _, _ = fixture_mlx_deployment(tmp_path)
+    manifest_path = recipes / "example.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["deployments"]["mlx-rest"]["hardware"] = {"nvidia-h100-sxm-80gb": {"status": "unverified"}}
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    with pytest.raises(ValueError, match="backend-incompatible"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_model_identity_cannot_be_split_across_manifests(tmp_path):
+    recipes, _, _ = fixture_recipe(tmp_path)
+    (recipes / "another.yaml").write_text((recipes / "example.yaml").read_text())
+    with pytest.raises(ValueError, match="duplicate model identity.*add deployments"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_streaming_runtime_reuses_native_config_without_importing_engine(tmp_path, monkeypatch):
+    import builtins
+
+    recipes, _, config_path = fixture_recipe(tmp_path, runtime="fastvideo-cuda-streaming",
+                                             controls=["server.host", "server.port", "default_request.sampling.num_frames"])
+    baseline = yaml.safe_load((cookbook_config.ROOT / "examples/serving/streaming_demo.yaml").read_text())
+    config_path.write_text(yaml.safe_dump(baseline))
+    original_import = builtins.__import__
+
+    def no_streaming_runtime(name, *args, **kwargs):
+        if name.startswith("fastvideo.entrypoints.streaming"):
+            pytest.fail("The docs exporter must not import streaming runtime or GPU dependencies")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_streaming_runtime)
+    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
+    assert result["base_config"] == baseline
+    assert result["base_config"]["streaming"]["stream_mode"] == "av_fmp4"
+    assert result["base_config"]["streaming"]["pool"]["conditioning_num_frames"] == 9
+    assert result["runtime"]["backend"] == "cuda"
+    assert result["runtime"]["interface"] == "websocket"
+    assert result["runtime"]["client_guide_url"] == "../../design/server_contracts/streaming/"
+    assert result["runtime"]["launch_argv"] == ["fastvideo", "serve", "--config", "config.yaml"]
+
+
+def test_streaming_deployment_requires_native_streaming_block(tmp_path):
+    recipes, _, _ = fixture_recipe(tmp_path, runtime="fastvideo-cuda-streaming")
+    with pytest.raises(ValueError, match="requires a streaming block"):
+        cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+@pytest.mark.parametrize("path", ["server", "server.served_model_name", "server.output_dir"])
+def test_streaming_does_not_expose_ignored_rest_server_controls(tmp_path, path):
+    recipes, _, config_path = fixture_recipe(tmp_path, runtime="fastvideo-cuda-streaming", controls=[path])
+    config_path.write_text((cookbook_config.ROOT / "examples/serving/streaming_demo.yaml").read_text())
+    with pytest.raises(ValueError, match="Unsupported streaming control: server"):
+        cookbook_config.build_catalogs(recipes, tmp_path)

@@ -1,34 +1,46 @@
-"""Export serving schemas and registered model defaults without loading weights.
+"""Build browser catalogs from model manifests and native serving deployments.
 
-build_catalog(model_id) describes one registered model. The command-line export
-reads the cookbook's selected model IDs and writes an index plus a complete
-catalog for each model. Shared schemas and pipeline declarations are discovered
-once per export; the browser only fetches the selected model's catalog.
+Each model manifest offers deployments with a native serving YAML and an
+explicit list of editable fields. The complete baseline is preserved; public Python declarations supply
+metadata only for those controls. Export validates native parsing and serving
+translation without loading weights. JSON files are generated docs assets.
 
-FastVideo imports are delayed until export: importing docs tooling should not
-initialize the inference package and its PyTorch/backend dependencies.
+FastVideo imports stay inside export helpers because importing its package also
+initializes PyTorch/backend dependencies; ordinary docs tooling need not do so.
 """
 
 from __future__ import annotations
 
 import argparse
 import copy
-import dataclasses
-import hashlib
 import json
+import math
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_type_hints
-
-if TYPE_CHECKING:
-    from fastvideo.configs.pipelines.base import PipelineConfig
+from tempfile import TemporaryDirectory
+from typing import Any
+from urllib.parse import quote, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_SELECTION_PATH = ROOT / "docs/cookbook/config-builder-models.yaml"
+RECIPES_DIR = ROOT / "docs/cookbook/recipes"
 OUTPUT_DIR = ROOT / "docs/assets/cookbook-config"
 JS_SAFE_INTEGER = 2**53 - 1
 SCHEMA_DATA = {"default", "examples", "enum", "const"}
+RUNTIME_IDS = {"fastvideo-cuda-rest", "fastvideo-mlx-rest", "fastvideo-cuda-streaming"}
+HARDWARE_FILE = "docs/cookbook/hardware.yaml"
+# These fields change identity/topology or are rejected/overridden by the REST adapter.
+UNSUPPORTED_CONTROLS = {
+    "generator.pipeline.preset",
+    "generator.pipeline.preset_version",
+    "generator.pipeline.components.vae_weights",
+    "generator.model_path",
+    "generator.pipeline.workload_type",
+    "generator.engine.num_gpus",
+    "default_request.output.save_video",
+    "default_request.output.return_frames",
+    "default_request.output.output_path",
+}
 
 
 def _dereference(node: dict[str, Any], document: dict[str, Any]) -> dict[str, Any]:
@@ -72,32 +84,6 @@ def _inline_references(value: Any, document: dict[str, Any], trail: tuple[str, .
     return value
 
 
-def _merge(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    result = copy.deepcopy(left)
-    for key, value in right.items():
-        if isinstance(result.get(key), dict) and isinstance(value, dict):
-            result[key] = _merge(result[key], value)
-        else:
-            result[key] = copy.deepcopy(value)
-    return result
-
-
-def _put(schema: dict[str, Any], path: tuple[str, ...], value: dict[str, Any]) -> None:
-    owner = schema
-    for part in path[:-1]:
-        owner = owner.setdefault("properties", {}).setdefault(part, {"type": "object"})
-    owner.setdefault("properties", {})[path[-1]] = value
-
-
-def _leaves(schema: dict[str, Any], prefix: tuple[str, ...] = ()):
-    for name, field in schema.get("properties", {}).items():
-        path = (*prefix, name)
-        if field.get("properties"):
-            yield from _leaves(field, path)
-        else:
-            yield path, field
-
-
 def _prepare_schema(value: Any) -> Any:
     """Match the native parser's closed dataclasses and JS's integer transport."""
     if isinstance(value, list):
@@ -120,176 +106,403 @@ def _prepare_schema(value: Any) -> Any:
     return result
 
 
-def _field_annotation(owner: type, name: str) -> Any:
-    # Resolve only this field; unrelated forward references in model internals
-    # need not be importable merely to describe a public scalar option.
-    for base in owner.__mro__:
-        if name in base.__dict__.get("__annotations__", {}):
-            carrier = type("_Field", (), {"__annotations__": {name: base.__annotations__[name]}})
-            return get_type_hints(carrier, globalns=vars(sys.modules[base.__module__]), localns=dict(vars(base)))[name]
-    raise KeyError(name)
+def _https_url(value: Any, context: str) -> None:
+    if not isinstance(value, str) or urlsplit(value).scheme != "https" or not urlsplit(value).netloc:
+        raise ValueError(f"{context} must be an HTTPS URL")
 
 
-def _pipeline_overlay(config_type: type[PipelineConfig], shared: dict[str, Any]) -> dict[str, Any]:
-    """Discover legacy options from public argument declarations and model defaults.
-
-    This constructs configuration data, never a model or execution pipeline.
-    Python-only objects are not made into JSON controls. Typed public paths win;
-    remaining legacy arguments use the runtime's experimental mapping.
-    """
-    from pydantic import PydanticInvalidForJsonSchema, PydanticSchemaGenerationError, TypeAdapter
-
-    config = config_type()
-    parser = argparse.ArgumentParser(add_help=False)
-    config_type.add_cli_args(parser)
-    typed = list(_leaves(shared["properties"]["generator"]["properties"]["pipeline"]))
-    overlay: dict[str, Any] = {}
-    for action in parser._actions:
-        owner = config
-        parts = action.dest.split(".")
-        try:
-            for part in parts[:-1]:
-                owner = getattr(owner, part)
-            annotation = _field_annotation(type(owner), parts[-1])
-            default = getattr(owner, parts[-1])
-            default = json.loads(json.dumps(default, allow_nan=False))
-            source_field = next(item for item in dataclasses.fields(type(owner)) if item.name == parts[-1])
-            option_type = dataclasses.make_dataclass(
-                "PipelineOption", [("value", annotation, dataclasses.field(metadata=source_field.metadata))])
-            declared = TypeAdapter(option_type).json_schema()
-        except (KeyError, AttributeError, TypeError, ValueError, PydanticInvalidForJsonSchema,
-                PydanticSchemaGenerationError):
-            continue
-        field = _inline_references(declared["properties"]["value"], declared)
-        matches = [path for path, _ in typed if len(parts) == 1 and path[-1] == action.dest]
-        if len(matches) == 1:
-            _put(overlay, ("generator", "pipeline", *matches[0]), {"default": default})
-            continue
-        field.update(default=default, title=action.dest.replace("_", " "), description=action.help or "")
-        if action.choices is not None:
-            for branch in field.get("anyOf", [field]):
-                if branch.get("type") != "null":
-                    branch.get("items", branch)["enum"] = list(action.choices)
-        _put(overlay, ("generator", "pipeline", "experimental", action.dest), _prepare_schema(field))
-    return overlay
-
-
-def _model_overlay(model: dict[str, Any], shared: dict[str, Any]) -> dict[str, Any]:
-    from fastvideo.api.presets import get_preset
-    from fastvideo.registry import get_preset_selection, get_sampling_param_cls_for_name
-
-    overlay: dict[str, Any] = {}
-    _put(overlay, ("generator", "model_path"), {"const": model["id"]})
-    workloads = model["workload_types"]
-    _put(overlay, ("generator", "pipeline", "workload_type"), {"enum": [None, *workloads], "default": workloads[0]})
-    preset_name, family = get_preset_selection(model["id"])
-    defaults = {}
-    if preset_name and family:
-        defaults = get_preset(preset_name, family).defaults
-    else:
-        sampling_type = get_sampling_param_cls_for_name(model["id"])
-        if sampling_type is not None and dataclasses.is_dataclass(sampling_type):
-            defaults = {
-                field.name: field.default
-                for field in dataclasses.fields(sampling_type) if field.default is not dataclasses.MISSING
-            }
-    request = shared["properties"]["default_request"]
-    for path, _ in _leaves(request):
-        if path[-1] in defaults:
-            try:
-                default = json.loads(json.dumps(defaults[path[-1]], allow_nan=False))
-            except (TypeError, ValueError):
-                continue
-            _put(overlay, ("default_request", *path), {"default": default})
-    return overlay
-
-
-def _validate_model_ids(value: Any) -> list[str]:
-    if not isinstance(value, list) or not value:
-        raise ValueError("Expected a nonempty 'models' list")
-    seen: set[str] = set()
-    for model_id in value:
-        if not isinstance(model_id, str) or not model_id.strip():
-            raise ValueError("Every selected model ID must be a nonempty string")
-        if model_id in seen:
-            raise ValueError(f"Duplicate selected model ID: {model_id}")
-        seen.add(model_id)
-    return list(value)
-
-
-def load_model_ids(path: Path = MODEL_SELECTION_PATH) -> list[str]:
-    """Read only model selection; all option metadata comes from FastVideo."""
+def load_hardware(root: Path = ROOT) -> dict[str, dict[str, Any]]:
+    """Load shared physical GPU facts; inventory membership is not compatibility."""
     import yaml
 
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or set(document) != {"models"}:
-        raise ValueError("Model selection YAML must contain only a 'models' list")
-    return _validate_model_ids(document["models"])
+    document = yaml.safe_load((root / HARDWARE_FILE).read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or set(document) != {"gpus"} or not isinstance(document["gpus"], dict):
+        raise ValueError("Hardware inventory must contain a 'gpus' mapping")
+    for gpu_id, device in document["gpus"].items():
+        if not isinstance(gpu_id, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", gpu_id):
+            raise ValueError(f"Invalid hardware ID: {gpu_id}")
+        if not isinstance(device, dict) or set(device) != {"label", "platform", "memory_gb", "source_url"}:
+            raise ValueError(f"{gpu_id}: hardware needs label, platform, memory_gb and source_url")
+        if any(not isinstance(device[key], str) or not device[key].strip() for key in ("label", "platform")):
+            raise ValueError(f"{gpu_id}: label and platform must be nonempty strings")
+        memory = device["memory_gb"]
+        if type(memory) not in (int, float) or not math.isfinite(memory) or memory <= 0:
+            raise ValueError(f"{gpu_id}: memory_gb must be a positive finite number")
+        _https_url(device["source_url"], f"{gpu_id} source_url")
+    return document["gpus"]
 
 
-def build_catalogs(model_ids: list[str]) -> list[dict[str, Any]]:
-    """Compose complete model catalogs, sharing discovery work within this call."""
-    selected = _validate_model_ids(model_ids)
+def _recipe_hardware(recipe: dict[str, Any], devices: dict[str, dict[str, Any]], backend: str) -> list[dict[str, Any]]:
+    """Join author-reported baseline evidence with shared GPU specifications."""
+    records = recipe.get("hardware", {})
+    if not isinstance(records, dict):
+        raise ValueError(f"{recipe['id']}: hardware must be a mapping of GPU IDs to records")
+    for gpu_id, record in records.items():
+        if gpu_id not in devices or devices[gpu_id]["platform"] != backend:
+            raise ValueError(f"{recipe['id']}: unknown or backend-incompatible hardware ID: {gpu_id}")
+        if not isinstance(record, dict) or "status" not in record or set(record) - {"status", "evidence_url", "reason"}:
+            raise ValueError(f"{gpu_id}: hardware record needs status; optional evidence_url and reason")
+        if record["status"] not in ("verified", "unverified", "unsupported"):
+            raise ValueError(f"{gpu_id}: unknown hardware verification status")
+        if "evidence_url" in record:
+            _https_url(record["evidence_url"], f"{gpu_id} evidence_url")
+        if "reason" in record and (not isinstance(record["reason"], str) or not record["reason"].strip()):
+            raise ValueError(f"{gpu_id}: reason must be nonempty text")
+        if record["status"] == "verified" and not record.get("evidence_url"):
+            raise ValueError(f"{gpu_id}: verified hardware requires serving-test evidence_url")
+        if record["status"] == "unsupported" and not record.get("reason"):
+            raise ValueError(f"{gpu_id}: unsupported hardware requires a reason")
+    return [{
+        "id": gpu_id,
+        **copy.deepcopy(devices[gpu_id]),
+        **copy.deepcopy(record)
+    } for gpu_id, record in records.items()]
+
+
+def _guide_link(value: Any, root: Path) -> dict[str, str] | None:
+    """Reference normal MkDocs output instead of adding a browser Markdown renderer."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or Path(value).is_absolute():
+        raise ValueError("guide must be a repository-relative Markdown path under docs/")
+    path = (root / value).resolve()
+    docs = (root / "docs").resolve()
+    if not path.is_relative_to(docs) or path.suffix != ".md" or not path.is_file():
+        raise ValueError("guide must reference an existing Markdown file under docs/")
+    relative = path.relative_to(docs)
+    parts = relative.parts[:-1] if relative.name == "index.md" else (*relative.parts[:-1], relative.stem)
+    page = "/".join(quote(part, safe="-._~") for part in parts)
+    # All catalog links resolve against assets/cookbook-config/index.json.
+    return {"url": "../../" + (page + "/" if page else "")}
+
+
+def load_recipes(recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> list[dict[str, Any]]:
+    """Flatten model manifests in filename order and deployments in authored order.
+
+    Each deployment is self-contained. Only model-level summary and guide can
+    supply presentation fallbacks; configuration, controls and launch settings
+    never leak from one deployment to another.
+    """
+    import yaml
+
+    recipes = []
+    required = {"runtime", "config", "workload", "controls"}
+    allowed = required | {"summary", "env", "requirements", "hardware", "guide", "label"}
+    paths = sorted([*recipes_dir.glob("*.yaml"), *recipes_dir.glob("*.yml")])
+    ids: set[str] = set()
+    for path in paths:
+        model_key = path.stem
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", model_key) or model_key in ids:
+            raise ValueError(f"Invalid or duplicate recipe ID: {model_key}")
+        ids.add(model_key)
+        manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if (not isinstance(manifest, dict) or not {"title", "deployments"} <= manifest.keys()
+                or manifest.keys() - {"title", "summary", "guide", "deployments"}):
+            raise ValueError(f"{path.name}: expected title and deployments; optional summary and guide")
+        if not isinstance(manifest["title"], str) or not manifest["title"].strip():
+            raise ValueError(f"{path.name}: title must be a nonempty string")
+        if "summary" in manifest and not isinstance(manifest["summary"], str):
+            raise ValueError(f"{path.name}: summary must be text")
+        deployments = manifest["deployments"]
+        if not isinstance(deployments, dict) or not deployments:
+            raise ValueError(f"{path.name}: deployments must be a nonempty mapping")
+        for deployment_key, deployment in deployments.items():
+            if not isinstance(deployment_key, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", deployment_key):
+                raise ValueError(f"{path.name}: invalid deployment ID: {deployment_key}")
+            recipe_id = f"{model_key}/{deployment_key}"
+            if not isinstance(deployment, dict) or not required <= deployment.keys() or deployment.keys() - allowed:
+                raise ValueError(f"{recipe_id}: expected {sorted(required)}; optional {sorted(allowed - required)}")
+            for key in ("config", "runtime", "workload"):
+                if not isinstance(deployment[key], str) or not deployment[key].strip():
+                    raise ValueError(f"{recipe_id}: {key} must be a nonempty string")
+            if deployment["runtime"] not in RUNTIME_IDS:
+                raise ValueError(f"{recipe_id}: unsupported runtime {deployment['runtime']}")
+            workloads = {"t2v", "i2v"} if deployment["runtime"] == "fastvideo-cuda-rest" else {"t2v"}
+            if deployment["workload"] not in workloads:
+                raise ValueError(
+                    f"{recipe_id}: unsupported workload {deployment['workload']} for {deployment['runtime']}")
+            controls = deployment["controls"]
+            if not isinstance(controls, list) or any(not isinstance(item, str) for item in controls):
+                raise ValueError(f"{recipe_id}: controls must be an explicit list of field paths or namespaces")
+            if len(set(controls)) != len(controls):
+                raise ValueError(f"{recipe_id}: duplicate control path")
+            env = deployment.get("env", {})
+            if not isinstance(env, dict) or any(
+                    not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+                    or not isinstance(value, str) or "\0" in value for key, value in env.items()):
+                raise ValueError(f"{recipe_id}: env must map environment names to strings")
+            requirements = deployment.get("requirements", [])
+            if not isinstance(requirements, list) or any(not isinstance(item, str) or not item.strip()
+                                                         for item in requirements):
+                raise ValueError(f"{recipe_id}: requirements must be a list of text notes or links")
+            if "label" in deployment and (not isinstance(deployment["label"], str) or not deployment["label"].strip()):
+                raise ValueError(f"{recipe_id}: label must be nonempty text")
+            if "summary" in deployment and not isinstance(deployment["summary"], str):
+                raise ValueError(f"{recipe_id}: summary must be text")
+            config_path = (root / deployment["config"]).resolve()
+            if Path(deployment["config"]).is_absolute() or not config_path.is_relative_to(
+                (root / "examples/serving").resolve()):
+                raise ValueError(f"{recipe_id}: config must reference a YAML under examples/serving")
+            if config_path.suffix not in {".yaml", ".yml"}:
+                raise ValueError(f"{recipe_id}: config must reference a native serving YAML")
+            baseline = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            if not isinstance(baseline, dict):
+                raise ValueError(f"{recipe_id}: serving configuration must be a mapping")
+            recipes.append({
+                "summary": manifest.get("summary", ""),
+                "guide": manifest.get("guide"),
+                **deployment,
+                "id": recipe_id,
+                "model_key": model_key,
+                "deployment_key": deployment_key,
+                "title": manifest["title"],
+                "env": env,
+                "requirements": requirements,
+                "base_config": baseline,
+            })
+    if not recipes:
+        raise ValueError(f"No serving recipe manifests found in {recipes_dir}")
+    return recipes
+
+
+def _control_schema(schema: dict[str, Any], path: str) -> dict[str, Any]:
+    """Resolve only typed public leaves; opaque experimental maps stay in the baseline."""
+    if path in UNSUPPORTED_CONTROLS or path.startswith("generator.engine.parallelism.") or not re.fullmatch(
+            r"(?:generator|server|default_request)(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+", path):
+        raise ValueError(f"Unsupported serving control: {path}")
+    field = schema
+    for part in path.split("."):
+        field = field.get("properties", {}).get(part, {})
+    branches = field.get("anyOf", [field])
+    if not field or any(
+            branch.get("type") not in {"string", "integer", "number", "boolean", "null", "array"}
+            for branch in branches):
+        raise ValueError(f"No public editable field metadata for: {path}")
+    return copy.deepcopy(field)
+
+
+def _expand_controls(schema: dict[str, Any], selectors: list[str]) -> list[dict[str, Any]]:
+    """Expand explicit namespaces completely, rejecting ineligible or overlapping leaves.
+
+    Manifest order comes first; descendants follow schema declaration order.
+    Objects with no declared properties and nullable objects are not namespaces.
+    The browser receives ordinary leaf controls and needs no expansion logic.
+    """
+    controls = []
+    owners: dict[str, str] = {}
+
+    def visit(field: dict[str, Any], path: str, selector: str) -> None:
+        if field.get("type") == "object" and field.get("properties"):
+            for name, child in field["properties"].items():
+                visit(child, f"{path}.{name}", selector)
+            return
+        try:
+            editable = _control_schema(schema, path)
+        except ValueError as failure:
+            raise ValueError(f"Control selector '{selector}' includes unsupported field '{path}'; "
+                             "use narrower selectors. " + str(failure)) from failure
+        if path in owners:
+            raise ValueError(
+                f"Overlapping control selector '{selector}': '{path}' is already enabled by '{owners[path]}'")
+        owners[path] = selector
+        controls.append({"path": path, "schema": editable})
+
+    for selector in selectors:
+        if not re.fullmatch(r"(?:generator|server|default_request)(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*", selector):
+            raise ValueError(f"Unsupported control selector: {selector}")
+        node = schema
+        for part in selector.split("."):
+            node = node.get("properties", {}).get(part, {})
+        if not node:
+            raise ValueError(f"No public field metadata for control selector: {selector}")
+        visit(node, selector, selector)
+    return controls
+
+
+def _check_json_values(value: Any) -> None:
+    """Prevent JavaScript from rounding hidden integer settings in the baseline."""
+    if isinstance(value, dict):
+        for child in value.values():
+            _check_json_values(child)
+    elif isinstance(value, list):
+        for child in value:
+            _check_json_values(child)
+    elif isinstance(value, int) and not isinstance(value, bool) and abs(value) > JS_SAFE_INTEGER:
+        raise ValueError(f"Configuration integer exceeds browser-safe range: {value}")
+
+
+def _runtime_metadata(runtime_id: str) -> tuple[Any, dict[str, Any], dict[str, Any]]:
+    """Use each serving entrypoint's native configuration, without loading its engine."""
     from pydantic import TypeAdapter
 
-    from fastvideo.api.schema import ServeConfig
-    from fastvideo.registry import get_pipeline_config_cls_from_name, get_registered_models_with_workloads
+    runtime: dict[str, Any]
+    if runtime_id in {"fastvideo-cuda-rest", "fastvideo-cuda-streaming"}:
+        from fastvideo.api.schema import ServeConfig, ServerConfig
 
-    registered = {model["id"]: model for model in get_registered_models_with_workloads() if model["workload_types"]}
-    unknown = set(selected) - registered.keys()
-    if unknown:
-        raise ValueError(f"Models have no registered serving workload: {', '.join(sorted(unknown))}")
-    native = TypeAdapter(ServeConfig).json_schema()
-    shared = _prepare_schema(_inline_references(native, native))
-    shared["$schema"] = "https://json-schema.org/draft/2020-12/schema"
-    pipelines = {}
-    catalogs = []
-    runtime = {
-        "id": "pytorch",
-        "label": "FastVideo serve",
-        "launch_argv": ["fastvideo", "serve", "--config", "config.yaml"],
+        config_type = ServeConfig
+        server = ServerConfig()
+        runtime = {
+            "id": runtime_id,
+            "label": "CUDA streaming" if runtime_id == "fastvideo-cuda-streaming" else "CUDA REST",
+            "backend": "cuda",
+            "interface": "websocket" if runtime_id == "fastvideo-cuda-streaming" else "rest",
+            "launch_argv": ["fastvideo", "serve", "--config", "config.yaml"],
+            "install_url": "https://haoailab.com/FastVideo/getting_started/installation/",
+        }
+    else:
+        from fastvideo.entrypoints.openai.mlx_server import MLXServeConfig, MLXServerConfig
+
+        config_type = MLXServeConfig
+        server = MLXServerConfig()
+        runtime = {
+            "id": runtime_id,
+            "label": "MLX REST",
+            "backend": "mlx",
+            "interface": "rest",
+            "hardware_label": "Apple Silicon",
+            "launch_argv": ["python", "-m", "fastvideo.entrypoints.openai.mlx_server", "--config", "config.yaml"],
+            "install_url": "https://haoailab.com/FastVideo/getting_started/installation/mlx/",
+        }
+    if runtime["interface"] == "websocket":
+        runtime["client_guide_url"] = "../../design/server_contracts/streaming/"
+    runtime["server_defaults"] = {
+        "host": server.host,
+        "port": server.port,
+        "served_model_name": server.served_model_name,
     }
-    for model_id in selected:
-        model = registered[model_id]
-        config_type = get_pipeline_config_cls_from_name(model_id)
-        key = f"{config_type.__module__}.{config_type.__name__}"
-        if key not in pipelines:
-            pipelines[key] = _pipeline_overlay(config_type, shared)
-        schema = _merge(_merge(shared, pipelines[key]), _model_overlay(model, shared))
-        catalogs.append({"model": copy.deepcopy(model), "runtime": copy.deepcopy(runtime), "schema": schema})
+    adapter = TypeAdapter(config_type)
+    declared = adapter.json_schema()
+    return adapter, _prepare_schema(_inline_references(declared, declared)), runtime
+
+
+def build_catalogs(recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> list[dict[str, Any]]:
+    """Validate deployment baselines and reuse native field metadata per runtime."""
+    recipes = load_recipes(recipes_dir, root)
+    devices = load_hardware(root)
+    from fastvideo.api.compat import generator_config_to_fastvideo_args
+    from fastvideo.api.parser import parse_config
+    from fastvideo.api.schema import ServeConfig
+    from fastvideo.registry import get_registered_models_with_workloads
+
+    registered = {model["id"]: model for model in get_registered_models_with_workloads()}
+    runtimes = {
+        runtime_id: _runtime_metadata(runtime_id)
+        for runtime_id in dict.fromkeys(recipe["runtime"] for recipe in recipes)
+    }
+    model_ids: dict[str, str] = {}
+    model_owners: dict[str, str] = {}
+    catalogs = []
+    for recipe in recipes:
+        baseline = recipe["base_config"]
+        adapter, shared, runtime = runtimes[recipe["runtime"]]
+        hardware = _recipe_hardware(recipe, devices, runtime["backend"])
+        guide = _guide_link(recipe.get("guide"), root)
+        _check_json_values(baseline)
+        native = adapter.validate_python(baseline)
+        model_id = native.generator.model_path
+        if model_id not in registered:
+            raise ValueError(f"{recipe['id']}: unknown registered model {model_id}")
+        if recipe["model_key"] in model_ids and model_ids[recipe["model_key"]] != model_id:
+            raise ValueError(f"{recipe['id']}: all deployments in a model manifest must use the same model_path")
+        if model_id in model_owners and model_owners[model_id] != recipe["model_key"]:
+            raise ValueError(f"{recipe['id']}: duplicate model identity {model_id}; "
+                             f"add deployments to {model_owners[model_id]}.yaml instead")
+        model_ids[recipe["model_key"]] = model_id
+        model_owners[model_id] = recipe["model_key"]
+        if recipe["workload"] not in registered[model_id]["workload_types"]:
+            raise ValueError(f"{recipe['id']}: workload is not registered for {model_id}")
+        if runtime["backend"] == "cuda":
+            native = parse_config(ServeConfig, baseline)
+            if runtime["interface"] == "rest" and native.streaming is not None:
+                raise ValueError(f"{recipe['id']}: CUDA REST recipe cannot enable streaming")
+            if runtime["interface"] == "websocket" and native.streaming is None:
+                raise ValueError(f"{recipe['id']}: CUDA streaming recipe requires a streaming block")
+            selected_workload = native.generator.pipeline.workload_type
+            if selected_workload is not None and selected_workload != recipe["workload"]:
+                raise ValueError(f"{recipe['id']}: workload disagrees with the serving baseline")
+            # Exact registered IDs were checked above: no Hub discovery or model weights.
+            generator_config_to_fastvideo_args(native.generator)
+        else:
+            from fastvideo.entrypoints.openai.mlx_server import create_mlx_app
+
+            # The entrypoint validates its opaque default_request here. Creating
+            # the app does not enter lifespan or invoke the model factory.
+            # Admission creates a sample output directory, so confine that
+            # validation side effect without rewriting the published baseline.
+            with TemporaryDirectory(prefix="fastvideo-cookbook-mlx-") as output_dir:
+                validation_config = native.model_copy(deep=True)
+                validation_config.server.output_dir = output_dir
+                create_mlx_app(validation_config)
+        controls = _expand_controls(shared, recipe["controls"])
+        if runtime["interface"] == "websocket":
+            for control in controls:
+                if control["path"] in {"server.served_model_name", "server.output_dir"}:
+                    raise ValueError(f"Unsupported streaming control: {control['path']}")
+        catalogs.append({
+            "id": recipe["id"],
+            "title": recipe["title"],
+            "summary": recipe.get("summary", ""),
+            "source_config": recipe["config"],
+            "model": {
+                "id": model_id,
+                "key": recipe["model_key"],
+                "title": recipe["title"]
+            },
+            "deployment": {
+                "id": recipe["deployment_key"],
+                "label": recipe.get("label", runtime["label"])
+            },
+            "workload": recipe["workload"],
+            "runtime": copy.deepcopy(runtime),
+            "env": copy.deepcopy(recipe["env"]),
+            "base_config": copy.deepcopy(baseline),
+            "controls": controls,
+            "requirements": copy.deepcopy(recipe["requirements"]),
+            "hardware": hardware,
+            "guide": guide,
+        })
     return catalogs
 
 
-def build_catalog(model_id: str) -> dict[str, Any]:
-    """Resolve any registered model ID; the demo's model choice is not defined here."""
-    return build_catalogs([model_id])[0]
+def _catalog_url(recipe_id: str) -> str:
+    return f"recipes/{recipe_id}.json"
 
 
-def _catalog_url(model_id: str) -> str:
-    # Hash the complete ID so names with slashes, punctuation or case differences
-    # remain distinct, filesystem-safe and stable when YAML order changes.
-    return f"models/{hashlib.sha256(model_id.encode('utf-8')).hexdigest()}.json"
-
-
-def export_catalogs(output_dir: Path = OUTPUT_DIR, models_file: Path = MODEL_SELECTION_PATH) -> dict[str, Any]:
-    """Generate selected catalogs; prune only exporter-owned files after success."""
-    catalogs = build_catalogs(load_model_ids(models_file))
+def export_catalogs(output_dir: Path = OUTPUT_DIR,
+                    recipes_dir: Path = RECIPES_DIR,
+                    root: Path = ROOT) -> dict[str, Any]:
+    """Publish catalogs only after composition succeeds; prune generated recipe files."""
+    catalogs = build_catalogs(recipes_dir, root)
     index: dict[str, Any] = {"models": []}
     documents = {}
+    models: dict[str, dict[str, Any]] = {}
     for catalog in catalogs:
-        model = catalog["model"]
-        url = _catalog_url(model["id"])
-        if url in documents:
-            raise ValueError(f"Catalog filename collision for model: {model['id']}")
+        url = _catalog_url(catalog["id"])
         documents[url] = json.dumps(catalog, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
-        index["models"].append({**model, "catalog_url": url})
-
-    # Finish validation/composition before modifying the last successful export.
-    if output_dir.is_symlink() or (output_dir / "models").is_symlink():
+        model_key = catalog["model"]["key"]
+        if model_key not in models:
+            models[model_key] = {
+                "id": model_key,
+                "title": catalog["model"]["title"],
+                "model_id": catalog["model"]["id"],
+                "deployments": [],
+            }
+            index["models"].append(models[model_key])
+        models[model_key]["deployments"].append({
+            "id": catalog["id"],
+            "label": catalog["deployment"]["label"],
+            "workload": catalog["workload"],
+            "runtime": catalog["runtime"]["id"],
+            "catalog_url": url,
+        })
+    if output_dir.is_symlink() or (output_dir / "recipes").is_symlink():
         raise ValueError("Generated catalog directories must not be symlinks")
-    (output_dir / "models").mkdir(parents=True, exist_ok=True)
+    (output_dir / "recipes").mkdir(parents=True, exist_ok=True)
     for url, document in documents.items():
         path = output_dir / url
+        if path.parent.is_symlink():
+            raise ValueError("Generated model catalog directories must not be symlinks")
+        path.parent.mkdir(exist_ok=True)
         temporary = path.with_suffix(".json.tmp")
         temporary.write_text(document, encoding="utf-8")
         temporary.replace(path)
@@ -297,36 +510,58 @@ def export_catalogs(output_dir: Path = OUTPUT_DIR, models_file: Path = MODEL_SEL
     temporary = manifest.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(manifest)
-    for path in (output_dir / "models").glob("*.json"):
-        if re.fullmatch(r"[0-9a-f]{64}\.json", path.name) and f"models/{path.name}" not in documents:
+    # Only prune recognized files within the dedicated generated directory,
+    # including flat catalogs written by the previous exporter.
+    for path in (output_dir / "recipes").rglob("*.json"):
+        relative = path.relative_to(output_dir).as_posix()
+        if (relative not in documents
+                and re.fullmatch(r"recipes/(?:[a-z0-9]+(?:-[a-z0-9]+)*/)?[a-z0-9]+(?:-[a-z0-9]+)*\.json", relative)):
             path.unlink()
+    # Remove only the previous exporter’s hashed model files in its dedicated directory.
+    legacy = output_dir / "models"
+    if legacy.is_dir() and not legacy.is_symlink():
+        for path in legacy.glob("*.json"):
+            if re.fullmatch(r"[0-9a-f]{64}\.json", path.name):
+                path.unlink()
     return index
 
 
-def check_site(site_dir: Path, models_file: Path = MODEL_SELECTION_PATH) -> None:
-    """Check the built site includes every selected catalog before deployment."""
+def check_site(site_dir: Path, recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> None:
+    """Check generated catalogs survive the documentation build."""
     output_dir = site_dir / "assets/cookbook-config"
     index = json.loads((output_dir / "index.json").read_text(encoding="utf-8"))
-    if [model["id"] for model in index["models"]] != load_model_ids(models_file):
-        raise ValueError("Built cookbook index does not match the selected model IDs and order")
-    for model in index["models"]:
-        if model["catalog_url"] != _catalog_url(model["id"]):
-            raise ValueError(f"Unexpected catalog URL for model: {model['id']}")
-        catalog = json.loads((output_dir / model["catalog_url"]).read_text(encoding="utf-8"))
-        if catalog["model"]["id"] != model["id"] or not {"model", "runtime", "schema"} <= catalog.keys():
-            raise ValueError(f"Invalid built catalog for model: {model['id']}")
+    recipes = load_recipes(recipes_dir, root)
+    expected_models = list(dict.fromkeys(recipe["model_key"] for recipe in recipes))
+    if [model["id"] for model in index["models"]] != expected_models:
+        raise ValueError("Built cookbook models do not match recipe manifests")
+    deployments = [deployment for model in index["models"] for deployment in model["deployments"]]
+    if [deployment["id"] for deployment in deployments] != [recipe["id"] for recipe in recipes]:
+        raise ValueError("Built cookbook index does not match recipe manifests")
+    for recipe, source in zip(deployments, recipes, strict=True):
+        if recipe["catalog_url"] != _catalog_url(recipe["id"]):
+            raise ValueError(f"Unexpected catalog URL for recipe: {recipe['id']}")
+        catalog = json.loads((output_dir / recipe["catalog_url"]).read_text(encoding="utf-8"))
+        if catalog["id"] != recipe["id"] or not {"base_config", "controls", "runtime"} <= catalog.keys():
+            raise ValueError(f"Invalid built catalog for recipe: {recipe['id']}")
+        guide = _guide_link(source.get("guide"), root)
+        if catalog.get("guide") != guide:
+            raise ValueError(f"Built guide link differs from manifest: {recipe['id']}")
+        if guide:
+            page = unquote(guide["url"][len("../../"):])
+            if not (site_dir / page / "index.html").is_file():
+                raise ValueError(f"Guide page missing from built site: {page}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--models-file", type=Path, default=MODEL_SELECTION_PATH)
+    parser.add_argument("--recipes-dir", type=Path, default=RECIPES_DIR)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--check-site", type=Path, help="Verify a built site instead of generating catalogs.")
     args = parser.parse_args()
     sys.path.insert(0, str(ROOT))
     if args.check_site:
-        check_site(args.check_site, args.models_file)
+        check_site(args.check_site, args.recipes_dir)
         print("Built cookbook catalogs verified.")
     else:
-        export_catalogs(args.output_dir, args.models_file)
+        export_catalogs(args.output_dir, args.recipes_dir)
         print(args.output_dir / "index.json")

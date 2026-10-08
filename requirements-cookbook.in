@@ -10,9 +10,16 @@
 # The docs job installs both locks in one environment.
 -c requirements-mkdocs.txt
 
-# Exporter and model-selection manifest.
+# Exporter and cookbook manifests.
 pydantic>=2.11,<3
 PyYAML>=6.0.1
+
+# Native MLX serving configuration lives beside its server entrypoint. Creating
+# the app validates the baseline without entering its model-loading lifespan.
+fastapi>=0.129.0
+uvicorn>=0.41.0
+aiofiles
+python-multipart
 
 # Configuration imports currently traverse the public FastVideo package and its
 # shared runtime helpers. CPU wheels suffice for schema generation; no weights
