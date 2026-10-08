@@ -10,14 +10,20 @@ from __future__ import annotations
 
 import json
 
+import pytest
 import torch
 from torch.testing import assert_close
 
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler as FastVideoFlowUniPCMultistepScheduler, )
-from lingbot_video.scheduling_flow_unipc import (
-    FlowUniPCMultistepScheduler as OfficialFlowUniPCMultistepScheduler, )
 from tests.local_tests.lingbot_video.hf_assets import OFFICIAL_DENSE, download_components
+
+# The official implementation is an opt-in local reference checkout. Skip when it
+# is absent instead of failing collection of the whole `pytest tests/` run.
+OfficialFlowUniPCMultistepScheduler = pytest.importorskip(
+    "lingbot_video.scheduling_flow_unipc",
+    reason="requires the official LingBot-Video reference package; see tests/local_tests/lingbot_video/README.md",
+).FlowUniPCMultistepScheduler
 
 PARITY_SCOPE = "implementation_subcomponent"
 
