@@ -1,6 +1,10 @@
 # Serving configuration builder
 
-<!-- TODO(cookbook-ui): Replace this temporary demo page and inline styling with the final cookbook UI. -->
+!!! note "Design demonstration"
+
+    This page demonstrates recipe authoring and the shared JavaScript API to communicate the cookbook design.
+    Final cookbook UI design and implementation belong to a separate follow-up.
+    **TODO(cookbook-ui):** Replace this presentation while retaining the recipe catalog and shared API.
 
 Choose a model and one of its maintained deployments, then adjust its reviewed controls.
 The downloaded YAML preserves **every explicit baseline setting**, including settings hidden from this form.
