@@ -7,11 +7,9 @@ deployments:
     runtime: fastvideo-cuda-streaming
     workload: t2v
     config: examples/serving/streaming_demo.yaml
+    # Existing fallback note in the referenced native YAML's header.
     requirements:
-      - Install FastVideo with the streaming extra and ffmpeg with libx264 support.
-      - This native baseline uses NVFP4 quantization; it requires flashinfer-python and a compatible CUDA GPU with compute capability 10.0 or newer.
-      - Use a client implementing the linked streaming protocol. The command below checks server health only; it does not generate a video.
-      - Hidden prompt, safety and pool settings are preserved from the Dreamverse baseline; the bare streaming server does not activate those integrations.
+      - Hosts without flashinfer / NVFP4 can comment out engine.quantization to fall back to bf16.
     controls:
       - server.host
       - server.port

@@ -1,6 +1,5 @@
 title: FastWan2.1 1.3B
 summary: Distilled text-to-video serving with sparse attention.
-guide: docs/cookbook/guides/fastwan21-serving.md
 
 deployments:
   cuda-rest:

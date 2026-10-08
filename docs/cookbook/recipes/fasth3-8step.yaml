@@ -1,12 +1,15 @@
 title: FastH3 8-Step V2
 summary: Distilled text-to-video serving with CUDA or native Apple Silicon MLX.
-guide: docs/cookbook/guides/fasth3-8step-serving.md
+guide: docs/cookbook/openai-api.md
 
 deployments:
   cuda-rest:
     runtime: fastvideo-cuda-rest
     workload: t2v
     config: examples/serving/openai_fasth3_8step.yaml
+    # Existing FastH3 V2 installation command: docs/cookbook/openai-api.md.
+    requirements:
+      - 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"'
     controls:
       - server
       - generator.engine.offload.text_encoder
@@ -20,10 +23,11 @@ deployments:
     runtime: fastvideo-mlx-rest
     workload: t2v
     config: examples/serving/mlx_fasth3_8step.yaml
+    # Existing MLX / FastH3 V2 setup notes: docs/cookbook/openai-api.md.
     requirements:
-      - Install FastVideo's MLX extra and ffmpeg on an Apple Silicon Mac.
-      - Follow the linked H3 guide to download the V2 weights and convert the transformer with --include-vsa.
-      - Set model_root and mlx_checkpoint below to your prepared local directories; paths are relative to the launch directory.
+      - 'uv pip install -e ".[mlx]"'
+      - For FastH3 V2, convert that checkpoint's transformer with --include-vsa and start the 8-step config. Do not overwrite a V1 export.
+      - Paths are relative to the directory where you launch the server.
     controls:
       - server
       - generator.model_root

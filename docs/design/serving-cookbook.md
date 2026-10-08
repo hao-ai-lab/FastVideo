@@ -134,6 +134,11 @@ instead emits a health/liveness command, WebSocket URL and the
 [protocol guide](server_contracts/streaming.md); it does not fake a REST client.
 The baseline retains actual GPU topology and deployment requirements.
 
+The demo reuses native serving examples and existing runbooks. It does not add
+model runbooks or establish which hardware/option combinations have been tested.
+Manifest setup notes are copied from those sources; optional guide links are
+omitted where there is no suitable existing page.
+
 ## Guides and checks
 
 MkDocs renders optional guide pages. Catalogs carry their URLs, not Markdown.

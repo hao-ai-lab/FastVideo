@@ -19,7 +19,6 @@ names. Adding the entry publishes it; there is no separate model list.
 ```yaml
 # docs/cookbook/recipes/fastwan21.yaml
 title: FastWan2.1 1.3B
-guide: docs/cookbook/guides/fastwan21-serving.md
 deployments:
   cuda-rest:
     runtime: fastvideo-cuda-rest
@@ -85,19 +84,20 @@ or sampling choices fixed unless reviewed: FastWan's three steps and DMD
 schedule belong together. Hidden experimental values stay in the output. MLX's
 untyped `default_request` stays hidden rather than borrowing an HTTP schema.
 
-Put machine and installation prerequisites in `requirements`. Wan I2V uses two
-CUDA GPUs and needs an image reference. The LTX2 NVFP4 baseline needs compute
-capability >= 10.0, `flashinfer-python`, FFmpeg with `libx264` and the `streaming`
-extra. Its hidden DreamVerse settings do not make the bare server activate
-those integrations or require `CEREBRAS_API_KEY`.
+Copy necessary installation or usage notes from the referenced serving example
+or existing runbook into `requirements`, with a source comment. Do not add a
+new hardware recommendation or claim that every selectable value is tested.
 
 ## 3. Add an optional Markdown guide
 
 A `guide` points to a page under `docs/`, shared at model level or overridden
-for a deployment. Cover prerequisites, launch, client workflow and relevant
-troubleshooting; link native YAML instead of copying it. See the
-[FastWan guide](../cookbook/guides/fastwan21-serving.md) and
-[Wan I2V guide](../cookbook/guides/wan21-i2v-serving.md).
+for a deployment. Reuse an existing runbook instead of adding a second copy of
+its instructions. Omit the optional guide when no suitable page exists. The
+FastH3 example uses [the existing server runbook](../cookbook/openai-api.md):
+
+```yaml
+guide: docs/cookbook/openai-api.md
+```
 
 MkDocs renders the page, and the demo provides a normal guide link. Guide text
 describes the baseline, while generated commands track edits. Streaming

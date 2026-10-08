@@ -1,15 +1,18 @@
 title: Wan2.1 I2V 14B
 summary: Image-conditioned video generation from a source frame.
-guide: docs/cookbook/guides/wan21-i2v-serving.md
 
 deployments:
   cuda-rest:
     runtime: fastvideo-cuda-rest
     workload: i2v
     config: examples/serving/openai_wan21_i2v_14b.yaml
+    # Existing requirement in the referenced native YAML's header.
     requirements:
-      - The maintained baseline uses two CUDA GPUs; no exact GPU serving test is recorded here.
-      - Replace the sample image path with a source image accessible to the server for every request.
+      - >-
+        Each request must supply its own source image through the OpenAI-compatible
+        reference fields, e.g. {"input_reference": "/path/to/first-frame.png"} or
+        {"image_reference": [{"image_url": "https://example.com/first-frame.png"}]};
+        there is no default image.
     controls:
       - server
       - generator.engine.offload.text_encoder
