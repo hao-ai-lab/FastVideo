@@ -73,6 +73,8 @@ imageio==2.38.0
     # via -r requirements-cookbook.in
 importlib-metadata==9.0.1
     # via diffusers
+iniconfig==2.3.1
+    # via pytest
 jinja2==3.1.6
     # via
     #   -c requirements-mkdocs.txt
@@ -103,6 +105,7 @@ packaging==26.2
     # via
     #   -c requirements-mkdocs.txt
     #   huggingface-hub
+    #   pytest
     #   transformers
 pillow==12.3.0
     # via
@@ -110,6 +113,8 @@ pillow==12.3.0
     #   diffusers
     #   imageio
     #   torchvision
+pluggy==1.6.0
+    # via pytest
 psutil==7.2.2
     # via -r requirements-cookbook.in
 pydantic==2.13.5
@@ -121,7 +126,10 @@ pydantic-core==2.46.5
 pygments==2.20.0
     # via
     #   -c requirements-mkdocs.txt
+    #   pytest
     #   rich
+pytest==9.1.1
+    # via -r requirements-cookbook.in
 python-multipart==0.0.32
     # via -r requirements-cookbook.in
 pyyaml==6.0.3

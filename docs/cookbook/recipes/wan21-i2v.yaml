@@ -1,6 +1,6 @@
 title: Wan2.1 I2V 14B
 summary: Image-conditioned video generation from a source frame.
-guide: docs/cookbook/wan.md
+guide: docs/cookbook/guides/wan21-i2v-serving.md
 
 deployments:
   cuda-rest:

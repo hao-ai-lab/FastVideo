@@ -1,193 +1,36 @@
 # Serving cookbook design
 
-The cookbook helps a user choose a model, select one maintained deployment,
-adjust reviewed settings, and download its native serving configuration. It is
-not an automatic form for every runtime field or a matrix of arbitrary model,
-hardware and backend combinations.
+Existing configuration schemas describe accepted fields; native examples provide
+recommended values. The cookbook combines them with curated model/deployment
+choices, selected controls and optional Markdown guidance. It remains a static
+site: Python prepares metadata at build time; a shared JavaScript API resolves
+edits locally and emits YAML and commands.
 
-The model picker is followed by a deployment picker. FastWan currently offers
-CUDA T2V REST; FastH3 8-Step V2 offers CUDA REST and native MLX REST. Wan2.1 I2V
-uses its maintained two-GPU REST baseline, and LTX2 Distilled uses its native
-CUDA streaming baseline. These are explicit deployment examples, not a complete
-capability matrix. H3 is registered for I2V, but no maintained H3 I2V serving
-YAML is presented here; FastWan's example is T2V. Choosing MLX for FastH3 does
-not imply that FastWan supports it. The UI is a temporary demo;
-the model manifests, runtime adapters, exporter and shared resolver are reusable.
+## Sources and delivery
 
-## Ownership and authoring
-
-| Information | Authoritative source |
+| Source | Responsibility |
 | --- | --- |
-| Explicit recommended settings | Native `examples/serving/*.yaml` baseline for each deployment |
-| Model identity | `generator.model_path` in the native baselines |
-| Model title and available deployments | `docs/cookbook/recipes/<model-key>.yaml` |
-| Runtime, workload, controls, environment and requirements | Each deployment entry in that manifest |
-| Field metadata and config validation | The selected runtime's public configuration contract |
-| GPU specifications | Shared `docs/cookbook/hardware.yaml` inventory |
-| Hardware status and evidence | Explicit hardware records in a deployment |
-| Optional explanatory instructions | Markdown page referenced by `guide` |
-| Widgets, labels, grouping and command formatting | Shared cookbook code |
-| Static delivery data | Generated, gitignored `docs/assets/cookbook-config/` |
+| `examples/serving/*.yaml` | Complete explicit baseline values, including hidden settings |
+| `docs/cookbook/recipes/<model-key>.yaml` | Model title and deployments: runtime, workload, baseline, controls, environment, requirements and optional guide |
+| Runtime Python/Pydantic definitions | Public field metadata and native configuration validation |
+| `docs/cookbook_config.py` | Validate, expand selected fields and publish static catalogs |
+| `docs/assets/cookbook-config.js` | Load metadata, expose option values, resolve YAML and commands |
+| `docs/assets/cookbook-demo.js` | Temporary rendering and inline-guide behavior |
 
-Adding a manifest publishes a model; adding an entry under `deployments`
-publishes another supported way to serve that same model. There is no separate
-model-selection list. All baselines in one manifest must identify the same
-model. Configuration values are not duplicated in the manifest.
+See the [contributor guide](../contributing/cookbook_configuration.md) for manifest
+syntax. Every deployment in one model file references the same native model ID.
+Only summary and guide fall back from model to deployment; no controls or config
+inheritance is performed. The UI offers authored deployments, not a cross-product
+of models, hardware and backends.
 
-```yaml
-# docs/cookbook/recipes/fastwan21.yaml
-title: FastWan2.1 1.3B
-summary: Distilled text-to-video serving with sparse attention.
-guide: docs/cookbook/guides/fastwan21-serving.md
-
-deployments:
-  cuda-rest:
-    runtime: fastvideo-cuda-rest
-    workload: t2v
-    config: examples/serving/openai_fastwan21_1_3b.yaml
-    env:
-      FASTVIDEO_ATTENTION_BACKEND: VIDEO_SPARSE_ATTN
-    controls:
-      - server
-      - generator.engine.offload.dit_layerwise
-      - generator.engine.offload.text_encoder
-      - generator.engine.offload.vae
-      - generator.engine.compile.enabled
-      - default_request.sampling.num_frames
-      - default_request.sampling.height
-      - default_request.sampling.width
-      - default_request.sampling.fps
-      - default_request.sampling.seed
-```
-
-Model-level keys are `title`, optional `summary` and `guide`, and a nonempty
-`deployments` mapping. Every deployment requires `runtime`, `workload`, `config`
-and `controls`; optional keys are `label`, `env`, `requirements`, `hardware`,
-`summary` and `guide`. A deployment label defaults to its runtime's label;
-provide one to distinguish multiple setups using the same runtime. Unknown
-keys are errors. Only summary and guide fall back from
-model to deployment. Controls, environment and requirements are never inherited
-or merged across deployments.
-
-Model filenames and deployment keys are stable lowercase hyphenated names.
-The generated deployment ID is `<model-key>/<deployment-key>`. Config paths are
-repository-relative references to native serving YAML files. Runtime and
-workload are explicit: a recipe demonstrates one workload, not every workload
-the model might support.
-
-## Controls and baseline preservation
-
-Each positive control selector names a typed editable leaf or a non-nullable
-declared object namespace. A namespace expands to all descendant editable
-fields in declaration order. Arrays remain leaves. Manifest order determines
-order between selectors. If a descendant is protected, opaque or unsupported,
-generation fails with its path rather than silently filtering it. Unknown
-paths, duplicate selectors and overlaps such as `server` plus `server.port`
-are errors. Nullable objects and free-form maps cannot be expanded.
-
-There are no implicit controls, `add`, `hide` or per-model JavaScript branches.
-A namespace opts into future public fields beneath it; an unsupported new child
-fails generation for review. Exact leaves provide a stable surface. Native
-availability does not establish that a field is useful for every deployment.
-For example, FastWan's fixed DMD schedule makes the whole sampling namespace
-an inappropriate selector.
-
-```text
-Displayed values = baseline + user edits; absent fields show Inherited
-Saved YAML       = baseline + user edits
-Reset            = baseline for the selected deployment
-```
-
-Keep the complete raw baseline mapping. Parsing validates it but must not
-replace it with a dataclass/model dump populated with defaults. Hidden values,
-including experimental settings, timesteps and negative prompts, survive.
-Comments and formatting need not survive. Changing a deployment loads its own
-baseline and discards the previous deployment's edits.
-
-Schema defaults are declarations, not a simulation of checkpoint, hardware or
-HTTP request resolution. An absent field stays omitted until edited. Explicit
-`false`, `0`, empty strings and `null` remain values. Removing an override and
-assigning null are different operations. Exact-path edits preserve siblings;
-arrays replace as whole values. GPU topology stays fixed where its coupled
-changes are not supported by the builder.
-
-## Runtime adapters
-
-A small shared adapter supplies configuration validation, selected-field
-metadata, installation guidance and launch arguments. Runtime metadata also
-identifies its backend and interface. The initial adapters are:
-
-| Runtime | Configuration source | Launch |
-| --- | --- | --- |
-| `fastvideo-cuda-rest` | `ServeConfig`, native parser and serving compatibility adapter | `fastvideo serve --config config.yaml` |
-| `fastvideo-mlx-rest` | `MLXServeConfig` from the native MLX server | `python -m fastvideo.entrypoints.openai.mlx_server --config config.yaml` |
-| `fastvideo-cuda-streaming` | `ServeConfig` with an active `streaming` block, native parser and generator translation | `fastvideo serve --config config.yaml` |
-
-CUDA exposes reviewed typed public fields. Experimental map entries remain
-hidden and preserved. CUDA REST rejects an active streaming block and fields
-that its compatibility adapter rejects.
-
-The streaming adapter has backend `cuda` and interface `websocket`. It requires
-an active streaming block, which makes the native CLI select its streaming
-server. The LTX2 example references `examples/serving/streaming_demo.yaml` and
-exposes only host, port, frames, height and width. Its NVFP4 baseline requires
-compatible compute capability >= 10.0, `flashinfer-python`, FFmpeg with `libx264`
-and FastVideo's `streaming` extra. Preserve its hidden warmup, prompt, safety
-and pool settings, but do not imply that the bare serving entrypoint activates
-those DreamVerse integrations or requires `CEREBRAS_API_KEY`.
-
-Streaming metadata validation uses configuration parsing and generator
-translation without importing the streaming execution modules. Client guidance
-shows the health URL, `ws://<host>:<port>/v1/stream` and the
-[streaming protocol contract](server_contracts/streaming.md). It does not
-invent a REST video request or add a standalone streaming client.
-
-MLX currently supports the FastH3 models declared by its native config.
-Controls can expose its typed server fields and generator paths such as
-`model_root`, `mlx_checkpoint`, `prompt_cache_dir`, `vae_dtype` and
-`vsa_sparsity`. MLX's `default_request` is an untyped mapping: preserve it but
-do not borrow types or constraints from an HTTP request schema to expose it.
-The supplied baseline retains its required request settings. Weight conversion,
-local paths and machine requirements are explained in installation guidance
-and deployment requirements, not performed by the exporter.
-
-A deployment for an existing adapter requires native YAML and manifest data,
-not new frontend code. A genuinely new serving interface requires one shared
-adapter and tests; adding a manifest alone cannot implement a new runtime.
-
-## Hardware and optional guides
-
-The shared hardware inventory stores exact GPU facts and their source URLs.
-It is not automatically displayed for every model or deployment. A deployment
-explicitly lists the inventory IDs relevant to its hardware table. An omitted
-hardware map produces no rows and establishes no serving evidence. A listed
-row is `unverified` unless evidence or a known incompatibility is declared.
-
-`verified` requires an HTTPS evidence link to a successful serving run of that
-baseline. `unsupported` requires a concrete reason. Evidence should record SKU,
-count, configuration, code/software versions, environment, workload and successful
-server output. Rated memory does not establish fit, and a direct inference
-result is not REST or WebSocket serving evidence. Configuration edits are custom and
-unverified; baseline evidence remains labeled with its original scope.
-Hardware records never change configuration values. There is no hardware
-selector or automatic VRAM estimate in this implementation.
-
-A `guide` points to an existing Markdown file under `docs/`. Model-level guides
-are useful for shared background; deployments can choose more specific pages.
-MkDocs renders them normally. Generated metadata carries a compiled relative
-URL, not Markdown contents or a browser Markdown renderer.
-
-## Generated output and browser behavior
-
-The docs build reads model manifests in filename order and deployments in
-mapping order. It validates their baselines and writes:
+The exporter writes ignored build output:
 
 ```text
 docs/assets/cookbook-config/index.json
 docs/assets/cookbook-config/recipes/<model-key>/<deployment-key>.json
 ```
 
-The index is grouped by model:
+The small index contains no configurations or schemas:
 
 ```text
 models: [{
@@ -196,45 +39,96 @@ models: [{
 }]
 ```
 
-Each complete catalog contains the selected deployment's identity, source
-configuration, model identity, runtime metadata, workload, environment,
-requirements, hardware records, guide URL, raw `base_config` and a flat expanded
-`controls: [{path, schema}]` list. The browser performs no manifest inheritance
-or namespace expansion.
+Each deployment catalog contains its identity, model, runtime metadata, workload,
+source YAML path, environment, requirements, optional compiled guide URL, raw
+`base_config` and `controls: [{path, schema}]`. Controls are already expanded to
+flat leaf paths. Model files are ordered by filename; deployment and selector
+order follow the manifest. The browser fetches only the selected catalog.
+Relative catalog, guide and runtime client-guide URLs resolve against the index
+URL. `loadDeployment` returns catalog metadata without rewriting those links.
 
-The browser fetches the index, shows Model then Deployment, and fetches only
-the selected catalog. It offers declared deployments, not a backend/workload
-cross-product. Loading or errors disable stale output; late responses cannot
-replace the current choice. Only the active catalog and validator are retained.
-The same pure resolver serves browser interactions and Node tests. Ajv checks
-values without coercing types or inserting defaults.
+## Shared JavaScript API
 
-The page presents runtime-specific installation guidance, requirements, source
-YAML, controls, hardware evidence when provided, optional guide, complete YAML,
-launch command and runtime-specific client guidance. Environment values are safely quoted.
-REST samples use the effective port and model alias and distinguish T2V from
-I2V; the Wan2.1 I2V request includes a required `input_reference` placeholder.
-Streaming instead shows a health/liveness-check command, its WebSocket URL and protocol
-guide. Both map wildcard bind addresses to loopback client addresses. They
-describe a local client workflow, not network reachability or successful model
-generation. Copying commands executes nothing.
+The framework-independent core exposes four functions through
+`FastVideoConfigCookbook` in the browser and CommonJS in Node:
 
-## Validation and extension boundaries
+| Function | Result |
+| --- | --- |
+| `loadIndex(url, {signal, fetcher} = {})` | `{models, url}`; URL context for resolving catalog links |
+| `loadDeployment(indexContext, deploymentId, {signal, fetcher} = {})` | The selected complete catalog |
+| `getOptions(catalog, config = catalog.base_config)` | `[{path, schema, value}]` for the declared controls |
+| `resolveConfig(catalog, edits = {})` | `config`, `yaml`, `command`, `clientRequest`, `clientCommand`, and optional `websocketUrl` |
 
-CI checks manifest/reference consistency, same-model baselines, runtime config
-validation, supported controls, deterministic delivery and compiled URLs. Tests
-cover complete baseline preservation, edits/reset, explicit versus inherited
-values, environment quoting, runtime/workload commands, nested model/deployment
-selection and failed or out-of-order fetches. Generated files are temporary test
-fixtures or ignored build output, not hand-maintained source files.
+`fetcher` is optional dependency injection for tests; `signal` supports canceling
+obsolete requests. `getOptions` returns `undefined` for an inherited value;
+`null`, `false` and `0` remain explicit. `schema.default` is informational and
+must not populate missing values. Edits map expanded field paths to new values.
 
-Generation uses CPU configuration dependencies without loading weights,
-creating generators or running GPU/MLX inference. Structural checks do not
-certify model output, hardware fit or an actual serving run. Docs CI generates
-the assets before MkDocs builds and checks their URLs before deployment.
+```javascript
+const api = FastVideoConfigCookbook;
+const index = await api.loadIndex(indexUrl);
+const catalog = await api.loadDeployment(index, "fastwan21/cuda-rest");
+const fields = api.getOptions(catalog);
+const result = api.resolveConfig(catalog, {"server.port": 9000});
+// Render fields and result.yaml/result.command in the chosen UI framework.
+```
 
-Add adapters only for maintained native serving interfaces. Avoid a generic
-command-template language, deployment inheritance system or model-specific UI.
-Memory estimation and automatic evidence matching remain separate future work.
-See [Adding a model deployment](../contributing/cookbook_configuration.md) for
-the contributor workflow.
+The core does not mount UI, manipulate guide HTML or execute commands. A small
+page-only bootstrap loads dependencies and mounts the replaceable demo. The demo
+owns Model/Deployment selectors, cancellation and stale-response checks, error
+states, copying/downloads and inline guides. Loading a new catalog disables old
+outputs and resets edits. Guide loading is independent: failure leaves the form
+usable. Only active catalog/validator state is retained.
+
+## Configuration invariants
+
+```text
+Displayed values = baseline + edits; missing fields show Inherited
+Saved YAML       = complete explicit baseline + edits
+Reset            = selected deployment's baseline
+```
+
+Validation must not replace the raw baseline with a default-filled model dump.
+Hidden values survive; formatting/comments need not. Exact-path edits preserve
+siblings; arrays replace whole values. Missing and explicit null differ. The
+runtime still resolves checkpoint-dependent, hardware-dependent and request
+fallback values; the cookbook does not simulate those decisions.
+
+Selectors are positive leaves or non-nullable declared namespaces. Expansion
+follows declaration order and rejects any protected/opaque/unsupported child,
+duplicate or overlap. Arrays are leaves; maps and nullable objects are not
+expandable. Namespace selection opts into future public fields. No implicit
+controls, add/hide rules or model-specific JavaScript are introduced.
+
+## Runtime boundaries and examples
+
+| Runtime | Native validation and launch |
+| --- | --- |
+| `fastvideo-cuda-rest` | `ServeConfig` + serving translation; `fastvideo serve --config config.yaml`; rejects active streaming |
+| `fastvideo-mlx-rest` | `MLXServeConfig`; `python -m fastvideo.entrypoints.openai.mlx_server --config config.yaml` |
+| `fastvideo-cuda-streaming` | `ServeConfig` + generator translation, requires active streaming; same `fastvideo serve` command |
+
+The four models demonstrate five deployments: FastWan CUDA T2V, FastH3 CUDA and
+MLX T2V, Wan2.1 CUDA I2V, and LTX2 CUDA streaming. This is not a complete capability
+matrix. MLX uses its native typed fields; its untyped request-default map stays
+hidden. Streaming exports metadata without importing execution modules.
+
+REST client examples use effective host, port and model alias; I2V includes an
+image reference. Wildcard hosts become loopback client addresses. Streaming
+instead emits a health/liveness command, WebSocket URL and the
+[protocol guide](server_contracts/streaming.md); it does not fake a REST client.
+The baseline retains actual GPU topology and deployment requirements.
+
+## Guides and checks
+
+MkDocs renders optional guide pages. Catalogs carry their URLs, not Markdown.
+The temporary demo displays the article inline with a standalone link, rewrites
+relative links/media and omits nested builders. Guide text remains baseline
+reference material; generated instructions reflect edits.
+
+CI generates catalogs before MkDocs and checks catalog/guide URLs in the built
+site. Focused Python/Node tests cover native validation, baseline preservation,
+explicit/inherited values, environment quoting, public API behavior, runtime
+commands and selection races. Tests generate temporary assets. No weights,
+server startup or GPU inference are required. A new runtime needs one shared
+adapter and tests; ordinary deployment additions remain data-only.

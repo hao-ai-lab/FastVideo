@@ -6,13 +6,6 @@ OpenAI-compatible video API on one CUDA GPU. Start from the
 or choose **FastWan2.1 1.3B**, then its **CUDA REST** deployment in the
 [serving configuration builder](../config-builder.md).
 
-The deployment's hardware table shows only explicitly listed devices, with
-exact GPU specifications separate from serving evidence. A listed device with
-no serving-test record is **unverified**. No table means no hardware evidence
-was supplied, not that all GPUs work.
-Its presence and rated memory capacity do not establish that this recipe fits
-or has successfully generated a video on that GPU.
-
 ## Prepare and launch
 
 Complete the [CUDA installation guide](../../getting_started/installation/gpu.md)
@@ -34,9 +27,8 @@ To adjust the recipe, use the builder, download `config.yaml`, and copy its
 launch command. The builder preserves every explicit baseline setting,
 including hidden VSA settings, DMD timesteps and the negative prompt. An
 **Inherited** field stays omitted until edited; it does not display a resolved
-runtime value. Reset restores this deployment's baseline. Changes to controls such as frames,
-resolution, offload or compilation create a custom, unverified configuration.
-Any baseline evidence remains scoped to the original setup.
+runtime value. Reset restores this deployment's baseline. Frames, resolution,
+offload and compilation can be adjusted without discarding its other settings.
 
 ## Send a request
 

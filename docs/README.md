@@ -21,14 +21,19 @@ Each model lists its maintained deployments, with a runtime, native serving
 YAML and explicit controls for each one. The UI presents Model, then Deployment;
 only authored deployments are selectable. The exporter writes a model index
 and complete catalogs at `docs/assets/cookbook-config/recipes/<model-key>/<deployment-key>.json`.
-These files are ignored by Git. Regenerate after changing manifests, baselines,
-hardware metadata or public configuration definitions. See
+These files are ignored by Git. Regenerate after changing manifests, baselines
+or public configuration definitions. See
 [the contributor guide](contributing/cookbook_configuration.md). MkDocs does not
 run the exporter automatically.
 
 The current examples cover CUDA T2V/I2V REST, native FastH3 MLX REST and LTX2
 CUDA WebSocket streaming. The streaming example links its protocol guide and
 shows a health/liveness check and WebSocket endpoint, not a REST generation request.
+
+`docs/assets/cookbook-config.js` provides the shared loading, option and YAML
+generation API. `cookbook-demo.js` and its page-only bootstrap are temporary
+presentation code; optional guides are ordinary MkDocs pages displayed inline
+by that demo. See the [design](design/serving-cookbook.md) for the API contract.
 
 `requirements-cookbook.txt` supplies the configuration import dependencies.
 CPU PyTorch is sufficient; generating the catalogs does not load model weights

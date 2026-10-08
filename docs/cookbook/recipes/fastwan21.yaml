@@ -9,11 +9,6 @@ deployments:
     config: examples/serving/openai_fastwan21_1_3b.yaml
     env:
       FASTVIDEO_ATTENTION_BACKEND: "VIDEO_SPARSE_ATTN"
-    hardware:
-      nvidia-h100-sxm-80gb:
-        status: unverified
-      nvidia-rtx-4090:
-        status: unverified
     controls:
       - server
       - generator.engine.offload.dit_layerwise

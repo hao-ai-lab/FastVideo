@@ -4,7 +4,7 @@
  * Ajv's 2020 class matches Pydantic's exported schema dialect. Compilation and
  * validation implement JSON Schema keywords, including nested objects, enums,
  * exclusive bounds, and if/then dependencies. No FastVideo rules live here.
- * Defaults are populated separately by the form; validation never changes data.
+ * Values come from the native baseline and explicit edits; validation never inserts defaults or changes data.
  *
  * Run `npm run build:validator --prefix docs` after editing this file or the
  * pinned dependencies. MkDocs ships the resulting self-contained asset, with no

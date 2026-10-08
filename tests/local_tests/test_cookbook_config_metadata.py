@@ -14,9 +14,6 @@ MODEL = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers"
 
 
 def fixture_recipe(tmp_path, **updates):
-    hardware_path = tmp_path / cookbook_config.HARDWARE_FILE
-    hardware_path.parent.mkdir(parents=True, exist_ok=True)
-    hardware_path.write_text((cookbook_config.ROOT / cookbook_config.HARDWARE_FILE).read_text())
     baseline = yaml.safe_load((cookbook_config.ROOT / "examples/serving/openai_fastwan21_1_3b.yaml").read_text())
     config_path = tmp_path / "examples/serving/config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,6 +45,7 @@ def test_manifest_controls_select_fields_without_filtering_baseline(tmp_path):
     assert result["runtime"]["server_defaults"] == {"host": "0.0.0.0", "port": 8000, "served_model_name": None}
     assert result["env"]["FASTVIDEO_ATTENTION_BACKEND"] == "VIDEO_SPARSE_ATTN"
     assert "schema" not in result
+    assert "hardware" not in result
 
 
 def test_inherited_defaults_only_describe_controls_and_never_expand_baseline(tmp_path):
@@ -75,6 +73,7 @@ def test_inherited_defaults_only_describe_controls_and_never_expand_baseline(tmp
     ({"env": {"VALUE": True}}, "environment names"),
     ({"requirements": "install"}, "list of text"),
     ({"unknown": 1}, "expected"),
+    ({"hardware": {}}, "expected"),
     ({"config": "../secret.yaml"}, "under examples/serving"),
 ])
 def test_bad_manifests_fail_clearly(tmp_path, updates, message):
@@ -209,54 +208,6 @@ def test_default_generated_files_are_ignored():
     assert set(result.stdout.splitlines()) == set(map(str, paths))
 
 
-def test_unlisted_hardware_is_not_implicitly_published(tmp_path):
-    recipes, baseline, _ = fixture_recipe(tmp_path)
-    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
-    assert result["base_config"] == baseline
-    assert result["hardware"] == []
-    assert result["guide"] is None
-
-
-def test_hardware_evidence_is_joined_without_changing_configuration(tmp_path):
-    records = {
-        "nvidia-h100-sxm-80gb": {"status": "verified", "evidence_url": "https://example.org/serving-run"},
-        "nvidia-rtx-4090": {"status": "unsupported", "reason": "Documented failure of this test fixture"},
-    }
-    recipes, baseline, _ = fixture_recipe(tmp_path, hardware=records)
-    result = cookbook_config.build_catalogs(recipes, tmp_path)[0]
-    assert result["base_config"] == baseline
-    assert result["hardware"][0]["evidence_url"] == records["nvidia-h100-sxm-80gb"]["evidence_url"]
-    assert result["hardware"][1]["reason"] == records["nvidia-rtx-4090"]["reason"]
-    assert "memory_gb" not in records["nvidia-h100-sxm-80gb"]
-
-
-@pytest.mark.parametrize("records, message", [
-    ({"unknown-gpu": {"status": "verified"}}, "hardware ID"),
-    ({"nvidia-h100-sxm-80gb": {"status": "verified"}}, "requires serving-test"),
-    ({"nvidia-h100-sxm-80gb": {"status": "unsupported"}}, "requires a reason"),
-    ({"nvidia-h100-sxm-80gb": {"status": "maybe"}}, "verification status"),
-    ({"nvidia-h100-sxm-80gb": {"status": "verified", "evidence_url": "javascript:alert(1)"}}, "HTTPS"),
-    ({"nvidia-h100-sxm-80gb": {"status": "unverified", "reason": ""}}, "nonempty text"),
-    ({"nvidia-h100-sxm-80gb": "verified"}, "hardware record"),
-    ([], "hardware must be a mapping"),
-])
-def test_invalid_hardware_evidence_is_rejected(tmp_path, records, message):
-    recipes, _, _ = fixture_recipe(tmp_path, hardware=records)
-    with pytest.raises(ValueError, match=message):
-        cookbook_config.build_catalogs(recipes, tmp_path)
-
-
-@pytest.mark.parametrize("memory", [0, -1, True, float("inf"), "80GB"])
-def test_hardware_inventory_requires_numeric_rated_capacity(tmp_path, memory):
-    fixture_recipe(tmp_path)
-    path = tmp_path / cookbook_config.HARDWARE_FILE
-    raw = yaml.safe_load(path.read_text())
-    raw["gpus"]["nvidia-h100-sxm-80gb"]["memory_gb"] = memory
-    path.write_text(yaml.safe_dump(raw))
-    with pytest.raises(ValueError, match="positive finite"):
-        cookbook_config.load_hardware(tmp_path)
-
-
 def test_markdown_guide_is_a_page_reference_not_another_renderer(tmp_path):
     guide = tmp_path / "docs/cookbook/guides/example.md"
     guide.parent.mkdir(parents=True, exist_ok=True)
@@ -282,7 +233,7 @@ def test_markdown_guide_is_a_page_reference_not_another_renderer(tmp_path):
         cookbook_config.check_site(site, recipes, tmp_path)
 
 
-@pytest.mark.parametrize("guide", ["../private.md", "/tmp/private.md", "docs/missing.md", "docs/cookbook/hardware.yaml"])
+@pytest.mark.parametrize("guide", ["../private.md", "/tmp/private.md", "docs/missing.md", "examples/serving/config.yaml"])
 def test_guides_are_existing_markdown_files_inside_docs(tmp_path, guide):
     recipes, _, _ = fixture_recipe(tmp_path, guide=guide)
     with pytest.raises(ValueError, match="guide must"):
@@ -459,6 +410,7 @@ def test_deployments_share_identity_but_not_baselines_or_controls(tmp_path):
     manifest = yaml.safe_load(manifest_path.read_text())
     manifest["summary"] = "Model overview"
     guide = tmp_path / "docs/guide.md"
+    guide.parent.mkdir(exist_ok=True)
     guide.write_text("# Model guide\n")
     manifest["guide"] = "docs/guide.md"
     manifest["deployments"]["cuda-rest"] = {
@@ -501,16 +453,6 @@ def test_one_model_manifest_rejects_deployments_for_different_models(tmp_path):
     }
     manifest_path.write_text(yaml.safe_dump(manifest))
     with pytest.raises(ValueError, match="same model_path"):
-        cookbook_config.build_catalogs(recipes, tmp_path)
-
-
-def test_hardware_record_must_match_the_selected_backend(tmp_path):
-    recipes, _, _ = fixture_mlx_deployment(tmp_path)
-    manifest_path = recipes / "example.yaml"
-    manifest = yaml.safe_load(manifest_path.read_text())
-    manifest["deployments"]["mlx-rest"]["hardware"] = {"nvidia-h100-sxm-80gb": {"status": "unverified"}}
-    manifest_path.write_text(yaml.safe_dump(manifest))
-    with pytest.raises(ValueError, match="backend-incompatible"):
         cookbook_config.build_catalogs(recipes, tmp_path)
 
 
@@ -558,3 +500,22 @@ def test_streaming_does_not_expose_ignored_rest_server_controls(tmp_path, path):
     config_path.write_text((cookbook_config.ROOT / "examples/serving/streaming_demo.yaml").read_text())
     with pytest.raises(ValueError, match="Unsupported streaming control: server"):
         cookbook_config.build_catalogs(recipes, tmp_path)
+
+
+def test_stale_catalog_pruning_preserves_unowned_files_and_symlink_targets(tmp_path):
+    recipes, _, _ = fixture_recipe(tmp_path)
+    output = tmp_path / "output"
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    stale = output / "recipes/example/removed.json"
+    stale.write_text("{}")
+    marker = output / "recipes/example/keep.custom.json"
+    marker.write_text("{}")
+    outside = tmp_path / "external"
+    outside.mkdir()
+    external_catalog = outside / "cuda-rest.json"
+    external_catalog.write_text("{}")
+    (output / "recipes/external").symlink_to(outside, target_is_directory=True)
+    cookbook_config.export_catalogs(output, recipes, tmp_path)
+    assert not stale.exists()
+    assert marker.exists()
+    assert external_catalog.exists()

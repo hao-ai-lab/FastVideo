@@ -21,7 +21,8 @@ This demo does not start a server or load model weights.
 [data-config-builder] button { padding: .4rem .7rem; border: 1px solid var(--md-default-fg-color--lighter); border-radius: .2rem; }
 [data-config-builder] button:disabled { opacity: .5; }
 [data-config-builder] pre { max-height: 32rem; overflow: auto; }
-.config-builder-hardware-table { overflow-x: auto; }
+.config-builder-guide { margin-top: 2rem; border-top: 1px solid var(--md-default-fg-color--lighter); }
+.config-builder-guide .md-content__inner { margin: 0; padding: 0; }
 [data-config-error] { color: var(--md-typeset-a-color); }
 </style>
 
@@ -32,18 +33,11 @@ This demo does not start a server or load model weights.
   </div>
   <p><strong data-config-model>Loading available models…</strong></p>
   <p data-config-summary></p>
-  <p class="config-builder-links"><a data-config-source>View the native recipe configuration</a> <a data-config-guide hidden>Read serving guide</a></p>
-  <section data-config-hardware hidden>
-    <h2>Hardware</h2>
+  <p class="config-builder-links"><a data-config-source>View the native recipe configuration</a></p>
+  <section data-config-requirements-section hidden>
+    <h2>Deployment requirements</h2>
     <p data-config-topology></p>
-    <p data-config-hardware-state aria-live="polite"></p>
-    <div class="config-builder-hardware-table" data-config-hardware-table>
-      <table>
-        <thead><tr><th scope="col">GPU</th><th scope="col">Rated GPU memory</th><th scope="col">Baseline status</th><th scope="col">Baseline record</th></tr></thead>
-        <tbody data-config-hardware-rows></tbody>
-      </table>
-    </div>
-    <p data-config-hardware-note>Rated memory is manufacturer capacity, not required or available memory. Unverified means no serving test is recorded for this deployment and GPU.</p>
+    <ul data-config-requirements></ul>
   </section>
   <div data-config-controls></div>
   <button type="button" data-config-reset disabled>Reset recipe</button>
@@ -51,8 +45,7 @@ This demo does not start a server or load model weights.
   <p data-config-status role="status" aria-live="polite">Loading maintained model deployments…</p>
   <div data-config-output hidden>
     <h2>1. Prepare the environment</h2>
-    <p>Follow the <a data-config-install>installation guide</a>, then apply these deployment requirements.</p>
-    <ul data-config-requirements></ul>
+    <p>Follow the <a data-config-install>installation guide</a>, then apply the deployment requirements above.</p>
     <h2>2. Save config.yaml</h2>
     <div class="config-builder-actions">
       <button type="button" data-config-copy="yaml" data-copy-label="YAML" disabled>Copy YAML</button>
@@ -73,4 +66,11 @@ This demo does not start a server or load model weights.
     </div>
   </div>
   <p data-config-request-note hidden>Request defaults apply when a client omits those values. Explicit client request values take precedence.</p>
+  <section class="config-builder-guide" data-config-guide-section hidden>
+    <h2>Serving guide</h2>
+    <p>The guide describes the recipe baseline. The generated configuration and commands above reflect your current selections.</p>
+    <p><a data-config-guide hidden>Open standalone guide</a></p>
+    <p data-config-guide-status role="status" aria-live="polite"></p>
+    <div data-config-guide-body></div>
+  </section>
 </div>

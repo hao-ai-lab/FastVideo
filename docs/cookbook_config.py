@@ -1,8 +1,8 @@
 """Build browser catalogs from model manifests and native serving deployments.
 
 Each model manifest offers deployments with a native serving YAML and an
-explicit list of editable fields. The complete baseline is preserved; public Python declarations supply
-metadata only for those controls. Export validates native parsing and serving
+explicit list of editable fields. The complete baseline is preserved; public
+Python declarations supply metadata only for those controls. Export validates native parsing and serving
 translation without loading weights. JSON files are generated docs assets.
 
 FastVideo imports stay inside export helpers because importing its package also
@@ -14,13 +14,12 @@ from __future__ import annotations
 import argparse
 import copy
 import json
-import math
 import re
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPES_DIR = ROOT / "docs/cookbook/recipes"
@@ -28,7 +27,6 @@ OUTPUT_DIR = ROOT / "docs/assets/cookbook-config"
 JS_SAFE_INTEGER = 2**53 - 1
 SCHEMA_DATA = {"default", "examples", "enum", "const"}
 RUNTIME_IDS = {"fastvideo-cuda-rest", "fastvideo-mlx-rest", "fastvideo-cuda-streaming"}
-HARDWARE_FILE = "docs/cookbook/hardware.yaml"
 # These fields change identity/topology or are rejected/overridden by the REST adapter.
 UNSUPPORTED_CONTROLS = {
     "generator.pipeline.preset",
@@ -106,59 +104,6 @@ def _prepare_schema(value: Any) -> Any:
     return result
 
 
-def _https_url(value: Any, context: str) -> None:
-    if not isinstance(value, str) or urlsplit(value).scheme != "https" or not urlsplit(value).netloc:
-        raise ValueError(f"{context} must be an HTTPS URL")
-
-
-def load_hardware(root: Path = ROOT) -> dict[str, dict[str, Any]]:
-    """Load shared physical GPU facts; inventory membership is not compatibility."""
-    import yaml
-
-    document = yaml.safe_load((root / HARDWARE_FILE).read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or set(document) != {"gpus"} or not isinstance(document["gpus"], dict):
-        raise ValueError("Hardware inventory must contain a 'gpus' mapping")
-    for gpu_id, device in document["gpus"].items():
-        if not isinstance(gpu_id, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", gpu_id):
-            raise ValueError(f"Invalid hardware ID: {gpu_id}")
-        if not isinstance(device, dict) or set(device) != {"label", "platform", "memory_gb", "source_url"}:
-            raise ValueError(f"{gpu_id}: hardware needs label, platform, memory_gb and source_url")
-        if any(not isinstance(device[key], str) or not device[key].strip() for key in ("label", "platform")):
-            raise ValueError(f"{gpu_id}: label and platform must be nonempty strings")
-        memory = device["memory_gb"]
-        if type(memory) not in (int, float) or not math.isfinite(memory) or memory <= 0:
-            raise ValueError(f"{gpu_id}: memory_gb must be a positive finite number")
-        _https_url(device["source_url"], f"{gpu_id} source_url")
-    return document["gpus"]
-
-
-def _recipe_hardware(recipe: dict[str, Any], devices: dict[str, dict[str, Any]], backend: str) -> list[dict[str, Any]]:
-    """Join author-reported baseline evidence with shared GPU specifications."""
-    records = recipe.get("hardware", {})
-    if not isinstance(records, dict):
-        raise ValueError(f"{recipe['id']}: hardware must be a mapping of GPU IDs to records")
-    for gpu_id, record in records.items():
-        if gpu_id not in devices or devices[gpu_id]["platform"] != backend:
-            raise ValueError(f"{recipe['id']}: unknown or backend-incompatible hardware ID: {gpu_id}")
-        if not isinstance(record, dict) or "status" not in record or set(record) - {"status", "evidence_url", "reason"}:
-            raise ValueError(f"{gpu_id}: hardware record needs status; optional evidence_url and reason")
-        if record["status"] not in ("verified", "unverified", "unsupported"):
-            raise ValueError(f"{gpu_id}: unknown hardware verification status")
-        if "evidence_url" in record:
-            _https_url(record["evidence_url"], f"{gpu_id} evidence_url")
-        if "reason" in record and (not isinstance(record["reason"], str) or not record["reason"].strip()):
-            raise ValueError(f"{gpu_id}: reason must be nonempty text")
-        if record["status"] == "verified" and not record.get("evidence_url"):
-            raise ValueError(f"{gpu_id}: verified hardware requires serving-test evidence_url")
-        if record["status"] == "unsupported" and not record.get("reason"):
-            raise ValueError(f"{gpu_id}: unsupported hardware requires a reason")
-    return [{
-        "id": gpu_id,
-        **copy.deepcopy(devices[gpu_id]),
-        **copy.deepcopy(record)
-    } for gpu_id, record in records.items()]
-
-
 def _guide_link(value: Any, root: Path) -> dict[str, str] | None:
     """Reference normal MkDocs output instead of adding a browser Markdown renderer."""
     if value is None:
@@ -187,7 +132,7 @@ def load_recipes(recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> list[dic
 
     recipes = []
     required = {"runtime", "config", "workload", "controls"}
-    allowed = required | {"summary", "env", "requirements", "hardware", "guide", "label"}
+    allowed = required | {"summary", "env", "requirements", "guide", "label"}
     paths = sorted([*recipes_dir.glob("*.yaml"), *recipes_dir.glob("*.yml")])
     ids: set[str] = set()
     for path in paths:
@@ -378,7 +323,6 @@ def _runtime_metadata(runtime_id: str) -> tuple[Any, dict[str, Any], dict[str, A
 def build_catalogs(recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> list[dict[str, Any]]:
     """Validate deployment baselines and reuse native field metadata per runtime."""
     recipes = load_recipes(recipes_dir, root)
-    devices = load_hardware(root)
     from fastvideo.api.compat import generator_config_to_fastvideo_args
     from fastvideo.api.parser import parse_config
     from fastvideo.api.schema import ServeConfig
@@ -395,7 +339,6 @@ def build_catalogs(recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> list[d
     for recipe in recipes:
         baseline = recipe["base_config"]
         adapter, shared, runtime = runtimes[recipe["runtime"]]
-        hardware = _recipe_hardware(recipe, devices, runtime["backend"])
         guide = _guide_link(recipe.get("guide"), root)
         _check_json_values(baseline)
         native = adapter.validate_python(baseline)
@@ -458,7 +401,6 @@ def build_catalogs(recipes_dir: Path = RECIPES_DIR, root: Path = ROOT) -> list[d
             "base_config": copy.deepcopy(baseline),
             "controls": controls,
             "requirements": copy.deepcopy(recipe["requirements"]),
-            "hardware": hardware,
             "guide": guide,
         })
     return catalogs
@@ -510,19 +452,12 @@ def export_catalogs(output_dir: Path = OUTPUT_DIR,
     temporary = manifest.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(manifest)
-    # Only prune recognized files within the dedicated generated directory,
-    # including flat catalogs written by the previous exporter.
-    for path in (output_dir / "recipes").rglob("*.json"):
+    # Prune only this exporter's current model/deployment layout.
+    for path in (output_dir / "recipes").glob("*/*.json"):
         relative = path.relative_to(output_dir).as_posix()
-        if (relative not in documents
-                and re.fullmatch(r"recipes/(?:[a-z0-9]+(?:-[a-z0-9]+)*/)?[a-z0-9]+(?:-[a-z0-9]+)*\.json", relative)):
+        if (not path.parent.is_symlink() and relative not in documents
+                and re.fullmatch(r"recipes/[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*\.json", relative)):
             path.unlink()
-    # Remove only the previous exporter’s hashed model files in its dedicated directory.
-    legacy = output_dir / "models"
-    if legacy.is_dir() and not legacy.is_symlink():
-        for path in legacy.glob("*.json"):
-            if re.fullmatch(r"[0-9a-f]{64}\.json", path.name):
-                path.unlink()
     return index
 
 

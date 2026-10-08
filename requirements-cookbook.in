@@ -13,6 +13,8 @@
 # Exporter and cookbook manifests.
 pydantic>=2.11,<3
 PyYAML>=6.0.1
+# Focused CPU metadata and generated-configuration checks in the docs workflow.
+pytest>=8,<10
 
 # Native MLX serving configuration lives beside its server entrypoint. Creating
 # the app validates the baseline without entering its model-loading lifespan.
