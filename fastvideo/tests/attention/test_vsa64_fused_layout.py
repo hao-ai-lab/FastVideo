@@ -1,9 +1,9 @@
 """VSA64 fused layout routing, fallback, and forward parity.
 
-The fused route is gated on SM100, but the Triton layout kernel itself is
-architecture-agnostic. Routing and layout tests therefore run on any CUDA GPU
-(the unit CI runs on L40S) with the capability check pinned to SM100; only the
-end-to-end ``video_sparse_attn`` parity test needs a real SM100 device.
+The fused route is gated on SM100 and GB10, but the Triton layout kernel itself
+is architecture-agnostic. Routing and layout tests therefore run on any CUDA
+GPU (the unit CI runs on L40S) with capability pinned to SM100; the actual
+``video_sparse_attn`` parity cases require a real SM100 or GB10 device.
 """
 
 import pytest
@@ -15,9 +15,9 @@ from fastvideo.attention.backends.video_sparse_attn import VideoSparseAttentionI
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA device required")
 
-requires_sm100 = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability() != (10, 0),
-    reason="SM100 CUDA device required",
+requires_sm100_or_gb10 = pytest.mark.skipif(
+    not torch.cuda.is_available() or torch.cuda.get_device_capability() not in ((10, 0), (12, 1)),
+    reason="SM100 or GB10 CUDA device required",
 )
 
 
@@ -136,7 +136,7 @@ def test_vsa64_fused_layout_falls_back_when_kernel_missing(monkeypatch, as_sm100
     assert result.shape[1] == metadata.variable_block_sizes.numel() * 64
 
 
-@requires_sm100
+@requires_sm100_or_gb10
 @pytest.mark.parametrize("dit_shape", [(5, 5, 6), (16, 28, 52)])
 def test_vsa64_fused_forward_matches_legacy(dit_shape):
     try:
