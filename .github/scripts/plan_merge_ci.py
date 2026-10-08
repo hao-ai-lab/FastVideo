@@ -106,6 +106,8 @@ SAFE_PATTERNS = (
     "mkdocs.yml",
     "requirements-mkdocs.in",
     "requirements-mkdocs.txt",
+    "requirements-cookbook.in",
+    "requirements-cookbook.txt",
     "scripts/**",
     "tests/__init__.py",
     "tests/local_tests/**",
@@ -344,7 +346,8 @@ def classify_paths(paths: list[str]) -> MergePlan:
             plan.require_all("changed-file API failed; failing closed")
             continue
 
-        if path in {"requirements-mkdocs.in", "requirements-mkdocs.txt"}:
+        if path in {"requirements-mkdocs.in", "requirements-mkdocs.txt", "requirements-cookbook.in",
+                    "requirements-cookbook.txt"}:
             plan.reasons.append(f"documentation dependencies need no GPU integration: {path}")
             continue
 

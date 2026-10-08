@@ -40,6 +40,8 @@ def resolve_candidates(file_path: Path, docs_root: Path, target: str) -> list[Pa
 def check_links(docs_root: Path) -> list[str]:
     errors: list[str] = []
     for md_file in sorted(docs_root.rglob("*.md")):
+        if "node_modules" in md_file.relative_to(docs_root).parts:
+            continue
         content = md_file.read_text(encoding="utf-8")
         for line_no, line in enumerate(content.splitlines(), start=1):
             for target in LINK_PATTERN.findall(line):

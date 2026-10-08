@@ -1,0 +1,23 @@
+title: FastWan2.1 1.3B
+summary: Distilled text-to-video serving with sparse attention.
+
+deployments:
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    workload: t2v
+    config: examples/serving/openai_fastwan21_1_3b.yaml
+    env:
+      FASTVIDEO_ATTENTION_BACKEND: "VIDEO_SPARSE_ATTN"
+    controls:
+      - server
+      - generator.engine.num_gpus
+      - generator.engine.parallelism
+      - generator.engine.offload.dit_layerwise
+      - generator.engine.offload.text_encoder
+      - generator.engine.offload.vae
+      - generator.engine.compile.enabled
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.fps
+      - default_request.sampling.seed

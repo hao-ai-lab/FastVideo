@@ -1,0 +1,20 @@
+title: LTX2 Distilled
+summary: Incremental video delivery over the native streaming WebSocket interface.
+guide: docs/design/server_contracts/streaming.md
+
+deployments:
+  cuda-streaming:
+    runtime: fastvideo-cuda-streaming
+    workload: t2v
+    config: examples/serving/streaming_demo.yaml
+    # Existing fallback note in the referenced native YAML's header.
+    requirements:
+      - Hosts without flashinfer / NVFP4 can comment out engine.quantization to fall back to bf16.
+    controls:
+      - server.host
+      - server.port
+      - generator.engine.num_gpus
+      - generator.engine.parallelism
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
