@@ -86,7 +86,9 @@ public:
     OutputDtype output_reg[NumElementPerThread];
 
 
-    Saver<OutputDtype, BlockSize, BlockSize, NumThrPerCta, IsEvenM, IsEvenN> saver;
+    // quant.cu allocates a contiguous [m, n] tensor without padded columns.
+    // Rounding its row stride to BlockSize corrupts rows and overruns tails.
+    Saver<OutputDtype, BlockSize, BlockSize, NumThrPerCta, IsEvenM, IsEvenN, false> saver;
 
     float amax = _reduce_amax(float_reg, (float*)shared_data);
     

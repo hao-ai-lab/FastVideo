@@ -14,6 +14,21 @@ except ImportError:
 from fastvideo_kernel import turbodiffusion_ops
 
 
+def int8_quant_ref(x):
+    """Independent CPU block reference, including valid elements in edge tiles."""
+    x = x.detach().cpu().float()
+    rows, cols = x.shape
+    quantized = torch.empty((rows, cols), dtype=torch.int8)
+    scales = torch.empty(((rows + 127) // 128, (cols + 127) // 128), dtype=torch.float32)
+    for row in range(0, rows, 128):
+        for col in range(0, cols, 128):
+            tile = x[row:row + 128, col:col + 128]
+            maximum = tile.abs().max().clamp_min(1e-8)
+            scales[row // 128, col // 128] = maximum / 128
+            quantized[row:row + 128, col:col + 128] = (tile * (128 / maximum)).round().clamp(-128, 127).to(torch.int8)
+    return quantized, scales
+
+
 # Helper for RMS Norm reference
 def rms_norm_ref(x, w, eps=1e-6):
     dtype = x.dtype
@@ -25,6 +40,29 @@ def rms_norm_ref(x, w, eps=1e-6):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 class TestTurboDiffusion:
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize("shape", [(1, 7), (16, 129), (129, 241), (257, 257), (32, 256), (128, 512)])
+    @pytest.mark.parametrize("pattern", ["random", "zeros", "ones"])
+    def test_quant_tails_match_block_reference(self, dtype, shape, pattern):
+        if turbodiffusion_ops.quant_cuda is None:
+            pytest.skip("quant_cuda not available")
+
+        generator = torch.Generator().manual_seed(42)
+        x = torch.randn(shape, generator=generator, dtype=dtype)
+        if pattern == "zeros":
+            x.zero_()
+        elif pattern == "ones":
+            x.fill_(1)
+        expected_q, expected_scale = int8_quant_ref(x)
+        actual_q, actual_scale = turbodiffusion_ops.int8_quant(x.cuda())
+        torch.cuda.synchronize()
+
+        assert actual_q.shape == shape
+        assert actual_q.is_contiguous()
+        assert torch.isfinite(actual_scale).all()
+        assert torch.equal(actual_q.cpu(), expected_q)
+        assert torch.equal(actual_scale.cpu().view(torch.uint8), expected_scale.view(torch.uint8))
 
     def test_quant_invalid_dtype_names_int8_operation(self):
         if turbodiffusion_ops.quant_cuda is None:
