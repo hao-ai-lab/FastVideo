@@ -1,0 +1,6 @@
+# Models published in the configuration builder, in dropdown order.
+# Options and defaults are read from FastVideo's Python definitions.
+models:
+  - Wan-AI/Wan2.2-TI2V-5B-Diffusers
+  - FastVideo/FastWan2.1-T2V-1.3B-Diffusers
+  - FastVideo/LTX2-Distilled-Diffusers

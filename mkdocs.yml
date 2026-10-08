@@ -9,6 +9,7 @@ exclude_docs: |
   README.md
   generate_examples.py
   cookbook_config.py
+  cookbook/config-builder-models.yaml
   package.json
   package-lock.json
   build-validator.mjs

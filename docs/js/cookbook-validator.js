@@ -12,15 +12,15 @@
  */
 import Ajv2020 from "ajv/dist/2020.js";
 
-const ajv = new Ajv2020({
-  allErrors: true,
-  strict: true,
-  ownProperties: true,
-  coerceTypes: false,
-  useDefaults: false,
-  removeAdditional: false,
-});
-
 export function createValidator(schema) {
+  // Ajv retains compiled schemas: each active catalog gets its own collectable instance.
+  const ajv = new Ajv2020({
+    allErrors: true,
+    strict: true,
+    ownProperties: true,
+    coerceTypes: false,
+    useDefaults: false,
+    removeAdditional: false,
+  });
   return ajv.compile(schema);
 }

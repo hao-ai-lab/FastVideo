@@ -15,8 +15,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from docs.cookbook_config import build_catalog
+from docs.cookbook_config import build_catalog, export_catalogs
 from fastvideo.api.compat import explicit_request_updates
+from fastvideo.api.schema import ServeConfig, GeneratorConfig
 from fastvideo.entrypoints.cli.inference_config import build_serve_config
 from fastvideo.entrypoints.cli.serve import ServeSubcommand
 from fastvideo.entrypoints.openai.protocol import VideoGenerationRequest
@@ -27,8 +28,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(scope="module")
-def catalog():
-    return build_catalog()
+def catalog(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("cookbook-catalog")
+    selection = directory / "models.yaml"
+    selection.write_text(yaml.safe_dump({"models": ["Wan-AI/Wan2.2-TI2V-5B-Diffusers"]}), encoding="utf-8")
+    output = directory / "assets"
+    index = export_catalogs(output_dir=output, models_file=selection)
+    return json.loads((output / index["models"][0]["catalog_url"]).read_text())
 
 
 def resolve_in_browser(catalog, selections):
@@ -84,6 +90,8 @@ def parse_download(result, tmp_path, monkeypatch):
     },
     {"default_request.sampling.guidance_scale": 0.0000001},
     {"default_request.sampling.num_frames": 82},
+    {"generator.pipeline.vae_tiling": None, "generator.engine.offload.lazy_module_load": None},
+    {"/generator/pipeline/experimental/vae_config.load_encoder": True},
 ])
 def test_download_round_trips_through_real_cli(catalog, selections, tmp_path, monkeypatch):
     result = resolve_in_browser(catalog, selections)
@@ -91,25 +99,45 @@ def test_download_round_trips_through_real_cli(catalog, selections, tmp_path, mo
 
     assert config.generator.model_path == catalog["model"]["id"]
     frame_path = "default_request.sampling.num_frames"
-    sampling_schema = catalog["schema"]["properties"]["default_request"]["properties"]["sampling"]
-    expected_frames = selections.get(frame_path, sampling_schema["properties"]["num_frames"]["default"])
+    native = ServeConfig(generator=GeneratorConfig(model_path=catalog["model"]["id"]))
+    expected_frames = selections.get(frame_path, native.default_request.sampling.num_frames)
     assert config.default_request.sampling.num_frames == expected_frames
     assert config.generator.engine.offload.vae is selections.get("generator.engine.offload.vae", True)
-    assert config.default_request.output.return_frames is False
+    assert config.default_request.output.return_frames is native.default_request.output.return_frames
     if "default_request.sampling.seed" in selections:
         assert config.default_request.sampling.seed == selections["default_request.sampling.seed"]
     if "default_request.sampling.guidance_scale" in selections:
         assert config.default_request.sampling.guidance_scale == selections["default_request.sampling.guidance_scale"]
-    assert explicit_request_updates(config.default_request)["num_frames"] == config.default_request.sampling.num_frames
+    updates = explicit_request_updates(config.default_request)
+    expected_updates = {
+        path.rsplit(".", 1)[-1]: value
+        for path, value in selections.items() if path.startswith("default_request.sampling.")
+    }
+    assert updates == expected_updates
+    if "/generator/pipeline/experimental/vae_config.load_encoder" in selections:
+        assert config.generator.pipeline.experimental == {"vae_config.load_encoder": True}
+    if "generator.pipeline.vae_tiling" in selections:
+        assert config.generator.pipeline.vae_tiling is None
+        assert config.generator.engine.offload.lazy_module_load is None
+
+
+@pytest.mark.parametrize("model_id, frames", [
+    ("Wan-AI/Wan2.2-TI2V-5B-Diffusers", 121),
+    ("Tongyi-MAI/Z-Image-Turbo", 1),
+])
+def test_model_defaults_are_displayed_without_pinning_request_values(model_id, frames, tmp_path, monkeypatch):
+    result = resolve_in_browser(build_catalog(model_id), {})
+    config = parse_download(result, tmp_path, monkeypatch)
+    assert result["values"]["default_request"]["sampling"]["num_frames"] == frames
+    assert "default_request" not in result["config"]
+    assert explicit_request_updates(config.default_request) == {}
+    assert config.generator.model_path == model_id
 
 
 def test_prompt_only_client_inherits_yaml_and_explicit_request_wins(catalog, tmp_path, monkeypatch):
     result = resolve_in_browser(catalog, {"default_request.sampling.num_frames": 81, "server.port": 9000})
     config = parse_download(result, tmp_path, monkeypatch)
-    client_argv = shlex.split(result["clientCommand"].replace("\\\n", ""))
-    body = json.loads(client_argv[client_argv.index("--data") + 1])
-    assert "num_frames" not in body
-    assert "9000" in result["clientCommand"]
+    body = {"model": catalog["model"]["id"], "prompt": "A calm river"}
     args = SimpleNamespace(model_path=config.generator.model_path,
                            lora_path=None,
                            lora_nickname="default",

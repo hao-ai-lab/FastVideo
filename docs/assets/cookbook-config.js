@@ -1,19 +1,44 @@
 /**
  * Schema-backed cookbook demo: exported Python defaults -> selections -> config.yaml.
  *
- * An explicit Python export writes the committed cookbook-config.json; the documentation
- * build verifies and ships it. resolveConfig() reads that data without a browser and returns
- * a complete configuration, YAML, and short launch
- * command. mount() fetches the static JSON once and connects the resolver to controls.
+ * Python exports a selected model index and complete per-model catalogs. The
+ * browser loads one catalog and edits the discovered fields, without a field list.
  * Standard JSON Schema defaults and constraints come from the exporter; Ajv validates them.
  * Labels and grouping live here.
- * Neither function starts a server, loads a model, or submits an inference request.
+ * These helpers do not start a server, load a model, or submit an inference request.
  */
 ((scope) => {
   "use strict";
 
   const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
   const clone = (value) => JSON.parse(JSON.stringify(value));
+
+  const pathParts = (path) => path.startsWith("/") ? path.slice(1).split("/")
+    .map((key) => key.replace(/~1/g, "/").replace(/~0/g, "~")) : path.split(".");
+
+  /** Fetch only the selected catalog; obsolete responses and failures never reach the form. */
+  function createCatalogLoader(index, indexUrl, onChange, fetcher = (...args) => scope.fetch(...args)) {
+    let generation = 0, controller;
+    return async (modelId) => {
+      const token = ++generation;
+      controller?.abort();
+      controller = new AbortController();
+      const model = index.models.find((item) => item.id === modelId);
+      onChange({ state: "loading", model });
+      try {
+        if (!model) throw new Error(`No exported configuration for model: ${modelId}`);
+        const response = await fetcher(new URL(model.catalog_url, indexUrl).href, { signal: controller.signal });
+        if (token !== generation) return;
+        if (!response.ok) throw new Error(`Could not load model configuration: HTTP ${response.status}`);
+        const catalog = await response.json();
+        if (token !== generation) return;
+        if (catalog.model.id !== modelId) throw new Error(`Unexpected model configuration: ${catalog.model.id}`);
+        onChange({ state: "ready", catalog });
+      } catch (failure) {
+        if (token === generation) onChange({ state: "error", message: failure.message });
+      }
+    };
+  }
 
   /** Quote a shell argument independently of YAML serialization. */
   function shellQuote(value) {
@@ -23,9 +48,9 @@
 
   /** Assign a canonical field path into a private copy of the base configuration. */
   function setPath(config, path, value) {
-    const parts = path.split(".");
-    if (!/^(generator|server|default_request)\./.test(path) || parts.some((part) =>
-      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(part) || ["__proto__", "constructor", "prototype"].includes(part))) {
+    const parts = pathParts(path);
+    if (!["generator", "server", "default_request", "streaming"].includes(parts[0]) || parts.some((part) =>
+      !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(part) || ["__proto__", "constructor", "prototype"].includes(part))) {
       throw new Error(`Invalid configuration path: ${path}`);
     }
     let cursor = config;
@@ -72,17 +97,19 @@
   /** Look up a canonical field through the schema's properties; constraints remain standard JSON Schema. */
   function getSchemaField(schema, path) {
     let node = schema;
-    for (const part of path.split(".")) node = resolveSchemaNode(node, schema)?.properties?.[part];
+    for (const part of pathParts(path)) node = resolveSchemaNode(node, schema)?.properties?.[part];
     return resolveSchemaNode(node, schema);
   }
 
   /** Enumerate editable leaves so newly exported fields need no frontend registration. */
-  function getEditableFields(schema, prefix = "", root = schema) {
+  function getEditableFields(schema, parts = [], root = schema) {
     const node = resolveSchemaNode(schema, root);
     if (own(node, "const")) return [];
-    if (!node.properties) return prefix ? [{ path: prefix, field: node }] : [];
+    if (!node.properties) return parts.length ? [{
+      path: parts.join("."), pointer: "/" + parts.map((key) => key.replace(/~/g, "~0").replace(/\//g, "~1")).join("/"), field: node,
+    }] : [];
     return Object.entries(node.properties).flatMap(([key, property]) =>
-      getEditableFields(property, prefix ? `${prefix}.${key}` : key, root));
+      getEditableFields(property, [...parts, key], root));
   }
 
   function validateConfig(schema, config) {
@@ -135,194 +162,230 @@
   }
 
   /**
-   * Resolve schema/model defaults plus flat canonical-path overrides into runnable YAML.
-   * Inputs are not mutated. Ajv validates the complete result before any output is emitted.
+   * Resolve declared defaults for the form and explicit edits for the YAML download.
+   * Inputs are not mutated. Ajv validates both views before any output is emitted.
    * Example: resolveConfig(catalog, {"default_request.sampling.num_frames": 81}).
-   * Request defaults are saved in YAML; the launch command remains `--config config.yaml`.
+   * Only edited request defaults are pinned in YAML, preserving runtime inheritance.
+   * `values` supplies the form's defaults; `config` and `yaml` contain the saved edits.
+   * The launch command remains `fastvideo serve --config config.yaml`.
    */
   function resolveConfig(catalog, selections = {}) {
     if (!selections || typeof selections !== "object" || Array.isArray(selections)) {
       throw new Error("Selections must be a field-to-value object");
     }
-    const config = getDefaultConfig(catalog.schema);
-    for (const [path, value] of Object.entries(selections)) setPath(config, path, value);
+    const values = getDefaultConfig(catalog.schema);
+    const config = { generator: { model_path: catalog.model.id } };
+    if (values.generator?.pipeline?.workload_type) {
+      config.generator.pipeline = { workload_type: values.generator.pipeline.workload_type };
+    }
+    for (const [path, value] of Object.entries(selections)) {
+      setPath(values, path, value);
+      setPath(config, path, value);
+    }
+    validateConfig(catalog.schema, values);
     validateConfig(catalog.schema, config);
 
-    let host = config.server.host;
-    if (["0.0.0.0", "::"].includes(host)) host = "127.0.0.1";
-    if (host.includes(":")) host = `[${host}]`;
-    const baseUrl = `http://${host}:${config.server.port}`;
     const argv = [...catalog.runtime.launch_argv];
-    const clientRequest = {
-      endpoint: `${baseUrl}/v1/videos/sync`,
-      body: {
-        model: config.server.served_model_name || catalog.model.id,
-        prompt: "A cinematic view of a futuristic city at sunset, smooth camera pan",
-      },
-      outputFile: "output.mp4",
-    };
     return {
       config,
+      values,
       yaml: toYaml(config),
       argv,
       command: argv.map(shellQuote).join(" "),
-      healthCommand: `curl --fail-with-body ${shellQuote(`${baseUrl}/health`)}`,
-      clientRequest,
-      clientCommand: `curl --fail-with-body --request POST ${shellQuote(clientRequest.endpoint)} \\\n  --header 'Content-Type: application/json' \\\n  --data ${shellQuote(JSON.stringify(clientRequest.body))} \\\n  --output output.mp4`,
     };
   }
 
-  const api = { resolveConfig, getDefaultConfig, getSchemaField, getEditableFields, toYaml, shellQuote };
+  const api = { resolveConfig, createCatalogLoader, getDefaultConfig, getSchemaField, getEditableFields, toYaml, shellQuote };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   scope.FastVideoConfigCookbook = api;
   if (typeof document === "undefined") return;
 
-  // Optional presentation preferences. Every other exported field gets a generic label/group.
-  const groups = {
-    execution: [
-      ["generator.engine.num_gpus", "GPU count"],
-      ["generator.engine.offload.vae", "Offload VAE to CPU"],
-    ],
-    request: [
-      ["default_request.sampling.num_frames", "Frames"],
-      ["default_request.sampling.width", "Width"],
-      ["default_request.sampling.height", "Height"],
-      ["default_request.sampling.num_inference_steps", "Sampling steps"],
-    ],
-    advanced: [
-      ["default_request.sampling.fps", "Frames per second"],
-      ["default_request.sampling.guidance_scale", "Guidance scale"],
-      ["default_request.sampling.seed", "Seed"],
-      ["server.host", "Server host"],
-      ["server.port", "Server port"],
-    ],
-  };
-
-  /**
-   * Load static metadata, render basic controls, and keep YAML/copy/download output synchronized.
-   * TODO(cookbook-ui): Replace this temporary page adapter with the final cookbook UI;
-   * retain the pure resolver, serializer, and their tests as the shared generation layer.
-   */
+  // TODO(cookbook-ui): Replace this demo DOM adapter; keep schema selection and YAML generation.
   async function mount(root) {
     const status = root.querySelector("[data-config-status]");
     const error = root.querySelector("[data-config-error]");
     const output = root.querySelector("[data-config-output]");
-    const outputButtons = root.querySelectorAll("[data-config-copy], [data-config-download]");
-    let resolved = null;
-    let selections = {};
-    const inputs = new Map();
+    const buttons = root.querySelectorAll("[data-config-copy], [data-config-download]");
+    const picker = root.querySelector("[data-config-model-picker]");
+    const controls = root.querySelector("[data-config-controls]");
+    const reset = root.querySelector("[data-config-reset]");
+    let catalog, resolved, selections = {};
+    const inputErrors = new Map();
 
     function invalidate(message) {
       resolved = null;
       output.hidden = true;
-      outputButtons.forEach((button) => { button.disabled = true; });
+      buttons.forEach((button) => { button.disabled = true; });
       error.textContent = message;
+    }
+    function render() {
+      status.textContent = "";
+      try {
+        if (inputErrors.size) throw new Error([...inputErrors.values()].join("; "));
+        resolved = resolveConfig(catalog, selections);
+        error.textContent = "";
+        output.hidden = false;
+        buttons.forEach((button) => { button.disabled = false; });
+        for (const key of ["yaml", "command"]) {
+          root.querySelector(`[data-config-code="${key}"]`).textContent = resolved[key];
+        }
+      } catch (failure) { invalidate(failure.message); }
+    }
+
+    function renderControls() {
+      controls.replaceChildren();
+      const sections = new Map();
+      for (const { path, pointer, field } of getEditableFields(catalog.schema)) {
+        const parts = pathParts(pointer);
+        const sectionName = parts.length > 2 ? parts.slice(0, 2).join(".") : parts[0];
+        if (!sections.has(sectionName)) {
+          const section = document.createElement("details");
+          section.className = "config-builder-section";
+          const title = document.createElement("summary");
+          title.textContent = sectionName;
+          const content = document.createElement("div");
+          content.className = "config-builder-fields";
+          section.append(title, content);
+          controls.append(section);
+          sections.set(sectionName, content);
+        }
+        const row = document.createElement("label");
+        row.className = "config-builder-field";
+        const title = document.createElement("strong");
+        title.textContent = field.title || parts.at(-1).replace(/_/g, " ");
+        const address = document.createElement("small");
+        address.textContent = path;
+        const value = getDefaultConfig(field, catalog.schema);
+        const branches = field.anyOf || field.oneOf || [field];
+        const nonNull = branches.filter((item) => item.type !== "null");
+        const basic = nonNull.length === 1 ? nonNull[0] : field;
+        const type = basic.type;
+        const nullable = branches.some((item) => item.type === "null");
+        const choiceValues = field.enum || basic.enum || (type === "boolean" ? [false, true] : null);
+        let input, automatic;
+        if (choiceValues) {
+          input = document.createElement("select");
+          const choices = [...choiceValues];
+          if (nullable && !choices.includes(null)) choices.unshift(null);
+          choices.forEach((item, index) => {
+            const option = document.createElement("option");
+            option.value = index;
+            option.textContent = item === null ? "Auto" : String(item);
+            input.append(option);
+          });
+          input.value = choices.findIndex((item) => item === value);
+          input.addEventListener("change", () => { selections[pointer] = choices[input.value]; render(); });
+        } else {
+          const scalar = ["string", "integer", "number"].includes(type);
+          input = document.createElement(scalar ? "input" : "textarea");
+          if (scalar) {
+            input.type = type === "string" ? "text" : "number";
+            if (basic.minimum !== undefined) input.min = basic.minimum;
+            if (basic.maximum !== undefined) input.max = basic.maximum;
+            input.step = basic.multipleOf || (type === "integer" ? "1" : "any");
+            input.value = value == null ? "" : value;
+          } else {
+            input.rows = 3;
+            input.placeholder = "JSON value";
+            input.value = value === undefined ? "" : JSON.stringify(value, null, 2);
+          }
+          const update = () => {
+            try {
+              if (automatic?.checked) selections[pointer] = null;
+              else if (type === "string" && scalar) selections[pointer] = input.value;
+              else if (scalar) selections[pointer] = input.value === "" ? NaN : Number(input.value);
+              else if (input.value.trim() === "" && value === undefined) delete selections[pointer];
+              else selections[pointer] = JSON.parse(input.value);
+              inputErrors.delete(pointer);
+              render();
+            } catch (failure) {
+              inputErrors.set(pointer, `${path}: ${failure.message}`);
+              invalidate(inputErrors.get(pointer));
+            }
+          };
+          if (nullable && scalar) {
+            automatic = document.createElement("input");
+            automatic.type = "checkbox";
+            automatic.checked = value === null;
+            automatic.setAttribute("aria-label", `${path}: Auto`);
+            input.disabled = automatic.checked;
+            automatic.addEventListener("change", () => { input.disabled = automatic.checked; update(); });
+            const autoLabel = document.createElement("span");
+            autoLabel.append(automatic, " Auto");
+            row.append(autoLabel);
+          }
+          input.addEventListener("input", update);
+        }
+        input.dataset.configPath = pointer;
+        input.setAttribute("aria-label", path);
+        const initial = document.createElement("small");
+        initial.textContent = value === undefined ? "Default: unset" : `Default: ${JSON.stringify(value)}`;
+        row.prepend(title, address);
+        row.append(input, initial);
+        if (field.description) {
+          const help = document.createElement("small");
+          help.textContent = field.description;
+          row.append(help);
+        }
+        sections.get(sectionName).append(row);
+      }
     }
 
     try {
       const response = await fetch(root.dataset.metadata);
-      if (!response.ok) throw new Error(`Could not load configuration metadata: HTTP ${response.status}`);
-      const catalog = await response.json();
-      root.querySelector("[data-config-model]").textContent = `${catalog.model.label} · ${catalog.runtime.label}`;
-
-      function render() {
-        status.textContent = "";
-        try {
-          resolved = resolveConfig(catalog, selections);
-          error.textContent = "";
-          output.hidden = false;
-          outputButtons.forEach((button) => { button.disabled = false; });
-          for (const key of ["yaml", "command", "healthCommand", "clientCommand"]) {
-            root.querySelector(`[data-config-code="${key}"]`).textContent = resolved[key];
-          }
-        } catch (failure) {
-          invalidate(failure.message);
-        }
+      if (!response.ok) throw new Error(`Could not load registry metadata: HTTP ${response.status}`);
+      const indexUrl = response.url;
+      const index = await response.json();
+      if (!index.models.length) throw new Error("No models are selected for this configuration builder");
+      for (const model of index.models) {
+        const option = document.createElement("option");
+        option.value = model.id;
+        option.textContent = model.id;
+        picker.append(option);
       }
-
-      const preferences = Object.entries(groups).flatMap(([group, definitions]) =>
-        definitions.map(([path, label]) => ({ path, label, group })));
-      const fields = getEditableFields(catalog.schema).sort((a, b) => {
-        const rank = (path) => {
-          const index = preferences.findIndex((item) => item.path === path);
-          return index < 0 ? preferences.length : index;
-        };
-        return rank(a.path) - rank(b.path);
-      });
-      for (const { path, field: declared } of fields) {
-        const preference = preferences.find((item) => item.path === path);
-        const group = preference?.group ?? (path.startsWith("generator.") ? "execution" :
-          path.startsWith("default_request.") ? "request" : "advanced");
-        const fallback = path.split(".").at(-1).replace(/_/g, " ");
-        const label = preference?.label ?? declared.title ?? `${fallback[0].toUpperCase()}${fallback.slice(1)}`;
-        const container = root.querySelector(`[data-config-group="${group}"]`);
-        // Nullable schemas still render the non-null type; Ajv validates the original whole schema.
-        const branch = declared.anyOf?.find((item) => item.type && item.type !== "null");
-        const field = { ...branch, ...declared };
-        const type = Array.isArray(field.type) ? field.type.find((item) => item !== "null") : field.type;
-        const defaultValue = getDefaultConfig(declared, catalog.schema);
-        const row = document.createElement("label");
-        row.className = "config-builder-field";
-        const title = document.createElement("strong");
-        title.textContent = label;
-        let input;
-        if (field.enum) {
-          input = document.createElement("select");
-          field.enum.forEach((value, index) => {
-            const option = document.createElement("option");
-            option.value = index;
-            option.textContent = value;
-            input.append(option);
-          });
+      const resetForm = () => {
+        selections = {};
+        inputErrors.clear();
+        renderControls();
+        render();
+      };
+      const load = createCatalogLoader(index, indexUrl, (update) => {
+        if (update.state === "loading") {
+          catalog = null;
+          selections = {};
+          inputErrors.clear();
+          controls.replaceChildren();
+          reset.disabled = true;
+          invalidate("");
+          root.querySelector("[data-config-model]").textContent = update.model?.label || picker.value;
+          status.textContent = "Loading the selected model configuration…";
+        } else if (update.state === "ready") {
+          catalog = update.catalog;
+          root.querySelector("[data-config-model]").textContent =
+            `${catalog.model.label} · ${catalog.model.workload_types.join(", ")} · ${catalog.runtime.label}`;
+          resetForm();
+          reset.disabled = false;
         } else {
-          input = document.createElement("input");
-          input.type = type === "boolean" ? "checkbox" : type === "string" ? "text" : "number";
-          if (field.minimum !== undefined) input.min = field.minimum;
-          if (field.maximum !== undefined) input.max = field.maximum;
-          input.step = field.multipleOf ?? (type === "integer" ? "1" : "any");
+          status.textContent = "";
+          invalidate(update.message);
         }
-        input.dataset.configPath = path;
-        input.setAttribute("aria-label", label);
-        const setDefault = () => {
-          if (field.enum) input.value = field.enum.indexOf(defaultValue);
-          else if (type === "boolean") input.checked = defaultValue;
-          else input.value = defaultValue;
-        };
-        setDefault();
-        inputs.set(path, setDefault);
-        input.addEventListener(field.enum ? "change" : "input", () => {
-          selections[path] = field.enum ? field.enum[input.value] : type === "boolean" ? input.checked :
-            type === "string" ? input.value : input.value === "" ? NaN : Number(input.value);
-          render();
-        });
-        const origin = document.createElement("small");
-        origin.textContent = `Default: ${defaultValue}`;
-        row.append(title, input, origin);
-        if (path === "default_request.sampling.num_frames" || (field.multipleOf !== undefined &&
-          ["default_request.sampling.width", "default_request.sampling.height"].includes(path))) {
-          const help = document.createElement("small");
-          help.textContent = path.endsWith("num_frames") ?
-            "Runtime may align the requested length to the model’s VAE." :
-            `Multiples of ${field.multipleOf} pixels.`;
-          row.append(help);
-        }
-        container.append(row);
-      }
-
+      });
+      picker.value = index.models[0].id;
+      picker.disabled = false;
+      picker.addEventListener("change", () => load(picker.value));
+      reset.addEventListener("click", resetForm);
       root.querySelectorAll("[data-config-copy]").forEach((button) => {
         button.addEventListener("click", async () => {
           if (!resolved) return;
           try {
             await navigator.clipboard.writeText(resolved[button.dataset.configCopy]);
             status.textContent = `${button.dataset.copyLabel} copied.`;
-          } catch (_) {
-            status.textContent = "Clipboard access failed. Select and copy the text in the output block.";
-          }
+          } catch (_) { status.textContent = "Clipboard unavailable. Select and copy the output text."; }
         });
       });
       root.querySelector("[data-config-download]").addEventListener("click", () => {
         if (!resolved) return;
-        const url = URL.createObjectURL(new Blob([resolved.yaml], { type: "text/yaml;charset=utf-8" }));
+        const url = URL.createObjectURL(new Blob([resolved.yaml], {type:"text/yaml;charset=utf-8"}));
         const link = document.createElement("a");
         link.href = url;
         link.download = "config.yaml";
@@ -330,23 +393,11 @@
         document.body.append(link);
         link.click();
         link.remove();
-        // Give browsers time to consume the Blob before releasing its URL.
         setTimeout(() => URL.revokeObjectURL(url), 30000);
         status.textContent = "config.yaml download started.";
       });
-      const reset = root.querySelector("[data-config-reset]");
-      reset.disabled = false;
-      reset.addEventListener("click", () => {
-        selections = {};
-        inputs.forEach((setDefault) => setDefault());
-        render();
-        status.textContent = "Defaults restored.";
-      });
-      render();
-    } catch (failure) {
-      status.textContent = "";
-      invalidate(failure.message);
-    }
+      await load(picker.value);
+    } catch (failure) { status.textContent = ""; invalidate(failure.message); }
   }
 
   const init = () => document.querySelectorAll("[data-config-builder]").forEach((root) => {
