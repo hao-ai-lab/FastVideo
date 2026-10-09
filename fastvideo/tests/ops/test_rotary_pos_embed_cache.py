@@ -7,6 +7,8 @@ import torch
 from fastvideo.layers.rotary_embedding import (
     _ROTARY_POS_EMBED_CACHE,
     _ROTARY_POS_EMBED_CACHE_MAXSIZE,
+    _ROTARY_POS_EMBED_DEVICE_CACHE,
+    _ROTARY_POS_EMBED_DEVICE_CACHE_MAXSIZE,
     get_rotary_pos_embed,
 )
 
@@ -46,10 +48,12 @@ def _call(
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
-    """Isolate every test by clearing the module-level cache around it."""
+    """Isolate every test by clearing the module-level caches around it."""
     _ROTARY_POS_EMBED_CACHE.clear()
+    _ROTARY_POS_EMBED_DEVICE_CACHE.clear()
     yield
     _ROTARY_POS_EMBED_CACHE.clear()
+    _ROTARY_POS_EMBED_DEVICE_CACHE.clear()
 
 
 def test_repeated_call_hits_cache():
@@ -211,3 +215,84 @@ def test_cache_hit_refreshes_recency():
     surviving = {key[-2] for key in _ROTARY_POS_EMBED_CACHE}
     assert 0 in surviving
     assert 1 not in surviving
+
+
+_DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+
+
+@pytest.mark.parametrize("device", _DEVICES)
+def test_device_tables_match_caller_side_move_and_cast(device):
+    """device/output_dtype output is bitwise-equal to the old caller-side .to(device).float()."""
+    host_cos, host_sin = _call(rope_sizes=(21, 45, 80), hidden_size=5120, heads_num=40)
+    cos, sin = _call(rope_sizes=(21, 45, 80),
+                     hidden_size=5120,
+                     heads_num=40,
+                     device=device,
+                     output_dtype=torch.float32)
+    assert cos.device.type == device and cos.dtype == torch.float32
+    assert torch.equal(cos.cpu(), host_cos.to(device).float().cpu())
+    assert torch.equal(sin.cpu(), host_sin.to(device).float().cpu())
+
+
+@pytest.mark.parametrize("device", _DEVICES)
+def test_device_repeated_call_hits_cache(device):
+    """A second identical device call returns the same tensors without re-uploading."""
+    cos1, sin1 = _call(device=device, output_dtype=torch.float32)
+    cos2, sin2 = _call(device=device, output_dtype=torch.float32)
+    assert cos1 is cos2 and sin1 is sin2
+    assert len(_ROTARY_POS_EMBED_DEVICE_CACHE) == 1
+
+
+def test_device_miss_reuses_host_entry():
+    """Device lookups share the host table instead of recomputing it."""
+    host_cos, _ = _call()
+    _call(device="cpu", output_dtype=torch.float32)
+    assert len(_ROTARY_POS_EMBED_CACHE) == 1
+    assert _call()[0] is host_cos
+
+
+def test_device_without_output_dtype_keeps_dtype():
+    """output_dtype=None leaves the tables in the computed dtype."""
+    cos, _ = _call(dtype=torch.float64, device="cpu")
+    assert cos.dtype == torch.float64
+
+
+def test_output_dtype_without_device_raises():
+    """output_dtype only applies to device tables."""
+    with pytest.raises(ValueError):
+        _call(output_dtype=torch.float32)
+
+
+def test_distinct_output_dtypes_create_distinct_device_entries():
+    """Each output dtype is cached separately."""
+    _call(device="cpu", output_dtype=torch.float32)
+    _call(device="cpu", output_dtype=torch.bfloat16)
+    assert len(_ROTARY_POS_EMBED_DEVICE_CACHE) == 2
+
+
+def test_device_cache_is_bounded_and_evicts_oldest():
+    """The device cache caps at its own, smaller, max size."""
+    assert _ROTARY_POS_EMBED_DEVICE_CACHE_MAXSIZE <= _ROTARY_POS_EMBED_CACHE_MAXSIZE
+    overshoot = _ROTARY_POS_EMBED_DEVICE_CACHE_MAXSIZE + 3
+    for frame in range(overshoot):
+        _call(rope_sizes=(2, 2, 2), start_frame=frame, device="cpu", output_dtype=torch.float32)
+        assert len(_ROTARY_POS_EMBED_DEVICE_CACHE) <= _ROTARY_POS_EMBED_DEVICE_CACHE_MAXSIZE
+    surviving = {key[0][-2] for key in _ROTARY_POS_EMBED_DEVICE_CACHE}  # start_frame slot
+    assert overshoot - 1 in surviving
+    assert 0 not in surviving
+
+
+def test_inference_mode_tables_are_not_reused_for_autograd():
+    """A table cached under inference_mode must not leak into a training forward."""
+    with torch.inference_mode():
+        inference_cos, _ = _call(device="cpu", output_dtype=torch.float32)
+    assert inference_cos.is_inference()
+
+    cos, _ = _call(device="cpu", output_dtype=torch.float32)
+    assert cos is not inference_cos and not cos.is_inference()
+    assert len(_ROTARY_POS_EMBED_DEVICE_CACHE) == 2
+    # Mirrors _apply_rotary_emb: multiplying a grad-requiring input by the table
+    # saves the table for backward, which fails for inference tensors.
+    x = torch.randn(cos.shape, requires_grad=True)
+    (x * cos).sum().backward()
+    assert x.grad is not None

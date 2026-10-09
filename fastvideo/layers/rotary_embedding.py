@@ -457,12 +457,37 @@ _ROTARY_POS_EMBED_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
 # capping memory.
 _ROTARY_POS_EMBED_CACHE_MAXSIZE = 16
 
+# Device-resident copies of the tables above, already cast to the caller's
+# compute dtype. Without them every forward re-uploads the float64 table from
+# pageable host memory (~155 MB for Wan 14B at 720p/81f), which blocks the host
+# until the GPU drains. These entries hold accelerator memory, so the bound is
+# tighter than the host cache.
+_ROTARY_POS_EMBED_DEVICE_CACHE: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
+_ROTARY_POS_EMBED_DEVICE_CACHE_MAXSIZE = 4
+
 
 def _hashable(value: Any) -> Any:
     """Return a hashable view of a scalar or sequence for use in a cache key."""
     if isinstance(value, list | tuple):
         return tuple(value)
     return value
+
+
+def _lru_get(cache: dict, key: tuple) -> Any:
+    """Return the cached value for ``key`` (or None) and mark it most recently used."""
+    cached = cache.get(key)
+    # Pop with a default: a concurrent eviction between the get() above and
+    # here would otherwise raise KeyError on the hit path.
+    if cached is not None and cache.pop(key, None) is not None:
+        cache[key] = cached
+    return cached
+
+
+def _lru_put(cache: dict, key: tuple, value: Any, maxsize: int) -> None:
+    """Insert ``value``, evicting the least-recently-used entry at capacity."""
+    if len(cache) >= maxsize:
+        cache.pop(next(iter(cache)))
+    cache[key] = value
 
 
 def get_rotary_pos_embed(
@@ -478,6 +503,8 @@ def get_rotary_pos_embed(
     dtype: torch.dtype = torch.float32,
     start_frame: int = 0,
     use_real: bool = True,
+    device: torch.device | str | None = None,
+    output_dtype: torch.dtype | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generate rotary positional embeddings for the given sizes.
@@ -493,6 +520,11 @@ def get_rotary_pos_embed(
         shard_dim: Which dimension to shard for sequence parallelism. Defaults to 0.
         do_sp_sharding: Whether to shard the positional embeddings for sequence parallelism. Defaults to False.
         use_real: If True, output full head_dim for rotate_half style RoPE. Defaults to True.
+        device: If set, return tables moved to this device and memoize that copy, so repeated
+            calls skip the host-to-device upload. Defaults to None (host tables).
+        output_dtype: If set together with device, cast the tables to this dtype after the move.
+            The tables are computed in ``dtype`` first, so the result matches
+            ``table.to(device).to(output_dtype)``. Defaults to None (keep ``dtype``).
         
     Returns:
         Tuple of (cos, sin) tensors for rotary embeddings. Shape [S, D] if use_real, [S, D/2] otherwise.
@@ -530,37 +562,51 @@ def get_rotary_pos_embed(
         start_frame,
         use_real,
     )
-    cached = _ROTARY_POS_EMBED_CACHE.get(cache_key)
-    if cached is not None:
-        # Move to most-recently-used position so the active table is not evicted
-        # when several resolutions / buckets share the process (LRU recency).
-        # Pop with a default: a concurrent eviction between the get() above and
-        # here would otherwise raise KeyError on the hit path.
-        if _ROTARY_POS_EMBED_CACHE.pop(cache_key, None) is not None:
-            _ROTARY_POS_EMBED_CACHE[cache_key] = cached
-        return cached
+    device_key = None
+    if device is not None:
+        device = torch.device(device)
+        # Tensors created under inference_mode cannot be saved for backward, so
+        # a table cached during validation must not be reused by a training
+        # forward.
+        device_key = (cache_key, device, output_dtype, torch.is_inference_mode_enabled())
+        cached = _lru_get(_ROTARY_POS_EMBED_DEVICE_CACHE, device_key)
+        if cached is not None:
+            return cached
+    elif output_dtype is not None:
+        raise ValueError("output_dtype requires device")
 
-    freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
-        rope_dim_list,
-        rope_sizes,
-        theta=rope_theta,
-        theta_rescale_factor=theta_rescale_factor,
-        interpolation_factor=interpolation_factor,
-        shard_dim=shard_dim,
-        sp_rank=sp_rank,
-        sp_world_size=sp_world_size,
-        dtype=dtype,
-        start_frame=start_frame,
-        use_real=use_real,
-    )
-    # The returned tensors are shared cache entries: callers must never mutate
-    # them in place. Note .to(device) is an identity alias when the tensor is
-    # already on the target device (e.g. CPU runs), so it does NOT guarantee a
-    # copy — treat the tables as read-only and copy before any in-place op.
-    # Reached only on a miss, so evict the least-recently-used entry at capacity.
-    if len(_ROTARY_POS_EMBED_CACHE) >= _ROTARY_POS_EMBED_CACHE_MAXSIZE:
-        _ROTARY_POS_EMBED_CACHE.pop(next(iter(_ROTARY_POS_EMBED_CACHE)))
-    _ROTARY_POS_EMBED_CACHE[cache_key] = (freqs_cos, freqs_sin)
+    # Hits move the entry to the most-recently-used position so the active
+    # table is not evicted when several resolutions / buckets share the process.
+    host_tables = _lru_get(_ROTARY_POS_EMBED_CACHE, cache_key)
+    if host_tables is None:
+        host_tables = get_nd_rotary_pos_embed(
+            rope_dim_list,
+            rope_sizes,
+            theta=rope_theta,
+            theta_rescale_factor=theta_rescale_factor,
+            interpolation_factor=interpolation_factor,
+            shard_dim=shard_dim,
+            sp_rank=sp_rank,
+            sp_world_size=sp_world_size,
+            dtype=dtype,
+            start_frame=start_frame,
+            use_real=use_real,
+        )
+        # The returned tensors are shared cache entries: callers must never
+        # mutate them in place. Note .to(device) is an identity alias when the
+        # tensor is already on the target device (e.g. CPU runs), so it does NOT
+        # guarantee a copy — treat the tables as read-only and copy before any
+        # in-place op. The device-resident copies below follow the same rule.
+        _lru_put(_ROTARY_POS_EMBED_CACHE, cache_key, host_tables, _ROTARY_POS_EMBED_CACHE_MAXSIZE)
+    if device_key is None:
+        return host_tables
+
+    # Move first, then cast, matching the order callers used before this cache
+    # so outputs stay bitwise identical.
+    freqs_cos, freqs_sin = (t.to(device) for t in host_tables)
+    if output_dtype is not None:
+        freqs_cos, freqs_sin = freqs_cos.to(output_dtype), freqs_sin.to(output_dtype)
+    _lru_put(_ROTARY_POS_EMBED_DEVICE_CACHE, device_key, (freqs_cos, freqs_sin), _ROTARY_POS_EMBED_DEVICE_CACHE_MAXSIZE)
     return freqs_cos, freqs_sin
 
 
