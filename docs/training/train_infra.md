@@ -683,11 +683,35 @@ validated full-export target; use a larger-memory host.
 
 ### Reproducibility
 
-The training entrypoint enables deterministic mode automatically:
+The training entrypoint configures cuDNN reproducibility automatically:
 
 - `torch.backends.cudnn.benchmark = False`
 - `torch.backends.cudnn.deterministic = True`
-- `torch.use_deterministic_algorithms(True)`
+
+It does not enable PyTorch's global deterministic-algorithm mode. To opt in
+through the existing Python entrypoint:
+
+```python
+import torch
+from fastvideo.train.entrypoint.train import run_training_from_config
+
+torch.use_deterministic_algorithms(True, warn_only=False)
+run_training_from_config("run.yaml")
+```
+
+FastVideo's FA2 wrappers honor this global setting, including masked and
+cross-attention backward. An explicit FA2 `deterministic=True` also remains
+effective. The backward keeps the forward's deterministic choice and checks
+the global setting again, so enabling determinism before backward cannot
+downgrade to the ordinary algorithm. Unsupported deterministic operations raise
+in strict mode. With the global setting disabled, ordinary FA2 training keeps
+its existing defaults and does not promise bitwise reproducibility. cuDNN's
+setting alone does not enable FA2 determinism. FA3/FA4 are not covered by this
+FA2 guarantee; deterministic algorithms may also cost additional memory or time.
+For `torch.compile`, enable strict mode before the forward call. PyTorch rejects
+turning it on between a compiled forward and its backward when that graph was
+created in ordinary mode. Changing the setting before a new forward call is
+supported and causes the graph to select the corresponding policy.
 
 A shared CUDA RNG generator is seeded from `training.data.seed` and threaded
 through all random operations (noise sampling, timestep sampling, etc.).
