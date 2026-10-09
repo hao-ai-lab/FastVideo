@@ -101,6 +101,6 @@ it does not start a model server. The page reads generated JSON from
 documentation build. Existing guide links open the published runbooks.
 
 See [the contributor guide](contributing/cookbook_configuration.md) for recipe
-authoring and local test commands, and [the API contract](design/serving-cookbook.md)
+authoring and local test commands, and [the API contract](cookbook/design.md)
 for using the same catalogs in another UI. The temporary demo will be removed
 when the final UI replaces it.

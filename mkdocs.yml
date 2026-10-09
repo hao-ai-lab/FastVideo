@@ -167,6 +167,7 @@ nav:
     - V1 API: getting_started/v1_api.md
   - Cookbook:
     - Overview: cookbook/index.md
+    - Design and API: cookbook/design.md
     - H3 server and playground: cookbook/openai-api.md
     - Video:
       - MiniMax H3: cookbook/minimax-h3.md
@@ -231,7 +232,6 @@ nav:
     - Debugging: utilities/debugging.md
   - Design:
     - Overview: design/overview.md
-    - Serving Cookbook: design/serving-cookbook.md
     - Training Architecture: design/training_architecture.md
     - Server Contracts:
       - Overview: design/server_contracts/index.md
