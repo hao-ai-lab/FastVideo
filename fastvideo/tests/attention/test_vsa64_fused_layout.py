@@ -2,7 +2,7 @@
 
 The fused route is gated on SM100 and GB10, but the Triton layout kernel itself
 is architecture-agnostic. Routing and layout tests therefore run on any CUDA
-GPU (the unit CI runs on L40S) with capability pinned to SM100; the actual
+GPU (the unit CI runs on L40S) with capability pinned to SM100 or GB10; the actual
 ``video_sparse_attn`` parity cases require a real SM100 or GB10 device.
 """
 
@@ -21,10 +21,10 @@ requires_sm100_or_gb10 = pytest.mark.skipif(
 )
 
 
-@pytest.fixture
-def as_sm100(monkeypatch):
-    """Pin the capability gate to SM100 so fallbacks are caused by the condition under test."""
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *args, **kwargs: (10, 0))
+@pytest.fixture(params=[(10, 0), (12, 1)], ids=["sm100", "gb10"])
+def as_supported_capability(monkeypatch, request):
+    """Pin a supported capability so fallbacks are caused by the condition under test."""
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *args, **kwargs: request.param)
 
 
 def _fused_layout(enabled: bool):
@@ -62,7 +62,7 @@ def _build(dit_shape: tuple[int, int, int]):
 
 
 @pytest.mark.parametrize("dit_shape", [(5, 5, 6), (16, 28, 52)])
-def test_vsa64_fused_layout_matches_legacy_tiles(as_sm100, tile_kernel, dit_shape):
+def test_vsa64_fused_layout_matches_legacy_tiles(as_supported_capability, tile_kernel, dit_shape):
     impl, builder, kwargs = _build(dit_shape)
     fused_metadata = builder.build(**kwargs)
     legacy_metadata = builder.build(**kwargs)
@@ -83,7 +83,7 @@ def test_vsa64_fused_layout_matches_legacy_tiles(as_sm100, tile_kernel, dit_shap
 
 
 @pytest.mark.parametrize("dit_shape", [(5, 5, 6), (16, 28, 52)])
-def test_vsa64_fused_layout_can_be_disabled(as_sm100, dit_shape):
+def test_vsa64_fused_layout_can_be_disabled(as_supported_capability, dit_shape):
     impl, builder, kwargs = _build(dit_shape)
     metadata = builder.build(**kwargs)
     sequence = metadata.total_seq_length
@@ -94,7 +94,7 @@ def test_vsa64_fused_layout_can_be_disabled(as_sm100, dit_shape):
     assert disabled.ndim == 4 and disabled.shape[1] == metadata.variable_block_sizes.numel() * 64
 
 
-def test_vsa64_fused_layout_training_falls_back(as_sm100):
+def test_vsa64_fused_layout_training_falls_back(as_supported_capability):
     impl, builder, kwargs = _build((5, 5, 6))
     metadata = builder.build(**kwargs)
     qkvg = torch.randn((4, 150, 2, 128), device="cuda", dtype=torch.bfloat16)
@@ -105,7 +105,7 @@ def test_vsa64_fused_layout_training_falls_back(as_sm100):
     assert training.requires_grad
 
 
-def test_vsa64_mismatched_metadata_uses_original_path(monkeypatch, as_sm100):
+def test_vsa64_mismatched_metadata_uses_original_path(monkeypatch, as_supported_capability):
     impl, builder, kwargs = _build((5, 5, 6))
     metadata = builder.build(**kwargs)
     qkvg = torch.empty((4, metadata.total_seq_length - 1, 2, 128), device="cuda", dtype=torch.bfloat16)
@@ -125,7 +125,7 @@ def test_vsa64_mismatched_metadata_uses_original_path(monkeypatch, as_sm100):
     assert not metadata.fused_layout_active
 
 
-def test_vsa64_fused_layout_falls_back_when_kernel_missing(monkeypatch, as_sm100):
+def test_vsa64_fused_layout_falls_back_when_kernel_missing(monkeypatch, as_supported_capability):
     impl, builder, kwargs = _build((5, 5, 6))
     metadata = builder.build(**kwargs)
     qkvg = torch.randn((4, metadata.total_seq_length, 2, 128), device="cuda", dtype=torch.bfloat16)
