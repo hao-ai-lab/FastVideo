@@ -1,16 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """The loader must not hold the whole checkpoint alive while it copies it.
 
-``hf_to_custom_state_dict`` drains the weight iterator into one dict before a
-single parameter is placed. Production safetensors values may retain
-memory-mapped shard storage, and mapped or merged parameters can own ordinary
-allocations. Keeping every source reference until loading finishes raises the
-host or unified-memory working set enough to kill a large-model load.
+The loader consumes ``iter_hf_to_custom_state_dict`` one tensor at a time:
+each source tensor is cast and placed before the next one is pulled from the
+weight iterator. Production safetensors values may retain memory-mapped shard
+storage, and since the DiT path reads straight onto the GPU, draining the
+iterator into a dict first would keep a full-precision checkpoint resident in
+full before the bf16 cast.
 
-Checking after the call proves nothing, because the dict is a local and dies
-with the frame. So these tests keep a reference to that dict from the outside
-and assert it comes back empty: if the loader iterated instead of draining,
-every source tensor would still be reachable through the reference we hold.
+These tests observe the source iterator itself: at the moment the loader pulls
+a tensor, the previously placed one must already be collectable.
 """
 from __future__ import annotations
 
@@ -52,26 +51,25 @@ def _source_tensors(scale: bool = False) -> dict[str, torch.Tensor]:
     }
 
 
-def _capture_state_dict(monkeypatch) -> dict:
-    """Hold the loader's internal dict from outside so we can inspect it after."""
-    captured: dict = {}
-    real = fsdp_load.hf_to_custom_state_dict
+def _releasing_iterator(sources: dict[str, torch.Tensor], alive_at_pull: list[list[str]]):
+    """Mirror safetensors_weights_iterator (drops each tensor as it yields) and record
+    which earlier source tensors are still reachable each time the loader pulls."""
+    refs: dict[str, weakref.ref] = {}
+    for name in list(sources):
+        gc.collect()
+        alive_at_pull.append(sorted(n for n, ref in refs.items() if ref() is not None))
+        tensor = sources.pop(name)
+        refs[name] = weakref.ref(tensor)
+        yield name, tensor
+        del tensor
 
-    def spy(*args, **kwargs):
-        custom_param_sd, reverse = real(*args, **kwargs)
-        captured["sd"] = custom_param_sd
-        return custom_param_sd, reverse
 
-    monkeypatch.setattr(fsdp_load, "hf_to_custom_state_dict", spy)
-    return captured
-
-
-def test_the_state_dict_is_drained_not_iterated(monkeypatch) -> None:
-    captured = _capture_state_dict(monkeypatch)
+def test_each_source_tensor_is_released_before_the_next_is_pulled() -> None:
+    alive_at_pull: list[list[str]] = []
 
     load_model_from_full_model_state_dict(
         _TinyModel(),
-        iter(list(_source_tensors().items())),
+        _releasing_iterator(_source_tensors(), alive_at_pull),
         torch.device("cpu"),
         torch.bfloat16,
         strict=False,
@@ -79,29 +77,25 @@ def test_the_state_dict_is_drained_not_iterated(monkeypatch) -> None:
         training_mode=False,
     )
 
-    assert captured["sd"] == {}, ("the loader finished with the checkpoint still in hand; on a real model that is the "
-                                  "whole file held resident for the length of the copy")
+    assert alive_at_pull == [[], [], []], ("the loader pulled a tensor while an earlier one was still in hand; on a "
+                                           "real model that is the checkpoint accumulating on the GPU")
 
 
 @pytest.mark.parametrize(
     ("skipped_name", "strict"),
     (("metadata._extra_state", True), ("unexpected.weight", False)),
 )
-def test_skipped_source_entry_is_popped_before_continue(monkeypatch, skipped_name: str, strict: bool) -> None:
-    """Both skip branches must drop their source before advancing the loop."""
-    captured = _capture_state_dict(monkeypatch)
+def test_skipped_source_entry_is_not_retained(monkeypatch, skipped_name: str, strict: bool) -> None:
+    """Both skip branches must drop their source once the loader moves on."""
     warning_names = []
-
-    def assert_popped_before_warning(_message, warned_name) -> None:
-        assert warned_name not in captured["sd"]
-        warning_names.append(warned_name)
-
-    monkeypatch.setattr(fsdp_load.logger, "warning", assert_popped_before_warning)
-    sources = {**_source_tensors(), skipped_name: torch.ones(8, 8)}
+    monkeypatch.setattr(fsdp_load.logger, "warning", lambda _message, name: warning_names.append(name))
+    sources = {skipped_name: torch.ones(8, 8), **_source_tensors()}
+    skipped_ref = weakref.ref(sources[skipped_name])
+    alive_at_pull: list[list[str]] = []
 
     load_model_from_full_model_state_dict(
         _TinyModel(),
-        iter(sources.items()),
+        _releasing_iterator(sources, alive_at_pull),
         torch.device("cpu"),
         torch.bfloat16,
         strict=strict,
@@ -110,35 +104,10 @@ def test_skipped_source_entry_is_popped_before_continue(monkeypatch, skipped_nam
     )
 
     assert warning_names == [skipped_name]
-    assert captured["sd"] == {}
-
-
-def test_source_tensors_become_collectable(monkeypatch) -> None:
-    """The reason the drain matters: the tensors have to actually go."""
-    captured = _capture_state_dict(monkeypatch)
-    sources = _source_tensors()
-    refs = {name: weakref.ref(tensor) for name, tensor in sources.items()}
-
-    # Mirror safetensors_weights_iterator, which drops each tensor as it yields.
-    def iterator():
-        while sources:
-            yield sources.popitem()
-
-    load_model_from_full_model_state_dict(
-        _TinyModel(),
-        iterator(),
-        torch.device("cpu"),
-        torch.bfloat16,
-        strict=False,
-        param_names_mapping=_identity_mapping,
-        training_mode=False,
-    )
-
-    # captured["sd"] is still in scope here on purpose: it is the reference that
-    # would keep them alive if the loader had not popped.
+    # The loop variable keeps a skipped entry alive for one pull; it must be gone by the one after.
+    assert skipped_name not in alive_at_pull[2]
     gc.collect()
-    alive = sorted(name for name, ref in refs.items() if ref() is not None)
-    assert not alive, f"still reachable through the loader's state dict: {alive}"
+    assert skipped_ref() is None
 
 
 def test_weights_still_land_in_the_model() -> None:
