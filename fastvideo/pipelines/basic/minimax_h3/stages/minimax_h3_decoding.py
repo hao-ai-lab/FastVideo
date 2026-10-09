@@ -67,6 +67,25 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
     def __init__(self, vae: AutoencoderKLMiniMaxH3 | None) -> None:
         super().__init__()
         self.vae = vae
+        self._output_buffer: tuple[tuple[tuple[int, ...], bool], torch.Tensor] | None = None
+
+    def _pixel_buffer(self, shape: tuple[int, ...], pin_memory: bool) -> torch.Tensor:
+        """The CPU FP32 pixel buffer, reused across requests of the same geometry.
+
+        The stage returns a uint8 copy, so the buffer never escapes. Reuse matters on
+        unified-memory GPUs (DGX Spark): device-to-host copies into never-touched pageable
+        pages fault through the driver at ~150 MB/s (+3-7 s per 480p-768p clip whenever the
+        allocator hands back fresh pages), while populated pages copy at full speed.
+        ``zero_`` populates a new buffer from the CPU once.
+        """
+        key = (tuple(shape), bool(pin_memory))
+        if self._output_buffer is None or self._output_buffer[0] != key:
+            self._output_buffer = None
+            buffer = allocate_cpu_tensor_with_pin_fallback(shape, dtype=torch.float32, pin_memory=pin_memory)
+            if not buffer.is_pinned():
+                buffer.zero_()
+            self._output_buffer = (key, buffer)
+        return self._output_buffer[1]
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
@@ -139,11 +158,8 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
 
             output = None
             if is_output_rank:
-                output = allocate_cpu_tensor_with_pin_fallback(
-                    self.vae.decoded_pixel_shape(latents.shape),
-                    dtype=torch.float32,
-                    pin_memory=fastvideo_args.pin_cpu_memory,
-                )
+                output = self._pixel_buffer(tuple(self.vae.decoded_pixel_shape(latents.shape)),
+                                            fastvideo_args.pin_cpu_memory)
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
             with (
