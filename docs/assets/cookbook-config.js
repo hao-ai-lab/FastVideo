@@ -136,7 +136,7 @@
   /**
    * Serialize JSON-shaped configuration data as YAML without a browser dependency.
    * Nested mappings use indentation; arrays use JSON syntax, which YAML accepts.
-   * All strings use JSON quoting so empty text and values such as "false" stay strings.
+   * String values and mapping keys use JSON quoting so YAML 1.1 readers preserve their types.
    */
   function yamlValue(value) {
     if (typeof value === "number") {
@@ -158,7 +158,7 @@
   function toYaml(value, depth = 0) {
     const indent = "  ".repeat(depth);
     return Object.entries(value).map(([key, item]) => {
-      const yamlKey = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? key : JSON.stringify(key);
+      const yamlKey = JSON.stringify(key);
       const isMapping = item !== null && typeof item === "object" && !Array.isArray(item);
       if (isMapping && Object.keys(item).length) return `${indent}${yamlKey}:\n${toYaml(item, depth + 1)}`;
       return `${indent}${yamlKey}: ${yamlValue(item)}\n`;
@@ -179,7 +179,9 @@
         websocketUrl: `ws://${host}:${server.port}/v1/stream`,
       };
     }
-    const body = { model: server.served_model_name || catalog.model.id, prompt: "A river flowing through a peaceful forest" };
+    const components = config.generator?.pipeline?.components;
+    const model = components?.lora_path ? components.lora_nickname : server.served_model_name || catalog.model.id;
+    const body = { ...(model === undefined ? {} : { model }), prompt: "A river flowing through a peaceful forest" };
     if (catalog.workload === "i2v") body.input_reference = "/absolute/path/to/first-frame.png";
     const argv = ["curl", "--fail-with-body", `http://${host}:${server.port}/v1/videos/sync`,
       "-H", "Content-Type: application/json", "--data", JSON.stringify(body)];

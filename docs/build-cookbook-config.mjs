@@ -249,7 +249,6 @@ export function buildCatalogs({ root = ROOT, recipesDir = join(root, "docs/cookb
         controls: expandOptions(merged, deployment.options, runtime), requirements: clone(requirements),
         guide: guideLink(Object.hasOwn(deployment, "guide") ? deployment.guide : manifest.guide, root),
       };
-      // Share the browser's authored-field and topology checks. Never materialize schema defaults in YAML.
       try { resolveConfig(catalog); } catch (failure) { throw new Error(`${id}: ${failure.message}`); }
       catalogs.push(catalog);
     }

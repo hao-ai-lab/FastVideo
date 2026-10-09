@@ -55,7 +55,6 @@
     const fieldInputs = new Map();
 
     function updateControlLimits() {
-      // Preview limits even when a GPU edit temporarily invalidates an existing parallel degree.
       for (const { path, schema } of cookbook.getOptions(catalog, catalog.base_config, selections)) {
         const input = fieldInputs.get(path);
         if (input?.type !== "number") continue;

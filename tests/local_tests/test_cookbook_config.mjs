@@ -6,6 +6,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 const require = createRequire(import.meta.url);
+const { parse } = createRequire(new URL("../../docs/package.json", import.meta.url))("yaml");
 const { loadIndex, loadDeployment, getOptions, resolveConfig } =
   require("../../docs/assets/cookbook-config.js");
 
@@ -176,6 +177,18 @@ test("sample requests follow effective alias, host and port without repinning re
   assert.equal(resolveConfig(image).clientRequest.input_reference, "/absolute/path/to/first-frame.png");
 });
 
+test("LoRA sample requests use the startup adapter instead of an edited server alias", () => {
+  const data = catalog();
+  const components = { lora_path: "/models/adapter.safetensors", lora_nickname: "my-adapter" };
+  data.base_config.generator.pipeline.components = components;
+  const edits = { "server.served_model_name": "different-server-name" };
+  assert.equal(resolveConfig(data, edits).clientRequest.model, "my-adapter");
+  delete components.lora_nickname;
+  assert.equal(Object.hasOwn(resolveConfig(data, edits).clientRequest, "model"), false);
+  components.lora_path = null;
+  assert.equal(resolveConfig(data, edits).clientRequest.model, "different-server-name");
+});
+
 test("environment variables are present and shell quoted without evaluation", () => {
   const data = catalog();
   data.env = { BACKEND: "it's literal $(touch /never-run)" };
@@ -195,11 +208,23 @@ test("YAML preserves literal types and scientific notation", () => {
     return resolveConfig(data).yaml;
   };
   assert.equal(yaml({ off: false, zero: 0, empty: "", auto: null, list: ["a", true] }),
-    'off: false\nzero: 0\nempty: ""\nauto: null\nlist: ["a",true]\n');
+    '"off": false\n"zero": 0\n"empty": ""\n"auto": null\n"list": ["a",true]\n');
   assert.equal(yaml({ small: 1e-7, negative: -1e-7, text: "1e-7" }),
-    'small: 1.0e-7\nnegative: -1.0e-7\ntext: "1e-7"\n');
-  // Match the catalog builder's numeric precision checks for browser edits too.
+    '"small": 1.0e-7\n"negative": -1.0e-7\n"text": "1e-7"\n');
   assert.throws(() => yaml({ large: 1e21 }), /safe integer/);
+});
+
+test("YAML 1.1 preserves ambiguous string keys in hidden settings and editable objects", () => {
+  const data = catalog();
+  const values = Object.fromEntries(["off", "on", "yes", "no", "true", "false", "null", "NULL", "~", "01", "a:b", 'a"b']
+    .map((key, index) => [key, [false, 0, null, "yes"][index % 4]]));
+  const path = "generator.pipeline.experimental.custom";
+  data.base_config.generator.pipeline.experimental.hidden = { ...values, nested: values, list: [values] };
+  data.controls.push({ path, schema: { type: "object" } });
+  for (const edits of [{}, { [path]: values }]) {
+    const result = resolveConfig(data, edits);
+    assert.deepEqual(parse(result.yaml, { version: "1.1" }), result.config);
+  }
 });
 
 test("caller edits, catalog and resolved configuration do not share nested values", () => {

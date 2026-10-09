@@ -132,10 +132,10 @@ test("model and deployment selectors reset edits, update runtime guidance and cl
   ]);
   control("server.port").value = "9001";
   control("server.port").trigger("input");
-  assert.match(code("yaml"), /port: 9001/);
+  assert.match(code("yaml"), /"port": 9001/);
   element("deployment-picker").value = "alpha/mlx-rest";
   await element("deployment-picker").trigger("change");
-  assert.match(code("yaml"), /port: 8000/);
+  assert.match(code("yaml"), /"port": 8000/);
   assert.match(code("command"), /python -m fastvideo.entrypoints.openai.mlx_server/);
   assert.equal(element("install").textContent, "MLX REST installation guide");
   assert.equal(element("topology").textContent, "Hardware family: Apple Silicon.");
@@ -151,7 +151,7 @@ test("model and deployment selectors reset edits, update runtime guidance and cl
   control("generator.vae_dtype").value = "2";
   control("generator.vae_dtype").trigger("change");
   assert.equal(element("output").hidden, false);
-  assert.match(code("yaml"), /vae_dtype: "bf16"/);
+  assert.match(code("yaml"), /"vae_dtype": "bf16"/);
   element("model-picker").value = "image";
   await element("model-picker").trigger("change");
   assert.deepEqual(element("deployment-picker").children.map((item) => item.value), ["image/cuda-rest"]);
@@ -161,7 +161,7 @@ test("model and deployment selectors reset edits, update runtime guidance and cl
   control("server.port").value = "9003";
   control("server.port").trigger("input");
   element("reset").trigger("click");
-  assert.match(code("yaml"), /port: 8000/);
+  assert.match(code("yaml"), /"port": 8000/);
   failures.add("alpha/cuda-rest");
   element("model-picker").value = "alpha";
   await element("model-picker").trigger("change");
@@ -232,8 +232,8 @@ test("GPU edits update degree bounds in place while invalid topology waits for t
   sp.value = "2";
   sp.trigger("input");
   assert.equal(element("output").hidden, false);
-  assert.match(code("yaml"), /num_gpus: 2/);
-  assert.match(code("yaml"), /sp_size: 2/);
+  assert.match(code("yaml"), /"num_gpus": 2/);
+  assert.match(code("yaml"), /"sp_size": 2/);
   element("reset").trigger("click");
   assert.equal(control("generator.engine.parallelism.sp_size").max, 4);
   assert.equal(control("generator.engine.parallelism.sp_size").value, 4);
