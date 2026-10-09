@@ -12,7 +12,7 @@
 #   not pick up ``yunchang`` as a runtime dependency. Only ``AttnType.FA`` is
 #   implemented.
 # - wiring into FastVideo's Ring Attention process group happens in
-#   fastvideo/attention/layer.py.
+#   fastvideo/attention/ring_attention.py.
 
 import torch
 import torch.distributed as dist

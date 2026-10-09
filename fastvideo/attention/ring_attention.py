@@ -1,21 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Ring Attention (optionally combined with Ulysses as the USP hybrid).
+"""Ring Attention, optionally combined with Ulysses as the USP hybrid.
 
-Owns every Ring/USP-specific decision: construction-time validation of a
-layer's shape against the process-wide Ring topology, the Ulysses-within-ring
-all-to-all, Ring-local RoPE slicing, and the direct call into the vendored
-Ring FlashAttention kernel -- bypassing the local-kernel-backend abstraction
-(``fastvideo.attention.selector`` / ``AttentionImpl``) entirely, since that
-abstraction resolves a single-GPU math kernel once per component, while Ring
-is a distributed strategy layered above it: it picks *which* backend runs
-per shard (today hard-restricted to FLASH_ATTN) and changes RoPE application,
-so it cannot also be a member of that registry without a circular
-relationship.
-
-``fastvideo.attention.layer.DistributedAttention`` delegates to an instance
-of this class exactly the way it delegates local-kernel choice to
-``self.attn_impl`` -- Ring is a second delegate with the same shape, not a
-code path inlined into the attention layer.
+Ring is a distributed strategy layered above the local-kernel backends, so it
+calls the vendored Ring FlashAttention kernel directly instead of going
+through ``AttentionImpl``; ``AttentionImpl.forward`` would only attend within
+the local shard and does not return the softmax LSE that Ring merges.
 """
 
 from __future__ import annotations
@@ -53,14 +42,7 @@ class RingAttention:
         causal: bool,
         backend: AttentionBackendEnum,
     ) -> RingAttention | None:
-        """Return a configured ``RingAttention``, or ``None`` if Ring Attention
-        is disabled (``ring_size == 1``) for the current process.
-
-        This is the only place outside this module that reads the
-        process-wide Ring topology (``DistributedAttention`` itself no longer
-        does) -- everything else about Ring is decided here, at construction
-        time, from the layer's own shape.
-        """
+        """Return a ``RingAttention``, or ``None`` when ``ring_size == 1``."""
         if get_ring_size() <= 1:
             return None
         return cls(num_heads=num_heads,
@@ -223,12 +205,7 @@ class RingAttention:
 
         batch_size, local_seq_len, _, _ = q.shape
 
-        # Ulysses step (skipped entirely when ulysses_size == 1, i.e. pure
-        # Ring): redistribute heads -> sequence within this rank's Ulysses
-        # subgroup so that each Ring rank holds one full, contiguous Ring
-        # chunk. The stack-into-one-all-to-all-then-chunk below costs a real
-        # copy of Q/K/V, so only pay it when there is an actual Ulysses
-        # subgroup to redistribute within.
+        # Skip the cat/chunk copy in pure Ring, where there is no Ulysses group.
         if get_ulysses_group() is not None:
             qkv = torch.cat([q, k, v], dim=0)
             qkv = ulysses_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
@@ -241,14 +218,8 @@ class RingAttention:
             q = _apply_rotary_emb(q, local_cos, local_sin, is_neox_style=False)
             k = _apply_rotary_emb(k, local_cos, local_sin, is_neox_style=False)
 
-        # Ring Attention calls the distributed ring kernel directly rather than
-        # a local-kernel-backend's ``AttentionImpl.forward``: that runs plain
-        # (non-distributed) FlashAttention over whatever it is given, which
-        # would silently compute attention within the local shard only.
-        # ``preprocess_qkv`` / ``postprocess_output`` are identity for the
-        # FlashAttention backend (the only backend Ring supports, enforced in
-        # ``__init__``), so skipping them here does not diverge from the
-        # Ulysses path.
+        # Skipping attn_impl's preprocess_qkv/postprocess_output is safe: both
+        # are identity for FLASH_ATTN, the only backend allowed in __init__.
         ring_group = get_ring_group()
         if ring_group is None:
             raise RuntimeError("Ring Attention is enabled, but the Ring process group is not initialized.")
@@ -264,8 +235,6 @@ class RingAttention:
             original_seq_len=original_seq_len,
         )
 
-        # Ulysses step back (no-op when ulysses_size == 1): redistribute
-        # sequence -> heads to restore the original per-rank shard shape.
         output = ulysses_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
 
         if output.shape[:2] != (batch_size, local_seq_len):
