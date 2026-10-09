@@ -93,6 +93,7 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "vae_cpu_offload",
     "pin_cpu_memory",
     "enable_torch_compile",
+    "enable_causal_cuda_graph",
     "torch_compile_kwargs",
     "lora_path",
     "lora_strength",
@@ -1152,6 +1153,8 @@ class VideoGenerator:
             "video_path": output_path if save_to_disk else None,
             "peak_memory_mb": output_batch.extra.get("peak_memory_mb"),
         }
+        if "causal_cuda_graph" in output_batch.extra:
+            result["causal_cuda_graph"] = output_batch.extra["causal_cuda_graph"]
 
         return result
 

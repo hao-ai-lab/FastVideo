@@ -32,6 +32,7 @@ surfaces:
       pin_cpu_memory: generator.engine.offload.pin_cpu_memory
       lazy_module_load: generator.engine.offload.lazy_module_load
       enable_torch_compile: generator.engine.compile.enabled
+      enable_causal_cuda_graph: generator.engine.enable_causal_cuda_graph
       enable_torch_compile_text_encoder: generator.engine.compile.text_encoder_enabled
       enable_torch_compile_vae: generator.engine.compile.vae_enabled
       enable_torch_compile_audio_vae: generator.engine.compile.audio_vae_enabled
@@ -149,6 +150,9 @@ surfaces:
       scheduler_step_in_fp32: "Runtime scheduler precision toggle; not part of the public typed inference API."
 
   pipeline_config_extensions:
+    moved:
+      causal_local_attn_size: generator.pipeline.experimental.pipeline_config.causal_local_attn_size
+      causal_rope_cache_policy: generator.pipeline.experimental.pipeline_config.causal_rope_cache_policy
     preset_owned:
       audio_encoder_precision:
         sources:

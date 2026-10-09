@@ -518,6 +518,46 @@ print(f"compiled steady-state: {time.perf_counter() - t0:.2f}s")
 See `examples/inference/optimizations/torch_compile_example.py` for a
 baseline-vs-compile A/B with the warmup correctly excluded.
 
+## Causal Wan CUDA graphs
+
+This option records GPU operations and reuses them during video generation.
+It is off by default. Short videos can be slower, longer videos may be a
+little faster, and GPU memory use is higher. Measure it on your own setup.
+
+Run the example with the option on, then off:
+
+```bash
+python examples/inference/optimizations/causal_cuda_graph_example.py
+python examples/inference/optimizations/causal_cuda_graph_example.py --no-cuda-graph
+
+fastvideo generate --config examples/inference/optimizations/causal_cuda_graph.yaml
+fastvideo generate --config examples/inference/optimizations/causal_cuda_graph.yaml \
+  --generator.engine.enable_causal_cuda_graph false
+```
+
+For your own config, set `generator.engine.enable_causal_cuda_graph` to `true`.
+The example and YAML file include the other required settings:
+
+- One CUDA GPU and one causal Wan transformer, without distributed execution.
+- Transformer CPU offload, layerwise offload, and both compile options turned off.
+- A fixed attention window large enough for the first frames kept in the cache
+  plus one new chunk.
+- `rope_cache_policy="relativistic"`, with the same frame size throughout a request.
+
+If these conditions are not met, FastVideo logs the reason and runs normally.
+
+Graphs start after the attention cache fills. The first step makes room for
+new frames; later steps and the clean-frame update write to the same slots.
+The first frames kept in the cache stay in place. These three operations have
+separate recordings, reused only within that request. Cache counters update
+after each replay.
+
+Compare on and off with the same model, prompt, seed, and settings. Changing
+the attention window or position policy can change the output. Include graph
+recording time and check GPU memory use. Short clips may finish before graphs
+start; the example prints recording and replay counts so you can check.
+See the [performance guide](../contributing/performance_benchmarks.md).
+
 ## Benchmarking different optimizations
 
 To benchmark backend performance, generate the same prompt with the same seed and compare end-to-end generation times:
