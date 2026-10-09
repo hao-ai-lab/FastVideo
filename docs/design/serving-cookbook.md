@@ -52,6 +52,12 @@ For local assets, run `npm ci --prefix docs` and
 standalone demo. `mkdocs build` and `mkdocs serve` do not regenerate catalogs;
 rerun the Node build when shared options, manifests or baseline YAML change.
 
+The npm `pretest:cookbook` and `prebuild:catalog` hooks first bundle the validator
+from `docs/js/cookbook-validator.js` and the locked dependencies. Both
+`docs/assets/cookbook-validator.js` and `cookbook-validator.LICENSE.txt` are
+Git-ignored build outputs, published together by MkDocs. Direct Node CLI use
+requires `npm run build:validator --prefix docs` first.
+
 The small index contains no configurations or schemas:
 
 ```text

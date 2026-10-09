@@ -6,9 +6,10 @@
  * exclusive bounds, and if/then dependencies. No FastVideo rules live here.
  * Values come from the native baseline and explicit edits; validation never inserts defaults or changes data.
  *
- * Run `npm run build:validator --prefix docs` after editing this file or the
- * pinned dependencies. The result is a self-contained browser asset, with no
- * CDN or Node requirement for readers.
+ * The npm catalog-build and test commands build this source automatically.
+ * `npm run build:validator --prefix docs` also builds it independently. The JS
+ * bundle and license notices are Git-ignored outputs published together with
+ * the site, with no CDN or Node requirement for readers.
  */
 import Ajv2020 from "ajv/dist/2020.js";
 

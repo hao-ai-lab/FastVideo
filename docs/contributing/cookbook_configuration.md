@@ -207,7 +207,7 @@ Run from the repository root:
 
 ```bash
 npm ci --prefix docs
-node docs/build-cookbook-config.mjs
+npm run build:catalog --prefix docs
 python -m http.server 8195 --bind 127.0.0.1
 ```
 
@@ -229,9 +229,12 @@ Review the referenced serving example and its configuration documentation when
 changing option definitions. Include other edited files in pre-commit and add
 Node checks for unusual requirements.
 
-Generated catalogs under `docs/assets/cookbook-config/` are ignored by Git:
-never hand-edit or commit them. `mkdocs build` and `mkdocs serve` include generated
-catalogs without regenerating them; rerun the Node build after source changes.
+The npm build and test commands automatically rebuild the validator first.
+Catalogs under `docs/assets/cookbook-config/`, `docs/assets/cookbook-validator.js`
+and its generated license notices are ignored by Git: never hand-edit or commit
+them. MkDocs publishes the validator and notices together. `mkdocs build` and
+`mkdocs serve` include generated catalogs without regenerating them; rerun the
+Node build after source changes.
 The normal `.github/workflows/infra-docs.yml` docs job installs only Node and
 MkDocs dependencies, generates catalogs, and builds the static site. Invalid
 metadata blocks deployment. `options.yaml` and recipe manifests are source-only
@@ -247,10 +250,13 @@ Preview the complete catalog for a deployment as YAML before generating JSON:
 
 ```bash
 npm ci --prefix docs
+npm run build:validator --prefix docs
 node docs/build-cookbook-config.mjs --preview fasth3-8step/cuda-rest
 ```
 
-The ID is exactly `<model-key>/<deployment-key>`: the recipe filename without
+The direct Node CLI needs the validator built first; npm build/test commands
+perform that preparation automatically. The ID is exactly
+`<model-key>/<deployment-key>`: the recipe filename without
 `.yaml`, followed by a key under its `deployments` map. To save the preview:
 
 ```bash

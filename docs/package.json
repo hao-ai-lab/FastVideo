@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "build:validator": "node build-validator.mjs",
+    "prebuild:catalog": "npm run build:validator",
     "build:catalog": "node build-cookbook-config.mjs",
+    "pretest:cookbook": "npm run build:validator",
     "test:cookbook": "node --test ../tests/local_tests/test_cookbook_config.mjs ../tests/local_tests/test_cookbook_config_metadata.mjs ../tests/local_tests/test_cookbook_config_integration.mjs ../tests/local_tests/test_cookbook_demo.mjs"
   },
   "dependencies": {

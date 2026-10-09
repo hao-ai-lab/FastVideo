@@ -57,9 +57,10 @@ eggs/
 site/
 docs/assets/cookbook-serving.json
 docs/assets/cookbook-config/
+docs/assets/cookbook-validator.js
+docs/assets/cookbook-validator.LICENSE.txt
 examples/serving/clients/node_modules/
 docs/node_modules/
-!docs/assets/cookbook-validator.LICENSE.txt
 docs/getting_started/examples/
 docs/examples/
 docs/inference/examples/

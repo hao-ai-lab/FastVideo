@@ -9,7 +9,7 @@ This directory contains the FastVideo documentation built with MkDocs.
 uv pip install -r requirements-mkdocs.txt
 npm ci --prefix docs
 
-# Generate cookbook catalogs
+# Build the validator and generate cookbook catalogs
 npm run build:catalog --prefix docs
 
 # Serve docs with live reload (recommended for development)
@@ -23,6 +23,10 @@ Run these commands from the repository root. Catalog generation uses authored
 YAML and Node dependencies; it does not import FastVideo or install model runtime
 dependencies. `mkdocs build` and `mkdocs serve` use the generated files without
 regenerating them. Rerun `build:catalog` after changing cookbook sources.
+The npm `prebuild:catalog` and `pretest:cookbook` hooks automatically build the
+validator before catalog generation and tests, including in CI. Its generated
+`docs/assets/cookbook-validator.js` and `cookbook-validator.LICENSE.txt` are
+Git-ignored and published together with the site; do not hand-edit or commit them.
 
 ## View the docs
 
@@ -77,10 +81,10 @@ Generate catalogs from the repository root:
 
 ```bash
 npm ci --prefix docs
-node docs/build-cookbook-config.mjs
+npm run build:catalog --prefix docs
 ```
 
-`npm run build:catalog --prefix docs` runs the same command. Rerun it whenever
+This command builds the validator first. Rerun it whenever
 shared options, recipe manifests or baseline YAML change. Then `mkdocs build`
 or `mkdocs serve` includes the generated assets. Generation loads no model
 weights and performs no inference.
