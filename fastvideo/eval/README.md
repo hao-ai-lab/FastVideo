@@ -47,7 +47,7 @@ ignored):
 | `audio.kl_divergence` | yes | `audio` (path), `reference_audio` (path) |
 | `audio.frechet_distance` | **set-vs-set** | `audio` (path), `reference_audio` (path) — accumulated across ≥2 samples; `corpus["audio.frechet_distance"]` carries the score |
 | `audio.wer` | yes | `audio` (path), `reference_text` (str) or `text_prompt` (str) |
-| `audio.desync` | yes | `video` (decoded tensor or path), `audio` (path) |
+| `audio.desync` | yes | `video` (decoded tensor or path), `audio` (path), `fps` |
 | `audio.imagebind_score` | yes | `video_path` (str) **and** `audio` (path) — needs the path, not the pool-decoded tensor, because ImageBind's preprocessing decodes its own clips |
 
 `audio.frechet_distance` is the only set-vs-set metric. The kwargs
