@@ -138,3 +138,12 @@ cd FastVideo</code></pre>
       <p>Both recipes map to checked-in FastVideo examples and recorded single-GPU B200 runs. The image-to-video run also records 10,365.89 MB peak GPU memory. These measurements describe the recorded runs; they are not minimum hardware requirements.</p>
   </div>
 </details>
+
+## Sequence parallel inference
+
+For dense inference on two GPUs, set:
+
+    generator = VideoGenerator.from_pretrained(
+        "kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s-Diffusers",
+        num_gpus=2, sp_size=2, tp_size=1, use_fsdp_inference=False,
+    )
