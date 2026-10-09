@@ -221,6 +221,7 @@ class LTX2DenoisingStage(PipelineStage):
         num_inference_steps_override: int | None = None,
         force_guidance_scale: float | None = None,
         initial_audio_latents_key: str | None = "ltx2_audio_latents",
+        refine_stage: bool = False,
     ) -> None:
         super().__init__()
         self.transformer = transformer
@@ -228,12 +229,21 @@ class LTX2DenoisingStage(PipelineStage):
         self.num_inference_steps_override = num_inference_steps_override
         self.force_guidance_scale = force_guidance_scale
         self.initial_audio_latents_key = initial_audio_latents_key
+        self.refine_stage = refine_stage
 
     def forward(
         self,
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
+        # The refine stages are built from the load-time args, but callers
+        # such as training validation pass their own args to forward. Like
+        # the refine init/upsample/LoRA stages, skip when refinement is off
+        # there; otherwise the finished stage-1 latents would be denoised
+        # again from the stage-2 sigma as if they were still noisy.
+        if self.refine_stage and not fastvideo_args.ltx2_refine_enabled:
+            return batch
+
         if batch.latents is None:
             raise ValueError("Latents must be provided before denoising.")
 
