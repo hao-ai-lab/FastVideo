@@ -60,7 +60,9 @@ device cannot run it.
 """
 
 import functools
+import itertools
 import math
+import weakref
 from dataclasses import dataclass
 from typing import Any
 
@@ -155,6 +157,32 @@ def _h3_vsa_sm100a_from_mask_compat_fake(
 ) -> torch.Tensor:
     del k, v, block_map, variable_block_sizes
     return torch.empty_like(q)
+
+
+# Impls prepared for regional compile; the key is a CPU tensor so every block shares one graph.
+_REGIONAL_VSA_IMPLS: "weakref.WeakValueDictionary[int, MiniMaxH3VSAImpl]" = weakref.WeakValueDictionary()
+_REGIONAL_VSA_KEYS = itertools.count()
+
+
+@torch.library.custom_op("fastvideo::h3_vsa_packed_attention", mutates_args=())
+def _h3_vsa_packed_attention(qkvg: torch.Tensor, impl_key: torch.Tensor, has_gate: bool) -> torch.Tensor:
+    """Tile, attend and untile on the eager route, reading per-request metadata at run time."""
+    from fastvideo.forward_context import get_forward_context
+
+    impl = _REGIONAL_VSA_IMPLS[int(impl_key)]
+    metadata = get_forward_context().attn_metadata
+    tiled = impl.preprocess_qkv(qkvg, metadata)
+    if has_gate:
+        query, key, value, gate = tiled.chunk(4, dim=0)
+    else:
+        (query, key, value), gate = tiled.chunk(3, dim=0), None
+    return impl.postprocess_output(impl.forward(query, key, value, gate, metadata), metadata)
+
+
+@torch.library.register_fake("fastvideo::h3_vsa_packed_attention")
+def _h3_vsa_packed_attention_fake(qkvg: torch.Tensor, impl_key: torch.Tensor, has_gate: bool) -> torch.Tensor:
+    del impl_key
+    return qkvg.new_empty((qkvg.shape[0] // (4 if has_gate else 3), *qkvg.shape[1:]))
 
 
 def _sm100a_has_compile_safe_mask_route(sm100a_mod: Any) -> bool:
@@ -566,6 +594,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # request-time env/probe/fallback behavior; only Dynamo capture reads
         # the prepared, static route.
         self._regional_compile_sm100a_enabled: bool | None = None
+        self._regional_impl_key: torch.Tensor | None = None
         # Tile-128 route per (device, dtype, head size): None when the CUDA
         # kernel can run it, else why not. The kernel's predicate otherwise
         # depends only on the tile-128 buffer contract (contiguous BHSD,
@@ -620,9 +649,19 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 getattr(_sm100a, "block_sparse_attn_sm100a_from_mask", None)) else
                      "FastVideo compatibility mask adapter")
             logger.info_once(f"VSA-H3 regional compile mask route: {route}")
+            if self._regional_impl_key is None:
+                key = next(_REGIONAL_VSA_KEYS)
+                _REGIONAL_VSA_IMPLS[key] = self
+                self._regional_impl_key = torch.tensor(key, dtype=torch.int64)
         if requested and reason is not None:
             logger.warning_once(f"VSA-H3 regional compile is unavailable and will stay eager: {reason}")
         return reason
+
+    def packed_attention(self, qkvg: torch.Tensor, has_gate: bool) -> torch.Tensor | None:
+        """Run tile + attention + untile as one opaque op; None outside a prepared no-grad capture."""
+        if self._regional_impl_key is None or torch.is_grad_enabled():
+            return None
+        return torch.ops.fastvideo.h3_vsa_packed_attention(qkvg, self._regional_impl_key, has_gate)
 
     def tile(self, x: torch.Tensor, attn_metadata: MiniMaxH3VSAMetadata) -> torch.Tensor:
         """Scatter rows into the padded tile buffer (pad positions stay zero).
