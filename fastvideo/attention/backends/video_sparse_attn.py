@@ -161,7 +161,6 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     # Maps padded tile positions to input tokens; -1 marks padding. The map
     # shares this metadata's fixed partition and device across layer calls.
     fused_tile_source_index: torch.Tensor | None = None
-    # Records the most recent preprocessing layout for forward().
     fused_layout_active: bool = False
 
 
