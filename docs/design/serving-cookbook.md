@@ -17,7 +17,7 @@ the docs independently of that preview.
 | `docs/cookbook/options.yaml` | Authored common schemas, runtime metadata, workloads and runtime option overrides |
 | `docs/cookbook/recipes/<model-key>.yaml` | Model title and deployments: runtime, workload, baseline, controls, schema overrides, environment, requirements and optional guide |
 | `docs/build-cookbook-config.mjs` | Validate authored metadata, merge schema overrides, expand selected paths and publish static catalogs |
-| Runtime Python/Pydantic definitions | Native behavior and independent round-trip checks; no docs-build imports |
+| Existing serving examples and configuration documentation | Author review references for native behavior; no docs-build imports |
 | `docs/assets/cookbook-config.js` | Load metadata, expose option values, resolve YAML and commands |
 | `examples/cookbook/cookbook-demo.js` | Temporary form, download buttons and guide links |
 
@@ -100,7 +100,7 @@ per-deployment JSON contract. The metadata authority changes from exported
 Python/Pydantic definitions to authored YAML schemas, so docs builds need only
 Node and MkDocs dependencies. That removes runtime imports from publication but
 makes schema drift an explicit maintenance responsibility, checked separately
-against native parsers.
+by reviewing existing serving examples and configuration documentation.
 
 ## Shared JavaScript API
 
@@ -212,9 +212,9 @@ generated instructions reflect edits.
 Catalog generation and browser checks need only Node. They cover authored schema
 validation and composition, baseline preservation, explicit/inherited values,
 environment quoting, public API behavior, launch commands and selection races.
-Independent Python round-trip tests check generated YAML against native parsers
-in a FastVideo configuration environment; they stay outside the docs build.
-These checks help detect drift but do not prove server startup, runtime success
-or GPU compatibility. No weights or GPU inference are required. A new runtime
+These authored-schema and browser checks do not establish native runtime
+validity, server startup or GPU compatibility. Authors review existing serving
+examples and configuration documentation to keep option definitions aligned.
+No weights or GPU inference are required. A new runtime
 needs metadata, option schemas and tests, plus JavaScript support if it adds a
 launch protocol; ordinary deployment additions remain data-only.

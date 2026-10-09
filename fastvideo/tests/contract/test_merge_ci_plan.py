@@ -23,8 +23,6 @@ def test_docs_only_merge_adds_no_gpu_lanes():
         "docs/contributing/testing.md",
         "README.md",
         "requirements-mkdocs.txt",
-        "requirements-cookbook.in",
-        "requirements-cookbook.txt",
     ])
 
     assert plan.encoded_lanes() == ",none,"

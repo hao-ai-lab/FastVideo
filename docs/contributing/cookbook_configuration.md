@@ -169,24 +169,15 @@ client port/alias, the I2V image reference and optional guide. Streaming's healt
 response alone does not establish generation readiness or output.
 
 ```bash
-node --test tests/local_tests/test_cookbook_config.mjs tests/local_tests/test_cookbook_demo.mjs
-node --test tests/local_tests/test_cookbook_config_metadata.mjs
-node --test tests/local_tests/test_cookbook_config_integration.mjs
+npm run test:cookbook --prefix docs
 pre-commit run --files docs/cookbook/recipes/fastwan21.yaml
 ```
 
-Catalog and browser tests run in Node. Independently, use a FastVideo Python
-configuration environment to check downloaded YAML against native parsers:
-
-```bash
-python -m pytest tests/local_tests/test_cookbook_config_roundtrip.py
-```
-
-Native round-trip checks stay outside the docs build. They help detect drift in
-authored schemas and baselines but do not prove server startup, runtime success
-or GPU compatibility. Browser validation checks selected field constraints, not
-every native cross-field rule. Include other edited files in pre-commit and add
-checks for unusual requirements.
+Catalog and browser tests run in Node and check the authored schema contract.
+They do not establish native runtime validity, server startup or GPU compatibility.
+Review the referenced serving example and its configuration documentation when
+changing option definitions. Include other edited files in pre-commit and add
+Node checks for unusual requirements.
 
 Generated catalogs under `docs/assets/cookbook-config/` are ignored by Git:
 never hand-edit or commit them. `mkdocs build` and `mkdocs serve` include generated
