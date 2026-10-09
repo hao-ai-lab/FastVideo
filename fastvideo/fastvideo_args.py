@@ -166,12 +166,6 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: int = -1
     sp_size: int = -1
-    # Number of ranks within the sequence-parallel group used by Ring
-    # Attention. ``1`` disables Ring Attention (pure Ulysses SP). When
-    # ``1 < ring_size < sp_size``, Ring Attention runs combined with Ulysses
-    # as a 2D hybrid (USP): ``sp_size`` must be divisible by ``ring_size``,
-    # and the remaining ``sp_size // ring_size`` factor is the Ulysses
-    # subgroup size (see ``_check_ring_attention_args``).
     ring_size: int = 1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1

@@ -811,11 +811,6 @@ def get_dp_group() -> GroupCoordinator:
     return _DP
 
 
-# USP (Unified Sequence Parallelism) topology: how each sequence-parallel
-# group's ranks decompose into a Ring x Ulysses mesh. The construction policy
-# (deriving ring/ulysses sizes, the degenerate-aliasing cases, building
-# subgroups) lives in usp_topology.py; this module just stores the result and
-# hands out thin accessors, the same way it does for _TP/_SP/_DP.
 _USP_TOPOLOGY: USPTopology | None = None
 
 
@@ -885,9 +880,8 @@ def initialize_model_parallel(
             hold singletons and the denoise ranks form one group). Every rank
             must still belong to exactly one group.
         dp_group_ranks: explicit DP group layout, same contract.
-        ring_size: number of ranks within the sequence-parallel group used by
-            pure Ring Attention. ``1`` disables Ring Attention (default
-            Ulysses-only sequence parallelism).
+        ring_size: Ring Attention ranks per SP group; the remaining
+            ``sp_size // ring_size`` factor is Ulysses. ``1`` disables Ring.
     """
     # Get world size and rank. Ensure some consistencies.
     assert _WORLD is not None, "world group is not initialized, please call init_distributed_environment first"
@@ -933,10 +927,6 @@ def initialize_model_parallel(
 
     _SP = init_model_parallel_group(sp_group_ranks, get_world_group().local_rank, backend, group_name="sp")
 
-    # Build the USP (Ring x Ulysses) topology within each SP replica. See
-    # usp_topology.py for the construction policy (size derivation, the
-    # degenerate-aliasing cases, subgroup construction); this module only
-    # stores the resulting topology.
     global _USP_TOPOLOGY
     assert _USP_TOPOLOGY is None, ("USP topology is already initialized")
     _USP_TOPOLOGY = build_usp_topology(
@@ -1103,11 +1093,8 @@ def destroy_model_parallel() -> None:
         _TP.destroy()
     _TP = None
 
-    # Destroy the USP subgroups before the SP group, since the pure-Ring /
-    # pure-Ulysses degenerate cases alias one of these to the SP group
-    # itself (`GroupCoordinator.destroy()` is idempotent, so aliasing is
-    # safe either way, but distinct groups must be destroyed explicitly or
-    # they leak).
+    # Pure Ring / pure Ulysses alias one USP group to _SP; destroy only the
+    # distinct subgroups here.
     global _USP_TOPOLOGY, _SP
     if _USP_TOPOLOGY is not None:
         if _USP_TOPOLOGY.ring_group is not None and _USP_TOPOLOGY.ring_group is not _SP:

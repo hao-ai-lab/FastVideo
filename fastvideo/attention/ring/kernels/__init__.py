@@ -3,8 +3,8 @@
 # Adapted from:
 # https://github.com/feifeibear/long-context-attention/blob/main/yunchang/kernels/__init__.py
 #
-# FastVideo keeps only the FA dispatch path used by the vendored pure-Ring
-# Attention implementation (fastvideo.attention.layer). Upstream yunchang
+# FastVideo keeps only the FA dispatch path used by the vendored Ring
+# Attention implementation (fastvideo.attention.ring_attention). Upstream yunchang
 # dispatches to many more backends (FA3, FlashInfer, aiter, SageAttention,
 # torch SDPA); FastVideo already has its own backend-dispatch system
 # (fastvideo.attention.selector / backends/), so those paths were dropped
