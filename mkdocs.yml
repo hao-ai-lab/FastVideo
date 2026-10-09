@@ -8,6 +8,17 @@ docs_dir: docs
 exclude_docs: |
   README.md
   generate_examples.py
+  cookbook/options.yaml
+  cookbook/recipes/*.yaml
+  cookbook/recipes/*.yml
+  package.json
+  package-lock.json
+  check_cookbook_assets.py
+  eslint.config.mjs
+  prettier.config.mjs
+  tests/
+  js/
+  node_modules/
   **/__pycache__/**
 
 # Repository
@@ -57,6 +68,7 @@ theme:
 
 # Native MkDocs hooks
 hooks:
+  - docs/check_cookbook_assets.py
   - docs/generate_examples.py
 
 # Plugins
@@ -158,6 +170,8 @@ nav:
     - V1 API: getting_started/v1_api.md
   - Cookbook:
     - Overview: cookbook/index.md
+    # TODO: Publish this page once the new design is reflected in the UI.
+    # - Design and API: cookbook/design.md
     - H3 server and playground: cookbook/openai-api.md
     - Video:
       - MiniMax H3: cookbook/minimax-h3.md

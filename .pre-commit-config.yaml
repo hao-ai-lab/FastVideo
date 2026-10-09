@@ -6,7 +6,7 @@ exclude: |
     fastvideo/third_party/.*|
     fastvideo-kernel/.*|
     assets/.*|
-    tests/.*|
+    (?<!docs/)tests/.*|
     scripts/.*|
     fastvideo/dataset/.*|
     fastvideo/models/(?!wan/(config|vae_config|pipeline_config|definition|__init__)\.py$).*|
@@ -64,6 +64,14 @@ repos:
       - 'git ls-files | grep -v "^\"*fastvideo/tests/ssim/" | grep -v "^\"*fastvideo/tests/inference/lora/L40S_reference_videos/" | grep " " && echo "Filenames should not contain spaces!" && exit 1 || exit 0'
     language: system
     always_run: true
+    pass_filenames: false
+  - id: cookbook-javascript
+    name: Cookbook JavaScript lint and format
+    entry: npm run check:cookbook --prefix docs
+    language: system
+    # CI's trusted manual stage must not execute PR-authored npm scripts.
+    stages: [pre-commit]
+    files: ^docs/(js/(build-)?cookbook-.*\.mjs|tests/.*\.test\.mjs|eslint\.config\.mjs|prettier\.config\.mjs|package(-lock)?\.json)$
     pass_filenames: false
   # Keep `suggestion` last
   - id: suggestion

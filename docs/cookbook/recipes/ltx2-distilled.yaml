@@ -1,0 +1,35 @@
+# TODO(cookbook-review): Design sample only. Before merge, double-check the
+# selected options, schema types/ranges, and baseline values for each deployment.
+# TODO: Recheck field paths and choices when the typed API in PR #1913 is finalized.
+title: LTX2 Distilled
+summary: Incremental video delivery over the native streaming WebSocket interface.
+
+deployments:
+  cuda-streaming:
+    runtime: fastvideo-cuda-streaming
+    guide: docs/design/server_contracts/streaming.md
+    workload: t2v
+    defaults: examples/serving/streaming_demo.yaml
+    # Existing fallback note in the referenced native YAML's header.
+    requirements:
+      - Hosts without flashinfer / NVFP4 can comment out engine.quantization to fall back to bf16.
+    options:
+      - server.*
+      - "!server.served_model_name"
+      - "!server.output_dir"
+      - generator.engine.num_gpus
+      - generator.engine.parallelism.sp_size
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - streaming.session_timeout_seconds
+      - streaming.generation_segment_cap
+    overrides:
+      # This baseline fixes refinement on; its half-resolution pass needs a 32-pixel grid.
+      default_request.sampling.height:
+        minimum: 64
+        multipleOf: 64
+        default: 1088
+      default_request.sampling.width:
+        minimum: 64
+        multipleOf: 64

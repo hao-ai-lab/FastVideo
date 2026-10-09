@@ -56,6 +56,21 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install cookbook dependencies
+        run: npm ci --prefix docs
+
+      - name: Validate and generate cookbook catalogs
+        run: |
+          npm run check:cookbook --prefix docs
+          npm run test:cookbook --prefix docs
+          python docs/tests/test_cookbook_assets.py
+          npm run build:catalog --prefix docs
+
       - name: Build documentation
         run: mkdocs build
 
