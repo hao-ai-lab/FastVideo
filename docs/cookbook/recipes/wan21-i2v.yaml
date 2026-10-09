@@ -1,3 +1,6 @@
+# TODO(cookbook-review): Design sample only. Before merge, double-check the
+# selected options, schema types/ranges, and baseline values for each deployment.
+# Recheck field paths and choices when the typed API in PR #1913 is finalized.
 title: Wan2.1 I2V 14B
 summary: Image-conditioned video generation from a source frame.
 
