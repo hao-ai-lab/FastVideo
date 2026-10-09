@@ -123,10 +123,25 @@ class TimestepEmbedder(nn.Module):
 
         self.mlp = MLP(frequency_embedding_size, hidden_size, hidden_size, act_type=act_layer, dtype=dtype)
         self.freq_dtype = freq_dtype
+        self.cache_frequencies = False
+        self._frequency_cache: tuple[tuple, torch.Tensor] | None = None
 
     def forward(self, t: torch.Tensor, timestep_seq_len: int | None = None) -> torch.Tensor:
-        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period,
-                                    dtype=self.freq_dtype).to(self.mlp.fc_in.weight.dtype)
+        freqs = None
+        if self.cache_frequencies:
+            key = (self.frequency_embedding_size, self.max_period, self.freq_dtype, t.device)
+            if self._frequency_cache is None or self._frequency_cache[0] != key:
+                if t.is_cuda and torch.cuda.is_current_stream_capturing():
+                    raise RuntimeError("Prepare timestep frequencies before CUDA graph capture")
+                half = self.frequency_embedding_size // 2
+                freqs = torch.exp(-math.log(self.max_period) * torch.arange(half, dtype=self.freq_dtype) / half)
+                self._frequency_cache = (key, freqs.to(t.device))
+            freqs = self._frequency_cache[1]
+        t_freq = timestep_embedding(t,
+                                    self.frequency_embedding_size,
+                                    self.max_period,
+                                    dtype=self.freq_dtype,
+                                    freqs=freqs).to(self.mlp.fc_in.weight.dtype)
         if timestep_seq_len is not None:
             t_freq = t_freq.unflatten(0, (1, timestep_seq_len))
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
@@ -137,7 +152,8 @@ class TimestepEmbedder(nn.Module):
 def timestep_embedding(t: torch.Tensor,
                        dim: int,
                        max_period: int = 10000,
-                       dtype: torch.dtype = torch.float32) -> torch.Tensor:
+                       dtype: torch.dtype = torch.float32,
+                       freqs: torch.Tensor | None = None) -> torch.Tensor:
     """
     Create sinusoidal timestep embeddings.
     
@@ -150,7 +166,9 @@ def timestep_embedding(t: torch.Tensor,
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) / half).to(device=t.device)
+    if freqs is None:
+        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) /
+                          half).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
