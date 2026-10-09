@@ -282,17 +282,41 @@ def test_device_cache_is_bounded_and_evicts_oldest():
     assert 0 not in surviving
 
 
-def test_inference_mode_tables_are_not_reused_for_autograd():
-    """A table cached under inference_mode must not leak into a training forward."""
+def test_tables_built_under_inference_mode_are_ordinary_tensors():
+    """Tables built under inference_mode are reused outside it and work with autograd."""
     with torch.inference_mode():
-        inference_cos, _ = _call(device="cpu", output_dtype=torch.float32)
-    assert inference_cos.is_inference()
+        host_cos, _ = _call()
+        dev_cos, _ = _call(device="cpu", output_dtype=torch.float32)
+    assert not host_cos.is_inference() and not dev_cos.is_inference()
 
     cos, _ = _call(device="cpu", output_dtype=torch.float32)
-    assert cos is not inference_cos and not cos.is_inference()
-    assert len(_ROTARY_POS_EMBED_DEVICE_CACHE) == 2
-    # Mirrors _apply_rotary_emb: multiplying a grad-requiring input by the table
-    # saves the table for backward, which fails for inference tensors.
+    assert cos is dev_cos
+    assert len(_ROTARY_POS_EMBED_DEVICE_CACHE) == 1
+    # as in _apply_rotary_emb, the product saves the table for backward
+    x = torch.randn(cos.shape, requires_grad=True)
+    (x * cos + x * host_cos).sum().backward()
+    assert x.grad is not None
+
+
+def test_identity_move_and_cast_under_inference_mode_is_autograd_safe():
+    """An aliasing .to() (CPU, dtype == output_dtype) must still yield an autograd-safe table."""
+    with torch.inference_mode():
+        cos_inf, _ = _call(dtype=torch.float32, device="cpu", output_dtype=torch.float32)
+    cos, _ = _call(dtype=torch.float32, device="cpu", output_dtype=torch.float32)
+    assert cos is cos_inf and not cos.is_inference()
     x = torch.randn(cos.shape, requires_grad=True)
     (x * cos).sum().backward()
     assert x.grad is not None
+
+
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="needs two CUDA devices")
+def test_unindexed_cuda_device_is_resolved_per_current_device():
+    """A bare "cuda" device is keyed by the current device index."""
+    with torch.cuda.device(0):
+        cos0, _ = _call(device="cuda", output_dtype=torch.float32)
+    with torch.cuda.device(1):
+        cos1, _ = _call(device="cuda", output_dtype=torch.float32)
+    assert cos0.device == torch.device("cuda", 0)
+    assert cos1.device == torch.device("cuda", 1)
+    assert len(_ROTARY_POS_EMBED_DEVICE_CACHE) == 2
+    assert torch.equal(cos0.cpu(), cos1.cpu())
