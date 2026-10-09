@@ -171,6 +171,9 @@ non-causal, head-dimension-128 configuration with a 16-aligned KV length. SM120
 (including RTX 5090) keeps the previous tiling but joins the quantized and STE
 P@V operations and uses a shallower backward pipeline for long sequences. Set
 `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV=0` to compare against the split P@V path.
+GB10 (SM121) always uses the split P@V path because joining changes its softmax
+statistics, outputs and gradients; `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV` only
+applies to SM120.
 Unsupported configurations retain the previous implementation. Set
 `FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED=0` to benchmark that previous path on SM100. Forward tuning is available through
 `FASTVIDEO_ATTN_QAT_FWD_MODE=fast|balanced|reference`; exact reference-order
@@ -194,6 +197,16 @@ python benchmarks/bench_vsa.py --block_size 256 --use_cute \
 python benchmarks/bench_vsa.py --block_size 128 --use_cute \
   --batch_size 1 --num_heads 12 --head_dim 128 --q_seq_lens 39936 --topk 40
 ```
+
+### GB10 Attn-QAT forward-consistent dV
+
+On GB10 (SM121) the training backward rebuilds dV from the forward's own
+quantized online probabilities instead of re-quantizing normalized P, whose
+E4M3 group scales underflow to zero on long sequences; forward output, dQ, dK,
+STE output and M are unchanged bit for bit. `FASTVIDEO_ATTN_QAT_SM121_FWD_DV=0`
+restores the legacy dV and `FASTVIDEO_ATTN_QAT_SM121_DV_STATS=save|recompute`
+selects retained statistics or a forward replay; see
+[the QAT training documentation](../docs/training/attn_qat.md).
 
 ### TurboDiffusion Kernels
 
