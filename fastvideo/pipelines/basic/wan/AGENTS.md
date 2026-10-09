@@ -23,6 +23,19 @@ encoders stay shared; the Wan VAE video encoder and decoder live together in
 - `stages/causal_denoising.py`: standard and DMD causal samplers share cache
   allocation, not a sampling-loop inheritance chain. Reset UniPC per block and
   caches per request; preserve clean-context writes and RNG ordering.
+- `stages/vace_input.py`: VACE-specific mask loading, reference-image
+  preprocessing, and zero-pixel synthesis whenever source video is absent. Runs after
+  shared validation and text encoding.
+- `stages/vace_conditioning.py`: VAE-encodes video/mask/reference into 96-channel
+  `control_hidden_states`. Control signal goes through `control_hidden_states`,
+  not channel concat in denoising.
+- `stages/vace_latent_preparation.py`: adds one leading latent frame per reference
+  image via `latent_num_frames()`; does not mutate the request. Runs after
+  `vace_context_stage`, matching Diffusers `WanVACEPipeline` ordering.
+- `stages/vace_denoising.py`: forwards `control_hidden_states` and the
+  per-layer scale through `prepare_family_transformer_kwargs`.
+- `stages/vace_decoding.py`: strips reference-frame latents (final and
+  trajectory) before VAE decode.
 
 Do not change scheduler arithmetic, autocast placement, step counts, offload,
 or model math as incidental cleanup. Keep legacy sampler exports as aliases;

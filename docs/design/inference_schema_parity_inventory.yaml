@@ -608,6 +608,8 @@ surfaces:
       init_noise_level: request.extensions.stable_audio.init_noise_level
       inpaint_audio: request.extensions.stable_audio.inpaint_audio
       inpaint_mask: request.extensions.stable_audio.inpaint_mask
+      mask_path: request.extensions.wan_vace.mask_path
+      conditioning_scale: request.extensions.wan_vace.conditioning_scale
     internal_only:
       data_type: "Derived from the request shape and not a public input."
 

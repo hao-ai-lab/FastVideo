@@ -90,7 +90,15 @@ class ForwardBatch:
 
     # Video inputs
     video_path: str | None = None
+    mask_path: str | None = None
     video_latent: torch.Tensor | None = None
+    mask_video: torch.Tensor | None = None
+
+    # Wan-VACE conditioning
+    vace_control_latents: torch.Tensor | None = None
+    conditioning_scale: float | list[float] = 1.0
+    vace_num_reference_frames: int = 0
+    vace_reference_images: list[torch.Tensor] | None = None
 
     # Wan-Animate inputs: paths to the *preprocessed* driving artifacts (the
     # official wan/modules/animate/preprocess outputs), and the tensors the

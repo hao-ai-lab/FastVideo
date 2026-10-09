@@ -33,6 +33,8 @@ LEGACY_VARIANTS = (
     ("Wan-AI/Wan2.2-Animate-14B-Diffusers", "WanAnimate14BConfig", "wan_animate_14b", ("i2v",)),
     ("weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers", "WanI2V480PConfig", "wan_fun_1_3b_inp", ("i2v",)),
     ("IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers", "WANV2VConfig", "wan_fun_1_3b_control", ()),
+    ("Wan-AI/Wan2.1-VACE-1.3B-diffusers", "WanVACE1_3B_Config", "wan_vace_1_3b", ()),
+    ("Wan-AI/Wan2.1-VACE-14B-diffusers", "WanVACE14B_Config", "wan_vace_14b", ()),
     ("FastVideo/FastWan2.1-T2V-1.3B-Diffusers", "FastWan2_1_T2V_480P_Config", "fast_wan_t2v_480p", ("t2v",)),
     ("FastVideo/FastWan2.1-T2V-14B-480P-Diffusers", "FastWan2_1_T2V_480P_Config", "fast_wan_t2v_480p", ("t2v",)),
     ("Wan-AI/Wan2.2-TI2V-5B-Diffusers", "Wan2_2_TI2V_5B_Config", "wan_2_2_ti2v_5b", ("t2v", "i2v")),
@@ -145,6 +147,8 @@ def test_manifest_selection_and_explicit_override_are_not_pinned(monkeypatch, tm
     ("SelfForcingWanT2V480PConfig", 5.0, [1000, 750, 500, 250], False),
     ("SelfForcingWan2_2_T2V480PConfig", 12.0, [1000, 850, 700, 550, 350, 275, 200, 125], True),
     ("WanS2V14BConfig", 5.0, None, True),
+    ("WanVACE1_3B_Config", 16.0, None, True),
+    ("WanVACE14B_Config", 16.0, None, True),
 ])
 def test_component_precision_and_sampling_defaults(config_name, flow_shift, dmd_steps, load_encoder):
     config_cls = getattr(pipeline_config, config_name)

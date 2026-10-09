@@ -52,8 +52,7 @@ class LatentPreparationStage(PipelineStage):
             The batch with prepared latent variables.
         """
 
-        latent_num_frames = (batch.num_frames -
-                             1) // fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio + 1
+        latent_num_frames = self.latent_num_frames(batch, fastvideo_args)
         # Determine batch size; fall back to action/image inputs when no text encoder is present
         if not batch.prompt_embeds:
             if batch.keyboard_cond is not None:
@@ -150,6 +149,11 @@ class LatentPreparationStage(PipelineStage):
         batch.raw_latent_shape = bcthw_shape
 
         return batch
+
+    def latent_num_frames(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> int:
+        """Temporal length of the initial latents; subclasses may add conditioning frames."""
+        temporal_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        return (batch.num_frames - 1) // temporal_ratio + 1
 
     def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify latent preparation stage inputs."""
