@@ -124,8 +124,6 @@ input parsing, loading/error states, cancellation, stale-response handling,
 guide links, copying and downloads. Catch failures and clear invalid output.
 Reuse the loaded catalog and treat it as read-only: validators are cached by
 schema object identity. Returned field previews and configurations are copies.
-The replaceable adapter in `examples/cookbook/cookbook-demo.js` demonstrates
-these responsibilities without coupling them to the shared API.
 
 ## Configuration invariants
 
@@ -213,8 +211,14 @@ override workflow is introduced here.
 
 ## Coexistence with the current cookbook
 
-The existing cookbook pages use the legacy recipe catalog, `cookbook.js` and the
-example-page build hook for their curated commands and serving links. The new
-catalogs and API support editable serving YAML and the separate review demo.
-Both remain available. A final UI can consume the new API; migrating existing
-pages or deleting the demo/review guide is deferred to a later change.
+Family pages still load `docs/assets/cookbook-recipes.json` through `cookbook.js`
+for generate commands, hardware evidence, and the H3 "Run a server" panel.
+Those pages are unchanged. This catalog and API sit beside them: manifests under
+`docs/cookbook/recipes/` point at the same `examples/serving/*.yaml` baselines
+the family pages already advertise, plus authored editable-field metadata.
+
+A later UI change can call `loadIndex` / `resolveConfig` from those pages so
+users download a customized serving YAML instead of copying a static file. Until
+then, keep recipe IDs aligned with the family catalog (`fasth3-8step`,
+`fastwan21`, `wan21-i2v`, `ltx2-distilled`) and treat `cookbook-recipes.json`
+`serving.source` as the native baseline, not a second options schema.

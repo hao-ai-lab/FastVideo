@@ -74,11 +74,7 @@ uv pip compile requirements-mkdocs.in \
   --python-version 3.12
 ```
 
-## Local cookbook assets and design demo
-
-The temporary UI lives in `examples/cookbook/`; it is not part of the published
-MkDocs site. The reusable JSON catalogs and JavaScript API are published independently
-of this demo.
+## Local cookbook catalogs
 
 Generate catalogs from the repository root:
 
@@ -92,21 +88,15 @@ shared options, recipe manifests or baseline YAML change. Then `mkdocs build`
 or `mkdocs serve` includes the generated assets. Generation loads no model
 weights and performs no inference.
 
-To preview the standalone demo without building the docs site:
+Inspect a deployment without a browser UI:
 
 ```bash
-python -m http.server 8195 --bind 127.0.0.1
+node docs/js/build-cookbook-config.mjs --preview fastwan21/cuda-rest
 ```
-
-Open `http://127.0.0.1:8195/examples/cookbook/`. This serves a static local page;
-it does not start a model server. The page reads generated JSON from
-`docs/assets/cookbook-config/`, which is ignored by Git but included in the
-documentation build. Existing guide links open the published runbooks.
 
 See [the contributor guide](contributing/cookbook_configuration.md) for recipe
 authoring and local test commands, and [the API contract](cookbook/design.md)
-for using the same catalogs in another UI. The temporary demo will be removed
-when the final UI replaces it.
+for using the same catalogs from a cookbook UI.
 
 ## Check cookbook changes
 
@@ -117,7 +107,7 @@ python -m unittest discover -s docs/tests -p 'test_*.py'
 ```
 
 `npm run format:cookbook --prefix docs` formats handwritten cookbook modules,
-build scripts, tooling configuration and Node tests under `docs/`. The temporary
-demo adapter follows the existing `examples/` exclusion. The check commands do not change files.
-The Node tests use synthetic fixtures for reusable behavior and discover every
-production recipe for integration checks. They do not launch serving processes.
+build scripts, tooling configuration and Node tests under `docs/`. The check
+commands do not change files. The Node tests use synthetic fixtures for reusable
+behavior and discover every production recipe for integration checks. They do
+not launch serving processes.

@@ -120,29 +120,17 @@ node docs/js/build-cookbook-config.mjs --preview fastwan21/cuda-rest
 
 This prints metadata and field schemas as well as the serving configuration
 under `base_config`. To save the catalog preview, append
-`> /tmp/fastwan21-catalog-preview.yaml`. Use the browser's YAML download for a
-serving `config.yaml`. For another deployment, replace the ID with
-`<model-key>/<deployment-key>`.
+`> /tmp/fastwan21-catalog-preview.yaml`. For another deployment, replace the ID
+with `<model-key>/<deployment-key>`. Check that:
 
-Then start the browser preview:
-
-```bash
-python -m http.server 8195 --bind 127.0.0.1
-```
-
-Open `http://127.0.0.1:8195/examples/cookbook/`, select **FastWan2.1 1.3B** and
-**CUDA REST**, then check:
-
-- The unchanged YAML matches the baseline's configuration values; comments and
-  formatting may differ.
-- Changing the port updates the YAML and client command. Reset restores the
-  baseline. Hidden settings remain present.
-- Your chosen fields, validation constraints, environment variables and any
+- Unchanged values match the baseline configuration; comments and formatting
+  may differ.
+- Hidden settings remain present in `base_config`.
+- Selected fields, validation constraints, environment variables, and any
   setup notes or guide links appear as intended.
 
-For a new deployment, select its model and deployment labels instead. The local
-preview does not start a model server. Metadata tests do not establish server
-startup, native runtime validity or GPU compatibility.
+The preview does not start a model server. Metadata tests do not establish
+server startup, native runtime validity or GPU compatibility.
 
 Generated catalogs, the combined bundle and its license notices are ignored by
 Git. Commit authored sources rather than generated output. For docs setup and
