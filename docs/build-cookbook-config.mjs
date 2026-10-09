@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { createRequire } from "node:module";
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseDocument } from "yaml";
+import { parseDocument, stringify } from "yaml";
 
 const require = createRequire(import.meta.url);
 const { createValidator } = require("./assets/cookbook-validator.js");
@@ -60,10 +60,10 @@ function keys(value, required, optional, context) {
   `${context}: expected ${required.join(", ")}; optional ${optional.join(", ")}`);
 }
 
-function safePath(path, namespace = false) {
+function safePath(path) {
   requireValue(typeof path === "string" &&
     /^(generator|server|default_request)(\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(path) &&
-    (namespace || path.includes(".")) && !path.split(".").some((part) => reserved.has(part)),
+    path.includes(".") && !path.split(".").some((part) => reserved.has(part)),
   `Invalid configuration path: ${path}`);
 }
 
@@ -150,22 +150,35 @@ function guideLink(value, root) {
   return { url: `../../${parts.map(encodeURIComponent).join("/")}${parts.length ? "/" : ""}` };
 }
 
-function expandControls(options, selectors, runtime) {
-  requireValue(Array.isArray(selectors), "controls must be an ordered list of paths or namespaces");
-  const seen = new Set(), controls = [];
+/** Match canonical field paths with '*' and optional leading '!' exclusion. */
+function optionPattern(selector) {
+  requireValue(typeof selector === "string" && selector.length > 0, `Invalid option pattern: ${selector}`);
+  const exclude = selector.startsWith("!"), pattern = exclude ? selector.slice(1) : selector;
+  requireValue(!pattern.includes("**") && pattern.split(".").every((part) =>
+    /^[A-Za-z_*][A-Za-z0-9_*]*$/.test(part) && !reserved.has(part)), `Invalid option pattern: ${selector}`);
+  const expression = pattern.split("*").map((part) => part.replace(/\./g, "\\.")).join(".*");
+  return { exclude, match: new RegExp(`^${expression}$`) };
+}
+
+/** Apply selection rules before checking the final editable fields. */
+function expandOptions(options, selectors, runtime) {
+  requireValue(Array.isArray(selectors), "options must be an ordered list of paths or patterns");
+  const available = Object.keys(options), selected = new Set();
   for (const selector of selectors) {
-    safePath(selector, true);
-    const paths = Object.hasOwn(options, selector) ? [selector] : Object.keys(options).filter((path) => path.startsWith(`${selector}.`));
-    requireValue(paths.length, `Unknown control or namespace: ${selector}`);
-    for (const path of paths) {
-      const forbidden = [...protectedPaths, ...(runtime.interface === "websocket" ? ["server.output_dir", "server.served_model_name"] : [])];
-      requireValue(!forbidden.some((item) => item === path || item.startsWith(`${path}.`) || path.startsWith(`${item}.`)),
-        `Protected configuration control: ${path}`);
-      requireValue(![...seen].some((item) => item === path || item.startsWith(`${path}.`) || path.startsWith(`${item}.`)),
-        `Overlapping or duplicate control: ${path}`);
-      seen.add(path);
-      controls.push({ path, schema: clone(options[path]) });
-    }
+    const { exclude, match } = optionPattern(selector);
+    const paths = available.filter((path) => match.test(path));
+    requireValue(paths.length, `Unknown option pattern: ${selector}`);
+    for (const path of paths) { if (exclude) selected.delete(path); else selected.add(path); }
+  }
+  const forbidden = [...protectedPaths, ...(runtime.interface === "websocket" ? ["server.output_dir", "server.served_model_name"] : [])];
+  const seen = new Set(), controls = [];
+  for (const path of selected) {
+    requireValue(!forbidden.some((item) => item === path || item.startsWith(`${path}.`) || path.startsWith(`${item}.`)),
+      `Protected configuration option: ${path}`);
+    requireValue(![...seen].some((item) => item.startsWith(`${path}.`) || path.startsWith(`${item}.`)),
+      `Overlapping options: ${path}`);
+    seen.add(path);
+    controls.push({ path, schema: clone(options[path]) });
   }
   return controls;
 }
@@ -204,11 +217,11 @@ export function buildCatalogs({ root = ROOT, recipesDir = join(root, "docs/cookb
     for (const [deploymentKey, deployment] of Object.entries(manifest.deployments)) {
       const id = `${modelKey}/${deploymentKey}`;
       requireValue(ID.test(deploymentKey), `Invalid deployment key: ${id}`);
-      keys(deployment, ["runtime", "workload", "config", "controls"], ["label", "summary", "guide", "env", "requirements", "overrides"], id);
+      keys(deployment, ["runtime", "workload", "defaults", "options"], ["label", "summary", "guide", "env", "requirements", "overrides"], id);
       requireValue(runtimes.has(deployment.runtime), `${id}: unknown runtime ${deployment.runtime}`);
       const { runtime, workloads, options } = runtimes.get(deployment.runtime);
       requireValue(workloads.includes(deployment.workload), `${id}: unsupported workload ${deployment.workload}`);
-      const baseline = readYaml(within(root, deployment.config, "examples/serving", [".yaml", ".yml"]));
+      const baseline = readYaml(within(root, deployment.defaults, "examples/serving", [".yaml", ".yml"]));
       requireValue(object(baseline) && text(baseline.generator?.model_path), `${id}: baseline needs generator.model_path`);
       const currentModel = baseline.generator.model_path;
       requireValue(modelId === undefined || modelId === currentModel, `${id}: deployments must use the same model_path`);
@@ -230,10 +243,10 @@ export function buildCatalogs({ root = ROOT, recipesDir = join(root, "docs/cookb
       const merged = mergeOptions(options, deployment.overrides ?? {}, id);
       validateOptions(merged, id);
       const catalog = {
-        id, title: manifest.title, summary: deployment.summary ?? manifest.summary ?? "", source_config: deployment.config,
+        id, title: manifest.title, summary: deployment.summary ?? manifest.summary ?? "", source_config: deployment.defaults,
         model: { id: modelId, key: modelKey, title: manifest.title }, deployment: { id: deploymentKey, label: deployment.label ?? runtime.label },
         workload: deployment.workload, runtime: clone(runtime), env: clone(env), base_config: baseline,
-        controls: expandControls(merged, deployment.controls, runtime), requirements: clone(requirements),
+        controls: expandOptions(merged, deployment.options, runtime), requirements: clone(requirements),
         guide: guideLink(Object.hasOwn(deployment, "guide") ? deployment.guide : manifest.guide, root),
       };
       // Share the browser's authored-field and topology checks. Never materialize schema defaults in YAML.
@@ -242,6 +255,15 @@ export function buildCatalogs({ root = ROOT, recipesDir = join(root, "docs/cookb
     }
   }
   return catalogs;
+}
+
+/** Render one validated deployment catalog as YAML without writing generated files. */
+export function previewCatalog(recipeId, options = {}) {
+  requireValue(text(recipeId), "Preview requires a model/deployment ID");
+  const catalogs = buildCatalogs(options), catalog = catalogs.find((item) => item.id === recipeId);
+  const available = catalogs.map((item) => item.id).join(", ");
+  requireValue(catalog, `Unknown cookbook deployment: ${recipeId}. Available: ${available}`);
+  return stringify(catalog, { aliasDuplicateObjects: false });
 }
 
 function writeDocument(path, value) {
@@ -282,12 +304,23 @@ export function exportCatalogs({ outputDir = join(ROOT, "docs/assets/cookbook-co
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const options = {};
-    const flags = { "--output-dir": "outputDir", "--recipes-dir": "recipesDir", "--catalog": "catalogPath" };
+    const flags = {
+      "--output-dir": "outputDir", "--recipes-dir": "recipesDir", "--catalog": "catalogPath", "--preview": "previewRecipe",
+    };
     for (let index = 2; index < process.argv.length; index += 2) {
-      requireValue(Object.hasOwn(flags, process.argv[index]) && process.argv[index + 1], "Use --output-dir PATH, --recipes-dir PATH or --catalog PATH");
-      options[flags[process.argv[index]]] = resolve(process.argv[index + 1]);
+      const flag = process.argv[index], value = process.argv[index + 1];
+      requireValue(Object.hasOwn(flags, flag) && value && !value.startsWith("--"),
+        "Use --preview MODEL/DEPLOYMENT, --output-dir PATH, --recipes-dir PATH or --catalog PATH");
+      options[flags[flag]] = flag === "--preview" ? value : resolve(value);
     }
-    exportCatalogs(options);
-    console.log(join(options.outputDir || join(ROOT, "docs/assets/cookbook-config"), "index.json"));
+    if (Object.hasOwn(options, "previewRecipe")) {
+      requireValue(!Object.hasOwn(options, "outputDir"),
+        "--output-dir cannot be used with --preview; redirect stdout to save YAML");
+      const { previewRecipe, ...builderOptions } = options;
+      process.stdout.write(previewCatalog(previewRecipe, builderOptions));
+    } else {
+      exportCatalogs(options);
+      console.log(join(options.outputDir || join(ROOT, "docs/assets/cookbook-config"), "index.json"));
+    }
   } catch (failure) { console.error(failure.message); process.exitCode = 1; }
 }

@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { buildCatalogs, deepMerge, exportCatalogs, mergeOptions } from "../../docs/build-cookbook-config.mjs";
+import { ROOT, buildCatalogs, deepMerge, exportCatalogs, mergeOptions, previewCatalog } from "../../docs/build-cookbook-config.mjs";
 
+const { parse } = createRequire(new URL("../../docs/package.json", import.meta.url))("yaml");
 const clone = (value) => structuredClone(value);
 function write(path, data) {
   mkdirSync(dirname(path), { recursive: true });
@@ -42,8 +45,8 @@ function fixture(t) {
     server: { host: "0.0.0.0", port: 8000, served_model_name: "video" },
     default_request: { sampling: { num_frames: 81, seed: 0 }, output: { return_frames: false } },
   };
-  const deployment = { runtime: "cuda-rest", workload: "t2v", config: "examples/serving/example.yaml",
-    controls: ["server", "generator.engine.compile.enabled", "default_request.sampling.num_frames"] };
+  const deployment = { runtime: "cuda-rest", workload: "t2v", defaults: "examples/serving/example.yaml",
+    options: ["server.*", "generator.engine.compile.enabled", "default_request.sampling.num_frames"] };
   const manifest = { title: "Example", deployments: { rest: deployment } };
   const save = () => { write(catalogPath, declarations); write(configPath, baseline); write(manifestPath, manifest); };
   save();
@@ -68,7 +71,7 @@ test("deep merge preserves sibling metadata, replaces arrays and exact false/zer
   assert.deepEqual(source, before); assert.deepEqual(patch, patchBefore);
 });
 
-test("common -> runtime -> deployment metadata composes, while controls remain independent", (t) => {
+test("common -> runtime -> deployment metadata composes, while selected options remain independent", (t) => {
   const f = fixture(t);
   f.declarations.runtimes["cuda-rest"].options["server.port"] = { maximum: 9000, description: "Runtime ports" };
   f.deployment.overrides = {
@@ -83,7 +86,7 @@ test("common -> runtime -> deployment metadata composes, while controls remain i
   assert.deepEqual(field, { type: "integer", minimum: 0, maximum: 9000, default: 0, title: "Port", description: "Recipe port" });
   assert.equal(data.controls.some((item) => item.path.endsWith("flow_shift")), false);
   assert.deepEqual(data.base_config, f.baseline);
-  f.deployment.controls.push("generator.pipeline.experimental.flow_shift", "default_request.sampling.seed");
+  f.deployment.options.push("generator.pipeline.experimental.flow_shift", "default_request.sampling.seed");
   f.save();
   const extended = buildCatalogs(f.options)[0];
   assert.equal(extended.controls.at(-2).schema.default, 3);
@@ -92,7 +95,7 @@ test("common -> runtime -> deployment metadata composes, while controls remain i
   assert.equal(extended.base_config.default_request.sampling.seed, 0);
 });
 
-test("namespace expansion follows authored option order and preserves the entire baseline", (t) => {
+test("wildcard expansion follows authored option order and preserves the entire baseline", (t) => {
   const f = fixture(t), data = buildCatalogs(f.options)[0];
   assert.deepEqual(data.controls.map((item) => item.path), ["server.host", "server.port", "server.served_model_name",
     "generator.engine.compile.enabled", "default_request.sampling.num_frames"]);
@@ -136,24 +139,137 @@ test("literal schema annotations do not become reference instructions", (t) => {
     type: "object", additionalProperties: true, default: { $ref: "literal", minimum: "text" },
     examples: [{ $ref: "also literal" }],
   } };
-  f.deployment.controls.push("generator.pipeline.experimental.extra"); f.save();
+  f.deployment.options.push("generator.pipeline.experimental.extra"); f.save();
   const data = buildCatalogs(f.options)[0];
   assert.deepEqual(data.controls.at(-1).schema.default, { $ref: "literal", minimum: "text" });
 });
 
-for (const selectors of [["server", "server.port"], ["server.unknown"], ["generator.__proto__.polluted"]]) {
-  test(`invalid selectors fail: ${JSON.stringify(selectors)}`, (t) => {
-    const f = fixture(t); f.deployment.controls = selectors; f.save();
-    assert.throws(() => buildCatalogs(f.options), /Overlapping|Unknown control|Invalid configuration path/);
+test("selection patterns deduplicate, exclude and reinclude options in order", (t) => {
+  const f = fixture(t);
+  f.deployment.options = ["server.*", "server.port", "!server.port", "default_request.sampling.*", "server.port"];
+  f.save();
+  assert.deepEqual(buildCatalogs(f.options)[0].controls.map((item) => item.path), [
+    "server.host", "server.served_model_name", "default_request.sampling.num_frames",
+    "default_request.sampling.seed", "server.port",
+  ]);
+});
+
+test("star spans path segments, matches zero characters and keeps dots literal", (t) => {
+  const f = fixture(t);
+  f.deployment.overrides = {
+    "server.port_extra": { type: "integer", default: 42 },
+    "generator.pipeline.port": { type: "integer", default: 43 },
+    "generator.pipeline.serverport": { type: "integer", default: 44 },
+  };
+  f.deployment.options = ["*.port"];
+  f.save();
+  assert.deepEqual(buildCatalogs(f.options)[0].controls.map((item) => item.path), [
+    "server.port", "generator.pipeline.port",
+  ]);
+  f.deployment.options = ["server.port*"];
+  f.save();
+  assert.deepEqual(buildCatalogs(f.options)[0].controls.map((item) => item.path), [
+    "server.port", "server.port_extra",
+  ]);
+  f.deployment.options = ["generator.*enabled", "*sampling.*"];
+  f.save();
+  assert.deepEqual(buildCatalogs(f.options)[0].controls.map((item) => item.path), [
+    "generator.engine.compile.enabled", "default_request.sampling.num_frames", "default_request.sampling.seed",
+  ]);
+});
+
+test("bare namespaces are not expanded and wildcard patterns match whole paths", (t) => {
+  const f = fixture(t);
+  for (const pattern of ["server", "port", "sampling.*", "*.por", "serve.*"]) {
+    f.deployment.options = [pattern]; f.save();
+    assert.throws(() => buildCatalogs(f.options), /Unknown option pattern|Invalid option pattern|Invalid configuration path/);
+  }
+});
+
+for (const selectors of [[], ["!server.port"], ["server.*", "!server.*"]]) {
+  test(`empty selection preserves the baseline: ${JSON.stringify(selectors)}`, (t) => {
+    const f = fixture(t); f.deployment.options = selectors; f.save();
+    const data = buildCatalogs(f.options)[0];
+    assert.deepEqual(data.controls, []);
+    assert.deepEqual(data.base_config, f.baseline);
   });
 }
+
+test("a root wildcard selects all declared options in their authored order", (t) => {
+  const f = fixture(t); f.deployment.options = ["*"]; f.save();
+  assert.deepEqual(buildCatalogs(f.options)[0].controls.map((item) => item.path), [
+    "server.host", "server.port", "server.served_model_name", "generator.engine.compile.enabled",
+    "default_request.sampling.num_frames", "default_request.sampling.seed",
+  ]);
+});
+
+test("local option overrides participate in wildcard selection and exclusion", (t) => {
+  const f = fixture(t);
+  f.deployment.overrides = {
+    "server.port": { maximum: 9000 },
+    "generator.pipeline.experimental.flow_shift": { type: "number", minimum: 0, default: 3 },
+  };
+  f.deployment.options = ["server.*", "generator.pipeline.experimental.*", "!server.port"];
+  f.baseline.server.port = 70000;
+  f.baseline.generator.pipeline.experimental.flow_shift = 4;
+  f.save();
+  const data = buildCatalogs(f.options)[0];
+  assert.deepEqual(data.controls.map((item) => item.path), [
+    "server.host", "server.served_model_name", "generator.pipeline.experimental.flow_shift",
+  ]);
+  assert.equal(data.controls.at(-1).schema.default, 3);
+  assert.deepEqual(data.base_config, f.baseline);
+});
+
+test("parent and child selected options overlap unless one is excluded", (t) => {
+  const f = fixture(t);
+  f.deployment.overrides = { "generator.engine.compile": { type: "object", additionalProperties: true } };
+  f.deployment.options = ["generator.engine.compile", "generator.engine.compile.*"];
+  f.save();
+  assert.throws(() => buildCatalogs(f.options), /Overlapping options/);
+  f.deployment.options.push("!generator.engine.compile"); f.save();
+  assert.deepEqual(buildCatalogs(f.options)[0].controls.map((item) => item.path), ["generator.engine.compile.enabled"]);
+});
+
+test("the old controls manifest key is rejected instead of silently selecting defaults", (t) => {
+  const f = fixture(t);
+  f.deployment.controls = f.deployment.options;
+  delete f.deployment.options;
+  f.save();
+  assert.throws(() => buildCatalogs(f.options), /expected.*options/);
+});
+
+for (const selectors of [
+  ["server.unknown"], ["server.*", "!server.unknown"], ["!unknown.*"],
+  ["server.**"], ["server.?ort"], ["server.[hp]*"], ["server/port"], [" server.*"], ["server.* "],
+  ["!"], ["!!server.port"], ["generator.__proto__.*"], ["*.constructor.*"], ["server.prototype*"],
+  ["generator..*"], [false],
+]) {
+  test(`invalid selectors fail: ${JSON.stringify(selectors)}`, (t) => {
+    const f = fixture(t); f.deployment.options = selectors; f.save();
+    assert.throws(() => buildCatalogs(f.options), /Unknown option pattern|Invalid option pattern|Invalid configuration path/);
+  });
+}
+
+test("wildcards may include protected fields if later exclusions remove them", (t) => {
+  const f = fixture(t);
+  f.deployment.overrides = {
+    "generator.model_path": { type: "string" },
+    "default_request.output.return_frames": { type: "boolean" },
+  };
+  f.deployment.options = ["*", "!generator.model_path", "!default_request.output.*"];
+  f.save();
+  assert.equal(buildCatalogs(f.options)[0].controls.length, 6);
+  f.deployment.options.push("generator.model_path"); f.save();
+  assert.throws(() => buildCatalogs(f.options), /Protected configuration option/);
+});
 
 for (const path of ["generator.model_path", "generator.pipeline.workload_type", "default_request.output",
   "default_request.output.return_frames"]) {
   test(`custom schemas cannot enable protected fields: ${path}`, (t) => {
     const f = fixture(t); f.deployment.overrides = { [path]: { type: "string" } };
-    f.deployment.controls = [path]; f.save();
-    assert.throws(() => buildCatalogs(f.options), /Protected configuration control/);
+    f.deployment.options = [path]; f.save();
+    assert.throws(() => buildCatalogs(f.options), /Protected configuration option/);
   });
 }
 
@@ -192,10 +308,17 @@ test("an explicit streaming block must match the authored runtime interface", (t
   f.baseline.streaming = {}; f.save();
   assert.throws(() => buildCatalogs(f.options), /streaming block disagrees/);
   f.declarations.runtimes["cuda-rest"].metadata.interface = "websocket";
-  f.deployment.controls = ["server.host", "server.port"]; f.save();
-  assert.deepEqual(buildCatalogs(f.options)[0].base_config.streaming, {});
-  f.deployment.controls.push("server.served_model_name"); f.save();
-  assert.throws(() => buildCatalogs(f.options), /Protected configuration control/);
+  f.declarations.options["server.output_dir"] = { type: "string", default: "outputs" };
+  f.baseline.server.output_dir = "streaming-output";
+  f.deployment.options = ["server.*", "!server.served_model_name", "!server.output_dir"]; f.save();
+  const data = buildCatalogs(f.options)[0];
+  assert.deepEqual(data.controls.map((item) => item.path), ["server.host", "server.port"]);
+  assert.deepEqual(data.base_config, f.baseline);
+  f.deployment.options.push("server.served_model_name"); f.save();
+  assert.throws(() => buildCatalogs(f.options), /Protected configuration option/);
+  f.deployment.options.pop();
+  f.deployment.options.push("server.output_dir"); f.save();
+  assert.throws(() => buildCatalogs(f.options), /Protected configuration option/);
   delete f.baseline.streaming; f.save();
   assert.throws(() => buildCatalogs(f.options), /streaming block disagrees/);
 });
@@ -208,10 +331,10 @@ test("manifest identity, duplicate keys, environment and file boundaries are val
   writeFileSync(f.manifestPath, "title: One\ntitle: Two\ndeployments: {}\n");
   assert.throws(() => buildCatalogs(f.options), /unique|duplicate/i);
   f.save();
-  f.deployment.config = "docs/cookbook/options.yaml"; f.save();
+  f.deployment.defaults = "docs/cookbook/options.yaml"; f.save();
   assert.throws(() => buildCatalogs(f.options), /under examples\/serving/);
-  f.deployment.config = "examples/serving/example.yaml";
-  f.manifest.deployments.other = { ...clone(f.deployment), config: "examples/serving/other.yaml" };
+  f.deployment.defaults = "examples/serving/example.yaml";
+  f.manifest.deployments.other = { ...clone(f.deployment), defaults: "examples/serving/other.yaml" };
   write(join(f.root, "examples/serving/other.yaml"), { ...f.baseline, generator: { model_path: "Other/Video" } }); f.save();
   assert.throws(() => buildCatalogs(f.options), /same model_path/);
 });
@@ -227,7 +350,7 @@ test("unsafe hidden integers and cyclic YAML are rejected before JSON serializat
 test("ordinary YAML anchors reuse authored runtime options", (t) => {
   const f = fixture(t);
   writeFileSync(f.catalogPath, `options: &fields\n  server.port: {type: integer, minimum: 1, default: 8000}\nruntimes:\n  cuda-rest:\n    metadata: ${JSON.stringify(f.declarations.runtimes["cuda-rest"].metadata)}\n    workloads: [t2v]\n    options: *fields\n`);
-  f.deployment.controls = ["server.port"]; write(f.manifestPath, f.manifest);
+  f.deployment.options = ["server.port"]; write(f.manifestPath, f.manifest);
   assert.equal(buildCatalogs(f.options)[0].controls[0].schema.minimum, 1);
 });
 
@@ -255,10 +378,100 @@ test("export writes matching index/catalogs, preserves mtimes and prunes only cu
   assert.equal(statSync(catalogFile).mtimeMs, modified);
   assert.equal(existsSync(stale), false); assert.ok(existsSync(marker));
   assert.ok(existsSync(join(external, "rest.json")));
-  f.deployment.controls = ["unknown.path"]; f.save();
+  f.deployment.options = ["unknown.path"]; f.save();
   assert.throws(() => exportCatalogs({ ...f.options, outputDir }));
   assert.equal(statSync(catalogFile).mtimeMs, modified);
   unlinkSync(join(outputDir, "recipes/external"));
+});
+
+test("preview returns the selected full catalog with merged schemas and exclusions", (t) => {
+  const f = fixture(t);
+  f.deployment.overrides = {
+    "server.port": { maximum: 9000, description: "Recipe-specific port" },
+    "generator.pipeline.experimental.flow_shift": { type: "number", default: 3 },
+  };
+  f.deployment.options = ["server.*", "!server.host", "generator.pipeline.experimental.*"];
+  f.deployment.env = { BACKEND: "special attention" };
+  f.deployment.requirements = ["Prepare the checkpoint"];
+  f.save();
+  const expected = buildCatalogs(f.options)[0], data = parse(previewCatalog("example/rest", f.options));
+  assert.deepEqual(data, expected);
+  assert.deepEqual(data.controls.map((item) => item.path), [
+    "server.port", "server.served_model_name", "generator.pipeline.experimental.flow_shift",
+  ]);
+  assert.equal(data.controls[0].schema.maximum, 9000);
+  assert.deepEqual(data.base_config, f.baseline);
+  assert.deepEqual(data.env, { BACKEND: "special attention" });
+});
+
+test("preview selects an exact deployment and lists available IDs for unknown or bare model IDs", (t) => {
+  const f = fixture(t);
+  f.manifest.deployments.other = { ...clone(f.deployment), label: "Another deployment", options: ["server.port"] };
+  f.save();
+  const expected = buildCatalogs(f.options);
+  for (const catalog of expected) assert.deepEqual(parse(previewCatalog(catalog.id, f.options)), catalog);
+  for (const id of ["example", "missing/rest"]) {
+    assert.throws(() => previewCatalog(id, f.options), (error) => {
+      assert.ok(error.message.includes(id));
+      assert.match(error.message, /example\/rest/);
+      assert.match(error.message, /example\/other/);
+      return true;
+    });
+  }
+});
+
+test("preview rebuilds current authored sources without reading or writing generated JSON", (t) => {
+  const f = fixture(t), outputDir = join(f.root, "docs/assets/cookbook-config");
+  exportCatalogs({ ...f.options, outputDir });
+  const stalePath = join(outputDir, "recipes/example/rest.json"), staleJson = readFileSync(stalePath, "utf8");
+  const staleTime = statSync(stalePath).mtimeMs, indexText = readFileSync(join(outputDir, "index.json"), "utf8");
+  f.baseline.server.port = 8080;
+  f.deployment.options = ["server.*", "!server.host"];
+  f.save();
+  assert.deepEqual(parse(previewCatalog("example/rest", f.options)), buildCatalogs(f.options)[0]);
+  assert.equal(parse(previewCatalog("example/rest", f.options)).base_config.server.port, 8080);
+  assert.equal(readFileSync(stalePath, "utf8"), staleJson);
+  assert.equal(statSync(stalePath).mtimeMs, staleTime);
+  assert.equal(readFileSync(join(outputDir, "index.json"), "utf8"), indexText);
+  rmSync(outputDir, { recursive: true });
+  f.baseline.server.port = 8081; f.save();
+  assert.equal(parse(previewCatalog("example/rest", f.options)).base_config.server.port, 8081);
+  assert.equal(existsSync(outputDir), false);
+  f.baseline.server.port = 70000; f.save();
+  assert.throws(() => previewCatalog("example/rest", f.options), /server.port/);
+  assert.equal(existsSync(outputDir), false);
+});
+
+test("preview CLI prints only YAML and reports errors without exporting files", (t) => {
+  const f = fixture(t), outputDir = join(f.root, "cli-output");
+  f.deployment.defaults = "examples/serving/openai_fastwan21_1_3b.yaml";
+  f.deployment.options = ["server.*", "!server.host"];
+  f.deployment.overrides = { "server.port": { maximum: 9000 } };
+  f.save();
+  const script = join(ROOT, "docs/build-cookbook-config.mjs");
+  const sourceFlags = ["--recipes-dir", f.recipesDir, "--catalog", f.catalogPath];
+  const run = (...flags) => spawnSync(process.execPath, [script, ...flags, ...sourceFlags], { cwd: f.root, encoding: "utf8" });
+  const generatedPaths = [join(ROOT, "docs/assets/cookbook-config/index.json"),
+    join(ROOT, "docs/assets/cookbook-config/recipes/example/rest.json")];
+  const generatedState = () => generatedPaths.map((path) => existsSync(path) ?
+    { contents: readFileSync(path, "utf8"), modified: statSync(path).mtimeMs } : null);
+  const before = generatedState();
+  const success = run("--preview", "example/rest");
+  assert.equal(success.status, 0, success.error?.message || success.stderr || success.stdout);
+  assert.equal(success.stderr, "");
+  assert.deepEqual(parse(success.stdout), buildCatalogs({ ...f.options, root: ROOT })[0]);
+  assert.equal(existsSync(outputDir), false);
+  const unknown = run("--preview", "example");
+  assert.notEqual(unknown.status, 0);
+  assert.equal(unknown.stdout, "");
+  assert.match(unknown.stderr, /example\/rest/);
+  const conflict = run("--preview", "example/rest", "--output-dir", outputDir);
+  assert.notEqual(conflict.status, 0);
+  assert.equal(conflict.stdout, "");
+  assert.match(conflict.stderr, /--preview/);
+  assert.match(conflict.stderr, /--output-dir/);
+  assert.equal(existsSync(outputDir), false);
+  assert.deepEqual(generatedState(), before);
 });
 
 test("mergeOptions refuses unsafe names and does not mutate its inputs", () => {

@@ -2,7 +2,7 @@
 
 Authored option schemas describe the cookbook's selectable fields; native
 examples provide recommended values. The cookbook combines them with curated
-model/deployment choices, selected controls and optional Markdown guidance.
+model/deployment choices, selected options and optional Markdown guidance.
 A Node build prepares static JSON metadata without importing the model runtime;
 a shared JavaScript API resolves edits locally and emits YAML and commands.
 The temporary preview is a standalone local page to remove when the final UI
@@ -15,7 +15,7 @@ the docs independently of that preview.
 | --- | --- |
 | `examples/serving/*.yaml` | Complete explicit baseline values, including hidden settings |
 | `docs/cookbook/options.yaml` | Authored common schemas, runtime metadata, workloads and runtime option overrides |
-| `docs/cookbook/recipes/<model-key>.yaml` | Model title and deployments: runtime, workload, baseline, controls, schema overrides, environment, requirements and optional guide |
+| `docs/cookbook/recipes/<model-key>.yaml` | Model title and deployments: runtime, workload, `defaults` baseline reference, option selectors, schema overrides, environment, requirements and optional guide |
 | `docs/build-cookbook-config.mjs` | Validate authored metadata, merge schema overrides, expand selected paths and publish static catalogs |
 | Existing serving examples and configuration documentation | Author review references for native behavior; no docs-build imports |
 | `docs/assets/cookbook-config.js` | Load metadata, expose option values, resolve YAML and commands |
@@ -23,9 +23,15 @@ the docs independently of that preview.
 
 See the [contributor guide](../contributing/cookbook_configuration.md) for manifest
 syntax. Every deployment in one model file references the same native model ID.
-Only summary and guide fall back from model to deployment; no controls or config
-inheritance is performed. The UI offers authored deployments, not a cross-product
+Only summary and guide fall back from model to deployment; option selections
+and `defaults` do not inherit. The UI offers authored deployments, not a cross-product
 of models, hardware and backends.
+
+The required deployment `defaults` is a repository-relative path to the complete
+native serving YAML, including hidden and fixed settings. Its values form the
+starting configuration and are preserved unless explicitly edited in the UI.
+The name does not refer to JSON Schema `default` annotations or the deployment's
+`overrides` of field schemas: neither supplies or replaces baseline values.
 
 The exporter writes ignored build output:
 
@@ -57,9 +63,10 @@ models: [{
 
 Each deployment catalog contains its identity, model, runtime metadata, workload,
 source YAML path, environment, requirements, optional compiled guide URL, raw
-`base_config` and `controls: [{path, schema}]`. Controls are already expanded to
-flat leaf paths. Model files are ordered by filename; deployment and selector
-order follow the manifest. The browser fetches only the selected catalog.
+`base_config` and `controls: [{path, schema}]`. The authored deployment `options`
+list expands into this unchanged `controls` API field containing flat paths.
+Model files are ordered by filename; deployment and selector order follow the
+manifest. The browser fetches only the selected catalog.
 Relative catalog, guide and runtime client-guide URLs resolve against the index
 URL. `loadDeployment` returns catalog metadata without rewriting those links.
 
@@ -72,20 +79,41 @@ or additions. A deployment's `overrides` map uses the same canonical paths.
 Schema precedence is common options, then runtime options, then deployment
 overrides.
 
+The builder parses YAML into objects, merges these schemas, applies option
+selectors and validates the complete catalog before serializing it. JSON export
+and YAML preview serialize that same catalog. The exported
+`previewCatalog(recipeId, builderOptions = {})` helper and CLI
+`node docs/build-cookbook-config.mjs --preview fasth3-8step/cuda-rest` expose a
+single deployment as YAML without writing JSON catalogs. This includes the
+starting serving configuration in `base_config` and merged schemas in `controls`.
+See the contributor guide's [preview instructions](../contributing/cookbook_configuration.md#inspect-one-merged-deployment).
+
 Objects, including nested schema properties, merge recursively; arrays replace
 whole arrays. Omitted keys inherit, and explicit `false`, `0` and allowed `null`
 remain explicit. The merge is Hydra-like; there is no Hydra dependency,
 interpolation, defaults list or sweep behavior. Existing shared paths retain
 their type identity. The builder rejects inconsistent constraints, invalid enum
 values and defaults, and schema `$ref` references. New model-local paths need
-complete schemas in `overrides` and an explicit selection in `controls`.
+complete schemas in `overrides` and an explicit selection in `options`.
 
-The ordered `controls` list is independent of schema composition: an override
-alone never enables an option. An exact path selects one declared option;
-a namespace expands prefix-matching catalog entries in declaration order.
-It does not expand properties inside one option schema. Duplicate or overlapping
-selections and unknown paths fail. Namespace selection also includes future
-matching options; exact paths keep the selected surface stable.
+The deployment's ordered `options` list is independent of schema composition:
+an override alone never selects an option. Selection starts empty. An exact
+path selects one declared option; `*` matches zero or more characters, including
+dots, in declared canonical paths. For example, `server.*` selects the declared
+server fields, while a bare `server` does not expand. Positive entries add
+matches in catalog declaration order without duplicates. An entry prefixed
+with `!` removes its matches from the current selection; a later positive entry
+can re-add a path at the end. Quote exclusions in YAML, such as
+`'!server.output_dir'`.
+
+Every selector must match a declared option, including exclusions that remove
+nothing from the current selection. Final selections reject protected paths
+and parent/child overlaps after exclusions have been applied. Matching uses
+canonical option paths, not filesystem paths or properties inside one option
+schema. Only `*` and leading `!` are supported; this is not a full `.gitignore`
+parser, and `**` and `?` are unsupported. Wildcards include future matching
+options; exact paths keep the selected surface stable. An empty list is valid,
+and excluded fields retain their hidden native baseline values.
 
 Types, ranges and annotations are an author-maintained contract. The Node build
 checks that contract's internal consistency, without querying the runtime
@@ -173,9 +201,9 @@ changing user values. It does not reproduce arbitrary model/FSDP validators or
 hardware compatibility. Reset discards edits by resolving the baseline again.
 
 Entries in `experimental` and other untyped maps can become controls only with
-explicitly authored schemas and control selection. Existing hidden values still
-survive every download. No implicit controls, add/hide rules or model-specific
-JavaScript are introduced.
+explicitly authored schemas and selection in deployment `options`. Existing
+hidden values still survive every download. No implicit option selection,
+separate add/hide keys or model-specific JavaScript are introduced.
 
 ## Runtime boundaries and examples
 

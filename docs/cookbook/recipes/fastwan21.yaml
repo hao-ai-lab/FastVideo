@@ -5,13 +5,13 @@ deployments:
   cuda-rest:
     runtime: fastvideo-cuda-rest
     workload: t2v
-    config: examples/serving/openai_fastwan21_1_3b.yaml
+    defaults: examples/serving/openai_fastwan21_1_3b.yaml
     env:
       FASTVIDEO_ATTENTION_BACKEND: "VIDEO_SPARSE_ATTN"
-    controls:
-      - server
+    options:
+      - server.*
       - generator.engine.num_gpus
-      - generator.engine.parallelism
+      - generator.engine.parallelism.*
       - generator.engine.offload.dit_layerwise
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae

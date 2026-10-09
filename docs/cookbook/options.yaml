@@ -1,5 +1,5 @@
 # Authored control metadata. These standard JSON Schema fragments describe the
-# available fields; deployment.controls selects which ones appear in a recipe.
+# available fields; deployment.options selects which ones appear in a recipe.
 # Config values come from the native baseline, not these informational defaults.
 # CUDA declarations follow fastvideo/api/schema.py; MLX declarations follow
 # fastvideo/entrypoints/openai/mlx_server.py. Integer bounds preserve JS precision.

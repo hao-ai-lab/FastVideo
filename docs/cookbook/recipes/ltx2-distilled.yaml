@@ -6,15 +6,16 @@ deployments:
   cuda-streaming:
     runtime: fastvideo-cuda-streaming
     workload: t2v
-    config: examples/serving/streaming_demo.yaml
+    defaults: examples/serving/streaming_demo.yaml
     # Existing fallback note in the referenced native YAML's header.
     requirements:
       - Hosts without flashinfer / NVFP4 can comment out engine.quantization to fall back to bf16.
-    controls:
-      - server.host
-      - server.port
+    options:
+      - server.*
+      - "!server.served_model_name"
+      - "!server.output_dir"
       - generator.engine.num_gpus
-      - generator.engine.parallelism
+      - generator.engine.parallelism.*
       - default_request.sampling.num_frames
       - default_request.sampling.height
       - default_request.sampling.width

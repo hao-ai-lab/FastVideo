@@ -131,7 +131,7 @@ test("every generated recipe resolves without edits and baseline defaults win", 
 
 });
 
-test("GPU and namespace-selected parallelism controls validate complete edits", () => {
+test("GPU and pattern-selected parallelism controls validate complete edits", () => {
   const data = catalogs.get("fasth3-8step/cuda-rest");
   const paths = new Set(data.controls.map((control) => control.path));
   for (const path of ["generator.engine.num_gpus", "generator.engine.parallelism.tp_size",

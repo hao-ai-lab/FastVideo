@@ -24,13 +24,13 @@ deployments:
   cuda-rest:
     runtime: fastvideo-cuda-rest
     workload: t2v
-    config: examples/serving/openai_fastwan21_1_3b.yaml
+    defaults: examples/serving/openai_fastwan21_1_3b.yaml
     env:
       FASTVIDEO_ATTENTION_BACKEND: VIDEO_SPARSE_ATTN
-    controls:
-      - server
+    options:
+      - server.*
       - generator.engine.num_gpus
-      - generator.engine.parallelism
+      - generator.engine.parallelism.*
       - generator.engine.compile.enabled
       - default_request.sampling.num_frames
 ```
@@ -38,14 +38,19 @@ deployments:
 | Level | Required | Optional |
 | --- | --- | --- |
 | Model | `title`, nonempty `deployments` | `summary`, `guide` |
-| Deployment | `runtime`, `workload`, `config`, `controls` | `label`, `summary`, `guide`, `env`, `requirements`, `overrides` |
+| Deployment | `runtime`, `workload`, `defaults`, `options` | `label`, `summary`, `guide`, `env`, `requirements`, `overrides` |
 
-`config` and `guide` are repository-relative paths. `label` defaults to the
-runtime label; use it to distinguish deployments using the same runtime.
+`defaults` and `guide` are repository-relative paths. `defaults` references the
+complete native serving YAML used as the starting configuration, including
+hidden and fixed settings. The saved configuration is that baseline plus explicit
+UI edits. JSON Schema `default` annotations describe fields; they do not provide
+these values. The deployment's `overrides` map changes field schemas rather than the
+baseline values. `label` defaults to the runtime label; use it to distinguish
+deployments using the same runtime.
 `env` maps environment names to strings; quote numeric values. `requirements`
 is a list of plain-text setup notes or documentation URLs. Unknown keys fail
 validation. Only summary and guide fall back from model to deployment; there
-is no configuration, control or environment inheritance.
+is no inheritance of configuration, option selections or environments.
 
 For another supported runtime, add a sibling entry under `deployments` in the
 same model file. For example, `fasth3-8step.yaml` can add:
@@ -54,14 +59,14 @@ same model file. For example, `fasth3-8step.yaml` can add:
 mlx-rest:
   runtime: fastvideo-mlx-rest
   workload: t2v
-  config: examples/serving/mlx_fasth3_8step.yaml
-  controls:
-    - server
+  defaults: examples/serving/mlx_fasth3_8step.yaml
+  options:
+    - server.*
     - generator.model_root
     - generator.mlx_checkpoint
 ```
 
-## 2. Choose runtime and controls
+## 2. Choose runtime and options
 
 | Runtime | Native contract and example |
 | --- | --- |
@@ -74,20 +79,50 @@ mlx-rest:
 runtime needs shared runtime metadata, option definitions and tests; a new
 launch protocol also needs support in the JavaScript API.
 
-Controls are an explicit ordered list; `[]` is valid. Select a declared option
-path or a namespace prefix such as `server`. A namespace expands matching
-catalog entries in their declaration order; it does not expand `properties`
-inside an option's schema. Unknown paths, duplicates and overlaps such as
-`server` plus `server.port` fail rather than silently disappearing. There is no
-implicit list, `add` or `hide`. Namespaces opt into future matching options;
-use exact paths for a stable surface.
+The deployment's `options` is an explicit ordered list; `[]` exposes no fields.
+It supports exact paths, `*` wildcards and leading `!` exclusions:
+
+| Entry | Effect |
+| --- | --- |
+| `server.port` | Select that declared option |
+| `server.*` | Select every declared path beginning with `server.` |
+| `'!server.output_dir'` | Remove that option from the selection |
+| `'!generator.engine.offload.*'` | Remove every matching offload option |
+
+Start with an empty selection and process entries from top to bottom. `*`
+matches zero or more characters, including dots, in canonical option paths.
+Positive entries add matching options in catalog declaration order; already
+selected paths appear only once. Exclusions remove matching selected paths.
+A later positive entry can add an excluded path again, at the end of the list.
+For example:
+
+```yaml
+options:
+  - server.*
+  - '!server.output_dir'
+  - generator.engine.parallelism.*
+  - '!generator.engine.parallelism.dist_timeout'
+```
+
+Quote entries beginning with `!` because YAML otherwise treats them as tags.
+Every entry, including an exclusion, must match at least one declared option;
+an exclusion can match a declared option that is not currently selected.
+Bare namespaces such as `server` do not expand: use `server.*`. This syntax
+supports only `*` and leading `!`, not the full `.gitignore` pattern language;
+`**` and `?` are unsupported. Patterns match declared paths, not filesystem
+paths or `properties` inside one option schema.
+
+After exclusions, selecting a protected path or both a parent option and its
+child fails validation. Wildcards opt into future matching options; use exact
+paths for a stable surface. Excluding a field only hides its editor: its native
+baseline value still appears in the saved configuration.
 
 Types and constraints are curated by the option author, who must keep them
 aligned with native configuration definitions and supported usage. The build
 does not import Python schemas or perform registry/admission checks. Existence
 in an authored schema does not prove runtime support. GPU count can be selected
-with `generator.engine.num_gpus`; `generator.engine.parallelism` expands TP, SP,
-HSDP dimensions and the distributed timeout into ordinary controls. The shared
+with `generator.engine.num_gpus`; `generator.engine.parallelism.*` selects the
+TP, SP, HSDP dimensions and distributed timeout as ordinary controls. The shared
 JavaScript API limits parallel degrees to the selected GPU count and checks
 divisibility. TP, SP and HSDP shard size retain the native `-1` automatic value.
 Invalid combinations block output until corrected; the editor does not silently
@@ -120,8 +155,11 @@ An override may change annotations or constraints but must retain an existing
 shared option's path and type. Keep constraints mutually consistent; enum values
 and default annotations must satisfy the resulting schema. To add a model-local
 option, give it a complete schema in `overrides` and select its path in
-`controls`. Overrides never enable controls by themselves. The ordered controls
-list remains the only selection mechanism, including namespace expansion.
+`options`. Overrides never select options by themselves. The ordered deployment
+`options` list remains the only selection mechanism, including wildcard
+matching and exclusions. The generated JSON still uses
+`controls: [{path, schema}]` for the expanded selection consumed by the shared
+JavaScript API.
 
 Schema `default` is informational. The displayed and saved values always come
 from the native baseline plus user edits; missing values remain inherited. An
@@ -190,3 +228,42 @@ and excluded from the site.
 The demo stays local under `examples/cookbook/`, outside MkDocs, until the final
 UI replaces it. No weights or GPU inference are needed for these checks. See the
 [design](../design/serving-cookbook.md) for the data/API contract.
+
+### Inspect one merged deployment
+
+Preview the complete catalog for a deployment as YAML before generating JSON:
+
+```bash
+npm ci --prefix docs
+node docs/build-cookbook-config.mjs --preview fasth3-8step/cuda-rest
+```
+
+The ID is exactly `<model-key>/<deployment-key>`: the recipe filename without
+`.yaml`, followed by a key under its `deployments` map. To save the preview:
+
+```bash
+node docs/build-cookbook-config.mjs --preview fasth3-8step/cuda-rest > /tmp/fasth3-cuda-preview.yaml
+```
+
+The preview contains the same validated metadata as the generated deployment
+JSON: identity, runtime, requirements, `base_config`, and expanded `controls`
+with their merged schemas. It writes YAML to standard output without creating
+JSON catalogs. This is a complete metadata catalog; its `base_config` section
+is the starting serving configuration, including hidden values.
+
+The builder first parses YAML into objects, merges common option schemas, runtime
+schemas and deployment `overrides`, then applies the deployment's `options`
+selectors. JSON generation and YAML preview serialize the same resulting catalog.
+For a schema override example, inspect the MLX deployment:
+
+```bash
+node docs/build-cookbook-config.mjs --preview fasth3-8step/mlx-rest
+```
+
+Find `generator.vae_dtype` in `controls`: its title and description come from
+the recipe's `overrides`, while its type, enum and default annotation remain
+inherited. The actual starting value remains in `base_config` from `defaults`.
+
+`--recipes-dir` and `--catalog` also work with `--preview` for custom source
+locations. `--output-dir` cannot be combined with `--preview`, which does not
+write JSON output files.

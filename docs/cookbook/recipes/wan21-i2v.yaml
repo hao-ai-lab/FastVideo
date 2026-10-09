@@ -5,7 +5,7 @@ deployments:
   cuda-rest:
     runtime: fastvideo-cuda-rest
     workload: i2v
-    config: examples/serving/openai_wan21_i2v_14b.yaml
+    defaults: examples/serving/openai_wan21_i2v_14b.yaml
     # Existing requirement in the referenced native YAML's header.
     requirements:
       - >-
@@ -13,10 +13,10 @@ deployments:
         reference fields, e.g. {"input_reference": "/path/to/first-frame.png"} or
         {"image_reference": [{"image_url": "https://example.com/first-frame.png"}]};
         there is no default image.
-    controls:
-      - server
+    options:
+      - server.*
       - generator.engine.num_gpus
-      - generator.engine.parallelism
+      - generator.engine.parallelism.*
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
       - generator.pipeline.experimental.flow_shift
@@ -26,7 +26,7 @@ deployments:
       - default_request.sampling.seed
     overrides:
       # WanT2V480PConfig declares flow_shift in fastvideo/models/wan/pipeline_config.py.
-      # A complete local schema enables the new path only because controls selects it.
+      # A complete local schema enables the new path only because options selects it.
       generator.pipeline.experimental.flow_shift:
         title: Flow shift
         type: number
