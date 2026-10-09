@@ -10,10 +10,6 @@ if HAS_FLASH_ATTN:
     from flash_attn.flash_attn_interface import _flash_attn_backward, _flash_attn_forward
 
     def _parse_version(version: str) -> tuple[int, ...]:
-        # A plain string compare (e.g. "2.10.0" <= "2.6.3") is lexicographic
-        # and misclassifies once a two-digit minor version ships, so parse
-        # to an int tuple instead. Non-numeric suffixes (e.g. "2.6.3.post1")
-        # are tolerated by defaulting an unparsable segment to 0.
         parts = []
         for part in version.split(".")[:3]:
             match = re.match(r"\d+", part)

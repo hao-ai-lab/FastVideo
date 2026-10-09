@@ -10,7 +10,7 @@ Backend registry + selector wrapping FlashAttn / SageAttn / SageAttn3 / SDPA / V
 attention/
 ├── __init__.py            # Exports DistributedAttention, LocalAttention, get_attn_backend
 ├── layer.py               # DistributedAttention, DistributedAttention_VSA, LocalAttention
-├── ring_attention.py      # RingAttention: owns every Ring/USP-specific decision (see below)
+├── ring_attention.py      # RingAttention (Ring / USP hybrid), see below
 ├── selector.py            # get_attn_backend (cached) + _component_attention_backend_scope
 ├── ring/                  # Vendored Ring FlashAttention kernel (ring_flash_attn_func)
 ├── backends/
@@ -114,32 +114,17 @@ scope goes away when the last family lands. Do not build on it.
 
 ## Ring Attention / USP Ownership Boundary
 
-Ring Attention (and its Ring+Ulysses/USP hybrid) is a second delegate on
-`DistributedAttention`, with the same shape as `self.attn_impl`:
+- `RingAttention` (`ring_attention.py`) owns every Ring/USP decision: input
+  validation, the Ulysses-within-ring all-to-all, Ring-local RoPE slicing, and
+  the direct call into the vendored FA2 Ring kernel (it bypasses
+  `self.attn_impl`). `DistributedAttention` only dispatches to it and rejects
+  Ring for subclasses that override `forward()`.
+- `fastvideo/distributed/usp_topology.py` owns the Ring x Ulysses mesh;
+  `parallel_state.py` only stores the resulting `USPTopology` and exposes
+  accessors.
 
-- `DistributedAttention` reads only `get_ring_size()`, and only to fail loudly
-  if a subclass overrides `forward()` wholesale (e.g. `DistributedAttention_VSA`)
-  without wiring in the Ring dispatch. Everything else about Ring — reading
-  the process-wide topology, the Ulysses-within-ring all-to-all, Ring-local
-  RoPE slicing, construction-time validation, and the direct call into the
-  vendored Ring FlashAttention kernel (bypassing `self.attn_impl` /
-  `AttentionBackend` entirely, since Ring picks *which* backend runs per
-  shard rather than being one) — lives in `RingAttention`
-  (`ring_attention.py`). `DistributedAttention.forward()` dispatches to
-  `self._ring_attention.forward(...)` when Ring is enabled, exactly the way
-  it dispatches to `self.attn_impl.forward(...)` otherwise.
-- The Ring x Ulysses topology itself (deriving ring/ulysses sizes from
-  `sp_size`, the pure-Ring / pure-Ulysses degenerate cases, building the 2D
-  mesh of subgroups) is policy owned by `fastvideo/distributed/usp_topology.py`,
-  not `parallel_state.py`. `parallel_state.py` calls
-  `build_usp_topology()` once from `initialize_model_parallel()` and stores
-  the resulting `USPTopology`, then hands out thin accessors
-  (`get_ring_group()`, `get_ulysses_group()`, `get_ring_rank()`, ...) the same
-  way it does for `_TP`/`_SP`/`_DP` — it stays a process-group registry, not a
-  sequence-parallel policy module.
-
-A new Ring/USP-specific decision belongs in `RingAttention` or
-`usp_topology.py`, not back in `layer.py` or `parallel_state.py`.
+Put new Ring/USP logic in those two modules, not in `layer.py` or
+`parallel_state.py`.
 
 ## Adding a Backend
 

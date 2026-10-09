@@ -85,12 +85,7 @@ def build_usp_topology(
     The pure-Ring and pure-Ulysses degenerate cases reuse ``sp_group`` itself
     rather than creating a redundant, identical process group.
     """
-    # Lazy import: avoids a module-load-time cycle. parallel_state.py calls
-    # into this module from initialize_model_parallel(), so a module-level
-    # import back into parallel_state.py here would try to bind a name that
-    # doesn't exist yet while parallel_state.py is still executing its own
-    # top level. parallel_state.py already uses this same lazy-import
-    # pattern elsewhere (e.g. `current_platform` inside GroupCoordinator).
+    # Lazy import: parallel_state imports this module at load time.
     from fastvideo.distributed.parallel_state import init_model_parallel_group
 
     sequence_model_parallel_size = sp_group.world_size

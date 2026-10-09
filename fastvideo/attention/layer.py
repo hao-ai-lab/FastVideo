@@ -99,15 +99,6 @@ class DistributedAttention(nn.Module):
         self.dtype = dtype
         self.causal = causal
 
-        # Ring Attention (and its USP hybrid with Ulysses) is a process-wide
-        # parallelism setting (like SP itself), so RingAttention itself reads
-        # it from the distributed runtime rather than it being threaded
-        # through every model's constructor. The one thing only this class
-        # can decide is the guard below: a subclass that overrides forward()
-        # wholesale (e.g. LTXDistributedAttention, DistributedAttention_VSA)
-        # would otherwise never reach the Ring dispatch in forward() below
-        # and silently keep running plain Ulysses SP -- fail loudly here
-        # instead of letting that divergence pass unnoticed.
         if get_ring_size() > 1 and type(self).forward is not DistributedAttention.forward:
             raise NotImplementedError(f"Ring Attention is not implemented for {type(self).__name__}, which overrides "
                                       "DistributedAttention.forward() directly instead of using the base dispatch. "
