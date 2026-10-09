@@ -30,13 +30,13 @@ Native serving YAML + option schemas + deployment manifests
 | `examples/serving/*.yaml` | Complete explicit baseline, including hidden settings |
 | `docs/cookbook/options.yaml` | Authored field schemas and runtime metadata |
 | `docs/cookbook/recipes/*.yaml` | Deployments, baseline references, selected fields and schema overrides |
-| `docs/build-cookbook-config.mjs` | Validate metadata and export static catalogs |
-| `docs/assets/cookbook-config.js` | Load catalogs, preview fields, validate edits and produce output |
+| `docs/js/build-cookbook-config.mjs` | Validate metadata and export static catalogs |
+| `docs/js/cookbook-config.mjs` | Load catalogs, preview fields, validate edits and produce output |
 
 Catalog generation runs in Node without importing FastVideo or loading model
 weights. The docs build generates assets before MkDocs copies them into the
-published site. Generated JSON, the validator bundle and its license notices
-are Git-ignored build output; the validator and notices are published together.
+published site. Generated JSON, the combined API/validator bundle and its license notices
+are Git-ignored build output published together under `assets/cookbook-config/`.
 Website visitors need only the static assets. The schemas are author-maintained
 and must stay aligned with native runtime behavior.
 
@@ -45,6 +45,8 @@ and must stay aligned with native runtime behavior.
 The builder writes a small index and one catalog per deployment:
 
 ```text
+docs/assets/cookbook-config/cookbook-config.js
+docs/assets/cookbook-config/cookbook-config.LICENSE.txt
 docs/assets/cookbook-config/index.json
 docs/assets/cookbook-config/recipes/<model-key>/<deployment-key>.json
 ```
@@ -72,8 +74,9 @@ to documentation, not embedded HTML.
 
 ## Shared JavaScript API
 
-`docs/assets/cookbook-config.js` exposes these four functions through the browser
-global `FastVideoConfigCookbook` and CommonJS in Node:
+`docs/js/cookbook-config.mjs` exports the four functions below. The generated
+`assets/cookbook-config/cookbook-config.js` bundles them with Ajv and exposes
+the browser global `FastVideoConfigCookbook` and CommonJS exports:
 
 | Function | Result |
 | --- | --- |
@@ -87,15 +90,16 @@ present. REST deployments return a request object and omit `websocketUrl`.
 
 `signal` supports canceling obsolete loads; `fetcher` accepts a fetch-compatible
 replacement for tests or other callers. Loading failures reject the promise.
-Validation failures throw an `Error` with a message; there is no structured
-field-error or error-code contract.
+Loading checks the consumed index/catalog structure, including unique model,
+deployment and control identities. Malformed data fails before reaching UI
+helpers. Relative catalog URLs are supported; these checks do not validate
+full native configurations or certify runtime compatibility.
 
-Load the validator before resolving configuration in the browser. For this
-site's deployment prefix:
+Load one bundle before calling the API. Ajv is included; no separate validator
+script or CDN is needed. For this site's deployment prefix:
 
 ```html
-<script src="/FastVideo/assets/cookbook-validator.js"></script>
-<script src="/FastVideo/assets/cookbook-config.js"></script>
+<script src="/FastVideo/assets/cookbook-config/cookbook-config.js"></script>
 ```
 
 ```javascript
@@ -108,8 +112,9 @@ const result = api.resolveConfig(catalog, edits);
 // Render fields; display result.yaml/result.command and offer a YAML download.
 ```
 
-Adjust asset URLs for other deployment prefixes. Loading catalogs and previewing
-fields do not need the validator. `getOptions()` previews pending edits without
+Adjust asset URLs for other deployment prefixes. Node tools can import the
+handwritten ES module directly; they do not require a generated bundle.
+`getOptions()` previews pending edits without
 full schema/topology validation; `resolveConfig()` validates before generating
 output. Edits are a flat path-to-value object with correctly typed JavaScript
 values, and only declared controls are editable.
@@ -117,6 +122,8 @@ values, and only declared controls are editable.
 The core returns data and strings. The UI owns layout, widgets, edit state,
 input parsing, loading/error states, cancellation, stale-response handling,
 guide links, copying and downloads. Catch failures and clear invalid output.
+Reuse the loaded catalog and treat it as read-only: validators are cached by
+schema object identity. Returned field previews and configurations are copies.
 The replaceable adapter in `examples/cookbook/cookbook-demo.js` demonstrates
 these responsibilities without coupling them to the shared API.
 
@@ -145,3 +152,69 @@ server readiness or GPU memory fit. Client instructions use same-machine
 addresses: REST deployments return a sample request command, while streaming
 deployments return a health command and WebSocket URL. The UI displays these
 instructions; the API does not execute them.
+
+## Validation errors
+
+`CookbookValidationError` is an additional named export and browser-global member.
+It extends `Error`, so existing `catch (error) { ...error.message }` handlers work.
+
+| Property | Meaning |
+| --- | --- |
+| `message` | Human-readable explanation; do not parse it for field identity |
+| `path` | Canonical selected field or topology path, such as `server.port`; `null` for configuration-wide failures |
+| `errors` | Detached records containing `instancePath`, `schemaPath`, `keyword`, `params` and `message` |
+
+For field-schema failures, `errors` preserves Ajv details. `instancePath` is a
+JSON Pointer **relative to the selected field's value**: for an object control
+at `generator.pipeline.experimental.settings`, `/tags/0` points inside that
+object. Missing/additional property names remain in `params`. Non-Ajv failures
+use `editable`, `path`, `topology` or `configuration` as their keyword;
+`instancePath` and `schemaPath` are empty. A topology failure may include
+`params.relatedPaths`. HTTP, JSON parsing and cancellation failures remain
+ordinary loading errors. The error records are copied, so later validations
+cannot overwrite details already shown by the UI.
+
+```javascript
+try {
+  const result = api.resolveConfig(catalog, edits);
+} catch (error) {
+  if (error instanceof api.CookbookValidationError) {
+    highlightField(error.path, error.errors);
+  }
+  showError(error.message);
+}
+```
+
+## Validation boundaries and future work
+
+The Node builder and browser validate individual selected fields with Ajv and
+apply the existing GPU/parallel-degree checks. Hidden baseline fields are
+preserved, not exhaustively validated. Native path/type drift checks run
+separately in an existing FastVideo Python environment; they are not a Python
+dependency of the docs build. See the contributor guide for the command and
+its coverage limits.
+
+TODO: consider reusable deployment-wide validation only when a maintained
+recipe needs it. It is not implemented in this change:
+
+- An offset frame grid such as `(frames - 1) % 4 === 0` is not `multipleOf: 4`.
+  A bounded enum or reusable step/offset rule could express it. Some Wan paths
+  align frames rather than reject them, so exact-output policy must be labeled.
+- H3's `width * height <= 768 * 1344` requires a cross-field arithmetic check.
+  Separate per-dimension bounds cannot enforce it.
+- Refinement-dependent geometry could use JSON Schema `if`/`then`/`else` on a
+  complete configuration object. The current field-only validator cannot see
+  sibling fields. The current LTX2 baseline fixes refinement on and uses 64-pixel
+  dimensions accordingly.
+
+Memory estimates, measured hardware support, format versioning and HTTP cache
+freshness remain separate follow-ups. No general arithmetic validator or CLI
+override workflow is introduced here.
+
+## Coexistence with the current cookbook
+
+The existing cookbook pages use the legacy recipe catalog, `cookbook.js` and the
+example-page build hook for their curated commands and serving links. The new
+catalogs and API support editable serving YAML and the separate review demo.
+Both remain available. A final UI can consume the new API; migrating existing
+pages or deleting the demo/review guide is deferred to a later change.

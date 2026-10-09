@@ -59,6 +59,7 @@ runtimes:
         maximum: 8
       generator.engine.parallelism.tp_size:
         title: Tensor parallelism
+        description: Splits supported text encoders across GPUs; this does not shard every model's DiT.
         type: integer
         default: -1
         minimum: -1
@@ -172,6 +173,31 @@ runtimes:
         minimum: 0.0
         exclusiveMaximum: 1.0
         default: 0.9
+      default_request.sampling.num_frames:
+        title: Frames
+        type: integer
+        minimum: 108
+        maximum: 362
+        description: Configured counts align upward to the next 17n+5 value; explicit HTTP counts must already be aligned.
+      default_request.sampling.height:
+        title: Height
+        type: integer
+        minimum: 32
+        maximum: 4096
+        multipleOf: 32
+        description: H3 serving requires multiples of 32; its canvas-area limit also applies.
+      default_request.sampling.width:
+        title: Width
+        type: integer
+        minimum: 32
+        maximum: 4096
+        multipleOf: 32
+        description: H3 serving requires multiples of 32; its canvas-area limit also applies.
+      default_request.sampling.seed:
+        title: Seed
+        type: integer
+        minimum: 0
+        maximum: 4294967295
 
   fastvideo-cuda-streaming:
     metadata:
@@ -185,4 +211,17 @@ runtimes:
       client_guide_url: ../../design/server_contracts/streaming/
       server_defaults: *cuda_server
     workloads: [t2v]
-    options: *cuda_options
+    options:
+      <<: *cuda_options
+      streaming.session_timeout_seconds:
+        title: Client message timeout (seconds)
+        type: integer
+        minimum: 1
+        default: 300
+        description: Time allowed for client initialization, an idle client message, or worker acquisition; not an ongoing-generation deadline.
+      streaming.generation_segment_cap:
+        title: Maximum segments per session
+        type: integer
+        minimum: 1
+        default: 6
+        description: Stop the session after this many generated segments.

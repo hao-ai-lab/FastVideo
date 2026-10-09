@@ -9,7 +9,7 @@ This directory contains the FastVideo documentation built with MkDocs.
 uv pip install -r requirements-mkdocs.txt
 npm ci --prefix docs
 
-# Build the validator and generate cookbook catalogs
+# Build the browser API/validator bundle and generate cookbook catalogs
 npm run build:catalog --prefix docs
 
 # Serve docs with live reload (recommended for development)
@@ -19,14 +19,17 @@ mkdocs serve
 mkdocs build
 ```
 
-Run these commands from the repository root. Catalog generation uses authored
+Run these commands from the repository root with Node 22.13+ (22.x) or Node 24+. Catalog generation uses authored
 YAML and Node dependencies; it does not import FastVideo or install model runtime
 dependencies. `mkdocs build` and `mkdocs serve` use the generated files without
-regenerating them. Rerun `build:catalog` after changing cookbook sources.
-The npm `prebuild:catalog` and `pretest:cookbook` hooks automatically build the
-validator before catalog generation and tests, including in CI. Its generated
-`docs/assets/cookbook-validator.js` and `cookbook-validator.LICENSE.txt` are
-Git-ignored and published together with the site; do not hand-edit or commit them.
+regenerating them. A small MkDocs hook checks required assets before and after
+the build and explains how to prepare them if missing. Rerun `build:catalog`
+after changing cookbook sources. The npm `prebuild:catalog` and `pretest:cookbook`
+hooks automatically run `build:assets`, including in CI. The combined
+`docs/assets/cookbook-config/cookbook-config.js`, its
+`cookbook-config.LICENSE.txt`, index and catalogs are Git-ignored and published
+together; do not hand-edit or commit them. Handwritten modules live in `docs/js/`
+and tests in `docs/tests/`.
 
 ## View the docs
 
@@ -53,7 +56,7 @@ Documentation is automatically built and deployed to GitHub Pages when relevant
 changes are pushed to the `main` branch via `.github/workflows/infra-docs.yml`.
 Pull requests run the build without deploying. The normal docs job installs
 `requirements-mkdocs.txt` and the Node dependencies with `npm ci --prefix docs`,
-runs cookbook tests, generates catalogs with `npm run build:catalog --prefix docs`,
+runs scoped lint/format checks, cookbook tests and asset-check tests, generates catalogs with `npm run build:catalog --prefix docs`,
 and runs `mkdocs build`. Invalid authored
 metadata stops the build. The generated JSON remains Git-ignored but is copied
 to `site/assets/cookbook-config/` for publication. The source-only
@@ -84,7 +87,7 @@ npm ci --prefix docs
 npm run build:catalog --prefix docs
 ```
 
-This command builds the validator first. Rerun it whenever
+This command builds the combined API/validator bundle first. Rerun it whenever
 shared options, recipe manifests or baseline YAML change. Then `mkdocs build`
 or `mkdocs serve` includes the generated assets. Generation loads no model
 weights and performs no inference.
@@ -104,3 +107,17 @@ See [the contributor guide](contributing/cookbook_configuration.md) for recipe
 authoring and local test commands, and [the API contract](cookbook/design.md)
 for using the same catalogs in another UI. The temporary demo will be removed
 when the final UI replaces it.
+
+## Check cookbook changes
+
+```bash
+npm run test:cookbook --prefix docs
+npm run check:cookbook --prefix docs
+python -m unittest discover -s docs/tests -p 'test_*.py'
+```
+
+`npm run format:cookbook --prefix docs` formats handwritten cookbook modules,
+build scripts, tooling configuration and Node tests under `docs/`. The temporary
+demo adapter follows the existing `examples/` exclusion. The check commands do not change files.
+The Node tests use synthetic fixtures for reusable behavior and discover every
+production recipe for integration checks. They do not launch serving processes.

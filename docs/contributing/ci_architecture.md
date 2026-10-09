@@ -400,16 +400,17 @@ If you add a new CI test category:
 
 ### Documentation
 
-`.github/workflows/infra-docs.yml` builds documentation for PRs that touch
-`docs/**`, `mkdocs.yml`, `requirements-mkdocs.txt`, or the workflow itself. On
-pushes to `main`, it also deploys the built site to GitHub Pages.
+`.github/workflows/infra-docs.yml` validates documentation changes on PRs and
+deploys to GitHub Pages on pushes to `main`. Its path filters cover documentation,
+examples and related build tooling; see the workflow for the exact triggers.
 
 The docs job:
 
-1. Installs the pinned MkDocs dependencies.
-2. Runs `mkdocs build`; the native MkDocs hook generates example pages before the build.
-3. Runs `python scripts/check_docs_links.py` against the generated documentation.
-4. Uploads the Pages artifact and deploys only from `main`.
+1. Installs Python and Node documentation dependencies.
+2. Runs lint, formatting checks and tests for documentation tooling.
+3. Generates required static assets.
+4. Builds the MkDocs site and checks its assets and documentation links.
+5. Uploads the site artifact and publishes only from `main`.
 
 ### Docker Images
 

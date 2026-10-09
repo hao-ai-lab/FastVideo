@@ -26,13 +26,13 @@ deployments:
       - default_request.sampling.fps
       - default_request.sampling.seed
     overrides:
-      # Generic input validation requires dimensions divisible by eight.
+      # Wan uses an 8-pixel VAE stride and a 2x2 spatial DiT patch.
       default_request.sampling.height:
-        minimum: 8
-        multipleOf: 8
+        minimum: 16
+        multipleOf: 16
       default_request.sampling.width:
-        minimum: 8
-        multipleOf: 8
+        minimum: 16
+        multipleOf: 16
       # Generic stage verification accepts nonnegative seeds, including zero.
       default_request.sampling.seed:
         minimum: 0

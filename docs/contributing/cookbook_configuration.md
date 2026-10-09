@@ -13,7 +13,7 @@ model and serving configuration already work in that runtime. If you need a new
 baseline, follow the model's serving runbook first.
 
 Run commands from the repository root. Local metadata checks need Node.js and
-npm; the docs CI uses Node 22. Metadata checks do not load weights or require a GPU.
+npm. Use Node 22.13+ in the 22.x line, or Node 24+; docs CI uses Node 22. Metadata checks do not load weights or require a GPU.
 
 | File | What it controls | When to edit it |
 | --- | --- | --- |
@@ -63,11 +63,11 @@ deployments:
       - default_request.sampling.height
     overrides:
       default_request.sampling.height:
-        minimum: 8
-        multipleOf: 8
+        minimum: 16
+        multipleOf: 16
 ```
 
-The real manifest already exists and exposes additional reviewed fields. Keep
+The real manifest already exists and exposes additional sample fields. Keep
 its existing entries when making an addition. `defaults` points to the full
 baseline; `options` selects editors from the shared option catalog:
 
@@ -83,9 +83,9 @@ value in downloaded YAML. Other hidden settings, including the DMD schedule,
 also remain in the download.
 
 The height `overrides` inherits the shared field's type and title, then requires
-a value of at least 8 that is divisible by 8. It does not change the baseline
+a value of at least 16 that is divisible by 16 (Wan VAE stride 8 times DiT patch size 2). It does not change the baseline
 height of 480. Selecting the height in `options` makes it editable; an override
-alone does not expose a field.
+must refer to a field selected by the final `options` list.
 
 | What you want to change | Where to change it |
 | --- | --- |
@@ -103,18 +103,19 @@ starting value. `overrides` changes field schemas, not baseline values.
 npm ci --prefix docs
 npm run build:catalog --prefix docs
 npm run test:cookbook --prefix docs
+npm run check:cookbook --prefix docs
 pre-commit run --files docs/cookbook/recipes/fastwan21.yaml
 ```
 
 Use your changed paths in the pre-commit command. The npm build/test commands
-automatically generate the validator first. A successful build writes
+automatically generate the combined browser API/validator bundle first. A successful build writes
 `docs/assets/cookbook-config/index.json` and, for this deployment,
 `docs/assets/cookbook-config/recipes/fastwan21/cuda-rest.json`.
 
 Inspect the merged deployment catalog as YAML in the terminal:
 
 ```bash
-node docs/build-cookbook-config.mjs --preview fastwan21/cuda-rest
+node docs/js/build-cookbook-config.mjs --preview fastwan21/cuda-rest
 ```
 
 This prints metadata and field schemas as well as the serving configuration
@@ -143,7 +144,7 @@ For a new deployment, select its model and deployment labels instead. The local
 preview does not start a model server. Metadata tests do not establish server
 startup, native runtime validity or GPU compatibility.
 
-Generated catalogs, the validator bundle and its license notices are ignored by
+Generated catalogs, the combined bundle and its license notices are ignored by
 Git. Commit authored sources rather than generated output. For docs setup and
 CI publication, see the [docs README](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/README.md).
 
@@ -207,9 +208,9 @@ fields. Selection starts empty and processes entries from top to bottom:
 | `'!server.output_dir'` | Remove a field from the selection |
 | `'!generator.engine.offload.*'` | Remove matching fields |
 
-`*` matches zero or more characters, including dots. Positive entries add fields
-in catalog declaration order without duplicates; a later positive entry can
-re-add an excluded field at the end. Every entry must match a declared option,
+`*` matches zero or more characters, including dots. Each positive entry adds its matches in catalog declaration order. Fields
+already selected retain their position; removing and later re-adding a field
+moves it to the end. Selections never contain duplicates. Every entry must match a declared option,
 even an exclusion that removes nothing. Bare `server`, `**` and `?` are unsupported.
 Quote leading `!` entries because YAML otherwise treats them as tags.
 Patterns match canonical option paths, not filesystem paths or schema properties.
@@ -253,8 +254,12 @@ editable baseline values must satisfy the merged schemas.
 
 The walkthrough's height override demonstrates adding constraints while
 retaining the shared type and title. For a model-local field, provide a complete
-schema in `overrides` and select its path in `options`. An override alone never
-makes a field editable.
+schema in `overrides` and select its path in `options`. Every deployment
+override must survive the final selector list, including exclusions; otherwise
+the build names the unused path and asks you to select it or remove the override.
+Shared/runtime options may remain unselected. Invalid recipes fail before
+export replaces catalogs or the index. Run the local build before pushing;
+CI is a second check after the push.
 
 ### Choosing what to expose
 
@@ -265,35 +270,68 @@ support; native cross-field checks still apply at server startup.
 
 Keep coupled settings fixed unless reviewed, such as FastWan's inference steps
 and DMD schedule. Experimental or untyped fields need an authored schema before
-they become controls; MLX's untyped request defaults remain hidden.
+they become controls. MLX sampling controls are declared only where their
+conversion into `GenerationRequest` and the serving adapter have been checked.
 
-Current CUDA recipes expose TP/SP and exclude
-`'!generator.engine.parallelism.hsdp_*'` because their baselines do not enable
-FSDP. HSDP fields are available for reviewed FSDP deployments; the unused
-distributed timeout is not offered. The API checks GPU count and parallel-degree
-divisibility, preserving supported `-1` automatic values instead of changing
-invalid edits. Common ceilings (8 GPUs, 512 frames, 4096 pixels per dimension,
-120 FPS) are overridable editor policy, not capacity guarantees. Put model-specific
-geometry and seed constraints in `overrides`.
+Current samples keep HSDP fields hidden because FSDP is disabled. Wan and H3
+retain TP for their supported text encoders; their DiTs do not thereby become
+tensor-parallel. LTX2 uses SP and does not expose an ineffective TP editor.
+The API checks GPU count and degree divisibility, preserving `-1` automatic
+values instead of changing invalid edits. Common ceilings (8 GPUs, 512 frames,
+4096 pixels per dimension, 120 FPS) are overridable editor policy, not capacity
+guarantees. Put verified model geometry and seed constraints in `overrides`.
+
+The current Wan sample dimensions use a 16-pixel grid. LTX2 uses 64 while its
+baseline keeps refinement enabled. MLX exposes frames, dimensions and seed;
+FPS, guidance and inference steps stay fixed by that serving route. MLX VSA
+sparsity only has an effect when the baseline enables VSA. WebSocket recipes
+can expose `streaming.session_timeout_seconds` and
+`streaming.generation_segment_cap`; the timeout covers waiting for client
+messages and pool acquisition, not a deadline for ongoing generation.
+
+H3's raw configuration range is 108–362 frames. The native alignment in
+[`packing.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/pipelines/basic/minimax_h3/packing.py)
+and the serving adapter maps defaults 108–124 to 124 and 125 to 141;
+360 frames (nominally 15 seconds at 24 FPS) aligns to 362. Explicit HTTP frame
+counts have a different contract: they must already be aligned to `17n+5`.
+Keep the raw baseline values rather than replacing them with a strict aligned
+enum. The 362-frame cap does not mean a given GPU can fit that generation.
+Combined geometry rules remain [future validation work](../cookbook/design.md#validation-boundaries-and-future-work).
+
+### Check native declaration drift separately
+
+In an existing FastVideo development environment, run:
+
+```bash
+python -m pytest --noconftest tests/local_tests/test_cookbook_native_contract.py -q
+```
+
+This check inspects the current authored runtime options and all discovered
+recipes against native Python declarations. CUDA REST and streaming use
+`ServeConfig`; MLX uses `MLXServeConfig`, with its opaque request-default map
+checked against `GenerationRequest`. The known Wan experimental `flow_shift`
+path maps explicitly to `PipelineConfig.flow_shift`.
+
+The check detects missing paths and incompatible root types/nullability. It
+allows narrower cookbook schemas and does not compare informational defaults,
+numeric bounds, enum values or nested array-item schemas. It does not prove
+that a model consumes every setting. This test is separate from Node docs CI
+and needs the existing FastVideo environment; no model weights or GPU execution
+are required. Ordinary recipe additions are discovered automatically.
 
 ### Inspect one merged deployment
 
-To inspect the same FastWan deployment without writing generated catalogs:
+Use the [build and preview walkthrough](#3-build-test-and-open-the-preview).
+The direct `node docs/js/build-cookbook-config.mjs --preview MODEL/DEPLOYMENT`
+command imports handwritten sources and needs only installed Node dependencies,
+not generated browser assets. It validates every source recipe before selecting
+one, so an invalid unrelated recipe can block the preview.
 
-```bash
-npm run build:validator --prefix docs
-node docs/build-cookbook-config.mjs --preview fastwan21/cuda-rest
-```
-
-Install dependencies first if you skipped the walkthrough. Direct Node commands
-need the validator built explicitly. The ID is `<model-key>/<deployment-key>`.
-Output is a YAML representation of the catalog, including the starting serving
-configuration in `base_config` and merged field schemas in `controls`.
-The preview validates all source recipes before selecting one; an invalid
-unrelated recipe can block it.
-
-Redirect stdout to save it. `--recipes-dir` and `--catalog` select custom inputs;
-`--output-dir` cannot be combined with `--preview`.
+`--recipes-dir` and `--catalog` select custom inputs. `--root` supplies the
+repository root for fixture/local work; baseline and guide paths resolve there.
+`--output-dir` cannot be combined with `--preview`; redirect stdout to save a
+catalog preview. Browser downloads contain the serving configuration, not the
+catalog metadata.
 
 For reusable UI methods and configuration guarantees, see the
 [design and API contract](../cookbook/design.md). Streaming client instructions

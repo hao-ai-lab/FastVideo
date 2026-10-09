@@ -3,7 +3,7 @@
 > **TEMPORARY: remove this file after the API documentation has been reviewed.**
 > Keep any agreed permanent guidance in the [serving cookbook design](../cookbook/design.md).
 
-This guide describes the public API of [cookbook-config.js](cookbook-config.js)
+This guide describes the public API of [cookbook-config.js](cookbook-config/cookbook-config.js)
 for someone replacing the current cookbook UI. The same catalogs and functions
 can support React, Vue, or plain HTML. The library returns data and strings;
 your UI owns components, layout, state, events, error display, copy buttons,
@@ -18,32 +18,32 @@ npm ci --prefix docs
 npm run build:catalog --prefix docs
 ```
 
-The npm command builds the validator before generating the JSON catalogs.
+The npm command bundles the API and Ajv together before generating the JSON catalogs.
 Serve the files over HTTP using the docs server or the local demo setup.
 Website visitors only need the published assets, not Node or the YAML sources.
 
-Load these scripts in order, adjusting the prefix for your deployment:
+Load one script, adjusting the prefix for your deployment:
 
 ```html
-<script src="/FastVideo/assets/cookbook-validator.js"></script>
-<script src="/FastVideo/assets/cookbook-config.js"></script>
+<script src="/FastVideo/assets/cookbook-config/cookbook-config.js"></script>
 ```
 
-The browser API is `globalThis.FastVideoConfigCookbook`. The file also supports
-CommonJS in Node; it does not expose named ES module exports.
+The browser API is `globalThis.FastVideoConfigCookbook`. The generated bundle
+also supports CommonJS. Node tools can instead import named exports directly
+from the handwritten `docs/js/cookbook-config.mjs`, without building assets.
 
 ```js
-const api = require("./docs/assets/cookbook-config.js"); // From the repository root in CommonJS.
+const api = require("./docs/assets/cookbook-config/cookbook-config.js"); // From the repository root in CommonJS.
 ```
 
-`cookbook-config.js` is handwritten source. The validator bundle, its license
-notices, and the JSON catalogs are generated assets. Publish the generated
-validator and its license notices together.
+`docs/js/cookbook-config.mjs` and `docs/js/cookbook-validator.mjs` are handwritten
+source. The combined bundle, its license notices and JSON catalogs are generated
+under `docs/assets/cookbook-config/`. Publish this generated directory together.
 
 ## Public methods
 
-Only these four methods are public. All other functions in the script are
-implementation details. The shapes below document the current JavaScript API;
+These four methods and the `CookbookValidationError` class are public. Other
+functions are implementation details. The shapes below document the current JavaScript API;
 they are not TypeScript declarations or a versioned compatibility guarantee.
 
 | Method | Returns | Purpose |
@@ -80,7 +80,9 @@ The URL is needed to resolve relative catalog links.
 
 Use a deployment ID from `index.models`, such as `fastwan21/cuda-rest`.
 The method locates its catalog URL, fetches JSON, and checks that the returned
-catalog ID matches. Catalogs are loaded on demand rather than all at once.
+catalog ID matches, then validates consumed metadata and configuration/control
+containers. Both loaders reject malformed entries with context; duplicate model,
+deployment and control IDs are rejected. Catalogs are loaded on demand.
 
 The returned catalog includes:
 
@@ -219,10 +221,16 @@ UI's selected deployment or edit state.
   baseline; it does not delete the baseline setting from generated YAML.
 - Hidden baseline fields remain in output. Do not reconstruct the configuration
   from visible controls alone.
-- Treat the catalog as read-only. Preview and resolution work on copies.
-- Validation errors throw `Error` with a message. There is no structured
-  per-field error array or stable error-code contract; avoid parsing messages
-  to infer field identities. Hide or disable stale output when validation fails.
+- Treat the catalog as read-only and reuse it while editing so its cached
+  validators can be reused. Preview and resolution return copies.
+- Validation errors throw `CookbookValidationError`, which extends `Error`.
+  `path` identifies the selected field (or is `null` for configuration-wide
+  failures); `errors` contains copied Ajv-compatible records. Nested
+  `instancePath` pointers are relative to that field value. Topology, unselected
+  edit and path failures also provide structured records. See the
+  [error contract](../cookbook/design.md#validation-errors) for keywords and
+  related paths. Existing message-only handlers still work. Hide or disable
+  stale output when validation fails; do not parse messages for field identity.
 - These are authored-field and topology checks. Native runtime validation and
   GPU capacity remain outside this API's contract.
 

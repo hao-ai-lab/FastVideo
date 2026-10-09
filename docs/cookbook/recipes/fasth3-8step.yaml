@@ -55,6 +55,10 @@ deployments:
       - generator.prompt_cache_dir
       - generator.vae_dtype
       - generator.vsa_sparsity
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.seed
     overrides:
       generator.vae_dtype:
         # Keep MLXGeneratorConfig's enum/default; customize only its explanation.

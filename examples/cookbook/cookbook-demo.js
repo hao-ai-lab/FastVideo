@@ -2,14 +2,17 @@
 ((scope) => {
   "use strict";
 
-  const cookbook = typeof module !== "undefined" && module.exports ?
-    require("../../docs/assets/cookbook-config.js") : scope.FastVideoConfigCookbook;
+  const cookbook =
+    typeof module !== "undefined" && module.exports
+      ? require("../../docs/assets/cookbook-config/cookbook-config.js")
+      : scope.FastVideoConfigCookbook;
   const pathParts = (path) => path.split(".");
 
   /** The demo discards obsolete catalog responses when its selection changes. */
   function createCatalogLoader(index, onChange, fetcher = (...args) => scope.fetch(...args)) {
     const entries = index.models.flatMap((model) => model.deployments.map((deployment) => ({ model, deployment })));
-    let generation = 0, controller;
+    let generation = 0,
+      controller;
     return async (id) => {
       const token = ++generation;
       controller?.abort();
@@ -27,7 +30,12 @@
 
   function controlPresentation(control) {
     const parts = pathParts(control.path);
-    const groups = { server: "Server", generator: "Resources", default_request: "Request defaults" };
+    const groups = {
+      server: "Server",
+      generator: "Resources",
+      default_request: "Request defaults",
+      streaming: "Streaming",
+    };
     return { label: control.schema?.title || parts.at(-1).replace(/_/g, " "), group: groups[parts[0]] };
   }
 
@@ -50,7 +58,9 @@
     const streamingClient = root.querySelector("[data-config-streaming-client]");
     const websocketUrl = root.querySelector("[data-config-websocket-url]");
     const clientGuide = root.querySelector("[data-config-client-guide]");
-    let catalog, resolved, selections = {};
+    let catalog,
+      resolved,
+      selections = {};
     const inputErrors = new Map();
     const fieldInputs = new Map();
 
@@ -61,7 +71,10 @@
         const branches = schema.anyOf || schema.oneOf || [schema];
         const nonNull = branches.filter((item) => item.type !== "null");
         const basic = nonNull.length === 1 ? nonNull[0] : schema;
-        for (const [property, keyword] of [["min", "minimum"], ["max", "maximum"]]) {
+        for (const [property, keyword] of [
+          ["min", "minimum"],
+          ["max", "maximum"],
+        ]) {
           const bound = schema[keyword] ?? basic[keyword];
           if (bound === undefined) input.removeAttribute(property);
           else input[property] = bound;
@@ -85,7 +98,9 @@
     function invalidate(message) {
       resolved = null;
       output.hidden = true;
-      buttons.forEach((button) => { button.disabled = true; });
+      buttons.forEach((button) => {
+        button.disabled = true;
+      });
       error.textContent = message;
       streamingClient.hidden = true;
       websocketUrl.textContent = "";
@@ -98,24 +113,30 @@
         resolved = cookbook.resolveConfig(catalog, selections);
         error.textContent = "";
         output.hidden = false;
-        buttons.forEach((button) => { button.disabled = false; });
+        buttons.forEach((button) => {
+          button.disabled = false;
+        });
         for (const key of ["yaml", "command", "clientCommand"]) {
           root.querySelector(`[data-config-code="${key}"]`).textContent = resolved[key];
         }
         const streaming = Boolean(resolved.websocketUrl);
-        root.querySelector("[data-config-client-title]").textContent = streaming ?
-          "4. Check server and connect a streaming client" : "4. Send a sample request";
+        root.querySelector("[data-config-client-title]").textContent = streaming
+          ? "4. Check server and connect a streaming client"
+          : "4. Send a sample request";
         const clientCopy = root.querySelector('[data-config-copy="clientCommand"]');
         clientCopy.textContent = streaming ? "Copy health check" : "Copy sample request";
         clientCopy.dataset.copyLabel = streaming ? "Health check" : "Sample request";
-        root.querySelector("[data-config-client-note]").textContent = streaming ?
-          "Run this health check, then connect a compatible WebSocket client using the contract below. Use the server machine’s address from another computer." :
-          catalog.workload === "i2v" ? "Same-machine example: replace the image path with a file accessible to the server." :
-            "Same-machine example. Use the server machine’s address when calling from another computer.";
+        root.querySelector("[data-config-client-note]").textContent = streaming
+          ? "Run this health check, then connect a compatible WebSocket client using the contract below. Use the server machine’s address from another computer."
+          : catalog.workload === "i2v"
+            ? "Same-machine example: replace the image path with a file accessible to the server."
+            : "Same-machine example. Use the server machine’s address when calling from another computer.";
         streamingClient.hidden = !streaming;
         websocketUrl.textContent = resolved.websocketUrl || "";
         root.querySelector("[data-config-request-note]").hidden = streaming;
-      } catch (failure) { invalidate(failure.message); }
+      } catch (failure) {
+        invalidate(failure.message);
+      }
     }
 
     function renderControls() {
@@ -164,7 +185,9 @@
           });
           if (value === undefined) {
             const inherited = document.createElement("option");
-            inherited.value = ""; inherited.textContent = "Inherited"; input.prepend(inherited);
+            inherited.value = "";
+            inherited.textContent = "Inherited";
+            input.prepend(inherited);
           }
           input.value = value === undefined ? "" : choices.findIndex((item) => item === value);
           input.addEventListener("change", () => {
@@ -208,7 +231,10 @@
             automatic.checked = value === null;
             automatic.setAttribute("aria-label", `${path}: Set null`);
             input.disabled = automatic.checked;
-            automatic.addEventListener("change", () => { input.disabled = automatic.checked; update(); });
+            automatic.addEventListener("change", () => {
+              input.disabled = automatic.checked;
+              update();
+            });
             const autoLabel = document.createElement("span");
             autoLabel.append(automatic, " Set null explicitly");
             row.append(autoLabel);
@@ -257,15 +283,17 @@
           clearMetadata();
           reset.disabled = true;
           invalidate("");
-          root.querySelector("[data-config-model]").textContent = update.model ?
-            `${update.model.title} · ${update.deployment.label}` : modelPicker.value;
+          root.querySelector("[data-config-model]").textContent = update.model
+            ? `${update.model.title} · ${update.deployment.label}`
+            : modelPicker.value;
           status.textContent = "Loading the selected deployment…";
         } else if (update.state === "ready") {
           catalog = update.catalog;
           root.querySelector("[data-config-model]").textContent =
             `${catalog.model.title} · ${catalog.deployment.label} · ${catalog.workload}`;
           root.querySelector("[data-config-summary]").textContent = catalog.summary;
-          root.querySelector("[data-config-source]").href = `https://github.com/hao-ai-lab/FastVideo/blob/main/${catalog.source_config}`;
+          root.querySelector("[data-config-source]").href =
+            `https://github.com/hao-ai-lab/FastVideo/blob/main/${catalog.source_config}`;
           const guideHref = guideUrl(catalog, indexUrl);
           guide.hidden = !guideHref;
           if (guideHref) guide.href = guideHref;
@@ -276,14 +304,16 @@
           const requirements = root.querySelector("[data-config-requirements]");
           requirements.replaceChildren();
           for (const note of catalog.requirements) {
-            const item = document.createElement("li"); item.textContent = note; requirements.append(item);
+            const item = document.createElement("li");
+            item.textContent = note;
+            requirements.append(item);
           }
           const installation = root.querySelector("[data-config-install]");
           installation.href = catalog.runtime.install_url;
           installation.textContent = `${catalog.runtime.label} installation guide`;
-          root.querySelector("[data-config-topology]").textContent =
-            catalog.runtime.hardware_label ? `Hardware family: ${catalog.runtime.hardware_label}.` :
-              `Recipe baseline GPU count: ${catalog.base_config.generator.engine?.num_gpus ?? "inherited"}.`;
+          root.querySelector("[data-config-topology]").textContent = catalog.runtime.hardware_label
+            ? `Hardware family: ${catalog.runtime.hardware_label}.`
+            : `Recipe baseline GPU count: ${catalog.base_config.generator.engine?.num_gpus ?? "inherited"}.`;
           resetForm();
           reset.disabled = false;
         } else {
@@ -316,12 +346,14 @@
           try {
             await navigator.clipboard.writeText(resolved[button.dataset.configCopy]);
             status.textContent = `${button.dataset.copyLabel} copied.`;
-          } catch (_) { status.textContent = "Clipboard unavailable. Select and copy the output text."; }
+          } catch {
+            status.textContent = "Clipboard unavailable. Select and copy the output text.";
+          }
         });
       });
       root.querySelector("[data-config-download]").addEventListener("click", () => {
         if (!resolved) return;
-        const url = URL.createObjectURL(new Blob([resolved.yaml], {type:"text/yaml;charset=utf-8"}));
+        const url = URL.createObjectURL(new Blob([resolved.yaml], { type: "text/yaml;charset=utf-8" }));
         const link = document.createElement("a");
         link.href = url;
         link.download = "config.yaml";
@@ -333,7 +365,11 @@
         status.textContent = "config.yaml download started.";
       });
       await selectModel();
-    } catch (failure) { status.textContent = ""; clearMetadata(); invalidate(failure.message); }
+    } catch (failure) {
+      status.textContent = "";
+      clearMetadata();
+      invalidate(failure.message);
+    }
   }
 
   if (typeof module !== "undefined" && module.exports) {

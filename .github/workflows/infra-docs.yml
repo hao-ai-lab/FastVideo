@@ -11,7 +11,6 @@ on:
       - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
       - 'scripts/check_docs_links.py'
-      - 'tests/local_tests/test_cookbook*.mjs'
       - '.github/workflows/infra-docs.yml'
   pull_request:
     branches: [ main ]
@@ -23,7 +22,6 @@ on:
       - 'requirements-mkdocs.in'
       - 'requirements-mkdocs.txt'
       - 'scripts/check_docs_links.py'
-      - 'tests/local_tests/test_cookbook*.mjs'
       - '.github/workflows/infra-docs.yml'
 
 permissions:
@@ -68,7 +66,9 @@ jobs:
 
       - name: Validate and generate cookbook catalogs
         run: |
+          npm run check:cookbook --prefix docs
           npm run test:cookbook --prefix docs
+          python docs/tests/test_cookbook_assets.py
           npm run build:catalog --prefix docs
 
       - name: Build documentation
