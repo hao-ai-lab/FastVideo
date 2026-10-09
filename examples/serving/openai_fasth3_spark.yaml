@@ -4,10 +4,9 @@
 # GB10 has no FA4 / sm_100a VSA kernel. Prefix the serve command with:
 #   FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3
 #
-# default_request.sampling is an example. H3 aligns defaults upward to 17n+5,
-# up to 362 frames (the 15-second target is 360 frames at 24 FPS).
-# Explicit HTTP frame counts must already be aligned. A 345-frame request on
-# one Spark can OOM; prefer 124 or 243, or a two-Spark Ray cluster.
+# default_request.sampling is an example. Legal H3 frame counts are 17n+5,
+# max 345 (15 s). A 345-frame request on one Spark can OOM; prefer 124 or 243,
+# or a two-Spark Ray cluster.
 generator:
   model_path: FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree
   engine:

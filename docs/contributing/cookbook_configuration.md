@@ -289,13 +289,6 @@ can expose `streaming.session_timeout_seconds` and
 `streaming.generation_segment_cap`; the timeout covers waiting for client
 messages and pool acquisition, not a deadline for ongoing generation.
 
-H3's raw configuration range is 108–362 frames. The native alignment in
-[`packing.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/pipelines/basic/minimax_h3/packing.py)
-and the serving adapter maps defaults 108–124 to 124 and 125 to 141;
-360 frames (nominally 15 seconds at 24 FPS) aligns to 362. Explicit HTTP frame
-counts have a different contract: they must already be aligned to `17n+5`.
-Keep the raw baseline values rather than replacing them with a strict aligned
-enum. The 362-frame cap does not mean a given GPU can fit that generation.
 Combined geometry rules remain [future validation work](../cookbook/design.md#validation-boundaries-and-future-work).
 
 ### Check native declaration drift separately

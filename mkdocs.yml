@@ -170,7 +170,8 @@ nav:
     - V1 API: getting_started/v1_api.md
   - Cookbook:
     - Overview: cookbook/index.md
-    - Design and API: cookbook/design.md
+    # TODO: Publish this page once the new design is reflected in the UI.
+    # - Design and API: cookbook/design.md
     - H3 server and playground: cookbook/openai-api.md
     - Video:
       - MiniMax H3: cookbook/minimax-h3.md
