@@ -3,11 +3,11 @@
 # Recheck field paths and choices when the typed API in PR #1913 is finalized.
 title: LTX2 Distilled
 summary: Incremental video delivery over the native streaming WebSocket interface.
-guide: docs/design/server_contracts/streaming.md
 
 deployments:
   cuda-streaming:
     runtime: fastvideo-cuda-streaming
+    guide: docs/design/server_contracts/streaming.md
     workload: t2v
     defaults: examples/serving/streaming_demo.yaml
     # Existing fallback note in the referenced native YAML's header.

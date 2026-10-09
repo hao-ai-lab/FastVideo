@@ -3,11 +3,11 @@
 # Recheck field paths and choices when the typed API in PR #1913 is finalized.
 title: FastH3 8-Step V2
 summary: Distilled text-to-video serving with CUDA or native Apple Silicon MLX.
-guide: docs/cookbook/openai-api.md
 
 deployments:
   cuda-rest:
     runtime: fastvideo-cuda-rest
+    guide: docs/cookbook/openai-api.md
     workload: t2v
     defaults: examples/serving/openai_fasth3_8step.yaml
     # Existing FastH3 V2 installation command: docs/cookbook/openai-api.md.
@@ -40,6 +40,7 @@ deployments:
 
   mlx-rest:
     runtime: fastvideo-mlx-rest
+    guide: docs/cookbook/openai-api.md
     workload: t2v
     defaults: examples/serving/mlx_fasth3_8step.yaml
     # Existing MLX / FastH3 V2 setup notes: docs/cookbook/openai-api.md.
