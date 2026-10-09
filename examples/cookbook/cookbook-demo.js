@@ -27,23 +27,8 @@
 
   function controlPresentation(control) {
     const parts = pathParts(control.path);
-    const labels = {
-      "server.host": "Bind address", "server.port": "Port",
-      "server.served_model_name": "Served model name", "server.output_dir": "Output directory",
-      "generator.engine.compile.enabled": "Compile transformer", "generator.engine.offload.vae": "Offload VAE",
-      "generator.engine.offload.dit_layerwise": "Offload transformer layers",
-      "generator.engine.offload.text_encoder": "Offload text encoder",
-      "generator.engine.num_gpus": "GPU count", "generator.engine.parallelism.tp_size": "Tensor parallel size",
-      "generator.engine.parallelism.sp_size": "Sequence parallel size",
-      "default_request.sampling.num_frames": "Frames", "default_request.sampling.height": "Height",
-      "default_request.sampling.width": "Width", "default_request.sampling.fps": "FPS",
-      "default_request.sampling.seed": "Seed",
-      "generator.model_root": "Model directory", "generator.mlx_checkpoint": "Converted MLX checkpoint",
-      "generator.prompt_cache_dir": "Prompt cache directory", "generator.vae_dtype": "VAE precision",
-      "generator.vsa_sparsity": "VSA sparsity",
-    };
     const groups = { server: "Server", generator: "Resources", default_request: "Request defaults" };
-    return { label: control.schema?.title || labels[control.path] || parts.at(-1).replace(/_/g, " "), group: groups[parts[0]] };
+    return { label: control.schema?.title || parts.at(-1).replace(/_/g, " "), group: groups[parts[0]] };
   }
 
   function guideUrl(catalog, indexUrl) {
