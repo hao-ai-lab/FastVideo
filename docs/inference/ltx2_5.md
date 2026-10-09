@@ -55,10 +55,20 @@ Pass `--variant dev` with a converted dev directory to use the 30-step dev
 guidance preset. Distilled inference uses the official eight-step ancestral
 schedule and a three-step spatial refinement pass by default.
 
+## Fine-tune
+
+Video-only full and LoRA fine-tuning of the dev transformer go through the
+modular trainer. Point `models.student.init_from` at the converted dev
+directory and start from the recipes in
+`examples/train/configs/fine_tuning/ltx2_5/`; preprocess your data with the
+same directory so latents and text embeddings come from the LTX-2.5 VAE and
+Gemma 4 stack. Validation during training samples the dev preset in a single
+stage at the training resolution.
+
 ## Current scope
 
 The initial inference path includes the native transformer, packed Gemma 4
 text stack, convolutional video VAE, audio VAE/vocoder, dev guidance, and the
 distilled ancestral sampler. DiffVAE/NATTEN, generated keyframes, temporal
-upsampling, automatic duration selection, HDR, training, fine-tuning, and
-quantized deployment are separate follow-up work.
+upsampling, automatic duration selection, HDR, audio training, distillation,
+and quantized deployment are separate follow-up work.

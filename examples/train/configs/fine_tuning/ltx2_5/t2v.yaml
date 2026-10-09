@@ -1,0 +1,120 @@
+# LTX-2.5 T2V full fine-tune.
+#
+# Starting point for fine-tuning the LTX-2.5 dev transformer (the LTX-2.3
+# graph plus bias-free video FFNs and a learned keyframe embedding;
+# 4096-d post-connector Gemma 4 text embeddings) on your own dataset with
+# the modular trainer. Model wiring (checkpoint, CFG rate, output
+# preconditioning, sharding) follows the validated
+# examples/train/configs/overfit_ltx2_5_t2v.yaml run; data paths, step
+# counts, and learning rate are placeholders you must adapt — the right
+# values depend on your dataset and are marked below.
+#
+# Prerequisites:
+#   1. Lightricks/LTX-2.5 ships split component files. Convert the dev
+#      variant into a FastVideo model directory (docs/inference/ltx2_5.md)
+#      and point init_from at it.
+#   2. Preprocess your dataset into the trainer's latent format with the
+#      same converted directory, so the latents come from the LTX-2.5 VAE
+#      and the text embeddings from its Gemma 4 stack (see
+#      docs/training/data_preprocess.md;
+#      fastvideo/pipelines/preprocess/preprocess_ltx2_overfit.py is a
+#      minimal LTX-2 reference to adapt — set
+#      FASTVIDEO_TEST_LTX2_OVERFIT_MODEL to the converted directory).
+#
+# Run:
+#   NUM_GPUS=8 bash examples/train/run.sh \
+#     examples/train/configs/fine_tuning/ltx2_5/t2v.yaml
+
+models:
+  student:
+    _target_: fastvideo.train.models.ltx2.LTX2Model
+    # REQUIRED: the converted LTX-2.5 dev directory (or a Hub copy of it).
+    # Validation below runs the dev preset (30 steps, CFG + STG).
+    init_from: FastVideo/LTX-2.5-Dev-Diffusers
+    trainable: true
+    enable_gradient_checkpointing_type: full
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    # The 13B video branch needs sharding; the validated run used 8-way
+    # HSDP shard on 8x H20 (~71GB per GPU at 81x480x832 with full
+    # activation checkpointing). Scale num_gpus/hsdp_shard_dim together.
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 8
+
+  data:
+    # REQUIRED: path to your preprocessed dataset.
+    data_path: data/your_dataset_preprocessed
+    dataloader_num_workers: 4
+    train_batch_size: 1
+    # > 0 enables CFG dropout: LTX2Model swaps in the dev preset's
+    # negative-prompt embedding, which loads Gemma 4 on every rank.
+    training_cfg_rate: 0.0
+    seed: 42
+    # Must match your preprocessed resolution/length.
+    # num_latent_t = (num_frames - 1) / 8 + 1.
+    num_latent_t: 11
+    num_height: 480
+    num_width: 832
+    num_frames: 81
+
+  optimizer:
+    # Carried from the validated LTX-2.5 overfit run as a starting point;
+    # tune for your dataset size and batch configuration.
+    learning_rate: 5.0e-5
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    # Workload-dependent: set from your dataset size and target epochs.
+    max_train_steps: 2000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/ltx2_5_t2v_finetune
+    # A full training-state checkpoint is ~150GB for the 13B trainable
+    # video branch — size the interval and total limit to your storage.
+    training_state_checkpointing_steps: 500
+    checkpoints_total_limit: 2
+    resume_from_checkpoint: latest
+
+  tracker:
+    trackers: [wandb]
+    project_name: fastvideo_ltx2
+    run_name: ltx2_5_t2v_finetune
+
+  model:
+    # LTX2Model.predict_noise converts the DiT's x0 output to velocity,
+    # so the default noise-minus-clean target reproduces the official
+    # unweighted masked-MSE (mask is all-ones for plain T2V).
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.ltx2.ltx2_pipeline.LTX2Pipeline
+    # REQUIRED: prompts to sample during training.
+    dataset_file: data/your_dataset_preprocessed/validation_prompts.json
+    every_steps: 250
+    # Single-stage dev sampling at the training resolution; guidance
+    # comes from the dev preset. The converted checkpoint's spatial
+    # refine pass stays off during validation.
+    sampling_steps: [30]
+    num_frames: 81
+
+# Required so the LTX2T2VConfig pipeline config is resolved from
+# init_from (without a `pipeline:` key the loader falls back to a
+# generic PipelineConfig and the LTX-2 DiT cannot be constructed).
+pipeline: {}
