@@ -1,6 +1,6 @@
 # TODO(cookbook-review): Design sample only. Before merge, double-check the
 # selected options, schema types/ranges, and baseline values for each deployment.
-# Recheck field paths and choices when the typed API in PR #1913 is finalized.
+# TODO: Recheck field paths and choices when the typed API in PR #1913 is finalized.
 title: LTX2 Distilled
 summary: Incremental video delivery over the native streaming WebSocket interface.
 
