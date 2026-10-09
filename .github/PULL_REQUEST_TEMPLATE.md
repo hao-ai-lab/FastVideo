@@ -61,3 +61,8 @@ Fixes #
 **For model/pipeline changes, also check:**
 - [ ] I verified SSIM regression tests pass
 - [ ] I updated the support matrix if adding a new model
+
+**For new models or serving runtimes:**
+
+- [ ] I added or updated the native serving YAML and [cookbook deployment](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/contributing/cookbook_configuration.md),
+      or explained why this is not applicable.
