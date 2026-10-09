@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -41,10 +42,14 @@ def _new_runtime_video_generator() -> VideoGenerator:
         model_path="test-model",
         prompt_txt=None,
         workload_type=SimpleNamespace(value="t2v"),
+        pipeline_config=SimpleNamespace(apply_request_constraints=lambda request, sampling_param: sampling_param),
     )
     generator.executor = SimpleNamespace(
         set_log_queue=lambda queue: None,
         clear_log_queue=lambda: None,
+        is_output_rank=True,
+        uses_spmd_execution=False,
+        broadcast_from_output_rank=lambda value: value,
     )
     generator.config = None
     return generator
@@ -114,7 +119,9 @@ def _single_video_args(output_type="pil"):
         output_type=output_type,
         pin_cpu_memory=False,
         VSA_sparsity=0.0,
-        pipeline_config=SimpleNamespace(flow_shift=1.0, embedded_cfg_scale=1.0),
+        pipeline_config=SimpleNamespace(flow_shift=1.0,
+                                        embedded_cfg_scale=1.0,
+                                        apply_request_constraints=lambda request, sampling_param: sampling_param),
         workload_type=SimpleNamespace(value="t2v"),
     )
 
@@ -145,9 +152,41 @@ def _single_video_output_batch(output, *, extra=None):
 def _single_video_generator(output_batch, fastvideo_args):
     generator = _new_video_generator()
     generator.fastvideo_args = fastvideo_args
-    generator.executor = SimpleNamespace(execute_forward=lambda batch, args: output_batch)
+    generator.executor = SimpleNamespace(
+        execute_forward=lambda batch, args: output_batch,
+        is_output_rank=True,
+        uses_spmd_execution=False,
+        broadcast_from_output_rank=lambda value: value,
+    )
     generator.config = None
     return generator
+
+
+def test_run_on_output_rank_non_root_does_not_touch_local_filesystem():
+    generator = _new_video_generator()
+    operation = pytest.fail
+    generator.executor = SimpleNamespace(
+        is_output_rank=False,
+        uses_spmd_execution=True,
+        broadcast_from_output_rank=lambda value: (True, "/rank-zero/output.mp4"),
+    )
+
+    assert generator._run_on_output_rank(operation, description="output-path setup") == "/rank-zero/output.mp4"
+
+
+def test_run_on_output_rank_propagates_rank_zero_error():
+    generator = _new_video_generator()
+    generator.executor = SimpleNamespace(
+        is_output_rank=True,
+        uses_spmd_execution=True,
+        broadcast_from_output_rank=lambda value: value,
+    )
+
+    def fail_setup():
+        raise PermissionError("output mount is read-only")
+
+    with pytest.raises(RuntimeError, match="output mount is read-only"):
+        generator._run_on_output_rank(fail_setup, description="output-path setup")
 
 
 def test_resolve_output_size_uses_produced_pixel_geometry() -> None:
@@ -533,7 +572,7 @@ def test_generate_single_video_ray_audio_only_save_preserves_worker_metadata(mon
         },
     )
     worker = Worker.__new__(Worker)
-    worker.fastvideo_args = SimpleNamespace()
+    worker.fastvideo_args = SimpleNamespace(is_output_rank=True)
     worker.pipeline = SimpleNamespace(forward=lambda batch, args: worker_output)
 
     monkeypatch.setattr(RayDistributedExecutor, "__abstractmethods__", frozenset())
@@ -595,6 +634,97 @@ def test_generate_single_video_latent_metadata_skips_cpu_materialization(tmp_pat
     assert result["video_path"] is None
 
 
+def test_generate_single_video_non_output_rank_suppresses_all_user_payloads(tmp_path):
+    audio = torch.ones(8)
+    audio_latents = torch.ones(2)
+    output_batch = _single_video_output_batch(
+        torch.empty(0),
+        extra={
+            "audio": audio,
+            "audio_sample_rate": 24000,
+            "ltx2_audio_latents": audio_latents,
+        },
+    )
+    output_batch.trajectory_latents = torch.ones(1)
+    output_batch.trajectory_timesteps = [torch.ones(1)]
+    output_batch.trajectory_decoded = [torch.ones(1)]
+    fastvideo_args = _single_video_args(output_type="latent")
+    generator = _single_video_generator(output_batch, fastvideo_args)
+    captured = {}
+
+    def execute_forward(batch, args):
+        captured["batch"] = batch
+        return output_batch
+
+    generator.executor = SimpleNamespace(
+        execute_forward=execute_forward,
+        is_output_rank=False,
+        uses_spmd_execution=True,
+        broadcast_from_output_rank=lambda value: value,
+    )
+    sampling = _small_sampling_param(save_video=True, return_frames=True)
+    sampling.return_samples = True
+    sampling.return_trajectory_latents = True
+    sampling.return_trajectory_decoded = True
+
+    result = generator._generate_single_video(
+        prompt="non-output rank",
+        sampling_param=sampling,
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "must-not-exist.mp4"),
+    )
+
+    batch = captured["batch"]
+    assert not batch.save_video
+    assert not batch.return_frames
+    assert not batch.return_samples
+    assert not batch.return_trajectory_latents
+    assert not batch.return_trajectory_decoded
+    assert result["samples"] is None
+    assert result["frames"] is None
+    assert result["audio"] is None
+    assert result["audio_sample_rate"] is None
+    assert result["ltx2_audio_latents"] is None
+    assert result["trajectory"] is None
+    assert result["trajectory_timesteps"] is None
+    assert result["trajectory_decoded"] is None
+    assert result["video_path"] is None
+
+
+def test_prompt_batch_failure_is_not_swallowed_in_spmd_mode(tmp_path, monkeypatch):
+    generator = _new_runtime_video_generator()
+    generator.executor = SimpleNamespace(
+        set_log_queue=lambda queue: None,
+        clear_log_queue=lambda: None,
+        is_output_rank=True,
+        uses_spmd_execution=True,
+        broadcast_from_output_rank=lambda value: value,
+    )
+    _patch_sampling_param_from_pretrained(monkeypatch)
+    prompt_file = tmp_path / "prompts.txt"
+    prompt_file.write_text("first prompt\nsecond prompt\n", encoding="utf-8")
+    calls = []
+
+    def fail_first_prompt(prompt, **kwargs):
+        calls.append(prompt)
+        raise RuntimeError("injected forward failure")
+
+    monkeypatch.setattr(generator, "_generate_single_video", fail_first_prompt)
+
+    with pytest.raises(RuntimeError, match="injected forward failure"):
+        generator.generate({
+            "inputs": {
+                "prompt_path": str(prompt_file)
+            },
+            "output": {
+                "output_path": str(tmp_path / "outputs"),
+                "save_video": False,
+                "return_frames": False,
+            },
+        })
+    assert calls == ["first prompt"]
+
+
 def test_from_config_normalizes_and_translates(monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
     _patch_fastvideo_args_from_kwargs(monkeypatch)
@@ -608,6 +738,17 @@ def test_from_config_normalizes_and_translates(monkeypatch):
     assert captured["fastvideo_args"].num_gpus == 2
     assert captured["fastvideo_args"].workload_type.value == "t2v"
     assert generator.config == config
+
+
+def test_from_config_translates_external_launcher_backend(monkeypatch):
+    _patch_from_fastvideo_args(monkeypatch)
+    captured = _patch_fastvideo_args_from_kwargs(monkeypatch)
+    config = GeneratorConfig(model_path="test-model")
+    config.engine.execution_backend = "external_launcher"
+
+    VideoGenerator.from_config(config)
+
+    assert captured["kwargs"]["distributed_executor_backend"] == "external_launcher"
 
 
 def test_from_file_loads_generator_from_run_config(tmp_path, monkeypatch):
@@ -659,6 +800,20 @@ def test_from_pretrained_convenience_kwargs_do_not_warn(monkeypatch):
     assert generator.config.engine.num_gpus == 4
 
 
+def test_from_pretrained_accepts_external_launcher_backend(monkeypatch):
+    _patch_from_fastvideo_args(monkeypatch)
+    captured = _patch_fastvideo_args_from_kwargs(monkeypatch)
+
+    VideoGenerator.from_pretrained(
+        "test-model",
+        num_gpus=2,
+        sp_size=2,
+        distributed_executor_backend="external_launcher",
+    )
+
+    assert captured["kwargs"]["distributed_executor_backend"] == "external_launcher"
+
+
 def test_from_pretrained_legacy_only_kwargs_warn(monkeypatch):
     captured = _patch_from_fastvideo_args(monkeypatch)
     _patch_fastvideo_args_from_kwargs(monkeypatch)
@@ -702,6 +857,31 @@ def test_generate_uses_typed_request_path(monkeypatch):
     assert captured["sampling_param"].height == 480
     assert captured["sampling_param"].width == 832
     assert result.video_path == "outputs/test.mp4"
+
+
+@pytest.mark.parametrize("entry", ["generate", "generate_video"])
+def test_generate_applies_pipeline_config_request_constraints(monkeypatch, entry):
+    """Both entry points run the sampling params that the loaded model's request constraints return."""
+    generator = _new_runtime_video_generator()
+    _patch_sampling_param_from_pretrained(monkeypatch)
+
+    def apply_request_constraints(request, sampling_param):
+        return dataclasses.replace(sampling_param, num_inference_steps=8)
+
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(apply_request_constraints=apply_request_constraints)
+    captured = {}
+
+    def fake_generate_video_impl(prompt=None, sampling_param=None, **kwargs):
+        captured["sampling_param"] = sampling_param
+        return {"prompts": prompt, "video_path": "outputs/test.mp4"}
+
+    monkeypatch.setattr(generator, "_generate_video_impl", fake_generate_video_impl)
+    if entry == "generate":
+        generator.generate(GenerationRequest(prompt="hello world"))
+    else:
+        with pytest.warns(DeprecationWarning):
+            generator.generate_video(prompt="hello world")
+    assert captured["sampling_param"].num_inference_steps == 8
 
 
 def test_generate_rejects_stage_override_outside_registered_stage(monkeypatch) -> None:
@@ -923,7 +1103,8 @@ def test_generate_video_legacy_call_uses_legacy_impl(monkeypatch):
 
 def test_generate_video_legacy_call_routes_compat_kwargs(monkeypatch):
     generator = _new_runtime_video_generator()
-    generator.fastvideo_args.pipeline_config = SimpleNamespace(embedded_cfg_scale=1.0)
+    generator.fastvideo_args.pipeline_config = SimpleNamespace(
+        embedded_cfg_scale=1.0, apply_request_constraints=lambda request, sampling_param: sampling_param)
     captured = {}
 
     def fake_generate_video_impl(
@@ -1049,3 +1230,89 @@ def test_ffmpeg_pipe_preserves_video_duration(tmp_path, env_overrides, audio_sec
     assert int(video["nb_read_frames"]) == frame_count
     assert float(video["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
     assert float(sound["duration"]) == pytest.approx(frame_count / fps, abs=1 / fps)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.uint8])
+def test_return_samples_only_skips_preview_processing(monkeypatch, tmp_path, dtype):
+    output = torch.ones((2, 3, 1, 16, 16), dtype=dtype)
+    generator = _single_video_generator(_single_video_output_batch(output), _single_video_args())
+    monkeypatch.setattr("fastvideo.entrypoints.video_generator.pixels_to_uint8",
+                        lambda *args: pytest.fail("Samples-only requests must not quantize a preview"))
+    monkeypatch.setattr("fastvideo.entrypoints.video_generator.torchvision.utils.make_grid",
+                        lambda *args, **kwargs: pytest.fail("Samples-only requests must not build a preview grid"))
+    sampling = _small_sampling_param()
+    sampling.num_frames = 1
+    sampling.num_videos_per_prompt = 2
+    sampling.return_samples = True
+    result = generator._generate_single_video("samples only", sampling,
+                                             output_path=str(tmp_path / "unused.mp4"))
+    torch.testing.assert_close(result["samples"], output.float() / (255 if dtype == torch.uint8 else 1))
+    assert result["frames"] is None
+    assert result["video_path"] is None
+    assert result["size"] == (16, 16, 1)
+
+
+@pytest.mark.parametrize("return_frames", [False, True])
+def test_input_sized_output_skips_request_pixel_preallocation(monkeypatch, tmp_path, return_frames):
+    output = torch.full((1, 3, 1, 24, 32), 0.5)
+    args = _single_video_args()
+    args.pipeline_config.output_shape_from_input = True
+    generator = _single_video_generator(_single_video_output_batch(output), args)
+    monkeypatch.setattr(
+        video_generator_module, "allocate_cpu_tensor_with_pin_fallback",
+        lambda *args, **kwargs: pytest.fail("Input-sized outputs must not allocate request-sized pixel buffers"))
+    sampling = _small_sampling_param(return_frames=return_frames)
+    sampling.num_frames = 1
+    sampling.return_samples = True
+    result = generator._generate_single_video("input-sized output", sampling,
+                                             output_path=str(tmp_path / "unused.mp4"))
+    torch.testing.assert_close(result["samples"], output)
+    assert result["size"] == (24, 32, 1)
+    if return_frames:
+        assert len(result["frames"]) == 1
+    else:
+        assert result["frames"] is None
+    assert result["video_path"] is None
+
+
+@pytest.mark.parametrize("extension,format_name", [(".png", "PNG"), (".jpg", "JPEG"), (".jpeg", "JPEG"), (".webp", "WEBP")])
+def test_image_output_path_preserves_requested_format(tmp_path, extension, format_name):
+    from PIL import Image
+
+    args = _single_video_args()
+    args.workload_type = WorkloadType.from_string("t2i")
+    generator = _single_video_generator(_single_video_output_batch(torch.zeros(1, 3, 1, 16, 16)), args)
+    target = tmp_path / ("image" + extension)
+    output_path = generator._prepare_output_path(str(target), "a cat")
+    assert output_path == str(target)
+    sampling = _small_sampling_param(save_video=True)
+    sampling.num_frames = 1
+    result = generator._generate_single_video("a cat", sampling, output_path=output_path)
+    assert result["video_path"] == str(target)
+    with Image.open(target) as image:
+        assert image.format == format_name
+        assert image.size == (16, 16)
+
+
+def test_image_output_directory_defaults_to_png(tmp_path):
+    generator = _new_video_generator()
+    generator.fastvideo_args = SimpleNamespace(workload_type=WorkloadType.from_string("t2i"))
+    assert generator._prepare_output_path(str(tmp_path), "a cat") == str(tmp_path / "a cat.png")
+
+
+@pytest.mark.parametrize("extension,target_extension,workload", [
+    (".png", ".png", "t2i"), (".jpg", ".png", "t2i"), (".jpeg", ".png", "t2i"),
+    (".webp", ".png", "t2i"), (".JPEG", ".png", "t2i"),
+    (".mp4", ".mp4", "t2v"), (".wav", ".wav", "t2a"),
+])
+def test_existing_image_extension_directory_receives_output(tmp_path, extension, target_extension, workload):
+    generator = _new_video_generator()
+    generator.fastvideo_args = SimpleNamespace(workload_type=WorkloadType.from_string("t2i"))
+    generator.fastvideo_args.workload_type = WorkloadType.from_string(workload)
+    directory = tmp_path / ("renders" + extension)
+    directory.mkdir()
+    existing = directory / ("a cat" + target_extension)
+    existing.write_bytes(b"existing image")
+    result = generator._prepare_output_path(str(directory), "a cat")
+    assert result == str(directory / ("a cat_1" + target_extension))
+    assert existing.read_bytes() == b"existing image"

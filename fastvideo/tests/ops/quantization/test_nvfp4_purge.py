@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 
 import fastvideo.layers.quantization.nvfp4_config as nv
+from fastvideo.layers.lora.linear import BaseLayerWithLoRA, get_lora_layer
 
 _ALWAYS_FP4_PREFIX = "ltx2.blocks.0.attn1.to_q"
 _REFINE_ONLY_PREFIX = "ltx2.blocks.0.audio_to_video_attn.to_q"
@@ -86,6 +87,55 @@ def test_retain_true_keeps_everything() -> None:
     assert model.refine_only.weight is not None
 
 
+def test_retained_weight_lora_merge_reaches_nvfp4_buffers(monkeypatch) -> None:
+    """The behavior the retain flag exists for: a LoRA merged into a retained
+    NVFP4 weight must reach the FP4 GEMM's packed buffers.
+
+    Exercises the real ``get_lora_layer`` dispatch on a ``ReplicatedLinear``
+    (what ``convert_to_lora_layers`` wraps for LTX-2), the actual merge, and
+    the post-merge re-quantize that ``set_lora_adapter`` invokes. Without the
+    re-quantize the GEMM keeps the load-time buffers and the adapter is a
+    silent no-op even though the merge itself succeeds.
+    """
+    import fastvideo.layers.lora.linear as lora_linear
+    from fastvideo.layers.linear import ReplicatedLinear
+
+    monkeypatch.setattr(lora_linear, "get_local_torch_device", lambda: torch.device("cpu"))
+    captured: list[torch.Tensor] = []
+
+    def capturing_quantize(weight, global_sf, sfLayout=None, do_shuffle=False):
+        captured.append(weight.clone())
+        return _fake_quantize(weight, global_sf, sfLayout=sfLayout, do_shuffle=do_shuffle)
+
+    monkeypatch.setattr(nv, "_nvfp4_quantize", capturing_quantize)
+
+    layer = ReplicatedLinear(16, 8, bias=False, params_dtype=torch.bfloat16)
+    layer.quant_method = _method(_ALWAYS_FP4_PREFIX, retain=True)
+    root = nn.Module()
+    root.layer = layer
+    original = layer.weight.detach().clone()
+    nv.convert_model_to_nvfp4(root)
+    assert captured[-1].equal(original)
+
+    wrapped = get_lora_layer(layer)
+    assert isinstance(wrapped, BaseLayerWithLoRA)
+    rank = 4
+    lora_a = torch.randn(rank, 16, dtype=torch.bfloat16)
+    lora_b = torch.randn(8, rank, dtype=torch.bfloat16)
+    wrapped.set_lora_weights(lora_a, lora_b, lora_alpha=rank)
+
+    assert wrapped.merged
+    assert layer.weight is not None
+    assert not layer.weight.detach().equal(original)
+
+    # What set_lora_adapter runs after merging each block: re-derive the FP4
+    # buffers from the merged dense weight.
+    from fastvideo.pipelines.lora_pipeline import _convert_quantized_weights_after_lora_change
+    _convert_quantized_weights_after_lora_change([root])
+    assert captured[-1].equal(layer.weight.detach())
+    assert not captured[-1].equal(original)
+
+
 def test_retain_false_still_retains_dense_capable_layers() -> None:
     """Refine-only layers run dense under the base stage profile by
     deployment contract (single-stage deploys included), so no flag value
@@ -112,6 +162,27 @@ def test_apply_out_dim_survives_purge(monkeypatch) -> None:
     x = torch.randn(2, 3, 16, dtype=torch.bfloat16)
     out = layer.quant_method.apply(layer, x)
     assert out.shape == (2, 3, 8)
+
+
+def test_convert_refuses_fsdp_sharded_bf16_purge(monkeypatch) -> None:
+    import torch.distributed.tensor as tdt
+
+    class DummyDTensor:
+        def __init__(self, data: torch.Tensor) -> None:
+            self._data = data
+
+        def to_local(self) -> torch.Tensor:
+            return self._data
+
+        def float(self) -> torch.Tensor:
+            return self._data.float()
+
+    monkeypatch.setattr(tdt, "DTensor", DummyDTensor)
+    model = _model(retain=False)
+    del model.always_fp4._parameters["weight"]
+    object.__setattr__(model.always_fp4, "weight", DummyDTensor(torch.randn(8, 16, dtype=torch.bfloat16)))
+    with pytest.raises(RuntimeError, match="FSDP-sharded"):
+        nv.convert_model_to_nvfp4(model)
 
 
 def test_dense_path_after_purge_raises_with_flag_named(monkeypatch) -> None:

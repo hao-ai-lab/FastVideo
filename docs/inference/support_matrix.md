@@ -54,14 +54,20 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Lite-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
 | kandinsky5 | `kandinskylab/Kandinsky-5.0-I2V-Pro-distilled-5s-Diffusers` | I2V | [basic_kandinsky5_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky5_i2v.py) |
+| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Pro-sft-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| kandinsky6 | `kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-Lite-distill-5s-Diffusers` | T2V, I2V | [basic_kandinsky6_ti2va.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_ti2va.py) |
+| kandinsky6_sr | `kandinskylab/Kandinsky-6.0-VSR-5s-Diffusers`<br>`kandinskylab/Kandinsky-6.0-VSR-distilled2steps-5s-Diffusers` | — | [basic_kandinsky6_sr.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_kandinsky6_sr.py) |
 | lingbot_video | `FastVideo/LingBot-Video-MoE-30B-A3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbot_video | `FastVideo/LingBot-Video-Dense-1.3B-Diffusers` | T2V | [basic_lingbot_video.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbot_video.py) |
 | lingbotworld | `FastVideo/LingBot-World-Base-Cam-Diffusers` | I2V | [basic_lingbotworld_base_cam.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_base_cam.py) |
 | lingbotworld2 | `robbyant/lingbot-world-v2-14b-causal-fast` | I2V | [basic_lingbotworld2_causal_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld2_causal_fast.py) |
+| lingbotworld_fast | `FastVideo/LingBot-World-Fast-Diffusers` | I2V | [basic_lingbotworld_fast.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lingbotworld_fast.py) |
 | longcat | `FastVideo/LongCat-Video-T2V-Diffusers` | T2V | [basic_longcat_t2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_t2v.py) |
 | longcat | `FastVideo/LongCat-Video-I2V-Diffusers` | I2V | [basic_longcat_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_i2v.py) |
 | longcat | `FastVideo/LongCat-Video-VC-Diffusers` | — | [basic_longcat_vc.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_longcat_vc.py) |
 | ltx2 | `FastVideo/LTX2-Distilled-Diffusers`<br>`FastVideo/LTX2.3-Distilled-Diffusers`<br>`FastVideo/LTX-2.3-Distilled-Diffusers` | T2V | [basic_ltx2_distilled.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_distilled.py) |
+| ltx2 | `FastVideo/LTX-2.5-Distilled-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br>[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
+| ltx2 | `FastVideo/LTX-2.5-Dev-Diffusers` | T2V, I2V | [T2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_t2av.py)<br>[I2AV](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2_5_i2av.py) |
 | ltx2 | `Lightricks/LTX-2.3`<br>`FastVideo/LTX2.3-base`<br>`FastVideo/LTX2.3-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
 | ltx2 | `Lightricks/LTX-2`<br>`FastVideo/LTX2-base`<br>`FastVideo/LTX2-Diffusers` | T2V | [basic_ltx2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_ltx2.py) |
 | mmaudio | `FastVideo/MMAudio-large-44k-v2-Diffusers` | V2A, T2A | [basic_mmaudio.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mmaudio.py) |
@@ -78,12 +84,14 @@ column links a runnable script in `examples/inference/basic/` where one exists.
 | wan | `Wan-AI/Wan2.1-T2V-14B-Diffusers`<br>`FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers` | T2V | — |
 | wan | `Wan-AI/Wan2.1-I2V-14B-480P-Diffusers` | I2V | — |
 | wan | `Wan-AI/Wan2.1-I2V-14B-720P-Diffusers` | I2V | — |
+| wan | `Wan-AI/Wan2.2-Animate-14B-Diffusers` | I2V | [basic_wan_animate.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_animate.py) |
 | wan | `weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers` | I2V | — |
 | wan | `IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers` | — | [basic_wan2_2_Fun.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_Fun.py) |
 | wan | `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`<br>`FastVideo/FastWan2.1-T2V-14B-480P-Diffusers` | T2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
 | wan | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_wan2_2_ti2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_ti2v.py) |
 | wan | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`<br>`FastVideo/FastWan2.2-TI2V-5B-Diffusers` | T2V, I2V | [basic_dmd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_dmd.py) |
 | wan | `decart-ai/Lucy-Edit-Dev`<br>`decart-ai/Lucy-Edit-1.1-Dev` | — | [basic_lucy_edit.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_lucy_edit.py) |
+| wan | `FastVideo/Wan2.2-S2V-14B-Diffusers` | I2V | [basic_wan_s2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan_s2v.py) |
 | wan | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | T2V | [basic_wan2_2.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2.py) |
 | wan | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | I2V | [basic_wan2_2_i2v.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_wan2_2_i2v.py) |
 | wan | `wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers` | T2V | [basic_self_forcing_causal.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal.py) |
@@ -99,9 +107,33 @@ under the generic T2V workload option in the registry.
 yet public. Follow the [MMAudio inference guide](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/pipelines/basic/mmaudio/README.md)
 to convert the official weights locally and set `MMAUDIO_MODEL_PATH`.
 
+**Note (Cosmos Predict2.5 distilled)**: the released 2B Text2World student is
+supported through local checkpoint conversion, but no public converted model ID
+is registered yet. Follow the validation guide in
+`tests/local_tests/cosmos25/README.md`, then pass the converted directory to
+`basic_cosmos2_5_distilled_t2w.py --model`.
+
+The public DFD Video2World student is also supported through local DCP
+conversion. It uses exactly one conditioning image, 4 steps, 81 frames at
+704x1280 and 24 FPS. Use `basic_cosmos2_5_dfd_i2w.py`; a public converted model
+ID is not registered yet.
+
 **Note (MiniMax H3)**: T2VA, FL2VA, and Ref2VA all generate video with stereo
 audio. Use the Ref2VA example when passing ordered image, video, or audio
-references.
+references. Distilled Ref2VA PDD students (eight transformer forwards, with
+reference videos as sparse VSA regions) run through
+[basic_fasth3_omniref_pdd.py](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_fasth3_omniref_pdd.py);
+see [FastH3 distilled checkpoint schedules](fasth3-distilled.md#ref2va-pdd-students).
+
+**Note (Kandinsky 6)**: the `kandinsky6` IDs (Pro 30.1B and Lite 3.2B, each base
+and distilled) generate video with audio from text, optionally plus an image (see the [T2IVA guide](kandinsky6.md)); the
+`kandinsky6_sr` IDs upscale an existing video (see the
+[Video SR guide](kandinsky6_sr.md)).
+
+**Note (LTX-2.5)**: T2V and I2V produce synchronized video and audio. The
+official `Lightricks/LTX-2.5` repository uses gated, split component files, so
+it must first be converted to FastVideo's component layout. See the
+[LTX-2.5 inference guide](ltx2_5.md).
 
 **Note (Wan-VACE)**: not currently supported — no VACE pipeline or registered
 model ID exists on `main`
@@ -160,8 +192,10 @@ optimizations: absence means **untested**, not incompatible.
 | DreamX-World 5B Cam | `FastVideo/DreamX-World-5B-Cam-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | DreamX-World 5B AR | `FastVideo/DreamX-World-5B-Diffusers` | 704px1280p | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Lucy Edit Dev 5B*** | `decart-ai/Lucy-Edit-Dev` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
+| Wan2.2 S2V 14B**** | `FastVideo/Wan2.2-S2V-14B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Wan2.2 T2V A14B | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
 | Wan2.2 I2V A14B | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | 480P<br>720P | ❌ | ❌ | ✅ | ⭕ | ⭕ |
+| Wan2.2 Animate 14B | `Wan-AI/Wan2.2-Animate-14B-Diffusers` | 720P | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | HunyuanVideo | `hunyuanvideo-community/HunyuanVideo` | 720px1280p<br>544px960p | ❌ | ✅ | ✅ | ⭕ | ⭕ |
 | FastHunyuan | `FastVideo/FastHunyuan-diffusers` | 720px1280p<br>544px960p | ❌ | ✅ | ✅ | ⭕ | ⭕ |
 | Wan2.1 T2V 1.3B | `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` | 480P | ✅ | ✅ | ✅ | ⭕ | ⭕ |
@@ -199,6 +233,16 @@ CUDA FastWan-QAD (`FastVideo/FastWan-QAD-1.3B`,
 
 ***Lucy Edit Dev uses a non-commercial model license. FastVideo support is
 focused on inference integration for video editing workflows.
+
+****Wan2.2 S2V is audio-driven: it takes a reference image plus a speech/audio
+track and animates the subject in sync with it. The official checkpoint ships
+in native Wan format; `scripts/checkpoint_conversion/wan_s2v_to_diffusers.py`
+repackages it into the Diffusers layout this repo id refers to (bundling the
+`wav2vec2-large-xlsr-53-english` audio encoder). `num_frames` follows the
+usual `4k+1` contract (default 81): one clip generates 84 frames and shows
+81, and longer requests chain clips that carry the previous 73 frames forward
+as motion context, as the official runner does. The source audio is muxed into
+the saved MP4. Sequence parallelism is not yet wired up for this pipeline.
 
 `Sliding Tile Attn (Legacy Branch)` entries refer to the archived
 `sta_do_not_delete` branch workflow, not active `main` inference wiring.

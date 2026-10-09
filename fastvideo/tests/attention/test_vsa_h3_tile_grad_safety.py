@@ -36,10 +36,9 @@ def _build(builder=None, step=0):
     # A fresh metadata per step, all sharing the builder's holder.
     return builder.build(
         current_timestep=step,
-        raw_latent_shape=_SPEC["raw_latent_shape"],
         patch_size=_SPEC["patch_size"],
         VSA_sparsity=0.9,
-        prefix_segments=_SPEC["prefix_segments"],
+        packed_segments=(*_SPEC["prefix_segments"], _SPEC["raw_latent_shape"]),
         device=torch.device("cpu"),
         tile_size=_TILE_ELEMS,
     ), builder

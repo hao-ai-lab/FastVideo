@@ -657,15 +657,20 @@ def verify_model_config_and_directory(
     else:
         # Full snapshots keep the historical invariant that transformer/ is
         # present and every active manifest component exists locally.
+        # Explicitly marked offline preprocessor trees contain only frozen
+        # encoders and avoid duplicating a DiT that will never be loaded.
         transformer_dir = os.path.join(model_path, "transformer")
-        if not os.path.exists(transformer_dir):
+        preprocessor_only = config.get("_fastvideo_preprocessor_only") is True
+        if not preprocessor_only and not os.path.exists(transformer_dir):
             raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
 
     # Diffusers convention: component entries start with [library, class].
     # Modular manifests may append loading metadata, which FastVideo does not
     # need because published component subfolders match their manifest keys.
-    # Non-list entries are scalar metadata
-    # (e.g. boundary_ratio); a None first element marks a disabled
+    # Non-list entries, and list entries whose first element isn't a string,
+    # are scalar/tuple pipeline metadata (e.g. boundary_ratio, or a
+    # tuple-valued field registered via register_to_config, which serializes
+    # to a JSON list just like a component entry); a None first element marks a disabled
     # component (matches composed_pipeline_base.py). Pipelines that
     # lazy-load shared components from upstream HF repos simply omit the
     # key, so we only enforce "declared, active, but missing on disk".
@@ -677,7 +682,7 @@ def verify_model_config_and_directory(
         for key, value in config.items():
             if key.startswith("_") or key == "transformer" or key.startswith("tokenizer"):
                 continue
-            if not isinstance(value, list) or len(value) < 1 or value[0] is None:
+            if (not isinstance(value, list) or len(value) < 1 or value[0] is None or not isinstance(value[0], str)):
                 continue
             subdir = os.path.join(model_path, key)
             if not os.path.exists(subdir):
@@ -745,6 +750,32 @@ def maybe_download_model_index(model_name_or_path: str, revision: str | None = N
 
     except Exception as e:
         raise ValueError(f"Failed to download or parse a Diffusers manifest for {model_name_or_path}: {e}") from e
+
+
+def read_optional_model_json(model_name_or_path: str,
+                             relative_path: str,
+                             revision: str | None = None) -> dict[str, Any] | None:
+    """Read one JSON file of a local model directory or Hub repo; None when the model has no such file.
+
+    For a Hub repo only that file is downloaded, into the shared HF cache, so
+    a run can read small checkpoint metadata before any component weights.
+    """
+    if os.path.exists(model_name_or_path):
+        path = os.path.join(model_name_or_path, relative_path)
+        if not os.path.isfile(path):
+            return None
+    else:
+        from huggingface_hub import hf_hub_download
+        from huggingface_hub.utils import EntryNotFoundError
+
+        repo_id, subfolder = _split_hf_repo_subfolder(model_name_or_path)
+        filename = f"{subfolder}/{relative_path}" if subfolder else relative_path
+        try:
+            path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
+        except EntryNotFoundError:
+            return None
+    with open(path, encoding="utf-8") as f:
+        return cast(dict[str, Any], json.load(f))
 
 
 # Token variables that `huggingface_hub` itself reads, in its priority order.
@@ -1330,6 +1361,30 @@ def _cached_pin_memory_available(pid: int) -> bool:
 
 def is_pin_memory_available() -> bool:
     return _cached_pin_memory_available(os.getpid())
+
+
+def build_parser(pipeline_class: str | None = None, pipeline_module: str | None = None) -> FlexibleArgumentParser:
+    """Build the training-runner CLI parser.
+
+    When ``pipeline_class``/``pipeline_module`` are given they become optional defaults,
+    so the deprecated per-pipeline ``__main__`` blocks keep working without the flags.
+    """
+    from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+
+    parser = FlexibleArgumentParser()
+    parser.add_argument("--pipeline-class",
+                        type=str,
+                        required=pipeline_class is None,
+                        default=pipeline_class,
+                        help="Name of the pipeline class to run, e.g., WanTrainingPipeline")
+    parser.add_argument("--pipeline-module",
+                        type=str,
+                        required=pipeline_module is None,
+                        default=pipeline_module,
+                        help="Module containing the pipeline class, e.g., fastvideo.training.wan_training_pipeline")
+    parser = TrainingArgs.add_cli_args(parser)
+    parser = FastVideoArgs.add_cli_args(parser)
+    return parser
 
 
 def allocate_cpu_tensor_with_pin_fallback(

@@ -241,6 +241,9 @@ class SD35DenoisingStage(PipelineStage):
             {"generator": batch.generator[0] if isinstance(batch.generator, list) else batch.generator})
 
         for t in timesteps:
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             latents_4d = latents.squeeze(2)
 
             if batch.do_classifier_free_guidance:
@@ -308,6 +311,12 @@ class SD35DecodingStage(PipelineStage):
 
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if not fastvideo_args.is_output_rank:
+            # SD3.5 decoding has no collectives. Avoid duplicating the VAE
+            # forward and device-to-host pixel copy on non-output SPMD ranks.
+            batch.output = torch.empty((0, 3, 0, 0, 0), device="cpu", dtype=torch.float32)
+            return batch
+
         if batch.latents is None:
             raise ValueError("latents must be set before SD35DecodingStage")
 

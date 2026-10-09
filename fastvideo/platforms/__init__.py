@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/__init__.py
 
+import glob
+import os
 import traceback
 from typing import TYPE_CHECKING
 
@@ -35,8 +37,6 @@ def cuda_platform_plugin() -> str | None:
             raise e
 
         # CUDA is supported on Jetson, but NVML may not be.
-        import os
-
         def cuda_is_jetson() -> bool:
             return os.path.isfile("/etc/nv_tegra_release") \
                 or os.path.exists("/sys/class/tegra-firmware")
@@ -90,6 +90,24 @@ def cpu_platform_plugin() -> str | None:
     return "fastvideo.platforms.cpu.CpuPlatform"
 
 
+def _rocm_device_node_accessible() -> bool:
+    """True when this process has read/write permission on the AMD compute
+    device node and on at least one GPU render node.
+
+    The ROCm runtime opens both: /dev/kfd for compute and a DRM render node
+    under /dev/dri for each GPU, so a container given /dev/kfd but no render
+    node has no usable GPU. Looking at the nodes rather than querying the GPU
+    runtime keeps platform detection from initializing ROCm when fastvideo is
+    imported. Permission bits are not proof that an open() succeeds, so this
+    stays a heuristic.
+    """
+    read_write = os.R_OK | os.W_OK
+    if not os.access("/dev/kfd", read_write):
+        return False
+    render_nodes = sorted(glob.glob("/dev/dri/renderD*"))  # codespell:ignore renderd
+    return any(os.access(node, read_write) for node in render_nodes)
+
+
 def rocm_platform_plugin() -> str | None:
     is_rocm = False
 
@@ -104,6 +122,21 @@ def rocm_platform_plugin() -> str | None:
             amdsmi.amdsmi_shut_down()
     except Exception as e:
         logger.debug("ROCm platform is unavailable: %s", e)
+
+    if not is_rocm:
+        # Images built on rocm/pytorch ship a ROCm (HIP) torch but no amdsmi
+        # Python package, and the PyPI amdsmi wheel cannot load its library
+        # there, so the amdsmi check above finds no device and the CPU
+        # platform wins. A HIP torch build plus the AMD compute and render
+        # device nodes is a ROCm GPU.
+        try:
+            import torch
+            hip_version = getattr(torch.version, "hip", None)
+            if hip_version and _rocm_device_node_accessible():
+                is_rocm = True
+                logger.info("ROCm platform is available (torch HIP %s; detected without amdsmi)", hip_version)
+        except Exception as e:
+            logger.debug("ROCm platform is unavailable via torch: %s", e)
 
     return "fastvideo.platforms.rocm.RocmPlatform" if is_rocm else None
 

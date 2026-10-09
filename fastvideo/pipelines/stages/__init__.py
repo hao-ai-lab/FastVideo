@@ -10,10 +10,12 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (Cosmos25AutoDenoisingStage, Cosmos25DenoisingStage,
+                                                  Cosmos25DFDV2WDenoisingStage, Cosmos25DistilledT2WDenoisingStage,
                                                   Cosmos25V2WDenoisingStage, Cosmos25T2WDenoisingStage,
                                                   CosmosDenoisingStage, DenoisingStage)
 from fastvideo.pipelines.stages.sr_denoising import SRDenoisingStage
 from fastvideo.pipelines.stages.encoding import EncodingStage
+from fastvideo.pipelines.stages.audio_encoding import AudioEncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage, MatrixGame2ImageEncodingStage,
                                                        MatrixGame2ImageVAEEncodingStage,
                                                        MatrixGame3ImageVAEEncodingStage, RefImageEncodingStage,
@@ -23,6 +25,8 @@ from fastvideo.pipelines.stages.gamecraft_image_encoding import (GameCraftImageV
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (Cosmos25LatentPreparationStage, CosmosLatentPreparationStage,
                                                            Cosmos25AutoLatentPreparationStage,
+                                                           Cosmos25DFDV2WLatentPreparationStage,
+                                                           Cosmos25DistilledT2WLatentPreparationStage,
                                                            Cosmos25T2WLatentPreparationStage,
                                                            Cosmos25V2WLatentPreparationStage, LatentPreparationStage)
 from fastvideo.pipelines.basic.ltx2.stages import (  # noqa: F401
@@ -34,6 +38,9 @@ from fastvideo.pipelines.stages.matrixgame3_denoising import MatrixGame3Denoisin
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.kandinsky5 import (Kandinsky5DecodingStage, Kandinsky5DenoisingStage,
                                                    Kandinsky5LatentPreparationStage)
+from fastvideo.pipelines.stages.kandinsky6 import (Kandinsky6AudioDecodingStage, Kandinsky6DecodingStage,
+                                                   Kandinsky6DenoisingStage, Kandinsky6ImageEncodingStage,
+                                                   Kandinsky6LatentPreparationStage)
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.gen3c_stages import (Gen3CCFGPolicyStage, Gen3CConditioningStage, Gen3CDenoisingStage,
                                                      Gen3CLatentPreparationStage)
@@ -46,6 +53,7 @@ from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitS
 from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
 
 __all__ = [
+    "AudioEncodingStage",
     "PipelineStage",
     "InputValidationStage",
     "TimestepPreparationStage",
@@ -56,6 +64,8 @@ __all__ = [
     "Cosmos25T2WLatentPreparationStage",
     "Cosmos25V2WLatentPreparationStage",
     "Cosmos25AutoLatentPreparationStage",
+    "Cosmos25DistilledT2WLatentPreparationStage",
+    "Cosmos25DFDV2WLatentPreparationStage",
     "LTX2LatentPreparationStage",
     "LTX2AudioDecodingStage",
     "ConditioningStage",
@@ -69,6 +79,11 @@ __all__ = [
     "Kandinsky5DecodingStage",
     "Kandinsky5DenoisingStage",
     "Kandinsky5LatentPreparationStage",
+    "Kandinsky6AudioDecodingStage",
+    "Kandinsky6DecodingStage",
+    "Kandinsky6DenoisingStage",
+    "Kandinsky6ImageEncodingStage",
+    "Kandinsky6LatentPreparationStage",
     "GameCraftDenoisingStage",
     "Gen3CCFGPolicyStage",
     "Gen3CConditioningStage",
@@ -79,6 +94,8 @@ __all__ = [
     "Cosmos25T2WDenoisingStage",
     "Cosmos25V2WDenoisingStage",
     "Cosmos25AutoDenoisingStage",
+    "Cosmos25DistilledT2WDenoisingStage",
+    "Cosmos25DFDV2WDenoisingStage",
     "LTX2DenoisingStage",
     "LTX2TextEncodingStage",
     "SRDenoisingStage",
