@@ -1019,6 +1019,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_regional_compile(self) -> str | None:
         """Resolve state used only by inference regional fullgraph compile."""
         self.prepare_for_compile()
+        self._regional_compile_inputs = True
         prepared_vsa_impls = 0
         unsupported_reasons: set[str] = set()
         for block in self.transformer_blocks:
@@ -1036,6 +1037,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         if unsupported_reasons:
             return "; ".join(sorted(unsupported_reasons))
         return None
+
+    def _block_input(self, shard: torch.Tensor) -> torch.Tensor:
+        """Copy a sequence-parallel shard under regional compile so every block sees the same strides."""
+        return shard.clone() if getattr(self, "_regional_compile_inputs", False) else shard
 
     def materialize_non_persistent_buffers(
         self,
@@ -1136,7 +1141,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         text_original_seq_len = text_embeds.shape[1]
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if sp_world_size > 1:
-            text_embeds, _ = sequence_model_parallel_shard(text_embeds, dim=1)
+            text_embeds = self._block_input(sequence_model_parallel_shard(text_embeds, dim=1)[0])
         text_embeds = self.token_refiner(text_embeds, text_original_seq_len)
         if sp_world_size > 1:
             text_embeds = sequence_model_parallel_all_gather_with_unpad(
@@ -1201,9 +1206,9 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         original_seq_len = sequence_length
 
         if sp_world_size > 1:
-            packed_hidden_states, _ = sequence_model_parallel_shard(packed_hidden_states, dim=1)
-            rotary_cos, _ = sequence_model_parallel_shard(rotary_emb[0], dim=0)
-            rotary_sin, _ = sequence_model_parallel_shard(rotary_emb[1], dim=0)
+            packed_hidden_states = self._block_input(sequence_model_parallel_shard(packed_hidden_states, dim=1)[0])
+            rotary_cos = self._block_input(sequence_model_parallel_shard(rotary_emb[0], dim=0)[0])
+            rotary_sin = self._block_input(sequence_model_parallel_shard(rotary_emb[1], dim=0)[0])
             adaln_indices, _ = sequence_model_parallel_shard(adaln_indices, dim=0)
             local_timestep_indices, _ = sequence_model_parallel_shard(local_timestep_indices, dim=0)
             rotary_emb = (rotary_cos, rotary_sin)

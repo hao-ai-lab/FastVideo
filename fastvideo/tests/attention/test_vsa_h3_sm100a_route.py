@@ -674,3 +674,42 @@ def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(env_overrides)
 
     assert output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
     assert torch.isfinite(output).all()
+
+
+def test_packed_attention_op_reuses_one_graph_across_prompt_lengths(monkeypatch, env_overrides):
+    """Ten prompt lengths compile at most twice and match the uncompiled route exactly (#1940)."""
+    from torch._dynamo.testing import CompileCounter
+
+    from fastvideo.forward_context import set_forward_context
+
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", _FakeTriton())
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5,
+                            prefix="transformer_blocks.0.attn")
+    assert impl.prepare_for_regional_compile(torch.device("cpu")) is None
+    builder = MiniMaxH3VSAMetadataBuilder()
+    counter = CompileCounter()
+
+    def run(qkvg):
+        return impl.packed_attention(qkvg, True)
+
+    torch._dynamo.reset()
+    try:
+        compiled = torch.compile(run, backend=counter, fullgraph=True)
+        with torch.no_grad():
+            for text_rows in (17, 40, 64, 81, 100, 130, 151, 200, 233, 300):
+                meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
+                qkvg = torch.randn(4, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+                with set_forward_context(current_timestep=0, attn_metadata=meta):
+                    actual = compiled(qkvg)
+                    tiled = impl.preprocess_qkv(qkvg.clone(), meta)
+                    q, k, v, gate = tiled.chunk(4, dim=0)
+                    expected = impl.postprocess_output(impl.forward(q, k, v, gate, meta), meta)
+                torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        assert counter.frame_count <= 2, f"compiled {counter.frame_count} graphs for 10 prompt lengths"
+    finally:
+        torch._dynamo.reset()
