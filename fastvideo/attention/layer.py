@@ -251,19 +251,25 @@ class DistributedAttention_VSA(DistributedAttention):
             cos, sin = freqs_cis
             qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2], cos, sin, is_neox_style=False)
 
-        qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
+        # Keeps per-request attention metadata out of the traced graph.
+        packed_attention = getattr(self.attn_impl, "packed_attention", None)
+        output = None
+        if torch.compiler.is_compiling() and callable(packed_attention):
+            output = packed_attention(qkvg, gate_compress is not None)
+        if output is None:
+            qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
-        if gate_compress is None:
-            q, k, v = qkvg.chunk(3, dim=0)
-        else:
-            q, k, v, gate_compress = qkvg.chunk(4, dim=0)
-        output = self.attn_impl.forward(q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
+            if gate_compress is None:
+                q, k, v = qkvg.chunk(3, dim=0)
+            else:
+                q, k, v, gate_compress = qkvg.chunk(4, dim=0)
+            output = self.attn_impl.forward(q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
+
+            # Apply backend-specific postprocess_output
+            output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
-
-        # Apply backend-specific postprocess_output
-        output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
         output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_seq_len))
 

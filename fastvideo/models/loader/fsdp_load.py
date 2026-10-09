@@ -724,6 +724,21 @@ def _enable_regional_attention_compile(model: nn.Module) -> int:
     return enabled_count
 
 
+def _eager_past_recompile_limit(compiled: Callable[..., Any], eager: Callable[..., Any],
+                                name: str) -> Callable[..., Any]:
+    """Fall back to ``eager`` when ``fullgraph=True`` hits the recompile limit (raised before execution)."""
+
+    def forward(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return compiled(*args, **kwargs)
+        except torch._dynamo.exc.FailOnRecompileLimitHit:
+            logger.warning_once(f"Regional compile of {name} reached the recompile limit; "
+                                "inputs without a cached graph run eagerly.")
+            return eager(*args, **kwargs)
+
+    return forward
+
+
 def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> int:
     """Compile repeated mathematical regions after FSDP setup.
 
@@ -760,7 +775,9 @@ def _compile_model_regions(model: nn.Module, compile_kwargs: dict[str, Any]) -> 
             # mathematical regions. Keep their saved-tensor/recompute logic
             # eager and compile only the repeated block they own.
             compile_target = getattr(submodule, "_checkpoint_wrapped_module", submodule)
-            compile_target.forward = torch.compile(compile_target.forward, **kwargs)
+            eager_forward = compile_target.forward
+            compile_target.forward = _eager_past_recompile_limit(torch.compile(eager_forward, **kwargs), eager_forward,
+                                                                 type(compile_target).__name__)
             compiled_count += 1
 
     if compiled_count == 0:
