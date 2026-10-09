@@ -66,3 +66,5 @@ Fixes #
 
 - [ ] I added or updated the native serving YAML and [cookbook deployment](https://github.com/hao-ai-lab/FastVideo/blob/main/docs/contributing/cookbook_configuration.md),
       or explained why this is not applicable.
+- [ ] I documented the GPU type/count and minimum VRAM for the serving setup with supporting measurements,
+      or marked the minimum as unknown and any VRAM estimate as an estimate.
