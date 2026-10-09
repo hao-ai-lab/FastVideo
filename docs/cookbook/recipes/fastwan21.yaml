@@ -11,7 +11,8 @@ deployments:
     controls:
       - server
       - generator.engine.num_gpus
-      - generator.engine.parallelism
+      - generator.engine.parallelism.tp_size
+      - generator.engine.parallelism.sp_size
       - generator.engine.offload.dit_layerwise
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
@@ -21,3 +22,14 @@ deployments:
       - default_request.sampling.width
       - default_request.sampling.fps
       - default_request.sampling.seed
+    overrides:
+      # Generic input validation requires dimensions divisible by eight.
+      default_request.sampling.height:
+        minimum: 8
+        multipleOf: 8
+      default_request.sampling.width:
+        minimum: 8
+        multipleOf: 8
+      # Generic stage verification accepts nonnegative seeds, including zero.
+      default_request.sampling.seed:
+        minimum: 0

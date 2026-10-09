@@ -140,6 +140,10 @@
    */
   function yamlValue(value) {
     if (typeof value === "number") {
+      if (!Number.isFinite(value)) throw new Error("Configuration numbers must be finite");
+      if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+        throw new Error("Configuration integer exceeds JavaScript's safe integer range");
+      }
       // PyYAML needs a decimal point and signed exponent to recognize scientific notation as a float.
       return JSON.stringify(value).replace(/^(-?\d+(?:\.\d+)?)e([+-]?)(\d+)$/i,
         (_, mantissa, sign, exponent) => `${mantissa.includes(".") ? mantissa : `${mantissa}.0`}e${sign || "+"}${exponent}`);

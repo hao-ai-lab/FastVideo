@@ -196,7 +196,10 @@ test("YAML preserves literal types and scientific notation", () => {
   };
   assert.equal(yaml({ off: false, zero: 0, empty: "", auto: null, list: ["a", true] }),
     'off: false\nzero: 0\nempty: ""\nauto: null\nlist: ["a",true]\n');
-  assert.equal(yaml({ small: 1e-7, large: 1e21, text: "1e-7" }), 'small: 1.0e-7\nlarge: 1.0e+21\ntext: "1e-7"\n');
+  assert.equal(yaml({ small: 1e-7, negative: -1e-7, text: "1e-7" }),
+    'small: 1.0e-7\nnegative: -1.0e-7\ntext: "1e-7"\n');
+  // Match the catalog builder's numeric precision checks for browser edits too.
+  assert.throws(() => yaml({ large: 1e21 }), /safe integer/);
 });
 
 test("caller edits, catalog and resolved configuration do not share nested values", () => {
@@ -272,4 +275,19 @@ test("getOptions previews GPU-dependent limits without requiring a complete vali
   delete data.runtime.topology_defaults;
   assert.equal(option(getOptions(data), path).schema.maximum, undefined);
   assert.equal(resolveConfig(data, { "generator.engine.num_gpus": 2 }).config.generator.engine.num_gpus, 2);
+});
+
+test("YAML output rejects unsafe numbers independently of authored field ranges", () => {
+  const data = catalog();
+  const path = "default_request.sampling.seed";
+  for (const value of [Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1]) {
+    assert.throws(() => resolveConfig(data, { [path]: value }), /safe integer/);
+  }
+  for (const value of [Infinity, -Infinity, NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    const hidden = structuredClone(data);
+    hidden.base_config.generator.pipeline.experimental.unselected_numbers = [value];
+    assert.throws(() => resolveConfig(hidden), /finite|safe integer/);
+  }
+  assert.equal(resolveConfig(data, { [path]: Number.MAX_SAFE_INTEGER }).config.default_request.sampling.seed,
+    Number.MAX_SAFE_INTEGER);
 });

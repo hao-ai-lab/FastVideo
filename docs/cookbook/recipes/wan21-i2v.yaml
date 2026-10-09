@@ -16,7 +16,8 @@ deployments:
     controls:
       - server
       - generator.engine.num_gpus
-      - generator.engine.parallelism
+      - generator.engine.parallelism.tp_size
+      - generator.engine.parallelism.sp_size
       - generator.engine.offload.text_encoder
       - generator.engine.offload.vae
       - generator.pipeline.experimental.flow_shift
@@ -30,4 +31,16 @@ deployments:
       generator.pipeline.experimental.flow_shift:
         title: Flow shift
         type: number
-        description: Wan scheduler time shift; the serving baseline recommends 3.0.
+        # Positive-only editing is cookbook policy, not a native schema bound.
+        exclusiveMinimum: 0
+        description: Positive scheduler time shift (cookbook policy); the serving baseline recommends 3.0.
+      # Generic input validation requires dimensions divisible by eight.
+      default_request.sampling.height:
+        minimum: 8
+        multipleOf: 8
+      default_request.sampling.width:
+        minimum: 8
+        multipleOf: 8
+      # Generic stage verification accepts nonnegative seeds, including zero.
+      default_request.sampling.seed:
+        minimum: 0
