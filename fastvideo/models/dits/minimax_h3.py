@@ -1019,7 +1019,6 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_regional_compile(self) -> str | None:
         """Resolve state used only by inference regional fullgraph compile."""
         self.prepare_for_compile()
-        self._regional_compile_inputs = True
         prepared_vsa_impls = 0
         unsupported_reasons: set[str] = set()
         for block in self.transformer_blocks:
@@ -1036,6 +1035,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                         prepared_vsa_impls)
         if unsupported_reasons:
             return "; ".join(sorted(unsupported_reasons))
+        self._regional_compile_inputs = True
         return None
 
     def _block_input(self, shard: torch.Tensor) -> torch.Tensor:

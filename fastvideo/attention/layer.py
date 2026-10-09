@@ -251,7 +251,6 @@ class DistributedAttention_VSA(DistributedAttention):
             cos, sin = freqs_cis
             qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2], cos, sin, is_neox_style=False)
 
-        # Keeps per-request attention metadata out of the traced graph.
         packed_attention = getattr(self.attn_impl, "packed_attention", None)
         output = None
         if torch.compiler.is_compiling() and callable(packed_attention):
