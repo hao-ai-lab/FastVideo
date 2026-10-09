@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { resolveConfig } = require("../../docs/assets/cookbook-config.js");
+const { getOptions, resolveConfig } = require("../../docs/assets/cookbook-config.js");
 
 function exportedCatalogs() {
   const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -90,8 +90,7 @@ test("streaming offers a health check and effective WebSocket endpoint without a
   assert.deepEqual(data.controls.map((item) => item.path), [
     "server.host", "server.port", "generator.engine.num_gpus",
     "generator.engine.parallelism.tp_size", "generator.engine.parallelism.sp_size",
-    "generator.engine.parallelism.hsdp_replicate_dim", "generator.engine.parallelism.hsdp_shard_dim",
-    "generator.engine.parallelism.dist_timeout", "default_request.sampling.num_frames",
+    "default_request.sampling.num_frames",
     "default_request.sampling.height", "default_request.sampling.width",
   ]);
   for (const [host, clientHost] of [["0.0.0.0", "127.0.0.1"], ["::", "[::1]"], ["[::]", "[::1]"],
@@ -121,8 +120,6 @@ test("every generated recipe resolves without edits and baseline defaults win", 
   assert.deepEqual(data.controls.map((control) => control.path), [
     "server.host", "server.port", "server.output_dir", "server.served_model_name",
     "generator.engine.num_gpus", "generator.engine.parallelism.tp_size", "generator.engine.parallelism.sp_size",
-    "generator.engine.parallelism.hsdp_replicate_dim", "generator.engine.parallelism.hsdp_shard_dim",
-    "generator.engine.parallelism.dist_timeout",
     "generator.engine.offload.dit_layerwise", "generator.engine.offload.text_encoder", "generator.engine.offload.vae",
     "generator.engine.compile.enabled", "default_request.sampling.num_frames", "default_request.sampling.height",
     "default_request.sampling.width", "default_request.sampling.fps", "default_request.sampling.seed",
@@ -135,8 +132,7 @@ test("GPU and pattern-selected parallelism controls validate complete edits", ()
   const data = catalogs.get("fasth3-8step/cuda-rest");
   const paths = new Set(data.controls.map((control) => control.path));
   for (const path of ["generator.engine.num_gpus", "generator.engine.parallelism.tp_size",
-    "generator.engine.parallelism.sp_size", "generator.engine.parallelism.hsdp_replicate_dim",
-    "generator.engine.parallelism.hsdp_shard_dim", "generator.engine.parallelism.dist_timeout"]) {
+    "generator.engine.parallelism.sp_size"]) {
     assert.ok(paths.has(path), path);
   }
   assert.throws(() => resolveConfig(data, { "generator.engine.num_gpus": 2 }), /sp_size.*num_gpus/);
@@ -166,4 +162,80 @@ test("expanded server controls edit as ordinary leaves and reset preserves the n
   assert.deepEqual(result.config.generator, initial.config.generator);
   assert.deepEqual(result.config.default_request, initial.config.default_request);
   assert.deepEqual(resolveConfig(data), initial);
+});
+
+test("authored cookbook limits reject invalid requests while preserving every baseline", () => {
+  const frames = "default_request.sampling.num_frames";
+  for (const catalog of catalogs.values()) {
+    const fields = new Map(getOptions(catalog).map((field) => [field.path, field.schema]));
+    const initial = resolveConfig(catalog);
+    assert.deepEqual(initial.config, catalog.base_config);
+    assert.equal(fields.get("server.port").minimum, 1);
+    assert.equal(fields.get("server.port").maximum, 65535);
+    for (const value of [0, -1, 65536, 1.5]) {
+      assert.throws(() => resolveConfig(catalog, { "server.port": value }), /server.port/);
+    }
+    if (catalog.runtime.backend !== "cuda") continue;
+    assert.equal(fields.get("generator.engine.num_gpus").minimum, 1);
+    assert.equal(fields.get("generator.engine.num_gpus").maximum, 8);
+    assert.equal(fields.has("generator.engine.parallelism.dist_timeout"), false);
+    assert.equal(fields.has("generator.engine.parallelism.hsdp_replicate_dim"), false);
+    assert.equal(fields.has("generator.engine.parallelism.hsdp_shard_dim"), false);
+    for (const value of [0, -1, 9, 1.5]) {
+      assert.throws(() => resolveConfig(catalog, { "generator.engine.num_gpus": value }), /num_gpus/);
+    }
+    const h3 = catalog.model.key === "fasth3-8step";
+    assert.equal(fields.get(frames).minimum, h3 ? 108 : 1);
+    assert.equal(fields.get(frames).maximum, h3 ? 362 : 512);
+    for (const value of [0, -1, 1.5, fields.get(frames).minimum - 1, fields.get(frames).maximum + 1]) {
+      assert.throws(() => resolveConfig(catalog, { [frames]: value }), /num_frames/);
+    }
+    for (const value of [fields.get(frames).minimum, fields.get(frames).maximum]) {
+      assert.equal(resolveConfig(catalog, { [frames]: value }).config.default_request.sampling.num_frames, value);
+    }
+    for (const dimension of ["height", "width"]) {
+      const path = `default_request.sampling.${dimension}`;
+      assert.equal(fields.get(path).maximum, 4096);
+      for (const value of [0, -1, 4097, 33]) {
+        assert.throws(() => resolveConfig(catalog, { [path]: value }), new RegExp(dimension));
+      }
+    }
+    assert.deepEqual(resolveConfig(catalog), initial);
+  }
+  const fastwan = catalogs.get("fastwan21/cuda-rest");
+  for (const fps of [0, -1, 121, 1.5]) {
+    assert.throws(() => resolveConfig(fastwan, { "default_request.sampling.fps": fps }), /fps/);
+  }
+  assert.equal(resolveConfig(fastwan, { "default_request.sampling.fps": 120 }).config.default_request.sampling.fps, 120);
+});
+
+test("model seed rules and automatic parallelism survive practical cookbook caps", () => {
+  for (const catalog of catalogs.values()) {
+    if (catalog.runtime.backend !== "cuda") continue;
+    const edits = { "generator.engine.num_gpus": 8,
+      "generator.engine.parallelism.tp_size": -1, "generator.engine.parallelism.sp_size": -1 };
+    const result = resolveConfig(catalog, edits);
+    assert.equal(result.config.generator.engine.parallelism.tp_size, -1);
+    assert.equal(result.config.generator.engine.parallelism.sp_size, -1);
+    const fields = getOptions(catalog, catalog.base_config, edits);
+    for (const degree of ["tp_size", "sp_size"]) {
+      const path = `generator.engine.parallelism.${degree}`;
+      assert.equal(fields.find((field) => field.path === path).schema.maximum, 8);
+      for (const value of [-2, 0, 3, 16]) {
+        assert.throws(() => resolveConfig(catalog, { ...edits, [path]: value }), new RegExp(degree));
+      }
+    }
+  }
+  const seed = "default_request.sampling.seed";
+  for (const id of ["fastwan21/cuda-rest", "wan21-i2v/cuda-rest", "fasth3-8step/cuda-rest"]) {
+    const catalog = catalogs.get(id);
+    assert.equal(resolveConfig(catalog, { [seed]: 0 }).config.default_request.sampling.seed, 0);
+    assert.throws(() => resolveConfig(catalog, { [seed]: Number.MAX_SAFE_INTEGER + 1 }), /safe integer/);
+    if (id.startsWith("fasth3")) assert.equal(resolveConfig(catalog, { [seed]: -1 }).config.default_request.sampling.seed, -1);
+    else assert.throws(() => resolveConfig(catalog, { [seed]: -1 }), /seed/);
+  }
+  const wan = catalogs.get("wan21-i2v/cuda-rest");
+  for (const value of [0, -1]) {
+    assert.throws(() => resolveConfig(wan, { "generator.pipeline.experimental.flow_shift": value }), /flow_shift/);
+  }
 });

@@ -200,6 +200,17 @@ for future UIs, while the shared resolver rejects invalid combinations without
 changing user values. It does not reproduce arbitrary model/FSDP validators or
 hardware compatibility. Reset discards edits by resolving the baseline again.
 
+The authored numeric ranges are practical, overridable cookbook policy: positive
+GPU/frame/dimension/FPS values with common ceilings of 8, 512, 4096 and 120,
+respectively. These are editor policy limits, not runtime or memory-capacity
+guarantees. Model manifests add geometry and seed restrictions. The current
+recipes select `generator.engine.parallelism.*`, then exclude
+`'!generator.engine.parallelism.hsdp_*'` to expose TP/SP and leave HSDP hidden
+while FSDP is disabled; unused `dist_timeout` is omitted. Number finiteness and
+JavaScript integer precision are checked centrally during YAML serialization,
+rather than presented as
+usable option ranges.
+
 Entries in `experimental` and other untyped maps can become controls only with
 explicitly authored schemas and selection in deployment `options`. Existing
 hidden values still survive every download. No implicit option selection,

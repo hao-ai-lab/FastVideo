@@ -16,6 +16,16 @@ deployments:
       - "!server.output_dir"
       - generator.engine.num_gpus
       - generator.engine.parallelism.*
+      - "!generator.engine.parallelism.hsdp_*"
       - default_request.sampling.num_frames
       - default_request.sampling.height
       - default_request.sampling.width
+    overrides:
+      # LTX2VAEConfig in fastvideo/configs/models/vaes/ltx2vae.py uses a 32-pixel grid.
+      default_request.sampling.height:
+        minimum: 32
+        multipleOf: 32
+        default: 1088
+      default_request.sampling.width:
+        minimum: 32
+        multipleOf: 32

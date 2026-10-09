@@ -2,7 +2,10 @@
 # available fields; deployment.options selects which ones appear in a recipe.
 # Config values come from the native baseline, not these informational defaults.
 # CUDA declarations follow fastvideo/api/schema.py; MLX declarations follow
-# fastvideo/entrypoints/openai/mlx_server.py. Integer bounds preserve JS precision.
+# fastvideo/entrypoints/openai/mlx_server.py.
+# GPU count, frames, dimensions, and FPS have practical, overridable cookbook
+# limits. These UI choices do not describe engine capacity or guarantee GPU fit.
+# Integer transport precision is checked by the serializer, not modeled as range.
 options:
   server.host:
     title: Host
@@ -12,15 +15,15 @@ options:
     title: Port
     type: integer
     default: 8000
-    minimum: -9007199254740991
-    maximum: 9007199254740991
+    minimum: 1
+    maximum: 65535
   server.output_dir:
-    title: Output Dir
+    title: Output directory
     type: string
     default: outputs/
   server.served_model_name:
     # CUDA permits null; MLX requires a nonempty string. Each runtime completes it.
-    title: Served Model Name
+    title: Served model name
 
 runtimes:
   fastvideo-cuda-rest:
@@ -49,89 +52,78 @@ runtimes:
           - type: "null"
         default: null
       generator.engine.num_gpus:
-        title: Num Gpus
+        title: GPU count
         type: integer
         default: 1
-        minimum: -9007199254740991
-        maximum: 9007199254740991
+        minimum: 1
+        maximum: 8
       generator.engine.parallelism.tp_size:
-        title: Tp Size
+        title: Tensor parallelism
         type: integer
         default: -1
-        minimum: -9007199254740991
-        maximum: 9007199254740991
+        minimum: -1
+        not: {const: 0}
       generator.engine.parallelism.sp_size:
-        title: Sp Size
+        title: Sequence parallelism
         type: integer
         default: -1
-        minimum: -9007199254740991
-        maximum: 9007199254740991
+        minimum: -1
+        not: {const: 0}
       generator.engine.parallelism.hsdp_replicate_dim:
-        title: Hsdp Replicate Dim
+        title: HSDP replication
         type: integer
         default: 1
-        minimum: -9007199254740991
-        maximum: 9007199254740991
+        minimum: 1
       generator.engine.parallelism.hsdp_shard_dim:
-        title: Hsdp Shard Dim
+        title: HSDP sharding
         type: integer
         default: -1
-        minimum: -9007199254740991
-        maximum: 9007199254740991
-      generator.engine.parallelism.dist_timeout:
-        title: Dist Timeout
-        anyOf:
-          - type: integer
-            minimum: -9007199254740991
-            maximum: 9007199254740991
-          - type: "null"
-        default: null
+        minimum: -1
+        not: {const: 0}
       generator.engine.offload.dit_layerwise:
-        title: Dit Layerwise
+        title: Offload DiT layers to CPU
         type: boolean
         default: true
       generator.engine.offload.text_encoder:
-        title: Text Encoder
+        title: Offload text encoder to CPU
         type: boolean
         default: true
       generator.engine.offload.vae:
-        title: Vae
+        title: Offload VAE to CPU
         type: boolean
         default: true
       generator.engine.compile.enabled:
-        title: Enabled
+        title: Compile transformer
         type: boolean
         default: false
       default_request.sampling.num_frames:
-        title: Num Frames
+        title: Frames
         type: integer
         default: 125
-        minimum: -9007199254740991
-        maximum: 9007199254740991
+        minimum: 1
+        maximum: 512
       default_request.sampling.height:
         title: Height
         type: integer
         default: 720
-        minimum: -9007199254740991
-        maximum: 9007199254740991
+        minimum: 1
+        maximum: 4096
       default_request.sampling.width:
         title: Width
         type: integer
         default: 1280
-        minimum: -9007199254740991
-        maximum: 9007199254740991
+        minimum: 1
+        maximum: 4096
       default_request.sampling.fps:
-        title: Fps
+        title: FPS
         type: integer
         default: 24
-        minimum: -9007199254740991
-        maximum: 9007199254740991
+        minimum: 1
+        maximum: 120
       default_request.sampling.seed:
         title: Seed
         type: integer
         default: 1024
-        minimum: -9007199254740991
-        maximum: 9007199254740991
 
   fastvideo-mlx-rest:
     metadata:
@@ -160,22 +152,22 @@ runtimes:
         minLength: 1
         default: fasth3
       generator.model_root:
-        title: Model Root
+        title: Model directory
         type: string
       generator.mlx_checkpoint:
-        title: Mlx Checkpoint
+        title: MLX checkpoint
         type: string
       generator.prompt_cache_dir:
-        title: Prompt Cache Dir
+        title: Prompt cache directory
         type: string
         default: outputs/h3_prompt_cache
       generator.vae_dtype:
-        title: Vae Dtype
+        title: VAE precision
         type: string
         enum: [fp32, fp16, bf16]
         default: fp32
       generator.vsa_sparsity:
-        title: Vsa Sparsity
+        title: VSA sparsity
         type: number
         minimum: 0.0
         exclusiveMaximum: 1.0

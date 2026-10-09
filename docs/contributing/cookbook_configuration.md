@@ -31,6 +31,7 @@ deployments:
       - server.*
       - generator.engine.num_gpus
       - generator.engine.parallelism.*
+      - '!generator.engine.parallelism.hsdp_*'
       - generator.engine.compile.enabled
       - default_request.sampling.num_frames
 ```
@@ -101,7 +102,7 @@ options:
   - server.*
   - '!server.output_dir'
   - generator.engine.parallelism.*
-  - '!generator.engine.parallelism.dist_timeout'
+  - '!generator.engine.parallelism.hsdp_*'
 ```
 
 Quote entries beginning with `!` because YAML otherwise treats them as tags.
@@ -121,13 +122,24 @@ Types and constraints are curated by the option author, who must keep them
 aligned with native configuration definitions and supported usage. The build
 does not import Python schemas or perform registry/admission checks. Existence
 in an authored schema does not prove runtime support. GPU count can be selected
-with `generator.engine.num_gpus`; `generator.engine.parallelism.*` selects the
-TP, SP, HSDP dimensions and distributed timeout as ordinary controls. The shared
-JavaScript API limits parallel degrees to the selected GPU count and checks
-divisibility. TP, SP and HSDP shard size retain the native `-1` automatic value.
+with `generator.engine.num_gpus`. Current recipes select
+`generator.engine.parallelism.*`, then exclude
+`'!generator.engine.parallelism.hsdp_*'` to expose TP and SP only. HSDP controls
+remain hidden because their baselines do not enable FSDP.
+HSDP definitions remain available for a reviewed FSDP deployment. The unused
+distributed timeout is not offered. The shared JavaScript API limits parallel
+degrees to the selected GPU count and checks divisibility. TP, SP and HSDP shard
+size retain the native `-1` automatic value.
 Invalid combinations block output until corrected; the editor does not silently
 change the recipe's topology or FSDP policy. Model-specific and other native
 cross-field checks still apply when the server starts.
+
+The common GPU/frame/dimension/FPS ceilings (8 GPUs, 512 requested frames,
+4096 pixels per dimension and 120 FPS) are practical cookbook defaults, not
+runtime or memory-capacity limits. Reviewed deployments can override them.
+Model-specific bounds, dimension multiples and seed rules belong in deployment
+`overrides`. These per-field checks do not replace native cross-field rules
+such as H3's total canvas-area limit.
 
 Keep coupled sampling choices fixed unless reviewed: FastWan's three steps and
 DMD schedule belong together. Hidden experimental values stay in the output.
