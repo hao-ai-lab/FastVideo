@@ -295,10 +295,12 @@ def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_ov
     monkeypatch.setattr(vsa_h3, "_sm100a_unavailable_reason", fail_eager_dispatch)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fail_eager_dispatch)
 
+    from fastvideo.forward_context import set_forward_context
+
     torch._dynamo.reset()
     try:
         compiled = [torch.compile(impl.forward, backend="eager", fullgraph=True) for impl in implementations]
-        with torch.inference_mode():
+        with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
             for layer_idx, run in enumerate(compiled):
                 actual = run(q, k, v, None, meta)
                 expected_delta = 1.0 if layer_idx in meta.dense_layers else 0.0
@@ -663,9 +665,11 @@ def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(env_overrides)
         output = impl.forward(query, key, value, None, meta)
         return impl.postprocess_output(output, meta)
 
+    from fastvideo.forward_context import set_forward_context
+
     torch._dynamo.reset()
     try:
-        with torch.inference_mode():
+        with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
             compiled = torch.compile(run, fullgraph=True)
             output = compiled(raw_qkv)
             torch.cuda.synchronize()
@@ -676,26 +680,33 @@ def test_real_sm100a_odd_preprocess_forward_postprocess_fullgraph(env_overrides)
     assert torch.isfinite(output).all()
 
 
-def test_packed_attention_op_reuses_one_graph_across_prompt_lengths(monkeypatch, env_overrides):
-    """Ten prompt lengths compile at most twice and match the uncompiled route exactly (#1940)."""
+def test_regional_compile_reuses_graphs_across_prompt_lengths(monkeypatch, env_overrides):
+    """Ten prompt lengths stay under the recompile limit and match the eager route exactly (#1940)."""
     from torch._dynamo.testing import CompileCounter
 
     from fastvideo.forward_context import set_forward_context
 
+    def mask_count(q, num):
+        return q + num.repeat_interleave(q.shape[2] // num.shape[-1], dim=-1).unsqueeze(-1).to(q.dtype)
+
     fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a",
+                        lambda q, k, v, q2k_idx, q2k_num, vbs, need_lse=True: (mask_count(q, q2k_num), None))
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask",
+                        lambda q, k, v, block_map, vbs: (mask_count(q, block_map.sum(-1)), None))
     monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
     monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
-    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", _FakeTriton())
     env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
     monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
-    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5,
-                            prefix="transformer_blocks.0.attn")
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
     assert impl.prepare_for_regional_compile(torch.device("cpu")) is None
     builder = MiniMaxH3VSAMetadataBuilder()
     counter = CompileCounter()
 
-    def run(qkvg):
-        return impl.packed_attention(qkvg, True)
+    def run(raw, meta):
+        tiled = impl.preprocess_qkv(raw, meta)
+        query, key, value, gate = tiled.chunk(4, dim=0)
+        return impl.postprocess_output(impl.forward(query, key, value, gate, meta), meta)
 
     torch._dynamo.reset()
     try:
@@ -703,12 +714,10 @@ def test_packed_attention_op_reuses_one_graph_across_prompt_lengths(monkeypatch,
         with torch.no_grad():
             for text_rows in (17, 40, 64, 81, 100, 130, 151, 200, 233, 300):
                 meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
-                qkvg = torch.randn(4, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+                raw = torch.randn(4, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
                 with set_forward_context(current_timestep=0, attn_metadata=meta):
-                    actual = compiled(qkvg)
-                    tiled = impl.preprocess_qkv(qkvg.clone(), meta)
-                    q, k, v, gate = tiled.chunk(4, dim=0)
-                    expected = impl.postprocess_output(impl.forward(q, k, v, gate, meta), meta)
+                    actual = compiled(raw, meta)
+                    expected = run(raw.clone(), meta)
                 torch.testing.assert_close(actual, expected, atol=0, rtol=0)
         assert counter.frame_count <= 2, f"compiled {counter.frame_count} graphs for 10 prompt lengths"
     finally:

@@ -1039,8 +1039,10 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         return None
 
     def _block_input(self, shard: torch.Tensor) -> torch.Tensor:
-        """Copy a sequence-parallel shard under regional compile so every block sees the same strides."""
-        return shard.clone() if getattr(self, "_regional_compile_inputs", False) else shard
+        """Give a sequence-parallel shard standard strides under regional compile, so block 0 shares one graph."""
+        if getattr(self, "_regional_compile_inputs", False):
+            return shard.clone(memory_format=torch.contiguous_format)
+        return shard
 
     def materialize_non_persistent_buffers(
         self,
@@ -1207,8 +1209,8 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
 
         if sp_world_size > 1:
             packed_hidden_states = self._block_input(sequence_model_parallel_shard(packed_hidden_states, dim=1)[0])
-            rotary_cos = self._block_input(sequence_model_parallel_shard(rotary_emb[0], dim=0)[0])
-            rotary_sin = self._block_input(sequence_model_parallel_shard(rotary_emb[1], dim=0)[0])
+            rotary_cos, _ = sequence_model_parallel_shard(rotary_emb[0], dim=0)
+            rotary_sin, _ = sequence_model_parallel_shard(rotary_emb[1], dim=0)
             adaln_indices, _ = sequence_model_parallel_shard(adaln_indices, dim=0)
             local_timestep_indices, _ = sequence_model_parallel_shard(local_timestep_indices, dim=0)
             rotary_emb = (rotary_cos, rotary_sin)
