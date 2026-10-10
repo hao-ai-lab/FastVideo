@@ -376,7 +376,11 @@ the train-time QAT backend; the inference kernel is sm120-only.
 
 User-adaptable LTX-2 fine-tuning recipes (full, LoRA, and NVFP4 QAT) live in
 `examples/train/configs/fine_tuning/ltx2/`, alongside the other model
-families under `examples/train/configs/fine_tuning/`.
+families under `examples/train/configs/fine_tuning/`. LTX-2.3 and LTX-2.5
+have their own recipes in `fine_tuning/ltx2_3/` and `fine_tuning/ltx2_5/`;
+LTX-2.5 trains from a converted dev directory (see the
+[LTX-2.5 inference guide](../inference/ltx2_5.md) for the conversion), and
+`examples/train/configs/overfit_ltx2_5_t2v.yaml` is its end-to-end check.
 
 ---
 

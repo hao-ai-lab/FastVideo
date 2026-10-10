@@ -2,8 +2,10 @@
 
 Local parity, conversion, and smoke tests for the native LTX-2.5 FastVideo
 port. The launch scope is BF16 dev and distilled text/image-conditioned joint
-video-audio inference. Training, QAD/NVFP4, DiffVAE, DFR, HDR, temporal
-upsampling, and automatic duration prediction are follow-up work.
+video-audio inference. Video-only fine-tuning of the dev transformer goes
+through the modular trainer (`examples/train/configs/fine_tuning/ltx2_5/`).
+Audio training, QAD/NVFP4, DiffVAE, DFR, HDR, temporal upsampling, and
+automatic duration prediction are follow-up work.
 
 Port progress and unresolved questions live in
 `tests/local_tests/ltx2_5/PORT_STATUS.md`.
