@@ -34,23 +34,25 @@ configs = [
     for w in [4, 8]\
 ]
 
-# On AMD GPUs the Triton backend takes three launch knobs the generic configs
-# above never set: ``matrix_instr_nonkdim`` (MFMA instruction shape),
-# ``kpack`` (K-dimension packing of the operand loads) and ``waves_per_eu``
-# (occupancy hint).  Left at their defaults, this kernel reaches about 30% of
-# the dense flash kernel's throughput on gfx950 (MI355X); with the 16x16 MFMA
-# shape and kpack=2 the autotuner picks configs that are 1.22-1.34x faster
-# (S=64k..256k tokens, 10-20% block density, head 128, BF16), which cut a
-# 4x MI355X FastH3 1344x768 window's denoising time by 12%.  The CUDA backend
-# rejects these keys, so they are HIP-gated.
-if getattr(torch.version, "hip", None):
-    configs += [
-        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': wpe, 'matrix_instr_nonkdim': 16, 'kpack': kp},
-                      num_stages=2, num_warps=w)
-        for w in [4, 8]
-        for wpe in [1, 2]
-        for kp in [1, 2]
+# On AMD GPUs the Triton backend takes two launch knobs the generic configs
+# above never set: ``matrix_instr_nonkdim`` (MFMA instruction shape) and
+# ``waves_per_eu`` (occupancy hint).  Left at their defaults, this kernel
+# reaches about 30% of the dense flash kernel's throughput on gfx950 (MI355X);
+# with the 16x16 MFMA shape the autotuner picks configs that are 1.22-1.55x
+# faster (8k-256k tokens, 10-20% block density, head 128, BF16), which cut a
+# 4x MI355X FastH3 1344x768 window's denoising time by 12%.  ``kpack`` is left
+# out: Triton deprecates it from gfx950 on and already overrides kpack=2 to 1
+# there.  The CUDA backend rejects these keys, so they are HIP-gated.
+def _hip_configs():
+    return [
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': wpe, 'matrix_instr_nonkdim': 16},
+                      num_stages=2,
+                      num_warps=w) for w in [4, 8] for wpe in [1, 2]
     ]
+
+
+if getattr(torch.version, "hip", None):
+    configs += _hip_configs()
 
 
 # ──────────────────────────── SPARSE ADDITION BEGIN ───────────────────────────
