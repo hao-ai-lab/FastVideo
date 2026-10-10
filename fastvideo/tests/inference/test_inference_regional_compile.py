@@ -30,7 +30,7 @@ from torch import nn
 
 import fastvideo.envs as envs
 from fastvideo.attention import layer as attention_layer
-from fastvideo.attention.layer import DistributedAttention
+from fastvideo.attention.layer import DistributedAttention, LocalAttention
 from fastvideo.models.dits.minimax_h3 import MiniMaxH3Attention, MiniMaxH3Transformer3DModel
 from fastvideo.models.loader import fsdp_load
 from fastvideo.models.loader.fsdp_load import (
@@ -74,6 +74,34 @@ def test_flashinfer_backend_degrades_to_eager(env_overrides) -> None:
     assert "FLASHINFER" in reason
     assert "fullgraph" in reason
     assert "eager" in reason
+
+
+@pytest.mark.parametrize("attention_cls", [DistributedAttention, LocalAttention])
+@pytest.mark.parametrize("training", [False, True])
+def test_actual_flashinfer_backend_degrades_to_eager(attention_cls, training, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    # A mixed model must stay eager even if only its local/cross attention
+    # uses FlashInfer and the component config requests a different backend.
+    model = _model_with_actual_backend(AttentionBackendEnum.TORCH_SDPA)
+    attention = attention_cls.__new__(attention_cls)
+    nn.Module.__init__(attention)
+    attention.backend = AttentionBackendEnum.FLASHINFER
+    model.add_module("flashinfer_attention", attention)
+
+    reason = _regional_compile_unsupported_reason(
+        _init_params_for("TORCH_SDPA"), model=model, training=training)
+
+    assert reason is not None
+    assert "FLASHINFER" in reason
+    assert "eager" in reason
+
+
+@pytest.mark.parametrize("backend", [AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.FLASH_ATTN])
+def test_actual_supported_backend_overrides_flashinfer_request(backend, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    model = _model_with_actual_backend(backend)
+
+    assert _regional_compile_unsupported_reason(_init_params_for("FLASHINFER"), model=model) is None
 
 
 @pytest.mark.parametrize("backend_name", [None, "TORCH_SDPA"])
