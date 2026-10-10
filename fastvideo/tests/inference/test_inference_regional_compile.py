@@ -6,8 +6,8 @@ transformer loads (``FastVideoArgs.inference_torch_compile``, env
 ``FASTVIDEO_INFERENCE_TORCH_COMPILE=1``). These tests pin the two pieces that
 must not drift from the #1718 training-port semantics:
 
-- ``_regional_compile_unsupported_reason``: legacy VSA (and the attention
-  eager escape hatch) degrades to eager, while prepared MiniMax-H3 VSA is
+- ``_regional_compile_unsupported_reason``: FlashInfer, legacy VSA
+  (and the attention eager escape hatch) degrade to eager, while prepared MiniMax-H3 VSA is
   admitted to regional fullgraph capture.
 - attention forward dispatch: ordinary instances retain the historical
   compiler-disabled boundary; regional compile opts in only the selected
@@ -62,6 +62,17 @@ def test_legacy_vsa_backend_degrades_to_eager(env_overrides) -> None:
     reason = _regional_compile_unsupported_reason(_init_params_for(backend_name))
     assert reason is not None
     assert backend_name in reason
+    assert "eager" in reason
+
+
+def test_flashinfer_backend_degrades_to_eager(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+
+    reason = _regional_compile_unsupported_reason(_init_params_for("FLASHINFER"))
+
+    assert reason is not None
+    assert "FLASHINFER" in reason
+    assert "fullgraph" in reason
     assert "eager" in reason
 
 

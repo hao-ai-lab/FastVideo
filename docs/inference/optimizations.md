@@ -441,7 +441,8 @@ attention instances owned by this transformer. MiniMax-H3 VSA is supported
 only by the inference-only sm_100a tile-64 route
 (`FASTVIDEO_VSA_SM100A=1` and `VSA_tile_size=64`); the loader probes that
 route before capture and keeps the transformer eager when the kernel or
-device is unsupported. Legacy VSA, MiniMax-H3 tile-256 VSA, and the explicit
+device is unsupported. FlashInfer (`FLASHINFER`), legacy VSA, MiniMax-H3
+tile-256 VSA, and the explicit
 `FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep the transformer
 eager with one warning instead of failing mid-denoise.
 
