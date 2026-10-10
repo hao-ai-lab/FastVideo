@@ -64,7 +64,6 @@ def test_refine_stages_are_noops_when_refine_is_off_at_forward() -> None:
 
 def test_refine_denoising_stage_still_runs_when_refine_is_on() -> None:
     stage = _pipeline_with_refine_stages()._stage_name_mapping["ltx2_refine_denoising_stage"]
-    # Past the gate, the first thing the stage does is require latents.
     with pytest.raises(ValueError, match="Latents must be provided"):
         stage.forward(ForwardBatch(data_type="video"), _args(refine_enabled=True))
 
