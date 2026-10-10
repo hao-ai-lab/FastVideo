@@ -43,6 +43,7 @@ from torch.distributed import Backend, ProcessGroup, ReduceOp
 
 from fastvideo.distributed.device_communicators.base_device_communicator import (DeviceCommunicatorBase)
 from fastvideo.distributed.device_communicators.cpu_communicator import (CpuCommunicator)
+from fastvideo.distributed.usp_topology import USPTopology, build_usp_topology
 from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
 
@@ -810,10 +811,58 @@ def get_dp_group() -> GroupCoordinator:
     return _DP
 
 
+_USP_TOPOLOGY: USPTopology | None = None
+
+
+def get_ring_size() -> int:
+    """Return the configured Ring Attention subgroup size (1 == disabled)."""
+    return _USP_TOPOLOGY.ring_size if _USP_TOPOLOGY is not None else 1
+
+
+def get_ulysses_size() -> int:
+    """Return the configured Ulysses subgroup size (1 == pure Ring / no SP)."""
+    return _USP_TOPOLOGY.ulysses_size if _USP_TOPOLOGY is not None else 1
+
+
+def get_ring_group() -> GroupCoordinator | None:
+    """Return the Ring Attention subgroup coordinator, or ``None`` if disabled (``ring_size == 1``)."""
+    return _USP_TOPOLOGY.ring_group if _USP_TOPOLOGY is not None else None
+
+
+def get_ring_world_size() -> int:
+    """Return the world size of the Ring Attention process group (1 if disabled)."""
+    group = get_ring_group()
+    return 1 if group is None else group.world_size
+
+
+def get_ring_rank() -> int:
+    """Return this rank's position within the Ring Attention process group."""
+    group = get_ring_group()
+    return 0 if group is None else group.rank_in_group
+
+
+def get_ulysses_group() -> GroupCoordinator | None:
+    """Return the Ulysses subgroup coordinator, or ``None`` if pure Ring (ulysses_size == 1)."""
+    return _USP_TOPOLOGY.ulysses_group if _USP_TOPOLOGY is not None else None
+
+
+def get_ulysses_world_size() -> int:
+    """Return the world size of the Ulysses process group (1 if disabled)."""
+    group = get_ulysses_group()
+    return 1 if group is None else group.world_size
+
+
+def get_ulysses_rank() -> int:
+    """Return this rank's position within the Ulysses process group."""
+    group = get_ulysses_group()
+    return 0 if group is None else group.rank_in_group
+
+
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,
     sequence_model_parallel_size: int = 1,
     data_parallel_size: int = 1,
+    ring_size: int = 1,
     backend: str | None = None,
     sp_group_ranks: list[list[int]] | None = None,
     dp_group_ranks: list[list[int]] | None = None,
@@ -831,6 +880,8 @@ def initialize_model_parallel(
             hold singletons and the denoise ranks form one group). Every rank
             must still belong to exactly one group.
         dp_group_ranks: explicit DP group layout, same contract.
+        ring_size: Ring Attention ranks per SP group; the remaining
+            ``sp_size // ring_size`` factor is Ulysses. ``1`` disables Ring.
     """
     # Get world size and rank. Ensure some consistencies.
     assert _WORLD is not None, "world group is not initialized, please call init_distributed_environment first"
@@ -872,7 +923,19 @@ def initialize_model_parallel(
             ranks = list(range(i * sequence_model_parallel_size, (i + 1) * sequence_model_parallel_size))
             group_ranks.append(ranks)
 
-    _SP = init_model_parallel_group(group_ranks, get_world_group().local_rank, backend, group_name="sp")
+        sp_group_ranks = group_ranks
+
+    _SP = init_model_parallel_group(sp_group_ranks, get_world_group().local_rank, backend, group_name="sp")
+
+    global _USP_TOPOLOGY
+    assert _USP_TOPOLOGY is None, ("USP topology is already initialized")
+    _USP_TOPOLOGY = build_usp_topology(
+        sp_group=_SP,
+        sp_group_ranks=sp_group_ranks,
+        ring_size=ring_size,
+        local_rank=get_world_group().local_rank,
+        backend=backend,
+    )
 
     # Build the data parallel groups.
     num_data_parallel_groups: int = sequence_model_parallel_size
@@ -940,13 +1003,16 @@ def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
                                                           distributed_init_method: str = "env://",
                                                           timeout: timedelta | None = None,
                                                           sp_group_ranks: list[list[int]] | None = None,
-                                                          dp_group_ranks: list[list[int]] | None = None):
+                                                          dp_group_ranks: list[list[int]] | None = None,
+                                                          ring_size: int = 1):
     if _WORLD is not None and model_parallel_is_initialized():
         # make sure the tp and sp sizes are correct
         assert get_tp_world_size(
         ) == tp_size, f"You are trying to initialize model parallel groups with size {tp_size}, but they are already initialized with size {get_tp_world_size()}"
         assert get_sp_world_size(
         ) == sp_size, f"You are trying to initialize model parallel groups with size {sp_size}, but they are already initialized with size {get_sp_world_size()}"
+        assert get_ring_size(
+        ) == ring_size, f"You are trying to initialize Ring Attention with size {ring_size}, but it is already initialized with size {get_ring_size()}"
         return
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -966,7 +1032,8 @@ def maybe_init_distributed_environment_and_model_parallel(tp_size: int,
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size,
                               sp_group_ranks=sp_group_ranks,
-                              dp_group_ranks=dp_group_ranks)
+                              dp_group_ranks=dp_group_ranks,
+                              ring_size=ring_size)
 
     # set device if we're on a CUDA/NPU platform
     from fastvideo.platforms import current_platform
@@ -1026,7 +1093,16 @@ def destroy_model_parallel() -> None:
         _TP.destroy()
     _TP = None
 
-    global _SP
+    # Pure Ring / pure Ulysses alias one USP group to _SP; destroy only the
+    # distinct subgroups here.
+    global _USP_TOPOLOGY, _SP
+    if _USP_TOPOLOGY is not None:
+        if _USP_TOPOLOGY.ring_group is not None and _USP_TOPOLOGY.ring_group is not _SP:
+            _USP_TOPOLOGY.ring_group.destroy()
+        if _USP_TOPOLOGY.ulysses_group is not None and _USP_TOPOLOGY.ulysses_group is not _SP:
+            _USP_TOPOLOGY.ulysses_group.destroy()
+    _USP_TOPOLOGY = None
+
     if _SP:
         _SP.destroy()
     _SP = None

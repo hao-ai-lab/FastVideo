@@ -6,10 +6,11 @@ import torch
 import torch.nn as nn
 
 import fastvideo.envs as envs
+from fastvideo.attention.ring_attention import RingAttention
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
                                                     sequence_model_parallel_all_to_all_4D)
-from fastvideo.distributed.parallel_state import (get_sp_parallel_rank, get_sp_world_size)
+from fastvideo.distributed.parallel_state import get_ring_size, get_sp_parallel_rank, get_sp_world_size
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
@@ -96,6 +97,19 @@ class DistributedAttention(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.backend = backend_name_to_enum(attn_backend.get_name())
         self.dtype = dtype
+        self.causal = causal
+
+        if get_ring_size() > 1 and type(self).forward is not DistributedAttention.forward:
+            raise NotImplementedError(f"Ring Attention is not implemented for {type(self).__name__}, which overrides "
+                                      "DistributedAttention.forward() directly instead of using the base dispatch. "
+                                      "Disable Ring Attention (ring_size=1) for this model, or wire Ring Attention "
+                                      "dispatch into its forward().")
+        self._ring_attention = RingAttention.create_if_enabled(num_heads=num_heads,
+                                                               num_kv_heads=num_kv_heads,
+                                                               softmax_scale=self.softmax_scale,
+                                                               causal=causal,
+                                                               backend=self.backend)
+        self.use_ring_attention = self._ring_attention is not None
         # Preserve the historical compiler-disabled default. The regional
         # inference loader may enable this one instance after validating the
         # transformer's resolved backend; no process-global default changes.
@@ -117,7 +131,7 @@ class DistributedAttention(nn.Module):
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
-        
+
         Args:
             q (torch.Tensor): Query tensor [batch_size, seq_len, num_heads, head_dim]
             k (torch.Tensor): Key tensor [batch_size, seq_len, num_heads, head_dim]
@@ -126,7 +140,7 @@ class DistributedAttention(nn.Module):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
-            
+
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
                 - o (torch.Tensor): Output tensor after attention for the main sequence
@@ -134,6 +148,42 @@ class DistributedAttention(nn.Module):
         """
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
+
+        if self._ring_attention is not None:
+            return self._ring_attention.forward(
+                q,
+                k,
+                v,
+                training=self.training,
+                original_seq_len=original_seq_len,
+                replicated_q=replicated_q,
+                replicated_k=replicated_k,
+                replicated_v=replicated_v,
+                freqs_cis=freqs_cis,
+            )
+
+        return self._forward_ulysses_attention(
+            q=q,
+            k=k,
+            v=v,
+            original_seq_len=original_seq_len,
+            replicated_q=replicated_q,
+            replicated_k=replicated_k,
+            replicated_v=replicated_v,
+            freqs_cis=freqs_cis,
+        )
+
+    def _forward_ulysses_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        original_seq_len: int | None,
+        replicated_q: torch.Tensor | None,
+        replicated_k: torch.Tensor | None,
+        replicated_v: torch.Tensor | None,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor] | None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         batch_size, _, num_heads, _ = q.shape
         local_rank = get_sp_parallel_rank()
         world_size = get_sp_world_size()

@@ -166,6 +166,7 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: int = -1
     sp_size: int = -1
+    ring_size: int = 1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # torch.distributed timeout in seconds
@@ -638,6 +639,16 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.sp_size,
             help="The sequence parallelism size.",
+        )
+        parser.add_argument(
+            "--ring-size",
+            type=int,
+            default=FastVideoArgs.ring_size,
+            help=("Number of ranks used by Ring Attention within the sequence-parallel "
+                  "group. Set to 1 to disable Ring Attention. Must evenly divide sp_size; "
+                  "when ring_size == sp_size this is pure Ring Attention, when "
+                  "1 < ring_size < sp_size it runs combined with Ulysses as a hybrid "
+                  "(USP) using the remaining sp_size // ring_size ranks for Ulysses."),
         )
         parser.add_argument(
             "--hsdp-replicate-dim",
@@ -1114,12 +1125,17 @@ class FastVideoArgs:
                     "MiniMax-H3 h3_encoder_split: ignoring sp_size=%d; the denoise ranks run SP with "
                     "num_gpus - h3_encoder_workers.", self.sp_size)
         else:
-            assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
+            if self.sp_size < 1:
+                raise ValueError(f"sp_size must be >= 1 after automatic resolution, got {self.sp_size}.")
+            if self.sp_size > self.num_gpus:
+                raise ValueError(f"sp_size ({self.sp_size}) cannot exceed num_gpus ({self.num_gpus}).")
+            if self.num_gpus % self.sp_size != 0:
+                raise ValueError(f"num_gpus ({self.num_gpus}) must be divisible by sp_size ({self.sp_size}).")
+
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
 
-        if self.num_gpus < max(self.tp_size, self.sp_size):
-            self.num_gpus = max(self.tp_size, self.sp_size)
+        self._check_ring_attention_args()
 
         if self.pipeline_config is None:
             raise ValueError("pipeline_config is not set in FastVideoArgs")
@@ -1213,6 +1229,33 @@ class FastVideoArgs:
                     "them rather than freeing device memory.", flag, device_name)
                 setattr(self, flag, False)
         return offload_flag is None or offload_flag in UNIFIED_MEMORY_OFFLOAD_FLAGS
+
+    def _check_ring_attention_args(self) -> None:
+        """Validate Ring Attention configuration.
+
+        FastVideo supports pure Ring Attention (``ring_size == sp_size``) and
+        the Ring+Ulysses hybrid, a.k.a. USP (``1 < ring_size < sp_size``,
+        with the remaining ``sp_size // ring_size`` factor used as the
+        Ulysses subgroup size). Ring Attention training/backward is not
+        supported in either case.
+        """
+        if self.ring_size < 1:
+            raise ValueError(f"ring_size must be >= 1, got {self.ring_size}.")
+
+        if self.ring_size == 1:
+            return
+
+        if self.sp_size <= 1:
+            raise ValueError(f"Ring Attention requires sequence parallelism. Got ring_size={self.ring_size}, "
+                             f"sp_size={self.sp_size}.")
+
+        if self.sp_size % self.ring_size != 0:
+            raise ValueError("Ring Attention (including the Ring+Ulysses/USP hybrid) requires sp_size to be divisible "
+                             f"by ring_size. Got ring_size={self.ring_size}, sp_size={self.sp_size}.")
+
+        if not self.inference_mode:
+            raise NotImplementedError("Ring Attention training/backward is not supported in the initial "
+                                      "FastVideo integration. Set ring_size=1 for training.")
 
 
 _current_fastvideo_args = None
