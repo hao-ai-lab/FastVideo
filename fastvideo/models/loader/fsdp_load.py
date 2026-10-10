@@ -637,7 +637,7 @@ def _regional_compile_unsupported_reason(
     FA3 is safe for inference but its grad-enabled path graph-breaks, so it is
     rejected for regional training compile.
 
-    The legacy VSA backend remains outside the fullgraph support envelope.
+    FlashInfer and legacy VSA remain outside the fullgraph support envelope.
     MiniMax H3's VSA backend is supported only through the inference-only
     sm_100a tile-64 route; its regional hook resolves loaded compression
     gates and probes the kernel before block capture.
@@ -704,6 +704,11 @@ def _regional_compile_unsupported_reason(
         if vsa_tile_size != 64:
             return ("VIDEO_SPARSE_ATTN_H3 regional compile requires VSA_tile_size=64; "
                     f"got {vsa_tile_size!r}, so tile-256/CuTe VSA stays eager")
+    if "FLASHINFER" in backend_names:
+        # https://github.com/flashinfer-ai/flashinfer/issues/2733
+        return ("attention backend resolved to FLASHINFER, whose FlashInfer calls "
+                "cannot be traced by TorchDynamo in fullgraph regional compile; "
+                "this model stays eager")
     if "VIDEO_SPARSE_ATTN" in backend_names:
         return ("attention backend resolved to VIDEO_SPARSE_ATTN, whose Triton "
                 "kernels, sequence-parallel collectives, and sync metadata "
