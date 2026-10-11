@@ -28,7 +28,9 @@ from typing import Any
 import yaml
 
 from fastvideo.utils import get_mp_context
+from fastvideo.attention.selector import coerce_attn_backend, get_env_variable_attn_backend
 from fastvideo_studio.database import Database
+from fastvideo_studio.models import CreateJobRequest
 from fastvideo_studio.training_config import (
     build_training_config,
     get_training_env,
@@ -148,6 +150,8 @@ class Job:
     fps: int = 24
     seed: int = 1024
     negative_prompt: str = ""
+    attention_backend: str | None = None
+    vsa_tile_size: int | None = None
     num_gpus: int = 1
     dit_cpu_offload: bool = False
     dit_layerwise_offload: bool = False
@@ -210,6 +214,8 @@ class Job:
             "seed": self.seed,
             "negative_prompt": self.negative_prompt,
             "num_gpus": self.num_gpus,
+            "attention_backend": self.attention_backend,
+            "vsa_tile_size": self.vsa_tile_size,
             "dit_cpu_offload": self.dit_cpu_offload,
             "dit_layerwise_offload": self.dit_layerwise_offload,
             "text_encoder_cpu_offload": self.text_encoder_cpu_offload,
@@ -431,6 +437,8 @@ class JobRunner:
                     seed=row.get("seed", 1024),
                     negative_prompt=row.get("negative_prompt", "") or "",
                     num_gpus=row.get("num_gpus", 1),
+                    attention_backend=row.get("attention_backend"),
+                    vsa_tile_size=row.get("vsa_tile_size"),
                     dit_cpu_offload=row.get("dit_cpu_offload", False),
                     dit_layerwise_offload=row.get("dit_layerwise_offload", False),
                     text_encoder_cpu_offload=row.get("text_encoder_cpu_offload", False),
@@ -505,6 +513,8 @@ class JobRunner:
         guidance_rescale: float = 0.0,
         fps: int = 24,
         seed: int = 1024,
+        attention_backend: str | None = None,
+        vsa_tile_size: int | None = None,
         num_gpus: int = 1,
         negative_prompt: str = "",
         dit_cpu_offload: bool = False,
@@ -519,6 +529,9 @@ class JobRunner:
         sp_size: int = -1,
     ) -> Job:
         """Create a new job (does not start it automatically)."""
+        backend = coerce_attn_backend(attention_backend)
+        if vsa_tile_size is not None and vsa_tile_size <= 0:
+            raise ValueError("vsa_tile_size must be positive")
         job = Job(
             id=job_id,
             model_id=model_id,
@@ -553,6 +566,8 @@ class JobRunner:
             seed=seed,
             negative_prompt=negative_prompt or "",
             num_gpus=num_gpus,
+            attention_backend=backend.name if backend else None,
+            vsa_tile_size=vsa_tile_size,
             dit_cpu_offload=dit_cpu_offload,
             dit_layerwise_offload=dit_layerwise_offload,
             text_encoder_cpu_offload=text_encoder_cpu_offload,
@@ -631,6 +646,8 @@ class JobRunner:
         "fps",
         "seed",
         "num_gpus",
+        "attention_backend",
+        "vsa_tile_size",
         "dit_cpu_offload",
         "dit_layerwise_offload",
         "text_encoder_cpu_offload",
@@ -685,6 +702,18 @@ class JobRunner:
         unknown = set(updates) - set(self.CONFIG_FIELDS)
         if unknown:
             raise ValueError(f"Not editable: {', '.join(sorted(unknown))}")
+        updates = dict(updates)
+        if "attention_backend" in updates:
+            backend = coerce_attn_backend(updates["attention_backend"])
+            updates["attention_backend"] = backend.name if backend else None
+        if "vsa_tile_size" in updates:
+            tile = updates["vsa_tile_size"]
+            if tile is not None and (isinstance(tile, bool) or not isinstance(tile, int) or tile <= 0):
+                raise ValueError("vsa_tile_size must be a positive integer")
+        merged = {key: getattr(job, key) for key in self.CONFIG_FIELDS}
+        validated = CreateJobRequest(**{**merged, **updates}).model_dump()
+        updates = {key: validated[key] for key in updates}
+        self._db.update_job_config(job_id, updates)
         for field_name, value in updates.items():
             setattr(job, field_name, value)
         self._save_job(job)
@@ -803,8 +832,16 @@ class JobRunner:
         tp_size: int = -1,
         sp_size: int = -1,
         log_queue: mp.Queue | None = None,
+        attention_backend: str | None = None,
+        vsa_tile_size: int | None = None,
     ) -> Any:
+        backend = coerce_attn_backend(attention_backend)
+        if backend is None:
+            backend = get_env_variable_attn_backend()
+        resolved_backend = backend.name if backend else None
         cache_key = (
+            resolved_backend,
+            vsa_tile_size,
             model_id,
             workload_type,
             num_gpus,
@@ -877,6 +914,8 @@ class JobRunner:
             use_fsdp_inference=use_fsdp_inference,
             enable_torch_compile=enable_torch_compile,
             VSA_sparsity=vsa_sparsity,
+            attention_backend=resolved_backend,
+            VSA_tile_size=vsa_tile_size,
             tp_size=tp_size,
             sp_size=sp_size,
             log_queue=log_queue,
@@ -1096,6 +1135,8 @@ class JobRunner:
                 tp_size=job.tp_size,
                 sp_size=job.sp_size,
                 log_queue=log_queue,
+                attention_backend=job.attention_backend,
+                vsa_tile_size=job.vsa_tile_size,
             )
             buf.phase = "generating"
             logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)

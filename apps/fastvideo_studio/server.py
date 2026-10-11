@@ -35,6 +35,8 @@ from fastvideo.registry import (get_registered_model_paths, get_registered_model
 from fastvideo_studio.database import Database, _get_db_path
 from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
+from fastvideo_studio.inference_options import inference_options
+from fastvideo.attention.selector import coerce_attn_backend
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
                                      model_label)
 
@@ -101,6 +103,11 @@ def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
 def list_gpus() -> dict[str, Any]:
     """Return an NVML snapshot of every GPU on the API server host."""
     return get_gpu_snapshot()
+
+
+@app.get("/api/inference-options")
+def get_inference_options(model_id: str = "") -> dict[str, Any]:
+    return inference_options(model_id)
 
 
 @app.get("/api/models")
@@ -343,6 +350,10 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         data_path = _resolve_dataset_path(data_path)
         validation_dataset_file = _resolve_dataset_path(validation_dataset_file)
 
+    try:
+        coerce_attn_backend(req.attention_backend)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     job = job_runner.create_job(
         job_id=str(uuid.uuid4()),
         model_id=req.model_id,
@@ -370,6 +381,8 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         fps=req.fps,
         seed=req.seed,
         num_gpus=req.num_gpus,
+        attention_backend=req.attention_backend,
+        vsa_tile_size=req.vsa_tile_size,
         dit_cpu_offload=req.dit_cpu_offload,
         dit_layerwise_offload=req.dit_layerwise_offload,
         text_encoder_cpu_offload=req.text_encoder_cpu_offload,

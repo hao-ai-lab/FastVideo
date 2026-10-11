@@ -102,3 +102,22 @@ Refer to `.env.example` for reference.
 | `GET`    | `/api/jobs/{id}/video`        | Stream the generated video/image           |
 | `GET`    | `/api/jobs/{id}/logs`         | Get job logs (polling, supports `?after=`) |
 | `GET`    | `/api/jobs/{id}/download_log` | Download the job's log file                |
+
+## Per-job attention settings
+
+Inference jobs expose **Attention Backend** and **VSA Tile Size**. Auto keeps
+FastVideo's server/environment default; an explicit backend is passed to that
+job's generator. A backend appearing in the list does not guarantee that the
+current model or hardware supports it. Core checkpoint checks remain enabled.
+
+When a matching text-to-video serving YAML with an explicit backend and no
+component or quantization overrides exists under `examples/serving`,
+**Apply recipe defaults** copies its attention and sampling settings into the
+form. This is an explicit replacement of those fields; opening the form or
+changing models does not silently overwrite them. GPU count and CPU offload
+remain under the user's control. FastH3 8-Step V2 uses 9 sigma-grid points
+(8 transformer forwards), guidance 1, VSA sparsity 0.8 and tile size 64.
+
+Backend and tile selections are persisted with the job, survive edit/duplicate
+and server restart, and participate in generator cache identity. Old databases
+migrate to Auto for both backend and tile size without changing existing jobs' behavior.

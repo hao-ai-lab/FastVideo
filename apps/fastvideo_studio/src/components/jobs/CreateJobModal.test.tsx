@@ -4,13 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CreateJobModal from './CreateJobModal';
-import { createJob, getDatasets, getModels, uploadImage } from '@/lib/api';
+import { createJob, getDatasets, getModels, getInferenceOptions, uploadImage } from '@/lib/api';
 import { defaultOptionsStore } from '@/stores/defaultOptions';
 import { DEFAULT_OPTIONS } from '@/lib/defaultOptions';
 
 vi.mock('@/lib/api', () => ({
   createJob: vi.fn(),
   getModels: vi.fn(),
+  getInferenceOptions: vi.fn(),
   getDatasets: vi.fn(),
   uploadImage: vi.fn(),
   getSettings: vi.fn(),
@@ -26,6 +27,7 @@ beforeEach(() => {
   // Reset the shared options store to a known baseline for test isolation.
   defaultOptionsStore.set({ options: DEFAULT_OPTIONS });
   vi.mocked(getModels).mockResolvedValue(MODELS);
+  vi.mocked(getInferenceOptions).mockResolvedValue({ attention_backends: ["TORCH_SDPA", "VIDEO_SPARSE_ATTN_H3"], defaults: {}, source: null });
   vi.mocked(getDatasets).mockResolvedValue([]);
   vi.mocked(uploadImage).mockResolvedValue({ path: '/uploads/x.png' });
   vi.mocked(createJob).mockResolvedValue({ id: 'job-1' } as never);
@@ -205,5 +207,36 @@ describe('CreateJobModal', () => {
     expect(payload).not.toHaveProperty('num_inference_steps');
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  });
+});
+
+
+describe('attention configuration', () => {
+  it('submits an explicit backend and tile size', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByRole('option', { name: 'TORCH_SDPA' });
+    await user.selectOptions(screen.getByLabelText('Attention Backend'), 'TORCH_SDPA');
+    await user.selectOptions(screen.getByLabelText('VSA Tile Size'), '64');
+    await user.type(screen.getByLabelText('Prompt'), 'cat');
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+    expect(createJob).toHaveBeenCalledWith(expect.objectContaining({ attention_backend: 'TORCH_SDPA', vsa_tile_size: 64 }));
+  });
+
+  it('applies recipe defaults only when requested', async () => {
+    vi.mocked(getInferenceOptions).mockResolvedValue({ attention_backends: ['TORCH_SDPA', 'VIDEO_SPARSE_ATTN_H3'],
+      defaults: { attention_backend: 'VIDEO_SPARSE_ATTN_H3', vsa_tile_size: 64, vsa_sparsity: 0.8,
+        num_inference_steps: 9, guidance_scale: 1, num_frames: 124, height: 768, width: 1344, fps: 24 },
+      source: 'examples/serving/openai_fasth3_8step.yaml' });
+    const user = userEvent.setup();
+    renderModal();
+    const apply = await screen.findByRole('button', { name: 'Apply recipe defaults' });
+    expect(screen.getByLabelText('Attention Backend')).toHaveValue('');
+    await user.click(apply);
+    expect(screen.getByLabelText('Attention Backend')).toHaveValue('VIDEO_SPARSE_ATTN_H3');
+    await user.type(screen.getByLabelText('Prompt'), 'cat');
+    await user.click(screen.getByRole('button', { name: 'Create Job' }));
+    expect(createJob).toHaveBeenCalledWith(expect.objectContaining({ attention_backend: 'VIDEO_SPARSE_ATTN_H3',
+      vsa_tile_size: 64, num_inference_steps: 9, guidance_scale: 1 }));
   });
 });
