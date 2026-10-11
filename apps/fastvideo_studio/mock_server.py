@@ -391,8 +391,14 @@ def update_settings(settings: SettingsUpdate) -> dict[str, Any]:
 
 
 @app.get("/api/inference-options")
-def inference_options(model_id: str = "") -> dict[str, Any]:
-    return {"attention_backends": ["TORCH_SDPA", "FLASH_ATTN", "VIDEO_SPARSE_ATTN_H3"], "defaults": {}, "source": None}
+def inference_options(model_id: str = "", workload_type: str = "t2v") -> dict[str, Any]:
+    return {
+        "attention_backends": ["TORCH_SDPA", "FLASH_ATTN", "VIDEO_SPARSE_ATTN_H3"],
+        "defaults": {},
+        "source": None,
+        "auto_attention_backend": None,
+        "auto_vsa_tile_size": None
+    }
 
 
 @app.get("/api/models")

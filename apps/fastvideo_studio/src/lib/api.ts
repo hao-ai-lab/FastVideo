@@ -485,14 +485,16 @@ export function getDatasetMediaUrl(
 
 
 export interface InferenceOptions {
+  auto_attention_backend?: string | null;
+  auto_vsa_tile_size?: number | null;
   attention_backends: string[];
   defaults: Partial<Pick<CreateJobRequest, 'attention_backend' | 'vsa_tile_size' | 'vsa_sparsity' |
     'num_inference_steps' | 'num_frames' | 'height' | 'width' | 'guidance_scale' | 'fps'>>;
   source: string | null;
 }
 
-export async function getInferenceOptions(modelId: string): Promise<InferenceOptions> {
-  const response = await fetch(`${getApiBaseUrl()}/inference-options?model_id=${encodeURIComponent(modelId)}`);
+export async function getInferenceOptions(modelId: string, workloadType = 't2v'): Promise<InferenceOptions> {
+  const response = await fetch(`${getApiBaseUrl()}/inference-options?model_id=${encodeURIComponent(modelId)}&workload_type=${encodeURIComponent(workloadType)}`);
   if (!response.ok) throw new Error('Could not load inference options');
   return response.json();
 }

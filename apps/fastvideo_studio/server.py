@@ -106,8 +106,8 @@ def list_gpus() -> dict[str, Any]:
 
 
 @app.get("/api/inference-options")
-def get_inference_options(model_id: str = "") -> dict[str, Any]:
-    return inference_options(model_id)
+def get_inference_options(model_id: str = "", workload_type: str = "t2v") -> dict[str, Any]:
+    return inference_options(model_id, workload_type)
 
 
 @app.get("/api/models")

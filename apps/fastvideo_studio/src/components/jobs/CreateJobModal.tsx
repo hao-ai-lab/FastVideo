@@ -214,14 +214,19 @@ export default function CreateJobModal({
     setInferenceOptions(null);
     setOptionsError(null);
     if (isOpen && isInference && modelId) {
-      getInferenceOptions(modelId).then((value) => {
+      getInferenceOptions(modelId, inferenceWorkload).then((value) => {
         if (active) setInferenceOptions(value);
       }).catch(() => {
         if (active) setOptionsError('Inference options could not be loaded. Reopen the form to retry.');
       });
     }
     return () => { active = false; };
-  }, [isOpen, isInference, modelId]);
+  }, [isOpen, isInference, modelId, inferenceWorkload]);
+
+  const autoTileSize = attentionBackend
+    ? (attentionBackend === inferenceOptions?.defaults.attention_backend
+      ? inferenceOptions.defaults.vsa_tile_size : null)
+    : inferenceOptions?.auto_vsa_tile_size;
 
   function applyRecipeDefaults() {
     const defaults = inferenceOptions?.defaults;
@@ -1210,7 +1215,7 @@ export default function CreateJobModal({
               <FieldRow label="Attention Backend" htmlFor="modal-attention-backend">
                 <NativeSelect id="modal-attention-backend" value={attentionBackend}
                   onChange={(e) => setAttentionBackend(e.target.value)} disabled={isSubmitting}>
-                  <option value="">Auto (server default)</option>
+                  <option value="">Auto ({inferenceOptions?.auto_attention_backend ?? 'platform default'})</option>
                   {attentionBackend && !inferenceOptions?.attention_backends.includes(attentionBackend) && (
                     <option value={attentionBackend}>{attentionBackend}</option>
                   )}
@@ -1223,7 +1228,7 @@ export default function CreateJobModal({
                 <NativeSelect id="modal-vsa-tile-size" value={vsaTileSize ?? ''}
                   onChange={(e) => setVsaTileSize(e.target.value ? Number(e.target.value) : null)} disabled={isSubmitting}>
                   {vsaTileSize !== null && ![64, 128, 256].includes(vsaTileSize) && <option value={vsaTileSize ?? ''}>{vsaTileSize}</option>}
-                  <option value="">Auto (checkpoint default)</option>
+                  <option value="">Auto ({autoTileSize ?? 'checkpoint default'})</option>
                   {[64, 128, 256].map((size) => <option key={size} value={size}>{size}</option>)}
                 </NativeSelect>
               </FieldRow>

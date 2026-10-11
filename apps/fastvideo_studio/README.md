@@ -105,9 +105,14 @@ Refer to `.env.example` for reference.
 
 ## Per-job attention settings
 
-Inference jobs expose **Attention Backend** and **VSA Tile Size**. Auto keeps
-FastVideo's server/environment default; an explicit backend is passed to that
-job's generator. A backend appearing in the list does not guarantee that the
+Inference jobs expose **Attention Backend** and **VSA Tile Size**. An explicit
+job backend takes priority, followed by a server/environment override. With
+neither set, Auto uses the backend from a matching self-contained T2V serving
+recipe, then falls back to FastVideo's core selection. An unset tile uses the
+matching recipe's tile when the resolved backend agrees with that recipe.
+Unknown models, non-T2V workloads and pipeline overrides keep the core defaults.
+The form previews the Auto selection; logs record requested and resolved values.
+Auto does not change sampling steps, guidance, frame count or offload settings. A backend appearing in the list does not guarantee that the
 current model or hardware supports it. Core checkpoint checks remain enabled.
 
 When a matching text-to-video serving YAML with an explicit backend and no
@@ -120,6 +125,7 @@ remain under the user's control. FastH3 8-Step V2 uses 9 sigma-grid points
 
 Backend and tile selections are persisted with the job, survive edit/duplicate
 and server restart, and participate in generator cache identity. Old databases
-migrate to Auto for both backend and tile size without changing existing jobs' behavior.
+migrate to Auto for both backend and tile size. For a matching T2V recipe,
+previously unset attention fields now resolve from that recipe at execution.
 
 ![Per-job attention settings](../../docs/assets/studio-attention-settings.png)

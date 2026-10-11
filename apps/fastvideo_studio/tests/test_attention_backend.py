@@ -133,3 +133,63 @@ def test_recipes_requiring_external_options_are_not_advertised():
     for model in ('FastVideo/FastWan2.1-T2V-1.3B-Diffusers', './CompactH3'):
         data = client.get('/api/inference-options', params={'model_id': model}).json()
         assert data['defaults'] == {}
+
+
+def test_auto_resolves_h3_recipe_and_reuses_explicit_cache(runner, monkeypatch):
+    from fastvideo import VideoGenerator
+    monkeypatch.setattr('fastvideo_studio.job_runner.get_env_variable_attn_backend', lambda: None)
+    calls = []
+    def build(*args, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(shutdown=lambda: None)
+    monkeypatch.setattr(VideoGenerator, 'from_pretrained', build)
+    model = 'FastVideo/FastVideo-FastH3-8-Step-V2'
+    automatic = runner._get_or_create_generator(model, 't2v', 1)
+    explicit = runner._get_or_create_generator(model, 't2v', 1,
+                                              attention_backend='VIDEO_SPARSE_ATTN_H3', vsa_tile_size=64)
+    assert calls[0]['attention_backend'] == 'VIDEO_SPARSE_ATTN_H3'
+    assert calls[0]['VSA_tile_size'] == 64
+    assert automatic is explicit
+    assert len(calls) == 1
+
+
+def test_auto_does_not_override_explicit_backend_or_tile(runner, monkeypatch):
+    from fastvideo import VideoGenerator
+    from fastvideo.platforms import AttentionBackendEnum
+    monkeypatch.setattr('fastvideo_studio.job_runner.get_env_variable_attn_backend',
+                        lambda: AttentionBackendEnum.TORCH_SDPA)
+    calls = []
+    def build(*args, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(shutdown=lambda: None)
+    monkeypatch.setattr(VideoGenerator, 'from_pretrained', build)
+    model = 'FastVideo/FastVideo-FastH3-8-Step-V2'
+    runner._get_or_create_generator(model, 't2v', 1, attention_backend='FLASH_ATTN', vsa_tile_size=256)
+    assert calls[-1]['attention_backend'] == 'FLASH_ATTN'
+    assert calls[-1]['VSA_tile_size'] == 256
+    runner._get_or_create_generator(model, 't2v', 1)
+    assert calls[-1]['attention_backend'] == 'TORCH_SDPA'
+    assert calls[-1]['VSA_tile_size'] is None
+
+
+def test_auto_scope_and_preview(monkeypatch):
+    monkeypatch.setattr('fastvideo.attention.selector.get_env_variable_attn_backend', lambda: None)
+    client = TestClient(server.app)
+    response = client.get('/api/inference-options', params={'model_id': 'FastVideo/FastVideo-FastH3-8-Step-V2'})
+    assert response.json()['auto_attention_backend'] == 'VIDEO_SPARSE_ATTN_H3'
+    assert response.json()['auto_vsa_tile_size'] == 64
+    for params in ({'model_id': 'unknown'},
+                   {'model_id': 'FastVideo/FastVideo-FastH3-8-Step-V2', 'workload_type': 'i2v'}):
+        response = client.get('/api/inference-options', params=params)
+        assert response.json()['auto_attention_backend'] is None
+
+
+
+def test_auto_preview_respects_server_override(monkeypatch):
+    from fastvideo.platforms import AttentionBackendEnum
+    monkeypatch.setattr('fastvideo.attention.selector.get_env_variable_attn_backend',
+                        lambda: AttentionBackendEnum.TORCH_SDPA)
+    data = TestClient(server.app).get('/api/inference-options', params={
+        'model_id': 'FastVideo/FastVideo-FastH3-8-Step-V2'}).json()
+    assert data['auto_attention_backend'] == 'TORCH_SDPA'
+    assert data['auto_vsa_tile_size'] is None

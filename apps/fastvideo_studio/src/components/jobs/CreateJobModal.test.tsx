@@ -240,3 +240,34 @@ describe('attention configuration', () => {
       vsa_tile_size: 64, num_inference_steps: 9, guidance_scale: 1 }));
   });
 });
+
+it('previews model-resolved Auto and submits unset selections', async () => {
+  vi.mocked(getInferenceOptions).mockResolvedValue({
+    attention_backends: ['VIDEO_SPARSE_ATTN_H3'], defaults: {}, source: null,
+    auto_attention_backend: 'VIDEO_SPARSE_ATTN_H3', auto_vsa_tile_size: 64,
+  });
+  const user = userEvent.setup();
+  renderModal();
+  await screen.findByRole('option', { name: 'Auto (VIDEO_SPARSE_ATTN_H3)' });
+  expect(screen.getByRole('option', { name: 'Auto (64)' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Attention Backend')).toHaveValue('');
+  await user.type(screen.getByLabelText('Prompt'), 'cat');
+  await user.click(screen.getByRole('button', { name: 'Create Job' }));
+  expect(createJob).toHaveBeenCalledWith(expect.objectContaining({ attention_backend: null, vsa_tile_size: null }));
+});
+
+it('updates Auto tile preview when the explicit backend overrides the server', async () => {
+  vi.mocked(getInferenceOptions).mockResolvedValue({
+    attention_backends: ['TORCH_SDPA', 'FLASH_ATTN', 'VIDEO_SPARSE_ATTN_H3'],
+    defaults: { attention_backend: 'VIDEO_SPARSE_ATTN_H3', vsa_tile_size: 64 }, source: null,
+    auto_attention_backend: 'TORCH_SDPA', auto_vsa_tile_size: null,
+  });
+  const user = userEvent.setup();
+  renderModal();
+  await screen.findByRole('option', { name: 'VIDEO_SPARSE_ATTN_H3' });
+  expect(screen.getByRole('option', { name: 'Auto (checkpoint default)' })).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText('Attention Backend'), 'VIDEO_SPARSE_ATTN_H3');
+  expect(screen.getByRole('option', { name: 'Auto (64)' })).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText('Attention Backend'), 'FLASH_ATTN');
+  expect(screen.getByRole('option', { name: 'Auto (checkpoint default)' })).toBeInTheDocument();
+});

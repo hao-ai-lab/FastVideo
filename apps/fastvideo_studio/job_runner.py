@@ -30,6 +30,7 @@ import yaml
 from fastvideo.utils import get_mp_context
 from fastvideo.attention.selector import coerce_attn_backend, get_env_variable_attn_backend
 from fastvideo_studio.database import Database
+from fastvideo_studio.inference_options import resolve_attention_defaults
 from fastvideo_studio.models import CreateJobRequest
 from fastvideo_studio.training_config import (
     build_training_config,
@@ -838,10 +839,18 @@ class JobRunner:
         backend = coerce_attn_backend(attention_backend)
         if backend is None:
             backend = get_env_variable_attn_backend()
-        resolved_backend = backend.name if backend else None
+        resolved_backend, resolved_tile = resolve_attention_defaults(model_id,
+                                                                     workload_type,
+                                                                     backend.name if backend else None,
+                                                                     vsa_tile_size,
+                                                                     use_recipe=override_pipeline_cls_name is None)
+        logger.info(
+            "Attention settings for %s: requested_backend=%s resolved_backend=%s "
+            "requested_tile=%s resolved_tile=%s", model_id, attention_backend or "Auto", resolved_backend
+            or "platform default", vsa_tile_size, resolved_tile)
         cache_key = (
             resolved_backend,
-            vsa_tile_size,
+            resolved_tile,
             model_id,
             workload_type,
             num_gpus,
@@ -915,7 +924,7 @@ class JobRunner:
             enable_torch_compile=enable_torch_compile,
             VSA_sparsity=vsa_sparsity,
             attention_backend=resolved_backend,
-            VSA_tile_size=vsa_tile_size,
+            VSA_tile_size=resolved_tile,
             tp_size=tp_size,
             sp_size=sp_size,
             log_queue=log_queue,
