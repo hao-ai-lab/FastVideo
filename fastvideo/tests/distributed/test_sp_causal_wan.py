@@ -7,6 +7,12 @@ replicates the sequence and splits attention heads, and once with
 FASTVIDEO_CAUSAL_WAN_TOKEN_SP, which shards the tokens. Outputs and gradients
 averaged over the SP group must match the single rank in every case.
 
+Each latent frame has 16 tokens and a block has 3 frames. Teacher forcing with
+6 frames gives each rank 6 whole frames, once without and once with full
+activation checkpointing, so backward also recomputes the all-to-alls. Diffusion
+forcing with 9 frames puts the shard boundary inside frame 4, across 3 causal
+blocks. The fallback case has 45 tokens, which do not divide by 2.
+
 Requires two CUDA devices.
 """
 
@@ -17,6 +23,7 @@ import os
 import socket
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 import torch
@@ -31,18 +38,25 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.wan.causal_transformer import CausalWanTransformer3DModel
 from fastvideo.models.wan.config import WanVideoArchConfig, WanVideoConfig
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.train.utils.activation_checkpoint import apply_activation_checkpointing
 
 SP_WORLD_SIZE = 2
 SEED = 2026
 
-# name: (teacher forcing, latent frames, latent height, latent width)
+
+class Case(NamedTuple):
+    teacher_forcing: bool
+    frames: int
+    height: int
+    width: int
+    checkpointing: bool = False
+
+
 CASES = {
-    # 2 x 6 frames of 16 tokens: each rank holds 6 whole frames.
-    "teacher_forcing": (True, 6, 8, 8),
-    # 3 frames of 16 tokens: the shard boundary falls inside frame 1.
-    "diffusion_forcing": (False, 3, 8, 8),
-    # 3 frames of 15 tokens: 45 tokens do not divide by 2, so the token path falls back.
-    "fallback": (False, 3, 6, 10),
+    "teacher_forcing": Case(True, 6, 8, 8),
+    "teacher_forcing_checkpointed": Case(True, 6, 8, 8, checkpointing=True),
+    "diffusion_forcing": Case(False, 9, 8, 8),
+    "fallback": Case(False, 3, 6, 10),
 }
 
 
@@ -78,11 +92,13 @@ def _build_model(device: torch.device) -> CausalWanTransformer3DModel:
                 param.normal_(0.0, 0.02)
             else:
                 param.fill_(1.0)
-    return model.train()
+    # FastVideo linear layers create their weights with requires_grad=False; full fine-tuning
+    # turns them on, so do the same to check the gradients of every weight.
+    return model.train().requires_grad_(True)
 
 
 def _build_inputs(case: str, device: torch.device) -> dict[str, torch.Tensor | None]:
-    teacher_forcing, frames, height, width = CASES[case]
+    teacher_forcing, frames, height, width, _ = CASES[case]
     generator = torch.Generator(device="cpu").manual_seed(SEED + 1)
     shape = (1, 4, frames, height, width)
     hidden_states = torch.randn(shape, generator=generator)
@@ -101,6 +117,8 @@ def _build_inputs(case: str, device: torch.device) -> dict[str, torch.Tensor | N
 
 def _run_case(case: str, device: torch.device, sp_size: int) -> dict[str, object]:
     model = _build_model(device)
+    if CASES[case].checkpointing:
+        model = apply_activation_checkpointing(model, checkpointing_type="full")
     inputs = _build_inputs(case, device)
     shard_calls = []
 
@@ -114,7 +132,10 @@ def _run_case(case: str, device: torch.device, sp_size: int) -> dict[str, object
         loss = output.float().square().mean()
         loss.backward()
     grads = {}
+    missing = []
     for name, param in model.named_parameters():
+        if param.grad is None:
+            missing.append(name)
         grad = torch.zeros_like(param) if param.grad is None else param.grad
         if sp_size > 1:
             # FSDP averages gradients over the ranks of the SP group.
@@ -125,6 +146,7 @@ def _run_case(case: str, device: torch.device, sp_size: int) -> dict[str, object
         "loss": loss.item(),
         "grads": grads,
         "token_sharded": bool(shard_calls),
+        "params_without_grad": missing,
     }
 
 
@@ -161,9 +183,8 @@ def _run_torchrun(mode: str, nproc_per_node: int, output_path: Path) -> None:
         str(Path(__file__).resolve()), "--worker", "--mode", mode, "--output",
         str(output_path)
     ]
-    env = os.environ.copy()
-    env["FASTVIDEO_ATTENTION_BACKEND"] = "TORCH_SDPA"
-    process = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    with envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"):
+        process = subprocess.run(cmd, capture_output=True, text=True)
     if process.returncode != 0:
         raise RuntimeError(f"{mode} worker failed with code {process.returncode}\n"
                            f"STDOUT:\n{process.stdout}\nSTDERR:\n{process.stderr}")
@@ -188,6 +209,7 @@ def results(tmp_path_factory: pytest.TempPathFactory) -> dict:
 def test_sp_causal_wan_matches_single_rank(results: dict, case: str, sp_mode: str) -> None:
     ref, got = results[(case, "single")], results[(case, sp_mode)]
     assert got["token_sharded"] == (sp_mode == "token" and case != "fallback")
+    assert not ref["params_without_grad"] and not got["params_without_grad"], got["params_without_grad"]
     torch.testing.assert_close(got["output"], ref["output"], rtol=1e-4, atol=1e-5)
     assert got["loss"] == pytest.approx(ref["loss"], rel=1e-5)
     mismatched = []
@@ -208,7 +230,6 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# pytest -sv fastvideo/tests/distributed/test_sp_causal_wan.py
 if __name__ == "__main__":
     args = _parse_args()
     if not args.worker:
