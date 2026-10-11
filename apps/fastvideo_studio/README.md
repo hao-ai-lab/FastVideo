@@ -121,3 +121,5 @@ remain under the user's control. FastH3 8-Step V2 uses 9 sigma-grid points
 Backend and tile selections are persisted with the job, survive edit/duplicate
 and server restart, and participate in generator cache identity. Old databases
 migrate to Auto for both backend and tile size without changing existing jobs' behavior.
+
+![Per-job attention settings](../../docs/assets/studio-attention-settings.png)
