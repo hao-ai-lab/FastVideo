@@ -309,6 +309,12 @@ FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = EnvChoice(
     doc="Fused Ulysses all-to-all policy for grad-enabled calls whose window exceeds the long-training plane limit. "
     "auto keeps the original unchunked transport. chunked uses bounded chunks; validate the recipe's activation "
     "memory first.")
+FASTVIDEO_CAUSAL_WAN_TOKEN_SP = EnvBool(
+    False,
+    category="distributed",
+    doc="Causal Wan training forwards without a KV cache shard the token sequence across the sequence-parallel group "
+    "and run self-attention through an all-to-all. Falls back to replicating the sequence when the token count does "
+    "not divide by the SP size.")
 
 # ================== Logging ==================
 
