@@ -18,7 +18,9 @@ import torch.distributed as dist
 import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, LocalAttention)
 from fastvideo.models.wan.config import WanVideoConfig
-from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather)
+from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
+                                                    sequence_model_parallel_all_to_all_4D,
+                                                    sequence_model_parallel_shard)
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank, get_sp_world_size)
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift, RMSNorm, ScaleResidual,
@@ -79,7 +81,8 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache: dict | None = None,
                 current_start: int = 0,
                 cache_start: int | None = None,
-                frame_seqlen: int = 1560):
+                frame_seqlen: int = 1560,
+                sequence_sharded: bool = False):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
@@ -88,6 +91,9 @@ class CausalWanSelfAttention(nn.Module):
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
             frame_seqlen (int): Number of tokens per latent frame,
                 e.g. 1560 for 480x832 resolution.
+            sequence_sharded (bool): q, k, v and freqs hold only this rank's
+                contiguous token shard (token-sharded SP, training forward
+                without a KV cache). See CausalWanTransformer3DModel._forward_train.
         """
         if cache_start is None:
             cache_start = current_start
@@ -123,17 +129,28 @@ class CausalWanSelfAttention(nn.Module):
             head_slice = slice(None)
 
         if kv_cache is None:
+            if sequence_sharded:
+                # Token-sharded SP: this rank holds its token shard for all heads.
+                # The all-to-all gives it the full sequence for its slice of heads,
+                # so the flex call below sees global token positions and the same
+                # block mask as a single GPU.
+                roped_query = sequence_model_parallel_all_to_all_4D(roped_query, scatter_dim=2, gather_dim=1)
+                roped_key = sequence_model_parallel_all_to_all_4D(roped_key, scatter_dim=2, gather_dim=1)
+                v = sequence_model_parallel_all_to_all_4D(v, scatter_dim=2, gather_dim=1)
+                head_slice = slice(None)
             # Padding for flex attention
-            padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
+            seq_len = roped_query.shape[1]
+            padded_length = math.ceil(seq_len / 128) * 128 - seq_len
+            qs, ks = roped_query.shape, roped_key.shape
             padded_roped_query = torch.cat([
                 roped_query,
-                torch.zeros([q.shape[0], padded_length, q.shape[2], q.shape[3]], device=q.device, dtype=v.dtype)
+                torch.zeros([qs[0], padded_length, qs[2], qs[3]], device=q.device, dtype=v.dtype)
             ],
                                            dim=1)
 
             padded_roped_key = torch.cat([
                 roped_key,
-                torch.zeros([k.shape[0], padded_length, k.shape[2], k.shape[3]], device=k.device, dtype=v.dtype)
+                torch.zeros([ks[0], padded_length, ks[2], ks[3]], device=k.device, dtype=v.dtype)
             ],
                                          dim=1)
 
@@ -144,8 +161,11 @@ class CausalWanSelfAttention(nn.Module):
             x = flex_attention(query=padded_roped_query[:, :, head_slice].transpose(2, 1),
                                key=padded_roped_key[:, :, head_slice].transpose(2, 1),
                                value=padded_v[:, :, head_slice].transpose(2, 1),
-                               block_mask=block_mask)[:, :, :q.shape[1]].transpose(2, 1)
-            if sp_world_size > 1:
+                               block_mask=block_mask)[:, :, :seq_len].transpose(2, 1)
+            if sequence_sharded:
+                # Back to this rank's token shard with all heads.
+                x = sequence_model_parallel_all_to_all_4D(x.contiguous(), scatter_dim=1, gather_dim=2)
+            elif sp_world_size > 1:
                 # Gather per-rank head outputs back to the full head dimension.
                 x = sequence_model_parallel_all_gather(x.contiguous(), dim=2)
         else:
@@ -301,6 +321,7 @@ class CausalWanTransformerBlock(nn.Module):
         current_start: int = 0,
         cache_start: int | None = None,
         frame_seqlen: int | None = None,
+        sequence_sharded: bool = False,
     ) -> torch.Tensor:
         # hidden_states.shape: [batch_size, seq_length, inner_dim]
         # temb.shape: [batch_size, temb_seq_len, 6, inner_dim]
@@ -348,6 +369,7 @@ class CausalWanTransformerBlock(nn.Module):
             current_start,
             cache_start,
             frame_seqlen=frame_seqlen,
+            sequence_sharded=sequence_sharded,
         )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
@@ -575,6 +597,51 @@ class CausalWanTransformer3DModel(BaseDiT):
 
         return block_mask
 
+    @staticmethod
+    def _use_token_sharded_sp(seq_len: int) -> bool:
+        """Whether _forward_train shards the token sequence across the SP group."""
+        sp_world_size = get_sp_world_size()
+        if sp_world_size == 1 or not envs.FASTVIDEO_CAUSAL_WAN_TOKEN_SP.get():
+            return False
+        if seq_len % sp_world_size != 0:
+            logger.warning_once(f"FASTVIDEO_CAUSAL_WAN_TOKEN_SP is set, but {seq_len} tokens do not divide by the "
+                                f"sequence parallel size {sp_world_size}. Replicating the sequence on every rank.")
+            return False
+        logger.info_once("Causal Wan training shards tokens across the sequence parallel group.")
+        return True
+
+    @staticmethod
+    def _shard_for_token_sp(
+        hidden_states: torch.Tensor,
+        timestep_proj: torch.Tensor,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor] | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, tuple[torch.Tensor, torch.Tensor] | None]:
+        """Keep this rank's contiguous token shard of the block inputs.
+
+        The blocks modulate each run of seq_len / timestep_proj.shape[1] tokens
+        with one row of timestep_proj. A shard boundary can fall inside a frame,
+        so each frame's row is first repeated over runs of
+        gcd(tokens per frame, tokens per shard) tokens. The values do not change.
+
+        Both shards use scale_grad=True. The all-gather after the blocks
+        reduce-scatters identical output grads, so the block grads on each rank
+        are sp_size times its partial sum, and averaging over the SP group gives
+        the full gradient, as for the bidirectional Wan.
+        """
+        sp_world_size, sp_rank = get_sp_world_size(), get_sp_parallel_rank()
+        seq_len = hidden_states.shape[1]
+        frame_tokens = seq_len // timestep_proj.shape[1]
+        shard_tokens = seq_len // sp_world_size
+        run_tokens = math.gcd(frame_tokens, shard_tokens)
+        if run_tokens != frame_tokens:
+            timestep_proj = timestep_proj.repeat_interleave(frame_tokens // run_tokens, dim=1)
+        hidden_states, _ = sequence_model_parallel_shard(hidden_states, dim=1)
+        timestep_proj, _ = sequence_model_parallel_shard(timestep_proj, dim=1)
+        if freqs_cis is not None:
+            start = sp_rank * shard_tokens
+            freqs_cis = (freqs_cis[0][start:start + shard_tokens], freqs_cis[1][start:start + shard_tokens])
+        return hidden_states, timestep_proj, freqs_cis
+
     def _forward_inference(self,
                            hidden_states: torch.Tensor,
                            encoder_hidden_states: torch.Tensor | list[torch.Tensor],
@@ -794,6 +861,13 @@ class CausalWanTransformer3DModel(BaseDiT):
             timestep_proj = torch.cat([timestep_proj_clean, timestep_proj], dim=1)
             freqs_cis = (torch.cat([freqs_cos, freqs_cos], dim=0), torch.cat([freqs_sin, freqs_sin], dim=0))
 
+        # Opt-in token-sharded sequence parallelism. This path has no KV cache, so
+        # every rank can keep a contiguous shard of the token sequence; only
+        # self-attention needs the full sequence (see CausalWanSelfAttention).
+        sequence_sharded = self._use_token_sharded_sp(hidden_states.shape[1])
+        if sequence_sharded:
+            hidden_states, timestep_proj, freqs_cis = self._shard_for_token_sp(hidden_states, timestep_proj, freqs_cis)
+
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.blocks:
@@ -802,14 +876,19 @@ class CausalWanTransformer3DModel(BaseDiT):
                                                                   encoder_hidden_states,
                                                                   timestep_proj,
                                                                   freqs_cis,
-                                                                  block_mask=block_mask)
+                                                                  block_mask=block_mask,
+                                                                  sequence_sharded=sequence_sharded)
         else:
             for block in self.blocks:
                 hidden_states = block(hidden_states,
                                       encoder_hidden_states,
                                       timestep_proj,
                                       freqs_cis,
-                                      block_mask=block_mask)
+                                      block_mask=block_mask,
+                                      sequence_sharded=sequence_sharded)
+
+        if sequence_sharded:
+            hidden_states = sequence_model_parallel_all_gather(hidden_states.contiguous(), dim=1)
 
         if teacher_forcing:
             hidden_states = hidden_states[:, hidden_states.shape[1] // 2:]
