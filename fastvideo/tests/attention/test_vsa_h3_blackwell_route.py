@@ -682,7 +682,7 @@ def test_real_ptx_blackwell_odd_preprocess_forward_postprocess_fullgraph(env_ove
 
 
 def test_regional_compile_reuses_graphs_across_prompt_lengths(monkeypatch, env_overrides):
-    """Ten prompt lengths stay under the recompile limit and match the eager route exactly (#1940)."""
+    """Unseen prompt lengths reuse warm graphs and match the eager route exactly (#1940)."""
     from torch._dynamo.testing import CompileCounter
 
     from fastvideo.forward_context import set_forward_context
@@ -709,17 +709,28 @@ def test_regional_compile_reuses_graphs_across_prompt_lengths(monkeypatch, env_o
         query, key, value, gate = tiled.chunk(4, dim=0)
         return impl.postprocess_output(impl.forward(query, key, value, gate, meta), meta)
 
+    def check(text_rows_list):
+        parities = set()
+        for text_rows in text_rows_list:
+            meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
+            parities.add(meta.variable_block_sizes.numel() % 2)
+            raw = torch.randn(4, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+            with set_forward_context(current_timestep=0, attn_metadata=meta):
+                actual = compiled(raw, meta)
+                expected = run(raw.clone(), meta)
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        return parities
+
     torch._dynamo.reset()
     try:
         compiled = torch.compile(run, backend=counter, fullgraph=True)
         with torch.no_grad():
-            for text_rows in (17, 40, 64, 81, 100, 130, 151, 200, 233, 300):
-                meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
-                raw = torch.randn(4, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
-                with set_forward_context(current_timestep=0, attn_metadata=meta):
-                    actual = compiled(raw, meta)
-                    expected = run(raw.clone(), meta)
-                torch.testing.assert_close(actual, expected, atol=0, rtol=0)
-        assert counter.frame_count <= 2, f"compiled {counter.frame_count} graphs for 10 prompt lengths"
+            # Dynamo may still specialize on bounded shape classes (tile-count
+            # parity); once both are warm, unseen lengths must reuse a graph.
+            assert check((17, 40, 64, 81, 100, 130)) == {0, 1}
+            warm_graphs = counter.frame_count
+            assert check((151, 200, 233, 300, 47, 113)) == {0, 1}
+        assert counter.frame_count == warm_graphs, (
+            f"unseen prompt lengths compiled {counter.frame_count - warm_graphs} new graphs")
     finally:
         torch._dynamo.reset()
