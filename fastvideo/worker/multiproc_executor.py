@@ -195,8 +195,13 @@ class MultiprocExecutor(Executor):
         logging_info = None
         logging_info = responses[0]["logging_info"] if envs.FASTVIDEO_STAGE_LOGGING.get() else None
 
-        # Get extra dict (contains audio, peak_memory_mb, etc.)
-        extra = responses[0].get("extra", {})
+        # Keep rank 0's payload metadata, but report the largest worker memory peak.
+        extra = responses[0].get("extra", {}).copy()
+        peak_memories = [
+            peak for response in responses if (peak := response.get("extra", {}).get("peak_memory_mb")) is not None
+        ]
+        if peak_memories:
+            extra["peak_memory_mb"] = max(peak_memories)
 
         result_batch = ForwardBatch(data_type=forward_batch.data_type,
                                     output=output,
