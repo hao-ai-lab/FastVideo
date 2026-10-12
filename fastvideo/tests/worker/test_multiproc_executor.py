@@ -158,8 +158,6 @@ def test_parent_raises_worker_rpc_error() -> None:
     pytest.param([{"peak_memory_mb": None}, {}], None, id="unavailable-peaks"),
 ])
 def test_execute_forward_aggregates_peak_memory_preserving_rank_zero_data(worker_extras, expected_peak):
-    # Script only the pipe responses: exercise the real collective RPC and
-    # execute_forward result path without starting GPU/model workers.
     audio = object()
     responses = [
         {

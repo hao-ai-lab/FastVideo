@@ -195,7 +195,6 @@ class MultiprocExecutor(Executor):
         logging_info = None
         logging_info = responses[0]["logging_info"] if envs.FASTVIDEO_STAGE_LOGGING.get() else None
 
-        # Keep rank 0's payload metadata, but report the largest worker memory peak.
         extra = responses[0].get("extra", {}).copy()
         peak_memories = [
             peak for response in responses if (peak := response.get("extra", {}).get("peak_memory_mb")) is not None
