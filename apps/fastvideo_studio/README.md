@@ -129,3 +129,19 @@ migrate to Auto for both backend and tile size. For a matching T2V recipe,
 previously unset attention fields now resolve from that recipe at execution.
 
 ![Per-job attention settings](../../docs/assets/studio-attention-settings.png)
+
+## Task execution and isolation
+
+Starting a job places it in a FIFO queue (`queued`). One persistent scheduler
+thread executes jobs serially, including training, so this Studio instance does
+not concurrently allocate the same visible GPUs. Queued jobs can be cancelled;
+running inference stops cooperatively after loading or generation completes.
+This does not reserve GPUs against other applications.
+
+Inference always uses FastVideo's multiprocessing executor, even with one GPU.
+Model parallel groups and initialization cleanup therefore live in worker
+processes rather than the API process. Studio retains one generator for reuse
+by the same effective configuration. Switching models/settings releases the
+previous workers before loading; an inference error evicts the cached generator.
+Restarting the API marks interrupted queued/running jobs failed rather than
+silently replaying them. Queued jobs cannot be edited or started twice.

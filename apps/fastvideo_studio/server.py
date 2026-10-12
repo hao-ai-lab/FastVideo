@@ -793,12 +793,15 @@ def main() -> None:
     logger.info("Output directory: %s", output_dir)
     logger.info("Log directory: %s", log_dir)
 
-    uvicorn.run(
-        app,
-        host=args.host,
-        port=args.port,
-        log_level="info",
-    )
+    try:
+        uvicorn.run(
+            app,
+            host=args.host,
+            port=args.port,
+            log_level="info",
+        )
+    finally:
+        job_runner._shutdown()
 
 
 if __name__ == "__main__":
