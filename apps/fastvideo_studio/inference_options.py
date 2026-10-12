@@ -23,8 +23,6 @@ def _recipes() -> dict[str, dict[str, Any]]:
         model_id = generator.get("model_path")
         if not model_id or model_id in result:
             continue
-        # Restrict advice to the text-to-video recipe; do not apply a reference
-        # pipeline's sampling defaults to a different workload.
         pipeline = generator.get("pipeline", {})
         if pipeline.get("workload_type", "t2v") != "t2v" or pipeline.get("components", {}).get("lora_path"):
             continue
