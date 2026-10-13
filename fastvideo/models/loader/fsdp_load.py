@@ -19,6 +19,7 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule, MixedPrecision
 from torch.nn.modules.module import _IncompatibleKeys
 
 import fastvideo.envs as envs
+from fastvideo.hooks.pinned_memory import PinnedTensorArena
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.lora_patch import DenseLoRAPatch
 from fastvideo.models.loader.utils import (get_param_names_mapping, hf_to_custom_state_dict)
@@ -837,8 +838,18 @@ def shard_model(
         "mesh": mesh,
         "mp_policy": mp_policy,
     }
+    exact_size_pinning = cpu_offload and pin_cpu_memory and torch.cuda.is_available()
     if cpu_offload:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(pin_memory=pin_cpu_memory)
+        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(pin_memory=pin_cpu_memory and not exact_size_pinning)
+    if exact_size_pinning:
+        model._fastvideo_exact_size_pinning = True
+
+    def _shard(module: nn.Module, kwargs: dict[str, Any]) -> None:
+        fully_shard(module, **kwargs)
+        if exact_size_pinning:
+            # One unit at a time, so each pageable shard is released before the
+            # next unit's pinned copy is allocated.
+            pin_fsdp_offloaded_params(module, recurse=False)
 
     # iterating in reverse to start with
     # lowest-level modules first
@@ -866,7 +877,7 @@ def shard_model(
                 local_ignored_params = ignored_params_by_module[id(m)]
                 if local_ignored_params:
                     module_kwargs = {**fsdp_kwargs, "ignored_params": local_ignored_params}
-                fully_shard(m, **module_kwargs)
+                _shard(m, module_kwargs)
                 num_layers_sharded += 1
     else:
         # Shard all modules matching conditions
@@ -876,7 +887,7 @@ def shard_model(
                 local_ignored_params = ignored_params_by_module[id(m)]
                 if local_ignored_params:
                     module_kwargs = {**fsdp_kwargs, "ignored_params": local_ignored_params}
-                fully_shard(m, **module_kwargs)
+                _shard(m, module_kwargs)
                 num_layers_sharded += 1
 
         if num_layers_sharded == 0:
@@ -886,7 +897,48 @@ def shard_model(
     root_kwargs = fsdp_kwargs
     if ignored_params:
         root_kwargs = {**fsdp_kwargs, "ignored_params": ignored_params}
-    fully_shard(model, **root_kwargs)
+    _shard(model, root_kwargs)
+
+
+def pin_fsdp_offloaded_params(model: nn.Module, recurse: bool = True) -> None:
+    """Move FSDP2 CPU-offloaded parameter shards into exact-size pinned host memory.
+
+    ``CPUOffloadPolicy(pin_memory=True)`` pins every shard with ``Tensor.pin_memory()``,
+    whose caching host allocator rounds each allocation up to a power of two: a 4096x10240
+    bf16 weight (80 MiB) occupies 128 MiB of page-locked memory, so a large text encoder or
+    DiT needs up to ~2x its size in host RAM while offloaded. ``shard_model`` therefore
+    shards with ``pin_memory=False`` and calls this to copy each FSDP parameter group into a
+    single ``PinnedTensorArena`` (``cudaHostRegister`` on ordinary host storage), then points
+    FSDP's sharded data and the sharded ``DTensor`` local tensor at the registered copy.
+
+    Shards that are still on the meta device (weights loaded after sharding) or already
+    pinned are skipped, so this is safe to call again after loading weights.
+    """
+    modules = model.modules() if recurse else [model]
+    for module in modules:
+        if not isinstance(module, FSDPModule):
+            continue
+        for param_group in module._get_fsdp_state()._fsdp_param_groups:
+            fsdp_params = [
+                fsdp_param for fsdp_param in param_group.fsdp_params
+                if fsdp_param.offload_to_cpu and fsdp_param._sharded_param_data.device.type == "cpu"
+                and fsdp_param._sharded_param_data.numel() > 0 and not fsdp_param._sharded_param_data.is_pinned()
+            ]
+            if not fsdp_params:
+                continue
+            arena = PinnedTensorArena(
+                (str(index), fsdp_param._sharded_param_data) for index, fsdp_param in enumerate(fsdp_params))
+            for index, fsdp_param in enumerate(fsdp_params):
+                pageable = fsdp_param._sharded_param_data
+                pinned = arena.empty_like(str(index), pageable)
+                pinned.copy_(pageable)
+                local_tensor = fsdp_param.sharded_param._local_tensor
+                shard_dim = fsdp_param.fsdp_placement.dim
+                # `_sharded_param_data` is the flat padded shard and the DTensor's local
+                # tensor is its unpadded prefix; keep that aliasing on the pinned copy.
+                fsdp_param._sharded_param_data = pinned
+                fsdp_param.sharded_param._local_tensor = pinned.view(fsdp_param.padded_sharded_param_size).narrow(
+                    shard_dim, 0, local_tensor.size(shard_dim))
 
 
 def _drop_state_dict_parameter(model: nn.Module, param_name: str) -> None:
@@ -1115,4 +1167,7 @@ def load_model_from_full_model_state_dict(
         dense_lora_patch.report_unapplied()
 
     # choose `assign=True` since we cannot call `copy_` on meta tensor
-    return model.load_state_dict(sharded_sd, strict=strict, assign=True)
+    result = model.load_state_dict(sharded_sd, strict=strict, assign=True)
+    if getattr(model, "_fastvideo_exact_size_pinning", False):
+        pin_fsdp_offloaded_params(model)
+    return result
