@@ -840,8 +840,6 @@ def shard_model(
     }
     exact_size_pinning = cpu_offload and pin_cpu_memory and torch.cuda.is_available()
     if cpu_offload:
-        # With exact-size pinning, FSDP keeps pageable shards and
-        # `pin_fsdp_offloaded_params` registers them afterwards; see its docstring.
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(pin_memory=pin_cpu_memory and not exact_size_pinning)
     if exact_size_pinning:
         model._fastvideo_exact_size_pinning = True

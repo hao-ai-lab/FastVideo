@@ -21,7 +21,6 @@ from fastvideo.models.loader.fsdp_load import load_model_from_full_model_state_d
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA host registration requires one GPU")
 
-# Odd sizes on purpose: a power-of-two-sized weight would hide the rounding.
 _SHAPES = ((96, 160), (160, 96), (96, 40))
 
 
@@ -74,7 +73,6 @@ def _assert_exact_size_pinned(model: nn.Module) -> None:
     for fsdp_param in _fsdp_params(model):
         data = fsdp_param._sharded_param_data
         assert data.is_pinned()
-        # The DTensor local tensor must still alias FSDP's flat shard.
         assert fsdp_param.sharded_param._local_tensor.data_ptr() == data.data_ptr()
         arena = getattr(data, "_pinned_arena", None)
         assert arena is not None, "shard was pinned by the power-of-two caching host allocator"
@@ -82,7 +80,6 @@ def _assert_exact_size_pinned(model: nn.Module) -> None:
         arenas[id(arena)] = arena
         logical_bytes += data.numel() * data.element_size()
     registered = sum(arena.buffer.numel() for arena in arenas.values())
-    # Only 256-byte alignment and page rounding per arena, no power-of-two blow-up.
     assert registered <= logical_bytes + len(arenas) * 4096 + 256 * len(list(_fsdp_params(model)))
 
 
