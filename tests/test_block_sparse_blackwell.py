@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Correctness tests for the sm_100a/sm_103a CUDA block-sparse VSA forward.
+"""Correctness tests for the ptx_blackwell block-sparse VSA forward.
 
 Compared against an explicit PyTorch reference rather than the Triton kernel: Triton's
 block-sparse forward is hardcoded to 64-token blocks (BLOCK_M = BLOCK_N = 64) while this
@@ -8,7 +8,7 @@ different sparsity granularities. The reference below applies exactly the semant
 kernel is supposed to implement -- selected blocks only, keys past variable_block_sizes
 masked. Every case runs at both block sizes.
 
-Run with: python -m pytest tests/test_block_sparse_sm100a.py -v
+Run with: python -m pytest tests/test_block_sparse_blackwell.py -v
 """
 
 import os
@@ -18,14 +18,14 @@ import sys
 import pytest
 import torch
 
-from fastvideo_kernel import block_sparse_attn_sm100a as vsa
+from fastvideo_kernel import block_sparse_attn_ptx_blackwell as vsa
 
 HEAD_DIM = 128
 BLOCK_SIZES = [64, 128]
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}
-    or not vsa._HAS_VSA_SM100A,
+    or not vsa._HAS_VSA_PTX_BLACKWELL,
     reason="requires data-center Blackwell (sm_100a/sm_103a) and a built fastvideo_kernel extension",
 )
 
@@ -89,7 +89,7 @@ def run_and_compare(block, ragged, num_blocks=8, topk=4, heads=4, atol=0.02):
     q, k, v, idx, num, vbs = make_case(block, num_blocks=num_blocks, topk=topk, heads=heads,
                                        ragged=ragged)
     assert vsa.is_supported(q, vbs)
-    got, got_lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs)
+    got, got_lse = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs)
     ref, ref_lse = reference(q, k, v, idx, num, vbs, block)
 
     got_o = got if vsa.BHSD else got.transpose(1, 2)
@@ -127,7 +127,7 @@ def test_sequence_lengths(block, num_blocks):
 def test_lse_is_not_vacuous(block):
     """Guards the lse assertion: a wrong lse must actually fail the comparison."""
     q, k, v, idx, num, vbs = make_case(block, ragged=True)
-    _, got_lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs)
+    _, got_lse = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs)
     _, ref_lse = reference(q, k, v, idx, num, vbs, block)
     assert (got_lse.float() - (ref_lse + 1.0)).abs().max().item() > 0.5
 
@@ -138,7 +138,7 @@ def test_inference_no_lse_matches_eager_under_fullgraph_compile(block):
     q, k, v, idx, num, vbs = make_case(block, ragged=True)
 
     def inference_path(q, k, v, idx, num, vbs):
-        out, lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs, need_lse=False)
+        out, lse = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs, need_lse=False)
         assert lse is None
         return out
 
@@ -154,7 +154,7 @@ def test_inference_custom_op_fake_matches_real(block):
     """Pin the custom op schema and fake output metadata used by Dynamo."""
     q, k, v, idx, num, vbs = make_case(block, ragged=True)
     torch.library.opcheck(
-        torch.ops.fastvideo_kernel.block_sparse_attn_sm100a_inference.default,
+        torch.ops.fastvideo_kernel.block_sparse_attn_ptx_blackwell_inference.default,
         (q, k, v, idx, num, vbs),
         test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
     )
@@ -162,18 +162,18 @@ def test_inference_custom_op_fake_matches_real(block):
 
 @pytest.mark.parametrize("block", BLOCK_SIZES)
 def test_mask_inference_matches_index_route_under_fullgraph_compile(block):
-    """H3's bool mask compaction and sm_100a launch stay in one opaque op."""
+    """H3's bool mask compaction and ptx_blackwell launch stay in one opaque op."""
     batch, heads, num_blocks = 1, 4, 8
     q, k, v, idx, num, vbs = make_case(block, batch=batch, heads=heads, num_blocks=num_blocks, ragged=True)
     block_map = make_block_map(idx, num, batch, heads, num_blocks)
 
     def inference_path(q, k, v, block_map, vbs):
-        out, lse = vsa.block_sparse_attn_sm100a_from_mask(q, k, v, block_map, vbs)
+        out, lse = vsa.block_sparse_attn_ptx_blackwell_from_mask(q, k, v, block_map, vbs)
         assert lse is None
         return out
 
     with torch.inference_mode():
-        expected, _ = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs, need_lse=False)
+        expected, _ = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs, need_lse=False)
         compiled = torch.compile(inference_path, backend="eager", fullgraph=True)
         actual = compiled(q, k, v, block_map, vbs)
     torch.testing.assert_close(actual, expected, atol=0, rtol=0)
@@ -186,7 +186,7 @@ def test_mask_inference_custom_op_fake_matches_real(block):
     q, k, v, idx, num, vbs = make_case(block, batch=batch, heads=heads, num_blocks=num_blocks, ragged=True)
     block_map = make_block_map(idx, num, batch, heads, num_blocks)
     torch.library.opcheck(
-        torch.ops.fastvideo_kernel.block_sparse_attn_sm100a_from_mask_inference.default,
+        torch.ops.fastvideo_kernel.block_sparse_attn_ptx_blackwell_from_mask_inference.default,
         (q, k, v, block_map, vbs),
         test_utils=("test_schema", "test_faketensor", "test_aot_dispatch_dynamic"),
     )
@@ -251,7 +251,7 @@ def test_nonuniform_counts_straddling_a_pair(block):
     |out diff| ~0.6 on this exact case), leaving every other tile correct."""
     q, k, v, idx, num, vbs = make_two_class_case(block)
     assert vsa.is_supported(q, vbs)
-    got, got_lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs)
+    got, got_lse = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs)
     ref, ref_lse = reference(q, k, v, idx, num, vbs, block)
     got_o = got if vsa.BHSD else got.transpose(1, 2)
     diff = (got_o.float() - ref).abs().max().item()
@@ -269,7 +269,7 @@ def test_same_seed_determinism(block):
     runs = []
     for _ in range(2):
         q, k, v, idx, num, vbs = make_case(block, ragged=True, seed=3)
-        o, m = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs)
+        o, m = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs)
         torch.cuda.synchronize()
         runs.append((o, m))
     assert torch.equal(runs[0][0], runs[1][0]), "out differs across same-seed runs"
@@ -281,7 +281,7 @@ def _zero_count_case_main(block):
     zero_rows = (5, 6, 8, 9)  # odd member; even member with nonzero sibling 7; a whole pair
     q, k, v, idx, num, vbs = make_two_class_case(block, zero_rows=zero_rows)
     assert vsa.is_supported(q, vbs)
-    got, got_lse = vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs)
+    got, got_lse = vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs)
     torch.cuda.synchronize()
     ref, ref_lse = reference(q, k, v, idx, num, vbs, block)
     got_o = (got if vsa.BHSD else got.transpose(1, 2)).float()

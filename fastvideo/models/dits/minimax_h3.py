@@ -984,7 +984,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         layer identity so repeated blocks share one Dynamo graph. Generic and
         training compile retain their established attention dispatch; only
         the inference loader's separate ``prepare_for_regional_compile`` hook
-        may preselect the inference-only sm_100a path.
+        may preselect the inference-only ptx_blackwell path.
 
         The inference-only Triton fusions expose fake-backed custom operators,
         so Dynamo can keep them active as opaque nodes inside each fullgraph

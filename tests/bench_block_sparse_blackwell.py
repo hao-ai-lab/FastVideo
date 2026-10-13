@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""In-framework benchmark of the sm_100a/sm_103a VSA backend at real Wan shapes.
+"""In-framework benchmark of the ptx_blackwell VSA backend at real Wan shapes.
 
 Not the powers-of-two bench grid: this builds the metadata FastVideo actually builds, at the
 deployed latent shapes, and drives the same block_sparse_attn_from_indices entry point the
 model calls -- so it measures the path that will run, including the dispatch and the index
 tensors as constructed rather than synthesised.
 
-    PYTHONPATH=fastvideo-kernel/python python tests/bench_block_sparse_sm100a.py
+    PYTHONPATH=fastvideo-kernel/python python tests/bench_block_sparse_blackwell.py
 """
 
 import time
 
 import torch
 
-from fastvideo_kernel import block_sparse_attn_sm100a as vsa
+from fastvideo_kernel import block_sparse_attn_ptx_blackwell as vsa
 from fastvideo_kernel.block_sparse_attn import block_sparse_attn_triton
 from fastvideo_kernel.triton_kernels.index import map_to_index
 from fastvideo_kernel.vsa_utils import build_vsa_metadata
@@ -63,7 +63,7 @@ def main():
         idx, num = idx.to(torch.int32).contiguous(), num.to(torch.int32).contiguous()
 
         ok = vsa.is_supported(q, vbs)
-        ours = timed(lambda: vsa.block_sparse_attn_sm100a(q, k, v, idx, num, vbs)) if ok else float("nan")
+        ours = timed(lambda: vsa.block_sparse_attn_ptx_blackwell(q, k, v, idx, num, vbs)) if ok else float("nan")
 
         # Triton needs 64-token blocks: expand each 128-block into its two halves.
         if block == 128:   # Triton is 64-granular; expand only when we run 128

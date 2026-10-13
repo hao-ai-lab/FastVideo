@@ -1,9 +1,9 @@
-// block_sparse_kernel_sm100a.cuh -- VSA block-sparse FMHA forward (per-q-block top-k),
-// data-center Blackwell sm_100a/sm_103a. The filename is retained for API compatibility.
+// block_sparse_kernel_blackwell.cuh -- VSA block-sparse FMHA forward (per-q-block top-k),
+// data-center Blackwell.
 // Warp-specialized: load / MMA (tcgen05) / softmax / correction / epilogue / scheduler.
 // Writes O and, when asked, the log-sum-exp the backward consumes.
-#ifndef BLOCK_SPARSE_VSA_KERNEL_SM100A_CUH
-#define BLOCK_SPARSE_VSA_KERNEL_SM100A_CUH
+#ifndef BLOCK_SPARSE_VSA_KERNEL_PTX_BLACKWELL_CUH
+#define BLOCK_SPARSE_VSA_KERNEL_PTX_BLACKWELL_CUH
 
 #include <cuda.h>
 #include <cuda_runtime.h>
