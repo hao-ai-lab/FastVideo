@@ -238,7 +238,7 @@ def validate_cookbook() -> None:
     cookbook_pages = ROOT_DIR / "docs/cookbook"
     for page in sorted(cookbook_pages.glob("*.md")):
         text = page.read_text(encoding="utf-8")
-        if "cookbook-recipes.json" not in text:
+        if "data-recipes=" not in text:
             continue
         if cache_bust not in text:
             raise ValueError(f"{page}: recipe JSON cache-bust must be {cache_bust}")
