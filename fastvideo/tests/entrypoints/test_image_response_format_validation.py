@@ -147,3 +147,16 @@ def test_supported_edit_size_and_saved_input_are_forwarded(image_client, size):
     assert (kwargs["width"], kwargs["height"]) == (512, 768)
     assert Path(kwargs["image_path"]).read_bytes() == b"uploaded-image"
     engine.generator.generate_video.assert_called_once()
+
+
+@pytest.mark.parametrize("filename", ["../../../../escaped.png", "/tmp/../escaped.png", "nested/dir/cat.png"])
+def test_edit_upload_filename_cannot_leave_uploads_dir(image_client, tmp_path, filename):
+    client, engine = image_client
+    response = client.post(
+        "/v1/images/edits", data={"prompt": "a cat"},
+        files={"image": (filename, b"uploaded-image", "image/png")},
+    )
+    assert response.status_code == 200, response.text
+    saved = Path(engine.generator.generate_video.call_args.kwargs["image_path"]).resolve()
+    assert saved.parent == (tmp_path / "uploads").resolve()
+    assert saved.read_bytes() == b"uploaded-image"

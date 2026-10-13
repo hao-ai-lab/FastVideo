@@ -273,7 +273,7 @@ async def edits(
     input_paths: list[str] = []
     try:
         for idx, img in enumerate(image_list):
-            filename = getattr(img, "filename", f"image_{idx}")
+            filename = os.path.basename(getattr(img, "filename", None) or f"image_{idx}")
             input_path = await save_image_to_path(img, os.path.join(uploads_dir, f"{request_id}_{idx}_{filename}"))
             input_paths.append(input_path)
     except Exception as e:
