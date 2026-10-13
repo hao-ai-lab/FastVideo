@@ -193,6 +193,14 @@ class FastH3Backend:
 
     # --------------------------------------------------------------- profile
 
+    def _vsa_kernel(self) -> str:
+        """inference.vsa_kernel; the pre-rename value sm100a still selects ptx_blackwell, with a warning."""
+        kernel = str(self._config.inference.get("vsa_kernel", "ptx_blackwell"))
+        if kernel == "sm100a":
+            logger.warning("inference.vsa_kernel: sm100a is deprecated; use ptx_blackwell")
+            return "ptx_blackwell"
+        return kernel
+
     def _apply_profile_environment(self) -> None:
         """Set the FastH3 profile environment, as the reference CLI does.
 
@@ -201,11 +209,11 @@ class FastH3Backend:
         experiment settings cannot silently change what gets served.
         """
         cfg = self._config.inference
-        vsa_kernel = str(cfg.get("vsa_kernel", "sm100a"))
+        vsa_kernel = self._vsa_kernel()
         fusions = "all" if bool(cfg.get("h3_fusions", True)) else "0"
         environment: dict[str, str | None] = {
             "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
-            "FASTVIDEO_VSA_SM100A": "1" if vsa_kernel == "sm100a" else "0",
+            "FASTVIDEO_VSA_PTX_BLACKWELL": "1" if vsa_kernel == "ptx_blackwell" else "0",
             "FASTVIDEO_VSA_CUTEDSL": "0",
             # A non-empty path enables the diagnostic probe; it must stay unset.
             "FASTVIDEO_H3_VSA_PROBE": None,
@@ -241,15 +249,15 @@ class FastH3Backend:
             if not present:
                 raise RuntimeError("FastH3's FA4 route needs the pinned flash-attn-4 package. Install it, "
                                    "or set inference.fa4: false in your config.")
-        if str(cfg.get("vsa_kernel", "sm100a")) == "sm100a":
+        if self._vsa_kernel() == "ptx_blackwell":
             try:
-                from fastvideo_kernel import block_sparse_attn_sm100a
+                from fastvideo_kernel import block_sparse_attn_ptx_blackwell
             except ImportError:
                 present = False
             else:
-                present = bool(getattr(block_sparse_attn_sm100a, "_HAS_VSA_SM100A", False))
+                present = bool(getattr(block_sparse_attn_ptx_blackwell, "_HAS_VSA_PTX_BLACKWELL", False))
             if not present:
-                raise RuntimeError("FastH3's sm100a route needs fastvideo-kernel built with the Blackwell VSA "
+                raise RuntimeError("FastH3's ptx_blackwell route needs fastvideo-kernel built with the Blackwell VSA "
                                    "extension. Install a matching wheel, or set inference.vsa_kernel: triton.")
 
     def _generator_config(self) -> Any:

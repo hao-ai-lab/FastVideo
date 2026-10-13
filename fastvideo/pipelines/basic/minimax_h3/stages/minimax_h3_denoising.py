@@ -270,7 +270,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
             # Run-level tile geometry (256 default, 64 = native Triton path,
-            # 128 = sm_100a CUDA), plumbed like the run-level sparsity; the
+            # 128 = ptx_blackwell), plumbed like the run-level sparsity; the
             # builder validates the value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
             if vsa_ref_keep_rate is not None:

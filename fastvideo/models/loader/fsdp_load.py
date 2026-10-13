@@ -639,7 +639,7 @@ def _regional_compile_unsupported_reason(
 
     The legacy VSA backend remains outside the fullgraph support envelope.
     MiniMax H3's VSA backend is supported only through the inference-only
-    sm_100a tile-64 route; its regional hook resolves loaded compression
+    ptx_blackwell tile-64 route; its regional hook resolves loaded compression
     gates and probes the kernel before block capture.
     """
     try:
@@ -698,9 +698,9 @@ def _regional_compile_unsupported_reason(
         if envs.FASTVIDEO_H3_VSA_PROBE.get():
             return ("FASTVIDEO_H3_VSA_PROBE records tensors and files from the VSA-H3 attention body, which "
                     "regional fullgraph compile cannot capture; this model stays eager")
-        if not envs.FASTVIDEO_VSA_SM100A.get():
-            return ("VIDEO_SPARSE_ATTN_H3 regional compile requires the compile-safe sm_100a route "
-                    "(FASTVIDEO_VSA_SM100A=1); Triton/CuTe VSA stays eager")
+        if not envs.FASTVIDEO_VSA_PTX_BLACKWELL.get():
+            return ("VIDEO_SPARSE_ATTN_H3 regional compile requires the compile-safe ptx_blackwell route "
+                    "(FASTVIDEO_VSA_PTX_BLACKWELL=1); Triton/CuTe VSA stays eager")
         if vsa_tile_size != 64:
             return ("VIDEO_SPARSE_ATTN_H3 regional compile requires VSA_tile_size=64; "
                     f"got {vsa_tile_size!r}, so tile-256/CuTe VSA stays eager")

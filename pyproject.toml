@@ -120,7 +120,7 @@ members = ["apps/dreamverse", "apps/infinite_livestream"]
 # PyPI's aarch64 fastvideo-kernel wheels do not cover the NVIDIA DGX Spark /
 # GB10 (sm_121), so on ARM build from the in-tree source instead. The FastH3
 # extra also selects the in-tree source on x86_64 so a PR checkout can build
-# its matching sm_100a route before that version reaches PyPI. Other x86_64
+# its matching ptx_blackwell route before that version reaches PyPI. Other x86_64
 # installs keep the published wheel. This table is uv-only: plain pip ignores
 # it. Pass --no-sources to bypass it (e.g. when the kernel is already
 # installed, as in the Spark install guide).

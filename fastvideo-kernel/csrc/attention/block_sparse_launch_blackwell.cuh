@@ -1,18 +1,18 @@
-#ifndef BLOCK_SPARSE_VSA_LAUNCH_SM100A_CUH
-#define BLOCK_SPARSE_VSA_LAUNCH_SM100A_CUH
+#ifndef BLOCK_SPARSE_VSA_LAUNCH_PTX_BLACKWELL_CUH
+#define BLOCK_SPARSE_VSA_LAUNCH_PTX_BLACKWELL_CUH
 
-// Launch surface for the sm_100a/sm_103a VSA block-sparse FMHA forward.
+// Launch surface for the Blackwell VSA block-sparse FMHA forward.
 //
 // Everything a caller needs: a POD argument struct, a predicate saying whether this build can
 // run those arguments, and one launch entry point. The benchmark in
-// block_sparse_bench_sm100a.cu and the torch binding both go through here, so there is
+// block_sparse_bench.cu and the torch binding both go through here, so there is
 // one tensormap construction and one launch configuration rather than two that can drift.
 //
 // Two compile-time knobs select the four builds:
 //   VSA_BLK128  false -> 64-token sparse blocks, true -> 128-token
 //   VSA_BHSD    false -> [token][head][dim] (BSHD), true -> [batch][head][token][dim] (BHSD)
 
-#include "block_sparse_kernel_sm100a.cuh"
+#include "block_sparse_kernel_blackwell.cuh"
 
 namespace VSA_NAMESPACE {
 
@@ -53,7 +53,7 @@ __host__ inline cudaError_t block_sparse_supported(const BlockSparseVsaArgs& a) 
   return cudaSuccess;
 }
 
-__host__ inline cudaError_t launch_block_sparse_sm100a(const BlockSparseVsaArgs& a,
+__host__ inline cudaError_t launch_block_sparse_ptx_blackwell(const BlockSparseVsaArgs& a,
                                                            cudaStream_t stream) {
   const cudaError_t sup = block_sparse_supported(a);
   if (sup != cudaSuccess) return sup;
@@ -198,4 +198,4 @@ __host__ inline cudaError_t launch_block_sparse_sm100a(const BlockSparseVsaArgs&
 // only ever sees the one configuration its VSA_BLK128 selected.
 using namespace VSA_NAMESPACE;
 
-#endif  // BLOCK_SPARSE_VSA_LAUNCH_SM100A_CUH
+#endif  // BLOCK_SPARSE_VSA_LAUNCH_PTX_BLACKWELL_CUH

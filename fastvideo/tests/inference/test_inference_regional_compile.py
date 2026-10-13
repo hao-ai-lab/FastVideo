@@ -72,10 +72,10 @@ def test_supported_backends_allow_compile(backend_name, env_overrides) -> None:
     assert _regional_compile_unsupported_reason(_init_params_for(backend_name)) is None
 
 
-def test_h3_vsa_sm100a_tile64_allows_compile(env_overrides) -> None:
+def test_h3_vsa_ptx_blackwell_tile64_allows_compile(env_overrides) -> None:
     env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
     env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_PROBE.override(None))
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
 
     reason = _regional_compile_unsupported_reason(
         _init_params_for("VIDEO_SPARSE_ATTN_H3"),
@@ -85,14 +85,14 @@ def test_h3_vsa_sm100a_tile64_allows_compile(env_overrides) -> None:
     assert reason is None
 
 
-@pytest.mark.parametrize(("sm100a", "tile_size"), [(False, 64), (True, 256), (True, None)])
-def test_h3_vsa_unsupported_compile_route_degrades_to_eager(sm100a, tile_size, env_overrides) -> None:
+@pytest.mark.parametrize(("ptx_blackwell", "tile_size"), [(False, 64), (True, 256), (True, None)])
+def test_h3_vsa_unsupported_compile_route_degrades_to_eager(ptx_blackwell, tile_size, env_overrides) -> None:
     env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
     env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_PROBE.override(None))
-    if sm100a:
-        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    if ptx_blackwell:
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     else:
-        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
 
     reason = _regional_compile_unsupported_reason(
         _init_params_for("VIDEO_SPARSE_ATTN_H3"),
@@ -219,11 +219,11 @@ def test_minimax_h3_prepare_for_regional_compile_does_not_require_quantized_q_we
 def test_minimax_h3_prepare_for_regional_compile_propagates_backend_rejection() -> None:
     model = _gate_model(2.0)
     impl = model.transformer_blocks[0].attn.distributed_attention.attn_impl
-    impl.unsupported = "sm100a probe failed"
+    impl.unsupported = "ptx_blackwell probe failed"
 
     reason = model.prepare_for_regional_compile()
 
-    assert reason == "sm100a probe failed"
+    assert reason == "ptx_blackwell probe failed"
 
 
 def test_unprepared_vsa_gate_cannot_mutate_cache_during_compile(monkeypatch) -> None:
