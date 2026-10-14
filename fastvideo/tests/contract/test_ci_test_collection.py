@@ -412,7 +412,6 @@ def test_arm64_chromium_filters_generation_mode_playback_but_keeps_uploads():
         assert re.search(pattern, title), f'ARM64 Chromium cannot decode this playback test: {title}'
     assert not re.search(pattern, "proxies a media upload larger than Next's default 10 MiB body limit")
     assert not re.search(pattern, 'accepts a custom prompt and enters the streaming state')
-    # Firefox remains the full AV gate; only the Chromium invocation is filtered.
     arm_branch = lane.rsplit('if [[ $machine_arch =~ ^(aarch64|arm64)$ ]]; then', 1)[1].split('\nelse')[0]
     firefox_command = re.search(r'npm run e2e(?:\\\n|[^\n])*', arm_branch).group(0)
     assert '--project=firefox' in firefox_command
