@@ -214,6 +214,12 @@ Edit → Enabled**. That schedule submits the literal `HEAD`, which the trusted
 runner rejects before upload. The GitHub `BUILDKITE_API_TOKEN` must have
 `write_builds` access to the performance pipeline.
 
+The performance lane recognizes main-branch API builds from the dedicated
+performance pipeline with `TEST_SCOPE=direct` as scheduled-main runs. They
+refresh eligible baselines after successful tests and still produce comparison
+reports after test failures. PR and other direct reruns retain their existing
+upload policy.
+
 The gated FLUX.1-dev SSIM test is explicitly paused until its model access is
 provisioned. Its pytest skip is not FLUX quality validation; the other SSIM
 tests and the suite's fail-fast behavior remain active.

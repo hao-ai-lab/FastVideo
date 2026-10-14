@@ -291,6 +291,62 @@ def test_performance_trigger_rejects_head_and_sends_a_pinned_direct_build():
             assert payload['env']['PR_NUMBER'] == 'false'
 
 
+def test_weekly_performance_api_build_keeps_scheduled_baseline_policy():
+    import os
+    import subprocess
+    import tempfile
+
+    lane = (REPO_ROOT / '.buildkite/scripts/lanes/performance.sh').read_text()
+    lane = lane.replace('export PERF_REPORTS_DIR=/workspace/artifacts/performance',
+                        'export PERF_REPORTS_DIR="$TEST_REPORTS_DIR"')
+    cases = (
+        ('main', 'api', 'fastvideo-performance-lane', 'direct', 'false', 'scheduled_main', 'always'),
+        ('main', 'schedule', 'fastvideo-performance-lane', 'direct', 'false', 'scheduled_main', 'always'),
+        ('main', 'api', 'ci', 'full', 'false', 'scheduled_main', 'always'),
+        ('main', 'api', 'ci', 'direct', 'false', 'unknown', 'pass'),
+        ('feature', 'api', 'fastvideo-performance-lane', 'direct', 'false', 'unknown', 'pass'),
+        ('main', 'api', 'fastvideo-performance-lane', 'direct', '1958', 'pr', 'pass'),
+    )
+    with tempfile.TemporaryDirectory() as root:
+        directory = Path(root)
+        mocks = {
+            'nvidia-smi': '#!/bin/sh\nexit 0\n',
+            'pytest': '#!/bin/sh\nexit "$TEST_PYTEST_RC"\n',
+            'python': '#!/bin/sh\nprintf "%s|%s|%s|%s\\n" "$1" "$PERF_RUN_SOURCE" '
+            '"$PERF_UPLOAD_POLICY" "${PERF_PYTEST_RC:-}" >> "$TEST_CALLS_FILE"\n',
+        }
+        for name, contents in mocks.items():
+            executable = directory / name
+            executable.write_text(contents)
+            executable.chmod(0o755)
+        calls = directory / 'calls.txt'
+        for branch, source, pipeline, scope, pr, run_source, policy in cases:
+            for pytest_rc in (0, 1):
+                calls.unlink(missing_ok=True)
+                env = {
+                    **os.environ,
+                    'PATH': root + os.pathsep + os.environ['PATH'],
+                    'BUILDKITE_BRANCH': branch,
+                    'BUILDKITE_SOURCE': source,
+                    'BUILDKITE_PIPELINE_SLUG': pipeline,
+                    'BUILDKITE_PULL_REQUEST': pr,
+                    'TEST_SCOPE': scope,
+                    'TEST_PYTEST_RC': str(pytest_rc),
+                    'TEST_CALLS_FILE': str(calls),
+                    'TEST_REPORTS_DIR': str(directory / 'reports'),
+                }
+                result = subprocess.run(['bash', '-c', lane], cwd=root, env=env, text=True, capture_output=True)
+                assert result.returncode == pytest_rc, result.stderr
+                records = [line.split('|') for line in calls.read_text().splitlines()]
+                assert all(record[1:3] == [run_source, policy] for record in records)
+                comparisons = [record for record in records if record[0].endswith('/compare_baseline.py')]
+                if pytest_rc == 0 or policy == 'always':
+                    assert len(comparisons) == 1
+                    assert comparisons[0][3] == str(pytest_rc)
+                else:
+                    assert not comparisons
+
+
 def test_active_pipeline_has_no_modal_or_untrusted_compute_path():
     pipeline_text = (REPO_ROOT / ".buildkite/pipeline.yml").read_text()
     steps = _pipeline_steps()
