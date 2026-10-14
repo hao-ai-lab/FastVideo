@@ -759,7 +759,6 @@ def test_regional_compile_reuses_graphs_across_sp_padding_lengths(monkeypatch, e
                         lambda q, k, v, block_map, vbs: (mask_count(q, block_map.sum(-1)), None))
     monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
     monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
-    # The all-to-all is the identity on a single rank; the SP padding slice/pad in the layer still runs.
     monkeypatch.setattr(attn_layer, "sequence_model_parallel_all_to_all_4D", lambda x, **_: x)
     env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
