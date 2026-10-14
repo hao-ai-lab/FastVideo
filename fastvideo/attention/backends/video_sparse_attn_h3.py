@@ -562,6 +562,8 @@ def _fine_attention_from_name(name: str) -> Any:
         from fastvideo.attention.backends.fa4_vsa_h3 import FA4VSAFineAttention
         return FA4VSAFineAttention(mode)
     from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics, FP4VSAFineAttention
+    if mode == "bf16":
+        return FP4VSAFineAttention(FP4AttentionNumerics(quantize=False))
     prefix = {"mix8": "fp8", "mixmx": "mxfp8", "qk": None}[mode]
     return FP4VSAFineAttention(
         FP4AttentionNumerics(quantize=True, quantize_pv=False, smooth_k=True, prefix_precision=prefix))

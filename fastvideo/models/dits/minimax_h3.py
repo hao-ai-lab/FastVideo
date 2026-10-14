@@ -350,7 +350,8 @@ class MiniMaxH3Attention(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
     ) -> torch.Tensor:
-        if (self._vsa_fp4 and rotary_emb is not None and not torch.is_grad_enabled()
+        fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
+        if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
                 and not torch.compiler.is_compiling()):
             meta = get_forward_context().attn_metadata
             # Exempt mode lists the first prefix tile for every query, which the

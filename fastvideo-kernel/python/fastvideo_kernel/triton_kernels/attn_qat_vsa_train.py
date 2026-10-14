@@ -145,6 +145,7 @@ def _key_ok(KV_VALID, n_block, cols, HAS_VALID: tl.constexpr, HALF: tl.constexpr
 def _fwd_kernel(Q, K, V, O, OHP, LSE, MRUN, Q2K_IDX, Q2K_NUM, KV_VALID, BIAS, QGROUP, n_groups, seq_len, n_qblocks,
                 list_width, scale_log2, OFFSET: tl.constexpr, QUANT: tl.constexpr, HAS_VALID: tl.constexpr,
                 HAS_BIAS: tl.constexpr, FLOOR: tl.constexpr, FLOOR_VALUE: tl.constexpr, HIGH_PREC_O: tl.constexpr,
+                SAVE_MRUN: tl.constexpr,
                 D: tl.constexpr, ROWS: tl.constexpr, BLOCK_N: tl.constexpr):
     pid = tl.program_id(0)
     bh = tl.program_id(1).to(tl.int64)
@@ -191,7 +192,8 @@ def _fwd_kernel(Q, K, V, O, OHP, LSE, MRUN, Q2K_IDX, Q2K_NUM, KV_VALID, BIAS, QG
         acc = acc * alpha[:, None] + tl.dot(p_hat.to(tl.bfloat16), v)
         if HIGH_PREC_O:
             acc_hp = acc_hp * alpha[:, None] + tl.dot(p_tilde.to(tl.bfloat16), v)
-        tl.store(MRUN + (meta * list_width + slot) * BLOCK_N + row0 + offs_r, m_new)
+        if SAVE_MRUN:
+            tl.store(MRUN + (meta * list_width + slot) * BLOCK_N + row0 + offs_r, m_new)
         m_i = m_new
     inv = tl.where((l_i == 0.0) | (l_i != l_i), 0.0, 1.0 / l_i)
     tl.store(O + base + rows[:, None] * D + offs_d[None, :], (acc * inv[:, None]).to(O.dtype.element_ty))
@@ -290,7 +292,7 @@ class _FP4VSAAttnQAT(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, q, k, v, q2k_idx, q2k_num, kv_valid, quantize, quantize_pv, two_level_p, first_block_max_floor,
-                sm_scale, high_prec_o, key_bias=None, q_group=None):  # type: ignore[override]
+                sm_scale, high_prec_o, key_bias=None, q_group=None, need_backward=False):  # type: ignore[override]
         batch, heads, seq_len, dim = q.shape
         if seq_len % BLOCK or dim not in (64, 128):
             raise ValueError(f"need L % {BLOCK} == 0 and D in (64, 128), got L={seq_len}, D={dim}")
@@ -309,12 +311,16 @@ class _FP4VSAAttnQAT(torch.autograd.Function):
         out = torch.empty_like(q_hat)
         out_hp = torch.empty_like(q_hat) if high_prec_o else out
         lse = torch.empty((batch, heads, seq_len), device=q.device, dtype=torch.float32)
-        m_run = torch.empty((batch, heads, n_blocks, width, BLOCK), device=q.device, dtype=torch.float32)
         scale_log2 = sm_scale * LOG2E
         offset = LOG2_INV_TWO_LEVEL if two_level_p else 0.0
         floor = first_block_max_floor is not None
         # Only the P quantizer reads the kernel's QUANT path; QK-only mode runs it with exact softmax.
         quantize = bool(quantize and quantize_pv)
+        # dV only reads these maxima for quantized P. Inference and QK-only
+        # backward need no quadratic buffer; LSE is an unused pointer there.
+        save_mrun = bool(need_backward and quantize)
+        m_run = (torch.empty((batch, heads, n_blocks, width, BLOCK), device=q.device, dtype=torch.float32)
+                 if save_mrun else lse)
         has_bias = key_bias is not None
         if has_bias:
             key_bias = key_bias.float().contiguous()
@@ -325,9 +331,10 @@ class _FP4VSAAttnQAT(torch.autograd.Function):
                           key_bias if has_bias else lse, q_group if has_bias else q2k_num,
                           key_bias.shape[2] if has_bias else 1, seq_len, n_blocks, width, scale_log2, OFFSET=offset,
                           QUANT=bool(quantize), HAS_VALID=has_valid, HAS_BIAS=has_bias, FLOOR=floor, FLOOR_VALUE=float(first_block_max_floor or 0.0),
-                          HIGH_PREC_O=bool(high_prec_o), D=dim, ROWS=_ROWS, BLOCK_N=BLOCK, num_warps=_WARPS,
+                          HIGH_PREC_O=bool(high_prec_o), SAVE_MRUN=save_mrun, D=dim, ROWS=_ROWS, BLOCK_N=BLOCK, num_warps=_WARPS,
                           num_stages=2)
-        ctx.save_for_backward(q_hat, k_hat, v_hat, out_hp, lse, m_run, q2k_idx, q2k_num, kv_valid_arg)
+        if need_backward:
+            ctx.save_for_backward(q_hat, k_hat, v_hat, out_hp, lse, m_run, q2k_idx, q2k_num, kv_valid_arg)
         ctx.options = (bool(quantize), has_valid, floor, float(first_block_max_floor or 0.0), offset, sm_scale)
         ctx.has_bias = has_bias
         return out
@@ -357,7 +364,7 @@ class _FP4VSAAttnQAT(torch.autograd.Function):
                                OFFSET=offset, QUANT=quantize, HAS_VALID=has_valid, FLOOR=floor,
                                FLOOR_VALUE=floor_value, D=dim, ROWS=_ROWS, BLOCK_N=BLOCK, num_warps=_WARPS,
                                num_stages=2)
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None
 
 
 def _hadamard(dim: int, device: torch.device) -> torch.Tensor:
@@ -473,9 +480,12 @@ def fp4_vsa_attn_qat(q: torch.Tensor,
     if smooth_k:
         k = k - k.mean(dim=-2, keepdim=True)
     scale = sm_scale if sm_scale is not None else 1.0 / math.sqrt(q.shape[-1])
+    # Autograd.Function.forward runs with grad disabled even during training.
+    # Capture the caller's grad mode here, including no_grad on grad-enabled inputs.
+    need_backward = torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v))
     if not (hadamard or smooth_q or prefix_precision):
         return _FP4VSAAttnQAT.apply(q, k, v, q2k_idx, q2k_num, kv_valid, quantize, quantize_pv, two_level_p,
-                                    first_block_max_floor, scale, high_prec_o, None, None)
+                                    first_block_max_floor, scale, high_prec_o, None, None, need_backward)
     n_blocks = q.shape[2] // BLOCK
     hp_tiles = min(int(num_prefix_tiles or 0), n_blocks) if prefix_precision else 0
     num_fp4 = q2k_num
@@ -492,14 +502,14 @@ def fp4_vsa_attn_qat(q: torch.Tensor,
         groups = _query_groups(n_blocks, num_prefix_tiles, smooth_q == "segment", q.device)
         q_lo, bias = _smooth_queries(q_lo, k_lo, groups, n_groups)
     out = _FP4VSAAttnQAT.apply(q_lo, k_lo, v, q2k_idx, num_fp4, kv_valid, quantize, quantize_pv, two_level_p,
-                               first_block_max_floor, scale, high_prec_o, bias, groups)
+                               first_block_max_floor, scale, high_prec_o, bias, groups, need_backward)
     if not hp_tiles:
         return out
     num_hp = q2k_num - num_fp4
     hp_quant = {"bf16": lambda t: t, "fp8": fp8_per_token_fake_quant, "mxfp8": mxfp8_fake_quant}[prefix_precision]
     q_hp, k_hp = hp_quant(q), hp_quant(k)
     out_hp = _FP4VSAAttnQAT.apply(q_hp, k_hp, v, q2k_idx, num_hp, kv_valid, False, True, False, None, scale,
-                                  high_prec_o, None, None)
+                                  high_prec_o, None, None, need_backward)
     return out + out_hp
 
 

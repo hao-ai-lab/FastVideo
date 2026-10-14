@@ -599,16 +599,14 @@ FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
     "128-token tiles. Empty keeps every row on the FP4 kernel.")
 FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
     "",
-    choices=("", "fa4-mix8", "fa4-mixmx", "fa4-qk", "emulator-mix8", "emulator-mixmx", "emulator-qk"),
+    choices=("", "fa4-mix8", "fa4-mixmx", "fa4-qk", "emulator-mix8", "emulator-mixmx", "emulator-qk", "emulator-bf16"),
     category="attention",
-    doc="Replace VSA-H3's tile-128 fine block-sparse attention (selection and "
-    "the gated compression branch are unchanged): fa4-mix8 = FA4 NVFP4 Q/K video rows, "
-    "per-token FP8 Q/K dense-prefix rows (the validated QAD numerics); "
-    "fa4-mixmx = FA4 NVFP4 Q/K "
-    "video rows, MXFP8 Q/K dense-prefix rows, BF16 P.V, K smoothing "
-    "(sm_100/sm_103, needs the FA4-FP4 flash_attn.cute package); fa4-qk = "
-    "NVFP4 Q/K everywhere; emulator-* = the QAD FP4 emulator in that mode. "
-    "Empty keeps the BF16 sm_100a kernel.")
+    doc="Replace tile-128 fine attention, preserving VSA selection and compression: "
+    "fa4-mix8 = NVFP4 Q/K video, per-token FP8 Q/K prefix; fa4-mixmx = MXFP8 prefix; "
+    "fa4-qk = NVFP4 Q/K everywhere. FA4 modes use BF16 P.V and K smoothing, need sm_100/sm_103 "
+    "and the patched FA4-FP4 package. emulator-* uses Triton with those numerics; emulator-bf16 "
+    "uses unquantized BF16 on consumer CUDA GPUs. Nonempty overrides take priority over "
+    "FASTVIDEO_H3_VSA_FP4. Empty keeps the native route.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
                                             doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
