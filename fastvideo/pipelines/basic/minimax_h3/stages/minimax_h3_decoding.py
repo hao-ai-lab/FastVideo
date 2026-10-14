@@ -62,7 +62,7 @@ def _decode_participation(fastvideo_args: FastVideoArgs, want_parallel: bool) ->
 def _maybe_dump_generation(batch: ForwardBatch, layout: Any) -> None:
     """``FASTVIDEO_H3_DUMP_DIR``: save the request's final target rows and its text conditioning for evaluation.
 
-    Writes a seed and request digest filename with ``video`` / ``audio`` (the target rows the decoders read, fp32),
+    Writes ``<seed>-<prompt sha1[:12]>.pt`` with ``video`` / ``audio`` (the target rows the decoders read, fp32),
     ``prompt_embeds`` and ``text_token_tags``.
     """
     import hashlib
@@ -79,9 +79,7 @@ def _maybe_dump_generation(batch: ForwardBatch, layout: Any) -> None:
     # The geometry is part of the tag: the same prompt and seed at two shapes are
     # two different clips, and only the filename separates their dumps.
     geometry = repr(tuple(batch.raw_latent_shape))
-    reference_digest = batch.extra.get("minimax_h3_reference_digest", "")
-    case_id = batch.extra.get("case_id", "")
-    tag = hashlib.sha1(f"{batch.prompt}\x00{geometry}\x00{reference_digest}\x00{case_id}".encode()).hexdigest()[:12]
+    tag = hashlib.sha1(f"{batch.prompt}\x00{geometry}".encode()).hexdigest()[:12]
     audio = batch.audio_latents
     record = {
         "seed": batch.seed,
@@ -91,8 +89,6 @@ def _maybe_dump_generation(batch: ForwardBatch, layout: Any) -> None:
         "prompt_embeds": batch.prompt_embeds[0].float().cpu() if batch.prompt_embeds else None,
         "text_token_tags": batch.extra.get(MINIMAX_H3_TEXT_TOKEN_TAGS_KEY),
         "raw_latent_shape": tuple(batch.raw_latent_shape),
-        "reference_digest": reference_digest,
-        "case_id": case_id,
     }
     torch.save(record, os.path.join(directory, f"{batch.seed}-{tag}.pt"))
 
@@ -191,8 +187,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         # An NVFP4 decoder swapped in on the CPU could not pack its linears there;
         # freeze them now that the VAE is on the device, on the first decode.
         from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import freeze_nvfp4_linears_on_device
-        if freeze_nvfp4_linears_on_device(self.vae):
-            pinned_offload.refresh_host_copies(self.vae, pin=fastvideo_args.pin_cpu_memory)
+        freeze_nvfp4_linears_on_device(self.vae)
         try:
             latents = self.vae.denormalize_latents(latents.to(device=device, dtype=torch.float32))
             if fastvideo_args.output_type == "latent":

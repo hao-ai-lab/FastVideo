@@ -1,9 +1,8 @@
 """Run raw OmniRef cases end to end and dump each clip's final latents and text conditioning (quality arms).
 
 Same generator build as ``bench_e2e.py`` (preset, ``--nvfp4-dit``, ``--env``); every case runs once at its own
-geometry and seed (+ ``--seed-offset``) with ``FASTVIDEO_H3_DUMP_DIR=<out>``, which saves a seed and request
-digest filename with the target video/audio rows and the Qwen3-VL embeddings. The digest includes the output
-geometry and ordered reference contents, so equal prompts with different references keep separate dumps.
+geometry and seed (+ ``--seed-offset``) with ``FASTVIDEO_H3_DUMP_DIR=<out>``, which saves ``<seed>-<prompt
+hash>.pt`` with the target video/audio rows and the Qwen3-VL embeddings. Compare arms with ``quality_compare.py``.
 
   python quality_e2e.py --model-path <dir> --cases cases.json --preset lossless --nvfp4-dit --out <dump dir>
 """

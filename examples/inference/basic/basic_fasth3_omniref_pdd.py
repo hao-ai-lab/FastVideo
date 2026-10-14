@@ -26,7 +26,7 @@ for example ``--video dance.mp4 --image outfit.png --audio voice.wav``.
 one of those devices: a packed NVFP4 export, FP4 sparse attention with the dense
 prefix rows split off at 8-bit Q/K, and the pre-packed NVFP4 decoder, with the
 device's own offload policy and geometry. The 4090, having no FP4 hardware, runs
-the closest equivalent from a dense/FP8 export (FP8 linears, bf16 VSA, the dense decoder). See
+the closest equivalent (FP8 linears, bf16 VSA, the dense decoder) instead. See
 docs/inference/fasth3_omniref_consumer.md.
 
 ``--lossless-accel`` turns on every bit-identical speed-up the pipeline has
@@ -139,7 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
                         default=None,
                         help="run the full NVFP4 consumer stack for one device, with its offload policy and "
                         "environment (see docs/inference/fasth3_omniref_consumer.md); the checkpoint must be "
-                        "the packed NVFP4 export on Blackwell, or a dense/FP8 export on the 4090")
+                        "the packed NVFP4 export")
     parser.add_argument("--decoder",
                         default=None,
                         help="pre-packed NVFP4 VAE decoder (decoder-nvfp4.safetensors) used by --profile "
@@ -247,9 +247,6 @@ def resolve_model(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     export_dir = _snapshot(args.model_path, args.revision,
                            [CONTRACT, *MANIFESTS, *(f"{name}/**" for name in EXPORT_COMPONENTS)])
     contract = load_contract(export_dir)
-    if args.profile == "rtx-4090" and (export_dir / "transformer_ref" / "nvfp4_weights.safetensors").is_file():
-        raise ValueError("rtx-4090 requires a dense or FP8 OmniRef export. The packed NVFP4 export omits "
-                         "the weights needed for FP8 conversion; pass the dense/FP8 export with --model-path.")
     base_source, base_revision = base_model_source(args, contract)
     base_dir = _snapshot(base_source, base_revision, [*MANIFESTS, *(f"{name}/**" for name in BASE_COMPONENTS)])
     composed_dir = Path(args.composed_dir) if args.composed_dir else Path(args.output) / "fasth3_omniref_model"
@@ -348,8 +345,7 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
             # No FP4 hardware: FP8 linears and bf16 VSA attention instead, and the
             # dense light VAE because the NVFP4 decoder's GEMMs need FP4 too.
             "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
-            "FASTVIDEO_H3_VSA_FP4": "0",
-            "FASTVIDEO_H3_VSA_FINE_ATTENTION": "emulator-bf16",
+            "FASTVIDEO_H3_VSA_SM89_KERNEL": "bf16",
             "FASTVIDEO_MINIMAX_H3_FUSIONS": "all",
             "FASTVIDEO_VSA_TRITON": "1",
             "FASTVIDEO_VSA_SM100A": "0",

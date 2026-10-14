@@ -1,7 +1,7 @@
 # FastH3 OmniRef (Ref2VA) on one RTX 4090 (24 GB, no FP4): the FP8/bf16 equivalent, one clip per prompt.
 #
 # Point model_path at a composed OmniRef model directory: the distilled
-# dense or FP8 transformer_ref export (without nvfp4_weights.safetensors) symlinked
+# transformer_ref export (with its packed nvfp4_weights.safetensors) symlinked
 # together with base MiniMax-H3's text_encoder, tokenizer, processor, vae and
 # audio_vae. examples/inference/basic/basic_fasth3_omniref_pdd.py builds that
 # directory and runs it with --profile rtx-4090.
@@ -15,15 +15,14 @@
 # NVFP4 one needs FP4 hardware too), a non-resident encoder and a hard allocator cap.
 #
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3
-# FASTVIDEO_H3_VSA_FP4=0
-# FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16
+# FASTVIDEO_H3_VSA_SM89_KERNEL=bf16
 # PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt
 # fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_rtx4090.yaml
 #
 # See docs/inference/fasth3_omniref_consumer.md.
 generator:
-  model_path: ./FastH3-OmniRef-Dense-Composed
+  model_path: ./FastH3-OmniRef-QAD120-NVFP4
   engine:
     num_gpus: 1
     use_fsdp_inference: false
