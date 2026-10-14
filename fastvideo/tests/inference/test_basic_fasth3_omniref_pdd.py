@@ -7,6 +7,7 @@ import importlib.util
 import sys
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -208,3 +209,39 @@ def test_4090_accepts_dense_export(tmp_path, monkeypatch):
     args = _args("--profile", "rtx-4090", "--composed-dir", str(tmp_path / "composed"))
     composed, _ = example.resolve_model(args)
     assert (composed / "transformer_ref").resolve() == (export / "transformer_ref").resolve()
+
+
+@pytest.mark.parametrize("profile,dimensions,expected", [
+    (None, (), (832, 480)),
+    ("rtx-pro-6000", (), (1344, 768)),
+    ("rtx-pro-6000", ("--width", "832", "--height", "480"), (832, 480)),
+    ("rtx-pro-6000", ("--width", "832"), (832, 768)),
+    ("rtx-pro-6000", ("--height", "480"), (1344, 480)),
+    ("rtx-pro-6000", ("--width", "1024", "--height", "640"), (1024, 640)),
+    (None, ("--width", "1024"), (1024, 480)),
+    (None, ("--height", "640"), (832, 640)),
+])
+def test_main_preserves_explicit_dimensions_before_profile_defaults(tmp_path, monkeypatch, profile, dimensions, expected):
+    options = ["--output", str(tmp_path), *dimensions]
+    if profile:
+        options += ["--profile", profile]
+    args = _args(*options)
+    if "--width" not in dimensions:
+        assert args.width is None
+    if "--height" not in dimensions:
+        assert args.height is None
+    requests = []
+    shutdown = []
+
+    def generate(request):
+        requests.append(request)
+        return SimpleNamespace(video_path="out.mp4", generation_time=None, peak_memory_mb=None)
+
+    generator = SimpleNamespace(generate=generate, shutdown=lambda: shutdown.append(True))
+    monkeypatch.setattr(example, "parse_args", lambda: args)
+    monkeypatch.setattr(example, "resolve_model", lambda args: (tmp_path, CONTRACT))
+    monkeypatch.setattr(example, "apply_profile", lambda *args: None)
+    monkeypatch.setattr(example.VideoGenerator, "from_config", lambda config: generator)
+    example.main()
+    assert (requests[0].sampling.width, requests[0].sampling.height) == expected
+    assert shutdown == [True]

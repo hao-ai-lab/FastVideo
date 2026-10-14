@@ -2,6 +2,7 @@
 """Explicit fine attention must bypass the native consumer FP4 shortcut."""
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from fastvideo import envs
@@ -60,5 +61,35 @@ def test_bf16_override_keeps_tile128_without_quantization(monkeypatch, env_overr
         assert result.quantize is False
         assert result.prefix_precision is None
         assert len(numerics) == 1
+    finally:
+        video_sparse_attn_h3._fine_attention_from_name.cache_clear()
+
+
+@pytest.mark.parametrize("name", ["", "fa4", "emulator", "mix8", "fa4-", "emulator-", "other-mix8",
+                                "other-bf16", "fa4-bf16", "fa4-unknown", "emulator-unknown"])
+def test_invalid_fine_attention_names_raise_actionable_value_error(name):
+    with pytest.raises(ValueError, match="FASTVIDEO_H3_VSA_FINE_ATTENTION") as error:
+        video_sparse_attn_h3._fine_attention_from_name(name)
+    for accepted in ("fa4-mix8", "fa4-mixmx", "fa4-qk", "emulator-mix8", "emulator-mixmx", "emulator-qk",
+                     "emulator-bf16"):
+        assert accepted in str(error.value)
+
+
+@pytest.mark.parametrize("kind,mode", [("fa4", "mix8"), ("fa4", "mixmx"), ("fa4", "qk"),
+                                     ("emulator", "mix8"), ("emulator", "mixmx"), ("emulator", "qk")])
+def test_valid_fine_attention_names_keep_implementation_paths(monkeypatch, kind, mode):
+    from fastvideo.attention.backends import fa4_vsa_h3
+
+    monkeypatch.setattr(fa4_vsa_h3, "FA4VSAFineAttention", lambda value: ("fa4", value))
+    monkeypatch.setattr(fp4_vsa_qat, "FP4VSAFineAttention", lambda config: ("emulator", config))
+    video_sparse_attn_h3._fine_attention_from_name.cache_clear()
+    try:
+        result = video_sparse_attn_h3._fine_attention_from_name(f"{kind}-{mode}")
+        assert result[0] == kind
+        if kind == "fa4":
+            assert result[1] == mode
+        else:
+            assert result[1].prefix_precision == {"mix8": "fp8", "mixmx": "mxfp8", "qk": None}[mode]
+            assert result[1].quantize and not result[1].quantize_pv and result[1].smooth_k
     finally:
         video_sparse_attn_h3._fine_attention_from_name.cache_clear()

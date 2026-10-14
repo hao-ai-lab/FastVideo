@@ -103,8 +103,15 @@ def test_converter_parses_block_ranges():
     converter = _converter()
     assert converter.parse_blocks("42-49") == tuple(range(42, 50))
     assert converter.parse_blocks("3, 7,42-43") == (3, 7, 42, 43)
+    assert converter.parse_blocks("3,3,7-7") == (3, 7)
     assert converter.block_of("transformer_blocks.12.ff.net.2") == 12
     assert converter.block_of("proj_out") is None
+
+
+@pytest.mark.parametrize("text", ["49-42", "3,7,49-42", "7-3,42-49"])
+def test_converter_rejects_inverted_block_ranges(text):
+    with pytest.raises(ValueError, match=r"end \(\d+\) is below start \(\d+\)"):
+        _converter().parse_blocks(text)
 
 
 def test_converter_reads_full_name_amax_keys():

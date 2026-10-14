@@ -558,6 +558,10 @@ def _ptx_blackwell_unavailable_reason(ptx_blackwell_mod: Any, query_bhsd: torch.
 @functools.cache
 def _fine_attention_from_name(name: str) -> Any:
     kind, _, mode = name.partition("-")
+    modes = {"fa4": ("mix8", "mixmx", "qk"), "emulator": ("mix8", "mixmx", "qk", "bf16")}
+    if kind not in modes or mode not in modes[kind]:
+        accepted = ", ".join(f"{prefix}-{value}" for prefix, values in modes.items() for value in values)
+        raise ValueError(f"Invalid FASTVIDEO_H3_VSA_FINE_ATTENTION={name!r}; accepted names: {accepted}")
     if kind == "fa4":
         from fastvideo.attention.backends.fa4_vsa_h3 import FA4VSAFineAttention
         return FA4VSAFineAttention(mode)

@@ -12,7 +12,8 @@
 #
 # sm_89 has no FP4 hardware, so this profile is the closest equivalent rather than
 # the FP4 stack: FP8 linears, bf16 VSA attention, the dense light VAE decoder (the
-# NVFP4 one needs FP4 hardware too), a non-resident encoder and a hard allocator cap.
+# NVFP4 one needs FP4 hardware too), a non-resident encoder and expandable segments
+# to reduce memory fragmentation.
 #
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3
 # FASTVIDEO_H3_VSA_FP4=0

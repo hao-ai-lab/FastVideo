@@ -126,8 +126,8 @@ def build_parser() -> argparse.ArgumentParser:
                             help=f"an ordered {flag} reference (repeatable)")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3_omniref_pdd")
-    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
-    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
+    parser.add_argument("--height", type=int, default=None)
+    parser.add_argument("--width", type=int, default=None)
     parser.add_argument("--num-frames", type=int, default=124)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=1, help="sequence-parallel GPUs (must divide 56 heads)")
@@ -438,11 +438,13 @@ def main() -> None:
     profile = DEVICE_PROFILES[args.profile] if args.profile else None
     if profile is not None:
         apply_profile(profile, args.decoder, args.adaln_table)
-        args.width = args.width if args.width != DEFAULT_WIDTH else profile.width
-        args.height = args.height if args.height != DEFAULT_HEIGHT else profile.height
         print(f"Profile: {profile.label}")
     elif args.lossless_accel:
         apply_lossless_accel_env()
+    if args.width is None:
+        args.width = profile.width if profile is not None else DEFAULT_WIDTH
+    if args.height is None:
+        args.height = profile.height if profile is not None else DEFAULT_HEIGHT
     generator = VideoGenerator.from_config(
         build_generator_config(model_dir, args.num_gpus, args.lossless_accel, profile))
     try:

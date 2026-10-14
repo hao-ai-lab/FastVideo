@@ -47,7 +47,7 @@ the same clip as on another. Only the memory policy differs.
 | `spark` | DGX Spark, GB10, 128 GB unified | 480p | none: encoder, DiT and decoder all resident, as the released Spark recipe |
 | `rtx-pro-6000` | RTX PRO 6000, sm_120, 96 GB | 768p | none: encoder, DiT and decoder all resident |
 | `rtx-5090` | RTX 5090, sm_120, 32 GB | 480p | encoder not resident, denoise modules load on demand, AdaLN table |
-| `rtx-4090` | RTX 4090, sm_89, 24 GB | 480p | as the 5090, with a hard allocator cap |
+| `rtx-4090` | RTX 4090, sm_89, 24 GB | 480p | as the 5090, with expandable segments to reduce fragmentation |
 
 The DiT itself stays whole on every profile - no layerwise block streaming. The
 32 and 24 GB cards only give up the text encoder, which is the one component
@@ -182,8 +182,10 @@ without it are a third of the DiT and do not fit alongside the rest.
 | 36-block decoder, frozen | ~1.4 GiB | same |
 | 8-block `fast-8L` decoder | 0.31 GiB (measured) | same |
 
-So the resident set is ~45 GiB where the encoder can stay, and ~19 GiB where it
-cannot. The 32 GB card is the only one of these that has to stream anything.
+Budget about 69 GiB for the DiT and encoder when both stay resident, before the
+decoder and activations. The AdaLN table reduces the DiT's resident footprint.
+Both the RTX 5090 and RTX 4090 profiles offload the encoder and load denoise
+modules on demand; the 4090 also uses larger FP8 DiT weights instead of NVFP4.
 
 These are estimates until the devices are in hand, apart from the encoder and
 decoder figures, which were measured. See the device-test checklist in the
