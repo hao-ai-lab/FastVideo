@@ -458,6 +458,11 @@ FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
     category="performance",
     doc="Flux denoising disables reduced-precision reductions in bf16 matmuls, which tightens accumulation for "
     "the 4-step Klein model.")
+FASTVIDEO_ENABLE_FUSED_NORM = EnvBool(
+    False,
+    category="performance",
+    doc="Opt into Wan's inference-only Triton residual + LayerNorm + modulation fusion. "
+    "Its reduction order changes numerical outputs; the default keeps eager reference compatibility.")
 # Global kill switch for the opt-in, inference-only Triton fusion in
 # fastvideo/layers/triton_fused_norm.py, for debugging numerics or Triton issues.
 FASTVIDEO_DISABLE_FUSED_NORM = EnvBool(False,
