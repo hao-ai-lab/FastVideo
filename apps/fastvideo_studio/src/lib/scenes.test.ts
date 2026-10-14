@@ -218,6 +218,31 @@ describe("takes of the same clip", () => {
 		expect(scene.clips[0].job.id).toBe("p2");
 	});
 
+	it.each(["pending", "queued", "running"])("shows a %s redo over the completed take it replaces", (status) => {
+		const [scene] = buildScenes([
+			take("done", 1, { created_at: 1, status: "completed", finished_at: 10 }),
+			take("redo", 1, { created_at: 2, status }),
+		]);
+		expect(scene.clips[0].job.id).toBe("redo");
+	});
+
+	it("shows the newest of several in-flight redos", () => {
+		const [scene] = buildScenes([
+			take("done", 1, { created_at: 1, status: "completed", finished_at: 10 }),
+			take("r1", 1, { created_at: 2, status: "pending" }),
+			take("r2", 1, { created_at: 3, status: "pending" }),
+		]);
+		expect(scene.clips[0].job.id).toBe("r2");
+	});
+
+	it("doesn't let a stale pending take hide a take that completed after it was made", () => {
+		const [scene] = buildScenes([
+			take("stale", 1, { created_at: 1, status: "pending" }),
+			take("done", 1, { created_at: 2, status: "completed", finished_at: 10 }),
+		]);
+		expect(scene.clips[0].job.id).toBe("done");
+	});
+
 	it("shows the take the user chose, and lays the timeline out from it", () => {
 		const jobs = [
 			take("short", 1, { created_at: 1, status: "completed", num_frames: 120 }),

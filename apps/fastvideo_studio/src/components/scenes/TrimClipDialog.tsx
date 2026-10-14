@@ -53,7 +53,7 @@ const NEUTRAL_SECTION: Omit<EditableSection, 'key'> = { end_seconds: null, ...NE
 /** The clip's last-applied sections, or one neutral section covering everything if it was never edited. */
 function sectionsFromJob(job: Job): EditableSection[] {
   const segments = job.edit_segments;
-  if (segments && segments.length > 0) {
+  if (Array.isArray(segments) && segments.length > 0) {
     return segments.map((s) => ({ ...s, key: makeSectionKey() }));
   }
   return [{ ...NEUTRAL_SECTION, key: makeSectionKey() }];

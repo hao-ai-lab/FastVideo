@@ -426,3 +426,47 @@ def test_trimmed_frame_count_does_not_leak_the_internal_backup_key(client):
     res = client.post(f"/api/jobs/{job['id']}/trim", json={"start_seconds": 1.0, "end_seconds": 3.0})
     assert not any(k.startswith("_") for k in res.json())
     assert not any(k.startswith("_") for k in client.get(f"/api/jobs/{job['id']}").json())
+
+
+# --- loading a real server's db (--data-dir) -----------------------------------
+
+
+@pytest.fixture
+def snapshot_db(tmp_path):
+    """A real server's db on disk; mock state the loader replaces is restored afterwards."""
+    from fastvideo_studio.database import Database
+
+    saved = (dict(mock_server._settings), dict(mock_server._datasets), dict(mock_server._dataset_files))
+    db = Database(tmp_path / "fastvideo_ui.db")
+    yield tmp_path, db
+    mock_server._settings.clear()
+    mock_server._settings.update(saved[0])
+    mock_server._datasets.clear()
+    mock_server._datasets.update(saved[1])
+    mock_server._dataset_files.clear()
+    mock_server._dataset_files.update(saved[2])
+
+
+def _insert(db, job_id):
+    db.insert_job({"id": job_id, "model_id": "m", "prompt": "p", "status": "completed", "created_at": 1.0,
+                   "output_path": f"/nope/{job_id}.mp4"})
+
+
+def test_snapshot_edit_segments_are_served_as_a_list_not_json_text(client, snapshot_db):
+    # The db stores edit_segments as JSON text; serving that raw string made the
+    # Edit video dialog call .map on a string and crash.
+    data_dir, db = snapshot_db
+    _insert(db, "edited")
+    sections = [seg(brightness=20.0, end_seconds=2.0), seg(contrast=1.5)]
+    db.update_job_config("edited", {"edit_segments": sections})
+    assert mock_server._load_snapshot_from_db(data_dir)
+
+    assert client.get("/api/jobs/edited").json()["edit_segments"] == sections
+
+
+def test_snapshot_job_never_edited_has_an_empty_segment_list(client, snapshot_db):
+    data_dir, db = snapshot_db
+    _insert(db, "fresh")
+    assert mock_server._load_snapshot_from_db(data_dir)
+
+    assert client.get("/api/jobs/fresh").json()["edit_segments"] == []

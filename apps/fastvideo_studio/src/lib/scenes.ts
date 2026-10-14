@@ -94,13 +94,25 @@ function createdAt(job: Job): number {
 	return job.created_at ?? 0;
 }
 
-/** The take to show: the one the user chose, else the most recent completed one, else the newest. */
+/** Statuses of a take that is still on its way to a result. */
+const IN_FLIGHT_STATUSES = ["running", "queued", "pending"];
+
+/**
+ * The take to show: the one the user chose, else the newest in-flight take created
+ * after the latest completed one (a redo in progress), else the most recent
+ * completed one, else the newest.
+ */
 function pickTake(takes: Job[], choice?: string): Job {
 	const chosen = choice ? takes.find((j) => j.id === choice) : undefined;
 	if (chosen) return chosen;
+	const newest = (a: Job, b: Job) => createdAt(b) - createdAt(a);
 	const recent = (a: Job, b: Job) => (b.finished_at ?? createdAt(b)) - (a.finished_at ?? createdAt(a));
 	const completed = takes.filter((j) => j.status === "completed").sort(recent);
-	return completed[0] ?? [...takes].sort((a, b) => createdAt(b) - createdAt(a))[0];
+	const latestCompletedAt = Math.max(-Infinity, ...completed.map(createdAt));
+	const redo = takes
+		.filter((j) => IN_FLIGHT_STATUSES.includes(j.status) && createdAt(j) > latestCompletedAt)
+		.sort(newest)[0];
+	return redo ?? completed[0] ?? [...takes].sort(newest)[0];
 }
 
 /**

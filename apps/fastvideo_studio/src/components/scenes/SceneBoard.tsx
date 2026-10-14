@@ -1,14 +1,17 @@
 'use client';
 
 import * as React from 'react';
+import { Timer } from 'lucide-react';
 
 import { H3ShotPanel } from '@/components/jobs/H3ShotPanel';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useJobElapsed } from '@/hooks/useJobElapsed';
 import { NativeSelect } from '@/components/ui/native-select';
 import { getJobVideoUrl } from '@/lib/api';
 import { attachedLastFrames, whyCannotAttach } from '@/lib/continuation';
 import { formatCutTime } from '@/lib/h3Shots';
+import { computeElapsed } from '@/lib/jobTiming';
 import { QUEUEABLE_STATUSES } from '@/lib/sceneQueue';
 import { formatClock, type Scene, type SceneClip } from '@/lib/scenes';
 import type { Job } from '@/lib/types';
@@ -45,7 +48,8 @@ function takeLabel(job: Job, index: number, total: number): string {
     hour: '2-digit',
     minute: '2-digit',
   });
-  return `Take ${index + 1} of ${total} · ${job.status} · ${when}`;
+  const ran = job.status === 'running' ? null : computeElapsed(job, 0);
+  return `Take ${index + 1} of ${total} · ${job.status}${ran ? ` in ${ran}` : ''} · ${when}`;
 }
 
 function scrollToClip(id: string) {
@@ -132,6 +136,7 @@ function ClipRow({
   const [attaching, setAttaching] = React.useState(false);
   const [queueing, setQueueing] = React.useState(false);
   const { job } = clip;
+  const elapsed = useJobElapsed(job);
   const canPreview = job.status === 'completed' && !!job.output_path;
   const editable = EDITABLE_STATUSES.includes(job.status);
 
@@ -176,6 +181,15 @@ function ClipRow({
         </span>
         <h3 className="min-w-0 truncate text-sm font-semibold text-foreground">{clipLabel(clip)}</h3>
         <Badge variant={BADGE_VARIANTS[job.status] ?? 'secondary'}>{job.status}</Badge>
+        {elapsed && (
+          <span
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+            title={job.status === 'running' ? 'Running for' : 'Took'}
+          >
+            <Timer className="size-3.5" aria-hidden />
+            {elapsed}
+          </span>
+        )}
         <span className="font-mono text-xs text-muted-foreground">
           {formatClock(clip.startSeconds)}–{formatClock(clip.startSeconds + clip.durationSeconds)}
         </span>

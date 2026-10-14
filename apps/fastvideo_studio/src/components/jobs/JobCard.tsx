@@ -6,6 +6,7 @@ import { Timer } from 'lucide-react';
 import CreateJobModal from '@/components/jobs/CreateJobModal';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useJobElapsed } from '@/hooks/useJobElapsed';
 import { useStore } from '@/hooks/useStore';
 import {
   deleteJob,
@@ -23,32 +24,6 @@ import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
 interface JobCardProps {
   job: Job;
   onJobUpdated?: () => void;
-}
-
-function formatDuration(seconds: number): string {
-  const roundedSeconds = Math.round(seconds);
-  if (roundedSeconds < 60) return `${roundedSeconds}s`;
-  if (roundedSeconds < 3600) {
-    const mins = Math.floor(roundedSeconds / 60);
-    const secs = roundedSeconds % 60;
-    return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
-  }
-  const hours = Math.floor(roundedSeconds / 3600);
-  const mins = Math.floor((roundedSeconds % 3600) / 60);
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-}
-
-function computeElapsed(job: Job, currentTime: number): string | null {
-  if (!job.started_at) return null;
-  const endTime =
-    job.status === 'running' ? currentTime : (job.finished_at ?? 0);
-  if (!endTime && job.status !== 'running') return null;
-  const startedAtMs =
-    job.started_at < 1e12 ? job.started_at * 1000 : job.started_at;
-  const endTimeMs = endTime < 1e12 ? endTime * 1000 : endTime;
-  const elapsedSeconds = (endTimeMs - startedAtMs) / 1000;
-  if (elapsedSeconds <= 0) return null;
-  return formatDuration(elapsedSeconds);
 }
 
 const BADGE_VARIANTS: Record<string, BadgeProps['variant']> = {
@@ -69,15 +44,7 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
   const [isLoading, setIsLoading] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [isViewing, setIsViewing] = React.useState(false);
-  const [currentTime, setCurrentTime] = React.useState(() => Date.now());
-
-  const elapsedTime = computeElapsed(job, currentTime);
-
-  React.useEffect(() => {
-    if (job.status !== 'running' || !job.started_at) return;
-    const interval = setInterval(() => setCurrentTime(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [job.status, job.started_at]);
+  const elapsedTime = useJobElapsed(job);
 
   async function handleStart(e: React.MouseEvent) {
     e.preventDefault();

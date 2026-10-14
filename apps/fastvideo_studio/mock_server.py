@@ -443,8 +443,8 @@ def _seed() -> None:
 # --- DB snapshot (--data-dir) ------------------------------------------------
 
 
-def _decode_references(value: Any) -> list[dict[str, Any]]:
-    """Reference lists round-trip through the DB as JSON text."""
+def _decode_json_list(value: Any) -> list[dict[str, Any]]:
+    """References and edit_segments both round-trip through the DB as JSON text."""
     if not value:
         return []
     if isinstance(value, list):
@@ -476,7 +476,8 @@ def _job_from_snapshot(row: dict[str, Any]) -> dict[str, Any]:
         status = "pending"
         job["queued_at"] = None
     job["status"] = status
-    job["references"] = _decode_references(row.get("references"))
+    job["references"] = _decode_json_list(row.get("references"))
+    job["edit_segments"] = _decode_json_list(row.get("edit_segments"))
     job["progress"] = 100.0 if status == "completed" else 0.0
     job["progress_msg"] = "50/50 steps" if status == "completed" else ""
     job["phase"] = "done" if status == "completed" else status
