@@ -234,14 +234,16 @@ def validate_cookbook() -> None:
             if related_id not in ids:
                 raise ValueError(f"Cookbook recipe references unknown related id: {recipe['id']}: {related_id}")
 
+    validate_cookbook_cache_bust(ROOT_DIR / "docs/cookbook", version)
+
+
+def validate_cookbook_cache_bust(cookbook_pages: Path, version: int) -> None:
     cache_bust = f"cookbook-recipes.json?v={version}"
-    cookbook_pages = ROOT_DIR / "docs/cookbook"
     for page in sorted(cookbook_pages.glob("*.md")):
         text = page.read_text(encoding="utf-8")
-        if "cookbook-recipes.json" not in text:
-            continue
-        if cache_bust not in text:
-            raise ValueError(f"{page}: recipe JSON cache-bust must be {cache_bust}")
+        for _, url in re.findall(r"""\bdata-recipes\s*=\s*(["'])(.*?)\1""", text):
+            if not url.endswith(cache_bust):
+                raise ValueError(f"{page}: recipe JSON cache-bust must be {cache_bust}")
 
 
 def cookbook_serving_profile(recipe: dict) -> dict:
