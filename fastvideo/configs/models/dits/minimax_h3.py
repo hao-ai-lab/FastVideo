@@ -93,3 +93,7 @@ class MiniMaxH3Config(DiTConfig):
     # FastVideo's Fully Sharded Data Parallel (FSDP) loading path requires one
     # parameter dtype, while H3 inference keeps boundary projections in FP32.
     uniform_parameter_dtype: bool = False
+    # Training with FROZEN boundary projections (proj_in/out, audio_proj_in/out, time embedder): keep them FP32
+    # and replicated outside FSDP mixed precision, exactly as inference computes them. The loader allows the
+    # mixed dtypes; the training model must leave those parameters frozen (their gradients are never synced).
+    replicate_fp32_modules: bool = False

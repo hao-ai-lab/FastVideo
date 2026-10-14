@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 import contextlib
+import copy
 import re
 from collections.abc import Callable, Generator
 from itertools import chain
@@ -228,6 +229,32 @@ def _prepare_model_for_compile(model: nn.Module, *, regional: bool) -> str | Non
     return unsupported if isinstance(unsupported, str) and unsupported else None
 
 
+def _adopt_nvfp4_export_skip_blocks(init_params: dict[str, Any], quant_config: Any,
+                                    export_path: str) -> dict[str, Any]:
+    """Match the NVFP4 config's bf16 blocks to the ones the packed export declares.
+
+    A mixed export (e.g. FastH3 OmniRef QAD keeps blocks 42-49 in bf16) leaves
+    those blocks' linears out of the packed file; they must not be tagged NVFP4,
+    or the loader would expect packed buffers for them. An empty
+    ``skip_blocks`` adopts the export's list; a different explicit list is an
+    error rather than a silent precision change.
+    """
+    from fastvideo.layers.quantization.nvfp4_config import read_minimax_h3_nvfp4_dit_skip_blocks
+
+    export_blocks = read_minimax_h3_nvfp4_dit_skip_blocks(export_path)
+    config_blocks = tuple(getattr(quant_config, "skip_blocks", ()) or ())
+    if export_blocks == config_blocks:
+        return init_params
+    if config_blocks:
+        raise ValueError(f"NVFP4Config.skip_blocks={list(config_blocks)} but the packed export {export_path} keeps "
+                         f"blocks {list(export_blocks)} in bf16; drop skip_blocks to follow the export.")
+    logger.info("Packed NVFP4 DiT export keeps blocks %s in bf16; leaving their linears unquantized",
+                list(export_blocks))
+    transformer_config = copy.copy(init_params["config"])
+    transformer_config.quant_config = quant_config.with_skip_blocks(export_blocks)
+    return {**init_params, "config": transformer_config}
+
+
 def _validate_fsdp_inference_quantization(init_params: dict[str, Any], fsdp_inference: bool) -> None:
     """Enforce the transformer-quantization allowlist for FSDP inference."""
     transformer_config = init_params.get("config")
@@ -311,8 +338,17 @@ def maybe_load_fsdp_model(
     weight_dir_list = dense_transformer_safetensors(weight_dir_list)
     quant_config = getattr(init_params.get("config"), "quant_config", None)
     packed_profiles = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
-    packed_nvfp4_export = (packed_candidate
-                           if getattr(quant_config, "layer_profile", None) in packed_profiles else None)
+    packed_layer_profile = getattr(quant_config, "layer_profile", None)
+    packed_nvfp4_export = packed_candidate if packed_layer_profile in packed_profiles else None
+    if packed_candidate is not None and packed_nvfp4_export is None:
+        # A packed export leaves its quantized linears out of the dense shards, so
+        # loading it with any other profile misses those weights.
+        raise ValueError(
+            f"{packed_candidate} is a packed MiniMax-H3 NVFP4 export, which keeps the quantized linears out of "
+            f"the dense shards, but the quantization profile is {packed_layer_profile!r}. Load it with an NVFP4 "
+            f"config (layer_profile one of {', '.join(packed_profiles)}), or point the run at a dense export.")
+    if packed_nvfp4_export is not None:
+        init_params = _adopt_nvfp4_export_skip_blocks(init_params, quant_config, packed_nvfp4_export)
 
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
@@ -341,7 +377,8 @@ def maybe_load_fsdp_model(
     has_mixed_parameter_dtypes = callable(dtype_selector) and any(
         dtype_selector(_strip_checkpoint_wrapper_prefix(name), param_dtype) != param_dtype
         for name, _ in model.named_parameters())
-    if training_mode and has_mixed_parameter_dtypes:
+    frozen_fp32_ok = bool(getattr(getattr(model, "config", None), "replicate_fp32_modules", False))
+    if training_mode and has_mixed_parameter_dtypes and not frozen_fp32_ok:
         raise NotImplementedError("FSDP training with model-selected mixed parameter dtypes requires "
                                   "separate gradient synchronization for replicated parameters.")
 

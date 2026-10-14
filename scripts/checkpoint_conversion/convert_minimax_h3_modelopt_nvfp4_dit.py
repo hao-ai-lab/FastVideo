@@ -34,6 +34,17 @@ adds a calibrated static activation scale per linear
 (``_nvfp4_input_global_sf`` = 448 * 6 / amax) from a JSON of input amax keyed
 ``b<block>.<module>`` (e.g. ``b3.ff.fc_in``); without it activations use the
 unit global scale, which saturates inputs above 2688 (H3's ``ff.fc_out``).
+Every FFN linear needs an entry; attention projections and gates without one
+keep the unit scale, as in the V2 Consumer layout (OmniRef:
+``--quantize-ffn --act-amax amax.json --quantize-attention --quantize-gate``
+on the bf16 ``transformer_ref``).
+
+``--skip-blocks 42-49`` keeps every linear of those main blocks in bf16: they
+stay in the dense shards, are absent from the packed file, and the export's
+safetensors metadata lists them (``skip_blocks``) so the loader leaves them
+unquantized. FastH3 OmniRef QAD ships this way: ``scripts/quantization/
+minimax_h3_omniref/export_omniref_qad.py`` writes the student's bf16
+``transformer_ref`` that this converter then packs.
 
 Every exported linear is probed on random BF16 rows through the same
 ``mm_fp4`` path the loader runs; the relative error against a BF16 matmul with
@@ -76,6 +87,37 @@ def fastvideo_module_name(diffusers_prefix: str) -> str:
     for pattern, replacement in _RENAMES:
         name = pattern.sub(replacement, name)
     return name
+
+
+def act_amax_for(module: str, amax_table: dict[str, float], required: bool) -> float | None:
+    """The calibrated input amax of ``module``, or None for the unit scale.
+
+    Keys are ``b<block>.<sub>`` or the full module name (the Stage A / QAD tables use the latter).
+    FFN linears must have an entry; attention projections and gates without one keep the unit
+    activation scale (the V2 Consumer layout calibrates the FFN only).
+    """
+    block = re.match(r"transformer_blocks\.(\d+)\.(.+)$", module)
+    keys = (f"b{block.group(1)}.{block.group(2)}", module) if block else (module, )
+    for key in keys:
+        if key in amax_table:
+            return amax_table[key]
+    if required:
+        raise SystemExit(f"--act-amax has no entry {keys[0]!r} for {module}; nothing written")
+    return None
+
+
+def parse_blocks(text: str) -> tuple[int, ...]:
+    """``"42-49"`` or ``"3,7,42-49"`` -> sorted block indices."""
+    blocks: set[int] = set()
+    for part in filter(None, (p.strip() for p in text.split(","))):
+        low, _, high = part.partition("-")
+        blocks.update(range(int(low), int(high or low) + 1))
+    return tuple(sorted(blocks))
+
+
+def block_of(prefix: str) -> int | None:
+    match = re.match(r"transformer_blocks\.(\d+)\.", prefix)
+    return int(match.group(1)) if match else None
 
 
 def dequantize_modelopt(packed: torch.Tensor, scale: torch.Tensor, scale_2: torch.Tensor) -> torch.Tensor:
@@ -162,6 +204,8 @@ def main() -> None:
     parser.add_argument("--quantize-gate", action="store_true", help="also quantize attn.to_gate_compress")
     parser.add_argument("--quantize-ffn", action="store_true", help="quantize the FFN linears from a bf16 source")
     parser.add_argument("--act-amax", type=Path, help="JSON of calibrated input amax per linear")
+    parser.add_argument("--skip-blocks", type=parse_blocks, default=(),
+                        help="main blocks kept in bf16, e.g. 42-49 (recorded in the export metadata)")
     parser.add_argument("--max-probe-error", type=float, default=0.3)
     parser.add_argument("--dense-shard-gb", type=float, default=5.0)
     args = parser.parse_args()
@@ -182,7 +226,10 @@ def main() -> None:
     modelopt_set = set(modelopt)
     attention = sorted(k[:-len(".weight")] for k in weight_map
                        if k.endswith(".weight") and dense_pattern.match(k[:-len(".weight")])
-                       and k[:-len(".weight")] not in modelopt_set) if dense_pattern else []
+                       and k[:-len(".weight")] not in modelopt_set
+                       and block_of(k) not in args.skip_blocks) if dense_pattern else []
+    if any(block_of(p) in args.skip_blocks for p in modelopt):
+        parser.error("--skip-blocks names blocks whose linears the ModelOpt source already quantized")
     if args.quantize_ffn and any(_BLOCK_FFN.match(p) for p in modelopt):
         parser.error("--quantize-ffn needs a bf16 source; this one already holds ModelOpt FFN linears")
     amax_table = None
@@ -214,15 +261,14 @@ def main() -> None:
             raise SystemExit(f"probe error {error:.3f} on {prefix} exceeds {args.max_probe_error}; nothing written")
         module = fastvideo_module_name(prefix)
         if amax_table is not None:
-            block = re.match(r"transformer_blocks\.(\d+)\.(.+)$", module)
-            key = f"b{block.group(1)}.{block.group(2)}"
-            if key not in amax_table:
-                raise SystemExit(f"--act-amax has no entry {key!r} for {module}; nothing written")
-            buffers["_nvfp4_input_global_sf"] = torch.tensor((448.0 * 6.0) / max(amax_table[key], 1e-12),
-                                                             dtype=torch.float32)
+            amax = act_amax_for(module, amax_table, required=bool(_BLOCK_FFN.match(prefix)))
+            if amax is not None:
+                buffers["_nvfp4_input_global_sf"] = torch.tensor((448.0 * 6.0) / max(amax, 1e-12),
+                                                                 dtype=torch.float32)
         for name, value in buffers.items():
             export[f"{module}::{name}"] = value.cpu()
-    save_file(export, str(args.dst / EXPORT_FILENAME))
+    metadata = {"skip_blocks": json.dumps(list(args.skip_blocks))} if args.skip_blocks else None
+    save_file(export, str(args.dst / EXPORT_FILENAME), metadata=metadata)
 
     dense_keys = [k for k in weight_map if k not in modelopt_keys and k not in attention_keys]
     shard, shard_bytes, shards = {}, 0, []
@@ -254,6 +300,7 @@ def main() -> None:
                       "gate_linears": sum(1 for p in attention if _BLOCK_GATE.match(p)),
                       "min_scale_byte_agreement": round(min(agreements), 4) if agreements else None,
                       "mean_scale_byte_agreement": round(sum(agreements) / len(agreements), 4) if agreements else None,
+                      "skip_blocks": list(args.skip_blocks),
                       "dense_tensors": len(dense_keys), "dense_shards": len(shards)}))
 
 
