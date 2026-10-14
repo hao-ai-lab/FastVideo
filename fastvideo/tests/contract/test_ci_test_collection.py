@@ -300,6 +300,22 @@ def test_dreamverse_lane_keeps_arm64_browser_coverage_explicit():
     assert "--project=webkit" in lane
     assert "--project=mobile-safari" in lane
 
+    browser_commands = lane.rsplit("if [[ $machine_arch =~ ^(aarch64|arm64)$ ]]; then", maxsplit=1)[1]
+    arm64_commands, x64_commands = browser_commands.split("\nelse\n", maxsplit=1)
+    codec_filter = re.search(r"--grep-invert='([^']+)'", arm64_commands)
+    assert codec_filter is not None
+    excluded = re.compile(codec_filter.group(1))
+    mode_tests = (REPO_ROOT / "apps/dreamverse/web/e2e/generation-modes.spec.ts").read_text()
+    playback_title = "sends validated assets and plays a clearly labeled sample"
+    upload_title = "proxies a media upload larger than Next's default 10 MiB body limit"
+    assert playback_title in mode_tests
+    assert upload_title in mode_tests
+    for mode in ("t2va", "fl2va", "ref2va"):
+        assert excluded.search(f"{mode} {playback_title}"), f"ARM64 Chromium lacks codecs for {mode} playback"
+    assert not excluded.search(upload_title), "Codec-independent media uploads must retain Chromium coverage"
+    assert "npm run e2e -- --project=firefox\n" in arm64_commands
+    assert "--grep-invert" not in x64_commands
+
 
 def test_training_lanes_keep_tracking_offline_and_secret_free():
     lane_root = REPO_ROOT / ".buildkite/scripts/lanes"
