@@ -228,6 +228,13 @@ the other SSIM and golden tests and the suites' fail-fast behavior remain active
 The SD3.5 golden and SSIM tests are also explicitly paused at the maintainer's
 request while their gated checkpoint access is unavailable.
 
+MatrixGame 3 explicitly selects FA2 for its existing GB200 reference. That
+reference was published in dataset commit `e1a6e64` and was not part of the
+later FA4 refresh. Unchanged main with FA2 reproduces its video SHA-256
+`1d1d26a59481e37a9e838a628d875e196211c2236e8f9a370e0a9f73e97300c7`;
+FA4 scores 0.96636 against its unchanged 0.98 requirement. The test compares
+the current generation's returned path so older files cannot mask that check.
+
 ### Provisioning Required Hugging Face Models
 
 Gated access belongs to the individual HF account, not its organization or
