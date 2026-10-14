@@ -222,7 +222,7 @@ def test_decode_stage_reuses_its_pixel_buffer(monkeypatch) -> None:
     second = decode()
     assert allocations == [(1, 3, 5, 16, 16)]
     assert buffers[0][0] is buffers[1][0]
-    assert not buffers[0][1]
+    assert not buffers[0][1]  # zeroed (pages touched) before the decoder writes it
     assert torch.equal(first, torch.full_like(first, 63)) and torch.equal(second, torch.full_like(second, 127))
 
 

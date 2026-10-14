@@ -104,6 +104,7 @@ def test_swizzled_quantize_skips_the_pad_copy_bit_exactly(monkeypatch, rows: int
     x = torch.randn(rows, 256, device="cuda", dtype=torch.bfloat16)
     global_sf = (448.0 * 6.0) / x.float().abs().amax()
     expected = flashinfer.nvfp4_quantize(_pad_rows(x), global_sf, sfLayout=LAYOUT_128X4, do_shuffle=False)
+    # nv.F is torch.nn.functional, so the spy sees every pad; install it after the reference.
     pads = []
     real_pad = torch.nn.functional.pad
     monkeypatch.setattr(nv.F, "pad", lambda *args, **kwargs: pads.append(args) or real_pad(*args, **kwargs))

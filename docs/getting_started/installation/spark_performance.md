@@ -368,6 +368,39 @@ output:
 Within each configuration, repeated calls produced bit-identical frames
 except the previous V2 recipe, whose repeated calls diverged.
 
+### Optional NVFP4 video decoder
+
+`FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder.pt` swaps in an NVFP4
+decoder distilled with quantization-aware training and exported by
+`scripts/distill/minimax_h3_nvfp4_decoder/export_deploy.py`. At load the
+INT8 overlay is skipped, the VAE is depth-cut to the decoder's block count
+(the 26-layer light VAE hosts an 8-block decoder; a 36-block decoder needs
+the full `MiniMaxAI/MiniMax-H3` `vae/` in the stack's `vae/` folder), and
+only the packed FP4 weights stay resident (0.31 GiB for 8 blocks instead of
+2.3 GiB). The decode stage runs bf16 autocast for these decoders, the
+precision they were trained in. The decoder GEMMs use the cuDNN backend on
+GB10; outputs match CUTLASS bit for bit.
+
+The variable also accepts `.safetensors` files written by
+`fastvideo.models.vaes.minimax_h3_nvfp4_checkpoint`: either the same bf16
+master weights, or pre-packed NVFP4 weights from
+`scripts/distill/minimax_h3_nvfp4_decoder/export_packed.py`. A packed file is
+read straight onto the GPU and never materializes the full-precision weights
+of the quantized linears; it decodes bit-identically to packing the bf16 file
+at load.
+
+V2 at 832x480, 124 frames, seed 1234, one Spark, warm calls:
+
+| Video decoder | End to end | Denoise | Video decode | Peak allocated |
+|---|---:|---:|---:|---:|
+| Light VAE, INT8 overlay, 1 tile per call, eager | 112.4 s | 68.4 s | 42.7 s | 59.4 GiB |
+| Light VAE, dense, 12 tiles per call, compiled (recipe) | 78.9 s | 68.1 s | 9.6 s | 64.3 GiB |
+| 8-block NVFP4 decoder | 70.9 s | 68.2 s | 1.6 s | 58.0 GiB |
+
+The 8-block decoder decodes the same with or without `compile.vae_enabled`
+and does not need tile batching. Its output is lossy against the light VAE
+(31 dB PSNR on this clip); review clips before using it.
+
 ### Released model measurements
 
 The released Trim stack at revision `cae9ceb6feefe77d34a56640782cda3909363f19`

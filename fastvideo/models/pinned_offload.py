@@ -85,4 +85,10 @@ def unload(module: nn.Module) -> nn.Module:
     for name, t in _tensors(module):
         if t.data.device.type != "cpu":
             t.data = host[name]
+    # Parameters and buffers are not the whole story: a submodule may derive device
+    # tensors into a plain attribute, which would otherwise stay on the GPU.
+    for submodule in module.modules():
+        clear = getattr(submodule, "clear_offload_caches", None)
+        if clear is not None:
+            clear()
     return module
