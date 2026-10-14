@@ -100,6 +100,14 @@ pytest fastvideo/tests/vaes/test_wan_vae.py -q
 GPU-heavy suites need the right hardware, credentials, local caches, and
 sometimes custom kernels. Document those assumptions in new tests.
 
+The legacy VSA training regression selects a device-specific summary. Its
+GB200 reference was generated from unchanged upstream commit
+`d5253fd71055927f12aa6c4aa679b93a00238851` using two GB200 GPUs, Torch
+2.12.0+cu130, CUDA 13.0 and FA2. Two independent upstream runs produced
+gradient norms 1.909 and 1.935 and losses 0.30861 and 0.30886. The reference
+JSON retains provenance; the H100 reference and all comparison tolerances
+remain unchanged. Candidate outputs must not be used to refresh this reference.
+
 ## SSIM Tests
 
 SSIM tests generate videos using specific models and parameters, then compare
