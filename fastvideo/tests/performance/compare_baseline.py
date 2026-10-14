@@ -591,9 +591,7 @@ def main() -> int:
     upload_policy = _normalized_upload_policy()
     performance_pytest_failed = _performance_pytest_failed()
 
-    # Strict on upload-enabled runs: silent sync failure would make comparison
-    # and upload state ambiguous.
-    sync_from_hf(TRACKING_ROOT, strict=persist_tracking)
+    sync_from_hf(TRACKING_ROOT, strict=persist_tracking or _detect_run_source() == "pr")
 
     current_results = _load_current_results()
     if not current_results:

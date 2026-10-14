@@ -305,7 +305,7 @@ def test_weekly_performance_api_build_keeps_scheduled_baseline_policy():
         ('main', 'api', 'ci', 'full', 'false', 'scheduled_main', 'always'),
         ('main', 'api', 'ci', 'direct', 'false', 'unknown', 'pass'),
         ('feature', 'api', 'fastvideo-performance-lane', 'direct', 'false', 'unknown', 'pass'),
-        ('main', 'api', 'fastvideo-performance-lane', 'direct', '1958', 'pr', 'pass'),
+        ('main', 'api', 'fastvideo-performance-lane', 'direct', '1958', 'pr', 'never'),
     )
     with tempfile.TemporaryDirectory() as root:
         directory = Path(root)
