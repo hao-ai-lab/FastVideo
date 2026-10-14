@@ -235,6 +235,15 @@ later FA4 refresh. Unchanged main with FA2 reproduces its video SHA-256
 FA4 scores 0.96636 against its unchanged 0.98 requirement. The test compares
 the current generation's returned path so older files cannot mask that check.
 
+The missing GB200 HunyuanVideo 1.5 I2V and Kandinsky 6 references were generated
+from unchanged upstream commit `d5253fd71055927f12aa6c4aa679b93a00238851`
+with Torch 2.12.0, CUDA 13 and FA4. Their checkpoint revisions are pinned in
+the tests and recorded alongside the videos. Independent upstream repeats and
+the candidate both scored 1.0 for Hunyuan and 0.98395 for Kandinsky against
+the first upstream outputs, preserving the existing 0.95 and 0.98 thresholds.
+Kandinsky remains required; its authorized complete snapshot is prepared in
+the shared CI cache without exposing an authentication token to PR code.
+
 ### Provisioning Required Hugging Face Models
 
 Gated access belongs to the individual HF account, not its organization or
