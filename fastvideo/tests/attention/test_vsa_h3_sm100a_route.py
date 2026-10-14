@@ -733,3 +733,71 @@ def test_regional_compile_reuses_graphs_across_prompt_lengths(monkeypatch, env_o
             f"unseen prompt lengths compiled {counter.frame_count - warm_graphs} new graphs")
     finally:
         torch._dynamo.reset()
+
+
+def test_regional_compile_reuses_graphs_across_sp_padding_lengths(monkeypatch, env_overrides):
+    """Sequence lengths that do and don't divide by the SP degree reuse warm graphs (#1940).
+
+    ``DistributedAttention_VSA`` slices the SP padding off before the backend and pads the output back, so the
+    padded length (a function of ``total_seq_length % sp``) must not leak into the compiled graph's guards.
+    """
+    from torch._dynamo.testing import CompileCounter
+
+    from fastvideo.attention import layer as attn_layer
+    from fastvideo.forward_context import set_forward_context
+
+    sp_degree = 4
+
+    def mask_count(q, num):
+        return q + num.repeat_interleave(q.shape[2] // num.shape[-1], dim=-1).unsqueeze(-1).to(q.dtype)
+
+    fake_sm = _FakeSm100a(supported=True)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a",
+                        lambda q, k, v, q2k_idx, q2k_num, vbs, need_lse=True: (mask_count(q, q2k_num), None))
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_sm100a_from_mask",
+                        lambda q, k, v, block_map, vbs: (mask_count(q, block_map.sum(-1)), None))
+    monkeypatch.setattr(vsa_h3, "_sm100a", fake_sm)
+    monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
+    # The all-to-all is the identity on a single rank; the SP padding slice/pad in the layer still runs.
+    monkeypatch.setattr(attn_layer, "sequence_model_parallel_all_to_all_4D", lambda x, **_: x)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    assert impl.prepare_for_regional_compile(torch.device("cpu")) is None
+    layer = attn_layer.DistributedAttention_VSA.__new__(attn_layer.DistributedAttention_VSA)
+    torch.nn.Module.__init__(layer)
+    layer.attn_impl = impl
+    layer._compile_forward_enabled = True
+    builder = MiniMaxH3VSAMetadataBuilder()
+    counter = CompileCounter()
+
+    def run(q, k, v, total):
+        return layer(q, k, v, total)[0]
+
+    def check(text_rows_list):
+        pads = set()
+        for text_rows in text_rows_list:
+            meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
+            total = meta.total_seq_length
+            pad = -total % sp_degree
+            pads.add(pad)
+            q, k, v = (torch.randn(1, total + pad, _HEADS, _DIM, dtype=torch.bfloat16) for _ in range(3))
+            with set_forward_context(current_timestep=0, attn_metadata=meta):
+                actual = compiled(q, k, v, total)
+                expected = run(q, k, v, total)
+            assert actual.shape == (1, total + pad, _HEADS, _DIM)
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        return pads
+
+    torch._dynamo.reset()
+    try:
+        compiled = torch.compile(run, backend=counter, fullgraph=True)
+        with torch.no_grad():
+            warm_pads = check((17, 40, 64, 81, 100, 130))
+            assert 0 in warm_pads and len(warm_pads) > 1, "need lengths that do and don't divide by the SP degree"
+            warm_graphs = counter.frame_count
+            check((151, 200, 233, 300, 47, 113, 18, 19, 20))
+        assert counter.frame_count == warm_graphs, (
+            f"unseen padded lengths compiled {counter.frame_count - warm_graphs} new graphs")
+    finally:
+        torch._dynamo.reset()
