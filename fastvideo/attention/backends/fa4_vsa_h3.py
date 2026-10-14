@@ -37,7 +37,8 @@ output of its own group.
 Requires the FA4-FP4 ``flash_attn.cute`` package (``hao-ai-lab/flash-attention-fp4``
 ``fp4_B300@0633a0ef``) with ``scripts/benchmarks/fasth3_omniref_b200/flash_attention_fp4_omniref.patch``
 applied: cutlass-dsl 4.8 compatibility (so it imports next to FlashInfer), the FP4
-kernel's block-sparse paths, and the column-limit mask this module relies on.
+kernel's block-sparse paths, the column-limit mask, and per-token score scales.
+See ``scripts/benchmarks/fasth3_omniref_b200/README.md`` for installation commands.
 """
 from __future__ import annotations
 

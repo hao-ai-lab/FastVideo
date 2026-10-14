@@ -74,10 +74,27 @@ The NVFP4 stack the Blackwell profiles run is:
   is read straight onto the GPU without materializing the full-precision
   weights of its quantized linears.
 
-The RTX 4090 profile substitutes FP8 linears for NVFP4 and bf16 VSA attention
-for the FP4 kernel, and decodes with the VAE folder's own dense light decoder:
+The RTX 4090 profile requires a **dense or FP8 OmniRef export**, composed with
+the base components. Use `--model-path <dense-or-fp8-export> --profile rtx-4090`, or
+point the matching YAML recipe at its composed directory. A packed NVFP4 export
+omits the quantized linears from its dense shards and cannot load as FP8.
+The profile uses FP8 linears and the unquantized Triton emulator for the
+checkpoint's fixed 128-token VSA tiles. It decodes with the VAE folder's dense decoder:
 the NVFP4 decoder's GEMMs need FP4 hardware too, so `--decoder` does not apply
 there.
+
+To create the directory named by the RTX 4090 YAML recipe from a local dense export:
+
+```bash
+python examples/inference/basic/basic_fasth3_omniref_pdd.py \
+  --model-path ./FastH3-OmniRef-Dense \
+  --composed-dir ./FastH3-OmniRef-Dense-Composed \
+  --profile rtx-4090 --adaln-table /path/to/adaln_table.pt \
+  --image reference.png --prompt "a person speaking to camera"
+```
+
+Replace `./FastH3-OmniRef-Dense` with your dense or FP8 student export, including
+its Ref2VA PDD inference contract.
 
 ## Environment
 
@@ -103,8 +120,8 @@ GB10 (which needs CUDA 13). Building on the machine resolves the right one.
 
 ### Fallbacks, and what they cost
 
-The FP4 attention route needs that kernel build. If it is missing or fails, the
-attention falls back in this order, and never silently:
+The FP4 attention route needs that kernel build. These are explicit alternatives;
+a missing native kernel raises an error rather than selecting another mode:
 
 1. **FP4 kernel + prefix split** (the profiles above): fastest, the validated
    numerics.
@@ -112,8 +129,24 @@ attention falls back in this order, and never silently:
    the same kernel, with the same prefix split. Needs no consumer-Blackwell
    kernel build, but is slower. Use it to confirm a bad clip is the kernel and
    not the model.
-3. **bf16 VSA**: unset `FASTVIDEO_H3_VSA_FP4`. The reference quality, no FP4
-   kernel needed. This is what an sm_89 device runs.
+3. **bf16 VSA**: set `FASTVIDEO_H3_VSA_FP4=0` and
+   `FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16`. This runs unquantized
+   attention on the same 128-token tiles with Triton on consumer CUDA GPUs,
+   including sm_89. Disabling FP4 alone leaves the generic tile-128 route,
+   which requires the data-center sm_100a/sm_103a extension.
+
+A nonempty fine-attention override takes priority over `FASTVIDEO_H3_VSA_FP4=1`,
+including when a consumer profile sets that switch. Select it before constructing
+the generator. The emulator replaces fine attention only; it preserves VSA
+selection, partial-tile masking and the compression branch. These overrides use
+the eager path; disable inference compilation when using them.
+
+### Build FA4 for data-center Blackwell
+
+The optional `fa4-mix8`, `fa4-mixmx` and `fa4-qk` overrides use a separate
+FlashAttention dependency on sm_100/sm_103. The pinned revision and bundled patch,
+including sparse FP4 support and per-token score scales for `fa4-mix8`, have
+[installation instructions](https://github.com/aryan5v/FastVideo/blob/aryan/omniref-consumer-upstream/scripts/benchmarks/fasth3_omniref_b200/README.md#fa4-dependency-for-omniref).
 
 Dropping a component for a whole run is the last resort. If one NVFP4 component
 fails a quality check, keep the rest and move the smallest piece - the way the

@@ -139,6 +139,26 @@ def _rel(a: torch.Tensor, b: torch.Tensor) -> float:
 
 
 @needs_gpu
+@pytest.mark.parametrize("prefix_precision", [None, "fp8"])
+def test_inference_matches_training_without_running_maxima(monkeypatch, prefix_precision):
+    train = _triton()
+    q, k, v, idx, counts, valid, _, _ = _problem(4, heads=2, device="cuda")
+    q.requires_grad_(True)
+    options = dict(prefix_precision=prefix_precision, num_prefix_tiles=1 if prefix_precision else None)
+    expected = train.fp4_vsa_attn_qat(q, k, v, idx, counts, valid, **options).detach()
+    original = torch.empty
+
+    def allocate(shape, **kwargs):
+        assert len(shape) != 5, "inference must not allocate per-block running maxima"
+        return original(shape, **kwargs)
+
+    monkeypatch.setattr(torch, "empty", allocate)
+    with torch.no_grad():
+        actual = train.fp4_vsa_attn_qat(q, k, v, idx, counts, valid, **options)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+@needs_gpu
 @pytest.mark.parametrize("two_level_p,smooth_k", [(False, False), (True, False), (False, True), (True, True)])
 def test_triton_forward_matches_reference(two_level_p, smooth_k):
     q, k, v, q2k_idx, q2k_num, kv_valid, _, _ = _problem(6, heads=2, seed=4, device="cuda")

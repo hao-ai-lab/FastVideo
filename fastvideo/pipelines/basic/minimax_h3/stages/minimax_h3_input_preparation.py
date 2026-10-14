@@ -8,6 +8,7 @@ from typing import Any
 from PIL import Image, ImageOps
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.vision_utils import load_image
 from fastvideo.pipelines.basic.minimax_h3.packing import (
@@ -25,6 +26,7 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 from fastvideo.pipelines.basic.minimax_h3.reference import (
     MiniMaxH3PreparedReference,
     prepare_reference,
+    prepared_reference_digest,
     validate_references,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -203,6 +205,10 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         num_frames = resolve_target_num_frames(batch.num_frames)
         target_sample_rate = int(self.audio_vae.sampling_rate)
         batch.references = [prepare_reference(reference, num_frames, target_sample_rate) for reference in references]
+        if envs.FASTVIDEO_H3_DUMP_DIR.get():
+            # Latent preparation releases the media before decoding. Keep its
+            # content digest so equal prompts with different references stay distinct.
+            batch.extra["minimax_h3_reference_digest"] = prepared_reference_digest(batch.references)
         self._write_target_geometry(batch, height, width, ratio, num_frames)
         batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []
         batch.extra[MINIMAX_H3_KEYFRAME_ANCHORS_KEY] = ()

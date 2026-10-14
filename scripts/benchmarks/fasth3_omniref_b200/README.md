@@ -103,3 +103,30 @@ decode 7.8 -> 2.7 s. All four runs and both GPU counts give the same digests
 (frames `a48362b9...`, audio `0f0d42f8...`). One GPU runs none of the multi-rank
 paths (all-to-all, VAE splits), and its denoising dominates (46.6 -> 36.2 s),
 so the gain is smaller there.
+
+## FA4 dependency for OmniRef
+
+The FA4 VSA overrides require the FA4-FP4 fork at commit
+`0633a0efe6f26c8e63526c835bd1b6d18fcaedbe` plus the patch in this directory.
+The patch restores sparse FP4 paths, adapts them to CUTLASS DSL 4.8, adds
+partial-tile column masking, and restores per-token Q/K score scales before
+softmax for `fa4-mix8`. The original dependency code retains its BSD license.
+
+From the FastVideo repository root, in a CUDA environment with Torch and
+FlashInfer installed:
+
+```bash
+git clone https://github.com/hao-ai-lab/flash-attention-fp4.git
+git -C flash-attention-fp4 checkout 0633a0efe6f26c8e63526c835bd1b6d18fcaedbe
+git -C flash-attention-fp4 apply --check ../scripts/benchmarks/fasth3_omniref_b200/flash_attention_fp4_omniref.patch
+git -C flash-attention-fp4 apply ../scripts/benchmarks/fasth3_omniref_b200/flash_attention_fp4_omniref.patch
+pip install 'nvidia-cutlass-dsl==4.8.0'
+pip install -e ./flash-attention-fp4/flash_attn/cute
+```
+
+Use `FASTVIDEO_H3_VSA_FINE_ATTENTION=fa4-mix8` before loading the generator.
+This requires data-center Blackwell, sm_100 or sm_103. Consumer Blackwell and
+Ada devices can use `emulator-mix8` or `emulator-bf16` with Triton instead.
+
+The patch applies to the pinned revision. GPU compilation and output parity
+must be checked in the target CUDA environment.

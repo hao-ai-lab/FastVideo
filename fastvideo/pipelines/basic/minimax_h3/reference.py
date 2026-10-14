@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import hashlib
 import math
 from numbers import Integral, Real
 import os
@@ -73,6 +74,28 @@ class MiniMaxH3PreparedReference:
     latent_height: int = 0
     latent_width: int = 0
     num_audio_latents: int = 0
+
+
+def prepared_reference_digest(references: list[MiniMaxH3PreparedReference]) -> str:
+    """Content and preparation metadata of the ordered references for quality dumps."""
+    digest = hashlib.sha256()
+    for reference in references:
+        digest.update(
+            repr((reference.media_type, reference.has_audio, reference.block_timestamps, reference.num_latent_frames,
+                  reference.latent_height, reference.latent_width, reference.num_audio_latents)).encode())
+        for name in ("image", "frames", "waveform"):
+            value = getattr(reference, name)
+            if isinstance(value, torch.Tensor):
+                value = value.detach().cpu().numpy()
+            if isinstance(value, Image.Image):
+                digest.update(repr((name, value.mode, value.size)).encode())
+                digest.update(value.tobytes())
+            elif isinstance(value, np.ndarray):
+                digest.update(repr((name, value.shape, str(value.dtype))).encode())
+                digest.update(value.tobytes())
+            else:
+                digest.update(repr((name, value)).encode())
+    return digest.hexdigest()
 
 
 def coerce_reference(reference: Any) -> MiniMaxH3Reference:

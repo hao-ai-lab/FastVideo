@@ -228,10 +228,6 @@ def parse_args() -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--video", help="encode this clip with the full VAE encoder")
     source.add_argument("--latents", help="glob of raw (denormalized) NCTHW latents saved with torch.save")
-    source.add_argument("--holdout-data-root",
-                        action="append",
-                        help="train_qad.py data roots: decode its held-out clips and compare to their source videos")
-    parser.add_argument("--holdout-count", type=int, default=6, help="must match train_qad.py --eval-clips")
     parser.add_argument("--num-frames", type=int, default=124)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=832)
@@ -343,32 +339,6 @@ class Clip(NamedTuple):
     source: torch.Tensor | None  # [1, 3, T, H, W] uint8 on CPU, aligned to the decoded geometry
 
 
-def holdout_clips(args: argparse.Namespace, vae: nn.Module) -> list[Clip]:
-    """The exact held-out clips of train_qad.py (never trained on), with their source videos."""
-    import sys
-
-    import pyarrow.parquet as pq
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "distill" / "minimax_h3_nvfp4_decoder"))
-    from train_qad import list_parquets, load_holdout
-
-    files = list_parquets(args.holdout_data_root)
-    latents, held = load_holdout(files, args.holdout_count, True, vae.latents_mean.cpu(), vae.latents_std.cpu())
-    clips = []
-    for z, (path, row_index) in zip(latents, sorted(held, key=lambda item: files.index(item[0])), strict=True):
-        row = pq.ParquetFile(path).read_row_group(0, columns=["id"]).slice(row_index, 1).to_pylist()[0]
-        source_dir = Path(path).parents[2]
-        raw_path = next(
-            json.loads(line)["raw_video_path"] for line in open(source_dir / "MANIFEST_rows.jsonl")
-            if json.loads(line).get("conditioning_id") == row["id"])
-        _, _, frames, height, width = vae.decoded_pixel_shape(z.shape)
-        pixels = read_frames(raw_path, frames).float()
-        pixels = F.interpolate(pixels, size=(height, width), mode="bilinear", antialias=True, align_corners=False)
-        source = pixels.clamp(0, 255).round().to(torch.uint8).permute(1, 0, 2, 3).unsqueeze(0)
-        clips.append(Clip(f"{source_dir.name}_{row['id']}", z, source))
-    return clips
-
-
 def load_clips(args: argparse.Namespace, vae: nn.Module, out_dir: Path) -> list[Clip]:
     if args.video:
         pixels = read_video(args.video, args.num_frames, args.height, args.width)
@@ -381,7 +351,7 @@ def load_clips(args: argparse.Namespace, vae: nn.Module, out_dir: Path) -> list[
         if not paths:
             raise FileNotFoundError(args.latents)
         return [Clip(Path(path).stem, torch.load(path, map_location="cpu").float(), None) for path in paths]
-    return holdout_clips(args, vae)
+    raise ValueError("pass --video or --latents")
 
 
 def grid_tiles(vae: nn.Module, latent_shape: torch.Size) -> int:

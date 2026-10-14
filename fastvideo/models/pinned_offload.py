@@ -77,6 +77,17 @@ def load(module: nn.Module, device: torch.device, pin: bool = True) -> nn.Module
     return module
 
 
+def refresh_host_copies(module: nn.Module, pin: bool = True) -> None:
+    """Rebuild an existing host mirror after frozen weights or buffers change.
+
+    Resident modules have no mirror and do not need one. Release old masters
+    before copying newly packed buffers so both representations do not persist.
+    """
+    if getattr(module, _HOST_ATTR, None) is not None:
+        delattr(module, _HOST_ATTR)
+        _host_copies(module, pin and is_pin_memory_available())
+
+
 def unload(module: nn.Module) -> nn.Module:
     """Point a frozen ``module`` back at its host copies; no device-to-host copy."""
     host = getattr(module, _HOST_ATTR, None)
