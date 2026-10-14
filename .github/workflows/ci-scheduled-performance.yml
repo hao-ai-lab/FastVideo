@@ -1,0 +1,69 @@
+name: Scheduled Performance
+
+on:
+  schedule:
+    # Sunday 23:00 America/Los_Angeles, including daylight saving time.
+    - cron: "0 6 * * 1"
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    if: github.repository == 'hao-ai-lab/FastVideo' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select the Pacific-time schedule
+        id: schedule
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_EXPR: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == schedule ]]; then
+            expected='0 7 * * 1'
+            if [[ "$(TZ=America/Los_Angeles date +%z)" == -0700 ]]; then
+              expected='0 6 * * 1'
+            fi
+            if [[ "$SCHEDULE_EXPR" != "$expected" ]]; then
+              echo 'run=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+      - name: Trigger weekly performance on Slinky Slurm
+        if: steps.schedule.outputs.run == 'true'
+        env:
+          BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_BRANCH: ${{ github.event.repository.default_branch }}
+          BK_ORG: ${{ vars.BUILDKITE_ORG_SLUG }}
+          BK_PIPELINE: fastvideo-performance-lane
+        run: |
+          set -euo pipefail
+          if [[ ${#SOURCE_SHA} -ne 40 || "$SOURCE_SHA" == *[!0-9a-f]* ]]; then
+            echo 'SOURCE_SHA must be a full immutable commit SHA' >&2
+            exit 1
+          fi
+          curl -sS --fail-with-body --connect-timeout 10 --max-time 60 -X POST \
+            "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
+            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-raw "$(jq -n \
+              --arg commit "$SOURCE_SHA" \
+              --arg branch "$SOURCE_BRANCH" \
+              '{
+                commit: $commit,
+                branch: $branch,
+                message: "Weekly performance on Slinky Slurm",
+                ignore_pipeline_branch_filters: true,
+                env: {
+                  TEST_SCOPE: "direct",
+                  FULL_SUITE: "false",
+                  TEST_TYPE: "performance",
+                  PR_NUMBER: "false",
+                  PR_TITLE: "Scheduled performance"
+                }
+              }')"

@@ -249,6 +249,48 @@ def test_full_ssim_has_a_weekly_slurm_schedule():
     assert 'build.env("TEST_SCOPE") == "scheduled"' in str(ssim_step["if"])
 
 
+def test_performance_trigger_rejects_head_and_sends_a_pinned_direct_build():
+    import json
+    import os
+    import subprocess
+    import tempfile
+
+    workflow = yaml.safe_load((REPO_ROOT / '.github/workflows/ci-scheduled-performance.yml').read_text())
+    job = workflow['jobs']['trigger']
+    assert "github.repository == 'hao-ai-lab/FastVideo'" in job['if']
+    assert "github.ref == 'refs/heads/main'" in job['if']
+    step = job['steps'][-1]
+    assert step['env']['SOURCE_SHA'] == '${{ github.sha }}'
+    with tempfile.TemporaryDirectory() as root:
+        curl = Path(root) / 'curl'
+        curl.write_text('#!/bin/bash\nwhile [[ $# -gt 0 ]]; do\n'
+                        '  if [[ "$1" == --data-raw ]]; then printf "%s" "$2"; exit 0; fi\n'
+                        '  shift\ndone\nexit 1\n')
+        curl.chmod(0o755)
+        env = {
+            'PATH': root + os.pathsep + os.environ['PATH'],
+            'BUILDKITE_API_TOKEN': 'test-only',
+            'SOURCE_BRANCH': 'main',
+            'BK_ORG': 'fastvideo',
+            'BK_PIPELINE': step['env']['BK_PIPELINE'],
+        }
+        for commit in ('HEAD', 'abc123', 'g' * 40, 'a' * 40):
+            env['SOURCE_SHA'] = commit
+            result = subprocess.run(['bash', '-c', step['run']], env=env, text=True, capture_output=True)
+            if commit != 'a' * 40:
+                assert result.returncode != 0
+                assert not result.stdout
+                continue
+            assert result.returncode == 0, result.stderr
+            payload = json.loads(result.stdout)
+            assert payload['commit'] == commit
+            assert payload['branch'] == 'main'
+            assert payload['env']['TEST_TYPE'] == 'performance'
+            assert payload['env']['TEST_SCOPE'] == 'direct'
+            assert payload['env']['FULL_SUITE'] == 'false'
+            assert payload['env']['PR_NUMBER'] == 'false'
+
+
 def test_active_pipeline_has_no_modal_or_untrusted_compute_path():
     pipeline_text = (REPO_ROOT / ".buildkite/pipeline.yml").read_text()
     steps = _pipeline_steps()

@@ -60,7 +60,7 @@ Three Buildkite entry pipelines share the validated graph:
 |---|---|---|
 | `pr-fastcheck` | Automatic pull-request webhook | Six Fastcheck lanes |
 | `ci` | `/merge`, `ready`, schedules, and `/test` API builds | Change-aware merge gates, scheduled SSIM, explicit Full Suite, Fastcheck reruns, or one direct lane |
-| `fastvideo-performance-lane` | Weekly scheduler | Direct performance lane |
+| `fastvideo-performance-lane` | GitHub weekly scheduler | Direct performance lane |
 
 Each entry pipeline starts with the same trusted `pipeline-upload` job on the
 `ci-runner` queue. The `ci` pipeline's incoming GitHub webhook is disabled;
@@ -204,6 +204,19 @@ inside that range.
 
 See [Performance Benchmarks](performance_benchmarks.md) for the performance
 lane's thresholds, rolling baseline, artifacts, and reseeding process.
+
+`ci-scheduled-performance.yml` triggers the performance pipeline every Sunday
+at 23:00 America/Los_Angeles, passing the immutable `github.sha`. Its two UTC
+schedules select the matching Pacific offset so it runs once across daylight
+saving time. After this workflow lands, disable the legacy Buildkite schedule
+under **Settings → Schedules → FastVideo scheduled performance benchmarks →
+Edit → Enabled**. That schedule submits the literal `HEAD`, which the trusted
+runner rejects before upload. The GitHub `BUILDKITE_API_TOKEN` must have
+`write_builds` access to the performance pipeline.
+
+The gated FLUX.1-dev SSIM test is explicitly paused until its model access is
+provisioned. Its pytest skip is not FLUX quality validation; the other SSIM
+tests and the suite's fail-fast behavior remain active.
 
 ## `/merge` Request Flow
 
@@ -473,6 +486,7 @@ The reusable implementation lives in
 | `.github/workflows/ci-slash-commands.yml` | `/merge` and `/test` handling |
 | `.github/workflows/ci-trigger-full-suite.yml` | Change-aware merge-gate trigger for `ready` PRs and new pushes |
 | `.github/workflows/ci-scheduled-ssim.yml` | Weekly complete SSIM trigger on `main` |
+| `.github/workflows/ci-scheduled-performance.yml` | Weekly performance trigger with an immutable source SHA |
 | `.github/scripts/plan_merge_ci.py` | Trusted changed-path to integration-lane planner |
 | `.github/workflows/ci-aggregate-status.yml` | Aggregate Fastcheck and explicit Full Suite direct-rerun statuses |
 | `.buildkite/pipeline.yml` | Static 20-lane Slurm Buildkite graph |
