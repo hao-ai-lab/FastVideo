@@ -244,6 +244,13 @@ the first upstream outputs, preserving the existing 0.95 and 0.98 thresholds.
 Kandinsky remains required; its authorized complete snapshot is prepared in
 the shared CI cache without exposing an authentication token to PR code.
 
+LingBot Fast's missing GB200 reference uses the same upstream commit and
+runtime, with checkpoint revision `98583eb0fd66f481f73383428d65d2867c878e51`.
+Two unchanged-upstream runs with CPU offloading disabled produced identical
+video hashes. Its fixed FSDP CPU-offloaded run scored SSIM 1.0 against that
+reference, preserving the 0.70 requirement. The generation stage leaves FSDP
+parameter placement to FSDP instead of moving the whole model to the GPU.
+
 ### Provisioning Required Hugging Face Models
 
 Gated access belongs to the individual HF account, not its organization or
