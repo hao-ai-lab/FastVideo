@@ -1,0 +1,72 @@
+# FastH3 OmniRef (Ref2VA) on one DGX Spark (GB10, unified memory): the full NVFP4 stack, one clip per prompt.
+#
+# Point model_path at a composed OmniRef model directory: the distilled
+# transformer_ref export (with its packed nvfp4_weights.safetensors) symlinked
+# together with base MiniMax-H3's text_encoder, tokenizer, processor, vae and
+# audio_vae. examples/inference/basic/basic_fasth3_omniref_pdd.py builds that
+# directory and runs the same stack with --profile spark.
+#
+# The contract in the export's fastvideo_inference.json fixes the attention
+# backend, the VSA tile size and the eight-forward PDD partition; the run only
+# picks the device's offload policy and its environment:
+#
+# GB10: everything stays resident; cuDNN mm_fp4 and the dense batched decoder.
+# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3
+# FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_H3_VSA_FP4_PREFIX=fp8
+# FASTVIDEO_MINIMAX_H3_FUSIONS=all
+# FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0
+# FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt \
+# FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder-nvfp4.safetensors
+# FASTVIDEO_NVFP4_MM_BACKEND=cudnn
+# FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0
+# fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_spark.yaml
+#
+# See docs/inference/fasth3_omniref_consumer.md.
+generator:
+  model_path: ./FastH3-OmniRef-QAD120-NVFP4
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    quantization:
+      transformer_quant: NVFP4
+      layer_profile: h3_dit_vsa
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: false
+      text_encoder: false
+      image_encoder: false
+      vae: false
+      pin_cpu_memory: false
+      lazy_module_load: false
+  pipeline:
+    workload_type: i2v
+    components:
+      override_pipeline_cls_name: MiniMaxH3Ref2VAModularPipeline
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      video_decode_backend: h3-vae
+request:
+  prompt: >-
+    A person on a sofa, lit by a warm lamp, speaking to camera.
+  negative_prompt: ""
+  inputs:
+    references:
+      # Ordered: the clip is conditioned on these. Replace with your own media.
+      - source: assets/images/couple.jpg
+        media_type: image
+  sampling:
+    seed: 1234
+    height: 480
+    width: 832
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 8  # eight fused PDD blocks; the contract sets it
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    output_path: outputs/basic_fasth3_omniref_spark/
+    save_video: true
+    return_frames: false

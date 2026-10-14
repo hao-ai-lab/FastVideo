@@ -22,6 +22,13 @@ sequence is split across them (sequence parallelism).
 References are ordered. Pass them in order with --image / --video / --audio,
 for example ``--video dance.mp4 --image outfit.png --audio voice.wav``.
 
+``--profile {spark,rtx-pro-6000,rtx-5090,rtx-4090}`` runs the consumer stack on
+one of those devices: a packed NVFP4 export, FP4 sparse attention with the dense
+prefix rows split off at 8-bit Q/K, and the pre-packed NVFP4 decoder, with the
+device's own offload policy and geometry. The 4090, having no FP4 hardware, runs
+the closest equivalent (FP8 linears, bf16 VSA, the dense decoder) instead. See
+docs/inference/fasth3_omniref_consumer.md.
+
 ``--lossless-accel`` turns on every bit-identical speed-up the pipeline has
 (LOSSLESS_ACCEL_ENV below, plus resident encoders, pinned host memory and the
 sequence-parallel VAE); the output is bitwise the same as without it. It keeps
@@ -35,6 +42,7 @@ import argparse
 import json
 import os
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -49,12 +57,16 @@ from fastvideo.api import (
     OutputConfig,
     ParallelismConfig,
     PipelineSelection,
+    QuantizationConfig,
     SamplingConfig,
 )
 from fastvideo.configs.pipelines.minimax_h3 import parse_base_model_revision
 from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
 
 CONTRACT = "fastvideo_inference.json"
+# The default shape, and the one a device profile overrides when a run leaves the
+# geometry alone (profiles only choose between 480p and 768p).
+DEFAULT_HEIGHT, DEFAULT_WIDTH = 480, 832
 # Components the distilled export replaces, and the ones it shares with base MiniMax-H3.
 EXPORT_COMPONENTS = ("transformer_ref", "scheduler", "audio_scheduler")
 BASE_COMPONENTS = ("text_encoder", "tokenizer", "processor", "vae", "audio_vae")
@@ -114,14 +126,29 @@ def build_parser() -> argparse.ArgumentParser:
                             help=f"an ordered {flag} reference (repeatable)")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", default="outputs/fasth3_omniref_pdd")
-    parser.add_argument("--height", type=int, default=480)
-    parser.add_argument("--width", type=int, default=832)
+    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
+    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
     parser.add_argument("--num-frames", type=int, default=124)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=1, help="sequence-parallel GPUs (must divide 56 heads)")
     parser.add_argument("--lossless-accel",
                         action="store_true",
                         help="enable every bit-identical speed-up (output unchanged; about 125 GB per GPU)")
+    parser.add_argument("--profile",
+                        choices=sorted(DEVICE_PROFILES),
+                        default=None,
+                        help="run the full NVFP4 consumer stack for one device, with its offload policy and "
+                        "environment (see docs/inference/fasth3_omniref_consumer.md); the checkpoint must be "
+                        "the packed NVFP4 export")
+    parser.add_argument("--decoder",
+                        default=None,
+                        help="pre-packed NVFP4 VAE decoder (decoder-nvfp4.safetensors) used by --profile "
+                        "instead of the VAE folder's own decoder")
+    parser.add_argument("--adaln-table",
+                        default=None,
+                        help="precomputed AdaLN modulation table, so the 26 GB of adaln_proj never loads "
+                        "(write one once with FASTVIDEO_H3_ADALN_DUMP). Strongly recommended: the 24/32 GB "
+                        "profiles need it to keep the DiT resident")
     return parser
 
 
@@ -232,8 +259,138 @@ def apply_lossless_accel_env() -> None:
         os.environ.setdefault(name, value)
 
 
-def build_generator_config(model_dir: Path, num_gpus: int, lossless_accel: bool = False) -> GeneratorConfig:
-    if lossless_accel:
+# Device profiles for the full NVFP4 consumer stack; see
+# docs/inference/fasth3_omniref_consumer.md. Every profile keeps the validated
+# numerics: packed NVFP4 linears with the export's bf16 blocks, FP4 sparse
+# attention with the dense prefix rows split off at 8-bit Q/K, and the pre-packed
+# NVFP4 decoder. What differs per device is the offload policy and the Spark's
+# GEMM/VAE settings.
+_CONSUMER_ENV = {
+    # The checkpoint's trained attention backend; the contract fixes the tile size.
+    "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
+    # FP4 sparse attention on the consumer-Blackwell kernel, with the prefix split.
+    "FASTVIDEO_H3_VSA_FP4": "1",
+    "FASTVIDEO_H3_VSA_FP4_PREFIX": "fp8",
+    # Bit-exact kernels, and none of the data-center-only routes.
+    "FASTVIDEO_MINIMAX_H3_FUSIONS": "all",
+    "FASTVIDEO_VSA_TRITON": "1",
+    "FASTVIDEO_VSA_SM100A": "0",
+    "FASTVIDEO_FA4": "0",
+}
+
+
+@dataclass(frozen=True)
+class DeviceProfile:
+    """Everything that differs between consumer devices for one OmniRef clip."""
+
+    label: str
+    width: int
+    height: int
+    offload: OffloadConfig
+    env: dict[str, str]
+    # Defer the denoise modules until the sampler needs them, for the cards that
+    # cannot hold the text encoder and the DiT at once (the 24/32 GB recipes use it).
+    sequential_load: bool = False
+    # Linear quantization. sm_89 has no FP4 hardware, so the 4090 profile is the
+    # closest equivalent rather than the FP4 stack, in the DiT and - because the
+    # NVFP4 decoder's GEMMs need it too - in the VAE.
+    transformer_quant: str = "NVFP4"
+    layer_profile: str | None = "h3_dit_vsa"
+    nvfp4_decoder: bool = True
+
+
+DEVICE_PROFILES: dict[str, DeviceProfile] = {
+    "spark": DeviceProfile(
+        label="NVIDIA DGX Spark (GB10, 128 GB unified)",
+        width=832,
+        height=480,
+        # 128 GB unified holds the encoder, the DiT and the decoder at once:
+        # the same resident policy as the released Spark recipe.
+        offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=False, vae=False, pin_cpu_memory=False),
+        env={
+            **_CONSUMER_ENV,
+            # cuDNN mm_fp4 is 2.7-3x faster than CUTLASS on the H3 FFN shapes on GB10.
+            "FASTVIDEO_NVFP4_MM_BACKEND": "cudnn",
+            "FASTVIDEO_H3_VAE_TILE_BATCH": "12",
+            "FASTVIDEO_H3_VAE_INT8_OVERLAY": "0",
+        },
+    ),
+    "rtx-pro-6000": DeviceProfile(
+        label="NVIDIA RTX PRO 6000 (96 GB)",
+        width=1344,
+        height=768,
+        # 96 GB fits the encoder, the DiT and the decoder at once.
+        offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=False, vae=False, pin_cpu_memory=True),
+        env={**_CONSUMER_ENV, "FASTVIDEO_H3_VAE_TILE_BATCH": "8"},
+    ),
+    "rtx-5090": DeviceProfile(
+        label="NVIDIA RTX 5090 (32 GB)",
+        width=832,
+        height=480,
+        # The encoder is not resident, and the denoise modules load only when the
+        # sampler needs them. The DiT itself stays whole: no layerwise streaming.
+        offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=False, pin_cpu_memory=True),
+        sequential_load=True,
+        env={**_CONSUMER_ENV, "FASTVIDEO_H3_VAE_TILE_BATCH": "4"},
+    ),
+    "rtx-4090": DeviceProfile(
+        label="NVIDIA RTX 4090 (24 GB, sm_89, no FP4)",
+        width=832,
+        height=480,
+        # As the 5090, but 24 GB and FP8 linears (double the bytes of NVFP4):
+        # set FASTVIDEO_DIT_LAYERWISE to stream blocks if this still OOMs.
+        offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=False, pin_cpu_memory=True),
+        sequential_load=True,
+        env={
+            # No FP4 hardware: FP8 linears and bf16 VSA attention instead, and the
+            # dense light VAE because the NVFP4 decoder's GEMMs need FP4 too.
+            "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
+            "FASTVIDEO_H3_VSA_SM89_KERNEL": "bf16",
+            "FASTVIDEO_MINIMAX_H3_FUSIONS": "all",
+            "FASTVIDEO_VSA_TRITON": "1",
+            "FASTVIDEO_VSA_SM100A": "0",
+            "FASTVIDEO_FA4": "0",
+            # A 24 GB card fragments easily once the DiT is streamed.
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+            "FASTVIDEO_H3_VAE_TILE_BATCH": "4",
+        },
+        transformer_quant="FP8",
+        layer_profile=None,
+        nvfp4_decoder=False,
+    ),
+}
+
+
+def apply_profile(profile: DeviceProfile, decoder: str | None, adaln_table: str | None = None) -> None:
+    """Set a profile's environment, keeping any value already in the environment."""
+    for name, value in profile.env.items():
+        os.environ.setdefault(name, value)
+    if decoder and profile.nvfp4_decoder:
+        os.environ.setdefault("FASTVIDEO_H3_VAE_NVFP4_DECODER", decoder)
+    elif decoder:
+        print(f"--decoder ignored on {profile.label}: the NVFP4 decoder needs FP4 hardware; "
+              "this profile decodes with the VAE folder's own (dense) decoder")
+    if adaln_table:
+        # The AdaLN projections are a third of the DiT's bytes on disk; the
+        # precomputed table drops them entirely. Every profile takes it: on the
+        # 24/32 GB cards it is what makes residency possible, and elsewhere it
+        # buys headroom for the reference tokens.
+        os.environ.setdefault("FASTVIDEO_H3_ADALN_TABLE", adaln_table)
+
+
+def build_generator_config(model_dir: Path,
+                           num_gpus: int,
+                           lossless_accel: bool = False,
+                           profile: DeviceProfile | None = None) -> GeneratorConfig:
+    quantization = None
+    if profile is not None:
+        # `h3_dit_vsa` matches the packed export the consumer weights ship; the
+        # export's metadata names its bf16 blocks, so no skip list is needed.
+        quantization = QuantizationConfig(transformer_quant=profile.transformer_quant,
+                                          layer_profile=profile.layer_profile)
+        offload = profile.offload
+        experimental = {"h3_sequential_load": True} if profile.sequential_load else {}
+    elif lossless_accel:
         # Resident encoders skip streaming the 63 GB text encoder (and the
         # VAEs) from host memory on every clip; pinned buffers copy the
         # decoded clip at full PCIe speed; the parallel VAE paths reassemble
@@ -251,6 +408,7 @@ def build_generator_config(model_dir: Path, num_gpus: int, lossless_accel: bool 
             use_fsdp_inference=num_gpus > 1,
             parallelism=ParallelismConfig(tp_size=1, sp_size=num_gpus),
             offload=offload,
+            quantization=quantization,
         ),
         pipeline=PipelineSelection(
             workload_type="i2v",
@@ -273,9 +431,16 @@ def main() -> None:
           f"{contract['vsa_tile_size']}-token tiles, reference keep rate {contract['vsa_ref_keep_rate']}")
     references = [MiniMaxH3Reference(source=path, media_type=kind) for kind, path in args.references]
 
-    if args.lossless_accel:
+    profile = DEVICE_PROFILES[args.profile] if args.profile else None
+    if profile is not None:
+        apply_profile(profile, args.decoder, args.adaln_table)
+        args.width = args.width if args.width != DEFAULT_WIDTH else profile.width
+        args.height = args.height if args.height != DEFAULT_HEIGHT else profile.height
+        print(f"Profile: {profile.label}")
+    elif args.lossless_accel:
         apply_lossless_accel_env()
-    generator = VideoGenerator.from_config(build_generator_config(model_dir, args.num_gpus, args.lossless_accel))
+    generator = VideoGenerator.from_config(
+        build_generator_config(model_dir, args.num_gpus, args.lossless_accel, profile))
     try:
         result = generator.generate(
             GenerationRequest(
