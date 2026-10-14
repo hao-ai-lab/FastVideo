@@ -17,10 +17,12 @@ def _require_flashinfer() -> Any:
     return flashinfer
 
 
-@torch.compile
 def _global_sf(t: torch.Tensor) -> torch.Tensor:
-    maxabs = t.float().abs().nan_to_num().max()
-    maxabs = maxabs.clamp(min=1e-12)
+    # Eager amax: the previous torch.compile'd reduction lowered to a single-block
+    # Triton kernel (~38 ms for a 21k x 2048 activation on GB200). Max is exact
+    # in any order, so finite input gives the same scale bit for bit, and +-inf
+    # still maps to the largest finite value. No host sync.
+    maxabs = torch.nan_to_num(t.abs().amax().float(), nan=0.0).clamp(min=1e-12)
     return (448.0 * 6.0) / maxabs
 
 

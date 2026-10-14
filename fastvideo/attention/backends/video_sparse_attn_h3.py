@@ -555,6 +555,24 @@ def _ptx_blackwell_unavailable_reason(ptx_blackwell_mod: Any, query_bhsd: torch.
     return None
 
 
+@functools.cache
+def _fine_attention_from_name(name: str) -> Any:
+    kind, _, mode = name.partition("-")
+    if kind == "fa4":
+        from fastvideo.attention.backends.fa4_vsa_h3 import FA4VSAFineAttention
+        return FA4VSAFineAttention(mode)
+    from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics, FP4VSAFineAttention
+    prefix = {"mix8": "fp8", "mixmx": "mxfp8", "qk": None}[mode]
+    return FP4VSAFineAttention(
+        FP4AttentionNumerics(quantize=True, quantize_pv=False, smooth_k=True, prefix_precision=prefix))
+
+
+def fine_attention_from_env() -> Any:
+    """The ``FASTVIDEO_H3_VSA_FINE_ATTENTION`` replacement of the tile-128 fine kernel (shared), or None."""
+    name = envs.FASTVIDEO_H3_VSA_FINE_ATTENTION.get()
+    return _fine_attention_from_name(name) if name else None
+
+
 class MiniMaxH3VSAImpl(AttentionImpl):
 
     def __init__(
@@ -589,6 +607,12 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # 128-token blocks, an even tile count with the partner tile, integer
         # tile sizes), which every call meets, so it is evaluated once.
         self._tile128_route: dict[tuple[torch.device, torch.dtype, int], str | None] = {}
+        # Optional replacement of the fine block-sparse kernel only (selection,
+        # mask and the gated compression branch are unchanged). Called as
+        # ``fn(query, key, value, mask, metadata) -> [B, S, H, D]`` on the
+        # logical tile-ordered rows. Quantization-aware training installs its
+        # FP4 emulator here; it is also the only grad-capable tile-128 route.
+        self.fine_attention_override: Any = fine_attention_from_env()
 
     def prepare_for_compile(self, device: torch.device) -> None:
         """Tensorize per-layer state shared by every torch.compile route."""
@@ -838,7 +862,9 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # preserves the eager dense-layer contract without a Python branch.
             mask = mask | force_dense
 
-        if tile_elems in _PTX_BLACKWELL_TILE_ELEMS:
+        if self.fine_attention_override is not None and not compiling:
+            out = self.fine_attention_override(logical_query, logical_key, logical_value, mask, attn_metadata)
+        elif tile_elems in _PTX_BLACKWELL_TILE_ELEMS:
             # Native 64/128-token path: the block map is already at the
             # kernels' granularity. These entries take BHSD ([B, H, S_pad, D]);
             # mirror block_sparse_attn_256_bshd's Triton branch and transpose

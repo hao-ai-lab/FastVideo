@@ -588,6 +588,27 @@ FASTVIDEO_H3_VSA_FP4 = EnvBool(False,
                                category="attention",
                                doc="Run MiniMax-H3 VSA attention on the block-sparse SageAttention3 FP4 kernel "
                                "(sm_120 or GB10 sm_121, no-grad, single sequence-parallel rank).")
+FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
+    "",
+    choices=("", "fp8", "bf16"),
+    category="attention",
+    doc="Prefix split for the FP4 sparse attention kernel: keep the dense prefix query tiles (text, "
+    "reference and audio rows) off the FP4 kernel and run those rows densely with fp8 or bf16 Q/K and "
+    "bf16 P.V, while video query tiles stay on the FP4 kernel. The fp8 variant is the validated "
+    "training-time numerics and recovers most of the audio error that FP4 quantizes away. Needs "
+    "128-token tiles. Empty keeps every row on the FP4 kernel.")
+FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
+    "",
+    choices=("", "fa4-mix8", "fa4-mixmx", "fa4-qk", "emulator-mix8", "emulator-mixmx", "emulator-qk"),
+    category="attention",
+    doc="Replace VSA-H3's tile-128 fine block-sparse attention (selection and "
+    "the gated compression branch are unchanged): fa4-mix8 = FA4 NVFP4 Q/K video rows, "
+    "per-token FP8 Q/K dense-prefix rows (the validated QAD numerics); "
+    "fa4-mixmx = FA4 NVFP4 Q/K "
+    "video rows, MXFP8 Q/K dense-prefix rows, BF16 P.V, K smoothing "
+    "(sm_100/sm_103, needs the FA4-FP4 flash_attn.cute package); fa4-qk = "
+    "NVFP4 Q/K everywhere; emulator-* = the QAD FP4 emulator in that mode. "
+    "Empty keeps the BF16 sm_100a kernel.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
                                             doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
@@ -643,6 +664,10 @@ FASTVIDEO_H3_ADALN_TABLE = EnvPath(None,
                                    category="performance",
                                    doc="Precomputed MiniMax-H3 AdaLN modulation table; enables the cache and "
                                    "skips loading the AdaLN projection weights.")
+FASTVIDEO_H3_DUMP_DIR = EnvPath(None,
+                                category="debug",
+                                doc="Save each MiniMax-H3 request's final target video/audio rows and its text "
+                                "conditioning to this directory (evaluation of quantized components).")
 FASTVIDEO_H3_ADALN_DUMP = EnvPath(None,
                                   category="debug",
                                   doc="Write the MiniMax-H3 AdaLN modulation table to this path while sampling.")
@@ -675,6 +700,19 @@ FASTVIDEO_H3_VAE_TILE_PARALLEL = EnvBool(False,
                                          doc="Split MiniMax-H3 VAE spatial tiles (not only temporal chunks) across "
                                          "the sequence-parallel ranks in the parallel decode and keyframe encode; "
                                          "bitwise equal to the serial path.")
+FASTVIDEO_H3_VAE_NVFP4_FUSED = EnvBool(True,
+                                       category="performance",
+                                       doc="Run NVFP4 MiniMax-H3 VAE decoder blocks through the bit-exact fused "
+                                       "Triton kernels at inference.")
+FASTVIDEO_H3_VAE_NVFP4_CUDA_GRAPH = EnvBool(True,
+                                            category="performance",
+                                            doc="Replay small fused NVFP4 MiniMax-H3 VAE decoder calls (at most "
+                                            "four 1797-token tiles) as per-shape CUDA graphs.")
+FASTVIDEO_H3_VAE_NVFP4_DECODER = EnvPath(None,
+                                         category="performance",
+                                         doc="Exported NVFP4 MiniMax-H3 video decoder (.pt, or .safetensors with "
+                                         "bf16 masters or pre-packed NVFP4 weights) that replaces the VAE decoder "
+                                         "at load; skips the INT8 ConvRot overlay.")
 FASTVIDEO_H3_VAE_INT8_OVERLAY = EnvBool(True,
                                         category="performance",
                                         doc="Apply the INT8 ConvRot decoder overlay when the MiniMax-H3 VAE folder "
