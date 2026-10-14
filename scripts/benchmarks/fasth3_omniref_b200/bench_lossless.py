@@ -41,7 +41,14 @@ WARMUP_PROMPT = "A grey studio backdrop, still camera, room tone."
 def _example():
     spec = importlib.util.spec_from_file_location("basic_fasth3_omniref_pdd", EXAMPLE)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # `@dataclass` resolves the example's postponed annotations through the
+    # defining module's __dict__, so it has to be registered before it runs.
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
     return module
 
 
