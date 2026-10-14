@@ -223,6 +223,8 @@ upload policy.
 The gated FLUX.1-dev SSIM and golden tests are explicitly paused until their
 model access is provisioned. Their pytest skips are not FLUX quality validation;
 the other SSIM and golden tests and the suites' fail-fast behavior remain active.
+The SD3.5 golden and SSIM tests are also explicitly paused at the maintainer's
+request while their gated checkpoint access is unavailable.
 
 ## `/merge` Request Flow
 
