@@ -228,6 +228,41 @@ the other SSIM and golden tests and the suites' fail-fast behavior remain active
 The SD3.5 golden and SSIM tests are also explicitly paused at the maintainer's
 request while their gated checkpoint access is unavailable.
 
+### Provisioning Required Hugging Face Models
+
+Gated access belongs to the individual HF account, not its organization or
+token. An operator must request and obtain model access for the CI identity
+before configuring authentication. A valid token without model access still
+returns 403. Keep required models such as Kandinsky 6 strict until their
+weights and quality references are provisioned.
+
+The permanent operator rollout is:
+
+1. Approve every required gated repository for one maintained CI identity.
+2. Configure [HF CI/CD access through OIDC](https://huggingface.co/docs/hub/trusted-publishers)
+   for the trusted Buildkite preparation step, restricting issuer and job
+   claims to the intended organization and pipelines. A fine-grained read-only
+   token in the operator's secret store is an alternative. Keep performance
+   publishing credentials separate and restricted to the tracking dataset and
+   trusted main runs.
+3. Before leasing GPUs, check access to all required pinned manifests and
+   weight files together and check that their device/backend references exist.
+   Report every missing dependency in one preflight result; do not turn access
+   failures into passing quality gates.
+4. Fetch immutable model revisions into the runner-owned cache through trusted
+   code. Remove authentication before starting PR code, and keep download locks
+   and cache writes under the runner's identity. PR jobs consume the prepared
+   snapshots rather than depending on an interactive login or another user's
+   writable cache.
+5. For a missing SSIM reference, generate and inspect output from unchanged
+   upstream source on the CI GPU/backend/runtime, retain its provenance, and
+   publish only the reviewed new reference. Verify the candidate independently
+   before enabling the required gate; never use candidate output to clear a
+   regression failure.
+
+See [HF gated-model access](https://huggingface.co/docs/hub/models-gated) and
+the [testing guide](testing.md) for access and reference maintenance details.
+
 ## `/merge` Request Flow
 
 The Buildkite agent and Slurm have deliberately separate responsibilities:
