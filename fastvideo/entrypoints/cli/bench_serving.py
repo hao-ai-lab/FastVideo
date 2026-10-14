@@ -22,6 +22,7 @@ import re
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -57,11 +58,15 @@ class RequestFuncInput:
 @dataclass
 class RequestFuncOutput:
     success: bool = False
+    # From sending the request to its completion.
     latency: float = 0.0
     error: str = ""
     start_time: float = 0.0
     response_body: dict[str, Any] = field(default_factory=dict)
     peak_memory_mb: float = 0.0
+    # From the request's scheduled arrival to sending it, i.e. the wait for a
+    # --max-concurrency slot. Set by limited_request.
+    queue_wait: float = 0.0
 
 
 class BaseDataset(ABC):
@@ -561,12 +566,38 @@ async def async_request_video_sglang(
     return output
 
 
+async def limited_request(
+    request_func: Callable[[RequestFuncInput, aiohttp.ClientSession, tqdm | None], Awaitable[RequestFuncOutput]],
+    req: RequestFuncInput,
+    session: aiohttp.ClientSession,
+    pbar: tqdm | None,
+    semaphore: asyncio.Semaphore | None,
+) -> RequestFuncOutput:
+    """Send `req` once a concurrency slot is free, and record how long it waited.
+
+    The request is due when this is called. With --max-concurrency the requests
+    the server cannot keep up with queue here, in the client, and `latency` (which
+    starts when the request is sent) would not show that wait at all.
+    """
+    scheduled_time = time.perf_counter()
+    if semaphore is None:
+        output = await request_func(req, session, pbar)
+    else:
+        async with semaphore:
+            output = await request_func(req, session, pbar)
+    output.queue_wait = output.start_time - scheduled_time
+    return output
+
+
 def calculate_metrics(outputs: list[RequestFuncOutput], total_duration: float):
     success_outputs = [o for o in outputs if o.success]
     error_outputs = [o for o in outputs if not o.success]
 
     num_success = len(success_outputs)
     latencies = [o.latency for o in success_outputs]
+    # What a user arriving on the request schedule waits: queueing for a slot
+    # plus the request itself.
+    e2e_latencies = [o.queue_wait + o.latency for o in success_outputs]
     peak_memories = [o.peak_memory_mb for o in success_outputs if o.peak_memory_mb is not None and o.peak_memory_mb > 0]
 
     metrics = {
@@ -578,6 +609,9 @@ def calculate_metrics(outputs: list[RequestFuncOutput], total_duration: float):
         "latency_median": np.median(latencies) if latencies else 0,
         "latency_p99": np.percentile(latencies, 99) if latencies else 0,
         "latency_p50": np.percentile(latencies, 50) if latencies else 0,
+        "e2e_latency_mean": np.mean(e2e_latencies) if e2e_latencies else 0,
+        "e2e_latency_median": np.median(e2e_latencies) if e2e_latencies else 0,
+        "e2e_latency_p99": np.percentile(e2e_latencies, 99) if e2e_latencies else 0,
         "peak_memory_mb_max": max(peak_memories) if peak_memories else 0,
         "peak_memory_mb_mean": np.mean(peak_memories) if peak_memories else 0,
         "peak_memory_mb_median": np.median(peak_memories) if peak_memories else 0,
@@ -671,17 +705,6 @@ async def benchmark(args: argparse.Namespace) -> None:
     # Limit concurrency
     semaphore = asyncio.Semaphore(args.max_concurrency) if args.max_concurrency is not None else None
 
-    async def limited_request_func(
-        req: RequestFuncInput,
-        session: aiohttp.ClientSession,
-        pbar: tqdm | None,
-    ) -> RequestFuncOutput:
-        if semaphore:
-            async with semaphore:
-                return await request_func(req, session, pbar)
-        else:
-            return await request_func(req, session, pbar)
-
     # Run benchmark
     pbar = tqdm(total=len(requests_list), disable=args.disable_tqdm)
 
@@ -694,7 +717,7 @@ async def benchmark(args: argparse.Namespace) -> None:
                 interval = np.random.exponential(1.0 / args.request_rate)
                 await asyncio.sleep(interval)
 
-            task = asyncio.create_task(limited_request_func(req, session, pbar))
+            task = asyncio.create_task(limited_request(request_func, req, session, pbar, semaphore))
             tasks.append(task)
 
         outputs = await asyncio.gather(*tasks)
@@ -729,6 +752,9 @@ async def benchmark(args: argparse.Namespace) -> None:
     print("{:<40} {:<15.4f}".format("Latency Mean (s):", metrics["latency_mean"]))
     print("{:<40} {:<15.4f}".format("Latency Median (s):", metrics["latency_median"]))
     print("{:<40} {:<15.4f}".format("Latency P99 (s):", metrics["latency_p99"]))
+    print("{:<40} {:<15.4f}".format("E2E Latency Mean, incl. queue (s):", metrics["e2e_latency_mean"]))
+    print("{:<40} {:<15.4f}".format("E2E Latency Median, incl. queue (s):", metrics["e2e_latency_median"]))
+    print("{:<40} {:<15.4f}".format("E2E Latency P99, incl. queue (s):", metrics["e2e_latency_p99"]))
 
     if metrics["peak_memory_mb_max"] > 0:
         print(f"{'-' * 50}")
