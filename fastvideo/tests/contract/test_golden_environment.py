@@ -6,17 +6,14 @@ import fastvideo.envs as envs
 from fastvideo.tests.golden_gate._harness import GateSpec, assert_env_fingerprint_matches, env_fingerprint
 
 
-@pytest.mark.parametrize("raw", [None, "0", "false", "", "1"])
-def test_block_fingerprint_records_effective_fa4(monkeypatch, raw):
+@pytest.mark.parametrize("value", [None, False, True])
+def test_block_fingerprint_records_effective_fa4(monkeypatch, value):
     import torch
 
-    if raw is None:
-        monkeypatch.delenv("FASTVIDEO_FA4", raising=False)
-    else:
-        monkeypatch.setenv("FASTVIDEO_FA4", raw)
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda index: "NVIDIA GB200")
     spec = GateSpec("test", "test/repo", lambda layer: None, lambda device, seed: {})
-    assert env_fingerprint(spec)["fastvideo_fa4"] == str(int(envs.FASTVIDEO_FA4.get()))
+    with envs.FASTVIDEO_FA4.override(value):
+        assert env_fingerprint(spec)["fastvideo_fa4"] == str(int(envs.FASTVIDEO_FA4.get()))
 
 
 def test_legacy_unset_fa4_matches_disabled_without_changing_reference():

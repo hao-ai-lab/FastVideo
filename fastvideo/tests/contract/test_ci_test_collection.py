@@ -324,7 +324,6 @@ def test_weekly_performance_api_build_keeps_scheduled_baseline_policy():
             for pytest_rc in (0, 1):
                 calls.unlink(missing_ok=True)
                 env = {
-                    **os.environ,
                     'PATH': root + os.pathsep + os.environ['PATH'],
                     'BUILDKITE_BRANCH': branch,
                     'BUILDKITE_SOURCE': source,

@@ -47,23 +47,27 @@ jobs:
             echo 'SOURCE_SHA must be a full immutable commit SHA' >&2
             exit 1
           fi
+          payload=$(python3 - <<'PY'
+          import json
+          import os
+
+          print(json.dumps({
+              "commit": os.environ["SOURCE_SHA"],
+              "branch": os.environ["SOURCE_BRANCH"],
+              "message": "Weekly performance on Slinky Slurm",
+              "ignore_pipeline_branch_filters": True,
+              "env": {
+                  "TEST_SCOPE": "direct",
+                  "FULL_SUITE": "false",
+                  "TEST_TYPE": "performance",
+                  "PR_NUMBER": "false",
+                  "PR_TITLE": "Scheduled performance",
+              },
+          }))
+          PY
+          )
           curl -sS --fail-with-body --connect-timeout 10 --max-time 60 -X POST \
             "https://api.buildkite.com/v2/organizations/${BK_ORG}/pipelines/${BK_PIPELINE}/builds" \
             -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
             -H "Content-Type: application/json" \
-            --data-raw "$(jq -n \
-              --arg commit "$SOURCE_SHA" \
-              --arg branch "$SOURCE_BRANCH" \
-              '{
-                commit: $commit,
-                branch: $branch,
-                message: "Weekly performance on Slinky Slurm",
-                ignore_pipeline_branch_filters: true,
-                env: {
-                  TEST_SCOPE: "direct",
-                  FULL_SUITE: "false",
-                  TEST_TYPE: "performance",
-                  PR_NUMBER: "false",
-                  PR_TITLE: "Scheduled performance"
-                }
-              }')"
+            --data-raw "$payload"
