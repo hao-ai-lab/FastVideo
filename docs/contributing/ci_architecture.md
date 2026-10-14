@@ -220,9 +220,9 @@ refresh eligible baselines after successful tests and still produce comparison
 reports after test failures. PR and other direct reruns retain their existing
 upload policy.
 
-The gated FLUX.1-dev SSIM test is explicitly paused until its model access is
-provisioned. Its pytest skip is not FLUX quality validation; the other SSIM
-tests and the suite's fail-fast behavior remain active.
+The gated FLUX.1-dev SSIM and golden tests are explicitly paused until their
+model access is provisioned. Their pytest skips are not FLUX quality validation;
+the other SSIM and golden tests and the suites' fail-fast behavior remain active.
 
 ## `/merge` Request Flow
 

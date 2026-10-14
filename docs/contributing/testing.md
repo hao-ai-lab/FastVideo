@@ -53,6 +53,11 @@ or environment mismatch is not a pass. Do not replace a reference with the
 candidate output just to clear a failure. For a relocation, the unchanged
 parent is the baseline; two imports of the same class are not numerical proof.
 
+FA4 fingerprints record the effective boolean switch. Legacy block references
+with `fastvideo_fa4: <unset>` mean disabled and match an explicit `0`; enabling
+FA4 still fails the environment check. Other runtime pins and zero-tolerance
+tensor comparisons remain strict.
+
 The VAE and transformer CI lanes run their Wan component goldens first.
 Selected integration lanes wait for the golden lane in merge/full builds.
 See [CI/CD Architecture](ci_architecture.md) for direct-rerun and skip semantics.
