@@ -217,10 +217,12 @@ runner rejects before upload. The GitHub `BUILDKITE_API_TOKEN` must have
 The performance lane recognizes main-branch API builds from the dedicated
 performance pipeline with `TEST_SCOPE=direct` as scheduled-main runs. They
 refresh eligible baselines after successful tests and still produce comparison
-reports after test failures. PR and other direct reruns retain their existing
-upload policy.
+reports after test failures. PR performance runs use strict baseline reads and
+keep reports as Buildkite artifacts without requiring upload credentials.
+Scheduled-main publishing requires an operator-provisioned token with write
+access to `FastVideo/performance-tracking`.
 
-The gated FLUX.1-dev SSIM and golden tests are explicitly paused until their
+The gated FLUX.1-dev SSIM and golden tests and FLUX.2-klein-9B SSIM test are explicitly paused until their
 model access is provisioned. Their pytest skips are not FLUX quality validation;
 the other SSIM and golden tests and the suites' fail-fast behavior remain active.
 The SD3.5 golden and SSIM tests are also explicitly paused at the maintainer's
