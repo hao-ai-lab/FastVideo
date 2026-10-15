@@ -54,9 +54,11 @@ References are **ordered**: pass them in the order the model should read them.
 then the image, then the audio. At least one image or video reference is
 required; audio references accompany them.
 
-`--steps` defaults to the contract's `transformer_forwards`, which is the
-fused-block count the student was distilled on. Passing a different count is
-rejected unless the export supports it.
+`--steps` defaults to the contract's `transformer_forwards`: one transformer
+forward per fused block of the export's trained fine grid, exactly as on CUDA.
+Each step fuses that block's widened output heads into their integration-
+weighted mean, so the heads never all run at once. Passing a different count is
+rejected, because the partition is the checkpoint's.
 
 The prompt is cached under `--prompt-cache-dir` **for text-only requests**; a
 reference-conditioned request re-encodes, because the vision tokens are part of
