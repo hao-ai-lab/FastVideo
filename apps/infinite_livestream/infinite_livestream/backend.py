@@ -160,8 +160,8 @@ class FastH3Backend:
         Each clip length is a torch.compile shape, and the fullgraph regional
         route treats exceeding dynamo's recompile limit as a crash rather than
         a fallback. FastVideo's own imports lower it (`layers/lora/linear.py`
-        to 16, longcat's `bsa_interface.py` to 32), so this raises it again
-        and turns overflow back into a recompile.
+        to 16), so this raises it again and turns overflow back into a
+        recompile.
 
         One pinned clip length keeps every process far under even the lowered
         limit; a varied `warmup_lengths` is where this becomes the seatbelt it
