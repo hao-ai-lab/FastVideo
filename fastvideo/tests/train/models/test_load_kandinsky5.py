@@ -19,7 +19,6 @@ import fastvideo.envs as envs
 
 envs.setdefault_external("MASTER_ADDR", "localhost")
 envs.setdefault_external("MASTER_PORT", "29518")
-os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 from pathlib import Path
 
@@ -34,9 +33,11 @@ _FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "kandinsky5
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_kandinsky5_model_loads_and_forwards():
+def test_kandinsky5_model_loads_and_forwards(monkeypatch: pytest.MonkeyPatch):
     if not torch.cuda.is_available():
         pytest.skip("requires CUDA")
+    if "FASTVIDEO_ATTENTION_BACKEND" not in os.environ:
+        monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
     cfg = load_run_config(_FIXTURE)
     model = Kandinsky5Model(
