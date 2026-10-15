@@ -225,17 +225,34 @@ def parse_dense_layers(value: str | None) -> tuple[int, ...]:
 
 
 def prefix_segments_from_layout(layout: Any, patch_size: tuple[int, int, int]) -> tuple[int, ...]:
-    """Segment sizes preceding the generated-video tail, matching the PyTorch stage."""
+    """Segment sizes preceding the generated-video tail, matching the PyTorch stage.
+
+    Prefix tiles are chunked per segment, so a segment boundary must fall where
+    the packed rows change kind. A Ref2VA layout interleaves a video
+    reference's audio rows with the references themselves, so it is split per
+    reference from ``layout.reference_segments``; T2VA/FL2VA keep the single
+    condition segment they have always had.
+    """
     n_text = int(layout.text_indices.shape[0])
-    n_cond = int(layout.num_condition_video_rows)
-    n_audio = int(layout.audio_indices.shape[0])
     n_video = ((layout.num_video_latent_frames // patch_size[0]) * (layout.latent_height // patch_size[1]) *
                (layout.latent_width // patch_size[2]))
-    if n_text + n_cond + n_audio + n_video != int(layout.sequence_length):
+    reference_segments = getattr(layout, "reference_segments", ())
+    if reference_segments:
+        # Packed order is [text | ordered reference segments | target audio |
+        # target video]; everything before the video tail is prefix.
+        n_target_audio = int(layout.audio_indices.shape[0]) - int(layout.num_condition_audio_rows)
+        segments = (n_text, *(int(rows) for _, rows, _ in reference_segments), n_target_audio)
+        prefix_length = sum(segments)
+    else:
+        n_cond = int(layout.num_condition_video_rows)
+        n_audio = int(layout.audio_indices.shape[0])
+        segments = (n_text, n_cond, n_audio)
+        prefix_length = n_text + n_cond + n_audio
+    if prefix_length + n_video != int(layout.sequence_length):
         raise ValueError("VSA-H3 supports the standard [text|cond|audio|video] packing only; "
-                         f"segments ({n_text}, {n_cond}, {n_audio}) + video {n_video} do not sum to "
+                         f"segments {segments} + video {n_video} do not sum to "
                          f"sequence length {layout.sequence_length}.")
-    return n_text, n_cond, n_audio
+    return tuple(segments)
 
 
 def dit_seq_shape_from_layout(layout: Any, patch_size: tuple[int, int, int]) -> tuple[int, int, int]:

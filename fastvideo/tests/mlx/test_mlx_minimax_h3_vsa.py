@@ -447,6 +447,25 @@ def test_prefix_segments_from_t2va_layout_drop_empty_condition() -> None:
     assert prefix_segments_from_layout(layout, (1, 2, 2)) == (6, 0, 6)
 
 
+def test_ref2va_prefix_splits_per_reference() -> None:
+    """A reference-prefixed layout keeps its interleaved audio rows as their own segment."""
+    from fastvideo.mlx_runtime.minimax_h3 import build_ref2va_packed_layout
+    from fastvideo.mlx_runtime.minimax_h3_reference import MiniMaxH3PreparedReference
+
+    image = MiniMaxH3PreparedReference(media_type="image")
+    image.num_latent_frames, image.latent_height, image.latent_width = 1, 4, 4
+    video = MiniMaxH3PreparedReference(media_type="video", has_audio=True)
+    video.num_latent_frames, video.latent_height, video.latent_width = 2, 4, 4
+    video.num_audio_latents = 3
+    layout = build_ref2va_packed_layout(
+        np.full(6, 1, dtype=np.int64), [image, video], 2, 4, 4, 3, (1, 2, 2))
+
+    # text, image rows, video-reference audio rows, video-reference video rows, target audio.
+    assert prefix_segments_from_layout(layout, (1, 2, 2)) == (6, 4, 6, 8, 6)
+    geometry = build_h3_tile_geometry(prefix_segments_from_layout(layout, (1, 2, 2)), (2, 2, 2), 64)
+    assert geometry.total_seq_length == layout.sequence_length
+
+
 def test_token_tile_and_valid_covers_pad_slots() -> None:
     geo = build_h3_tile_geometry((7, 5, 3), (8, 4, 6), 256)
     tile, valid = token_tile_and_valid(geo.variable_block_sizes, geo.tile_elems)
