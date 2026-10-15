@@ -206,40 +206,6 @@ pull_request_rules:
         add: ["scope: model"]
 
   # ============================================================
-  # Pre-commit failure help comment
-  # ============================================================
-
-  - name: comment on pre-commit failure
-    conditions:
-      - check-failure~=pre-commit
-      - -closed
-    actions:
-      comment:
-        message: |
-          ## Pre-commit checks failed
-
-          Hi @{{author}}, the pre-commit checks have failed. To fix them locally:
-
-          ```bash
-          # Install pre-commit if you haven't already
-          uv pip install pre-commit
-          pre-commit install
-
-          # Run all checks and auto-fix what's possible
-          pre-commit run --all-files
-          ```
-
-          Common fixes:
-          - **yapf**: `yapf -i <file>` (formatting)
-          - **ruff**: `ruff check --fix <file>` (linting)
-          - **codespell**: `codespell --write-changes <file>` (spelling)
-
-          After fixing, commit and push the changes. The checks will re-run automatically.
-
-          For future commits, `pre-commit` will run automatically on changed files before each commit.
-
-
-  # ============================================================
   # Merge conflict detection
   # ============================================================
 
@@ -251,16 +217,6 @@ pull_request_rules:
     actions:
       label:
         add: [needs-rebase]
-      comment:
-        message: |
-          This PR has merge conflicts with the base branch. Please rebase:
-
-          ```bash
-          git fetch origin main
-          git rebase origin/main
-          # Resolve any conflicts, then:
-          git push --force-with-lease
-          ```
 
   - name: remove conflict label when resolved
     conditions:
@@ -289,36 +245,6 @@ pull_request_rules:
     actions:
       merge:
         method: squash
-
-  # ============================================================
-  # PR title format help
-  # ============================================================
-
-  - name: comment on invalid PR title format
-    conditions:
-      - -closed
-      - -draft
-      - "-title~=(?i)^\\[(feat|feature|bugfix|fix|refactor|perf|ci|doc|docs|misc|chore|kernel|new.?model|skill|skills|infra)\\]"
-    actions:
-      comment:
-        message: |
-          ## ⚠️ PR title format required
-
-          Your PR title must start with a type tag in brackets. Examples:
-          - `[feat] Add new model support`
-          - `[bugfix] Fix VAE tiling corruption`
-          - `[refactor] Restructure training pipeline`
-          - `[perf] Optimize attention kernel`
-          - `[ci] Update test infrastructure`
-          - `[infra] Add activation trace hooks`
-          - `[docs] Add inference guide`
-          - `[misc] Clean up configs`
-          - `[new-model] Port Flux2 to FastVideo`
-          - `[skill] Add add-model agent skill`
-
-          Valid tags: `feat`, `feature`, `bugfix`, `fix`, `refactor`, `perf`, `ci`, `infra`, `doc`, `docs`, `misc`, `chore`, `kernel`, `new-model`, `skill`, `skills`
-
-          Please update your PR title and the merge protection check will pass automatically.
 
 merge_protections_settings:
   reporting_method: check-runs

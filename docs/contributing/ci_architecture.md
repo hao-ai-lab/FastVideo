@@ -461,8 +461,12 @@ The reusable implementation lives in
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `community-issue-labeler.yml` | Issue opened or edited | Adds scope/platform labels from issue keywords. |
-| `community-welcome.yml` | First contribution | Posts a welcome comment for first-time contributors. |
-| `community-stale.yml` | Daily schedule | Marks and closes stale issues and PRs, with exemption labels. |
+| `community-stale.yml` | Daily | Labels/closes stale items with exemptions. |
+
+None of these automations post comments or messages on issues or pull
+requests; they only set labels and close stale items. Keep it that way: new
+automation must report through checks, commit statuses, or labels instead of
+PR/issue comments.
 
 ## File Reference
 
