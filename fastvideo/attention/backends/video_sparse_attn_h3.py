@@ -909,6 +909,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # fwd/bwd pairing is possible, but it is not built here.
             grad_mode = torch.is_grad_enabled() and (query.requires_grad or key.requires_grad or value.requires_grad)
             use_ptx_blackwell = False
+            split_tile128 = False
             if tile_elems == 128:
                 # The CUDA kernel's 128-token instantiation is the only tile-128
                 # implementation, so it needs no opt-in and never falls back.
@@ -922,10 +923,13 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                         reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
                     self._tile128_route[route_key] = reason
                 reason = self._tile128_route[route_key]
-                if reason is not None:
-                    raise RuntimeError(f"VSA-H3 tile 128 requires the ptx_blackwell block-sparse kernel: "
-                                       f"{reason}. Use VSA_tile_size=64 or 256 elsewhere.")
-                use_ptx_blackwell = True
+                if reason is None:
+                    use_ptx_blackwell = True
+                elif block_sparse_attn_64_bhsd is None:
+                    raise RuntimeError(f"VSA-H3 tile 128 requires the ptx_blackwell block-sparse kernel or "
+                                       f"the Triton tile-64 kernels: {reason}.")
+                else:
+                    split_tile128 = True
             elif regional_compiling:
                 if self._regional_compile_ptx_blackwell_enabled is None:
                     raise RuntimeError(
@@ -993,7 +997,17 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     v_bhsd = v_bhsd[:, :, :logical_seq_len]
                     if not sm89_strided:
                         q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
-                if sm89_route:
+                if split_tile128:
+                    # No sm_100a kernel on this device: run each 128-token tile as two
+                    # contiguous 64-token halves on the Triton kernels. Every half inherits
+                    # its tile's mask entries, and a partial tile's valid tokens fill the
+                    # first half before the second, so the selection is unchanged.
+                    logger.info_once("MiniMax-H3 VSA tile-128 forward: Triton tile-64 kernels on split tiles")
+                    mask64 = mask.repeat_interleave(2, dim=-2).repeat_interleave(2, dim=-1)
+                    vbs = attn_metadata.variable_block_sizes
+                    vbs64 = torch.stack((vbs.clamp(max=64), (vbs - 64).clamp(min=0)), dim=-1).flatten()
+                    out_bhsd, _ = block_sparse_attn_64_bhsd(q_bhsd, k_bhsd, v_bhsd, mask64, vbs64)
+                elif sm89_route:
                     from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
                     logger.info_once(f"MiniMax-H3 VSA tile-64 forward: sm89 {self._sm89_kernel} QK / BF16 PV")
                     out_bhsd = sparse_sm89_attention(q_bhsd,
