@@ -116,6 +116,20 @@ MINIMAX_H3_AUDIO_SHIFT = 3.0
 FASTH3_INFERENCE_CONTRACT = "fastvideo_inference.json"
 FASTH3_INFERENCE_CONTRACT_SCHEMA = "fasth3-inference-contract-v1"
 
+# A FastH3 Ref2VA PDD export writes a *different* contract than a DMD export:
+# ``pdd_steps`` / ``pdd_step_indices`` / ``grid_max_t`` instead of
+# ``dmd_denoising_steps``. The fields it pins to a value FastVideo fixes in
+# code (the Ref2VA pipeline, its conditioning, no CFG, and the per-reference
+# sparse regions) must hold that value here too, so a mismatched export fails
+# loudly (``fastvideo/configs/pipelines/minimax_h3.py::_PDD_FIXED_FIELDS``).
+FASTH3_PDD_FIXED_FIELDS: dict[str, Any] = {
+    "transformer_component": "transformer_ref",
+    "conditioning": "fixed_ordered_references_target_only_flow",
+    "guidance_scale": 1.0,
+    "attention_backend": "VIDEO_SPARSE_ATTN_H3",
+    "vsa_ref_policy": "p2_multi_region",
+}
+
 MINIMAX_H3_ROPE_FRAME_RESCALE = 5.0 / 3.0
 MINIMAX_H3_ROPE_FRAMES_PER_LATENT = (1, 4, 4, 4, 4)
 _ROPE_SPATIAL_SCALE = 32.0
@@ -666,12 +680,57 @@ def find_fasth3_inference_contract(model_root: str | Path | None) -> Path | None
     return None
 
 
+def _is_pdd_contract(contract: dict[str, Any]) -> bool:
+    """A PDD export names itself ``ref2va`` or carries the PDD partition."""
+    return contract.get("model_type") == "ref2va" or "pdd_step_indices" in contract
+
+
+def _load_pdd_contract(contract: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Validate a FastH3 Ref2VA PDD contract and normalize its partition and shifts."""
+    from fastvideo.mlx_runtime.minimax_h3_pdd import PDD_GRID_MAX_T
+
+    contract = dict(contract)
+    if contract.get("schema_version") != FASTH3_INFERENCE_CONTRACT_SCHEMA:
+        raise ValueError(f"Unsupported FastH3 inference contract schema in {path}.")
+    for key, expected in FASTH3_PDD_FIXED_FIELDS.items():
+        if key not in contract:
+            raise ValueError(f"{path} is a FastH3 PDD contract but declares no {key}.")
+        if contract[key] != expected:
+            raise ValueError(f"{path} {key}={contract[key]!r} is unsupported; expected {expected!r}.")
+    pdd_steps = contract.get("pdd_steps")
+    if isinstance(pdd_steps, bool) or not isinstance(pdd_steps, int) or pdd_steps < 2:
+        raise ValueError(f"{path} pdd_steps must be an int >= 2, got {pdd_steps!r}.")
+    grid_max_t = contract.get("grid_max_t")
+    if grid_max_t != PDD_GRID_MAX_T:
+        raise ValueError(f"{path} grid_max_t={grid_max_t!r} is unsupported; the PDD fine grid ends at "
+                         f"{PDD_GRID_MAX_T}.")
+    indices = contract.get("pdd_step_indices")
+    if (not isinstance(indices, list) or len(indices) < 2 or any(type(index) is not int for index in indices)
+            or indices[0] != 0 or indices[-1] != pdd_steps
+            or any(left >= right for left, right in zip(indices, indices[1:], strict=False))):
+        raise ValueError(f"{path} pdd_step_indices={indices!r} must increase strictly from 0 to "
+                         f"pdd_steps={pdd_steps}.")
+    blocks = len(indices) - 1
+    for key in ("num_inference_steps", "transformer_forwards"):
+        if contract.get(key) != blocks:
+            raise ValueError(f"{path} {key}={contract.get(key)!r} must equal the {blocks} blocks of pdd_step_indices.")
+    for key in ("video_scheduler_shift", "audio_scheduler_shift"):
+        if key not in contract:
+            raise ValueError(f"{path} is a FastH3 PDD contract but declares no {key}.")
+        contract[key] = _positive_shift(contract[key], name=key)
+    contract["pdd_step_indices"] = indices
+    contract["kind"] = "pdd"
+    return contract
+
+
 def load_fasth3_inference_contract(model_root: str | Path | None) -> dict[str, Any] | None:
-    """Load a shift-declaring FastH3 contract.
+    """Load a shift-declaring FastH3 contract, DMD or Ref2VA PDD.
 
     Four-step exports ship a sidecar without scheduler shifts and keep the
-    uniform ladder. Only a contract that declares both shifts, such as
-    FastH3 8-Step V2, selects the explicit DMD rungs. A shifted sidecar that
+    uniform ladder. A contract that declares both shifts selects an explicit
+    ladder: a FastH3 Ref2VA PDD export (``pdd_steps`` / ``pdd_step_indices``)
+    is tagged ``kind="pdd"`` and a FastH3 8-Step V2 DMD export (which carries
+    ``dmd_denoising_steps``) is tagged ``kind="dmd"``. A shifted sidecar that
     cannot be parsed fails instead of silently baking the four-step grid.
     """
     path = find_fasth3_inference_contract(model_root)
@@ -683,6 +742,8 @@ def load_fasth3_inference_contract(model_root: str | Path | None) -> dict[str, A
         raise ValueError(f"Malformed FastH3 inference contract {path}: {exc}") from exc
     if not isinstance(contract, dict):
         raise ValueError(f"Malformed FastH3 inference contract {path}.")
+    if _is_pdd_contract(contract):
+        return _load_pdd_contract(contract, path)
     declares_shifts = "video_scheduler_shift" in contract or "audio_scheduler_shift" in contract
     if not declares_shifts:
         return None
@@ -700,6 +761,7 @@ def load_fasth3_inference_contract(model_root: str | Path | None) -> dict[str, A
     contract["video_scheduler_shift"] = _positive_shift(contract["video_scheduler_shift"], name="video_scheduler_shift")
     contract["audio_scheduler_shift"] = _positive_shift(contract["audio_scheduler_shift"], name="audio_scheduler_shift")
     contract["dmd_denoising_steps"] = steps
+    contract["kind"] = "dmd"
     return contract
 
 
@@ -732,6 +794,39 @@ class ResolvedH3Schedule:
     adaln_timesteps: np.ndarray
     num_steps: int
     source: str
+    # The fused-block plan of a PDD contract (its per-modality coefficients and
+    # blocks); None for every other source.
+    pdd_plan: Any = None
+
+
+def pdd_plan_from_contract(contract: dict[str, Any]) -> Any:
+    """Build the fused-block plan a FastH3 PDD contract trained."""
+    from fastvideo.mlx_runtime.minimax_h3_pdd import PDDModalitySchedule, build_pdd_sampling_plan
+
+    schedules = {
+        "video": PDDModalitySchedule(shift=contract["video_scheduler_shift"]),
+        "audio": PDDModalitySchedule(shift=contract["audio_scheduler_shift"]),
+    }
+    return build_pdd_sampling_plan(contract["pdd_step_indices"], schedules)
+
+
+def _resolve_pdd_schedule(
+    contract: dict[str, Any],
+    num_steps: int,
+    cached_timesteps: np.ndarray | None,
+) -> ResolvedH3Schedule:
+    """A FastH3 PDD contract's fused-block ladder; ``--steps`` must match its blocks exactly."""
+    plan = pdd_plan_from_contract(contract)
+    blocks = len(contract["pdd_step_indices"]) - 1
+    if num_steps != blocks:
+        raise ValueError(f"Requested {num_steps} steps, but this FastH3 PDD contract runs exactly {blocks} "
+                         "transformer forwards (one per trained fused block).")
+    video = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["video_scheduler_shift"], plan.node_sigmas["video"])
+    audio = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["audio_scheduler_shift"], plan.node_sigmas["audio"])
+    union = adaln_timestep_union(video, audio)
+    if cached_timesteps is not None:
+        _require_cached_schedule(cached_timesteps, union, num_steps)
+    return ResolvedH3Schedule(video, audio, union, blocks, "contract-pdd", plan)
 
 
 def resolve_h3_denoise_schedule(
@@ -742,9 +837,11 @@ def resolve_h3_denoise_schedule(
 ) -> ResolvedH3Schedule:
     """Keep the uniform ladder unless the snapshot declares its own shifts.
 
-    ``num_steps`` is the transformer-forward count. A shift-declaring contract
-    also accepts that count plus one, the CUDA sigma-grid convention, and then
-    runs exactly its trained rung count.
+    ``num_steps`` is the transformer-forward count. A shift-declaring DMD
+    contract also accepts that count plus one, the CUDA sigma-grid convention,
+    and then runs exactly its trained rung count. A FastH3 Ref2VA PDD contract
+    instead runs its trained fused-block count exactly and the schedulers carry
+    the plan's node sigmas.
     """
     if type(num_steps) is not int or num_steps < 1:
         raise ValueError(f"num_steps must be a positive integer, got {num_steps!r}.")
@@ -758,6 +855,9 @@ def resolve_h3_denoise_schedule(
                              f"{num_steps}. Use the step count used during conversion (normally 4), or re-export "
                              "the checkpoint.")
         return ResolvedH3Schedule(video, audio, union, num_steps, "uniform")
+
+    if contract["kind"] == "pdd":
+        return _resolve_pdd_schedule(contract, num_steps, cached_timesteps)
 
     rungs = contract["dmd_denoising_steps"]
     forwards = len(rungs)
@@ -800,6 +900,20 @@ class MiniMaxH3SchedulerState:
         if sigmas64.size < 2 or not bool(np.all(sigmas64[1:] < sigmas64[:-1])) or float(sigmas64[-1]) != 0.0:
             raise ValueError("DMD sigmas must be strictly decreasing and end at 0.")
         return cls(shift=shift, sigmas=sigmas64.astype(np.float32), timesteps=(1.0 - sigmas64[:-1]).astype(np.float32))
+
+    @classmethod
+    def from_pdd_node_sigmas(cls, shift: float, node_sigmas: np.ndarray) -> MiniMaxH3SchedulerState:
+        """Carry a PDD plan's shifted node sigmas as the sampling ladder.
+
+        ``node_sigmas`` are already shifted (one noise level per fused-block
+        node, descending to 0), so an ordinary Euler step between consecutive
+        nodes applies exactly the block's total integration weight.
+        """
+        shift = _positive_shift(shift, name="shift")
+        sigmas = np.asarray(node_sigmas, dtype=np.float32)
+        if sigmas.size < 2 or float(sigmas[-1]) != 0.0 or not bool(np.all(sigmas[1:] < sigmas[:-1])):
+            raise ValueError("PDD node sigmas must be strictly decreasing and end at 0.")
+        return cls(shift=shift, sigmas=sigmas, timesteps=(1.0 - sigmas[:-1]).astype(np.float32))
 
     @property
     def num_steps(self) -> int:
@@ -1138,6 +1252,74 @@ class MLXMiniMaxH3DiT:
         self._vsa_capable = any("attn.to_gate_compress.weight" in block for block in blocks)
         self._gate_active: list[bool | None] = [None] * len(blocks)
         self.last_vsa_stats: MiniMaxH3VSAStats | None = None
+        self.pdd_grid_size = self._resolve_pdd_grid_size()
+
+    # -- PDD widened heads --------------------------------------------------
+
+    def _resolve_pdd_grid_size(self) -> int | None:
+        """The PDD head count of this checkpoint, or None for a single-headed DiT.
+
+        A PDD student widens ``proj_out`` / ``audio_proj_out`` head-major to
+        ``(grid, output_size)``. The grid comes from the packed manifest's
+        ``config["pdd_steps"]`` when present; otherwise it is inferred from the
+        projection's leading dimension and cross-checked against the audio head.
+        A widened head that would silently mis-project raises here.
+        """
+        from fastvideo.mlx_runtime.minimax_h3_pdd import resolved_grid_size
+
+        declared = self.config.get("pdd_steps")
+        if declared is not None and (isinstance(declared, bool) or not isinstance(declared, int) or declared < 2):
+            raise ValueError(f"MiniMax H3 pdd_steps must be an int >= 2, got {declared!r}.")
+        video_weight = self.weights.get("proj_out.weight")
+        audio_weight = self.weights.get("audio_proj_out.weight")
+        # Partial models (unit tests) may carry neither projection.
+        video_grid = None if video_weight is None else resolved_grid_size(
+            video_weight, self.weights.get("proj_out.bias"), self.patch_dim)
+        audio_grid = None if audio_weight is None else resolved_grid_size(
+            audio_weight, self.weights.get("audio_proj_out.bias"), self.audio_in_channels)
+        if video_grid is not None and audio_grid is not None and video_grid != audio_grid:
+            raise ValueError(f"MiniMax H3 PDD heads disagree between proj_out (grid {video_grid}) and "
+                             f"audio_proj_out (grid {audio_grid}).")
+        grid = video_grid if video_grid is not None else audio_grid
+        if declared is not None and grid is not None and grid != declared:
+            raise ValueError(f"MiniMax H3 checkpoint config pdd_steps={declared} disagrees with its widened heads "
+                             f"(grid {grid}).")
+        return grid if grid is not None else declared
+
+    def _fused_output_params(
+        self,
+        key: str,
+        modality: str,
+        pdd_block: tuple[int, int] | None,
+        pdd_integration_weights: dict[str, np.ndarray] | None,
+    ):
+        """The projection (weight, bias) to use, fusing a PDD block when one is supplied.
+
+        Without a block a single-headed head passes through and a widened head
+        (which would otherwise project with the raw ``grid * output_size`` rows)
+        is refused. With a block an unwidened head is refused.
+        """
+        weight = self.weights[key]
+        bias = self.weights.get(f"{key.rsplit('.', 1)[0]}.bias")
+        if pdd_block is None:
+            if self.pdd_grid_size is not None:
+                raise ValueError(f"MiniMax H3 checkpoint has a PDD-widened `{key}` but no PDD block was supplied; "
+                                 "pass pdd_block= and pdd_integration_weights= to the forward.")
+            return weight, bias
+        if self.pdd_grid_size is None:
+            raise ValueError(f"A PDD block was supplied but `{key}` is not widened (single-headed checkpoint).")
+        if pdd_integration_weights is None or modality not in pdd_integration_weights:
+            raise ValueError(f"A PDD block needs this modality's integration weights ({modality!r}).")
+        from fastvideo.mlx_runtime.minimax_h3_pdd import fuse_block_params
+
+        return fuse_block_params(
+            weight,
+            bias,
+            grid_size=self.pdd_grid_size,
+            start=pdd_block[0],
+            end=pdd_block[1],
+            weights=pdd_integration_weights[modality],
+        )
 
     # -- conditioning ------------------------------------------------------
 
@@ -1291,6 +1473,8 @@ class MLXMiniMaxH3DiT:
         video_indices,
         audio_indices,
         text_indices,
+        pdd_block: tuple[int, int] | None = None,
+        pdd_integration_weights: dict[str, np.ndarray] | None = None,
     ):
         """Faithful port of the torch forward (batch-1, rows already patchified).
 
@@ -1300,7 +1484,9 @@ class MLXMiniMaxH3DiT:
         identical math at a fraction of the cost.
 
         This entrypoint is dense-only. VSA requires ``forward_with_cache``
-        with a packed layout and step index.
+        with a packed layout and step index. With a PDD checkpoint pass the
+        step's ``pdd_block`` and ``pdd_integration_weights`` so the widened
+        heads are fused.
         """
         import mlx.core as mx
 
@@ -1355,15 +1541,19 @@ class MLXMiniMaxH3DiT:
         shift_rows, scale_rows = mx.split(shift_scale, 2, axis=-1)
         normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)
         normed = normed * (1.0 + scale_rows[timestep_indices]) + shift_rows[timestep_indices]
+        video_weight, video_bias = self._fused_output_params("proj_out.weight", "video", pdd_block,
+                                                             pdd_integration_weights)
+        audio_weight, audio_bias = self._fused_output_params("audio_proj_out.weight", "audio", pdd_block,
+                                                             pdd_integration_weights)
         video_output = linear(
-            normed[_as_mx_indices(video_indices)].astype(weight_dtype(self.weights["proj_out.weight"])),
-            self.weights["proj_out.weight"],
-            self.weights["proj_out.bias"],
+            normed[_as_mx_indices(video_indices)].astype(weight_dtype(video_weight)),
+            video_weight,
+            video_bias,
         )
         audio_output = linear(
-            normed[_as_mx_indices(audio_indices)].astype(weight_dtype(self.weights["audio_proj_out.weight"])),
-            self.weights["audio_proj_out.weight"],
-            self.weights["audio_proj_out.bias"],
+            normed[_as_mx_indices(audio_indices)].astype(weight_dtype(audio_weight)),
+            audio_weight,
+            audio_bias,
         )
         return video_output, audio_output
 
@@ -1377,13 +1567,17 @@ class MLXMiniMaxH3DiT:
         step_timesteps: np.ndarray,
         row_timestep_inverse: np.ndarray,
         step_index: int = 0,
+        pdd_block: tuple[int, int] | None = None,
+        pdd_integration_weights: dict[str, np.ndarray] | None = None,
     ):
         """Denoise-step forward served entirely from the AdaLN cache.
 
         ``step_timesteps`` are this step's unique timesteps (sorted);
         ``row_timestep_inverse`` maps each packed row to one of them (the
         ``build_row_timesteps`` inverse). The cache must cover every value in
-        ``step_timesteps``.
+        ``step_timesteps``. With a PDD checkpoint pass the step's
+        ``pdd_block`` and ``pdd_integration_weights`` so the widened output
+        heads are fused into the block's weighted mean.
         """
         import mlx.core as mx
 
@@ -1444,15 +1638,19 @@ class MLXMiniMaxH3DiT:
         row_positions = positions[row_inverse]
         normed = _h3_rms_norm(packed, self.weights["norm_out.norm.weight"], self.final_norm_eps)
         normed = normed * (1.0 + cache.norm_out_scale[row_positions]) + cache.norm_out_shift[row_positions]
+        video_weight, video_bias = self._fused_output_params("proj_out.weight", "video", pdd_block,
+                                                             pdd_integration_weights)
+        audio_weight, audio_bias = self._fused_output_params("audio_proj_out.weight", "audio", pdd_block,
+                                                             pdd_integration_weights)
         video_output = linear(
-            normed[mx.array(layout.video_indices)].astype(weight_dtype(self.weights["proj_out.weight"])),
-            self.weights["proj_out.weight"],
-            self.weights["proj_out.bias"],
+            normed[mx.array(layout.video_indices)].astype(weight_dtype(video_weight)),
+            video_weight,
+            video_bias,
         )
         audio_output = linear(
-            normed[mx.array(layout.audio_indices)].astype(weight_dtype(self.weights["audio_proj_out.weight"])),
-            self.weights["audio_proj_out.weight"],
-            self.weights["audio_proj_out.bias"],
+            normed[mx.array(layout.audio_indices)].astype(weight_dtype(audio_weight)),
+            audio_weight,
+            audio_bias,
         )
         return video_output, audio_output
 

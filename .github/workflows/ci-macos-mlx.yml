@@ -89,6 +89,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_spatial.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_ref_layout.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_pdd.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_reference_prep.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_ref2va_pipeline.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_ref_conditioning.py \
@@ -160,6 +161,7 @@ jobs:
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_spatial.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_ref_layout.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_pdd.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_reference_prep.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_ref2va_pipeline.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_ref_conditioning.py \

@@ -48,6 +48,7 @@ from fastvideo.mlx_runtime.minimax_h3 import (
     mlx_h3_checkpoint_vsa_capable,
     mlx_h3_dit_from_diffusers_safetensors,
     minimax_h3_sigmas,
+    pdd_plan_from_contract,
     save_mlx_h3_checkpoint,
 )
 
@@ -69,6 +70,16 @@ def _adaln_cache_timesteps(model_root: str | Path | None = None) -> np.ndarray:
         video = 1.0 - minimax_h3_sigmas(MINIMAX_H3_VIDEO_SHIFT, 4)[:-1]
         audio = 1.0 - minimax_h3_sigmas(MINIMAX_H3_AUDIO_SHIFT, 4)[:-1]
         return np.unique(np.concatenate([video, audio, [1.0]])).astype(np.float32)
+    if contract["kind"] == "pdd":
+        plan = pdd_plan_from_contract(contract)
+        video_state = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["video_scheduler_shift"],
+                                                                   plan.node_sigmas["video"])
+        audio_state = MiniMaxH3SchedulerState.from_pdd_node_sigmas(contract["audio_scheduler_shift"],
+                                                                   plan.node_sigmas["audio"])
+        logger.info("FastH3 PDD schedule contract: %d fused blocks of a %d-interval grid, video/audio shift=%g/%g",
+                    plan.num_steps, plan.pdd_steps, contract["video_scheduler_shift"],
+                    contract["audio_scheduler_shift"])
+        return adaln_timestep_union(video_state, audio_state)
     video_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["video_scheduler_shift"],
                                                          contract["dmd_denoising_steps"])
     audio_state = MiniMaxH3SchedulerState.from_dmd_steps(contract["audio_scheduler_shift"],

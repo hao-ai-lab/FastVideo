@@ -744,6 +744,10 @@ class MiniMaxH3MLXPipeline:
         audio_scheduler = schedule.audio
         union = schedule.adaln_timesteps
         num_steps = schedule.num_steps
+        # A FastH3 PDD export runs one fused head block per trained block; its
+        # plan supplies the block partition, the per-modality node sigmas
+        # (already on the schedulers) and the integration weights.
+        pdd_plan = schedule.pdd_plan
         # The keyframe-noise timestep (0.999) is only exercised by FL2VA/Ref2VA
         # conditioning rows; those modes recompute the ladder before denoise.
         if references is not None:
@@ -830,6 +834,20 @@ class MiniMaxH3MLXPipeline:
         text = mx.array(text_rows.astype(np.float32))
         dit_forward_s = 0.0
 
+        if pdd_plan is not None:
+            # PDD targets start at the first node's noise level (0.999 * eps),
+            # as the students were trained; conditioning rows stay untouched.
+            x_v = mx.concatenate([
+                x_v[:layout.num_condition_video_rows],
+                x_v[layout.num_condition_video_rows:] * float(pdd_plan.node_sigmas["video"][0]),
+            ],
+                                 axis=0)
+            x_a = mx.concatenate([
+                x_a[:layout.num_condition_audio_rows],
+                x_a[layout.num_condition_audio_rows:] * float(pdd_plan.node_sigmas["audio"][0]),
+            ],
+                                 axis=0)
+
         for step_index in range(num_steps):
             video_t = float(video_scheduler.timesteps[step_index])
             audio_t = float(audio_scheduler.timesteps[step_index])
@@ -841,6 +859,10 @@ class MiniMaxH3MLXPipeline:
                 condition_audio_timestep=1.0,
             )
             step_started = time.perf_counter()
+            pdd_forward_kwargs = ({} if pdd_plan is None else {
+                "pdd_block": pdd_plan.block(step_index),
+                "pdd_integration_weights": pdd_plan.integration_weights,
+            })
             video_velocity, audio_velocity = dit.forward_with_cache(
                 x_v,
                 x_a,
@@ -849,6 +871,7 @@ class MiniMaxH3MLXPipeline:
                 step_timesteps=unique,
                 row_timestep_inverse=inverse,
                 step_index=step_index,
+                **pdd_forward_kwargs,
             )
             # Only the target rows are denoised: condition rows stay pinned at
             # the timestep the contract trained them at.
