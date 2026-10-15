@@ -20,6 +20,7 @@ from safetensors.torch import save_file
 import fastvideo.envs as envs
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3ArchConfig, MiniMaxH3Config
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.forward_context import set_forward_context
 from fastvideo.layers.pdd import PDDModalitySchedule, PDDReplicatedLinear, pdd_fine_grid
 from fastvideo.models.dits import minimax_h3
@@ -133,6 +134,8 @@ def _write_transformer_ref(root, *, config_pdd_steps, weight_pdd_steps=PDD_STEPS
 def _load(path):
     args = SimpleNamespace(
         pipeline_config=MiniMaxH3PipelineConfig(),
+        attention_backend=None,
+        workload_type=WorkloadType.T2V,
         override_transformer_cls_name=None,
         model_paths={},
         init_weights_from_safetensors=None,

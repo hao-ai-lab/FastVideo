@@ -49,12 +49,20 @@ A loader may narrow the request for one component — the DMD teacher/critic
 transformers build dense — and the recorded value is what that component
 actually resolved, not what the run asked for globally.
 
-A component that chooses its own structure by backend (Wan's VSA block,
-LTX-2's distributed attention, the SDPA switch in the Gemma and T5-Gemma
-encoders) calls `effective_attention_backend(self.config)` instead of reading
+A component that chooses its own structure by backend (LTX-2's distributed
+attention, the SDPA switch in the Gemma and T5-Gemma encoders) calls
+`effective_attention_backend(self.config)` instead of reading
 `_resolved_attention_backend` directly. It returns the recorded decision, the
 active scope's rule, or, for a component constructed without a loader, the
 environment variable — the same order its attention layers follow.
+
+`WanTransformer3DModel` resolves its backend once in its constructor instead:
+`component_attention_backend(self)` (Wan opts in with
+`_preserve_auto_attention_backend`, so a recorded automatic selection stays
+`None`), falling back to the active scope's backend or, without a loader, the
+environment variable. It picks the VSA block from that value and passes it as
+`requested_backend` to every attention layer, so the block type and the layers
+cannot disagree.
 
 A call site that already knows its component passes the decision explicitly:
 

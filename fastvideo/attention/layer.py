@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 import fastvideo.envs as envs
-from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
+from fastvideo.attention.selector import NO_REQUEST, _NoRequest, backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (sequence_model_parallel_all_gather,
                                                     sequence_model_parallel_all_to_all_4D)
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank, get_sp_world_size)
@@ -67,6 +67,7 @@ class DistributedAttention(nn.Module):
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
                  prefix: str = "",
+                 requested_backend: AttentionBackendEnum | _NoRequest | None = NO_REQUEST,
                  **extra_impl_args) -> None:
         super().__init__()
         if softmax_scale is None:
@@ -78,7 +79,10 @@ class DistributedAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = get_compute_dtype()
-        attn_backend = get_attn_backend(head_size, dtype, supported_attention_backends=supported_attention_backends)
+        attn_backend = get_attn_backend(head_size,
+                                        dtype,
+                                        supported_attention_backends=supported_attention_backends,
+                                        requested=requested_backend)
         impl_cls = attn_backend.get_impl_cls()
         self.attn_impl = impl_cls(num_heads=num_heads,
                                   head_size=head_size,
@@ -284,6 +288,7 @@ class LocalAttention(nn.Module):
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
                  default_backend: AttentionBackendEnum | None = None,
+                 requested_backend: AttentionBackendEnum | _NoRequest | None = NO_REQUEST,
                  **extra_impl_args) -> None:
         super().__init__()
         if softmax_scale is None:
@@ -297,7 +302,8 @@ class LocalAttention(nn.Module):
         attn_backend = get_attn_backend(head_size,
                                         dtype,
                                         supported_attention_backends=supported_attention_backends,
-                                        default_backend=default_backend)
+                                        default_backend=default_backend,
+                                        requested=requested_backend)
         impl_cls = attn_backend.get_impl_cls()
         self.attn_impl = impl_cls(num_heads=num_heads,
                                   head_size=head_size,

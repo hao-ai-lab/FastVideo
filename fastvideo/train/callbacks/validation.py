@@ -1191,6 +1191,20 @@ class ValidationCallback(Callback):
         model_path = getattr(pipeline_config, "_fastvideo_train_model_path", None)
         return str(model_path or tc.model_path)
 
+    def _training_replaced_config_class(self) -> bool:
+        """Whether training uses a different config class than the model path resolves to."""
+        from fastvideo.registry import get_pipeline_config_cls_from_name
+
+        pipeline_config = getattr(self.training_config, "pipeline_config", None)
+        if pipeline_config is None:
+            return False
+        try:
+            path_config_cls = get_pipeline_config_cls_from_name(self._pipeline_model_path())
+        except ValueError:
+            # Unregistered path: leave loading (and its error) unchanged.
+            return False
+        return type(pipeline_config) is not path_config_cls
+
     def _validation_pipeline_config(self, transformer: torch.nn.Module) -> Any:
         tc = self.training_config
         pipeline_config = deepcopy(tc.pipeline_config)
@@ -1312,6 +1326,12 @@ class ValidationCallback(Callback):
         if flow_shift is not None:
             kwargs["flow_shift"] = float(flow_shift)
         kwargs.update(self.pipeline_kwargs)
+        if self._training_replaced_config_class():
+            # The model path resolves to a different config class than the one
+            # training substituted (e.g. the FullAttn-to-VSA LoRA recipe). Load
+            # with the training config so args validation and component loading
+            # (VAE encoder, attention backend) follow it, not the path's default.
+            kwargs["pipeline_config"] = self._validation_pipeline_config(transformer)
 
         # The pipeline class comes from a YAML target, so static analysis cannot
         # infer the dynamically resolved ``from_pretrained`` class method.
