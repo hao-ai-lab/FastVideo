@@ -52,11 +52,17 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from fastvideo.logger import init_logger
+
+if TYPE_CHECKING:
+    # Deferred: ``minimax_h3_reference`` imports this module's constants, so a
+    # runtime import here would close the cycle.
+    from fastvideo.mlx_runtime.minimax_h3_reference import MiniMaxH3PreparedReference
+
 from fastvideo.mlx_runtime.fastwan import (
     MLXQuantizationSpec,
     QuantizedMatrix,
@@ -278,6 +284,14 @@ class MiniMaxH3PackedLayout:
     latent_height: int
     latent_width: int
     num_audio_latents: int
+    # Per-reference conditioning spans in packed order (Ref2VA only; empty
+    # elsewhere): (kind, row_count, latent_shape) covering exactly the rows
+    # between the text tokens and the target audio. kind is "audio", "image",
+    # or "video"; latent_shape is the reference's raw latent (frames, height,
+    # width) for visual kinds and (0, 0, 0) for audio. A video reference with
+    # sound contributes two entries, its audio rows first. VSA-H3 uses them to
+    # tile (and sparsify) reference-video regions in place.
+    reference_segments: tuple[tuple[str, int, tuple[int, int, int]], ...] = ()
 
 
 def build_packed_layout(
@@ -370,6 +384,209 @@ def build_packed_layout(
         latent_height=latent_height,
         latent_width=latent_width,
         num_audio_latents=num_audio_latents,
+    )
+
+
+def _reference_temporal_span(num_latent_frames: int) -> float:
+    """Advance the Ref2VA clock using its required sequential summation order."""
+    return sum(MINIMAX_H3_ROPE_FRAME_RESCALE *
+               MINIMAX_H3_ROPE_FRAMES_PER_LATENT[index % len(MINIMAX_H3_ROPE_FRAMES_PER_LATENT)]
+               for index in range(num_latent_frames))
+
+
+def _frame_position_grid(
+    latent_height: int,
+    latent_width: int,
+    patch_h: int,
+    patch_w: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    sqrt_area = np.sqrt(latent_height * latent_width)
+    height_grid = spatial_position_grid(latent_height, patch_h, sqrt_area)
+    width_grid = spatial_position_grid(latent_width, patch_w, sqrt_area)
+    mesh_h, mesh_w = np.meshgrid(height_grid, width_grid, indexing="ij")
+    return np.stack([mesh_h.reshape(-1), mesh_w.reshape(-1)], axis=-1), width_grid
+
+
+def _fill_audio_positions(
+    position_ids: np.ndarray,
+    rows: slice,
+    num_audio_latents: int,
+    rotary_time: float,
+    width_grid: np.ndarray,
+) -> None:
+    time = rotary_time + np.arange(num_audio_latents, dtype=np.float64)
+    position_ids[rows, 0] = np.tile(time, MINIMAX_H3_AUDIO_CHANNELS)
+    position_ids[rows, 2] = np.concatenate([
+        np.full((num_audio_latents, ), float(width_grid[0]), dtype=np.float64),
+        np.full((num_audio_latents, ), float(width_grid[-1]), dtype=np.float64),
+    ])
+
+
+def _num_reference_video_rows(reference: MiniMaxH3PreparedReference, patch_size: tuple[int, int, int]) -> int:
+    patch_t, patch_h, patch_w = patch_size
+    geometry = (reference.num_latent_frames, reference.latent_height, reference.latent_width)
+    if any(value <= 0 for value in geometry):
+        raise ValueError(f"Incomplete visual reference geometry: {geometry}.")
+    if any(value % patch for value, patch in zip(geometry, patch_size, strict=True)):
+        raise ValueError(f"Visual reference geometry {geometry} is not divisible by patch {patch_size}.")
+    return (reference.num_latent_frames // patch_t) * (reference.latent_height // patch_h) * (reference.latent_width //
+                                                                                              patch_w)
+
+
+def build_ref2va_packed_layout(
+        text_token_tags: np.ndarray,
+        references: list[MiniMaxH3PreparedReference],
+        num_latent_frames: int,
+        latent_height: int,
+        latent_width: int,
+        num_audio_latents: int,
+        patch_size: tuple[int, int, int] = (1, 2, 2),
+) -> MiniMaxH3PackedLayout:
+    """Build the ``[text | ordered references | target audio | target video]`` layout.
+
+    Mirrors ``fastvideo.pipelines.basic.minimax_h3.packing.build_ref2va_packed_sequence``
+    so a reference-conditioned request packs the same rows, positions and
+    regions on both runtimes. References keep their declared order and each one
+    advances the shared rotary clock by what it occupies, which is what makes
+    the target rows continue after them rather than overlap.
+    """
+    if patch_size != (1, 2, 2):
+        raise ValueError(f"MiniMax-H3 Ref2VA requires patch_size=(1, 2, 2), got {patch_size}.")
+    if text_token_tags.ndim != 1:
+        raise ValueError(f"text_token_tags must be one-dimensional, got {text_token_tags.shape}.")
+    if not np.isin(text_token_tags, (MINIMAX_H3_TEXT_TAG, MINIMAX_H3_VIDEO_TAG)).all():
+        raise ValueError("text_token_tags may contain only text and vision tags.")
+    if not references:
+        raise ValueError("Ref2VA requires at least one prepared reference.")
+
+    patch_t, patch_h, patch_w = patch_size
+    target_geometry = (num_latent_frames, latent_height, latent_width)
+    if any(value <= 0 for value in target_geometry) or num_audio_latents <= 0:
+        raise ValueError("Ref2VA target latent geometry must be positive.")
+    if any(value % patch for value, patch in zip(target_geometry, patch_size, strict=True)):
+        raise ValueError(f"Target geometry {target_geometry} is not divisible by patch {patch_size}.")
+
+    visual_row_counts = [
+        0 if reference.media_type == "audio" else _num_reference_video_rows(reference, patch_size)
+        for reference in references
+    ]
+    for reference in references:
+        if reference.media_type == "audio" and not reference.has_audio:
+            raise ValueError("An audio reference must carry decoded waveform latents.")
+        if reference.has_audio and reference.num_audio_latents <= 0:
+            raise ValueError("An audio-bearing reference has no resolved audio latents.")
+
+    num_text_tokens = int(text_token_tags.shape[0])
+    num_target_video_rows = (num_latent_frames // patch_t) * (latent_height // patch_h) * (latent_width // patch_w)
+    num_target_audio_rows = num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS
+    num_reference_video_rows = sum(visual_row_counts)
+    num_reference_audio_rows = sum(reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS for reference in references
+                                   if reference.has_audio)
+    sequence_length = (num_text_tokens + num_reference_video_rows + num_reference_audio_rows + num_target_audio_rows +
+                       num_target_video_rows)
+
+    position_ids = np.zeros((sequence_length, 3), dtype=np.float64)
+    position_ids[:num_text_tokens, 0] = np.arange(num_text_tokens, dtype=np.float64)
+    target_frame_grid, target_width_grid = _frame_position_grid(latent_height, latent_width, patch_h, patch_w)
+
+    video_indices: list[np.ndarray] = []
+    audio_indices: list[np.ndarray] = []
+    reference_segments: list[tuple[str, int, tuple[int, int, int]]] = []
+    cursor = num_text_tokens
+    rotary_time = float(num_text_tokens)
+    for reference, visual_row_count in zip(references, visual_row_counts, strict=True):
+        visual_latent_shape = (reference.num_latent_frames, reference.latent_height, reference.latent_width)
+        if reference.media_type == "image":
+            reference_segments.append(("image", visual_row_count, visual_latent_shape))
+            rows = slice(cursor, cursor + visual_row_count)
+            cursor = rows.stop
+            video_indices.append(np.arange(rows.start, rows.stop))
+            frame_grid, _ = _frame_position_grid(
+                reference.latent_height,
+                reference.latent_width,
+                patch_h,
+                patch_w,
+            )
+            position_ids[rows, 0] = rotary_time
+            position_ids[rows, 1:] = frame_grid
+            rotary_time += 1.0
+        elif reference.media_type == "audio":
+            count = reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS
+            reference_segments.append(("audio", count, (0, 0, 0)))
+            rows = slice(cursor, cursor + count)
+            cursor = rows.stop
+            audio_indices.append(np.arange(rows.start, rows.stop))
+            _fill_audio_positions(position_ids, rows, reference.num_audio_latents, rotary_time, target_width_grid)
+            rotary_time += float(reference.num_audio_latents)
+        elif reference.media_type == "video":
+            audio_count = reference.num_audio_latents * MINIMAX_H3_AUDIO_CHANNELS if reference.has_audio else 0
+            if audio_count:
+                reference_segments.append(("audio", audio_count, (0, 0, 0)))
+            reference_segments.append(("video", visual_row_count, visual_latent_shape))
+            audio_rows = slice(cursor, cursor + audio_count)
+            video_rows = slice(audio_rows.stop, audio_rows.stop + visual_row_count)
+            cursor = video_rows.stop
+            if audio_count:
+                audio_indices.append(np.arange(audio_rows.start, audio_rows.stop))
+            video_indices.append(np.arange(video_rows.start, video_rows.stop))
+
+            frame_grid, width_grid = _frame_position_grid(
+                reference.latent_height,
+                reference.latent_width,
+                patch_h,
+                patch_w,
+            )
+            if audio_count:
+                _fill_audio_positions(
+                    position_ids,
+                    audio_rows,
+                    reference.num_audio_latents,
+                    rotary_time,
+                    width_grid,
+                )
+            frame_time = temporal_position_grid(reference.num_latent_frames, rotary_time)
+            rows_per_frame = frame_grid.shape[0]
+            position_ids[video_rows, 0] = np.repeat(frame_time, rows_per_frame)
+            position_ids[video_rows, 1:] = np.tile(frame_grid, (reference.num_latent_frames // patch_t, 1))
+            rotary_time += max(
+                float(reference.num_audio_latents if reference.has_audio else 0),
+                _reference_temporal_span(reference.num_latent_frames),
+            )
+        else:
+            raise ValueError(f"Unsupported prepared reference type: {reference.media_type!r}.")
+
+    audio_start = cursor
+    video_start = audio_start + num_target_audio_rows
+    _fill_audio_positions(position_ids, slice(audio_start, video_start), num_audio_latents, rotary_time,
+                          target_width_grid)
+    frame_time = temporal_position_grid(num_latent_frames, rotary_time)
+    position_ids[video_start:, 0] = np.repeat(frame_time, target_frame_grid.shape[0])
+    position_ids[video_start:, 1:] = np.tile(target_frame_grid, (num_latent_frames // patch_t, 1))
+
+    video_indices.append(np.arange(video_start, sequence_length))
+    audio_indices.append(np.arange(audio_start, video_start))
+    packed_video_indices = np.concatenate(video_indices)
+    packed_audio_indices = np.concatenate(audio_indices)
+    text_indices = np.arange(num_text_tokens)
+    token_tags = np.empty(sequence_length, dtype=np.int64)
+    token_tags[text_indices] = text_token_tags.astype(np.int64)
+    token_tags[packed_audio_indices] = MINIMAX_H3_AUDIO_TAG
+    token_tags[packed_video_indices] = MINIMAX_H3_VIDEO_TAG
+
+    return MiniMaxH3PackedLayout(
+        sequence_length=sequence_length,
+        position_ids=position_ids,
+        token_tags=token_tags,
+        video_indices=packed_video_indices,
+        audio_indices=packed_audio_indices,
+        text_indices=text_indices,
+        num_condition_video_rows=num_reference_video_rows,
+        num_condition_audio_rows=num_reference_audio_rows,
+        num_video_latent_frames=num_latent_frames,
+        latent_height=latent_height,
+        latent_width=latent_width,
+        num_audio_latents=num_audio_latents,
+        reference_segments=tuple(reference_segments),
     )
 
 
