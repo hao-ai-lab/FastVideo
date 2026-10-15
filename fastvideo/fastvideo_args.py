@@ -162,6 +162,11 @@ class FastVideoArgs:
     trust_remote_code: bool = False
     revision: str | None = None
 
+    # Persistent native Wan inference weights. Directory selects IPC attachment;
+    # identity alone records donor keys during ordinary disk loading.
+    weight_cache_dir: str | None = None
+    weight_cache_checkpoint: str | None = None
+
     # Parallelism
     num_gpus: int = 1
     tp_size: int = -1
@@ -568,6 +573,15 @@ class FastVideoArgs:
             type=str,
             help="The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
         )
+
+        parser.add_argument("--weight-cache-dir",
+                            type=str,
+                            default=None,
+                            help="Private directory containing native Wan inference weight-donor sockets")
+        parser.add_argument("--weight-cache-checkpoint",
+                            type=str,
+                            default=None,
+                            help="Immutable checkpoint revision/content identity for retained weights")
 
         # Running mode
         parser.add_argument(

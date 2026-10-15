@@ -8,7 +8,6 @@ from safetensors.torch import save_file
 
 from fastvideo.models.loader import component_loader
 from fastvideo.models.loader.component_loader import PipelineComponentLoader, VAELoader
-from fastvideo.models.loader.startup import collect_startup_timings
 from fastvideo.models.loader.utils import set_default_torch_dtype
 
 
@@ -40,8 +39,7 @@ def test_native_load_matches_separate_construction_and_hydration(tmp_path, monke
     else:
         save_file(tensors, str(tmp_path / "model.safetensors"))
     loader = VAELoader()
-    with collect_startup_timings() as timings:
-        combined = PipelineComponentLoader.load_module("vae", str(tmp_path), "diffusers", args)
+    combined = PipelineComponentLoader.load_module("vae", str(tmp_path), "diffusers", args)
     with set_default_torch_dtype(torch.float32):
         separate = loader.build_model(TinyVAE, config, torch.device("cpu"))
     assert torch.count_nonzero(separate.weight) == 0
@@ -53,13 +51,6 @@ def test_native_load_matches_separate_construction_and_hydration(tmp_path, monke
     assert not combined.training and not separate.training
     for name, tensor in separate.state_dict().items():
         torch.testing.assert_close(tensor, tensors[name], rtol=0, atol=0)
-    assert {p["name"] for p in timings.phases} == {
-        "component.vae", "vae.construct", "vae.device_transfer", "vae.checkpoint_read", "vae.weight_assignment",
-        "vae.finalize",
-    }
-
-    root_phase = next(p for p in timings.phases if p["name"] == "component.vae")
-    assert all(p["parent_id"] == root_phase["id"] for p in timings.phases if p is not root_phase)
 
 
 def test_construction_does_not_read_checkpoint(monkeypatch):

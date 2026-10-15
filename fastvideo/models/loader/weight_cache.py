@@ -9,7 +9,6 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, fields
 import contextlib
-import fcntl
 import hashlib
 import os
 from pathlib import Path
@@ -164,6 +163,10 @@ def serve_weight_cache(model: nn.Module, key: WeightCacheKey, socket_path: str |
     close before releasing the model. SIGKILL/donor crashes invalidate consumers.
     Callers own signal handling and must not mutate or offload donor tensors.
     """
+    # Keep the ordinary loader importable on platforms without Linux IPC.
+    # Only the explicitly requested donor needs flock.
+    import fcntl
+
     if model.training:
         raise ValueError("The donor model must be in evaluation mode")
     tensors, _, _ = _inventory(model)

@@ -6,9 +6,83 @@ IPC. Exiting a consumer does not unload the donor. This foundation is independen
 of an edit runner and does not pickle or transfer a model object.
 
 The initial contract is Linux, one GPU, native strided tensors, inference only,
-and one active consumer at a time. CPU registered tensors, DTensor/FSDP,
-quantized representations and training are not supported. Multiple components
-and parallel-rank routing need additional adapters and identity fields.
+and one active consumer pipeline at a time. The normal inference loader supports
+Wan 2.1 T2V 1.3B DiT, UMT5 text encoder and VAE together. CPU registered tensors,
+DTensor/FSDP, offload, compilation, quantization, LoRA and training are unsupported.
+These combinations raise rather than falling back to disk.
+
+## Complete Wan inference through the normal loader
+
+The donor example loads DiT, T5 and VAE once through `VideoGenerator`. One process
+owns all three components and serves one socket per component. Tokenizers and
+schedulers remain local; each consumer builds new model objects and request state.
+
+Start the donor on the same GPU, user and IPC namespace as the consumers:
+
+```bash
+python examples/benchmark/wan_weight_cache.py donor \
+  --model-path /path/to/Wan2.1-T2V-1.3B-Diffusers \
+  --checkpoint-id IMMUTABLE_REVISION --cache-dir /tmp/fv-wan-weights \
+  --output /tmp/wan-donor.json
+```
+
+Wait for `DiT, T5 and VAE donor sockets ready`, then run independent consumers:
+
+```bash
+python examples/benchmark/wan_weight_cache.py consumer \
+  --model-path /path/to/Wan2.1-T2V-1.3B-Diffusers \
+  --checkpoint-id IMMUTABLE_REVISION --cache-dir /tmp/fv-wan-weights \
+  --output /tmp/wan-consumer-1.json --tensor-output /tmp/wan-consumer-1.pt
+```
+
+Repeat with new output filenames. Use role `disk` for fresh-loading parity checks.
+Each worker runs two identical seeded 9-frame, 128x128, four-step requests. The
+in-process executor records full component fingerprints and IPC-handle witnesses.
+`--executor mp` also exercises the default executor selection; FastVideo resolves
+single-GPU `mp` to `UniprocExecutor`, which the report records explicitly.
+Stop the donor with Ctrl-C after consumers finish; it waits for active leases.
+
+For application code, use the ordinary public inference entry point:
+
+```python
+generator = VideoGenerator.from_pretrained(
+    local_checkpoint, num_gpus=1, tp_size=1, sp_size=1,
+    weight_cache_dir="/tmp/fv-wan-weights",
+    weight_cache_checkpoint="IMMUTABLE_REVISION",
+    dit_cpu_offload=False, dit_layerwise_offload=False,
+    text_encoder_cpu_offload=False, vae_cpu_offload=False,
+    lazy_module_load=False, inference_torch_compile=False,
+)
+try:
+    result = generator.generate_video(prompt, save_video=False)
+finally:
+    generator.shutdown()
+```
+
+The same fields have CLI options `--weight-cache-dir` and
+`--weight-cache-checkpoint`. A checkpoint identity without a directory keeps disk
+loading and records the donor keys. Supplying the directory makes attachment
+mandatory for all three components. There is no silent hydration fallback.
+
+`PipelineComponentLoader` retains normal config resolution and class dispatch.
+Its native loader adapters attach after configuration but before checkpoint
+hydration. Identity includes the resolved architecture, config constants, dtype,
+attention backend request and loader processing version. The caller must provide
+an immutable checkpoint revision or content identity; the cache does not hash
+all checkpoint files during attachment. Recreate the donor when the checkpoint,
+layout, or weight-processing implementation changes.
+
+The pipeline owns an `ExitStack` of attachment leases. Pipeline close and worker
+shutdown synchronize and detach all components; partial load failure releases
+already attached components. Direct `PipelineComponentLoader` users must supply
+`weight_cache_leases=stack` and keep that stack open throughout inference. Runtime
+LoRA merge/change APIs reject shared weights. Arbitrary user tensor mutations
+remain outside the read-only contract and cannot be prevented by CUDA IPC.
+
+The donor reserves the combined weight memory for its lifetime. Attached workers
+still need their own CUDA contexts, communication state and activation memory.
+Keep the donor and sequential workers inside the same GPU allocation; this does
+not retain GPU memory across allocation teardown or machine restart.
 
 ## Native Wan VAE example
 

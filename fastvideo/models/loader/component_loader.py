@@ -7,7 +7,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from copy import deepcopy
 from typing import Any, cast
 
@@ -39,7 +39,8 @@ from fastvideo.models.loader.text_encoder_quantization import (
     _process_quantized_text_encoder_weights,
     _resolve_text_encoder_checkpoint_path,
 )
-from fastvideo.models.loader.startup import startup_phase
+from fastvideo.models.loader.inference_weight_cache import (attach_cached_model, component_weight_cache,
+                                                           validate_cached_class)
 from fastvideo.models.loader.utils import set_default_torch_dtype
 from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files,
@@ -439,6 +440,11 @@ class TextEncoderLoader(ComponentLoader):
                 quant_cls = get_quantization_config(fastvideo_args.override_text_encoder_quant)
                 model_config.quant_config = quant_cls()
 
+            cached = attach_cached_model(model_cls, model_config, PRECISION_TO_TYPE[dtype],
+                                         lambda: model_cls(model_config))
+            if cached is not None:
+                return cached
+
             if getattr(model_cls, "supports_hf_from_pretrained", False):
                 model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
                     model_path,
@@ -837,6 +843,7 @@ class VAELoader(ComponentLoader):
             class_name = getattr(fastvideo_args, "_model_index_class_names", {}).get("vae")
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported.")
+        validate_cached_class(class_name)
         fastvideo_args.model_paths["vae"] = model_path
 
         from fastvideo.platforms import current_platform
@@ -949,6 +956,11 @@ class VAELoader(ComponentLoader):
                 vae_config = fastvideo_args.pipeline_config.vae_config
                 vae_config.update_model_arch(config)
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+                cached = attach_cached_model(
+                    vae_cls, vae_config, torch.get_default_dtype(),
+                    lambda: self.build_model(vae_cls, vae_config, torch.device("meta")))
+                if cached is not None:
+                    return cached
                 vae = self.build_model(vae_cls, vae_config, target_device)
 
         return self.load_weights(vae, model_path, class_name=class_name, config=config, target_device=target_device)
@@ -959,10 +971,8 @@ class VAELoader(ComponentLoader):
         Checkpoint-backed special constructors in load() retain their existing
         behavior. This boundary covers the native safetensors path, including Wan.
         """
-        with startup_phase("vae.construct"):
-            vae = vae_cls(config)
-        with startup_phase("vae.device_transfer"):
-            vae = vae.to(target_device)
+        vae = vae_cls(config)
+        vae = vae.to(target_device)
         return vae
 
     def load_weights(self, vae: nn.Module, model_path: str, *, class_name: str,
@@ -988,9 +998,8 @@ class VAELoader(ComponentLoader):
         # Common case: a single `.safetensors` checkpoint file.
         # Some models may be sharded into multiple files; in that case we merge.
         loaded = {}
-        with startup_phase("vae.checkpoint_read"):
-            for sf_file in safetensors_list:
-                loaded.update(safetensors_load_file(sf_file))
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
 
         # LTX-2 CausalVideoAutoencoder needs per_channel_statistics remapping
         if class_name == "CausalVideoAutoencoder" and "vae" in config:
@@ -1019,17 +1028,15 @@ class VAELoader(ComponentLoader):
         # strictly so missing/unexpected keys are surfaced early.
         # Kandinsky6SRVAE: a partially loaded KVAE decodes plausible-looking garbage, so it is strict as well.
         strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3", "Kandinsky6SRVAE"}
-        with startup_phase("vae.weight_assignment"):
-            vae.load_state_dict(loaded, strict=strict_load)
-        with startup_phase("vae.finalize"):
-            if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:
-                from fastvideo.models.vaes.minimax_h3_int8_convrot import overlay_minimax_h3_int8_convrot_decoder
-                overlay_minimax_h3_int8_convrot_decoder(vae, int8_convrot_path)
-            if (class_name == "AutoencoderKLWan" and getattr(vae.config, "use_light_vae", False)
-                    and target_device.type == "cuda" and hasattr(vae, "optimize_memory_format")):
-                vae.optimize_memory_format()
+        vae.load_state_dict(loaded, strict=strict_load)
+        if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:
+            from fastvideo.models.vaes.minimax_h3_int8_convrot import overlay_minimax_h3_int8_convrot_decoder
+            overlay_minimax_h3_int8_convrot_decoder(vae, int8_convrot_path)
+        if (class_name == "AutoencoderKLWan" and getattr(vae.config, "use_light_vae", False)
+                and target_device.type == "cuda" and hasattr(vae, "optimize_memory_format")):
+            vae.optimize_memory_format()
 
-            return vae.eval()
+        return vae.eval()
 
 
 class AudioDecoderLoader(ComponentLoader):
@@ -1234,6 +1241,17 @@ class TransformerLoader(ComponentLoader):
             dit_config.quant_config = None
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
+
+        default_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
+        def construct_cached_transformer():
+            with set_default_torch_dtype(default_dtype):
+                return model_cls(config=dit_config, hf_config=hf_config)
+        record_resolved_attention_backend(dit_config)
+        cached = attach_cached_model(model_cls, dit_config, default_dtype, construct_cached_transformer,
+                                     extra_config=hf_config)
+        if cached is not None:
+            fastvideo_args.pipeline_config.dit_config = dit_config
+            return cached
 
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
@@ -1614,6 +1632,7 @@ class PipelineComponentLoader:
         component_model_path: str,
         transformers_or_diffusers: str,
         fastvideo_args: FastVideoArgs,
+        weight_cache_leases: ExitStack | None = None,
     ):
         """
         Load a pipeline module.
@@ -1654,5 +1673,10 @@ class PipelineComponentLoader:
             attention_context = (_component_attention_backend_scope(resolved, component=module_name)
                                  if resolved is not None else nullcontext())
 
-        with startup_phase(f"component.{module_name}"), attention_context:
-            return loader.load(component_model_path, fastvideo_args)
+        with attention_context:
+            with component_weight_cache(module_name, fastvideo_args, weight_cache_leases) as cache:
+                model = loader.load(component_model_path, fastvideo_args)
+                if cache is not None:
+                    model._fastvideo_weight_cache_key = cache.key
+                    model._fastvideo_weight_cache_witness = cache.witness
+                return model
