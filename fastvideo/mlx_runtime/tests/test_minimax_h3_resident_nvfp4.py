@@ -164,7 +164,7 @@ def test_failed_preload_releases_encoder(monkeypatch):
     assert not pipeline._resident_components
 
 
-def test_single_shard_omits_unused_language_layers_and_vision(tmp_path):
+def test_single_shard_omits_unused_language_layers_but_keeps_vision(tmp_path):
     from safetensors.numpy import save_file
 
     kept = "model.language_model.layers.49.input_layernorm.weight"
@@ -172,5 +172,7 @@ def test_single_shard_omits_unused_language_layers_and_vision(tmp_path):
     save_file({kept: np.ones(8, np.float32), dropped: np.ones(8, np.float32),
                "model.visual.weight": np.ones((8, 8), np.float32)}, tmp_path / "model.safetensors")
     index = _ResidentNVFP4Index(_ShardIndex(tmp_path))
-    assert set(index.weights) == {kept}
+    # Layers past the 50-layer cut are dropped; the vision tower is kept because
+    # a Ref2VA request encodes its references through it.
+    assert set(index.weights) == {kept, "model.visual.weight"}
     index.close()

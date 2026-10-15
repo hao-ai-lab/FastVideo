@@ -49,11 +49,18 @@ class ConditionerConfig:
     rope_theta: float = 5_000_000.0
     mrope_section: tuple[int, ...] = (24, 20, 20)
     vocab_size: int = 151936
+    vision_start_token_id: int = 151652
+    image_token_id: int = 151655
+    video_token_id: int = 151656
+    # Vision merge size drives the MRoPE image/video layout; the vision tower
+    # itself re-reads its own ``vision_config`` from config.json.
+    vision_spatial_merge_size: int = 2
 
     @classmethod
     def from_config_json(cls, path: str | Path) -> ConditionerConfig:
         raw = json.loads(Path(path).read_text())
         text = raw.get("text_config", raw)
+        vision = raw.get("vision_config", {})
         scaling = text.get("rope_scaling", {}) or {}
         return cls(
             hidden_size=int(text["hidden_size"]),
@@ -66,6 +73,10 @@ class ConditionerConfig:
             rope_theta=float(text["rope_theta"]),
             mrope_section=tuple(int(v) for v in scaling.get("mrope_section", (24, 20, 20))),
             vocab_size=int(text.get("vocab_size", 151936)),
+            vision_start_token_id=int(raw.get("vision_start_token_id", text.get("vision_start_token_id", 151652))),
+            image_token_id=int(raw.get("image_token_id", text.get("image_token_id", 151655))),
+            video_token_id=int(raw.get("video_token_id", text.get("video_token_id", 151656))),
+            vision_spatial_merge_size=int(vision.get("spatial_merge_size", 2)),
         )
 
 
@@ -84,6 +95,11 @@ class _ShardIndex:
 
         def needed(key: str) -> bool:
             if key == "model.language_model.embed_tokens.weight":
+                return True
+            # The vision tower (Ref2VA references) streams through the same index;
+            # its keys are few and small next to the language layers, so keeping
+            # them resident in the mapping does not touch text-path laziness.
+            if key.startswith("model.visual."):
                 return True
             prefix = "model.language_model.layers."
             if not key.startswith(prefix):
@@ -266,6 +282,9 @@ class StreamedMiniMaxH3TextConditioner:
         self.config = ConditionerConfig.from_config_json(self.component_dir / "config.json")
         self.index: Any = _ShardIndex(self.component_dir)
         self.tokenizer = self._load_tokenizer(tokenizer_dir)
+        # Vision weights load on first Ref2VA encode; text-only callers never
+        # pay for the tower.
+        self._vision: Any = None
 
     def _load_tokenizer(self, tokenizer_dir: str | Path | None):
         from transformers import AutoTokenizer
@@ -322,6 +341,120 @@ class StreamedMiniMaxH3TextConditioner:
 
         tags = np.full((seq_len, ), 1, dtype=np.int64)  # MINIMAX_H3_TEXT_TAG
         return np.asarray(hidden).astype(np.float32), tags
+
+    def encode_tokens_with_vision(
+        self,
+        token_ids: list[int],
+        token_tags,
+        *,
+        pixel_values: np.ndarray | None = None,
+        image_grid_thw: np.ndarray | None = None,
+        pixel_values_videos: np.ndarray | None = None,
+        video_grid_thw: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Ref2VA encode: splice visual tokens into the prompt, then run the stack.
+
+        Mirrors ``MiniMaxH3Qwen3VLConditioner.encode_ids``: image/video features
+        replace the placeholder rows (in placeholder order), the mixed
+        text/image/video MRoPE positions replace the plain ``arange``, and each
+        of the first ``len(deepstack)`` layers adds its DeEPSTACK block back onto
+        the visual rows. Returns ``(hidden (S, hidden) fp32, token_tags (S,) int64)``
+        with the caller's tags passed through unchanged.
+        """
+        import mlx.core as mx
+
+        from fastvideo.mlx_runtime.minimax_h3_vision import qwen3_vl_rope_index
+
+        if (pixel_values is None) != (image_grid_thw is None):
+            raise ValueError("pixel_values and image_grid_thw must be provided together")
+        if (pixel_values_videos is None) != (video_grid_thw is None):
+            raise ValueError("pixel_values_videos and video_grid_thw must be provided together")
+
+        cfg = self.config
+        seq_len = len(token_ids)
+        ids = np.asarray(token_ids, dtype=np.int64)
+        has_vision = pixel_values is not None or pixel_values_videos is not None
+        if has_vision:
+            positions = qwen3_vl_rope_index(
+                ids,
+                image_grid_thw,
+                video_grid_thw,
+                vision_start_token_id=cfg.vision_start_token_id,
+                image_token_id=cfg.image_token_id,
+                video_token_id=cfg.video_token_id,
+                spatial_merge_size=cfg.vision_spatial_merge_size,
+            )
+        else:
+            positions = np.stack([np.arange(seq_len, dtype=np.float64)] * 3)
+        cos, sin = _mrope_cos_sin(positions, cfg)
+
+        hidden = self._embed_tokens(token_ids)
+        hidden, deepstack, visual_rows = self._splice_visual_tokens(hidden, ids, pixel_values, image_grid_thw,
+                                                                    pixel_values_videos, video_grid_thw)
+
+        if cfg.num_layers < TEXT_ENCODER_LAYER:
+            raise ValueError(f"Conditioner needs at least {TEXT_ENCODER_LAYER} layers, has {cfg.num_layers}.")
+        for layer in range(TEXT_ENCODER_LAYER):
+            hidden = self._decoder_layer(layer, hidden, cos, sin)
+            if layer < len(deepstack):
+                merged = np.asarray(hidden, dtype=np.float32)
+                merged[visual_rows] += deepstack[layer]
+                hidden = mx.array(merged)
+            # Per-layer sync keeps the 50-layer activation graph bounded.
+            mx.eval(hidden)
+            gc.collect()
+
+        return np.asarray(hidden).astype(np.float32), np.asarray(token_tags, dtype=np.int64)
+
+    def _vision_model(self):
+        if self._vision is None:
+            from fastvideo.mlx_runtime.minimax_h3_vision import MLXQwen3VLVisionModel
+
+            self._vision = MLXQwen3VLVisionModel.from_safetensors_dir(self.component_dir)
+        return self._vision
+
+    def _splice_visual_tokens(self, hidden, ids, pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw):
+        """Return ``(hidden, deepstack blocks, visual rows)`` with features spliced in."""
+        cfg = self.config
+        image_features = image_deepstack = video_features = video_deepstack = None
+        if pixel_values is not None:
+            image_features, image_deepstack = self._vision_model().encode(pixel_values, image_grid_thw)
+        if pixel_values_videos is not None:
+            video_features, video_deepstack = self._vision_model().encode(pixel_values_videos, video_grid_thw)
+
+        embedded = np.asarray(hidden, dtype=np.float32)
+        image_rows = video_rows = None
+        if image_features is not None:
+            image_rows = np.where(ids == cfg.image_token_id)[0]
+            if image_rows.size != image_features.shape[0]:
+                raise ValueError(f"Qwen3-VL image features and placeholders disagree: "
+                                 f"placeholders={image_rows.size}, features={image_features.shape[0]}")
+            embedded[image_rows] = image_features
+        if video_features is not None:
+            video_rows = np.where(ids == cfg.video_token_id)[0]
+            if video_rows.size != video_features.shape[0]:
+                raise ValueError(f"Qwen3-VL video features and placeholders disagree: "
+                                 f"placeholders={video_rows.size}, features={video_features.shape[0]}")
+            embedded[video_rows] = video_features
+        hidden = mx.array(embedded)
+
+        if image_rows is None and video_rows is None:
+            return hidden, [], np.empty((0, ), dtype=np.int64)
+        if image_rows is not None and video_rows is not None:
+            assert image_deepstack is not None and video_deepstack is not None
+            visual_rows = np.sort(np.concatenate([image_rows, video_rows]))
+            image_joint = np.isin(visual_rows, image_rows)
+            video_joint = np.isin(visual_rows, video_rows)
+            blocks = []
+            for image_block, video_block in zip(image_deepstack, video_deepstack, strict=True):
+                combined = np.zeros((visual_rows.size, image_block.shape[-1]), dtype=np.float32)
+                combined[image_joint] = image_block
+                combined[video_joint] = video_block
+                blocks.append(combined)
+            return hidden, blocks, visual_rows
+        if image_rows is not None:
+            return hidden, [np.asarray(block, dtype=np.float32) for block in image_deepstack], image_rows
+        return hidden, [np.asarray(block, dtype=np.float32) for block in video_deepstack], video_rows
 
     def _embed_tokens(self, token_ids: list[int]):
         # Embedding rows gathered individually; the full table is never
