@@ -348,14 +348,15 @@ def sageattn_blackwell_sparse_bshd(q,
     unsmoothed. Returns ``[B, H, L, D]``.
     """
     batch, seq_len, heads, _ = q.shape
-    if seq_len % BLOCK_M:
-        raise ValueError(f"sequence length {seq_len} must be a multiple of {BLOCK_M}")
+    kv_len = k.shape[1]
+    if seq_len % BLOCK_M or kv_len % BLOCK_M:
+        raise ValueError(f"query length {seq_len} and key length {kv_len} must be multiples of {BLOCK_M}")
     if validate:
-        check_sparse_block_lists(q2k_idx, q2k_num, seq_len)
+        check_sparse_block_lists(q2k_idx, q2k_num, kv_len)
     qh, kh, vh = (x.transpose(1, 2) for x in (q, k, v))
-    delta_s = _zero_delta_s(batch, heads, seq_len, q.device)
+    delta_s = _zero_delta_s(batch, heads, kv_len, q.device)
     return blockscaled_fp4_attn_sparse(scale_and_quant_fp4(qh), scale_and_quant_fp4_permute(kh),
-                                       scale_and_quant_fp4_transpose(vh), delta_s, seq_len, q2k_idx, q2k_num, kv_valid,
+                                       scale_and_quant_fp4_transpose(vh), delta_s, kv_len, q2k_idx, q2k_num, kv_valid,
                                        q2k_quad, False, q.dtype == torch.bfloat16, single_level_p_quant, sm_scale)[0]
 
 
