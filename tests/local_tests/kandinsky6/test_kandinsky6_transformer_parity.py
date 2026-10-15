@@ -7,7 +7,7 @@ provides Kandinsky6, else from a `diffusers` checkout at
 KANDINSKY6_DIFFUSERS_REPO_PATH), and the transformer weights of an official
 Diffusers repo (default: kandinskylab/Kandinsky-6.0-Pro-5s-Diffusers) must
 exist on disk. Absent either, this skips -- a skip is not a verified pass (see
-.agents/skills/add-model/shared/common_rules.md).
+docs/contributing/coding_agents.md).
 
 The reference's forward() uses a packed/ragged (sum_T, H, W, C) layout keyed
 by cu_seqlens (batch size folded into the leading dim); FastVideo's port uses

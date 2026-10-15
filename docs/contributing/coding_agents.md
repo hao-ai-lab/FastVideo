@@ -405,6 +405,9 @@ Action:
   causal masks, and broadcast shapes).
 - **Scheduler / sigma schedule mismatch**: even small differences in schedules
   or timestep shapes can cause noticeable drift.
+- **Skipped parity tests**: local parity tests skip when the reference clone,
+  weights, or a GPU are missing. A skip is not a pass; run them where the
+  reference and weights are available before claiming parity.
 
 ## Diffusers vs manual conversion
 

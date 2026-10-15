@@ -43,9 +43,8 @@ blocked_on: <TODO>
 ## Weight Setup
 
 ```bash
-python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
-    "stabilityai/stable-diffusion-3.5-medium" \
-    "official_weights/stabilityai__stable-diffusion-3.5-medium"
+hf download "stabilityai/stable-diffusion-3.5-medium" \
+    --local-dir "official_weights/stabilityai__stable-diffusion-3.5-medium"
 ```
 
 ## Tests in this directory
