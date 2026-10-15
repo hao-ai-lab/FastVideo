@@ -21,6 +21,10 @@ The script measures torch and FastVideo/helper imports separately, device and
 process-group setup, VAE loading, and the first decode of a fixed seeded latent
 input. It preserves launcher-provided rendezvous settings; otherwise it chooses a
 local rendezvous port. It uses one GPU, FP32, and the default cached Wan VAE path.
+Imports and configuration can themselves initialize CUDA. The
+`cuda_initialized_before_device_setup` field records whether the explicit
+device-setup interval begins with an existing context; import time includes
+any initialization side effects.
 It verifies output shape and finiteness; those checks alone do not establish
 parity. Compare the saved tensors against an independent unchanged-source run.
 
