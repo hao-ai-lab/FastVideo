@@ -440,46 +440,44 @@ class TextEncoderLoader(ComponentLoader):
                 model_config.quant_config = quant_cls()
 
             if getattr(model_cls, "supports_hf_from_pretrained", False):
-                with startup_phase("text_encoder.pretrained"):
-                    model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
-                        model_path,
-                        model_config,  # type: ignore[arg-type]
-                        dtype=PRECISION_TO_TYPE[dtype],
-                        device=target_device,
-                    )
+                model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
+                    model_path,
+                    model_config,  # type: ignore[arg-type]
+                    dtype=PRECISION_TO_TYPE[dtype],
+                    device=target_device,
+                )
                 # HF passthrough encoders return before FastVideo's FSDP
                 # wrapping path, so the text stage needs their placement to
                 # put token tensors on the same device.
                 model._fastvideo_input_device = target_device
                 return model.eval()
 
-            with startup_phase("text_encoder.construct"), target_device:
+            with target_device:
                 model = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}
-            with startup_phase("text_encoder.hydrate"):
-                if (use_text_encoder_override and fastvideo_args.override_text_encoder_safetensors is not None):
-                    if os.path.isdir(checkpoint_path):
-                        override_weights = self._get_all_weights(
-                            model,
-                            checkpoint_path,
-                            to_cpu=bool(cpu_offload),
-                        )
-                    else:
-                        if self.counter_before_loading_weights == 0.0:
-                            self.counter_before_loading_weights = time.perf_counter()
-                        override_weights = safetensors_weights_iterator(
-                            [checkpoint_path],
-                            to_cpu=use_cpu_offload,
-                        )
-                    loaded_weights: set[str] = model.load_weights(override_weights)  # type: ignore
+            if (use_text_encoder_override and fastvideo_args.override_text_encoder_safetensors is not None):
+                if os.path.isdir(checkpoint_path):
+                    override_weights = self._get_all_weights(
+                        model,
+                        checkpoint_path,
+                        to_cpu=bool(cpu_offload),
+                    )
                 else:
-                    loaded_weights: set[str] = model.load_weights(
-                        self._get_all_weights(
-                            model,
-                            model_path,
-                            to_cpu=cpu_offload,
-                        ))  # type: ignore
+                    if self.counter_before_loading_weights == 0.0:
+                        self.counter_before_loading_weights = time.perf_counter()
+                    override_weights = safetensors_weights_iterator(
+                        [checkpoint_path],
+                        to_cpu=use_cpu_offload,
+                    )
+                loaded_weights: set[str] = model.load_weights(override_weights)  # type: ignore
+            else:
+                loaded_weights: set[str] = model.load_weights(
+                    self._get_all_weights(
+                        model,
+                        model_path,
+                        to_cpu=cpu_offload,
+                    ))  # type: ignore
 
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
@@ -502,59 +500,57 @@ class TextEncoderLoader(ComponentLoader):
                             checkpoint_quant_config.get_name())
 
             # Explicitly move model to target device after loading weights
-            with startup_phase("text_encoder.device_transfer"):
-                model = model.to(target_device)
+            model = model.to(target_device)
 
-            with startup_phase("text_encoder.offload_setup"):
-                prepare_layerwise = getattr(model, "prepare_layerwise_offload", None)
-                if envs.FASTVIDEO_H3_ENCODER_LAYERWISE.get() and callable(prepare_layerwise):
-                    if target_device.type != "cpu":
-                        raise ValueError("Layerwise H3 encoder requires text_encoder_cpu_offload=True")
-                    prepare_layerwise(runtime_device)
-                    use_cpu_offload = False
-                    logger.info("Enabled text-only layerwise H3 encoder with CPU token embeddings")
+            prepare_layerwise = getattr(model, "prepare_layerwise_offload", None)
+            if envs.FASTVIDEO_H3_ENCODER_LAYERWISE.get() and callable(prepare_layerwise):
+                if target_device.type != "cpu":
+                    raise ValueError("Layerwise H3 encoder requires text_encoder_cpu_offload=True")
+                prepare_layerwise(runtime_device)
+                use_cpu_offload = False
+                logger.info("Enabled text-only layerwise H3 encoder with CPU token embeddings")
 
-                from fastvideo.platforms import current_platform
+            from fastvideo.platforms import current_platform
 
-                if use_cpu_offload and checkpoint_quant_config is not None:
-                    logger.info(
-                        "Skipping FSDP CPU offload for serialized %s text encoder; "
-                        "packed uint8 weights are not FSDP-shardable",
-                        checkpoint_quant_config.get_name(),
+            if use_cpu_offload and checkpoint_quant_config is not None:
+                logger.info(
+                    "Skipping FSDP CPU offload for serialized %s text encoder; "
+                    "packed uint8 weights are not FSDP-shardable",
+                    checkpoint_quant_config.get_name(),
+                )
+            elif use_cpu_offload:
+                pin_cpu_memory = fastvideo_args.pin_cpu_memory and is_pin_memory_available()
+                # Disable FSDP for MPS as it's not compatible
+                if current_platform.is_mps():
+                    logger.info("Disabling FSDP sharding for MPS platform as it's not compatible")
+                elif current_platform.is_npu():
+                    mesh = init_device_mesh(
+                        "npu",
+                        mesh_shape=(1, dist.get_world_size()),
+                        mesh_dim_names=("offload", "replicate"),
                     )
-                elif use_cpu_offload:
-                    pin_cpu_memory = fastvideo_args.pin_cpu_memory and is_pin_memory_available()
-                    # Disable FSDP for MPS as it's not compatible
-                    if current_platform.is_mps():
-                        logger.info("Disabling FSDP sharding for MPS platform as it's not compatible")
-                    elif current_platform.is_npu():
-                        mesh = init_device_mesh(
-                            "npu",
-                            mesh_shape=(1, dist.get_world_size()),
-                            mesh_dim_names=("offload", "replicate"),
-                        )
-                        shard_model(
-                            model,
-                            cpu_offload=True,
-                            reshard_after_forward=True,
-                            mesh=mesh["offload"],
-                            fsdp_shard_conditions=model._fsdp_shard_conditions,
-                            pin_cpu_memory=pin_cpu_memory,
-                        )
-                    else:
-                        mesh = init_device_mesh(
-                            "cuda",
-                            mesh_shape=(1, dist.get_world_size()),
-                            mesh_dim_names=("offload", "replicate"),
-                        )
-                        shard_model(
-                            model,
-                            cpu_offload=True,
-                            reshard_after_forward=True,
-                            mesh=mesh["offload"],
-                            fsdp_shard_conditions=model._fsdp_shard_conditions,
-                            pin_cpu_memory=pin_cpu_memory,
-                        )
+                    shard_model(
+                        model,
+                        cpu_offload=True,
+                        reshard_after_forward=True,
+                        mesh=mesh["offload"],
+                        fsdp_shard_conditions=model._fsdp_shard_conditions,
+                        pin_cpu_memory=pin_cpu_memory,
+                    )
+                else:
+                    mesh = init_device_mesh(
+                        "cuda",
+                        mesh_shape=(1, dist.get_world_size()),
+                        mesh_dim_names=("offload", "replicate"),
+                    )
+                    shard_model(
+                        model,
+                        cpu_offload=True,
+                        reshard_after_forward=True,
+                        mesh=mesh["offload"],
+                        fsdp_shard_conditions=model._fsdp_shard_conditions,
+                        pin_cpu_memory=pin_cpu_memory,
+                    )
         return model.eval()
 
 

@@ -79,58 +79,9 @@ page faults and transfers can occur during assignment. These labels describe
 loader operations, not independent physical disk-I/O and PCIe measurements.
 
 Checkpoint-backed special constructors retain their existing paths and only
-receive the component-total interval. The transformer and shared text-encoder loaders also expose the boundaries
-described below. First-use compilation and kernel warm-up still need separate
-measurement. Reusing GPU tensor
+receive the component-total interval. Transformer/text-encoder internals,
+compilation, and kernel warm-up need further instrumentation. Reusing GPU tensor
 storage across processes will require a separate compatibility manifest,
 ownership/lifetime protocol, and loader implementation. The extracted `load_weights()` method still copies from disk; a future IPC
 loader must bind storage instead of calling `load_state_dict()` and claiming
 zero-copy attachment.
-
-## Profile a complete Wan pipeline
-
-The whole-pipeline example loads the DiT, text encoder, tokenizer, and decoder
-VAE, then verifies a fixed tiny request:
-
-```bash
-python examples/benchmark/wan_pipeline_startup.py \
-  --model-path /path/to/wan-diffusers-checkpoint \
-  --output /tmp/wan-startup.json \
-  --tensor-output /tmp/wan-output.pt \
-  --synchronize
-```
-
-It selects one GPU and the in-process executor so the collector sees all loads.
-Add `--fsdp` to exercise single-rank FSDP inference; the default is unsharded.
-The JSON records resolved offload/FSDP settings and the live transformer
-FSDP-module status; assertions require both to match the request.
-Both paths disable CPU offload and compilation and use the checkpoint's native
-Wan 2.1 1.3B pipeline defaults. The request is 9 frames at 128x128, four steps,
-seed 1024, with a fixed prompt. It checks tensor shape and finiteness and can
-save the output for an independent original/refactored comparison. It is not a
-video-quality or production-throughput benchmark. No video file is written.
-
-`pipeline.create` includes configuration, worker/device setup and component
-loading. Its children include the `component.*` totals. `first_request` measures
-the complete tiny request, including any first-use warm-up and output handling;
-it does not separate JIT, autotuning, text encoding, denoising, and decoding.
-The reported CUDA-initialized flag identifies earlier import side effects.
-
-Native transformer phases are `transformer.construct` (meta construction),
-`transformer.shard_setup`, `transformer.hydrate`, `transformer.finalize`, and
-`transformer.compile_setup`. The last two cover post-load conversion/buffers and
-compile registration respectively, not the first execution of compiled code.
-The sharding and compile-setup intervals may be near zero when disabled.
-
-Native shared encoder-loader phases are `text_encoder.construct`,
-`text_encoder.hydrate`, `text_encoder.device_transfer`, and
-`text_encoder.offload_setup`. The shared path also serves image encoders; use the
-parent `component.*` name to identify the role. HF passthrough encoders report
-`text_encoder.pretrained` as one combined construction/loading operation.
-
-Hydration intervals contain consumption of the lazy checkpoint iterators,
-conversion/fusion, and weight assignment. They deliberately do not call iterator
-creation a disk-read measurement. In particular, a CUDA IPC loader would not
-necessarily save the entire hydration interval. Keep donor startup, attachment,
-compatibility validation, and an independent disk-loaded confirmation in any
-future comparison.
