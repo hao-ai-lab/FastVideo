@@ -461,12 +461,11 @@ The reusable implementation lives in
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `community-issue-labeler.yml` | Issue opened or edited | Adds scope/platform labels from issue keywords. |
-| `community-stale.yml` | Daily | Labels/closes stale items with exemptions. |
 
 None of these automations post comments or messages on issues or pull
-requests; they only set labels and close stale items. Keep it that way: new
-automation must report through checks, commit statuses, or labels instead of
-PR/issue comments.
+requests; they only set labels. Issues and pull requests are never marked
+stale or closed automatically. Keep it that way: new automation must report
+through checks, commit statuses, or labels instead of PR/issue comments.
 
 ## File Reference
 
