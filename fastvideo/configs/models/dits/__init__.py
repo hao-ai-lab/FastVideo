@@ -12,6 +12,7 @@ from fastvideo.configs.models.dits.longcat import LongCatVideoConfig
 from fastvideo.configs.models.dits.ltx2 import LTX2VideoConfig
 from fastvideo.configs.models.dits.magi_human import MagiHumanVideoConfig
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
+from fastvideo.configs.models.dits.pan2 import PAN2VideoConfig
 from fastvideo.configs.models.dits.mmaudio import (
     MMAUDIO_44K_TRAINING_VARIANTS,
     MMAUDIO_TRAINING_VARIANTS,
@@ -37,7 +38,7 @@ __all__ = [
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "Kandinsky6ArchConfig",
     "Kandinsky6VideoAudioConfig", "Kandinsky6SRArchConfig", "Kandinsky6SRConfig", "MagiHumanVideoConfig",
     "StableAudioConfig", "GlmImageDiTConfig", "HeliosConfig", "LingBotWorld2CausalFastVideoConfig",
-    "LingBotWorldFastVideoConfig", "LingBotVideoConfig", "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig",
-    "MMAudioTransformerConfig", "MMAUDIO_VARIANT_ARCHITECTURES", "MMAUDIO_TRAINING_VARIANTS",
+    "LingBotWorldFastVideoConfig", "LingBotVideoConfig", "MiniMaxH3Config", "PAN2VideoConfig", "ZImageDiTConfig",
+    "MMAudioArchConfig", "MMAudioTransformerConfig", "MMAUDIO_VARIANT_ARCHITECTURES", "MMAUDIO_TRAINING_VARIANTS",
     "MMAUDIO_44K_TRAINING_VARIANTS", "get_mmaudio_transformer_config"
 ]

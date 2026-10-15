@@ -50,6 +50,7 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
     "Kandinsky6Transformer3DModel": ("dits", "kandinsky6", "Kandinsky6Transformer3DModel"),
     "Flux2Transformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
+    "PAN2Transformer3DModel": ("dits", "pan2", "PAN2Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -103,6 +104,7 @@ _TEXT_ENCODER_MODELS = {
     "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
     "Qwen3ForCausalLM": ("encoders", "qwen3", "Qwen3ForCausalLM"),
     "Mistral3ForConditionalGeneration": ("encoders", "mistral3", "Mistral3ForConditionalGeneration"),
+    "Qwen3_5TextModel": ("encoders", "qwen3_5", "Qwen3_5TextModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
