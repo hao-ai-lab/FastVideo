@@ -39,6 +39,7 @@ from fastvideo.models.loader.text_encoder_quantization import (
     _process_quantized_text_encoder_weights,
     _resolve_text_encoder_checkpoint_path,
 )
+from fastvideo.models.loader.startup import startup_phase
 from fastvideo.models.loader.utils import set_default_torch_dtype
 from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files,
@@ -934,7 +935,7 @@ class VAELoader(ComponentLoader):
             # LTX-2 uses CausalVideoAutoencoder with nested "vae" config
             if class_name == "CausalVideoAutoencoder" and "vae" in config:
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-                vae = vae_cls(config).to(target_device)
+                vae = self.build_model(vae_cls, config, target_device)
                 if hasattr(vae, "set_tiling_config"):
                     vae_config = fastvideo_args.pipeline_config.vae_config
                     vae.set_tiling_config(
@@ -948,8 +949,30 @@ class VAELoader(ComponentLoader):
                 vae_config = fastvideo_args.pipeline_config.vae_config
                 vae_config.update_model_arch(config)
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-                vae = vae_cls(vae_config).to(target_device)
+                vae = self.build_model(vae_cls, vae_config, target_device)
 
+        return self.load_weights(vae, model_path, class_name=class_name, config=config, target_device=target_device)
+
+    def build_model(self, vae_cls: type[nn.Module], config: Any, target_device: torch.device) -> nn.Module:
+        """Construct a native VAE without checkpoint weights; the caller owns the dtype context.
+
+        Checkpoint-backed special constructors in load() retain their existing
+        behavior. This boundary covers the native safetensors path, including Wan.
+        """
+        with startup_phase("vae.construct"):
+            vae = vae_cls(config)
+        with startup_phase("vae.device_transfer"):
+            vae = vae.to(target_device)
+        return vae
+
+    def load_weights(self, vae: nn.Module, model_path: str, *, class_name: str,
+                     config: dict[str, Any], target_device: torch.device) -> nn.Module:
+        """Hydrate a constructed native VAE from disk and finalize it for inference.
+
+        Keep checkpoint remapping, strictness, overlays and memory-format changes
+        here so construction can be measured/reused independently. This remains a
+        copying disk loader; it does not attach IPC storage.
+        """
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
         int8_convrot_path = None
@@ -965,8 +988,9 @@ class VAELoader(ComponentLoader):
         # Common case: a single `.safetensors` checkpoint file.
         # Some models may be sharded into multiple files; in that case we merge.
         loaded = {}
-        for sf_file in safetensors_list:
-            loaded.update(safetensors_load_file(sf_file))
+        with startup_phase("vae.checkpoint_read"):
+            for sf_file in safetensors_list:
+                loaded.update(safetensors_load_file(sf_file))
 
         # LTX-2 CausalVideoAutoencoder needs per_channel_statistics remapping
         if class_name == "CausalVideoAutoencoder" and "vae" in config:
@@ -995,15 +1019,17 @@ class VAELoader(ComponentLoader):
         # strictly so missing/unexpected keys are surfaced early.
         # Kandinsky6SRVAE: a partially loaded KVAE decodes plausible-looking garbage, so it is strict as well.
         strict_load = class_name in {"AutoencoderKL", "AutoencoderKLMiniMaxH3", "Kandinsky6SRVAE"}
-        vae.load_state_dict(loaded, strict=strict_load)
-        if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:
-            from fastvideo.models.vaes.minimax_h3_int8_convrot import overlay_minimax_h3_int8_convrot_decoder
-            overlay_minimax_h3_int8_convrot_decoder(vae, int8_convrot_path)
-        if (class_name == "AutoencoderKLWan" and getattr(vae.config, "use_light_vae", False)
-                and target_device.type == "cuda" and hasattr(vae, "optimize_memory_format")):
-            vae.optimize_memory_format()
+        with startup_phase("vae.weight_assignment"):
+            vae.load_state_dict(loaded, strict=strict_load)
+        with startup_phase("vae.finalize"):
+            if class_name == "AutoencoderKLMiniMaxH3" and int8_convrot_path is not None:
+                from fastvideo.models.vaes.minimax_h3_int8_convrot import overlay_minimax_h3_int8_convrot_decoder
+                overlay_minimax_h3_int8_convrot_decoder(vae, int8_convrot_path)
+            if (class_name == "AutoencoderKLWan" and getattr(vae.config, "use_light_vae", False)
+                    and target_device.type == "cuda" and hasattr(vae, "optimize_memory_format")):
+                vae.optimize_memory_format()
 
-        return vae.eval()
+            return vae.eval()
 
 
 class AudioDecoderLoader(ComponentLoader):
@@ -1628,5 +1654,5 @@ class PipelineComponentLoader:
             attention_context = (_component_attention_backend_scope(resolved, component=module_name)
                                  if resolved is not None else nullcontext())
 
-        with attention_context:
+        with startup_phase(f"component.{module_name}"), attention_context:
             return loader.load(component_model_path, fastvideo_args)
