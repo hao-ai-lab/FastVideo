@@ -1,13 +1,13 @@
-// block_sparse_bwd_launch_sm100a.cuh -- host surface of the VSA block-sparse backward drop:
+// block_sparse_bwd_launch_blackwell.cuh -- host surface of the VSA block-sparse backward drop:
 // argument struct, workspace sizes, the support predicate and the stream-chained launch
 // (preprocess -> order -> main -> postprocess). Tensor maps are encoded per call (no static
 // cache: a torch caller hands us fresh pointers every time).
-#ifndef BLOCK_SPARSE_VSA_BWD_LAUNCH_SM100A_CUH
-#define BLOCK_SPARSE_VSA_BWD_LAUNCH_SM100A_CUH
+#ifndef BLOCK_SPARSE_VSA_BWD_LAUNCH_PTX_BLACKWELL_CUH
+#define BLOCK_SPARSE_VSA_BWD_LAUNCH_PTX_BLACKWELL_CUH
 
 #include <algorithm>
 #include <cmath>
-#include "block_sparse_bwd_kernel_sm100a.cuh"
+#include "block_sparse_bwd_kernel_blackwell.cuh"
 
 #ifndef VSA_BHSD
 #define VSA_BHSD false
@@ -230,7 +230,7 @@ __host__ inline cudaError_t launch_main(const BlockSparseVsaBwdArgs& args, const
   }
 }
 
-__host__ inline cudaError_t launch_block_sparse_bwd_sm100a(const BlockSparseVsaBwdArgs& args,
+__host__ inline cudaError_t launch_block_sparse_bwd_ptx_blackwell(const BlockSparseVsaBwdArgs& args,
                                                            cudaStream_t stream) {
   const cudaError_t supported = block_sparse_bwd_supported(args);
   if (supported != cudaSuccess) {
@@ -327,4 +327,4 @@ __host__ inline cudaError_t launch_block_sparse_bwd_sm100a(const BlockSparseVsaB
 
 using namespace vsa_bwd_blk64;
 
-#endif  // BLOCK_SPARSE_VSA_BWD_LAUNCH_SM100A_CUH
+#endif  // BLOCK_SPARSE_VSA_BWD_LAUNCH_PTX_BLACKWELL_CUH

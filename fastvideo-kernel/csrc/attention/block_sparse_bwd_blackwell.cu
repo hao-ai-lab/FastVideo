@@ -1,6 +1,6 @@
-// block_sparse_bwd_sm100a.cu -- torch binding for the sm_100a VSA block-sparse FMHA backward.
+// block_sparse_bwd_blackwell.cu -- torch binding for the Blackwell VSA block-sparse FMHA backward.
 //
-// Pairs with block_sparse_sm100a_fwd. Inputs are the forward's operands plus its output o and
+// Pairs with block_sparse_ptx_blackwell_fwd. Inputs are the forward's operands plus its output o and
 // its lse; lse is the Triton "M format" tensor the forward returns -- [B, H, S] fp32,
 // M = max(qk * sm_scale * log2e) + log2(l) -- and is consumed as-is. Sparsity arrives as
 // FastVideo's k2q metadata (fastvideo_kernel.triton_kernels.index.invert_indices): for every
@@ -10,8 +10,8 @@
 //
 // The layout is fixed at compile time: VSA_BHSD true -> [B, H, S, 128] (FastVideo's build),
 // false -> [B, S, H, 128] (repo native; the kernel addresses it as [B*S tokens, H, 128]).
-// VSA_BLK128 picks the kernel: false -> 64-token sparse blocks (block_sparse_sm100a_bwd), true ->
-// 128-token (block_sparse_sm100a_blk128_bwd; block_sparse_bwd_blk128_sm100a.cu re-includes this
+// VSA_BLK128 picks the kernel: false -> 64-token sparse blocks (block_sparse_ptx_blackwell_bwd), true ->
+// 128-token (block_sparse_ptx_blackwell_blk128_bwd; block_sparse_bwd_blk128_blackwell.cu re-includes this
 // file with it set). The python backend picks by the metadata's block size.
 #include <torch/extension.h>
 
@@ -24,11 +24,11 @@
 #define VSA_BLK128 false
 #endif
 #if VSA_BLK128
-#include "block_sparse_bwd_launch_sm100a_blk128.cuh"
-#define BLOCK_SPARSE_SM100A_BWD block_sparse_sm100a_blk128_bwd
+#include "block_sparse_bwd_launch_blk128_blackwell.cuh"
+#define BLOCK_SPARSE_PTX_BLACKWELL_BWD block_sparse_ptx_blackwell_blk128_bwd
 #else
-#include "block_sparse_bwd_launch_sm100a.cuh"
-#define BLOCK_SPARSE_SM100A_BWD block_sparse_sm100a_bwd
+#include "block_sparse_bwd_launch_blackwell.cuh"
+#define BLOCK_SPARSE_PTX_BLACKWELL_BWD block_sparse_ptx_blackwell_bwd
 #endif
 
 namespace {
@@ -61,7 +61,7 @@ __nv_bfloat16* bf16_ptr(const torch::Tensor& t) {
 }  // namespace
 
 // Returns {dq, dk, dv}: bf16, each with the shape and layout of q, k, v respectively.
-std::vector<torch::Tensor> BLOCK_SPARSE_SM100A_BWD(torch::Tensor grad_o, torch::Tensor q,
+std::vector<torch::Tensor> BLOCK_SPARSE_PTX_BLACKWELL_BWD(torch::Tensor grad_o, torch::Tensor q,
                                                    torch::Tensor k, torch::Tensor v,
                                                    torch::Tensor o, torch::Tensor lse,
                                                    torch::Tensor k2q_idx, torch::Tensor k2q_num,
@@ -166,7 +166,7 @@ std::vector<torch::Tensor> BLOCK_SPARSE_SM100A_BWD(torch::Tensor grad_o, torch::
 
   // Report an unsupported regime loudly rather than returning plausible-looking wrong values.
   TORCH_CHECK(block_sparse_bwd_supported(a) == cudaSuccess,
-              "block_sparse_sm100a_bwd (", BLOCK,
+              "block_sparse_ptx_blackwell_bwd (", BLOCK,
               "-token blocks): unsupported configuration -- requires head_dim==", HEAD_DIM,
               ", seqlen == num_kv_blocks_per_seq*", BLOCK,
               " with seqlen % 128 == 0, batch*heads <= 65535, "
@@ -174,8 +174,8 @@ std::vector<torch::Tensor> BLOCK_SPARSE_SM100A_BWD(torch::Tensor grad_o, torch::
               D, " num_kv_blocks_per_seq=", num_kv_blocks_per_seq, " seqlen=", S,
               " max_q_blocks=", max_q_blocks, " sm_scale=", sm_scale);
 
-  const cudaError_t err = launch_block_sparse_bwd_sm100a(a, at::cuda::getCurrentCUDAStream());
-  TORCH_CHECK(err == cudaSuccess, "block_sparse_sm100a_bwd (", BLOCK,
+  const cudaError_t err = launch_block_sparse_bwd_ptx_blackwell(a, at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(err == cudaSuccess, "block_sparse_ptx_blackwell_bwd (", BLOCK,
               "-token blocks) launch failed: ", cudaGetErrorString(err));
 
   return {dq, dk, dv};

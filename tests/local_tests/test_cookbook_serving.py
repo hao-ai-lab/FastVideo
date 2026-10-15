@@ -66,7 +66,7 @@ def test_spark_preview_is_a_runtime_with_one_or_two_devices():
         "gpu_count": 1,
         "evidence": "source-configured",
     }
-    assert profile["command"].startswith("FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0")
+    assert profile["command"].startswith("FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0")
     assert "openai_fasth3_spark.yaml" in profile["command"]
     assert "--server.host 127.0.0.1" in profile["command"]
 

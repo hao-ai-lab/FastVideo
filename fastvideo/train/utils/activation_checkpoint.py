@@ -53,8 +53,8 @@ _SELECTIVE_ACTIVATION_CHECKPOINTING_OP_NAMES = {
     "fastvideo::_flash_attn_varlen_qk_no_pad_forward",
     # VSA dispatches block_sparse_attn; video_sparse_attn is its Python entry
     # point, not an op, and naming that here would match nothing.
+    "fastvideo_kernel::block_sparse_attn_ptx_blackwell",
     "fastvideo_kernel::block_sparse_attn_sm90",
-    "fastvideo_kernel::block_sparse_attn_sm100a",
     "fastvideo_kernel::block_sparse_attn_triton",
 }
 

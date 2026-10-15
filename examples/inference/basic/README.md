@@ -95,7 +95,7 @@ python examples/inference/basic/basic_fasth3.py --prompt "your prompt"
 ```
 The default checkpoint, [FastH3 Preview v0.2](https://huggingface.co/FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2), is public on the Hub under the MiniMax H3 Community License. Review its model card and license before use or redistribution.
 
-The default `all` profile is the fastest measured four-GPU Preview recipe on GB200. It selects VSA sparsity 0.9 with 64-token tiles and the sm_100a sparse kernel, enables FA4 for eligible non-VSA paths, regionally compiles and replicates the sparse DiT, compiles and temporally parallelizes the video VAE with the `gather` strategy, and pins CPU-offloaded component memory. It also pins the benchmark protocol: five sigma-grid points (exactly four DiT forwards), one excluded seed-999 warmup, then three timed seed-1000 requests with distinct output paths.
+The default `all` profile is the fastest measured four-GPU Preview recipe on GB200. It selects VSA sparsity 0.9 with 64-token tiles and the ptx_blackwell sparse kernel, enables FA4 for eligible non-VSA paths, regionally compiles and replicates the sparse DiT, compiles and temporally parallelizes the video VAE with the `gather` strategy, and pins CPU-offloaded component memory. It also pins the benchmark protocol: five sigma-grid points (exactly four DiT forwards), one excluded seed-999 warmup, then three timed seed-1000 requests with distinct output paths.
 
 The equivalent explicit command is:
 
@@ -107,7 +107,7 @@ python examples/inference/basic/basic_fasth3.py \
   --steps 5 \
   --vsa-sparsity 0.9 \
   --vsa-tile-size 64 \
-  --vsa-kernel sm100a \
+  --vsa-kernel ptx_blackwell \
   --compile-vae \
   --parallel-vae \
   --replicated-dit \
@@ -143,13 +143,13 @@ Pass `--no-inference-torch-compile` to recover the eager sparse-DiT route.
 
 #### Hopper (H100 80 GB)
 
-Hopper has no FA4 and no sm_100a VSA kernel, so the GB200 profile above does
+Hopper has no FA4 and no ptx_blackwell VSA kernel, so the GB200 profile above does
 not apply there. The measured Hopper route keeps the same checkpoint, four
 forwards and 90% VSA sparsity and changes three things: the 64-token VSA path
 runs on the ThunderKittens sm_90a kernel, which fastvideo-kernel picks on sm_90
 whenever it is built with
 `cd fastvideo-kernel && CMAKE_ARGS='-DFASTVIDEO_KERNEL_BUILD_TK=ON' ./build.sh`
-(`--vsa-kernel tk` keeps the sm100a route off and fails early when that
+(`--vsa-kernel tk` keeps the ptx_blackwell route off and fails early when that
 extension is missing),
 the DiT is FSDP-sharded across the GPUs instead of replicated
 (`--no-replicated-dit`; a replicated 66 GB BF16 DiT does not fit 80 GB), and
@@ -216,7 +216,7 @@ runs a Parallel Decoding Distillation Ref2VA student in eight transformer
 forwards. The export carries only its `transformer_ref`, scheduler configs,
 and `fastvideo_inference.json`; the script links them with the base
 MiniMax-H3 components into one local model directory. Its 128-token VSA tiles
-need the sm_100a/sm_103a kernel:
+need the ptx_blackwell kernel:
 
 ```bash
 python examples/inference/basic/basic_fasth3_omniref_pdd.py \

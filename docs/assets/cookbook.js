@@ -202,7 +202,7 @@
       if (!hardware.minimum_memory) statements.push("This recorded device is not a minimum requirement.");
       details.textContent = ` ${statements.join(" ")}`;
     } else if (runtime.id === "spark") {
-      details.textContent = ` NVIDIA DGX Spark · ${gpuCountLabel(hardware, "spark")}. GB10 has no FA4 / sm_100a VSA kernel; keep Triton VSA and FA4 off.`;
+      details.textContent = ` NVIDIA DGX Spark · ${gpuCountLabel(hardware, "spark")}. GB10 has no FA4 / ptx_blackwell VSA kernel; keep Triton VSA and FA4 off.`;
     } else if (runtime.id === "cuda") {
       details.textContent = ` NVIDIA CUDA · ${gpuCountLabel(hardware, "cuda")}. The source does not record the GPU model or VRAM.`;
     } else {
