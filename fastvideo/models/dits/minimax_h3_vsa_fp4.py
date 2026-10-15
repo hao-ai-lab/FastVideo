@@ -194,11 +194,12 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
     k = k - k.mean(dim=1, keepdim=True)
     if precision == "fp8":
         q, k = _fp8_per_token(q), _fp8_per_token(k)
-    valid = key_valid[:logical]
-    out = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-                                         attn_mask=valid[None, None, None, :],
-                                         scale=1.0 / math.sqrt(q.shape[-1]))
-    return out
+    # Attend only the valid keys. Gathering them keeps SDPA on its unmasked (flash) kernel; a boolean
+    # mask over all rows falls back to the memory-efficient kernel, 3-4x slower at OmniRef prefix sizes.
+    valid_index = key_valid[:logical].nonzero().squeeze(1)
+    k, v = k.index_select(1, valid_index), v.index_select(1, valid_index)
+    return F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+                                          scale=1.0 / math.sqrt(q.shape[-1]))
 
 
 def vsa_tile_first_attention(attn: Any, hidden_states: torch.Tensor,
