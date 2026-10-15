@@ -119,7 +119,8 @@ def test_encode_reference_prompt_assigns_video_block_timestamps() -> None:
     assert call["video_grid_thw"].shape[0] == len(reference.block_timestamps)
     video_rows = sum(1 for token in call["token_ids"] if token == 1002)
     pad = VISION_CONFIG.spatial_merge_size**2
-    assert video_rows == int(np.prod(call["video_grid_thw"][:, 1:])) // pad
+    blocks = int(call["video_grid_thw"][0][0])
+    assert video_rows == int(np.prod(call["video_grid_thw"][:, 1:])) // pad * blocks
 
 
 def test_encode_reference_prompt_orders_references_as_declared() -> None:
@@ -164,3 +165,35 @@ def test_load_vision_limits_reads_the_processor_config(tmp_path) -> None:
     assert load_vision_limits(tmp_path) == (65536, 16777216)
     (tmp_path / "preprocessor_config.json").write_text('{"min_pixels": 1024, "max_pixels": 4096}')
     assert load_vision_limits(tmp_path) == (1024, 4096)
+
+
+def test_encode_reference_prompt_handles_odd_sample_count() -> None:
+    """A 124-frame reference samples to 11 frames, which the encoder must accept.
+
+    That is the real request length: 11 samples pad to 12, i.e. six labelled
+    blocks. Reporting the unpadded count (five) made the presentation and the
+    vision grid disagree and raised before encoding.
+    """
+    conditioner = _RecordingConditioner()
+    reference = _video(frames=124)
+
+    encode_reference_prompt(
+        conditioner,
+        "p",
+        [reference],
+        vision_config=VISION_CONFIG,
+        min_pixels=1024,
+        max_pixels=65536,
+    )
+
+    assert len(reference.block_timestamps) == 6
+    call = conditioner.calls[0]
+    # One grid row per video, whose temporal extent is the padded block count.
+    assert call["video_grid_thw"].shape[0] == 1
+    assert call["video_grid_thw"][0][0] == 6
+    assert call["pixel_values_videos"].shape[0] == int(np.prod(call["video_grid_thw"][0]))
+    # One padded vision block per labelled block, so the placeholders scale with
+    # the block count the presentation emitted.
+    assert sum(1 for token in call["token_ids"] if token == 1002) == (
+        int(np.prod(call["video_grid_thw"][:, 1:])) // VISION_CONFIG.spatial_merge_size**2 *
+        int(call["video_grid_thw"][0][0]))

@@ -410,8 +410,31 @@ class StreamedMiniMaxH3TextConditioner:
         if self._vision is None:
             from fastvideo.mlx_runtime.minimax_h3_vision import MLXQwen3VLVisionModel
 
-            self._vision = MLXQwen3VLVisionModel.from_safetensors_dir(self.component_dir)
+            self._vision = MLXQwen3VLVisionModel.from_safetensors_dir(self._vision_source_dir())
         return self._vision
+
+    def _vision_source_dir(self) -> Path:
+        """Where the vision tower's weights are read from.
+
+        A native MLX NVFP4 encoder cache stores what the resident loader keeps -
+        the packed matrices and their dense companions - which is every
+        ``.weight`` but no ``.bias``. The tower needs its LayerNorm,
+        patch-embed and projection biases, so it is read from the checkpoint the
+        cache records rather than from the cache, instead of forcing a re-export
+        of every existing cache.
+        """
+        manifest_path = self.component_dir / MLX_NVFP4_ENCODER_MANIFEST
+        if not manifest_path.is_file():
+            return self.component_dir
+        source = json.loads(manifest_path.read_text(encoding="utf-8")).get("source_dir")
+        if not source:
+            raise ValueError(f"{manifest_path} records no source_dir, so the vision tower cannot be read "
+                             "from the encoder cache.")
+        if not Path(source).is_dir():
+            raise FileNotFoundError(f"The checkpoint this encoder cache was built from, {source}, is gone; "
+                                    "the vision tower's biases live there. Re-export the cache from a "
+                                    "present checkpoint, or point --conditioner-dir at it.")
+        return Path(source)
 
     def _splice_visual_tokens(self, hidden, ids, pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw):
         """Return ``(hidden, deepstack blocks, visual rows)`` with features spliced in."""

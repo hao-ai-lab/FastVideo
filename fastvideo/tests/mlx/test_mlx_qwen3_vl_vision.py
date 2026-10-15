@@ -28,6 +28,7 @@ safetensors_numpy = pytest.importorskip("safetensors.numpy", reason="Writing the
 from transformers.models.qwen3_vl import Qwen3VLVisionConfig, Qwen3VLVisionModel  # noqa: E402
 
 from fastvideo.mlx_runtime.minimax_h3_conditioner import (  # noqa: E402
+    MLX_NVFP4_ENCODER_MANIFEST,
     ConditionerConfig,
     StreamedMiniMaxH3TextConditioner,
 )
@@ -288,3 +289,69 @@ def test_encode_tokens_with_vision_splices_and_keeps_text_path(tmp_path) -> None
                                                       pixel_values=pixels,
                                                       image_grid_thw=grid_thw)
     np.testing.assert_array_equal(repeat, hidden)
+
+
+def test_rotary_positions_are_frame_major() -> None:
+    """A two-patch-frame grid repeats the whole spatial grid, not each coordinate.
+
+    ``np.repeat`` instead runs each coordinate's frames together, which leaves
+    the end-to-end result only ~1e-5 off - inside the parity tolerance - so the
+    ordering is asserted structurally here.
+    """
+    mlx_model = MLXQwen3VLVisionModel(_mlx_config())
+    grid_thw = np.asarray([[2, 4, 6]], dtype=np.int64)
+    positions = np.asarray(mlx_model._rotary_positions(grid_thw))
+
+    per_frame = (4 // TINY["spatial_merge_size"]) * (6 // TINY["spatial_merge_size"]) * TINY["spatial_merge_size"]**2
+    assert positions.shape[0] == 2 * per_frame
+    np.testing.assert_array_equal(positions[:per_frame], positions[per_frame:])
+
+
+def test_prepare_vision_inputs_counts_padded_video_frames() -> None:
+    """An odd frame count pads up to a whole temporal patch, and the grid says so.
+
+    The placeholder count is derived from ``video_grid_thw``; reporting the
+    unpadded count makes a real 124-frame reference (11 samples, 6 padded
+    blocks) label six blocks and declare five.
+    """
+    generator = np.random.default_rng(11)
+    video = generator.integers(0, 256, (5, 41, 37, 3), dtype=np.uint8)
+
+    _, _, pixel_values_videos, video_grid_thw = prepare_vision_inputs(
+        None, [video], config=_mlx_config(), min_pixels=16 * 16 * 4, max_pixels=32 * 32 * 512)
+
+    temporal_patch = TINY["temporal_patch_size"]
+    assert video_grid_thw.shape == (1, 3)
+    assert video_grid_thw[0][0] == 6 // temporal_patch == 3
+    assert pixel_values_videos.shape[0] == int(np.prod(video_grid_thw[0]))
+
+    processor = pytest.importorskip("transformers.models.qwen3_vl").Qwen3VLVideoProcessor
+    reference = processor()(videos=[video],
+                           do_sample_frames=False,
+                           return_tensors="np",
+                           size={
+                               "shortest_edge": 16 * 16 * 4,
+                               "longest_edge": 32 * 32 * 512
+                           })
+    np.testing.assert_array_equal(video_grid_thw, reference["video_grid_thw"])
+
+
+def test_vision_source_dir_prefers_the_checkpoint_over_an_encoder_cache(tmp_path) -> None:
+    """A native MLX encoder cache keeps no biases, so the tower reads the source."""
+    source = tmp_path / "checkpoint"
+    source.mkdir()
+    conditioner = StreamedMiniMaxH3TextConditioner.__new__(StreamedMiniMaxH3TextConditioner)
+    conditioner.component_dir = tmp_path / "cache"
+    conditioner.component_dir.mkdir()
+    assert conditioner._vision_source_dir() == conditioner.component_dir
+
+    manifest = conditioner.component_dir / MLX_NVFP4_ENCODER_MANIFEST
+    manifest.write_text(json.dumps({"source_dir": str(source)}))
+    assert conditioner._vision_source_dir() == source
+
+    manifest.write_text(json.dumps({"source_dir": str(tmp_path / "gone")}))
+    with pytest.raises(FileNotFoundError, match="is gone"):
+        conditioner._vision_source_dir()
+    manifest.write_text("{}")
+    with pytest.raises(ValueError, match="records no source_dir"):
+        conditioner._vision_source_dir()

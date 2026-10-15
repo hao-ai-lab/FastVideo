@@ -7,15 +7,17 @@ The text encoder, tokenizer, processor and both VAEs are base MiniMax-H3's, so
 this script composes the two into one directory of symlinks - the same shape the
 CUDA example builds - and then runs the MLX runtime over it.
 
-The DiT has to be in the packed MLX layout first:
+There is no FP4 on Apple Silicon, so the DiT converts to INT8 (or INT6/INT4),
+the same formats the text-to-video-audio MLX path uses. The DiT has to be in
+the packed MLX layout first:
 
     python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \\
       --model-root <composed>/transformer_ref --out ~/models/FastH3-OmniRef-MLX \\
-      --formats bf16 --include-vsa
+      --formats int8 --include-vsa
 
     python examples/inference/basic/mlx_fasth3_omniref.py \\
       --export ./FastH3-OmniRef-QAD120-NVFP4 --composed-dir ./FastH3-OmniRef-composed \\
-      --base-model-path ./MiniMax-H3 --mlx-checkpoint ~/models/FastH3-OmniRef-MLX/bf16 \\
+      --base-model-path ./MiniMax-H3 --mlx-checkpoint ~/models/FastH3-OmniRef-MLX/int8 \\
       --image reference.png --audio voice.wav \\
       --prompt "a person on a sofa, lit by a warm lamp, speaking to camera" \\
       --output-path ~/fasth3_outputs/omniref.mp4

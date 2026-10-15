@@ -17,7 +17,8 @@ link resolves once that is in.)
 2. A **base MiniMax-H3 snapshot** — `text_encoder/`, `tokenizer/`,
    `processor/`, `vae/`, `audio_vae/`. The export does not carry these.
 3. An **MLX conversion of `transformer_ref`**. The runtime reads a packed MLX
-   checkpoint, not the diffusers shards.
+   checkpoint, not the diffusers shards. There is no FP4 on Apple Silicon, so
+   convert to INT8 (or INT6/INT4) - the same formats the T2VA MLX path uses.
 
 Compose the first two into one directory of symlinks and convert the DiT:
 
@@ -30,7 +31,7 @@ python examples/inference/basic/mlx_fasth3_omniref.py \
 
 python scripts/checkpoint_conversion/convert_minimax_h3_mlx.py \
   --model-root ./FastH3-OmniRef-composed/transformer_ref \
-  --out ~/models/FastH3-OmniRef-MLX --formats bf16 --include-vsa
+  --out ~/models/FastH3-OmniRef-MLX --formats int8 --include-vsa
 ```
 
 The composed directory is not throwaway: the runtime reads the contract
@@ -42,7 +43,7 @@ VAEs and text encoder from it for every request.
 ```bash
 python examples/inference/basic/mlx_fasth3_omniref.py \
   --model-root ./FastH3-OmniRef-composed \
-  --mlx-checkpoint ~/models/FastH3-OmniRef-MLX/bf16 \
+  --mlx-checkpoint ~/models/FastH3-OmniRef-MLX/int8 \
   --image reference.png --audio voice.wav \
   --prompt "a person on a sofa, lit by a warm lamp, speaking to camera" \
   --output-path ~/fasth3_outputs/omniref.mp4
@@ -66,8 +67,11 @@ the conditioning.
 The MLX runtime runs the same packed layout, the same reference conditioning
 and the same contract ladder as the CUDA path. Where it differs:
 
-- **No NVFP4.** The MLX DiT is a BF16/INT8/INT6/INT4 conversion. The export's
-  bf16-kept blocks land where the calibration put them, but nothing is FP4.
+- **No NVFP4.** The MLX DiT is an INT8/INT6/INT4 weight-only conversion, and
+  the text encoder and VAEs are the base snapshot's rather than the NVFP4
+  ones the CUDA consumer stack prefers. The export's bf16-kept blocks land
+  where the calibration put them; nothing is FP4. An NVFP4 text encoder
+  still works through the resident MLX encoder path if you have one.
 - **VSA reference regions are dense prefix.** With `--vsa`, the reference rows
   ride as dense prefix tiles split per reference. The CUDA path's
   `p2_multi_region` policy sparsifies each reference video region at

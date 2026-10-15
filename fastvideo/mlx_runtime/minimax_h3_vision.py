@@ -307,8 +307,15 @@ def prepare_vision_inputs(
                                source_width=frames.shape[2],
                                grid=(height, width),
                                config=config))
+            # ``_prepare_block`` pads a block up to a whole temporal patch, so
+            # the grid must count the padded frames: an 11-frame block is 6
+            # patches, not 5, and the placeholder count is derived from this.
+            # ``_prepare_block`` pads a block up to a whole temporal patch, so
+            # the grid must count the padded frames: an 11-frame block is 6
+            # patches, not 5, and the placeholder count is derived from this.
+            padded_frames = num_frames + (-num_frames % config.temporal_patch_size)
             video_grids.append(
-                (num_frames // config.temporal_patch_size, height // config.patch_size, width // config.patch_size))
+                (padded_frames // config.temporal_patch_size, height // config.patch_size, width // config.patch_size))
         pixel_values_videos = np.concatenate(video_patches, axis=0)
         video_grid_thw = np.asarray(video_grids, dtype=np.int64)
     return pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw
@@ -527,7 +534,11 @@ class MLXQwen3VLVisionModel:
             cols = block_cols[None, :, None, None] * merge + intra_cols[None, None, None, :]
             rows = np.broadcast_to(rows, (merged_height, merged_width, merge, merge)).reshape(-1)
             cols = np.broadcast_to(cols, (merged_height, merged_width, merge, merge)).reshape(-1)
-            coordinates = np.stack((rows, cols), axis=-1).repeat(frames, axis=0)
+            # ``tile``, not ``repeat``: the whole spatial grid is laid down once
+            # per frame, matching the frame-major patch order the patchify
+            # produces. ``repeat`` would instead run each coordinate's frames
+            # together, which only coincides for a single frame.
+            coordinates = np.tile(np.stack((rows, cols), axis=-1), (frames, 1))
             position_rows[offset:offset + coordinates.shape[0]] = coordinates
             offset += coordinates.shape[0]
         return frequency_table[mx.array(position_rows)].reshape(total_tokens, -1)
