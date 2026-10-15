@@ -83,6 +83,9 @@ and the same contract ladder as the CUDA path. Where it differs:
 - **The VAE encoders load only for reference requests.** They are needed to
   encode the references and are released after, which is why a
   reference-conditioned request carries a transient VAE-sized allocation.
+- **No fast temporal mode.** `--fast` stretches the generated video clock, and
+  the reference-prefixed packing does not stretch with it. A reference request
+  that asks for both is rejected rather than quietly stretched at one end.
 
 Not yet ported, and so absent rather than approximated: FL2VA keyframes through
 the MLX pipeline (`--image` on `mlx_fasth3.py`), two-pass refinement, and

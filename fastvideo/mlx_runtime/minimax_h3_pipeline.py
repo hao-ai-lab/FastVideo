@@ -402,7 +402,12 @@ def _preflight_media_dependencies(*,
 
 
 class MiniMaxH3MLXPipeline:
-    """Text-to-video-with-audio generation through the native MLX runtime."""
+    """Text-to-video-with-audio generation through the native MLX runtime.
+
+    ``generate`` also takes an ordered ``references`` list for the
+    reference-conditioned (Ref2VA / OmniRef) student, which prepends the
+    encoded references to the packed sequence and pins them as conditioning.
+    """
 
     # Defaults for pipelines built without __init__ (unit tests use __new__).
     resident = False
@@ -742,6 +747,12 @@ class MiniMaxH3MLXPipeline:
         # The keyframe-noise timestep (0.999) is only exercised by FL2VA/Ref2VA
         # conditioning rows; those modes recompute the ladder before denoise.
         if references is not None:
+            if video_temporal_scale != 1.0:
+                # The reference-prefixed builder stretches only the target video
+                # rows, which the CUDA packing never does either; refusing beats
+                # silently ignoring the request.
+                raise ValueError("Reference-conditioned packing has no temporal-scale stretch; "
+                                 "run Ref2VA without fast mode.")
             union = np.unique(np.concatenate([union, np.array([MINIMAX_H3_KEYFRAME_NOISE_AUG],
                                                               dtype=np.float32)])).astype(np.float32)
             if condition_video_rows is None or condition_audio_rows is None:

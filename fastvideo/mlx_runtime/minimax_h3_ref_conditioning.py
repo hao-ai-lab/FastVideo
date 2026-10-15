@@ -93,7 +93,7 @@ def encode_reference_prompt(
     """
     from fastvideo.mlx_runtime.minimax_h3_vision import prepare_vision_inputs
 
-    images = [reference.image for reference in references if reference.media_type == "image"]
+    images = [np.asarray(reference.image) for reference in references if reference.media_type == "image"]
     if any(image is None for image in images):
         raise ValueError("A reference image must be prepared before conditioning.")
     videos = []
@@ -104,7 +104,7 @@ def encode_reference_prompt(
             raise ValueError("A reference video must be prepared before conditioning.")
         sampled, timestamps = sample_reference_video_frames(reference.frames)
         reference.block_timestamps = timestamps
-        videos.append(sampled)
+        videos.append(np.stack(sampled))
 
     pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw = prepare_vision_inputs(
         images,

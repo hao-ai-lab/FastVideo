@@ -235,6 +235,28 @@ def test_denoise_schedules_the_condition_timestep(tmp_path: Path, fake_vaes: Non
         assert set(np.round(call["step_timesteps"], 6)) <= set(np.round(dit.adaln_timesteps, 6))
 
 
+def test_denoise_rejects_fast_mode_temporal_stretch(tmp_path: Path) -> None:
+    """A stretched ladder would leave the target rows on the unstretched clock."""
+    pipeline = _pipeline(tmp_path)
+    layout = _expected_layout()
+    with pytest.raises(ValueError, match="no temporal-scale stretch"):
+        pipeline.denoise(
+            np.zeros((NUM_TEXT_TOKENS, 16), dtype=np.float32),
+            np.full(NUM_TEXT_TOKENS, 1, dtype=np.int64),
+            height=HEIGHT,
+            width=WIDTH,
+            num_frames=NUM_FRAMES,
+            audio_num_frames=NUM_FRAMES,
+            video_temporal_scale=1.7,
+            seed=0,
+            num_steps=2,
+            dit=_RecordingDiT(),
+            references=_references(),
+            condition_video_rows=np.zeros((layout.num_condition_video_rows, PATCH_DIM), dtype=np.float32),
+            condition_audio_rows=np.zeros((layout.num_condition_audio_rows, AUDIO_IN_CHANNELS), dtype=np.float32),
+        )
+
+
 def test_denoise_encodes_condition_rows_when_absent(tmp_path: Path, fake_vaes: None) -> None:
     """With half the rows given, the pipeline encodes the missing half itself."""
     pipeline = _pipeline(tmp_path)
