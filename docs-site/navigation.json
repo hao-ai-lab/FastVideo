@@ -250,6 +250,10 @@
         ]
       },
       {
+        "label": "PAN2",
+        "href": "/inference/pan2"
+      },
+      {
         "label": "FLUX",
         "href": "/cookbook/flux"
       },

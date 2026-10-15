@@ -283,6 +283,15 @@ surfaces:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15T2V720PConfig
           - fastvideo.configs.pipelines.hyworld.HYWorldConfig
           - fastvideo.configs.pipelines.hyworld.Hunyuan15T2V480PConfig
+      text_system_prompt:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      text_encoder_skip_layers:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
+      text_max_sequence_length:
+        sources:
+          - fastvideo.configs.pipelines.pan2.PAN2PipelineConfig
       text_encoder_max_lengths:
         sources:
           - fastvideo.configs.pipelines.hunyuan15.Hunyuan15I2V480PStepDistilledConfig
