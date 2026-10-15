@@ -88,6 +88,12 @@ jobs:
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_spatial.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref_layout.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_reference_prep.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref2va_pipeline.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref_conditioning.py \
+            fastvideo/tests/mlx/test_mlx_qwen3_vl_vision.py \
+            fastvideo/tests/mlx/test_mlx_fasth3_omniref_example.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
             fastvideo/tests/mlx/test_frame_upsample.py \
@@ -153,6 +159,12 @@ jobs:
             fastvideo/tests/mlx/test_mlx_minimax_h3_vsa_regressions.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_mode.py \
             fastvideo/tests/mlx/test_mlx_minimax_h3_fast_spatial.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref_layout.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_reference_prep.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref2va_pipeline.py \
+            fastvideo/tests/mlx/test_mlx_minimax_h3_ref_conditioning.py \
+            fastvideo/tests/mlx/test_mlx_qwen3_vl_vision.py \
+            fastvideo/tests/mlx/test_mlx_fasth3_omniref_example.py \
             fastvideo/tests/mlx/test_mlx_fastwan_benchmark.py \
             fastvideo/tests/mlx/test_taehv_decode.py \
             fastvideo/tests/mlx/test_frame_upsample.py \
