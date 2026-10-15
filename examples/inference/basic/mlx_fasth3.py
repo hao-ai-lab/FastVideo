@@ -28,8 +28,9 @@ detail budget and reads softer than a native-resolution render, so it stays
 off by default.
 
 This entrypoint currently supports text-to-video-with-audio only. It does not
-yet wire FL2VA, Ref2VA, or two-pass refinement. The four-step preview stays
-the default. FastH3 8-Step V2 uses ``mlx_fasth3_8step.py``.
+yet wire FL2VA or two-pass refinement. The four-step preview stays the default.
+FastH3 8-Step V2 uses ``mlx_fasth3_8step.py``; reference-conditioned Ref2VA
+(OmniRef) uses ``mlx_fasth3_omniref.py``.
 
 VSA is off by default; existing dense MLX checkpoints remain supported.
 H3 uses fused MLX RMSNorm, which can change BF16 rounding compared with the
