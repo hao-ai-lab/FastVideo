@@ -78,6 +78,9 @@ and the same contract ladder as the CUDA path. Where it differs:
   `vsa_ref_keep_rate` instead, so reference rows are treated more conservatively
   here. Reference-conditioned VSA also needs the checkpoint converted with
   `--include-vsa`, like the T2VA path.
+- **No 128-token VSA tile.** The contract's `vsa_tile_size` is the trained 128,
+  but MLX only shapes tiles of 64 and 256, so `--vsa-tile-size` has to be set
+  rather than taken from the contract.
 - **The prefix split has no MLX equivalent.** The CUDA consumer route runs dense
   prefix query tiles at 8-bit Q/K to keep conditioning out of FP4 rounding;
   there is no FP4 kernel to split away from on Apple Silicon.
@@ -102,5 +105,7 @@ needs the real video VAE).
   `--video-decode-backend taeh3`. Use `h3-vae`.
 - **`not a Ref2VA contract`** — the export is a T2VA one; the PDD ladder and the
   reference layout come from a `model_type: ref2va` contract.
+- **`VSA tile_size must be one of [64, 256]`** — you passed the contract's 128.
+  Pass `--vsa-tile-size 64`.
 - **`VSA-H3 cannot run with this packed layout`** — the tile size does not fit
   the reference prefix. Try `--vsa-tile-size 64`, or drop `--vsa`.

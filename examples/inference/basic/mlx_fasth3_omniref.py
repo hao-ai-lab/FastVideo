@@ -82,7 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vsa", action="store_true",
                         help="VSA sparse attention; needs a checkpoint converted with --include-vsa")
     parser.add_argument("--vsa-sparsity", type=float, default=0.9)
-    parser.add_argument("--vsa-tile-size", type=int, default=64)
+    parser.add_argument("--vsa-tile-size", type=int, default=64,
+                        help="VSA tile: 64 or 256. The contract's trained 128 has no MLX tile shape.")
     parser.add_argument("--inter-step-cooldown-s", type=float, default=0.0)
     return parser
 
