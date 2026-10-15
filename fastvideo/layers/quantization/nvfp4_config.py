@@ -395,6 +395,10 @@ def _mm_fp4(
         raise TypeError(f"Unsupported kwargs for _mm_fp4: {sorted(kwargs)}")
     if alpha is not None and not torch.is_tensor(alpha):
         alpha = torch.tensor(alpha, device=a.device, dtype=torch.float32)
+    if (out is None and backend in ("cudnn", "auto") and a.shape[0] >= _SPLIT_MIN_ROWS
+            and not torch.compiler.is_compiling()):
+        return _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend,
+                                 use_nvfp4)
     return torch.ops.fastvideo_fp4.mm_fp4(
         a,
         b,
@@ -408,6 +412,62 @@ def _mm_fp4(
         backend,
         use_nvfp4,
     )
+
+
+_SPLIT_MIN_ROWS = 16384
+_SPLIT_CANDIDATES = (1, 2, 4)
+_SPLIT_CHOICE: dict[tuple[int, int, int, str], int] = {}
+
+
+def _mm_fp4_row_chunks(a: torch.Tensor, a_scale: torch.Tensor, parts: int) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Split activations and their 128x4-swizzled scales into ``parts`` row chunks on 128-row boundaries."""
+    rows = a.shape[0]
+    step = max(rows // parts // 128 * 128, 128)
+    bounds = [i * step for i in range(parts)] + [rows]
+    return [(a[lo:hi], a_scale[lo:hi]) for lo, hi in zip(bounds[:-1], bounds[1:], strict=True) if hi > lo]
+
+
+def _mm_fp4_chunked(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4,
+                    parts: int) -> torch.Tensor:
+    chunks = _mm_fp4_row_chunks(a, a_scale, parts) if parts > 1 else [(a, a_scale)]
+    outs = [
+        torch.ops.fastvideo_fp4.mm_fp4(ca, b, cs, b_scale, alpha, out_dtype, None, block_size, use_8x4_sf_layout,
+                                       backend, use_nvfp4) for ca, cs in chunks
+    ]
+    return outs[0] if len(outs) == 1 else torch.cat(outs, dim=0)
+
+
+def _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend,
+                      use_nvfp4) -> torch.Tensor:
+    """``mm_fp4`` over row chunks when that is faster.
+
+    The cuDNN FP4 plan heuristic falls off a cliff for some (rows, K, N) shapes: H3's FF
+    down projection (K=14336, N=5376, 35k rows) runs at ~110 TFLOPs whole but ~360 TFLOPs in
+    two halves (and N=14336 does the reverse). Row chunks are exact, so time 1/2/4 chunks
+    once per shape and keep the fastest.
+    """
+    key = (a.shape[0], a.shape[1], b.shape[1], backend)
+    args = (a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4)
+    if key not in _SPLIT_CHOICE:
+        if a_scale.dim() != 2 or a_scale.shape[0] < a.shape[0]:
+            _SPLIT_CHOICE[key] = 1
+        else:
+            import time
+            timings = {}
+            for parts in _SPLIT_CANDIDATES:
+                _mm_fp4_chunked(*args, parts)
+                torch.cuda.synchronize()
+                start = time.perf_counter()
+                for _ in range(2):
+                    _mm_fp4_chunked(*args, parts)
+                torch.cuda.synchronize()
+                timings[parts] = time.perf_counter() - start
+            _SPLIT_CHOICE[key] = min(timings, key=timings.__getitem__)
+            logger.info("NVFP4 mm_fp4 row split for %s: %d chunk(s) (%s ms)", key, _SPLIT_CHOICE[key], {
+                k: round(v * 500, 1)
+                for k, v in timings.items()
+            })
+    return _mm_fp4_chunked(*args, _SPLIT_CHOICE[key])
 
 
 def _mm_fp4_backend() -> str:
