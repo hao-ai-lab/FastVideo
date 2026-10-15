@@ -646,6 +646,12 @@ FASTVIDEO_LORA_SIDE_BRANCH = EnvBool(False,
 FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
                                     category="performance",
                                     doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
+FASTVIDEO_NVFP4_MM_ROW_SPLIT = EnvChoice(
+    "table",
+    choices=("off", "table", "auto"),
+    category="performance",
+    doc="Run large cuDNN NVFP4 GEMMs over row chunks where its plan heuristic is slow: off, table (fixed "
+    "per-shape chunk counts) or auto (time 1/2/4 chunks once per shape; not deterministic across runs).")
 FASTVIDEO_NVFP4_ACT_AMAX = EnvPath(None,
                                    category="performance",
                                    doc="JSON of calibrated NVFP4 input amax per linear, keyed b<block>.<sub> or "

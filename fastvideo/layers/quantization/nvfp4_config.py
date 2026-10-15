@@ -396,7 +396,7 @@ def _mm_fp4(
     if alpha is not None and not torch.is_tensor(alpha):
         alpha = torch.tensor(alpha, device=a.device, dtype=torch.float32)
     if (out is None and backend in ("cudnn", "auto") and a.shape[0] >= _SPLIT_MIN_ROWS
-            and not torch.compiler.is_compiling()):
+            and envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.get() != "off" and not torch.compiler.is_compiling()):
         return _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend,
                                  use_nvfp4)
     return torch.ops.fastvideo_fp4.mm_fp4(
@@ -417,6 +417,9 @@ def _mm_fp4(
 _SPLIT_MIN_ROWS = 16384
 _SPLIT_CANDIDATES = (1, 2, 4)
 _SPLIT_CHOICE: dict[tuple[int, int, int, str], int] = {}
+# Measured on GB10 (cuDNN 9.20 via FlashInfer 0.6): (packed K, N) -> chunks. H3's FF down projection is the only
+# shape that falls off the plan heuristic; the others are fastest whole.
+_SPLIT_TABLE: dict[tuple[int, int], int] = {(7168, 5376): 2}
 
 
 def _mm_fp4_row_chunks(a: torch.Tensor, a_scale: torch.Tensor, parts: int) -> list[tuple[torch.Tensor, torch.Tensor]]:
@@ -443,10 +446,14 @@ def _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_
 
     The cuDNN FP4 plan heuristic falls off a cliff for some (rows, K, N) shapes: H3's FF
     down projection (K=14336, N=5376, 35k rows) runs at ~110 TFLOPs whole but ~360 TFLOPs in
-    two halves (and N=14336 does the reverse). Row chunks are exact, so time 1/2/4 chunks
-    once per shape and keep the fastest.
+    two halves (and N=14336 does the reverse). The default ``table`` mode uses fixed per-shape
+    chunk counts, so every run takes the same kernels. Chunks accumulate in a different order from
+    the whole-matrix plan, so a few elements round one bf16 step differently (about 1e-8 of outputs,
+    at massive-activation rows); ``auto`` times 1/2/4 chunks once per shape instead.
     """
     key = (a.shape[0], a.shape[1], b.shape[1], backend)
+    if envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.get() == "table":
+        _SPLIT_CHOICE.setdefault(key, _SPLIT_TABLE.get((a.shape[1], b.shape[1]), 1))
     args = (a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4)
     if key not in _SPLIT_CHOICE:
         if a_scale.dim() != 2 or a_scale.shape[0] < a.shape[0]:
