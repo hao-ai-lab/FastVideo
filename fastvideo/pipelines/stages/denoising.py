@@ -496,6 +496,7 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
+                noise_pred = self.prepare_scheduler_model_output(noise_pred, state)
                 if scheduler_fp32:
                     # Diffusers-style: fp32 Euler update outside autocast avoids BF16 drift.
                     latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
@@ -628,6 +629,10 @@ class DenoisingStage(PipelineStage):
 
     def prepare_timestep(self, timestep, latent_model_input, batch, state) -> torch.Tensor:
         return timestep.repeat(latent_model_input.shape[0])
+
+    def prepare_scheduler_model_output(self, noise_pred, state) -> torch.Tensor:
+        """The model output handed to the scheduler step, which returns the next latents in its dtype."""
+        return noise_pred
 
     def finish_step(self, latents, state) -> torch.Tensor:
         return latents
