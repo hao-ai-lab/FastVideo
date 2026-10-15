@@ -9,6 +9,7 @@ import argparse
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from contextlib import ExitStack
 from functools import partial
 from typing import Any, cast
 
@@ -143,6 +144,7 @@ class ComposedPipelineBase(ABC):
         self._stages: list[PipelineStage] = []
         self._stage_name_mapping: dict[str, PipelineStage] = {}
         self._trace_mgr = None
+        self._weight_cache_leases = ExitStack()
 
         if required_config_modules is not None:
             self._required_config_modules = required_config_modules
@@ -170,7 +172,11 @@ class ComposedPipelineBase(ABC):
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
         with self.profiler_controller.region("profiler_region_model_loading"):
-            self.modules = self.load_modules(fastvideo_args, loaded_modules)
+            try:
+                self.modules = self.load_modules(fastvideo_args, loaded_modules)
+            except BaseException:
+                self._weight_cache_leases.close()
+                raise
 
     def set_trainable(self) -> None:
         # Only train DiT
@@ -627,6 +633,7 @@ class ComposedPipelineBase(ABC):
                     component_model_path=component_model_path,
                     transformers_or_diffusers=transformers_or_diffusers,
                     fastvideo_args=fastvideo_args,
+                    weight_cache_leases=self._weight_cache_leases,
                 )
 
             if self._lazy_module_load_enabled(fastvideo_args) and module_name in self._lazy_module_names:
@@ -787,6 +794,9 @@ class ComposedPipelineBase(ABC):
         raise NotImplementedError("if training_mode is True, the pipeline must implement this method")
 
     def close(self) -> None:
+        leases = getattr(self, "_weight_cache_leases", None)
+        if leases is not None:
+            leases.close()
         detach_activation_trace(getattr(self, "_trace_mgr", None))
         self._trace_mgr = None
 

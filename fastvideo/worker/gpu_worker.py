@@ -196,8 +196,7 @@ class Worker:
         logger.info("Worker %d shutting down...", self.rank, local_main_process_only=False)
         # Clean up resources
         if hasattr(self, 'pipeline') and self.pipeline is not None:
-            # Clean up pipeline resources if needed
-            pass
+            self.pipeline.close()
 
         # Destroy the distributed environment
         cleanup_dist_env_and_memory(shutdown_ray=False)

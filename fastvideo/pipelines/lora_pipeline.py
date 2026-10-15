@@ -424,6 +424,8 @@ class LoRAPipeline(ComposedPipelineBase):
             accumulate: Add this adapter to an already merged pure low-rank adapter.
         """
 
+        if getattr(self.fastvideo_args, "weight_cache_dir", None):
+            raise ValueError("LoRA edits cannot mutate shared IPC weights")
         if not math.isfinite(strength):
             raise ValueError(f"LoRA strength must be finite, got {strength}")
 
@@ -592,6 +594,8 @@ class LoRAPipeline(ComposedPipelineBase):
         NVFP4 layers are only supported while their BF16 weight is retained: a purged
         BF16 weight cannot be unmerged and remerged.
         """
+        if getattr(self.fastvideo_args, "weight_cache_dir", None):
+            raise ValueError("LoRA edits cannot mutate shared IPC weights")
         if _has_nvfp4_weights_without_bf16(self.trainable_transformer_modules):
             # TODO(David): Merge from the packed FP4 weight instead of rejecting.
             raise RuntimeError(
@@ -616,6 +620,8 @@ class LoRAPipeline(ComposedPipelineBase):
 
         NVFP4 is rejected: its FP4 buffers cannot be rebuilt from a purged BF16 weight.
         """
+        if getattr(self.fastvideo_args, "weight_cache_dir", None):
+            raise ValueError("LoRA edits cannot mutate shared IPC weights")
         if _has_quantized_nvfp4_weights(self.trainable_transformer_modules):
             # TODO(David): Preserve BF16 weights and requantize NVFP4 weights after LoRA unmerge.
             raise RuntimeError(

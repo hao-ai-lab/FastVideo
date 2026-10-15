@@ -7,7 +7,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from copy import deepcopy
 from typing import Any, cast
 
@@ -39,6 +39,8 @@ from fastvideo.models.loader.text_encoder_quantization import (
     _process_quantized_text_encoder_weights,
     _resolve_text_encoder_checkpoint_path,
 )
+from fastvideo.models.loader.inference_weight_cache import (attach_cached_model, component_weight_cache,
+                                                           validate_cached_class)
 from fastvideo.models.loader.utils import set_default_torch_dtype
 from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files,
@@ -438,6 +440,11 @@ class TextEncoderLoader(ComponentLoader):
                 quant_cls = get_quantization_config(fastvideo_args.override_text_encoder_quant)
                 model_config.quant_config = quant_cls()
 
+            cached = attach_cached_model(model_cls, model_config, PRECISION_TO_TYPE[dtype],
+                                         lambda: model_cls(model_config))
+            if cached is not None:
+                return cached
+
             if getattr(model_cls, "supports_hf_from_pretrained", False):
                 model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
                     model_path,
@@ -836,6 +843,7 @@ class VAELoader(ComponentLoader):
             class_name = getattr(fastvideo_args, "_model_index_class_names", {}).get("vae")
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported.")
+        validate_cached_class(class_name)
         fastvideo_args.model_paths["vae"] = model_path
 
         from fastvideo.platforms import current_platform
@@ -934,7 +942,7 @@ class VAELoader(ComponentLoader):
             # LTX-2 uses CausalVideoAutoencoder with nested "vae" config
             if class_name == "CausalVideoAutoencoder" and "vae" in config:
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-                vae = vae_cls(config).to(target_device)
+                vae = self.build_model(vae_cls, config, target_device)
                 if hasattr(vae, "set_tiling_config"):
                     vae_config = fastvideo_args.pipeline_config.vae_config
                     vae.set_tiling_config(
@@ -948,8 +956,33 @@ class VAELoader(ComponentLoader):
                 vae_config = fastvideo_args.pipeline_config.vae_config
                 vae_config.update_model_arch(config)
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-                vae = vae_cls(vae_config).to(target_device)
+                cached = attach_cached_model(
+                    vae_cls, vae_config, torch.get_default_dtype(),
+                    lambda: self.build_model(vae_cls, vae_config, torch.device("meta")))
+                if cached is not None:
+                    return cached
+                vae = self.build_model(vae_cls, vae_config, target_device)
 
+        return self.load_weights(vae, model_path, class_name=class_name, config=config, target_device=target_device)
+
+    def build_model(self, vae_cls: type[nn.Module], config: Any, target_device: torch.device) -> nn.Module:
+        """Construct a native VAE without checkpoint weights; the caller owns the dtype context.
+
+        Checkpoint-backed special constructors in load() retain their existing
+        behavior. This boundary covers the native safetensors path, including Wan.
+        """
+        vae = vae_cls(config)
+        vae = vae.to(target_device)
+        return vae
+
+    def load_weights(self, vae: nn.Module, model_path: str, *, class_name: str,
+                     config: dict[str, Any], target_device: torch.device) -> nn.Module:
+        """Hydrate a constructed native VAE from disk and finalize it for inference.
+
+        Keep checkpoint remapping, strictness, overlays and memory-format changes
+        here so construction can be measured/reused independently. This remains a
+        copying disk loader; it does not attach IPC storage.
+        """
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
         int8_convrot_path = None
@@ -1208,6 +1241,17 @@ class TransformerLoader(ComponentLoader):
             dit_config.quant_config = None
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
+
+        default_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
+        def construct_cached_transformer():
+            with set_default_torch_dtype(default_dtype):
+                return model_cls(config=dit_config, hf_config=hf_config)
+        record_resolved_attention_backend(dit_config)
+        cached = attach_cached_model(model_cls, dit_config, default_dtype, construct_cached_transformer,
+                                     extra_config=hf_config)
+        if cached is not None:
+            fastvideo_args.pipeline_config.dit_config = dit_config
+            return cached
 
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
@@ -1588,6 +1632,7 @@ class PipelineComponentLoader:
         component_model_path: str,
         transformers_or_diffusers: str,
         fastvideo_args: FastVideoArgs,
+        weight_cache_leases: ExitStack | None = None,
     ):
         """
         Load a pipeline module.
@@ -1629,4 +1674,9 @@ class PipelineComponentLoader:
                                  if resolved is not None else nullcontext())
 
         with attention_context:
-            return loader.load(component_model_path, fastvideo_args)
+            with component_weight_cache(module_name, fastvideo_args, weight_cache_leases) as cache:
+                model = loader.load(component_model_path, fastvideo_args)
+                if cache is not None:
+                    model._fastvideo_weight_cache_key = cache.key
+                    model._fastvideo_weight_cache_witness = cache.witness
+                return model
