@@ -21,6 +21,7 @@ from torch.nn.modules.module import _IncompatibleKeys
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.lora_patch import DenseLoRAPatch
+from fastvideo.models.loader.startup import startup_phase
 from fastvideo.models.loader.utils import (get_param_names_mapping, hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
@@ -328,7 +329,7 @@ def maybe_load_fsdp_model(
     )
 
     logger.info("Loading model with default_dtype: %s", default_dtype)
-    with set_default_dtype(default_dtype), torch.device("meta"):
+    with startup_phase("transformer.construct"), set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
     if pre_fsdp_model_transform is not None:
@@ -356,35 +357,36 @@ def maybe_load_fsdp_model(
         use_fsdp = False
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
 
-    if use_fsdp:
-        pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
-        world_size = hsdp_replicate_dim * hsdp_shard_dim
-        if not training_mode and not fsdp_inference:
-            hsdp_replicate_dim = world_size
-            hsdp_shard_dim = 1
+    with startup_phase("transformer.shard_setup"):
+        if use_fsdp:
+            pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
+            world_size = hsdp_replicate_dim * hsdp_shard_dim
+            if not training_mode and not fsdp_inference:
+                hsdp_replicate_dim = world_size
+                hsdp_shard_dim = 1
 
-        if device_mesh is None and current_platform.is_npu():
-            with torch.device("cpu"):
+            if device_mesh is None and current_platform.is_npu():
+                with torch.device("cpu"):
+                    device_mesh = init_device_mesh(
+                        "npu",
+                        # (Replicate(), Shard(dim=0))
+                        mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                        mesh_dim_names=("replicate", "shard"),
+                    )
+            elif device_mesh is None:
                 device_mesh = init_device_mesh(
-                    "npu",
+                    "cuda",
                     # (Replicate(), Shard(dim=0))
                     mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
                     mesh_dim_names=("replicate", "shard"),
                 )
-        elif device_mesh is None:
-            device_mesh = init_device_mesh(
-                "cuda",
-                # (Replicate(), Shard(dim=0))
-                mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
-                mesh_dim_names=("replicate", "shard"),
-            )
-        shard_model(model,
-                    cpu_offload=cpu_offload,
-                    reshard_after_forward=True,
-                    mp_policy=mp_policy,
-                    mesh=device_mesh,
-                    fsdp_shard_conditions=model._fsdp_shard_conditions,
-                    pin_cpu_memory=pin_cpu_memory)
+            shard_model(model,
+                        cpu_offload=cpu_offload,
+                        reshard_after_forward=True,
+                        mp_policy=mp_policy,
+                        mesh=device_mesh,
+                        fsdp_shard_conditions=model._fsdp_shard_conditions,
+                        pin_cpu_memory=pin_cpu_memory)
 
     nvfp4_skip_param_names: set[str] = set()
     if packed_nvfp4_export is not None:
@@ -459,85 +461,88 @@ def maybe_load_fsdp_model(
         }
         logger.info("Skipping %d AdaLN projection tensors (precomputed modulation tables)",
                     sum("adaln_proj" in n for n in skip_param_names))
-    load_model_from_full_model_state_dict(
-        model,
-        weight_iterator,
-        device,
-        default_dtype,
-        strict=strict,
-        cpu_offload=cpu_offload,
-        param_names_mapping=param_names_mapping_fn,
-        dense_lora_patch=dense_lora_patch,
-        skip_param_names=skip_param_names or None,
-    )
-    if packed_nvfp4_export is not None:
-        load_minimax_h3_nvfp4_dit_export(model, packed_nvfp4_export, device=device)
-    if fp8_targets:
-        _load_prequantized_fp8(model, weight_dir_list, fp8_targets, device=device)
-    if hasattr(model, "materialize_non_persistent_buffers"):
-        model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
-    for n, p in chain(model.named_parameters(), model.named_buffers()):
-        if p.is_meta:
-            raise RuntimeError(f"Unexpected param or buffer {n} on meta device.")
-        # Avoid unintended computation graph accumulation during inference
-        if isinstance(p, torch.nn.Parameter):
-            p.requires_grad = False
+    with startup_phase("transformer.hydrate"):
+        load_model_from_full_model_state_dict(
+            model,
+            weight_iterator,
+            device,
+            default_dtype,
+            strict=strict,
+            cpu_offload=cpu_offload,
+            param_names_mapping=param_names_mapping_fn,
+            dense_lora_patch=dense_lora_patch,
+            skip_param_names=skip_param_names or None,
+        )
+    with startup_phase("transformer.finalize"):
+        if packed_nvfp4_export is not None:
+            load_minimax_h3_nvfp4_dit_export(model, packed_nvfp4_export, device=device)
+        if fp8_targets:
+            _load_prequantized_fp8(model, weight_dir_list, fp8_targets, device=device)
+        if hasattr(model, "materialize_non_persistent_buffers"):
+            model.materialize_non_persistent_buffers(device=device, dtype=default_dtype)
+        for n, p in chain(model.named_parameters(), model.named_buffers()):
+            if p.is_meta:
+                raise RuntimeError(f"Unexpected param or buffer {n} on meta device.")
+            # Avoid unintended computation graph accumulation during inference
+            if isinstance(p, torch.nn.Parameter):
+                p.requires_grad = False
 
-    # Post-load weight quantization. We detect the active scheme by the
-    # ``quant_method`` attached to each linear layer at construction time
-    # (via ``QuantizationConfig.get_quant_method``). The loader's
-    # responsibility is just to materialize the quantized weight buffers
-    # from the freshly-loaded bf16 weights. No-op when no quantized layers
-    # are present (lazy imports inside the helper).
-    _maybe_quantize_model(model, defer_weight_conversion_until_lora_merge=lora_path is not None)
+        # Post-load weight quantization. We detect the active scheme by the
+        # ``quant_method`` attached to each linear layer at construction time
+        # (via ``QuantizationConfig.get_quant_method``). The loader's
+        # responsibility is just to materialize the quantized weight buffers
+        # from the freshly-loaded bf16 weights. No-op when no quantized layers
+        # are present (lazy imports inside the helper).
+        _maybe_quantize_model(model, defer_weight_conversion_until_lora_merge=lora_path is not None)
 
-    if enable_torch_compile and training_mode:
-        if not regional_compile:
-            # Legacy training stack (--enable-torch-compile): preserve the
-            # whole-model compile behavior and pass kwargs through unchanged.
-            unsupported = _prepare_model_for_compile(model, regional=False)
-            if unsupported is not None:
-                logger.warning("Training torch.compile requested but disabled: %s. Model stays eager.", unsupported)
+    with startup_phase("transformer.compile_setup"):
+        if enable_torch_compile and training_mode:
+            if not regional_compile:
+                # Legacy training stack (--enable-torch-compile): preserve the
+                # whole-model compile behavior and pass kwargs through unchanged.
+                unsupported = _prepare_model_for_compile(model, regional=False)
+                if unsupported is not None:
+                    logger.warning("Training torch.compile requested but disabled: %s. Model stays eager.", unsupported)
+                else:
+                    compile_kwargs = torch_compile_kwargs or {}
+                    logger.info("Enabling whole-model torch.compile with kwargs=%s", compile_kwargs)
+                    model = torch.compile(model, **compile_kwargs)
             else:
-                compile_kwargs = torch_compile_kwargs or {}
-                logger.info("Enabling whole-model torch.compile with kwargs=%s", compile_kwargs)
-                model = torch.compile(model, **compile_kwargs)
-        else:
+                unsupported = _regional_compile_unsupported_reason(
+                    init_params,
+                    model=model,
+                    training=True,
+                    vsa_tile_size=inference_vsa_tile_size,
+                )
+                if unsupported is None:
+                    unsupported = _prepare_model_for_compile(model, regional=False)
+                if unsupported is not None:
+                    logger.warning(
+                        "enable_torch_compile requested but disabled: %s. "
+                        "Training continues in eager mode.", unsupported)
+                else:
+                    attention_count = _enable_regional_attention_compile(model)
+                    logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
+                    _compile_model_regions(model, torch_compile_kwargs or {})
+        elif inference_regional_compile and not training_mode:
+            # Inference-side counterpart of the #1718 training regional compile:
+            # per-block fullgraph compile right after the transformer loads, no
+            # user kwargs needed (fullgraph + emulate_precision_casts injected).
             unsupported = _regional_compile_unsupported_reason(
                 init_params,
                 model=model,
-                training=True,
                 vsa_tile_size=inference_vsa_tile_size,
             )
             if unsupported is None:
-                unsupported = _prepare_model_for_compile(model, regional=False)
+                unsupported = _prepare_model_for_compile(model, regional=True)
             if unsupported is not None:
                 logger.warning(
-                    "enable_torch_compile requested but disabled: %s. "
-                    "Training continues in eager mode.", unsupported)
+                    "inference_torch_compile requested but disabled: %s. "
+                    "Inference continues in eager mode.", unsupported)
             else:
                 attention_count = _enable_regional_attention_compile(model)
                 logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
                 _compile_model_regions(model, torch_compile_kwargs or {})
-    elif inference_regional_compile and not training_mode:
-        # Inference-side counterpart of the #1718 training regional compile:
-        # per-block fullgraph compile right after the transformer loads, no
-        # user kwargs needed (fullgraph + emulate_precision_casts injected).
-        unsupported = _regional_compile_unsupported_reason(
-            init_params,
-            model=model,
-            vsa_tile_size=inference_vsa_tile_size,
-        )
-        if unsupported is None:
-            unsupported = _prepare_model_for_compile(model, regional=True)
-        if unsupported is not None:
-            logger.warning(
-                "inference_torch_compile requested but disabled: %s. "
-                "Inference continues in eager mode.", unsupported)
-        else:
-            attention_count = _enable_regional_attention_compile(model)
-            logger.info("Enabled attention tracing for %d modules in %s", attention_count, type(model).__name__)
-            _compile_model_regions(model, torch_compile_kwargs or {})
     return model
 
 
