@@ -1,4 +1,3 @@
-
 # Optimizations
 
 This page describes the various options for speeding up generation times in FastVideo.
@@ -7,8 +6,7 @@ This page describes the various options for speeding up generation times in Fast
     Several options on this page behave differently on the GB10's unified-memory
     hardware — some give little or nothing there. See
     [DGX Spark: Performance & Tuning](../getting_started/installation/spark_performance.md)
-    for what actually helps on that platform and why. Two Sparks, one clip:
-    [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
+    for what actually helps on that platform and why.
 
 ## Table of Contents
 
@@ -31,6 +29,7 @@ This page describes the various options for speeding up generation times in Fast
 
 - Torch SDPA: `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA`
 - Flash Attention 2 and 3: `FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN`
+- FlashInfer prefill: `FASTVIDEO_ATTENTION_BACKEND=FLASHINFER`
 - Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 - Sage Attention 3: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN_THREE`
@@ -60,6 +59,38 @@ You can also set the environment variable on the command line:
 ```bash
 FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN python example.py
 ```
+
+### FlashInfer cuDNN prefill
+
+**`FLASHINFER`**
+
+Wan and MiniMax H3 support the shared `FLASHINFER` attention backend for dense
+attention. Install a FlashInfer release that provides
+`cudnn_batch_prefill_with_kv_cache`, then select either the established per-sample
+kernel or the batched cuDNN SDPA path. Replace `example.py` below with your Wan
+or MiniMax H3 inference script:
+
+```bash
+uv pip install 'flashinfer-python>=0.6.18'
+
+# FlashInfer single_prefill_with_kv_cache (default)
+FASTVIDEO_ATTENTION_BACKEND=FLASHINFER \
+FASTVIDEO_FLASHINFER_PREFILL_BACKEND=single python example.py
+
+# FlashInfer batched cuDNN SDPA
+FASTVIDEO_ATTENTION_BACKEND=FLASHINFER \
+FASTVIDEO_FLASHINFER_PREFILL_BACKEND=cudnn python example.py
+```
+
+The cuDNN path is inference-only, currently requires head size 128, and does
+not accept arbitrary custom attention masks. It supports dense self-attention,
+cross-attention, GQA, and causal attention. FastVideo raises an error instead
+of silently selecting another kernel when these constraints are not met.
+
+Kernel-level benchmark results and the standalone benchmark script are included
+in [PR #1827](https://github.com/hao-ai-lab/FastVideo/pull/1827). The script is
+not shipped in the repository. These kernel measurements do not establish
+end-to-end speedups for Wan or MiniMax H3; the cuDNN path remains opt-in.
 
 ### Flash Attention
 
@@ -145,11 +176,19 @@ PyTorch 2.12.0 and CUDA 13 environment for this kernel.
 Branch-to-`nvidia-cutlass-dsl` compatibility (the fork tracks the CuTe DSL API
 surface closely):
 
-| fork branch | cutlass-dsl | notes |
-|---|---|---|
-| `fp4` | `==4.4.2` (+ `nvidia-cutlass-dsl-libs-base==4.4.2`) | validated set on GB200: `quack-kernels==0.4.1`, `flashinfer-python==0.6.8`, `CUTE_DSL_ENABLE_TVM_FFI=1`, `FASTVIDEO_FA4=1` |
-| `fix/cutlass-dsl-4.5` | `>=4.5.2` | carries the `cute.core.ThrMma` -> `cute.ThrMma` fix |
-| any | 4.6-era | unsupported: `cute.make_fragment` was removed at module level; fails at CuTe JIT trace |
+| fork branch           | cutlass-dsl                                         | notes                                                        |
+| --------------------- | --------------------------------------------------- | ------------------------------------------------------------ |
+| `fp4`                 | `==4.4.2` (+ `nvidia-cutlass-dsl-libs-base==4.4.2`) | historical GB200 validation only; see the version compatibility note below |
+| `fix/cutlass-dsl-4.5` | `>=4.5.2`                                           | carries the `cute.core.ThrMma` -> `cute.ThrMma` fix          |
+| any                   | 4.6-era                                             | unsupported: `cute.make_fragment` was removed at module level; fails at CuTe JIT trace |
+
+!!! warning "FP4 version compatibility"
+    The historical GB200 validation used `quack-kernels==0.4.1`,
+    `flashinfer-python==0.6.8`, `CUTE_DSL_ENABLE_TVM_FFI=1`, and `FASTVIDEO_FA4=1`.
+    That combination does not satisfy this checkout's Linux requirement of
+    `flashinfer-python>=0.6.18` and is not a supported installation recipe for
+    this checkout. FP4/FA4 still needs revalidation with the current FlashInfer
+    requirement; the cuDNN prefill tests do not validate FP4/FA4 compatibility.
 
 `FASTVIDEO_FA4=1` is required alongside the fork: it ships no compiled
 FlashAttention-2, so dense attention paths raise ImportError without the FA4
@@ -402,7 +441,8 @@ attention instances owned by this transformer. MiniMax-H3 VSA is supported
 only by the inference-only sm_100a tile-64 route
 (`FASTVIDEO_VSA_SM100A=1` and `VSA_tile_size=64`); the loader probes that
 route before capture and keeps the transformer eager when the kernel or
-device is unsupported. Legacy VSA, MiniMax-H3 tile-256 VSA, and the explicit
+device is unsupported. FlashInfer (`FLASHINFER`), legacy VSA, MiniMax-H3
+tile-256 VSA, and the explicit
 `FASTVIDEO_DISABLE_ATTENTION_COMPILE=1` escape hatch keep the transformer
 eager with one warning instead of failing mid-denoise.
 
@@ -425,8 +465,8 @@ The Wan result below measures the existing generic
 but it is **not** a benchmark or numerical gate for the stricter regional
 fullgraph path above.
 
-| Config | Effect |
-|---|---|
+| Config                                            | Effect                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------ |
 | Wan2.1-T2V-1.3B, A100-80GB, 480×832×81f, 50 steps | end-to-end **259.7s → 198.1s (−23.7%)**; per-step **4.91 → 3.78 s/it** |
 
 The speedup is **configuration-dependent** — it varies with model,
@@ -552,11 +592,11 @@ remaining steps. The technique is the LinearAG variant of Adaptive Guidance
 
 Set the `FASTVIDEO_CFG_GATE_STEP` environment variable to a float in `[0, 1]`:
 
-| Value | Behavior |
-|-------|----------|
-| `1.0` (default) | Disabled — legacy two-pass CFG every step. |
-| `0.5` | Cache the delta after `len(timesteps) * 0.5` steps; reuse for the rest. |
-| `0.0` | Cache from the very first step (most aggressive). |
+| Value           | Behavior                                                     |
+| --------------- | ------------------------------------------------------------ |
+| `1.0` (default) | Disabled — legacy two-pass CFG every step.                   |
+| `0.5`           | Cache the delta after `len(timesteps) * 0.5` steps; reuse for the rest. |
+| `0.0`           | Cache from the very first step (most aggressive).            |
 
 ```bash
 export FASTVIDEO_CFG_GATE_STEP=0.5

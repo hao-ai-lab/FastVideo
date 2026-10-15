@@ -6,8 +6,8 @@ transformer loads (``FastVideoArgs.inference_torch_compile``, env
 ``FASTVIDEO_INFERENCE_TORCH_COMPILE=1``). These tests pin the two pieces that
 must not drift from the #1718 training-port semantics:
 
-- ``_regional_compile_unsupported_reason``: legacy VSA (and the attention
-  eager escape hatch) degrades to eager, while prepared MiniMax-H3 VSA is
+- ``_regional_compile_unsupported_reason``: FlashInfer, legacy VSA
+  (and the attention eager escape hatch) degrade to eager, while prepared MiniMax-H3 VSA is
   admitted to regional fullgraph capture.
 - attention forward dispatch: ordinary instances retain the historical
   compiler-disabled boundary; regional compile opts in only the selected
@@ -30,7 +30,7 @@ from torch import nn
 
 import fastvideo.envs as envs
 from fastvideo.attention import layer as attention_layer
-from fastvideo.attention.layer import DistributedAttention
+from fastvideo.attention.layer import DistributedAttention, LocalAttention
 from fastvideo.models.dits.minimax_h3 import MiniMaxH3Attention, MiniMaxH3Transformer3DModel
 from fastvideo.models.loader import fsdp_load
 from fastvideo.models.loader.fsdp_load import (
@@ -63,6 +63,45 @@ def test_legacy_vsa_backend_degrades_to_eager(env_overrides) -> None:
     assert reason is not None
     assert backend_name in reason
     assert "eager" in reason
+
+
+def test_flashinfer_backend_degrades_to_eager(env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+
+    reason = _regional_compile_unsupported_reason(_init_params_for("FLASHINFER"))
+
+    assert reason is not None
+    assert "FLASHINFER" in reason
+    assert "fullgraph" in reason
+    assert "eager" in reason
+
+
+@pytest.mark.parametrize("attention_cls", [DistributedAttention, LocalAttention])
+@pytest.mark.parametrize("training", [False, True])
+def test_actual_flashinfer_backend_degrades_to_eager(attention_cls, training, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    # A mixed model must stay eager even if only its local/cross attention
+    # uses FlashInfer and the component config requests a different backend.
+    model = _model_with_actual_backend(AttentionBackendEnum.TORCH_SDPA)
+    attention = attention_cls.__new__(attention_cls)
+    nn.Module.__init__(attention)
+    attention.backend = AttentionBackendEnum.FLASHINFER
+    model.add_module("flashinfer_attention", attention)
+
+    reason = _regional_compile_unsupported_reason(
+        _init_params_for("TORCH_SDPA"), model=model, training=training)
+
+    assert reason is not None
+    assert "FLASHINFER" in reason
+    assert "eager" in reason
+
+
+@pytest.mark.parametrize("backend", [AttentionBackendEnum.TORCH_SDPA, AttentionBackendEnum.FLASH_ATTN])
+def test_actual_supported_backend_overrides_flashinfer_request(backend, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    model = _model_with_actual_backend(backend)
+
+    assert _regional_compile_unsupported_reason(_init_params_for("FLASHINFER"), model=model) is None
 
 
 @pytest.mark.parametrize("backend_name", [None, "TORCH_SDPA"])

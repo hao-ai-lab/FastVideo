@@ -383,6 +383,12 @@ FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT = EnvBool(
     category="attention",
     doc="VIDEO_SPARSE_ATTN keeps the original tile scatter and BSHD->BHSD transposes instead of the fused Triton "
     "layout kernel that no-grad SM100 BF16 head_dim-128 forwards with 64-token tiles use by default.")
+FASTVIDEO_FLASHINFER_PREFILL_BACKEND = EnvChoice(
+    "single",
+    choices=("single", "cudnn"),
+    category="attention",
+    doc="FlashInfer prefill implementation: single per sample or batched cuDNN SDPA.",
+)
 
 # ================== Performance ==================
 
