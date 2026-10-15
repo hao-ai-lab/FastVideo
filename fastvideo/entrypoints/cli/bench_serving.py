@@ -58,14 +58,11 @@ class RequestFuncInput:
 @dataclass
 class RequestFuncOutput:
     success: bool = False
-    # From sending the request to its completion.
     latency: float = 0.0
     error: str = ""
     start_time: float = 0.0
     response_body: dict[str, Any] = field(default_factory=dict)
     peak_memory_mb: float = 0.0
-    # From the request's scheduled arrival to sending it, i.e. the wait for a
-    # --max-concurrency slot. Set by limited_request.
     queue_wait: float = 0.0
 
 
@@ -572,20 +569,15 @@ async def limited_request(
     session: aiohttp.ClientSession,
     pbar: tqdm | None,
     semaphore: asyncio.Semaphore | None,
+    arrival_time: float,
 ) -> RequestFuncOutput:
-    """Send `req` once a concurrency slot is free, and record how long it waited.
-
-    The request is due when this is called. With --max-concurrency the requests
-    the server cannot keep up with queue here, in the client, and `latency` (which
-    starts when the request is sent) would not show that wait at all.
-    """
-    scheduled_time = time.perf_counter()
+    """Send `req` once a concurrency slot is free; `queue_wait` counts from `arrival_time`."""
     if semaphore is None:
         output = await request_func(req, session, pbar)
     else:
         async with semaphore:
             output = await request_func(req, session, pbar)
-    output.queue_wait = output.start_time - scheduled_time
+    output.queue_wait = output.start_time - arrival_time
     return output
 
 
@@ -595,8 +587,6 @@ def calculate_metrics(outputs: list[RequestFuncOutput], total_duration: float):
 
     num_success = len(success_outputs)
     latencies = [o.latency for o in success_outputs]
-    # What a user arriving on the request schedule waits: queueing for a slot
-    # plus the request itself.
     e2e_latencies = [o.queue_wait + o.latency for o in success_outputs]
     peak_memories = [o.peak_memory_mb for o in success_outputs if o.peak_memory_mb is not None and o.peak_memory_mb > 0]
 
@@ -712,12 +702,14 @@ async def benchmark(args: argparse.Namespace) -> None:
         start_time = time.perf_counter()
         tasks = []
         for req in requests_list:
+            arrival_time = start_time
             if args.request_rate != float("inf"):
                 # Poisson process: inter-arrival times follow exponential distribution
                 interval = np.random.exponential(1.0 / args.request_rate)
                 await asyncio.sleep(interval)
+                arrival_time = time.perf_counter()
 
-            task = asyncio.create_task(limited_request(request_func, req, session, pbar, semaphore))
+            task = asyncio.create_task(limited_request(request_func, req, session, pbar, semaphore, arrival_time))
             tasks.append(task)
 
         outputs = await asyncio.gather(*tasks)
