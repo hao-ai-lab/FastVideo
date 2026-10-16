@@ -277,6 +277,14 @@ The permanent operator rollout is:
    and cache writes under the runner's identity. PR jobs consume the prepared
    snapshots rather than depending on an interactive login or another user's
    writable cache.
+   When multiple operators prepare the shared cache, use its existing group
+   with `umask 0002`. Check group write access on each prepared model's cache,
+   snapshot, blob and `.locks` directories, not only the cache root. Verify
+   manifest resolution as the CI worker identity before running the lane.
+   A readable weight file alone is insufficient: Hub downloads also create
+   metadata and lock files. For example, Stable Audio's pinned revision is
+   `26609645c363fc81829282fcfe6356340346c1d4`; provision its complete snapshot,
+   including `model_index.json`, component configs and tokenizer files.
 5. For a missing SSIM reference, generate and inspect output from unchanged
    upstream source on the CI GPU/backend/runtime, retain its provenance, and
    publish only the reviewed new reference. Verify the candidate independently
