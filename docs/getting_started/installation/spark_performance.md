@@ -5,16 +5,17 @@ run next. It covers **which models are practical on the GB10, what actually
 makes them faster, and what won't help (and why)**, so you don't burn a night
 tuning knobs that can't move on this hardware.
 
-!!! tip "TL;DR"
-    - **Use distilled few-step models** (e.g. `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`).
-      They run in ~40 s/video. Full-step models are 12–47 min on the GB10.
-    - On few-step models, **VAE decode is the bottleneck**, not attention — it's
-      bandwidth-bound on the Spark's unified memory.
-    - **bf16 VAE decode** is the real, lossless lever (FastVideo already turns it
-      on for Wan). **FlashAttention, linear quantization, and `torch.compile` of
-      the VAE give little or nothing here** — see the table below.
-    - Heavy runs can make the box unreachable — run generations with VAE tiling on
-      and `nice -n 19`. See [Running safely](#running-safely-dont-lock-the-box).
+:::tip[TL;DR]
+- **Use distilled few-step models** (e.g. `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`).
+  They run in ~40 s/video. Full-step models are 12–47 min on the GB10.
+- On few-step models, **VAE decode is the bottleneck**, not attention — it's
+  bandwidth-bound on the Spark's unified memory.
+- **bf16 VAE decode** is the real, lossless lever (FastVideo already turns it
+  on for Wan). **FlashAttention, linear quantization, and `torch.compile` of
+  the VAE give little or nothing here** — see the table below.
+- Heavy runs can make the box unreachable — run generations with VAE tiling on
+  and `nice -n 19`. See [Running safely](#running-safely-dont-lock-the-box).
+:::
 
 ## The hardware reality (this explains everything below)
 
@@ -42,12 +43,13 @@ model is ~18× faster than the full-step version of the same architecture:
 The bottleneck flips from decode to denoise at around **4 steps**. Below that,
 you're paying mostly for VAE decode; above it, mostly for the denoising loop.
 
-!!! note "Few-step timings are noisy — measure in-process"
-    On a 3-step run, one-time per-process startup (Triton autotune, allocator
-    warmup) dominates and never amortizes, so single-run totals wobble ~±30%.
-    Compare levers **back-to-back in one process or as medians**, never as two
-    separate single runs. The [reproduction script](#reproduce-these-numbers)
-    does this for you.
+:::note[Few-step timings are noisy — measure in-process]
+On a 3-step run, one-time per-process startup (Triton autotune, allocator
+warmup) dominates and never amortizes, so single-run totals wobble ~±30%.
+Compare levers **back-to-back in one process or as medians**, never as two
+separate single runs. The [reproduction script](#reproduce-these-numbers)
+does this for you.
+:::
 
 ## bf16 VAE decode — the real lever (already on for Wan)
 

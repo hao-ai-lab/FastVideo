@@ -43,16 +43,13 @@ Diffusers 0.39.0, Transformers 5.13.1, and `flash-attn==2.8.1`.
 Download the pinned inference snapshot without the unused ODE transformer:
 
 ```bash
-.venv/bin/python \
-  .agents/skills/add-model-01-prep/scripts/download_hf_weights.py \
-  BestWishYsh/Helios-Distilled \
-  official_weights/helios \
+hf download BestWishYsh/Helios-Distilled \
+  --local-dir official_weights/helios \
   --revision 1999182614cb08d3bdcc46b9827504af2914b87b \
-  --ignore-pattern "transformer_ode/*"
+  --exclude "transformer_ode/*"
 ```
 
-Use only `HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`, or `HF_API_KEY` when auth is
-needed. Never put a token value in this file or a command log.
+Set `HF_TOKEN` when auth is needed. Never put a token value in this file or a command log.
 
 ## Component Matrix
 

@@ -318,3 +318,44 @@ For reusable UI methods and configuration guarantees, see the
 [design and API contract](../cookbook/design.md). Streaming client instructions
 follow the [WebSocket contract](../design/server_contracts/streaming.md); a health
 response alone does not establish generation readiness.
+
+## Model pages in the cookbook
+
+The Blume cookbook starts at `/cookbook` with model cards filtered by Video,
+Image, Audio, or World. FastH3 appears first. Each model has its own page in a
+sidebar family group.
+
+`docs-site/lib/cookbook-pages.ts` derives the inventory from
+`docs/assets/cookbook-recipes.json`. Recipes sharing a checkpoint become variants
+on one model page. `transfer-docs.mjs` generates source-recipe pages and sidebar
+entries. Preparation publishes exact checked-in YAML under
+`assets/cookbook-sources/`; it does not synthesize settings for these pages.
+
+For a model with an editable serving catalog, add its display metadata to
+`recipePages`, map the checkpoint in `backendModels`, and add an MDX overlay with
+`<Cookbook modelId="your-model-key" />`. Use `mode: frame` so the island owns the
+logo, heading, and YAML actions. Add the route to its sidebar family.
+Presentation metadata must not define editable options or compatibility claims.
+
+Editable pages organize catalog fields into a compact option matrix. The shared
+API owns validation and YAML/command generation. Each model owns one page. Hardware backend buttons select declared
+deployments, so unsupported NVIDIA, AMD, or MLX choices do not appear. Precision
+and encoder controls appear only when the deployment declares them.
+
+GPU targets are URL preferences for setup guidance. GPU count and parallelism
+use backend fields. Automatic parallelism sets the supported degrees to `-1`;
+it does not estimate memory. All configurations carry an unverified-recipe
+label until hardware-fit and runtime validation are connected.
+
+Old `/cookbook?deployment=<id>` links open the corresponding model page.
+
+Provider labels follow the displayed logo. FastVideo-owned releases and converted
+checkpoints using its mark display `FastVideo` as provider. FastH3 Trim replaces
+the obsolete CompactH3 catalog entry; do not restore its local assembly recipes.
+
+Custom hardware names can be added through the matrix and persist in the page
+URL. This is a device preference, not a memory lookup or compatibility result.
+The component explorer is a design preview for weights, encoders, and decoders.
+It does not alter serving YAML. Choosing an alternate component on an editable
+recipe suppresses generated output until the baseline components are restored.
+Connect those choices only after a matching backend recipe is defined.

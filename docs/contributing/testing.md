@@ -115,9 +115,10 @@ the output against reference videos with Structural Similarity Index Measure.
 Use them for pipeline-level visual regression coverage when output quality or
 generation behavior must be preserved.
 
-!!! note
-    Add enough prompts, seeds, backends, and parameter combinations to cover the
-    behavior you want to protect, but keep runtime reasonable for CI.
+:::note
+Add enough prompts, seeds, backends, and parameter combinations to cover the
+behavior you want to protect, but keep runtime reasonable for CI.
+:::
 
 ### Directory Structure
 

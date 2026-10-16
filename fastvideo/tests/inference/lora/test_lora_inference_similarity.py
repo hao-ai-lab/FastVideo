@@ -60,9 +60,8 @@ LORA_CONFIGS = [{
 }
                 # TODO: Add a LoRA with lora_alpha values to test alpha scaling
                 #
-                # Context: This change is mainly for an in-progress ticket porting over LongCat-Video,
-                # where they used an alpha value that is two times smaller than their rank. This fix
-                # ensures that LoRA weights are correctly scaled by the alpha/rank ratio when merged.
+                # Context: Some LoRAs use an alpha value that is two times smaller than their rank.
+                # This fix ensures that LoRA weights are correctly scaled by the alpha/rank ratio when merged.
                 #
                 # Issue: Currently, we cannot add a test for LoRA adapters with alpha values because:
                 # - The existing public LoRAs for Wan-AI/Wan2.1-T2V-1.3B-Diffusers don't store lora_alpha
@@ -70,7 +69,7 @@ LORA_CONFIGS = [{
                 # - This is why the alpha/rank scaling bug wasn't caught by existing tests
                 #
                 # The fix has been validated with:
-                # - LongCat-Video distilled LoRA (which includes alpha values)
+                # - A distilled LoRA that includes alpha values
                 # - Manual testing shows correct alpha/rank scaling behavior
                 # - Backward compatibility confirmed with LoRAs without alpha values
                 #

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
@@ -103,9 +104,9 @@ SAFE_PATTERNS = (
     "comfyui/**",
     "docs/**",
     "examples/**",
-    "mkdocs.yml",
-    "requirements-mkdocs.in",
-    "requirements-mkdocs.txt",
+    "docs-site/**",
+    "requirements-docs.in",
+    "requirements-docs.txt",
     "scripts/**",
     "tests/__init__.py",
     "tests/local_tests/**",
@@ -131,11 +132,6 @@ class FamilyCoverage:
 
 FAMILY_COVERAGE = (
     FamilyCoverage(
-        re.compile(r"(^|[/_.-])dreamx(_world)?([/_.-]|$)"),
-        ("test_dreamx.py", ),
-        ("test_dreamx_world_similarity.py", ),
-    ),
-    FamilyCoverage(
         re.compile(r"(^|[/_.-])flux[_-]?2([/_.-]|$)"),
         ("test_flux2_klein.py", ),
         ("test_flux2_similarity.py", ),
@@ -146,19 +142,9 @@ FAMILY_COVERAGE = (
         ("test_flux_t2i_similarity.py", ),
     ),
     FamilyCoverage(
-        re.compile(r"(^|[/_.-])(hunyuan)?gamecraft([/_.-]|$)"),
-        ("test_gamecraft.py", ),
-        ("test_gamecraft_similarity.py", ),
-    ),
-    FamilyCoverage(
         re.compile(r"(^|[/_.-])gen3c([/_.-]|$)"),
         ("test_gen3c.py", ),
         ("test_gen3c_similarity.py", ),
-    ),
-    FamilyCoverage(
-        re.compile(r"(^|[/_.-])glm[_-]?image([/_.-]|$)"),
-        ("test_glm_image.py", ),
-        ("test_glm_image_similarity.py", ),
     ),
     FamilyCoverage(
         re.compile(r"(^|[/_.-])hunyuan(video)?15([a-z0-9_-]*)([/_.-]|$)"),
@@ -174,11 +160,6 @@ FAMILY_COVERAGE = (
         re.compile(r"(^|[/_.-])lingbot([a-z0-9_-]*)([/_.-]|$)"),
         ("test_lingbot.py", ),
         ("test_lingbot_similarity.py", ),
-    ),
-    FamilyCoverage(
-        re.compile(r"(^|[/_.-])longcat([/_.-]|$)"),
-        ("test_longcat.py", ),
-        ("test_longcat_similarity.py", ),
     ),
     FamilyCoverage(
         re.compile(r"(^|[/_.-])ltx[_-]?2([/_.-]|$)"),
@@ -211,11 +192,6 @@ FAMILY_COVERAGE = (
         ("test_stable_audio_similarity.py", ),
     ),
     FamilyCoverage(
-        re.compile(r"(^|[/_.-])turbo(diffusion)?([/_.-]|$)"),
-        (),
-        ("test_turbodiffusion_similarity.py", ),
-    ),
-    FamilyCoverage(
         re.compile(r"(^|[/_.-])wan(video|vae)?([/_.-]|$)"),
         ("test_wan_t2v.py", "test_wan_vae.py", "test_wan_causal.py", "test_wan_denoising.py"),
         (
@@ -224,11 +200,6 @@ FAMILY_COVERAGE = (
             "test_wan_t2v_similarity.py",
             "test_wan_ti2v_similarity.py",
         ),
-    ),
-    FamilyCoverage(
-        re.compile(r"(^|[/_.-])z[_-]?image([/_.-]|$)"),
-        ("test_zimage.py", ),
-        ("test_zimage_similarity.py", ),
     ),
 )
 
@@ -325,16 +296,22 @@ def _select_output_coverage(plan: MergePlan, path: str) -> None:
         plan.add_ssim(SSIM_SMOKE_TESTS, reason=f"shared output SSIM smoke coverage: {path}")
 
 
-def classify_paths(paths: list[str]) -> MergePlan:
+def _normalize_path(raw_path: str) -> str:
+    path = raw_path.strip()
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
+def classify_paths(paths: list[str], removed_paths: Iterable[str] = ()) -> MergePlan:
+    """Plan merge lanes for ``paths``.
+
+    ``removed_paths`` lists changed paths that no longer exist at the PR head
+    (deleted files and rename sources); removed golden/SSIM tests are not run.
+    """
     plan = MergePlan()
-    normalized_paths: list[str] = []
-    for raw_path in paths:
-        path = raw_path.strip()
-        while path.startswith("./"):
-            path = path[2:]
-        if path:
-            normalized_paths.append(path)
-    normalized_paths = sorted(set(normalized_paths))
+    normalized_paths = sorted({path for path in map(_normalize_path, paths) if path})
+    removed = {path for path in map(_normalize_path, removed_paths) if path}
     if not normalized_paths:
         plan.require_all("changed-file list was empty; failing closed")
         return plan
@@ -344,7 +321,7 @@ def classify_paths(paths: list[str]) -> MergePlan:
             plan.require_all("changed-file API failed; failing closed")
             continue
 
-        if path in {"requirements-mkdocs.in", "requirements-mkdocs.txt"}:
+        if path in {"requirements-docs.in", "requirements-docs.txt"}:
             plan.reasons.append(f"documentation dependencies need no GPU integration: {path}")
             continue
 
@@ -374,7 +351,10 @@ def classify_paths(paths: list[str]) -> MergePlan:
         if path.startswith("fastvideo/tests/golden_gate/"):
             name = Path(path).name
             if name.startswith("test_") and name.endswith(".py"):
-                plan.add_golden((name, ), reason=f"changed golden test: {path}")
+                if path in removed:
+                    plan.reasons.append(f"removed golden test has nothing to run: {path}")
+                else:
+                    plan.add_golden((name, ), reason=f"changed golden test: {path}")
             elif name in {"AGENTS.md", "README.md"}:
                 plan.reasons.append(f"golden documentation only: {path}")
             else:
@@ -385,7 +365,10 @@ def classify_paths(paths: list[str]) -> MergePlan:
         if path.startswith("fastvideo/tests/ssim/"):
             name = Path(path).name
             if name.startswith("test_") and name.endswith(".py"):
-                plan.add_ssim((name, ), reason=f"changed SSIM test: {path}")
+                if path in removed:
+                    plan.reasons.append(f"removed SSIM test has nothing to run: {path}")
+                else:
+                    plan.add_ssim((name, ), reason=f"changed SSIM test: {path}")
             elif path.endswith((".py", ".json", ".pt", ".png", ".mp4")):
                 plan.ssim_all = True
                 plan.add_lanes("ssim", reason=f"shared SSIM harness/reference: {path}")
@@ -565,6 +548,7 @@ def _write_summary(output: TextIO, plan: MergePlan) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paths-file", type=Path, required=True)
+    parser.add_argument("--removed-paths-file", type=Path)
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--summary-file", type=Path)
     return parser.parse_args()
@@ -573,7 +557,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     paths = args.paths_file.read_text(encoding="utf-8").splitlines()
-    plan = classify_paths(paths)
+    removed_paths = (args.removed_paths_file.read_text(encoding="utf-8").splitlines()
+                     if args.removed_paths_file else [])
+    plan = classify_paths(paths, removed_paths)
     print(f"MERGE_TEST_PLAN={plan.encoded_lanes()}")
     print(f"MERGE_GOLDEN_TESTS={plan.encoded_golden_tests()}")
     print(f"MERGE_SSIM_TESTS={plan.encoded_ssim_tests()}")

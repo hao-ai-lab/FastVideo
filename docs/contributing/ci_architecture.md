@@ -498,8 +498,8 @@ The docs job:
 1. Installs Python and Node documentation dependencies.
 2. Runs lint, formatting checks and tests for documentation tooling.
 3. Generates required static assets.
-4. Builds the MkDocs site and checks its assets and documentation links.
-5. Uploads the site artifact and publishes only from `main`.
+4. Builds the Blume site, validates routes and assets, and tests navigation and cookbook interactions.
+5. Uploads `docs-site/dist/` as the Pages artifact and publishes only from `main`, at the existing `https://haoailab.com/FastVideo/` URL.
 
 ### Docker Images
 
@@ -550,8 +550,11 @@ The reusable implementation lives in
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `community-issue-labeler.yml` | Issue opened or edited | Adds scope/platform labels from issue keywords. |
-| `community-welcome.yml` | First contribution | Posts a welcome comment for first-time contributors. |
-| `community-stale.yml` | Daily schedule | Marks and closes stale issues and PRs, with exemption labels. |
+
+None of these automations post comments or messages on issues or pull
+requests; they only set labels. Issues and pull requests are never marked
+stale or closed automatically. Keep it that way: new automation must report
+through checks, commit statuses, or labels instead of PR/issue comments.
 
 ## File Reference
 
