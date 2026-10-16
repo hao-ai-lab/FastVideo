@@ -32,6 +32,7 @@ import importlib.util
 import torch
 
 from fastvideo import envs
+from fastvideo.attention.utils._fa2_determinism import _resolve_fa2_deterministic
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -96,11 +97,18 @@ if fa_version == "2":
         v: torch.Tensor,
         softmax_scale: float | None,
         causal: bool,
+        deterministic: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # `return_attn_probs=True` asks FA2 to also return softmax_lse +
         # S_dmask. We need softmax_lse to feed the backward; S_dmask is the
         # dropout mask (always None here since dropout_p is fixed at 0).
-        out, softmax_lse, _ = _fa_default(q, k, v, softmax_scale=softmax_scale, causal=causal, return_attn_probs=True)
+        out, softmax_lse, _ = _fa_default(q,
+                                          k,
+                                          v,
+                                          softmax_scale=softmax_scale,
+                                          causal=causal,
+                                          deterministic=_resolve_fa2_deterministic(deterministic),
+                                          return_attn_probs=True)
         return out, softmax_lse
 
     @torch.library.register_fake("fastvideo::_flash_attn_default_forward")
@@ -110,17 +118,20 @@ if fa_version == "2":
         v: torch.Tensor,
         softmax_scale: float | None,
         causal: bool,
+        deterministic: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        del softmax_scale, causal
+        del softmax_scale, causal, deterministic
         # FA2 default path: out = [batch, seqlen_q, nheads, head_dim_v],
         # softmax_lse = [batch, nheads, seqlen_q], fp32 regardless of q dtype.
         b, sq, hq = q.shape[0], q.shape[1], q.shape[2]
-        out = q.new_empty(b, sq, hq, v.shape[-1])
+        # Native FA2 uses empty_like(q); preserve its physical layout for
+        # dense non-contiguous inputs too (AOT checks the fake strides).
+        out = torch.empty_like(q)
         lse = q.new_empty(b, hq, sq, dtype=torch.float32)
         return out, lse
 
     def _flash_attn_default_setup_context(ctx, inputs, output):
-        q, k, v, softmax_scale, causal = inputs
+        q, k, v, softmax_scale, causal, deterministic = inputs
         out, lse = output
         ctx.save_for_backward(q, k, v, out, lse)
         # `lse` is an auxiliary output we save to feed FA2's backward; nobody
@@ -138,17 +149,27 @@ if fa_version == "2":
             softmax_scale = q.shape[-1]**-0.5
         ctx.softmax_scale = softmax_scale
         ctx.causal = causal
+        ctx.deterministic = _resolve_fa2_deterministic(deterministic)
 
-    def _flash_attn_default_backward(ctx, grad_out, grad_lse):
-        # We only differentiate `out`; softmax_lse is saved-for-backward, not
-        # a real differentiable output. (Mirrors the FP4 cute template.)
-        del grad_lse
-        q, k, v, out, lse = ctx.saved_tensors
+    @torch.library.custom_op("fastvideo::_flash_attn_default_grad", mutates_args=(), device_types="cuda")
+    def _flash_attn_default_grad(
+        grad_out: torch.Tensor,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        out: torch.Tensor,
+        lse: torch.Tensor,
+        softmax_scale: float,
+        causal: bool,
+        deterministic: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Resolve inside this opaque operation so an AOT backward cannot
+        # specialize a runtime global setting into a stale constant.
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
         # FA2's `_flash_attn_backward` writes into dq/dk/dv in place. The
-        # extra kwargs (window_size_*, softcap, alibi_slopes, deterministic,
+        # extra kwargs (window_size_*, softcap, alibi_slopes,
         # rng_state) are pinned to the same defaults the forward wrapper
         # uses — flash-attn==2.8.1 (the version FastVideo pins) requires
         # all of them explicitly. `rng_state=None` is correct for our
@@ -164,16 +185,38 @@ if fa_version == "2":
             dk,
             dv,
             dropout_p=0.0,
-            softmax_scale=ctx.softmax_scale,
-            causal=ctx.causal,
+            softmax_scale=softmax_scale,
+            causal=causal,
             window_size_left=-1,
             window_size_right=-1,
             softcap=0.0,
             alibi_slopes=None,
-            deterministic=False,
+            deterministic=_resolve_fa2_deterministic(deterministic),
             rng_state=None,
         )
-        return dq, dk, dv, None, None
+        return dq, dk, dv
+
+    @torch.library.register_fake("fastvideo::_flash_attn_default_grad")
+    def _flash_attn_default_grad_fake(
+        grad_out: torch.Tensor,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        out: torch.Tensor,
+        lse: torch.Tensor,
+        softmax_scale: float,
+        causal: bool,
+        deterministic: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        del grad_out, out, lse, softmax_scale, causal, deterministic
+        return torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
+
+    def _flash_attn_default_backward(ctx, grad_out, grad_lse):
+        del grad_lse
+        q, k, v, out, lse = ctx.saved_tensors
+        dq, dk, dv = torch.ops.fastvideo._flash_attn_default_grad(grad_out, q, k, v, out, lse, ctx.softmax_scale,
+                                                                  ctx.causal, ctx.deterministic)
+        return dq, dk, dv, None, None, None
 
     torch.library.register_autograd(
         "fastvideo::_flash_attn_default_forward",
@@ -187,7 +230,8 @@ if fa_version == "2":
         # `flash_attn_func` — returns just `out`; we drop the saved-for-
         # backward `lse` here so callers see the original single-tensor
         # contract.
-        out, _ = torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal)
+        out, _ = torch.ops.fastvideo._flash_attn_default_forward(q, k, v, softmax_scale, causal,
+                                                                 _resolve_fa2_deterministic())
         return out
 elif fa_version == "3":
     # FA3 path: same forward+fake custom op as the original PR #1373, with
