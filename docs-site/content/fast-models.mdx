@@ -1,0 +1,95 @@
+---
+title: Fast Models
+description: Explore FastVideo's released models and Hugging Face collections.
+noindex: true
+---
+
+Browse our checkpoints by family. Open a collection for the full release list,
+or choose an individual model below.
+
+<CardGroup cols={3}>
+  <Card
+    title="FastH3"
+    href="https://huggingface.co/collections/FastVideo/fasth3-v2"
+    icon="video"
+    cta="View collection"
+    arrow
+  >
+    Distilled MiniMax-H3 models for video with synchronized audio.
+  </Card>
+  <Card
+    title="FastWan"
+    href="https://huggingface.co/collections/FastVideo/fastwan"
+    icon="zap"
+    cta="View collection"
+    arrow
+  >
+    Wan models with distillation and sparse attention.
+  </Card>
+  <Card
+    title="FastMetal"
+    href="https://huggingface.co/collections/FastVideo/fastmetal"
+    icon="laptop"
+    cta="View collection"
+    arrow
+  >
+    INT8 models prepared for Apple Silicon and MLX.
+  </Card>
+</CardGroup>
+
+## FastH3
+
+FastH3 generates video and audio from text. V2 is the eight-step release;
+Trim is the smaller experimental variant. Choose the export used by your
+runtime's setup guide.
+
+| Release            | Checkpoints on Hugging Face                                                                                                                                                                                                                                                                                                  |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FastH3 8-Step V2   | [Original](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2) · [NVFP4](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4) · [FP8](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2-FP8) · [Consumer NVFP4](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer) |
+| FastH3 Trim 8-Step | [Original](https://huggingface.co/FastVideo/FastVideo-FastH3-Trim-8-Step) · [NVFP4](https://huggingface.co/FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4) · [FP8](https://huggingface.co/FastVideo/FastVideo-FastH3-Trim-8-Step-FP8)                                                                                          |
+| ComfyUI exports    | [FastH3 V2 NVFP4](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Comfy) · [FastH3 Trim](https://huggingface.co/FastVideo/FastVideo-FastH3-Trim-Comfy)                                                                                                                                                     |
+| 4-Step Preview v1  | [VSA / Data-Free](https://huggingface.co/FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree) · [Preview collection](https://huggingface.co/collections/FastVideo/fastvideo-fasth3)                                                                                                                                    |
+
+[RTX GPU setup](/inference/fasth3_rtx_pro_6000) ·
+[Apple Silicon setup](/getting_started/installation/mlx) ·
+[ComfyUI setup](/inference/comfyui)
+
+## FastWan
+
+FastWan includes distilled Wan checkpoints, attention variants, and the FP8
+FastWan-QAD release. The collection also includes the CausalWan image-to-video preview.
+
+| Model                              | Checkpoint on Hugging Face                                                             |
+| ---------------------------------- | -------------------------------------------------------------------------------------- |
+| FastWan2.1 T2V 1.3B                | [View model](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers)           |
+| FastWan2.1 T2V 14B                 | [View model](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-Diffusers)            |
+| FastWan2.2 TI2V 5B, full attention | [View model](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers)   |
+| FastWan-QAD FP8 1.3B               | [View model](https://huggingface.co/FastVideo/FastWan-QAD-FP8-1.3B)                    |
+| CausalWan2.2 I2V A14B Preview      | [View model](https://huggingface.co/FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers) |
+
+[FastWan collection](https://huggingface.co/collections/FastVideo/fastwan) ·
+[Inference guide](/inference/inference_quick_start) ·
+[Attn-QAT training](/training/attn_qat)
+
+## FastMetal
+
+FastMetal packages distilled Wan models with INT8 quantization-aware-trained
+DiTs for Apple Silicon. The family has 1.3B, 5B, and 14B checkpoints.
+
+| Model              | Checkpoint on Hugging Face                                        |
+| ------------------ | ----------------------------------------------------------------- |
+| FastMetal 1.3B QAD | [View model](https://huggingface.co/FastVideo/FastMetal-1.3B-QAD) |
+| FastMetal 5B QAD   | [View model](https://huggingface.co/FastVideo/FastMetal-5B-QAD)   |
+| FastMetal 14B QAD  | [View model](https://huggingface.co/FastVideo/FastMetal-14B-QAD)  |
+
+[FastMetal collection](https://huggingface.co/collections/FastVideo/fastmetal) ·
+[Apple Silicon setup](/getting_started/installation/mlx)
+
+## Run a model
+
+[Install FastVideo](/getting_started/installation), check the
+[support matrix](/inference/support_matrix), then open the [cookbook](/cookbook)
+to configure one of its maintained serving recipes.
+
+Model links reviewed October 16, 2026. Find the complete published catalog on
+[FastVideo's Hugging Face organization](https://huggingface.co/FastVideo).

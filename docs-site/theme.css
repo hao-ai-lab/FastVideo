@@ -68,6 +68,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  align-items: center;
   gap: 0.5rem;
   margin-block-end: 1.5rem;
 }
@@ -75,7 +76,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  min-block-size: 2rem;
+  min-block-size: 2.75rem;
   padding: 0.35rem 0.65rem;
   border: 1px solid var(--blume-border);
   border-radius: var(--radius);
@@ -83,12 +84,37 @@
   font-size: 0.8125rem;
   text-decoration: none;
 }
-.home-project-links .home-badge-date {
-  color: var(--blume-muted-foreground);
-  font-size: 0.75rem;
-}
 .home-project-links a:hover {
   background: var(--blume-muted);
+}
+.home-rank {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 2rem;
+  min-block-size: 2rem;
+  border-radius: 0.3rem;
+  background: var(--blume-muted);
+  font-weight: 600;
+}
+.home-ranking-copy {
+  display: grid;
+  gap: 0.15rem;
+  text-align: start;
+  line-height: 1.2;
+}
+.home-ranking-copy small {
+  color: var(--blume-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.home-project-links .home-models-link {
+  background: var(--blume-foreground);
+  border-color: var(--blume-foreground);
+  color: var(--blume-background);
+  font-weight: 500;
+}
+.home-project-links .home-models-link:hover {
+  background: color-mix(in srgb, var(--blume-foreground) 88%, var(--blume-background));
 }
 .home-project-links p {
   display: inline-flex;
@@ -144,9 +170,6 @@
   display: inline-block;
 }
 @media (max-width: 30rem) {
-  .home-project-links a {
-    min-block-size: 2.75rem;
-  }
   .home-news li {
     grid-template-columns: minmax(0, 1fr);
     gap: 0.1rem;

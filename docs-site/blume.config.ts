@@ -11,6 +11,7 @@ export default defineConfig({
   search: {
     popular: [
       { label: "Quick start", href: "/getting_started/quick_start", icon: "rocket" },
+      { label: "Fast Models", href: "/fast-models", icon: "boxes" },
       { label: "Installation", href: "/getting_started/installation", icon: "download" },
       { label: "Supported models", href: "/inference/support_matrix", icon: "video" },
       { label: "Python API", href: "/api", icon: "code" },

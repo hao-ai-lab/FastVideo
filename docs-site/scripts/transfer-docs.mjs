@@ -189,10 +189,12 @@ export async function transferDocs() {
       .replace(/\{#([^}]+)\}/g, "[#$1]")
       .replace(/<img\b([^>]*?)\/?\s*>/g, "<img$1 />")
       .replace(/ style="[^"]*"/g, "");
-  await writeFile(
-    join(content, "_snippets/home-introduction.mdx"),
-    asMdx(originalHome.slice(0, section).replace(/<a id="welcome-to-fastvideo"><\/a>/g, "")),
-  );
+  const description = originalHome
+    .slice(0, section)
+    .split(/\n\s*\n/)
+    .find((paragraph) => paragraph.trim().startsWith("FastVideo is an inference"));
+  if (!description) throw new Error("The homepage description paragraph needs updating.");
+  await writeFile(join(content, "_snippets/home-description.mdx"), asMdx(description.trim()));
   const documentation = originalHome.indexOf("## Documentation", section);
   if (documentation < 0) throw new Error("The homepage documentation section boundary needs updating.");
   await writeFile(join(content, "_snippets/home-details.mdx"), asMdx(originalHome.slice(section, documentation)));
@@ -288,6 +290,11 @@ export async function transferDocs() {
       group.collapsed = true;
     }
   }
+  navigation.splice(navigation.findIndex((item) => item.href === "/") + 1, 0, {
+    label: "Fast Models",
+    href: "/fast-models",
+    icon: "boxes",
+  });
   const apiGroup = navigation.find((item) => item.label === "API Reference");
   if (apiGroup) apiGroup.items.push({ label: "Python package", href: "/api/fastvideo" });
   await writeFile(join(generated, "navigation.json"), JSON.stringify(navigation));

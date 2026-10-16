@@ -39,8 +39,9 @@ production deployment. The existing MkDocs Pages workflow remains authoritative.
 ## Edit the documentation
 
 Keep editing handwritten guides under `docs/`. The Blume welcome page is
-`content/index.mdx`; it includes the original homepage material through generated
-partials. Run `npm run prepare:content --prefix docs-site`
+`content/index.mdx`; it includes the original description and key features through
+generated partials. The curated model directory is `content/fast-models.mdx`.
+Run `npm run prepare:content --prefix docs-site`
 after changing those pages or Python sources, then restart the dev server. This
 transition build regenerates the Blume copy rather than maintaining two editable
 versions. Do not edit or commit `.generated/` or `public/`.
@@ -52,6 +53,11 @@ and the last linked source. The projects list comes from its "Awesome work"
 section. Update those README sections to refresh the homepage. The GitHub star
 badge is an approximate snapshot, last checked October 16, 2026; the dated #6
 badge links to the recorded GitHub Trending achievement.
+
+Fast Models groups public checkpoints by family and links to the existing Hugging
+Face collections. Its links were reviewed against the public Hub API on October
+16, 2026. Update the page when adding or replacing a release, and use canonical
+model URLs when a Hub repository redirects to a renamed checkpoint.
 
 The transfer has three parts:
 

@@ -25,9 +25,37 @@ test("the welcome page introduces the project and opens the cookbook", async ({ 
   await expect(page.getByRole("heading", { name: "Projects and research", exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: "DanceGRPO", exact: true })).toBeVisible();
   await expect(page.getByText("Use the navigation menu on the left to explore different sections:")).toHaveCount(0);
+  await expect(page.getByText("About FastVideo and performance overview", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".home-page > p").first()).toContainText(
+    "FastVideo is an inference and post-training framework",
+  );
   await page.getByRole("link", { name: /^Cookbook Choose a model recipe/ }).click();
   await expect(page).toHaveURL(/FastVideo\/cookbook/);
   await expect(page.getByRole("heading", { name: "Configure a deployment", exact: true })).toBeVisible();
+});
+
+test("Fast Models connects the homepage, family collections, and checkpoints", async ({ page }) => {
+  await page.goto("/FastVideo");
+  await page.locator(".home-project-links").getByRole("link", { name: "Fast Models", exact: true }).click();
+  await expect(page).toHaveURL(/FastVideo\/fast-models$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Fast Models", exact: true })).toBeVisible();
+  for (const family of ["FastH3", "FastWan", "FastMetal"]) {
+    await expect(page.getByRole("heading", { level: 2, name: family, exact: false })).toBeVisible();
+  }
+  await expect(page.getByRole("link", { name: "FastMetal collection", exact: true })).toHaveAttribute(
+    "href",
+    "https://huggingface.co/collections/FastVideo/fastmetal",
+  );
+  await expect(page.locator('a[href="https://huggingface.co/FastVideo/FastWan-QAD-FP8-1.3B"]')).toBeVisible();
+  const checkpoints = await page
+    .locator('a[href^="https://huggingface.co/FastVideo/"]')
+    .evaluateAll((links) => [...new Set(links.map((link) => link.getAttribute("href")))]);
+  expect(checkpoints.length).toBeGreaterThanOrEqual(18);
+  await expect(
+    page.locator("#blume-nav-drawer").getByRole("link", { name: "Fast Models", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test("V1 API renders Python signatures within the Blume shell", async ({ page }) => {
