@@ -55,6 +55,25 @@ test("edits generate YAML and client instructions, invalid edits clear output, r
   await expect(yaml).toHaveText(baseline);
 });
 
+test("copy buttons use their own generated output", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto(route);
+  await output(page, "config.yaml");
+  const yaml = await page.getByLabel("Generated YAML", { exact: true }).innerText();
+  await page.getByRole("button", { name: "Copy YAML", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(yaml);
+  await output(page, "Commands");
+  await page.locator(".recipe-request-code > summary").click();
+  const copied = [yaml];
+  for (const label of ["Server command", "Client command"]) {
+    const command = await page.getByLabel(label, { exact: true }).innerText();
+    await page.getByRole("button", { name: `Copy ${label.toLowerCase()}`, exact: true }).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(command);
+    copied.push(command);
+  }
+  expect(new Set(copied).size).toBe(3);
+});
+
 test("deployment changes reset edits and support MLX and streaming", async ({ page }) => {
   await page.goto(route);
   await settings(page, "Serving");

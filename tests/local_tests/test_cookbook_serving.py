@@ -4,7 +4,6 @@ import ast
 import copy
 import json
 from pathlib import Path
-from html.parser import HTMLParser
 
 import pytest
 import yaml
@@ -231,32 +230,6 @@ def test_wan21_i2v_stays_python_only():
     recipes = json.loads(COOKBOOK_DATA.read_text())["recipes"]
     recipe = next(item for item in recipes if item["id"] == "wan21-i2v")
     assert "serving" not in recipe
-
-
-def test_h3_command_blocks_have_unique_copy_targets():
-    class CodeBlocks(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.ids = []
-
-        def handle_starttag(self, tag, attrs):
-            if tag == "pre":
-                block_id = dict(attrs).get("id")
-                if block_id:
-                    self.ids.append(block_id)
-
-    parser = CodeBlocks()
-    parser.feed((ROOT / "docs/cookbook/minimax-h3.md").read_text())
-    assert parser.ids == [
-        "cookbook-local-command",
-        "cookbook-server-install",
-        "cookbook-server-prepare",
-        "cookbook-server-command",
-        "cookbook-health-command",
-        "cookbook-client-install",
-        "cookbook-client-code",
-    ]
-    assert len(set(parser.ids)) == len(parser.ids)
 
 
 def test_kandinsky6_cookbook_recipes_match_maintained_examples():
