@@ -70,51 +70,53 @@
   justify-content: center;
   align-items: center;
   gap: 0.5rem;
-  margin-block-end: 1.5rem;
+  margin-block-end: 0.75rem;
 }
 .home-project-links a {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
   min-block-size: 2.75rem;
-  padding: 0.35rem 0.65rem;
+  padding: 0.35rem 0.875rem;
   border: 1px solid var(--blume-border);
   border-radius: var(--radius);
   color: var(--blume-foreground);
   font-size: 0.8125rem;
+  font-weight: 500;
   text-decoration: none;
 }
 .home-project-links a:hover {
   background: var(--blume-muted);
 }
-.home-rank {
-  display: inline-grid;
-  place-items: center;
-  min-inline-size: 2rem;
-  min-block-size: 2rem;
-  border-radius: 0.3rem;
-  background: var(--blume-muted);
-  font-weight: 600;
+.home-project-links svg {
+  flex-shrink: 0;
 }
-.home-ranking-copy {
-  display: grid;
-  gap: 0.15rem;
-  text-align: start;
-  line-height: 1.2;
+.home-github-stars {
+  font-variant-numeric: tabular-nums;
 }
-.home-ranking-copy small {
-  color: var(--blume-muted-foreground);
-  font-size: 0.75rem;
-  font-weight: 400;
+.home-star {
+  color: #eab308;
 }
-.home-project-links .home-models-link {
-  background: var(--blume-foreground);
-  border-color: var(--blume-foreground);
-  color: var(--blume-background);
-  font-weight: 500;
+.home-lab-link img {
+  display: block;
+  object-fit: contain;
+  background: white;
+  border-radius: 3px;
 }
-.home-project-links .home-models-link:hover {
-  background: color-mix(in srgb, var(--blume-foreground) 88%, var(--blume-background));
+.home-trendshift {
+  display: flex;
+  justify-content: center;
+  margin-block-end: 1.5rem;
+}
+.home-trendshift a {
+  display: block;
+  border-radius: 0.5rem;
+}
+.home-trendshift img {
+  display: block;
+  inline-size: 250px;
+  max-inline-size: 100%;
+  block-size: 55px;
 }
 .home-project-links p {
   display: inline-flex;

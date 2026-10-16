@@ -12,16 +12,18 @@ noindex: true
   </h1>
   <p className="home-description">Run, train, and accelerate video generation models with FastVideo.</p>
   <nav className="home-project-links" aria-label="About the project">
-    <a href="https://github.com/hao-ai-lab/FastVideo" title="4,612 GitHub stars, checked October 16, 2026">
-      <span aria-hidden="true">☆</span> 4.6k GitHub stars
-    </a>
-    <a href="https://haoailab.com/">Hao AI Lab</a>
-    <a className="home-trending" href="https://trendshift.io/repositories/14509" title="Reached #6 on GitHub's daily Python Trending list on August 6, 2025">
-      <span className="home-rank">#6</span>
-      <span className="home-ranking-copy"><span>GitHub Trending</span><small>Python · Aug 2025</small></span>
+    <GitHubStars />
+    <a className="home-lab-link" href="https://haoailab.com/">
+      <img src="/assets/hao-ai-lab.png" width={40} height={24} alt="" aria-hidden="true" />
+      Hao AI Lab
     </a>
     <a className="home-models-link" href="/fast-models">Fast Models <span aria-hidden="true">→</span></a>
   </nav>
+  <div className="home-trendshift">
+    <a href="https://trendshift.io/repositories/14509?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-14509" target="_blank" rel="noopener noreferrer">
+      <img src="https://trendshift.io/api/badge/repositories/14509" alt="hao-ai-lab/FastVideo | Trendshift" width={250} height={55} />
+    </a>
+  </div>
 </header>
 
 <include>/_snippets/home-description.mdx</include>

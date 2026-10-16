@@ -19,3 +19,5 @@ await cp(new URL("docs/assets/cookbook-config/", repo), destination, {
   recursive: true,
 });
 await cp(new URL("docs/assets/logos/icon_simple.svg", repo), new URL("icon.svg", publicDir));
+
+await cp(new URL("../assets/hao-ai-lab.png", import.meta.url), new URL("assets/hao-ai-lab.png", publicDir));

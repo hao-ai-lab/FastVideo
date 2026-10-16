@@ -51,8 +51,11 @@ own centered logo and accessible heading. News headlines come from the first two
 dated entries under `NEWS` in the root README, using the first sentence or clause
 and the last linked source. The projects list comes from its "Awesome work"
 section. Update those README sections to refresh the homepage. The GitHub star
-badge is an approximate snapshot, last checked October 16, 2026; the dated #6
-badge links to the recorded GitHub Trending achievement.
+button fetches the public repository count on page load and every five minutes
+while the page is visible. It shows "Star" if the first request fails and keeps
+the last count if a refresh fails. It uses no credentials. The Trendshift badge
+loads directly from Trendshift. The lab mark in `assets/hao-ai-lab.png` is the
+original image supplied for this page.
 
 Fast Models groups public checkpoints by family and links to the existing Hugging
 Face collections. Its links were reviewed against the public Hub API on October

@@ -1,5 +1,34 @@
 import { expect, test } from "@playwright/test";
 
+test("GitHub stars refresh automatically and survive a failed refresh", async ({ page }) => {
+  await page.clock.install();
+  let requests = 0;
+  await page.route("https://api.github.com/repos/hao-ai-lab/FastVideo", async (route) => {
+    requests++;
+    if (requests === 2) return route.fulfill({ status: 503, body: "Unavailable" });
+    await route.fulfill({ json: { stargazers_count: requests === 1 ? 4612 : 5234 } });
+  });
+  await page.goto("/FastVideo");
+  const stars = page.locator(".home-github-stars");
+  await expect(stars).toHaveText("4.6k");
+  await expect(stars).toHaveAccessibleName("FastVideo on GitHub, 4,612 stars");
+  await page.clock.fastForward(5 * 60 * 1000);
+  await expect.poll(() => requests).toBe(2);
+  await expect(stars).toHaveText("4.6k");
+  await page.clock.fastForward(5 * 60 * 1000);
+  await expect(stars).toHaveText("5.2k");
+});
+
+test("GitHub rate limits leave a usable Star link without a fabricated count", async ({ page }) => {
+  await page.route("https://api.github.com/repos/hao-ai-lab/FastVideo", (route) =>
+    route.fulfill({ status: 403, json: { message: "API rate limit exceeded" } }),
+  );
+  await page.goto("/FastVideo");
+  const stars = page.getByRole("link", { name: "Star FastVideo on GitHub", exact: true });
+  await expect(stars).toHaveText("Star");
+  await expect(stars).toHaveAttribute("href", "https://github.com/hao-ai-lab/FastVideo");
+});
+
 test("documentation navigation opens transferred guides", async ({ page }) => {
   await page.goto("/FastVideo");
   await expect(page.getByRole("heading", { name: "Welcome to FastVideo", exact: true })).toBeVisible();
@@ -20,6 +49,14 @@ test("the welcome page introduces the project and opens the cookbook", async ({ 
     "href",
     "https://haoailab.com/",
   );
+  const lab = page.locator(".home-lab-link img");
+  expect(await lab.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  const trending = page.locator(".home-trendshift a");
+  await expect(trending).toHaveAttribute(
+    "href",
+    "https://trendshift.io/repositories/14509?utm_source=repository-badge&utm_medium=badge&utm_campaign=badge-repository-14509",
+  );
+  await expect(trending.locator("img")).toHaveAttribute("src", "https://trendshift.io/api/badge/repositories/14509");
   await expect(page.locator(".home-news time")).toHaveCount(2);
   await expect(page.locator(".home-news")).toContainText("Kandinsky 6");
   await expect(page.getByRole("heading", { name: "Projects and research", exact: false })).toBeVisible();
