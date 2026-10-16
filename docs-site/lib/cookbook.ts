@@ -36,6 +36,7 @@ export interface Catalog {
   id: string;
   title: string;
   summary?: string;
+  workload: string;
   env: Record<string, string>;
   base_config: Record<string, Value>;
   runtime: {

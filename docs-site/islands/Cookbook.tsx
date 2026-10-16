@@ -195,6 +195,8 @@ function Editor({
   const [advanced, setAdvanced] = useState(false);
   const [componentDraft, setComponentDraft] = useState(false);
   const [runMode, setRunMode] = useState("serving");
+  const [sourceImage, setSourceImage] = useState("");
+  const sourceImageId = useId();
   const [showEnv, setShowEnv] = useState(false);
   const [showClient, setShowClient] = useState(false);
   const [outputTab, setOutputTab] = useState("commands");
@@ -208,6 +210,7 @@ function Editor({
   const [reset, setReset] = useState(0);
   const [notice, setNotice] = useState("");
   let result: Result | undefined;
+  let output: ReturnType<typeof inferenceOutput> | undefined;
   let failure = "";
   let failedPath: string | undefined;
   try {
@@ -215,12 +218,13 @@ function Editor({
       throw new Error("Component preview selected. A compatible serving recipe is needed before generating YAML.");
     if (Object.keys(parseErrors).length) throw new Error("Correct the highlighted fields to generate a configuration.");
     result = api.resolveConfig(catalog, edits);
+    output =
+      runMode === "serving" ? result : inferenceOutput(result, catalog.workload === "i2v" ? sourceImage : undefined);
   } catch (error) {
     failure = errorText(error);
     failedPath = (error as { path?: string }).path;
   }
   const fields = api.getOptions(catalog, catalog.base_config, edits);
-  const output = result && (runMode !== "serving" ? inferenceOutput(result) : result);
   const launchCommand =
     output &&
     (runMode === "sdk"
@@ -308,7 +312,7 @@ function Editor({
             <Button variant="outline" disabled={!output} onClick={() => output && copy(output.yaml)}>
               Copy YAML
             </Button>
-            <Button disabled={!result} onClick={download}>
+            <Button disabled={!output} onClick={download}>
               Download YAML
             </Button>
           </>
@@ -497,6 +501,30 @@ function Editor({
           </div>
           <p className="matrix-note">Hardware fit has not been verified. GPU count updates the YAML.</p>
         </MatrixRow>
+        {catalog.workload === "i2v" && runMode !== "serving" && (
+          <MatrixRow title="Inputs">
+            <div className="matrix-field">
+              <label htmlFor={sourceImageId} className="matrix-field-label">
+                Source image path
+              </label>
+              <Input
+                id={sourceImageId}
+                value={sourceImage}
+                required
+                aria-invalid={!sourceImage.trim()}
+                aria-describedby={`${sourceImageId}-hint`}
+                placeholder="/path/to/first-frame.png"
+                onChange={(event) => {
+                  setSourceImage(event.target.value);
+                  setNotice("");
+                }}
+              />
+              <p id={`${sourceImageId}-hint`} className="matrix-note">
+                Path to an image on the machine running FastVideo. Included as request.inputs.image_path.
+              </p>
+            </div>
+          </MatrixRow>
+        )}
         {model.family === "FastH3" && (
           <MatrixRow title="Components">
             {model.id === "fasth3-trim" && (
@@ -559,6 +587,7 @@ function Editor({
           variant="ghost"
           onClick={() => {
             setEdits({});
+            setSourceImage("");
             setComponentDraft(false);
             setParseErrors({});
             setReset(reset + 1);

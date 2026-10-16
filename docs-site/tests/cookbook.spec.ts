@@ -298,6 +298,26 @@ test("source-backed controls update the copied command without changing models",
   await expect(page.getByLabel("Inference command", { exact: true })).toContainText("--num-gpus '2'");
 });
 
+test("Wan I2V requires an image for CLI and SDK examples without changing server defaults", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/wan/wan21-i2v");
+  await chip(page, "Run mode", "CLI");
+  await expect(page.getByRole("alert")).toContainText("Enter a source image path");
+  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeDisabled();
+  await page.getByLabel("Source image path", { exact: true }).fill("/data/first-frame.png");
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText("image_path: /data/first-frame.png");
+  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
+  await chip(page, "Run mode", "Python SDK");
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText("image_path: /data/first-frame.png");
+  await page.getByLabel("Source image path", { exact: true }).fill("");
+  await expect(page.getByRole("button", { name: "Copy YAML", exact: true })).toBeDisabled();
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toHaveCount(0);
+  await chip(page, "Run mode", "Serving");
+  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
+  await expect(page.getByLabel("Generated YAML", { exact: true })).not.toContainText("image_path");
+});
+
 test("source editors retain required model flags and preparation commands", async ({ page }) => {
   await page.goto("/FastVideo/cookbook/wan/models/fastmetal-1-3b-mlx");
   await expect(page.getByLabel("Height", { exact: true })).toHaveValue("480");

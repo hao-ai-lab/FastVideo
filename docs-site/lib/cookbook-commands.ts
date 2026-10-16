@@ -42,14 +42,23 @@ finally:
 FASTVIDEO_SDK`;
 
 /** The CUDA CLI uses the same generator with request instead of server defaults. */
-export function inferenceOutput(result: Result) {
+export function inferenceOutput(result: Result, imagePath?: string) {
   const defaults = (result.config.default_request ?? {}) as Record<string, Value>;
   const output = (defaults.output ?? {}) as Record<string, Value>;
+  const generator = result.config.generator as Record<string, Value>;
+  const pipeline = generator.pipeline as Record<string, Value> | undefined;
+  const inputs = { ...((defaults.inputs ?? {}) as Record<string, Value>) };
+  if (imagePath !== undefined) inputs.image_path = imagePath.trim();
+  const images = Array.isArray(inputs.image_path) ? inputs.image_path : [inputs.image_path];
+  if (pipeline?.workload_type === "i2v" && !images.some((image) => typeof image === "string" && image.trim())) {
+    throw new Error("Enter a source image path before copying a CLI or Python SDK example.");
+  }
   return {
     yaml: stringify({
       generator: result.config.generator,
       request: {
         ...defaults,
+        ...(Object.keys(inputs).length ? { inputs } : {}),
         prompt: defaults.prompt ?? "A river flowing through a peaceful forest",
         output: { ...output, save_video: true, return_frames: false, output_path: "outputs/cookbook/" },
       },

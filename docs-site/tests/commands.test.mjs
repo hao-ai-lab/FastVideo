@@ -79,3 +79,22 @@ test("inference output preserves edited settings and hidden generator fields", (
   assert.equal(result.command, "FASTVIDEO_FA4=0 fastvideo generate --config config.yaml");
   assert.ok(config.server);
 });
+
+test("Wan I2V inference requires a source image and preserves the serving baseline", () => {
+  const config = parse(
+    readFileSync(new URL("../../examples/serving/openai_wan21_i2v_14b.yaml", import.meta.url), "utf8"),
+  );
+  const baseline = structuredClone(config);
+  const result = { config, command: "fastvideo serve --config config.yaml" };
+  assert.throws(() => inferenceOutput(result), /source image path/);
+  assert.throws(() => inferenceOutput(result, "   "), /source image path/);
+  const saved = parse(inferenceOutput(result, " /data/first-frame.png ").yaml);
+  assert.equal(saved.request.inputs.image_path, "/data/first-frame.png");
+  assert.deepEqual(saved.request.sampling, config.default_request.sampling);
+  assert.deepEqual(config, baseline);
+  assert.equal(config.default_request.inputs, undefined);
+  const withDefaults = structuredClone(config);
+  withDefaults.default_request.inputs = { image_path: "/data/existing.png", video_path: "/data/reference.mp4" };
+  const existing = parse(inferenceOutput({ ...result, config: withDefaults }).yaml);
+  assert.deepEqual(existing.request.inputs, withDefaults.default_request.inputs);
+});
