@@ -100,7 +100,30 @@ test("V1 API renders Python signatures within the Blume shell", async ({ page })
   await expect(page.getByRole("heading", { name: "V1 API", exact: true })).toBeVisible();
   await expect(page.locator('[id="fastvideo.entrypoints.video_generator.VideoGenerator"]')).toBeVisible();
   await expect(page.locator(".python-reference")).toContainText("from_pretrained");
+  for (const description of [
+    "The inference arguments",
+    "The executor class to use for inference",
+    "Whether to log statistics",
+    "Optional multiprocessing.Queue to forward worker logs to",
+  ]) {
+    await expect(page.locator(".python-reference")).toContainText(description);
+  }
   await expect(page.getByRole("button", { name: "Search", exact: true })).toBeVisible();
+});
+
+test("the API overview resolves Python references and guide links", async ({ page }) => {
+  await page.goto("/FastVideo/api");
+  const reference = page.locator(".python-reference");
+  await expect(reference.getByRole("link", { name: "API contracts and sampling", exact: true })).toHaveAttribute(
+    "href",
+    "/FastVideo/api/fastvideo/api#fastvideo.api",
+  );
+  await reference.getByRole("link", { name: "fastvideo.VideoGenerator", exact: true }).click();
+  await expect(page.locator('[id="fastvideo.VideoGenerator"]')).toBeVisible();
+  await page.goto("/FastVideo/api");
+  await page.locator(".python-reference").getByRole("link", { name: "V1 API", exact: true }).click();
+  await expect(page).toHaveURL(/\/FastVideo\/getting_started\/v1_api$/);
+  await expect(page.getByRole("heading", { name: "V1 API", exact: true })).toBeVisible();
 });
 
 test("generated module links stay inside the transferred Python reference", async ({ page }) => {

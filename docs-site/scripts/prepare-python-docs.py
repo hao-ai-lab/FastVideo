@@ -7,6 +7,7 @@ import re
 import runpy
 import shutil
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import griffe
 import markdown
@@ -59,6 +60,32 @@ def prose(text: str) -> str:
     return markdown.markdown(text, extensions=["fenced_code", "tables", "sane_lists"])
 
 
+def api_overview(text: str, package) -> str:
+    def reference(match):
+        label, target = match.groups()
+        path = (target or label).strip("`")
+        obj = package if path == package.path else package[path.removeprefix(package.path + ".")]
+        module = obj
+        while not module.is_module:
+            module = module.parent
+        route = "/api/" + module.path.replace(".", "/")
+        return f"[{label}]({route}#{path})"
+
+    text = re.sub(r"\[([^\]\n]+)\]\[([^\]\n]*)\]", reference, text)
+
+    def guide(match):
+        label, target = match.groups()
+        url = urlsplit(target)
+        if url.scheme or url.netloc or not re.search(r"\.mdx?$", url.path):
+            return match[0]
+        url = urlsplit(urljoin("/api/index.md", target))
+        route = re.sub(r"\.mdx?$", "", url.path)
+        route = re.sub(r"/index$", "", route) or "/"
+        return f"[{label}]({urlunsplit(('', '', route, url.query, url.fragment))})"
+
+    return prose(re.sub(r"\[([^\]\n]+)\]\(([^\s)]+)\)", guide, text))
+
+
 def docstring(obj, level: int) -> str:
     if not obj.docstring:
         return ""
@@ -91,6 +118,10 @@ def symbol(obj, path: str, level: int = 2, members: list[str] | None = None, sou
     output = [f'<h{level} id="{html.escape(path)}"><code>{html.escape(path)}</code></h{level}>']
     output.append(f'<pre class="doc-signature"><code>{code_html(signature(obj))}</code></pre>')
     output.append(docstring(obj, min(level + 1, 6)))
+    if obj.is_class:
+        constructor = obj.members.get("__init__")
+        if constructor is not None:
+            output.append(docstring(constructor, min(level + 1, 6)))
     if source and not obj.is_alias:
         try:
             code = obj.source
@@ -157,7 +188,7 @@ def prepare() -> None:
             except griffe.AliasResolutionError:
                 continue
         write_page("api/" + module.path.replace(".", "/"), module.name, "\n".join(body), anchors)
-    write_page("api", "Python API reference", prose((ROOT / "docs/api/index.md").read_text()), anchors)
+    write_page("api", "Python API reference", api_overview((ROOT / "docs/api/index.md").read_text(), package), anchors)
     v1 = (ROOT / "docs/getting_started/v1_api.md").read_text()
 
     def reference(match):
