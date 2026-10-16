@@ -2739,7 +2739,7 @@ export default function Page() {
 			<Header timeLeft={headerTimeLeft} formatTime={formatTime} onToggleSidebar={() => setSidebarOpen((prev) => !prev)} />
 
 			<div className={cn(
-				"relative flex flex-1 min-h-0 flex-col px-4 pb-2 sm:px-6 sm:pb-12",
+				"relative isolate flex flex-1 min-h-0 flex-col px-4 pb-2 sm:px-6 sm:pb-12",
 				!isViewingMode && !showActiveProject && generationMode !== "t2va"
 					? "justify-start overflow-y-auto pt-4"
 					: "justify-center",
