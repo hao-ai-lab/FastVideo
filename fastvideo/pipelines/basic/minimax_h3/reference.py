@@ -26,6 +26,13 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
 )
 
 MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE = 2048
+# Reference-image resize modes, named after SGLang's ``reference_resize_mode``.
+# ``diffusers`` (the default) is the released pipeline's: the short edge scales
+# to 2048, enlarging smaller images. ``max`` only shrinks an image whose short
+# edge exceeds 2048. ``match`` shrinks an image to the target canvas's area and
+# never enlarges one; distilled checkpoints trained that way (e.g. ModelTC's
+# MiniMax-H3-Turbo) expect it.
+MINIMAX_H3_REFERENCE_RESIZE_MODES = ("diffusers", "max", "match")
 MINIMAX_H3_QWEN_VIDEO_SAMPLE_FPS = 2.0
 MINIMAX_H3_QWEN_TEMPORAL_PATCH = 2
 MINIMAX_H3_MAX_REFERENCE_IMAGES = 9
@@ -180,13 +187,31 @@ def decode_reference_video(source: str | os.PathLike[str]) -> tuple[np.ndarray, 
     return result, float(rate), soundtrack
 
 
-def resolve_reference_image_size(width: int, height: int) -> tuple[int, int]:
-    """Resolve the released 2048-short-edge reference-image canvas."""
+def resolve_reference_image_size(
+    width: int,
+    height: int,
+    mode: str = "diffusers",
+    canvas: tuple[int, int] | None = None,
+) -> tuple[int, int]:
+    """Resolve a reference image's ``(height, width)`` under a resize ``mode``.
+
+    The aspect ratio is kept and each side rounds to a multiple of 32.
+    ``canvas`` is the target ``(height, width)``, which ``match`` needs.
+    """
     if width <= 0 or height <= 0:
         raise ValueError(f"A reference image must have a positive size, got {width}x{height}.")
     if width > 4 * height or height > 4 * width:
         raise ValueError(f"A reference image must be within 1:4 and 4:1, got {width}x{height}.")
-    scale = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height)
+    if mode == "diffusers":
+        scale = MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height)
+    elif mode == "max":
+        scale = min(1.0, MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE / min(width, height))
+    elif mode == "match":
+        if canvas is None:
+            raise ValueError("reference_resize_mode='match' needs the target canvas.")
+        scale = min(1.0, math.sqrt(canvas[0] * canvas[1] / (width * height)))
+    else:
+        raise ValueError(f"reference_resize_mode must be one of {MINIMAX_H3_REFERENCE_RESIZE_MODES}, got {mode!r}.")
     multiple = MINIMAX_H3_CANVAS_MULTIPLE
     return (
         max(multiple,
@@ -319,8 +344,14 @@ def prepare_reference(
     reference: MiniMaxH3Reference,
     num_frames: int,
     target_sample_rate: int,
+    resize_mode: str = "diffusers",
+    canvas: tuple[int, int] | None = None,
 ) -> MiniMaxH3PreparedReference:
-    """Decode and normalize one deferred Ref2VA medium."""
+    """Decode and normalize one deferred Ref2VA medium.
+
+    An image is sized by ``resolve_reference_image_size`` under ``resize_mode``
+    and the target ``canvas``; videos and audio ignore both.
+    """
     prepared = MiniMaxH3PreparedReference(media_type=reference.media_type)
     if reference.media_type == "image":
         source = reference.source
@@ -331,7 +362,8 @@ def prepare_reference(
                 raise ValueError(f"An image reference must be RGB, got {tuple(pixels.shape)}.")
             image = Image.fromarray(pixels)
         image = ImageOps.exif_transpose(image).convert("RGB")
-        height, width = resolve_reference_image_size(*image.size)
+        source_width, source_height = image.size
+        height, width = resolve_reference_image_size(source_width, source_height, resize_mode, canvas)
         prepared.image = prepare_reference_image(image, height, width)
         return prepared
 
@@ -385,6 +417,7 @@ __all__ = [
     "MINIMAX_H3_QWEN_TEMPORAL_PATCH",
     "MINIMAX_H3_QWEN_VIDEO_SAMPLE_FPS",
     "MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE",
+    "MINIMAX_H3_REFERENCE_RESIZE_MODES",
     "coerce_reference",
     "MiniMaxH3PreparedReference",
     "MiniMaxH3Reference",

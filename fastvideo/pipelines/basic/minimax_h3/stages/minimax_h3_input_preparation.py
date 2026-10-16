@@ -202,7 +202,12 @@ class MiniMaxH3InputPreparationStage(PipelineStage):
         height, width, ratio = resolve_target_canvas(batch, self.vae, (16, 9))
         num_frames = resolve_target_num_frames(batch.num_frames)
         target_sample_rate = int(self.audio_vae.sampling_rate)
-        batch.references = [prepare_reference(reference, num_frames, target_sample_rate) for reference in references]
+        # Per-request knob (``reference_resize_mode``, a batch extra like ``vsa_mode``).
+        resize_mode = batch.extra.get("reference_resize_mode", "diffusers")
+        batch.references = [
+            prepare_reference(reference, num_frames, target_sample_rate, resize_mode, (height, width))
+            for reference in references
+        ]
         self._write_target_geometry(batch, height, width, ratio, num_frames)
         batch.extra[MINIMAX_H3_KEYFRAMES_KEY] = []
         batch.extra[MINIMAX_H3_KEYFRAME_ANCHORS_KEY] = ()
