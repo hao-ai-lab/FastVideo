@@ -7,7 +7,6 @@ export default defineConfig({
   content: { root: ".generated/content" },
   logo: { image: "/icon.svg", text: "FastVideo" },
   theme: { accent: "blue", background: { light: "#ffffff", dark: "#1c1d20" }, mode: "system" },
-  banner: "Documentation preview. Production remains at haoailab.com/FastVideo.",
   search: {
     popular: [
       { label: "Quick start", href: "/getting_started/quick_start", icon: "rocket" },
@@ -19,7 +18,6 @@ export default defineConfig({
   },
   navigation: {
     actions: [{ label: "GitHub", href: "https://github.com/hao-ai-lab/FastVideo" }],
-    featured: [{ label: "Production docs", href: "https://haoailab.com/FastVideo/" }],
     tabs: [
       { label: "Documentation", path: "/" },
       { label: "Cookbook", path: "/cookbook" },
@@ -28,5 +26,5 @@ export default defineConfig({
   },
   // Keep the production prefix in local builds so asset-path regressions are visible.
   deployment: { site: "https://haoailab.com", base: "/FastVideo" },
-  seo: { robots: false, sitemap: false, og: { enabled: false } },
+  seo: { robots: true, sitemap: true, og: { enabled: false } },
 });

@@ -1,6 +1,6 @@
 /** Prepare the docs transfer and publish the existing cookbook catalogs. */
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 
 import { transferDocs } from "./transfer-docs.mjs";
 
@@ -21,3 +21,11 @@ await cp(new URL("docs/assets/cookbook-config/", repo), destination, {
 await cp(new URL("docs/assets/logos/icon_simple.svg", repo), new URL("icon.svg", publicDir));
 
 await cp(new URL("../assets/hao-ai-lab.png", import.meta.url), new URL("assets/hao-ai-lab.png", publicDir));
+
+// Preserve family recipe selectors during the cookbook redesign, inside a scoped stylesheet.
+const legacyCss = await readFile(new URL("docs/assets/custom.css", repo), "utf8");
+const tokens = `.legacy-cookbook { --md-default-fg-color: var(--blume-foreground); --md-default-fg-color--light: var(--blume-muted-foreground); --md-default-fg-color--lightest: var(--blume-border); --md-default-bg-color: var(--blume-background); --md-accent-fg-color: var(--blume-accent); --md-code-bg-color: var(--blume-muted); --md-code-fg-color: var(--blume-foreground); }`;
+await writeFile(
+  new URL("assets/cookbook-runbooks.css", publicDir),
+  `${tokens}\n@scope (.legacy-cookbook) {\n${legacyCss.replaceAll(".md-typeset", ":scope")}\n}`,
+);

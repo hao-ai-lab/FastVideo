@@ -13,7 +13,6 @@ const generated = join(site, ".generated");
 const content = join(generated, "content");
 const publicDir = join(site, "public");
 const attachments = new Set();
-const legacyOrigin = "https://haoailab.com/FastVideo";
 const routeFor = (file) =>
   "/" +
   file
@@ -37,11 +36,11 @@ function splitPage(text) {
   return match ? { data: parse(match[1]), body: text.slice(match[0].length) } : { data: {}, body: text };
 }
 
-function localTarget(target, from) {
+function localTarget(target, from, pretty = false) {
   if (/^(?:#|mailto:|data:|tel:)/.test(target)) return target;
   let url;
   try {
-    url = new URL(target, `https://transfer.invalid/${from}`);
+    url = new URL(target, `https://transfer.invalid${pretty ? `${routeFor(from)}/` : `/${from}`}`);
   } catch {
     return target;
   }
@@ -50,14 +49,8 @@ function localTarget(target, from) {
     url = new URL(url.pathname.replace(/^\/FastVideo/, "") + url.search + url.hash, "https://transfer.invalid");
   }
   const path = decodeURIComponent(url.pathname).replace(/^\//, "");
-  if (path.startsWith("cookbook/") || path === "cookbook") {
-    const route = routeFor(path);
-    return ["/cookbook", "/cookbook/"].includes(route)
-      ? `/cookbook${url.search}${url.hash}`
-      : `${legacyOrigin}${route}${url.search}${url.hash}`;
-  }
   // Links leaving docs/ name repository files, not files served by the docs host.
-  if (!target.startsWith("/") && !/^[a-z]+:/i.test(target)) {
+  if (!pretty && !target.startsWith("/") && !/^[a-z]+:/i.test(target)) {
     const actual = resolve(source, dirname(from), decodeURIComponent(target.split(/[?#]/)[0]));
     if (!actual.startsWith(source + sep) && existsSync(actual)) {
       return `https://github.com/hao-ai-lab/FastVideo/blob/main/${relative(repo, actual).replaceAll(sep, "/")}${url.hash}`;
@@ -87,7 +80,7 @@ function rewriteLinks(body, from) {
         .replace(/(\]\()([^\s)]+)(\))/g, (_, before, url, after) => before + localTarget(url, from) + after)
         .replace(
           /((?:href|src)=["'])([^"']+)(["'])/g,
-          (_, before, url, after) => before + localTarget(url, from) + after,
+          (_, before, url, after) => before + localTarget(url, from, from.startsWith("cookbook/")) + after,
         );
     })
     .join("\n");
@@ -135,7 +128,7 @@ export async function transferDocs() {
   execFileSync(python, [join(site, "scripts/prepare-python-docs.py")], { cwd: repo, stdio: "inherit" });
   await rm(content, { recursive: true, force: true });
   await mkdir(content, { recursive: true });
-  const ignored = new Set(["cookbook", "js", "tests", "node_modules", "__pycache__"]);
+  const ignored = new Set(["js", "tests", "node_modules", "__pycache__"]);
   await cp(source, content, {
     recursive: true,
     filter: async (path) => {
@@ -151,7 +144,7 @@ export async function transferDocs() {
       join(blumePackage, "skills/blume-migrate/scripts/mkdocs-codemod.mjs"),
       "--write",
       "--config",
-      join(repo, "mkdocs.yml"),
+      join(site, "content-syntax.yml"),
       content,
     ],
     { cwd: repo, encoding: "utf8" },
@@ -163,7 +156,7 @@ export async function transferDocs() {
     const rel = relative(content, path).replaceAll(sep, "/");
     const route = routeFor(rel);
     const { data, body } = splitPage(await readFile(path, "utf8"));
-    data.noindex = true;
+    delete data.noindex;
     data.slug = route.replace(/^\//, "") || "/";
     const pinned = pinHeadings(body, oldHeadings[route.slice(1) || "."], path.endsWith(".mdx"));
     // GitHub's buttons remain ordinary links; no third-party script is needed in the new shell.
@@ -174,9 +167,25 @@ export async function transferDocs() {
         /<style>([\s\S]*?)<\/style>/g,
         (_, css) => `<style>{${JSON.stringify(css)}}</style>`,
       );
+    if (rel.startsWith("cookbook/") && converted.includes("data-cookbook data-family=")) {
+      converted = converted.replace(
+        /data-recipes="[^"]*"/g,
+        'data-recipes="/FastVideo/assets/cookbook-recipes.json?v=16"',
+      );
+      const start = converted.indexOf('<div class="cookbook-shell');
+      const prefix = converted.slice(0, start);
+      const html = converted.slice(start);
+      const target = path.replace(/\.md$/, ".mdx");
+      await writeFile(
+        target,
+        `---\n${stringify(data)}---\n${prefix}\n<LegacyCookbook html={${JSON.stringify(html).replaceAll("<", "\\u003c")}} />\n`,
+      );
+      if (target !== path) await rm(path);
+      continue;
+    }
     await writeFile(path, `---\n${stringify(data)}---\n${converted}`);
   }
-  // API HTML is already rendered by mkdocstrings, including aliases and cross references.
+  // API HTML is extracted directly from Python source with Griffe.
   await rm(join(content, "getting_started/v1_api.md"), { force: true });
   await rm(join(content, "getting_started/v1_api.mdx"), { force: true });
   await cp(join(generated, "python-reference"), content, { recursive: true });
@@ -226,10 +235,12 @@ export async function transferDocs() {
   );
   await writeFile(join(content, "_snippets/home-projects.mdx"), asMdx(projects.trim()));
   await rm(join(content, "index.md"));
+  await rm(join(content, "cookbook/index.md"), { force: true });
+  await rm(join(content, "cookbook/index.mdx"), { force: true });
   await cp(join(site, "content"), content, { recursive: true });
   await cp(join(source, "assets"), join(publicDir, "assets"), {
     recursive: true,
-    filter: (path) => !path.endsWith(".md") && !/cookbook(?:-recipes|-serving)?\.(?:js|json)$/.test(path),
+    filter: (path) => !path.endsWith(".md"),
   });
 
   for (const path of attachments) {
@@ -247,18 +258,18 @@ export async function transferDocs() {
       )
       .map((path) => routeFor(relative(content, path))),
   );
-  function navEntries(entries) {
-    return entries.flatMap((entry) =>
-      Object.entries(entry).map(([label, value]) => {
-        if (label === "Cookbook") return { label, items: ["/cookbook"] };
-        if (Array.isArray(value)) return { label, items: navEntries(value) };
-        const route = routeFor(value);
-        if (!routes.has(route)) throw new Error(`Navigation target is missing: ${value}`);
-        return { label, href: route };
-      }),
-    );
+  const navigation = JSON.parse(await readFile(join(site, "navigation.json"), "utf8"));
+  function checkNavigation(items) {
+    for (const item of items) {
+      if (typeof item === "string") {
+        if (!routes.has(item)) throw new Error(`Navigation target is missing: ${item}`);
+      } else {
+        if (item.href && !routes.has(item.href)) throw new Error(`Navigation target is missing: ${item.href}`);
+        if (item.items) checkNavigation(item.items);
+      }
+    }
   }
-  const navigation = navEntries(JSON.parse(await readFile(join(generated, "mkdocs-nav.json"), "utf8")));
+  checkNavigation(navigation);
   // Keep generated modules discoverable without putting all 880 entries in every page's sidebar.
   for (const path of await files(join(content, "api"))) {
     if (!path.endsWith(".md")) continue;
@@ -276,28 +287,9 @@ export async function transferDocs() {
       `---\n${stringify(data)}---\n${body.replaceAll("{", "&#123;").replaceAll("}", "&#125;")}${links ? `\n<h2>Submodules</h2>\n<ul>\n${links}\n</ul>\n` : ""}`,
     );
   }
-  const start = navigation.find((item) => item.label === "Getting Started");
-  if (start) {
-    start.label = "Get started";
-    start.icon = "rocket";
-    const quickStart = start.items.find((item) => item.href === "/getting_started/quick_start");
-    start.items = [quickStart, ...start.items.filter((item) => item !== quickStart)];
-  }
-  for (const group of navigation) {
-    if (group.label === "Home") group.label = "Welcome";
-    if (["Training", "Distillation", "Attention", "Utilities", "Design", "Developer Guide"].includes(group.label)) {
-      group.display = "group";
-      group.collapsed = true;
-    }
-  }
-  navigation.splice(navigation.findIndex((item) => item.href === "/") + 1, 0, {
-    label: "Fast Models",
-    href: "/fast-models",
-    icon: "boxes",
-  });
-  const apiGroup = navigation.find((item) => item.label === "API Reference");
-  if (apiGroup) apiGroup.items.push({ label: "Python package", href: "/api/fastvideo" });
   await writeFile(join(generated, "navigation.json"), JSON.stringify(navigation));
   await writeFile(join(generated, "routes.json"), JSON.stringify([...routes].sort()));
-  console.log(`Transferred ${routes.size} documentation routes. Cookbook design sources are unchanged.`);
+  console.log(
+    `Transferred ${routes.size} documentation routes. Canonical guide routes and cookbook runbooks are published together.`,
+  );
 }

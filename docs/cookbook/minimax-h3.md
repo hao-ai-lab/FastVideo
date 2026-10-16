@@ -14,7 +14,7 @@ is why V2 is the higher-quality FastH3. The V2 schedule contract is in
 (RTX 5090 or RTX PRO 6000). The FastH3 V1 and V2 recipes are unchanged.
 
 The 42-block pruned checkpoint has an [MLX INT8/INT6 conversion and
-eight-forward T2VA command](../getting_started/installation/mlx.md#pruned-eight-forward-checkpoint).
+eight-forward T2VA command](../getting_started/installation/mlx.md#fasth3-v2-and-trim-with-int6).
 It reads `fastvideo_inference.json` for the trained schedule. The command
 uses native 832x480 resolution and all requested frames.
 

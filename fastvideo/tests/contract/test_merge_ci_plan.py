@@ -22,7 +22,10 @@ def test_docs_only_merge_adds_no_gpu_lanes():
     plan = PLAN_MERGE_CI.classify_paths([
         "docs/contributing/testing.md",
         "README.md",
-        "requirements-mkdocs.txt",
+        "requirements-docs.txt",
+        "requirements-docs.in",
+        "docs-site/blume.config.ts",
+        "docs-site/scripts/prepare-python-docs.py",
     ])
 
     assert plan.encoded_lanes() == ",none,"

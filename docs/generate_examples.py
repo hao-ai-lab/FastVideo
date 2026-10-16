@@ -15,13 +15,6 @@ ROOT_DIR_RELATIVE = '../..'
 EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/getting_started/examples"
 GITHUB_REPO = "hao-ai-lab/FastVideo"  # Update this to your repo
-GENERATED_DOC_PREFIXES = (
-    "examples/",
-    "getting_started/examples/",
-    "inference/examples/",
-    "training/examples/",
-    "distillation/examples/",
-)
 COOKBOOK_DATA = ROOT_DIR / "docs/assets/cookbook-recipes.json"
 COOKBOOK_SERVING_DATA = ROOT_DIR / "docs/assets/cookbook-serving.json"
 COOKBOOK_CLIENTS = {
@@ -387,7 +380,7 @@ class Index:
         content = f"# {self.title}\n\n{self.description}\n\n"
         if self.caption:
             content += f"## {self.caption}\n\n"
-        # Generate a simple list of links for MkDocs
+        # Generate a simple list of documentation links
         for doc in self.documents:
             # Convert document path to proper link
             doc_link = doc.replace("\\", "/")
@@ -519,7 +512,7 @@ class Example:
                 continue
 
             file_rel_path = file.relative_to(self.path)
-            # Use collapsible admonition syntax for MkDocs
+            # Use collapsible admonitions, normalized by the site preparation
             content += f"??? note \"{file_rel_path}\"\n\n"
 
             try:
@@ -845,25 +838,6 @@ def generate_examples(generate_main_index: bool = False) -> None:
     if generate_main_index and examples_index:
         with open(examples_index.path, "w+", encoding="utf-8") as f:
             f.write(examples_index.generate())
-
-
-def on_pre_build(config, **kwargs):
-    """
-    MkDocs hook to generate examples before building the documentation.
-    This function is called automatically by MkDocs' native hook system.
-    """
-    validate_cookbook()
-    generate_cookbook_serving()
-    print("Generating example documentation...")
-    generate_examples(generate_main_index=True)
-    print("Example documentation generated successfully!")
-
-
-def on_page_context(context, page, **kwargs):
-    """Hide repository edit actions for pages that only exist at build time."""
-    if page.file.src_uri.startswith(GENERATED_DOC_PREFIXES):
-        page.edit_url = None
-    return context
 
 
 if __name__ == "__main__":

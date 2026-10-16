@@ -18,7 +18,7 @@ Native serving YAML + option schemas + deployment manifests
                          |
                Generated JSON catalogs
                          |
-                 MkDocs / static hosting
+                 Blume / static hosting
                          |
             cookbook-config.js + UI edits
                          |
@@ -34,7 +34,7 @@ Native serving YAML + option schemas + deployment manifests
 | `docs/js/cookbook-config.mjs` | Load catalogs, preview fields, validate edits and produce output |
 
 Catalog generation runs in Node without importing FastVideo or loading model
-weights. The docs build generates assets before MkDocs copies them into the
+weights. The docs build generates assets before Blume copies them into the
 published site. Generated JSON, the combined API/validator bundle and its license notices
 are Git-ignored build output published together under `assets/cookbook-config/`.
 Website visitors need only the static assets. The schemas are author-maintained

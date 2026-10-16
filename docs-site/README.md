@@ -1,97 +1,65 @@
-# FastVideo Blume documentation
+# FastVideo documentation
 
-This Blume app previews the FastVideo documentation and the React cookbook from
-[cookbook migration #1949](https://github.com/hao-ai-lab/FastVideo/issues/1949).
-MkDocs continues to publish production while this transfer is reviewed.
+Blume builds the documentation and React cookbook at
+[haoailab.com/FastVideo](https://haoailab.com/FastVideo/). This PR replaces the
+previous MkDocs site using the existing GitHub Pages publishing workflow.
 
-![Documentation preview](docs-preview.jpg)
+![Documentation homepage](docs-preview.jpg)
 
-## Run locally
+![Fast Models catalog](fast-models-preview.jpg)
 
-Use Node 22.19 or newer and Python 3.12. From the repository root:
+## Develop and validate
 
-```bash
-uv venv docs-site/.venv --python 3.12
-uv pip install --python docs-site/.venv/bin/python -r requirements-mkdocs.txt
-npm ci --prefix docs
-npm ci --prefix docs-site
-npm run dev --prefix docs-site
-```
+Read [Documenting FastVideo](../docs/contributing/documentation.md) for setup,
+commands, source ownership, and the per-page writing template. Use Node 24 and
+Python 3.12. `npm run dev --prefix docs-site` serves under `/FastVideo`.
+`npm run build --prefix docs-site` prepares the content and writes `dist/`.
+`npm run preview --prefix docs-site` serves that static build.
 
-Open the URL printed by Blume, under `/FastVideo`. The production prefix also
-applies locally. The first preparation builds the Python reference and takes
-about a minute on a laptop. Subsequent runs reuse it until its source changes.
-You can select an existing docs environment with `DOCS_PYTHON=/path/to/python`.
-No FastVideo installation, model weights, or GPU runtime is needed.
+Edit canonical guides under `docs/`, the welcome page under `content/`, the model
+catalog in `lib/fast-models.ts`, and sidebar grouping in `navigation.json`.
+Preparation regenerates `.generated/` and `public/`; neither is an editable copy.
 
-For a production build and preview:
+The [documentation structure plan](INFORMATION_ARCHITECTURE.md) records the new
+navigation and proposed page consolidations. URLs stay stable in this PR.
+Hardware, integrations, and model guides now sit beneath Run inference rather
+than interrupting the getting-started path.
 
-```bash
-npm run check --prefix docs-site
-npm run build --prefix docs-site
-npm run validate --prefix docs-site
-npm run preview --prefix docs-site
-```
+## Build architecture
 
-Build output is `docs-site/dist/`. This draft adds a CI build artifact, not a
-production deployment. The existing MkDocs Pages workflow remains authoritative.
+- `scripts/prepare-python-docs.py` uses Griffe to extract modules, classes,
+  signatures, docstrings, and source directly from Python files. It never imports
+  FastVideo or needs PyTorch. Only Griffe, Markdown, and PyYAML are installed from
+  `requirements-docs.txt`. It also regenerates examples and serving metadata.
+- `scripts/transfer-docs.mjs` uses Blume's pinned Markdown syntax normalizer,
+  rewrites links, preserves fragments, copies assets, and overlays the handwritten
+  application pages. `content-syntax.yml` configures syntax compatibility only.
+- `migration-anchors.json` is a frozen compatibility contract for the previous
+  site's URLs and heading fragments. Tests check the published output against it.
+  Do not regenerate it to hide missing routes or anchors.
+- `scripts/prepare-content.mjs` builds and copies cookbook catalogs and assets.
+  Existing family recipe selectors are scoped inside the new shell while the
+  React editor and cookbook design continue to develop.
+- `.github/workflows/infra-docs.yml` validates and uploads `docs-site/dist/` with
+  the existing Pages actions. Deployment runs only on `main`. The domain,
+  environment and `/FastVideo` prefix are unchanged.
 
-## Edit the documentation
+## Homepage and catalog
 
-Keep editing handwritten guides under `docs/`. The Blume welcome page is
-`content/index.mdx`; it includes the original description and key features through
-generated partials. The curated model directory is `content/fast-models.mdx`.
-Run `npm run prepare:content --prefix docs-site`
-after changing those pages or Python sources, then restart the dev server. This
-transition build regenerates the Blume copy rather than maintaining two editable
-versions. Do not edit or commit `.generated/` or `public/`.
+The welcome page uses Blume frame mode for its centered logo and accessible
+heading. News comes from the first two dated entries under `NEWS` in the root
+README; projects come from its Awesome work section. The original introduction
+and key features come from canonical `docs/index.md`.
 
-The welcome page uses Blume's `frame` mode to keep the sidebar while supplying its
-own centered logo and accessible heading. News headlines come from the first two
-dated entries under `NEWS` in the root README, using the first sentence or clause
-and the last linked source. The projects list comes from its "Awesome work"
-section. Update those README sections to refresh the homepage. The GitHub star
-button fetches the public repository count on page load and every five minutes
-while the page is visible. It shows "Star" if the first request fails and keeps
-the last count if a refresh fails. It uses no credentials. The Trendshift badge
-loads directly from Trendshift. The lab mark in `assets/hao-ai-lab.png` is the
-original image supplied for this page.
+The star button fetches GitHub's public repository count on load and every five
+minutes while visible. Failed initial requests show "Star"; failed refreshes
+retain the previous count. No credentials are used. The Trendshift badge loads
+from Trendshift. The lab mark in `assets/hao-ai-lab.png` is the supplied image.
 
-Fast Models groups public checkpoints by family and links to the existing Hugging
-Face collections. Its links were reviewed against the public Hub API on October
-16, 2026. Update the page when adding or replacing a release, and use canonical
-model URLs when a Hub repository redirects to a renamed checkpoint.
-
-The transfer has three parts:
-
-- `scripts/prepare-python-docs.py` runs the existing example generator and
-  `mkdocs-api-autonav` / `mkdocstrings` against source files. It caches the comparison
-  build by content hash and extracts the Python reference's semantic HTML, without
-  Material's navigation or page shell. It imports no FastVideo runtime modules.
-- `scripts/transfer-docs.mjs` copies non-cookbook Markdown, runs Blume's pinned
-  MkDocs codemod, preserves old routes and heading IDs, translates local links,
-  copies images, and recreates the declared navigation. It embeds the rendered
-  API in the Blume shell, with links to child modules for discovery.
-- Handwritten Blume pages under `content/`, including the cookbook, overlay the
-  generated tree. Cookbook runbook links continue to the existing production site.
-  The cookbook UI, manifests, and design are not changed by this transfer.
-
-The output includes the homepage, installation, inference, training, distillation,
-attention, utilities, design, contributor guides, contact page, generated examples,
-and Python API. Existing URLs and headings are checked against the comparison
-build. The conversion log is `.generated/conversion-report.log`, and Python build
-diagnostics are in `.generated/mkdocs-build.log`.
-
-MkDocs remains a build dependency for the Python reference during this transition.
-Replacing its renderer can happen later without losing the source-generated API.
-The ordinary content uses Blume Markdown/MDX. The welcome cards, visible search
-control, and quieter navigation take inspiration from
-[Specific's documentation](https://docs.specific.dev/) while keeping FastVideo's
-blue branding. Material buttons become plain links,
-Slurm blocks use Bash highlighting, and GitHub's homepage buttons keep their links
-without loading the external widget script. Search, code copying, image zoom, theme
-switching, and page feedback use Blume's built-ins. Production deployment stays on
-the existing workflow until the cookbook and full-site preview are approved.
+Fast Models uses family cards, setup links, family filters, search, and consistent
+checkpoint rows. The curated links were checked against the public Hugging Face
+API on October 16, 2026. Published weights do not establish runtime or hardware
+compatibility. Check the support matrix and matching setup guide.
 
 ## Extend the cookbook
 
@@ -110,8 +78,8 @@ adding fields or recipes.
   URL serialization of all edited values is follow-up work.
 - Reset restores the baseline. Missing fields remain inherited. Explicit `false`,
   `0`, and `null` keep their meanings. Switching deployments discards edits.
-- Installation and deployment guides link to the existing published MkDocs site.
-  `guideUrl` resolves metadata against that site's index until those pages migrate.
+- Installation and deployment guides resolve against the current origin and
+  deployment prefix. Family runbook URLs remain available in the Blume site.
 - VRAM fit is unknown. Add a calculator or a verified-run badge only with the
   measurements and evidence contract described in #1949.
 
@@ -155,11 +123,11 @@ invalid-output suppression, reset, switching runtimes, retry, obsolete loads,
 keyboard editing, and mobile overflow under `/FastVideo`. Keep shared API tests
 in `docs/tests/`; add React interaction tests here. No serving process is launched.
 
-## Before switching production
+## Review and follow-up
 
-The transfer keeps the old documentation available. Before changing the Pages
-workflow, finish the cookbook design and remaining recipe migration from #1949,
-review the new docs at desktop and mobile widths, and resolve the dependency
-audit findings noted above. Keep the current Python renderer until a replacement
-preserves its API pages, aliases, and cross references. No old pages or recipes
-are removed by this preview.
+This PR switches the existing Pages artifact from MkDocs to Blume when merged.
+The original routes and fragments are checked against the frozen migration
+manifest. Review CI and the catalog/sidebar on desktop and mobile before merging.
+The remaining cookbook design and editor coverage in #1949 can continue without
+keeping a second documentation build. The editorial consolidation proposals are
+listed separately in `INFORMATION_ARCHITECTURE.md`.

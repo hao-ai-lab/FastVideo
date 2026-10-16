@@ -409,8 +409,8 @@ The docs job:
 1. Installs Python and Node documentation dependencies.
 2. Runs lint, formatting checks and tests for documentation tooling.
 3. Generates required static assets.
-4. Builds the MkDocs site and checks its assets and documentation links.
-5. Uploads the site artifact and publishes only from `main`.
+4. Builds the Blume site, validates routes and assets, and tests navigation and cookbook interactions.
+5. Uploads `docs-site/dist/` as the Pages artifact and publishes only from `main`, at the existing `https://haoailab.com/FastVideo/` URL.
 
 ### Docker Images
 

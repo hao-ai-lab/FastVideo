@@ -7,3 +7,4 @@ test-results
 playwright-report
 .generated
 .venv
+migration-anchors.json

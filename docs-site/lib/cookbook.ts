@@ -81,7 +81,10 @@ export function parseField(field: Field, raw: string): Value {
   return raw;
 }
 
-/** Catalog guide links are relative to the original index, which remains published by MkDocs. */
+/** Keep catalog guide links on the current site and its deployment prefix. */
 export function guideUrl(path: string): string {
-  return new URL(path, "https://haoailab.com/FastVideo/assets/cookbook-config/index.json").href;
+  return new URL(
+    path,
+    new URL(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/assets/cookbook-config/index.json`, window.location.origin),
+  ).href;
 }

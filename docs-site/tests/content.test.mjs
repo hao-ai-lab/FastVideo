@@ -4,9 +4,9 @@ import { test } from "node:test";
 
 const site = new URL("../", import.meta.url);
 const routes = JSON.parse(await readFile(new URL(".generated/routes.json", site), "utf8"));
-const old = JSON.parse(await readFile(new URL(".generated/old-headings.json", site), "utf8"));
+const old = JSON.parse(await readFile(new URL("migration-anchors.json", site), "utf8"));
 
-test("every original non-cookbook route and heading anchor survives the transfer", async () => {
+test("every migrated route and heading anchor survives the cutover", async () => {
   const failures = [];
   for (const [path, headings] of Object.entries(old)) {
     const route = path === "." ? "/" : `/${path}`;

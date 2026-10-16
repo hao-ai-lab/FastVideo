@@ -742,5 +742,6 @@
   };
 
   if (window.document$) window.document$.subscribe(init);
-  else document.addEventListener("DOMContentLoaded", init);
+  else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
 })();

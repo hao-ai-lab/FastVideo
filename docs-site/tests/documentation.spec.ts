@@ -32,7 +32,7 @@ test("GitHub rate limits leave a usable Star link without a fabricated count", a
 test("documentation navigation opens transferred guides", async ({ page }) => {
   await page.goto("/FastVideo");
   await expect(page.getByRole("heading", { name: "Welcome to FastVideo", exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "Installation", exact: true }).click();
+  await page.locator("#blume-nav-drawer").getByRole("link", { name: "Installation", exact: true }).click();
   await expect(page).toHaveURL(/getting_started\/installation/);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 });
@@ -83,7 +83,7 @@ test("Fast Models connects the homepage, family collections, and checkpoints", a
     "href",
     "https://huggingface.co/collections/FastVideo/fastmetal",
   );
-  await expect(page.locator('a[href="https://huggingface.co/FastVideo/FastWan-QAD-FP8-1.3B"]')).toBeVisible();
+  await expect(page.locator('a[href="https://huggingface.co/FastVideo/FastWan-QAD-FP8-1.3B"]').first()).toBeVisible();
   const checkpoints = await page
     .locator('a[href^="https://huggingface.co/FastVideo/"]')
     .evaluateAll((links) => [...new Set(links.map((link) => link.getAttribute("href")))]);
@@ -125,4 +125,38 @@ test("the welcome cards reflow on mobile without horizontal scrolling", async ({
   await expect(page.getByRole("heading", { name: "Welcome to FastVideo", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /Quick start Generate/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("the model catalog filters by family and checkpoint name", async ({ page }) => {
+  await page.goto("/FastVideo/fast-models");
+  const catalog = page.locator(".model-catalog");
+  await expect(catalog.getByRole("status")).toHaveText("18 checkpoints");
+  await page.getByRole("button", { name: "FastMetal", exact: true }).click();
+  await expect(catalog.getByRole("status")).toHaveText("3 checkpoints");
+  await page.getByRole("searchbox", { name: "Search checkpoints", exact: true }).fill("14B");
+  await expect(catalog.getByRole("status")).toHaveText("1 checkpoint");
+  await page.getByRole("searchbox").fill("no-such-model");
+  await expect(catalog.getByRole("status")).toHaveText("0 checkpoints");
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(catalog.getByRole("status")).toHaveText("18 checkpoints");
+});
+
+test("hardware guides are grouped below general inference tasks", async ({ page }) => {
+  await page.goto("/FastVideo");
+  const nav = page.locator("#blume-nav-drawer");
+  await expect(nav.getByRole("link", { name: "Two DGX Sparks", exact: true })).not.toBeVisible();
+  await nav.getByText("Hardware", { exact: true }).click();
+  await nav.getByRole("link", { name: "Two DGX Sparks", exact: true }).click();
+  await expect(page).toHaveURL(/getting_started\/installation\/spark_pair/);
+});
+
+test("existing cookbook family recipes still load in the Blume shell", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/wan/");
+  await expect(page.locator("[data-cookbook-command]")).not.toHaveText("Loading...");
+  await expect(page.locator("[data-cookbook-command]")).toContainText(/python|fastvideo/);
+  await expect(page.getByRole("button", { name: "Search", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "All model families", exact: true })).toHaveAttribute(
+    "href",
+    /\/FastVideo\/cookbook\/?$/,
+  );
 });

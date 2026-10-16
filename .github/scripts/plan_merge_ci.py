@@ -104,9 +104,9 @@ SAFE_PATTERNS = (
     "comfyui/**",
     "docs/**",
     "examples/**",
-    "mkdocs.yml",
-    "requirements-mkdocs.in",
-    "requirements-mkdocs.txt",
+    "docs-site/**",
+    "requirements-docs.in",
+    "requirements-docs.txt",
     "scripts/**",
     "tests/__init__.py",
     "tests/local_tests/**",
@@ -321,7 +321,7 @@ def classify_paths(paths: list[str], removed_paths: Iterable[str] = ()) -> Merge
             plan.require_all("changed-file API failed; failing closed")
             continue
 
-        if path in {"requirements-mkdocs.in", "requirements-mkdocs.txt"}:
+        if path in {"requirements-docs.in", "requirements-docs.txt"}:
             plan.reasons.append(f"documentation dependencies need no GPU integration: {path}")
             continue
 
