@@ -156,8 +156,10 @@ test("catalog discovery opens dedicated model recipes and filters by family and 
   await expect(cards).toHaveCount(1);
   await cards.click();
   await expect(page).toHaveURL(/cookbook\/wan\/wan21-i2v$/);
-  await expect(page.getByLabel("Base model")).toHaveValue("wan21-i2v");
-  await page.getByLabel("Base model").selectOption("fastwan21");
+  await expect(page.getByLabel("Base model")).toHaveCount(0);
+  await page.getByRole("link", { name: "← All recipes", exact: true }).click();
+  await page.getByLabel("Search recipes").fill("FastWan2.1");
+  await page.locator(".recipe-card").click();
   await expect(page).toHaveURL(/cookbook\/wan\/fastwan21$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("FastWan2.1 1.3B");
 });
@@ -228,4 +230,34 @@ test("image and audio models have logos and dedicated source recipe pages", asyn
   await page.goto("/FastVideo/cookbook");
   await page.getByRole("button", { name: "Audio", exact: true }).click();
   await expect(page.locator(".recipe-card")).toHaveCount(3);
+});
+
+test("provider labels match FastVideo logos and CompactH3 is replaced by FastH3 Trim", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook");
+  const ownedCards = page.locator(".recipe-card").filter({ has: page.locator('img[src$="/fastvideo.webp"]') });
+  for (const card of await ownedCards.all()) await expect(card.locator(".recipe-card-kicker")).toHaveText("FastVideo");
+  await page.getByLabel("Search recipes").fill("FastH3 Trim");
+  await expect(page.locator(".recipe-card")).toHaveCount(1);
+  await page.locator(".recipe-card").click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("FastH3 Trim");
+  await expect(page.getByRole("link", { name: "NVFP4 ↗", exact: true })).toHaveAttribute(
+    "href",
+    /FastVideo-FastH3-Trim-8-Step-NVFP4/,
+  );
+});
+
+test("custom devices persist and component previews cannot silently generate incompatible YAML", async ({ page }) => {
+  await page.goto(route);
+  await page.getByRole("button", { name: "+ Find or add a GPU", exact: true }).click();
+  await page.getByLabel("Device name", { exact: true }).fill("RTX 4090");
+  await page.getByRole("button", { name: "Add device", exact: true }).click();
+  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
+  await page.reload();
+  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
+  await page.locator(".component-plan > summary").click();
+  await chip(page, "Text encoder", "NVFP4 encoder");
+  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeDisabled();
+  await expect(page.getByRole("alert")).toContainText("compatible serving recipe");
+  await page.getByRole("button", { name: "Restore recipe components", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Download YAML", exact: true })).toBeEnabled();
 });

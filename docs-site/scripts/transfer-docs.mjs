@@ -76,7 +76,6 @@ function rewriteLinks(body, from) {
       }
       if (fence) return line;
       return line
-        .replace(/\{\s*\.md-button[^}]*\}/g, "")
         .replace(/<(?=[0-9=])/g, "&lt;")
         .replace(/(\]\()([^\s)]+)(\))/g, (_, before, url, after) => before + localTarget(url, from) + after)
         .replace(
@@ -166,6 +165,7 @@ export async function transferDocs() {
   const python = process.env.DOCS_PYTHON || (existsSync(localPython) ? localPython : "python3");
   execFileSync(python, [join(site, "scripts/prepare-python-docs.py")], { cwd: repo, stdio: "inherit" });
   await rm(content, { recursive: true, force: true });
+  await rm(publicDir, { recursive: true, force: true });
   await mkdir(content, { recursive: true });
   const ignored = new Set(["js", "tests", "node_modules", "__pycache__"]);
   await cp(source, content, {
@@ -176,19 +176,15 @@ export async function transferDocs() {
       return (await stat(path)).isDirectory() || /\.mdx?$/.test(path);
     },
   });
-  const blumePackage = dirname(fileURLToPath(import.meta.resolve("blume/package.json")));
-  const report = execFileSync(
-    process.execPath,
-    [
-      join(blumePackage, "skills/blume-migrate/scripts/mkdocs-codemod.mjs"),
-      "--write",
-      "--config",
-      join(site, "content-syntax.yml"),
-      content,
-    ],
-    { cwd: repo, encoding: "utf8" },
-  );
-  await writeFile(join(generated, "conversion-report.log"), report);
+  // Native callout directives and islands compile as MDX, while source links keep .md filenames.
+  for (const file of await files(content)) {
+    if (!file.endsWith(".md")) continue;
+    const text = await readFile(file, "utf8");
+    if (/^:::(?:note|tip|warning|danger|info|success)\b/m.test(text) || text.includes("<RecipeFamily ")) {
+      await writeFile(file.replace(/\.md$/, ".mdx"), text);
+      await rm(file);
+    }
+  }
   const oldHeadings = JSON.parse(await readFile(join(generated, "old-headings.json"), "utf8"));
   for (const path of await files(content)) {
     if (!/\.mdx?$/.test(path)) continue;
@@ -210,21 +206,14 @@ export async function transferDocs() {
         /<style>([\s\S]*?)<\/style>/g,
         (_, css) => `<style>{${JSON.stringify(css)}}</style>`,
       );
-    if (rel.startsWith("cookbook/") && converted.includes("data-cookbook data-family=")) {
-      converted = converted.replace(
-        /data-recipes="[^"]*"/g,
-        'data-recipes="/FastVideo/assets/cookbook-recipes.json?v=16"',
+    {
+      const aliases = (oldHeadings[route.slice(1)] ?? []).filter(
+        (heading) =>
+          !converted.includes(`id="${heading.id}"`) &&
+          !converted.includes(`[#${heading.id}]`) &&
+          !converted.includes(`{#${heading.id}}`),
       );
-      const start = converted.indexOf('<div class="cookbook-shell');
-      const prefix = converted.slice(0, start);
-      const html = converted.slice(start);
-      const target = path.replace(/\.md$/, ".mdx");
-      await writeFile(
-        target,
-        `---\n${stringify(data)}---\n${prefix}\n<LegacyCookbook html={${JSON.stringify(html).replaceAll("<", "\\u003c")}} />\n`,
-      );
-      if (target !== path) await rm(path);
-      continue;
+      converted += "\n" + aliases.map((heading) => `<a id="${heading.id}"></a>`).join("\n");
     }
     await writeFile(path, `---\n${stringify(data)}---\n${converted}`);
   }
@@ -236,6 +225,15 @@ export async function transferDocs() {
   const section = originalHome.indexOf("## Key Features");
   if (section < 0) throw new Error("The homepage source needs an updated section boundary.");
   await mkdir(join(content, "_snippets"), { recursive: true });
+  await mkdir(join(content, "_snippets/clients"), { recursive: true });
+  for (const [file, language] of [
+    ["video.py", "python"],
+    ["video.mjs", "javascript"],
+    ["video.sh", "bash"],
+  ]) {
+    const code = await readFile(join(repo, "examples/serving/clients", file), "utf8");
+    await writeFile(join(content, "_snippets/clients", `${file}.md`), `\`\`\`${language}\n${code}\n\`\`\`\n`);
+  }
   const asMdx = (body) =>
     body
       .replace(/\{#([^}]+)\}/g, "[#$1]")

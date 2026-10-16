@@ -127,7 +127,6 @@ def prepare() -> None:
     GENERATED.mkdir(exist_ok=True)
     examples = runpy.run_path(str(ROOT / "docs/generate_examples.py"))
     examples["validate_cookbook"]()
-    examples["generate_cookbook_serving"]()
     examples["generate_examples"](generate_main_index=True)
     anchors = json.loads((SITE / "migration-anchors.json").read_text())
     shutil.rmtree(GENERATED / "python-reference", ignore_errors=True)
@@ -161,14 +160,12 @@ def prepare() -> None:
     write_page("api", "Python API reference", prose((ROOT / "docs/api/index.md").read_text()), anchors)
     v1 = (ROOT / "docs/getting_started/v1_api.md").read_text()
 
-    def directive(match):
-        path, options = match.groups()
-        settings = yaml.safe_load(options) or {}
-        settings = settings.get("options", {})
+    def reference(match):
+        path, level, members = match.groups()
         return "\n" + symbol(package[path.removeprefix("fastvideo.")], path,
-                               settings.get("heading_level", 3), settings.get("members"), source=False) + "\n"
+                               int(level), members.split(","), source=False) + "\n"
 
-    v1 = re.sub(r"^::: (\S+)\n((?:[ \t]+.*\n|\n)*)", directive, v1, flags=re.MULTILINE)
+    v1 = re.sub(r'<api-reference path="([^"]+)" heading="(\d+)" members="([^"]+)" />', reference, v1)
     write_page("getting_started/v1_api", "V1 API", prose(v1.removeprefix("# V1 API\n")), anchors)
     (GENERATED / "old-headings.json").write_text(json.dumps(anchors))
     print(f"Rendered {len(modules) + 1} Python reference pages directly from source, without MkDocs or runtime imports.")

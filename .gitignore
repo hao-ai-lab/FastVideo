@@ -52,9 +52,8 @@ dist/
 eggs/
 .eggs/
 
-# MkDocs documentation
+# Generated documentation
 site/
-docs/assets/cookbook-serving.json
 docs/assets/cookbook-config/
 examples/serving/clients/node_modules/
 docs/node_modules/
@@ -63,7 +62,6 @@ docs/examples/
 docs/inference/examples/
 docs/training/examples/
 docs/distillation/examples/
-!requirements-mkdocs.txt
 
 # VSCode
 .vscode/

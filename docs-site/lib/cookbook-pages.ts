@@ -86,6 +86,18 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
     const family = familyInfo[first.family];
     const backend = recipePages.find((page) => page.id === backendModels[model]);
     const ownModel = model.startsWith("FastVideo/Fast");
+    const logo = ownModel ? "fastvideo" : family.logo;
+    const providers: Record<string, string> = {
+      fastvideo: "FastVideo",
+      minimax: "MiniMax",
+      "wan-ai": "Wan AI",
+      ltx: "Lightricks",
+      "tencent-hunyuan": "Tencent",
+      kandinsky: "Kandinsky Lab",
+      "black-forest-labs": "Black Forest Labs",
+      stabilityai: "Stability AI",
+      nvidia: "NVIDIA",
+    };
     return {
       id: backend?.id ?? first.id,
       model,
@@ -102,7 +114,9 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
       family: first.family === "minimax_h3" ? "FastH3" : (backend?.family ?? family.title),
       familyPath: `/cookbook/${family.path}`,
       path: backend?.path ?? `/cookbook/${family.path}/models/${first.id}`,
-      logo: ownModel ? "fastvideo" : family.logo,
+      logo,
+      provider: providers[logo],
+      releaseOnly: false,
       category: family.category,
       description: backend?.description ?? first.summary,
       tags: backend?.tags ?? [...new Set(recipes.map((recipe) => recipe.task))],
@@ -111,6 +125,26 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
       featured: backend?.featured ?? false,
     };
   })
+  .concat([
+    {
+      id: "fasth3-trim",
+      model: "FastVideo/FastVideo-FastH3-Trim-8-Step",
+      recipes: [] as SourceRecipe[],
+      title: "FastH3 Trim",
+      family: "FastH3",
+      familyPath: "/cookbook/minimax-h3",
+      path: "/cookbook/minimax-h3/fasth3-trim",
+      logo: "fastvideo",
+      provider: "FastVideo",
+      releaseOnly: true,
+      category: "Video",
+      description: "The smaller FastH3 release, previously called CompactH3.",
+      tags: ["Text to video", "Audio", "8-step"],
+      platforms: ["NVIDIA", "Apple Silicon"],
+      configurable: false,
+      featured: false,
+    },
+  ])
   .sort(
     (a, b) =>
       Number(b.featured) - Number(a.featured) ||

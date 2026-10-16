@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import SourceRecipe from "./SourceRecipe";
+import ComponentPlan from "@/components/cookbook/ComponentPlan";
+import HardwarePicker from "@/components/cookbook/HardwarePicker";
+import ModelRelease from "@/components/cookbook/ModelRelease";
 import ModelHeader from "@/components/cookbook/ModelHeader";
 import {
   api,
@@ -190,6 +193,7 @@ function Editor({
   selectRuntime: (id: string) => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
+  const [componentDraft, setComponentDraft] = useState(false);
   const [hardware, setHardware] = useState(
     () => new URL(window.location.href).searchParams.get("hardware") ?? "unspecified",
   );
@@ -201,6 +205,8 @@ function Editor({
   let failure = "";
   let failedPath: string | undefined;
   try {
+    if (componentDraft)
+      throw new Error("Component preview selected. A compatible serving recipe is needed before generating YAML.");
     if (Object.keys(parseErrors).length) throw new Error("Correct the highlighted fields to generate a configuration.");
     result = api.resolveConfig(catalog, edits);
   } catch (error) {
@@ -244,10 +250,6 @@ function Editor({
     setNotice("Downloaded config.yaml.");
   }
   const mlx = catalog.runtime.backend === "mlx";
-  const generator = catalog.base_config.generator as Record<string, Value>;
-  const engine = generator.engine as Record<string, Value> | undefined;
-  const quantization = engine?.quantization as Record<string, Value> | undefined;
-  const modelPath = String(generator.model_path);
   const hardwareOptions = mlx
     ? [["apple", "Apple Silicon", "Unified memory"]]
     : [
@@ -372,29 +374,6 @@ function Editor({
         </div>
       </details>
       <section className="recipe-matrix" aria-label="Configuration settings">
-        <MatrixRow title="Base model">
-          <select
-            aria-label="Base model"
-            value={model.id}
-            onChange={(event) => {
-              const selected = modelDirectory.find((model) => model.id === event.target.value);
-              if (selected) window.location.assign(sitePath(selected.path));
-            }}
-          >
-            {modelDirectory
-              .filter((entry) => entry.family === model.family)
-              .map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.title}
-                </option>
-              ))}
-          </select>
-          <span className="matrix-baseline">
-            {quantization?.transformer_quant
-              ? `Transformer: ${String(quantization.transformer_quant)}`
-              : "Recipe checkpoint"}
-          </span>
-        </MatrixRow>
         <MatrixRow title="Hardware">
           <div className="option-chips hardware-backends" role="group" aria-label="Hardware backend">
             {deployments.map((deployment) => (
@@ -411,24 +390,12 @@ function Editor({
             ))}
           </div>
           <div className="hardware-resource-grid">
-            <fieldset className="hardware-matrix">
-              <legend className="sr-only">Hardware target</legend>
-              {hardwareOptions.map(([value, title, detail]) => (
-                <label key={value} data-selected={selectedHardware[0] === value}>
-                  <input
-                    type="radio"
-                    name={`hardware-${catalog.id}`}
-                    checked={selectedHardware[0] === value}
-                    onChange={() => chooseHardware(value)}
-                    value={value}
-                  />
-                  <span>
-                    <strong>{title}</strong>
-                    <small>{detail}</small>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
+            <HardwarePicker
+              backend={mlx ? "mlx" : "nvidia"}
+              options={hardwareOptions}
+              value={hardware.startsWith("custom:") ? hardware : selectedHardware[0]}
+              onChange={chooseHardware}
+            />
             <div className="matrix-resources">
               <span className="matrix-resource-title">Resources</span>
               {fields.filter((field) => field.path === "generator.engine.num_gpus").map(renderField)}
@@ -448,6 +415,11 @@ function Editor({
           </div>
           <p className="matrix-note">Hardware fit has not been verified. GPU count updates the YAML.</p>
         </MatrixRow>
+        {model.family === "FastH3" && (
+          <MatrixRow title="Components">
+            <ComponentPlan key={reset} onDraftChange={setComponentDraft} />
+          </MatrixRow>
+        )}
         {standardGroups.map((group) => (
           <MatrixRow title={groupTitle(group) ?? group} key={group}>
             <div className="matrix-options-grid">{groupFields(group).map(renderField)}</div>
@@ -477,6 +449,7 @@ function Editor({
                     setParseErrors(
                       Object.fromEntries(Object.entries(parseErrors).filter(([path]) => !path.includes("parallelism"))),
                     );
+                    setComponentDraft(false);
                     setNotice("Parallelism set to automatic.");
                   }}
                 >
@@ -493,6 +466,7 @@ function Editor({
           variant="ghost"
           onClick={() => {
             setEdits({});
+            setComponentDraft(false);
             setParseErrors({});
             setReset(reset + 1);
             setNotice("Restored the baseline configuration.");
@@ -581,6 +555,7 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
   const model = index?.models.find((model) => model.id === modelId);
   if (!modelId) return <RecipeDirectory index={index} error={error} retry={() => setRetry(retry + 1)} />;
   const directoryModel = modelDirectory.find((model) => model.id === modelId);
+  if (directoryModel?.releaseOnly) return <ModelRelease model={directoryModel} />;
   if (directoryModel && !directoryModel.configurable) return <SourceRecipe model={directoryModel} />;
   return (
     <div className="cookbook not-prose recipe-detail">
@@ -686,7 +661,7 @@ function RecipeDirectory({ index, error, retry }: { index?: Index; error: string
           <a className="recipe-card" key={model.id} href={sitePath(model.path)}>
             <div className="recipe-card-top">
               <img src={sitePath(`/assets/logos/${model.logo}.webp`)} alt="" width="40" height="40" />
-              <span className="recipe-card-kicker">{model.family}</span>
+              <span className="recipe-card-kicker">{model.provider}</span>
               {model.featured && <span className="recipe-featured">Featured</span>}
             </div>
             <h2>{model.title}</h2>

@@ -16,7 +16,6 @@ EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/getting_started/examples"
 GITHUB_REPO = "hao-ai-lab/FastVideo"  # Update this to your repo
 COOKBOOK_DATA = ROOT_DIR / "docs/assets/cookbook-recipes.json"
-COOKBOOK_SERVING_DATA = ROOT_DIR / "docs/assets/cookbook-serving.json"
 COOKBOOK_CLIENTS = {
     "python": ("video.py", "python -m pip install openai==3.6.0"),
     "javascript": ("video.mjs", "npm install openai@7.8.0"),
@@ -223,16 +222,6 @@ def validate_cookbook() -> None:
             if related_id not in ids:
                 raise ValueError(f"Cookbook recipe references unknown related id: {recipe['id']}: {related_id}")
 
-    cache_bust = f"cookbook-recipes.json?v={version}"
-    cookbook_pages = ROOT_DIR / "docs/cookbook"
-    for page in sorted(cookbook_pages.glob("*.md")):
-        text = page.read_text(encoding="utf-8")
-        # Prose about the asset is not an interactive recipe mount.
-        if not re.search(r"data-recipes=[\"']", text):
-            continue
-        if cache_bust not in text:
-            raise ValueError(f"{page}: recipe JSON cache-bust must be {cache_bust}")
-
 
 def cookbook_serving_profile(recipe: dict) -> dict:
     """Read server facts separately from the local inference run's evidence."""
@@ -311,13 +300,6 @@ def cookbook_serving_profile(recipe: dict) -> dict:
         "sampling": config["default_request"]["sampling"],
         "clients": clients,
     }
-
-
-def generate_cookbook_serving() -> None:
-    """Publish executable clients and config facts through the docs build."""
-    data = json.loads(COOKBOOK_DATA.read_text(encoding="utf-8"))
-    profiles = {recipe["id"]: cookbook_serving_profile(recipe) for recipe in data["recipes"] if "serving" in recipe}
-    COOKBOOK_SERVING_DATA.write_text(json.dumps(profiles, indent=2) + "\n", encoding="utf-8")
 
 
 def fix_case(text: str) -> str:
@@ -842,7 +824,6 @@ def generate_examples(generate_main_index: bool = False) -> None:
 
 if __name__ == "__main__":
     validate_cookbook()
-    generate_cookbook_serving()
     print("Generating example documentation...")
     generate_examples(generate_main_index=True)
     print("Example documentation generated successfully!")

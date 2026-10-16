@@ -209,16 +209,9 @@ Memory estimates, measured hardware support, format versioning and HTTP cache
 freshness remain separate follow-ups. No general arithmetic validator or CLI
 override workflow is introduced here.
 
-## Coexistence with the current cookbook
+## Cookbook interface
 
-Family pages still load `docs/assets/cookbook-recipes.json` through `cookbook.js`
-for generate commands, hardware evidence, and the H3 "Run a server" panel.
-Those pages are unchanged. This catalog and API sit beside them: manifests under
-`docs/cookbook/recipes/` point at the same `examples/serving/*.yaml` baselines
-the family pages already advertise, plus authored editable-field metadata.
-
-A later UI change can call `loadIndex` / `resolveConfig` from those pages so
-users download a customized serving YAML instead of copying a static file. Until
-then, keep recipe IDs aligned with the family catalog (`fasth3-8step`,
-`fastwan21`, `wan21-i2v`, `ltx2-distilled`) and treat `cookbook-recipes.json`
-`serving.source` as the native baseline, not a second options schema.
+Family and model pages use the React cookbook in `docs-site/`. The model inventory
+comes from `docs/assets/cookbook-recipes.json`; the shared configuration API
+continues to own editable serving recipes. The old family JavaScript selector
+and site-theme assets have been removed.

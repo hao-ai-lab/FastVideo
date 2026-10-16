@@ -150,15 +150,15 @@ test("hardware guides are grouped below general inference tasks", async ({ page 
   await expect(page).toHaveURL(/getting_started\/installation\/spark_pair/);
 });
 
-test("existing cookbook family recipes still load in the Blume shell", async ({ page }) => {
+test("family runbooks use React model cards without the old cookbook runtime", async ({ page }) => {
   await page.goto("/FastVideo/cookbook/wan/");
-  await expect(page.locator("[data-cookbook-command]")).not.toHaveText("Loading...");
-  await expect(page.locator("[data-cookbook-command]")).toContainText(/python|fastvideo/);
+  await expect(page.locator(".recipe-card").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Search", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "All model families", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "← All models", exact: true })).toHaveAttribute(
     "href",
-    /\/FastVideo\/cookbook\/?$/,
+    /\/FastVideo\/cookbook$/,
   );
+  await expect(page.locator('script[src*="/assets/cookbook.js"],link[href*="cookbook-runbooks.css"]')).toHaveCount(0);
 });
 
 test("generated example titles render once and retain their original fragment", async ({ page }) => {

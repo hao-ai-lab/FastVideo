@@ -32,15 +32,15 @@ readers a single starting point for CUDA, MLX and ROCm.
   signatures, docstrings, and source directly from Python files. It never imports
   FastVideo or needs PyTorch. Only Griffe, Markdown, and PyYAML are installed from
   `requirements-docs.txt`. It also regenerates examples and serving metadata.
-- `scripts/transfer-docs.mjs` uses Blume's pinned Markdown syntax normalizer,
-  rewrites links, preserves fragments, copies assets, and overlays the handwritten
-  application pages. `content-syntax.yml` configures syntax compatibility only.
+- `scripts/transfer-docs.mjs` rewrites links, preserves fragments, copies
+  assets, and overlays the handwritten application pages. Canonical guides use
+  native Blume callouts and React family cards; no migration converter runs during builds.
 - `migration-anchors.json` is a frozen compatibility contract for the previous
   site's URLs and heading fragments. Tests check the published output against it.
   Do not regenerate it to hide missing routes or anchors.
 - `scripts/prepare-content.mjs` builds and copies cookbook catalogs and assets.
-  Existing family recipe selectors are scoped inside the new shell while the
-  React editor and cookbook design continue to develop.
+  React model cards replace the old family selectors. Source commands and
+  serving configurations remain owned by their checked-in recipes.
 - `.github/workflows/infra-docs.yml` validates and uploads `docs-site/dist/` with
   the existing Pages actions. Deployment runs only on `main`. The domain,
   environment and `/FastVideo` prefix are unchanged.

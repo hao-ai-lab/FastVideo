@@ -1,9 +1,10 @@
 # Activation Trace Mode
 
-!!! note
-    This page covers Extension 0 (module forward hooks), which is the implemented
-    tracing mechanism. Extensions 1-3 are design sketches for future work and are
-    **not yet implemented**.
+:::note
+This page covers Extension 0 (module forward hooks), which is the implemented
+tracing mechanism. Extensions 1-3 are design sketches for future work and are
+**not yet implemented**.
+:::
 
 ## Overview
 

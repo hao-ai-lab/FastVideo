@@ -44,8 +44,9 @@ jobs still need this split: sequence parallel replicates the DiT on each GB10
 
 ## Behavior Explanation
 
-!!! note
-    For CLI usage, replace underscores (`_`) with hyphens (`-`).
+:::note
+For CLI usage, replace underscores (`_`) with hyphens (`-`).
+:::
 
 ### `use_fsdp_inference`
 

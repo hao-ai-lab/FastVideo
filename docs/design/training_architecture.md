@@ -1,10 +1,11 @@
 # Training Architecture
 
-!!! warning "Work in Progress"
-    This training architecture (`fastvideo/train/`) is under active development
-    and is replacing the older `fastvideo/training/` module. APIs, config
-    formats, and supported methods may change. See the
-    [Current Status](#current-status) section for what is implemented so far.
+:::warning[Work in Progress]
+This training architecture (`fastvideo/train/`) is under active development
+and is replacing the older `fastvideo/training/` module. APIs, config
+formats, and supported methods may change. See the
+[Current Status](#current-status) section for what is implemented so far.
+:::
 
 FastVideo's training framework (`fastvideo/train/`) is built around a
 **pluggable, YAML-driven architecture** that cleanly separates **models**,

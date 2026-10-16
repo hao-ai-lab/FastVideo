@@ -181,9 +181,7 @@ python -m pip install openai==3.6.0
 python examples/serving/clients/video.py
 ```
 
-```python
---8<-- "examples/serving/clients/video.py"
-```
+<include>/_snippets/clients/video.py.md</include>
 
 ### OpenAI JavaScript
 
@@ -195,9 +193,7 @@ npm ci --prefix examples/serving/clients
 node examples/serving/clients/video.mjs
 ```
 
-```javascript
---8<-- "examples/serving/clients/video.mjs"
-```
+<include>/_snippets/clients/video.mjs.md</include>
 
 ### cURL
 
@@ -207,9 +203,7 @@ Install `curl` and `jq`, then run:
 bash examples/serving/clients/video.sh
 ```
 
-```bash
---8<-- "examples/serving/clients/video.sh"
-```
+<include>/_snippets/clients/video.sh.md</include>
 
 ## Connect your app
 

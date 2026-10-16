@@ -10,7 +10,7 @@ export default function ModelHeader({ model, actions }: { model: DirectoryModel;
       <header className="recipe-model-header">
         <img src={sitePath(`/assets/logos/${model.logo}.webp`)} alt="" width="48" height="48" />
         <div>
-          <p className="recipe-publisher">{model.family}</p>
+          <p className="recipe-publisher">{model.provider}</p>
           <h1>{model.title}</h1>
           <p className="recipe-model-task">{model.tags.join(" · ")}</p>
           {!model.model.startsWith("./") && (

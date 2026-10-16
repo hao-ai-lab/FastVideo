@@ -17,12 +17,15 @@ build needs. The steps below handle both, **without requiring `sudo`**.
 - **Python: 3.10–3.12**
 - **Compilers:** gcc/g++ 10+ (the Spark ships gcc 13)
 
-!!! note "Different compute capability?"
-    These instructions target the GB10's `sm_121`. The kernel build auto-detects
-    it from your GPU, so there is normally nothing to set. To check your device:
-    ```bash
-    python -c "import torch; print(torch.cuda.get_device_capability(0))"  # GB10 -> (12, 1)
-    ```
+:::note[Different compute capability?]
+These instructions target the GB10's `sm_121`. The kernel build auto-detects
+it from your GPU, so there is normally nothing to set. To check your device:
+
+```bash
+python -c "import torch; print(torch.cuda.get_device_capability(0))"  # GB10 -> (12, 1)
+```
+
+:::
 
 ## Install
 

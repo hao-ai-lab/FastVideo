@@ -109,3 +109,9 @@ actions, generated commands, and a compact hardware/options matrix. Other models
 publish existing source commands and YAML without inventing editable settings.
 Hardware-fit validation remains unverified. New quantization, encoder, or runtime
 choices require a backend recipe before becoming selectable.
+
+The retired page-copy and tab handlers, cookbook JavaScript, and theme styles are
+removed. Canonical callouts now use Blume syntax, so builds no longer execute a
+migration codemod. Existing family URLs show React model cards with their setup
+and troubleshooting content. The homepage adds a direct FastH3 recipe link while
+keeping the existing logo, news, project cards, typography, and backgrounds.

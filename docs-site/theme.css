@@ -1135,3 +1135,122 @@
     color: var(--blume-foreground);
   }
 }
+
+/* Compact component experiments and custom hardware stay inside the recipe matrix. */
+.recipe-detail [data-variant="outline"] {
+  color: var(--blume-foreground);
+  background: var(--blume-background);
+  border-color: var(--recipe-control);
+}
+.hardware-add {
+  margin-block-start: 0.5rem;
+  min-block-size: 2rem;
+  font-size: 0.6875rem;
+  color: var(--blume-muted-foreground);
+  cursor: pointer;
+}
+.hardware-search {
+  display: grid;
+  gap: 0.5rem;
+  margin-block-start: 0.5rem;
+  font-size: 0.75rem;
+}
+.hardware-search p {
+  font-size: 0.6875rem;
+  color: var(--blume-muted-foreground);
+  line-height: 1.6;
+}
+.hardware-search button {
+  justify-self: start;
+  min-block-size: 2.25rem;
+  border: 1px solid var(--recipe-control);
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+.hardware-search button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.hardware-matrix strong {
+  overflow-wrap: anywhere;
+}
+.component-plan > summary {
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+.component-plan > summary span {
+  margin-inline-start: 0.5rem;
+  color: var(--blume-muted-foreground);
+  font-size: 0.625rem;
+}
+.component-plan-fields {
+  display: grid;
+  gap: 1rem;
+  margin-block: 1rem;
+}
+.component-plan-label {
+  display: block;
+  margin-block-end: 0.5rem;
+  font-size: 0.6875rem;
+}
+.component-plan > p {
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
+.component-plan-reset {
+  margin-block-start: 0.5rem;
+  font-size: 0.6875rem;
+  min-block-size: 2rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.release-intro {
+  font-size: 0.875rem;
+  color: var(--blume-muted-foreground);
+  line-height: 1.7;
+  margin-block-end: 1.5rem;
+}
+.release-intro p + p {
+  margin-block-start: 0.5rem;
+}
+.home-featured-model {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 1rem;
+  margin-block: 1.25rem;
+  border: 1px solid var(--blume-border);
+  border-radius: 0.625rem;
+  color: var(--blume-foreground);
+  text-decoration: none;
+}
+.home-featured-model img {
+  display: block;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  border-radius: 0.5rem;
+}
+.home-featured-model > span:first-of-type {
+  flex: 1;
+}
+.home-featured-model small {
+  display: block;
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  margin-block-end: 0.25rem;
+}
+.home-featured-model strong {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.home-featured-action {
+  font-size: 0.75rem;
+}
+.recipe-request-code summary {
+  padding-block: 0.25rem;
+}

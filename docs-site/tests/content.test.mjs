@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, access } from "node:fs/promises";
 import { test } from "node:test";
 
 const site = new URL("../", import.meta.url);
@@ -62,4 +62,15 @@ test("generated examples show their page title only once", async () => {
     if (!title || headings.filter((heading) => heading.text === title).length !== 1) failures.push(route);
   }
   assert.deepEqual(failures, []);
+});
+
+test("the deployment artifact contains no retired site scripts or styles", async () => {
+  for (const name of ["custom.js", "custom.css", "copy-page.js", "cookbook.js", "cookbook-runbooks.css"]) {
+    await assert.rejects(access(new URL(`dist/assets/${name}`, site)));
+  }
+  const home = await readFile(new URL("dist/index.html", site), "utf8");
+  assert.ok(home.includes("home-featured-model"));
+  const family = await readFile(new URL("dist/cookbook/wan/index.html", site), "utf8");
+  assert.ok(!family.includes("legacy-cookbook"));
+  assert.ok(family.includes("recipe-card"));
 });
