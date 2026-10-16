@@ -3,6 +3,7 @@
  * `build_ref2va_presentation`, so what the user sees is what the model is shown.
  */
 import type { MediaType } from "@/lib/api";
+import type { ReferenceCapability } from "@/lib/modelCapabilities";
 
 export interface H3Reference {
 	/** stable key for React lists */
@@ -35,23 +36,54 @@ export function labelReferences(refs: H3Reference[]): string[] {
 	});
 }
 
-/** Human-readable reason the list is invalid, or null when it is acceptable. */
-export function validateReferences(refs: H3Reference[]): string | null {
-	if (refs.length === 0) return null;
-	if (refs.length > H3_MAX_REFERENCES) {
-		return `At most ${H3_MAX_REFERENCES} references (have ${refs.length}).`;
+/**
+ * Human-readable reason the list is invalid, or null when it is acceptable.
+ * Limits come from the model's capability when the server reports one.
+ */
+export function validateReferences(
+	refs: H3Reference[],
+	capability?: ReferenceCapability | null,
+): string | null {
+	const limits = capability?.limits ?? H3_REFERENCE_LIMITS;
+	const maxTotal = capability?.max_total ?? H3_MAX_REFERENCES;
+	if (refs.length === 0) {
+		return capability?.required
+			? "This model needs at least one image or video reference."
+			: null;
+	}
+	if (refs.length > maxTotal) {
+		return `At most ${maxTotal} references (have ${refs.length}).`;
 	}
 	const counts: Record<MediaType, number> = { image: 0, video: 0, audio: 0 };
 	for (const ref of refs) counts[ref.media_type] += 1;
 	for (const type of Object.keys(counts) as MediaType[]) {
-		if (counts[type] > H3_REFERENCE_LIMITS[type]) {
-			return `At most ${H3_REFERENCE_LIMITS[type]} ${type} references (have ${counts[type]}).`;
+		if (counts[type] > limits[type]) {
+			return `At most ${limits[type]} ${type} references (have ${counts[type]}).`;
 		}
 	}
 	if (counts.audio === refs.length) {
 		return "Audio references must be paired with at least one image or video.";
 	}
 	return null;
+}
+
+/**
+ * Move the reference at `index` by `delta` places. Order is what the model
+ * sees, and labels are numbered in that order, so this renumbers them.
+ */
+export function moveReference(
+	refs: H3Reference[],
+	index: number,
+	delta: number,
+): H3Reference[] {
+	const target = index + delta;
+	if (index < 0 || index >= refs.length || target < 0 || target >= refs.length) {
+		return refs;
+	}
+	const next = [...refs];
+	const [moved] = next.splice(index, 1);
+	next.splice(target, 0, moved);
+	return next;
 }
 
 /** Seed the guided prompt fields from the current reference list. */

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ModelRecipe } from "./modelCapabilities";
+
 export type JobType = "inference" | "finetuning" | "distillation";
 
 export interface Job {
@@ -14,6 +16,10 @@ export interface Job {
 	started_at: number | null;
 	finished_at: number | null;
 	error: string | null;
+	/** weights / parameters / kernel / memory / runtime, for failed jobs. */
+	error_category?: string | null;
+	recipe?: ModelRecipe | null;
+	references?: { source: string; media_type: string }[];
 	output_path: string | null;
 	log_file_path: string | null;
 	num_inference_steps: number;

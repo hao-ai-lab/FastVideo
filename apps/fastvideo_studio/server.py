@@ -33,8 +33,10 @@ from fastapi.responses import FileResponse
 
 from fastvideo.registry import (get_registered_model_paths, get_registered_models_with_workloads)
 from fastvideo_studio.database import Database, _get_db_path
+from fastvideo_studio.fasth3_omni import FastH3OmniRegistry, apply_recipe, validate_omni_job
 from fastvideo_studio.gpu import get_gpu_snapshot
 from fastvideo_studio.job_runner import JobRunner, JobStatus
+from fastvideo_studio.model_catalog import MINIMAX_H3_REF2VA_MODELS, build_catalog
 from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
                                      model_label)
 
@@ -53,6 +55,8 @@ _available_models: list[dict[str, str]] = [{
 
 job_runner: JobRunner
 database: Database | None = None
+# FastH3-Omni exports given on the command line (--fasth3-omni-export).
+fasth3_omni: FastH3OmniRegistry | None = None
 upload_dir: str = ""
 datasets_upload_dir: str = ""
 verbose = 0
@@ -103,18 +107,54 @@ def list_gpus() -> dict[str, Any]:
     return get_gpu_snapshot()
 
 
+def _registered_models() -> list[dict[str, Any]]:
+    """Every registered model path, with its workloads where the registry knows them."""
+    workloads = {m["id"]: m["workload_types"] for m in get_registered_models_with_workloads()}
+    return [{"id": m["id"], "workload_types": workloads.get(m["id"], [])} for m in _available_models]
+
+
 @app.get("/api/models")
 def list_models(workload_type: str | None = None) -> list[dict[str, Any]]:
     """Return the catalogue of available video-generation models.
+
+    Each entry carries ``capabilities`` (accepted inputs and limits), and for a
+    FastH3-Omni export the locked ``recipe`` read from its
+    fastvideo_inference.json, the ``hardware`` verdict, and any load ``error``.
 
     Query params:
         workload_type: If set (t2v, i2v, t2i), only return models that
             support this workload. Otherwise return all models.
     """
-    if workload_type:
-        models = get_registered_models_with_workloads(workload_type=workload_type)
-        return [{"id": m["id"], "label": m["label"]} for m in models]
-    return _available_models
+    return build_catalog(_registered_models(), fasth3_omni, workload_type)
+
+
+def _normalize_inference_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Validate an inference job's config against its model, locking recipe-owned fields.
+
+    Raises HTTPException(400) with a user-facing message.
+    """
+    model_id = fields.get("model_id") or ""
+    omni = fasth3_omni.get(model_id) if fasth3_omni is not None else None
+    if omni is not None:
+        recipe = omni.recipe()
+        if omni.error or recipe is None:
+            raise HTTPException(status_code=400, detail=f"FastH3-Omni export {model_id} is unusable: {omni.error}")
+        try:
+            validate_omni_job(fields)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return apply_recipe(fields, recipe)
+
+    valid_ids = {m["id"] for m in _available_models}
+    if model_id not in valid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Unknown model_id '{model_id}'. "
+                    f"Valid options: {sorted(valid_ids)}"),
+        )
+    if fields.get("references") and model_id not in MINIMAX_H3_REF2VA_MODELS:
+        raise HTTPException(status_code=400, detail=f"{model_id} does not accept references.")
+    return {**fields, "recipe": None}
 
 
 def _safe_upload_name(filename: str | None, ext: str) -> str:
@@ -212,6 +252,22 @@ async def upload_media(file: Annotated[UploadFile, File()], ) -> dict[str, str]:
             detail=f"Failed to save upload: {e}",
         ) from e
     return {"path": os.path.abspath(dest_path), "media_type": media_type}
+
+
+@app.get("/api/uploads/preview")
+def preview_upload(path: str) -> FileResponse:
+    """Serve a file uploaded through /api/upload-media or /api/upload-image, for previews.
+
+    Only files under the upload directory are served; any other path is a 404.
+    """
+    import mimetypes
+
+    if not upload_dir or not _path_is_within(path, upload_dir) or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if Path(path).suffix.lower() not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    mime, _ = mimetypes.guess_type(path)
+    return FileResponse(os.path.realpath(path), media_type=mime or "application/octet-stream")
 
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
@@ -321,14 +377,6 @@ def get_job(job_id: str) -> dict[str, Any]:
 def create_job(req: CreateJobRequest) -> dict[str, Any]:
     """Create a new job (does **not** start it automatically)."""
     job_type = req.job_type or "inference"
-    if job_type == "inference":
-        valid_ids = {m["id"] for m in _available_models}
-        if req.model_id not in valid_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=(f"Unknown model_id '{req.model_id}'. "
-                        f"Valid options: {sorted(valid_ids)}"),
-            )
 
     # Training jobs reference a dataset by id; resolve it to the on-disk media
     # directory the trainer reads (the UI has no free-text path field). Falls
@@ -343,50 +391,25 @@ def create_job(req: CreateJobRequest) -> dict[str, Any]:
         data_path = _resolve_dataset_path(data_path)
         validation_dataset_file = _resolve_dataset_path(validation_dataset_file)
 
-    job = job_runner.create_job(
-        job_id=str(uuid.uuid4()),
-        model_id=req.model_id,
-        name=req.name or "",
-        prompt=req.prompt,
-        workload_type=req.workload_type or "t2v",
+    fields = req.model_dump()
+    fields.update(
         job_type=job_type,
+        workload_type=req.workload_type or "t2v",
         image_path=req.image_path or "",
         last_image_path=req.last_image_path or "",
         references=req.references or [],
         data_path=data_path,
-        max_train_steps=req.max_train_steps,
-        train_batch_size=req.train_batch_size,
-        learning_rate=req.learning_rate,
-        num_latent_t=req.num_latent_t,
         validation_dataset_file=validation_dataset_file,
-        lora_rank=req.lora_rank,
-        negative_prompt=req.negative_prompt,
-        num_inference_steps=req.num_inference_steps,
-        num_frames=req.num_frames,
-        height=req.height,
-        width=req.width,
-        guidance_scale=req.guidance_scale,
-        guidance_rescale=req.guidance_rescale,
-        fps=req.fps,
-        seed=req.seed,
-        num_gpus=req.num_gpus,
-        dit_cpu_offload=req.dit_cpu_offload,
-        dit_layerwise_offload=req.dit_layerwise_offload,
-        text_encoder_cpu_offload=req.text_encoder_cpu_offload,
-        vae_cpu_offload=req.vae_cpu_offload,
-        image_encoder_cpu_offload=req.image_encoder_cpu_offload,
-        use_fsdp_inference=req.use_fsdp_inference,
-        enable_torch_compile=req.enable_torch_compile,
-        vsa_sparsity=req.vsa_sparsity,
-        tp_size=req.tp_size,
-        sp_size=req.sp_size,
-        dmd_use_vsa=req.dmd_use_vsa,
-        dmd_vsa_sparsity=req.dmd_vsa_sparsity,
         dmd_denoising_steps=req.dmd_denoising_steps or "1000,757,522",
-        real_score_guidance_scale=req.real_score_guidance_scale,
-        generator_update_interval=req.generator_update_interval,
         real_score_model_path=req.real_score_model_path or "",
         fake_score_model_path=req.fake_score_model_path or "",
+    )
+    if job_type == "inference":
+        fields = _normalize_inference_fields(fields)
+    job = job_runner.create_job(
+        job_id=str(uuid.uuid4()),
+        **{name: fields[name]
+           for name in JobRunner.CONFIG_FIELDS if name in fields},
     )
 
     if database is not None:
@@ -417,6 +440,19 @@ def duplicate_job(job_id: str) -> dict[str, Any]:
 @app.patch("/api/jobs/{job_id}")
 def update_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     """Edit a pending job's configuration. Started jobs cannot be edited."""
+    job = job_runner.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    # The recipe is derived from the model, never taken from the client.
+    updates = {k: v for k, v in updates.items() if k != "recipe"}
+    unknown = set(updates) - set(JobRunner.CONFIG_FIELDS)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Not editable: {', '.join(sorted(unknown))}")
+    merged = {name: getattr(job, name) for name in JobRunner.CONFIG_FIELDS} | updates
+    if (merged.get("job_type") or "inference") == "inference":
+        # The whole normalized config: the edits plus every field the model's recipe owns.
+        normalized = _normalize_inference_fields(merged)
+        updates = {name: normalized[name] for name in JobRunner.CONFIG_FIELDS}
     try:
         job = job_runner.update_job_config(job_id, updates)
     except ValueError as e:
@@ -712,7 +748,7 @@ def create_local_env(host: str, port: int) -> None:
 
 
 def main() -> None:
-    global job_runner, database, upload_dir, verbose, datasets_upload_dir  # noqa: PLW0603
+    global job_runner, database, upload_dir, verbose, datasets_upload_dir, fasth3_omni  # noqa: PLW0603
 
     # Set up signal handlers to prevent worker crashes from killing the server
     _setup_signal_handlers()
@@ -755,6 +791,27 @@ def main() -> None:
         action="store_true",
         help="Print full tracebacks in error messages (default: False)",
     )
+    parser.add_argument(
+        "--fasth3-omni-export",
+        action="append",
+        default=[],
+        metavar="PATH_OR_REPO[@REVISION]",
+        help=("A FastH3-Omni (OmniRef PDD) export to offer: a local export directory or a Hugging Face repo id, "
+              "optionally @revision. Repeatable. Also read from FASTVIDEO_STUDIO_FASTH3_OMNI_EXPORTS "
+              "(comma-separated)."),
+    )
+    parser.add_argument(
+        "--fasth3-omni-base",
+        default=os.environ.get("FASTVIDEO_STUDIO_FASTH3_OMNI_BASE") or None,
+        metavar="PATH_OR_REPO[@REVISION]",
+        help=("Base MiniMax-H3 snapshot to compose the exports with (default: the repo and revision each export "
+              "pins in its fastvideo_inference.json)."),
+    )
+    parser.add_argument(
+        "--model-cache-dir",
+        default=None,
+        help="Where composed FastH3-Omni model directories are kept (default: <data-dir>/models/fasth3_omni)",
+    )
     args = parser.parse_args()
 
     output_dir = os.path.abspath(args.output_dir)
@@ -770,11 +827,25 @@ def main() -> None:
     verbose = args.verbose
     logger.info("Database: %s", db_path)
 
+    omni_exports = [*args.fasth3_omni_export]
+    omni_exports += [s for s in os.environ.get("FASTVIDEO_STUDIO_FASTH3_OMNI_EXPORTS", "").split(",") if s.strip()]
+    if omni_exports:
+        fasth3_omni = FastH3OmniRegistry(
+            exports=omni_exports,
+            base=args.fasth3_omni_base,
+            cache_dir=args.model_cache_dir or str(data_dir / "models" / "fasth3_omni"),
+        )
+        for export in fasth3_omni.exports.values():
+            logger.info(
+                "FastH3-Omni export %s: %s", export.id, f"unusable ({export.error})" if export.error else
+                f"ready; hardware {export.hardware['supported']} {export.hardware['reason']}".rstrip())
+
     job_runner = JobRunner(
         output_dir=output_dir,
         log_dir=log_dir,
         verbose=args.verbose,
         database=database,
+        fasth3_omni=fasth3_omni,
     )
 
     logger.info("Output directory: %s", output_dir)

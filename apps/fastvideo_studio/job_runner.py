@@ -29,6 +29,9 @@ import yaml
 
 from fastvideo.utils import get_mp_context
 from fastvideo_studio.database import Database
+from fastvideo_studio.fasth3_omni import (FastH3OmniRegistry, OmniHardwareError, OmniWeightsError, apply_recipe,
+                                          classify_error, generator_settings, hardware_check_disabled, hardware_status,
+                                          is_omni_recipe)
 from fastvideo_studio.training_config import (
     build_training_config,
     get_training_env,
@@ -175,6 +178,10 @@ class Job:
     generator_update_interval: int = 5
     real_score_model_path: str = ""
     fake_score_model_path: str = ""
+    # FastH3-Omni: the locked recipe and where it came from (None for other models)
+    recipe: dict[str, Any] | None = None
+    # weights / parameters / kernel / memory / runtime, set when the job fails
+    error_category: str | None = None
     # Internal
     _thread: threading.Thread | None = field(default=None, repr=False)
     _stop_event: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -198,6 +205,8 @@ class Job:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
+            "error_category": self.error_category,
+            "recipe": self.recipe,
             "output_path": self.output_path,
             "log_file_path": self.log_file_path,
             "num_inference_steps": self.num_inference_steps,
@@ -292,6 +301,20 @@ def _decode_references(value: Any) -> list[dict[str, Any]]:
     return list(decoded) if isinstance(decoded, list) else []
 
 
+def _decode_recipe(value: Any) -> dict[str, Any] | None:
+    """Recipes round-trip through the DB as JSON text, like references."""
+    if not value:
+        return None
+    if isinstance(value, dict):
+        return value
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        logger.warning("Could not decode stored recipe: %r", value)
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
 def _generator_is_alive(generator: Any) -> bool:
     """True if the generator's worker processes are all still running.
 
@@ -320,6 +343,7 @@ class JobRunner:
         log_dir: str,
         database: Database,
         verbose: bool = False,
+        fasth3_omni: FastH3OmniRegistry | None = None,
     ):
         """Initialize the job runner.
 
@@ -333,6 +357,7 @@ class JobRunner:
         self.log_dir = log_dir
         self.verbose = verbose
         self._db = database
+        self._fasth3_omni = fasth3_omni
 
         self._jobs: dict[str, Job] = {}
         self._jobs_lock = threading.Lock()
@@ -400,6 +425,8 @@ class JobRunner:
                     image_path=row.get("image_path", "") or "",
                     last_image_path=row.get("last_image_path", "") or "",
                     references=_decode_references(row.get("references")),
+                    recipe=_decode_recipe(row.get("recipe")),
+                    error_category=row.get("error_category"),
                     data_path=row.get("data_path", "") or "",
                     max_train_steps=row.get("max_train_steps", 1000),
                     train_batch_size=row.get("train_batch_size", 1),
@@ -459,6 +486,7 @@ class JobRunner:
                     "started_at": job.started_at,
                     "finished_at": job.finished_at,
                     "error": job.error,
+                    "error_category": job.error_category,
                     "output_path": job.output_path,
                     "log_file_path": job.log_file_path,
                 })
@@ -517,6 +545,7 @@ class JobRunner:
         vsa_sparsity: float = 0.0,
         tp_size: int = -1,
         sp_size: int = -1,
+        recipe: dict[str, Any] | None = None,
     ) -> Job:
         """Create a new job (does not start it automatically)."""
         job = Job(
@@ -563,6 +592,7 @@ class JobRunner:
             vsa_sparsity=vsa_sparsity,
             tp_size=tp_size,
             sp_size=sp_size,
+            recipe=copy.deepcopy(recipe) if recipe else None,
         )
         with self._jobs_lock:
             self._jobs[job.id] = job
@@ -655,6 +685,7 @@ class JobRunner:
         "generator_update_interval",
         "real_score_model_path",
         "fake_score_model_path",
+        "recipe",
     )
 
     def duplicate_job(self, job_id: str, new_job_id: str) -> Job:
@@ -686,9 +717,16 @@ class JobRunner:
         if unknown:
             raise ValueError(f"Not editable: {', '.join(sorted(unknown))}")
         for field_name, value in updates.items():
-            setattr(job, field_name, value)
-        self._save_job(job)
+            setattr(job, field_name, copy.deepcopy(value))
+        self._persist_config(job, list(updates))
         return job
+
+    def _persist_config(self, job: Job, fields: list[str]) -> None:
+        """Write config fields to the database, so edits (and reference order) survive a restart."""
+        try:
+            self._db.update_job_config(job.id, {f: getattr(job, f) for f in fields})
+        except Exception as exc:
+            logger.warning("Failed to persist config of job %s: %s", job.id, exc)
 
     def start_job(self, job_id: str) -> Job:
         """Start (or restart) a pending / stopped / failed job.
@@ -707,6 +745,7 @@ class JobRunner:
         # Reset state for re-run
         job.status = JobStatus.PENDING
         job.error = None
+        job.error_category = None
         job.output_path = None
         job.log_file_path = None  # Will be set when job starts
         job.started_at = None
@@ -799,10 +838,11 @@ class JobRunner:
         image_encoder_cpu_offload: bool = False,
         use_fsdp_inference: bool = False,
         enable_torch_compile: bool = False,
-        vsa_sparsity: float = 0.0,
+        vsa_sparsity: float | None = 0.0,
         tp_size: int = -1,
         sp_size: int = -1,
         log_queue: mp.Queue | None = None,
+        recipe_key: str | None = None,
     ) -> Any:
         cache_key = (
             model_id,
@@ -821,6 +861,9 @@ class JobRunner:
             vsa_sparsity,
             tp_size,
             sp_size,
+            # A FastH3-Omni model directory is keyed by its export and base
+            # snapshots; the contract digest also separates recipes.
+            recipe_key,
         )
 
         # Generators are cached by model_id and configuration parameters
@@ -847,7 +890,7 @@ class JobRunner:
         logger.info(
             "Loading model %s (workload=%s, num_gpus=%d, offloads: "
             "dit=%s text_encoder=%s vae=%s image_encoder=%s, fsdp=%s, "
-            "torch_compile=%s, vsa_sparsity=%.2f, tp=%d sp=%d) …",
+            "torch_compile=%s, vsa_sparsity=%s, tp=%d sp=%d) …",
             model_id,
             workload_type,
             num_gpus,
@@ -889,6 +932,52 @@ class JobRunner:
                 gen.shutdown()
                 gen = self._generators[cache_key]
         return gen
+
+    def _check_omni_hardware(self, tile_size: int) -> None:
+        if hardware_check_disabled():
+            return
+        status = hardware_status(tile_size)
+        if status["supported"] is False:
+            raise OmniHardwareError(status["reason"])
+        if status["supported"] is None:
+            logger.warning("Hardware check skipped: %s", status["reason"])
+
+    def _prepare_omni(self, job: Job) -> tuple[str, dict[str, Any]]:
+        """Check the hardware, compose the export with its base, and lock the job to the effective recipe."""
+        assert job.recipe is not None
+        if self._fasth3_omni is None or self._fasth3_omni.get(job.model_id) is None:
+            raise OmniWeightsError(f"{job.model_id} is not configured on this server; restart it with "
+                                   f"--fasth3-omni-export {job.model_id}.")
+        # Before composing: resolving a pinned base can download the whole base snapshot.
+        stored_tile = int(job.recipe["contract"]["vsa_tile_size"])
+        self._check_omni_hardware(stored_tile)
+
+        job._log_buf.phase = "preparing weights"
+        logger.info("Composing FastH3-Omni export %s with its base model…", job.model_id)
+        model_dir, recipe = self._fasth3_omni.prepare(job.model_id)
+        if recipe["contract_sha256"] != job.recipe.get("contract_sha256"):
+            logger.warning("The export's %s changed since this job was created; running with the current one.",
+                           recipe["source"])
+        if int(recipe["contract"]["vsa_tile_size"]) != stored_tile:
+            self._check_omni_hardware(int(recipe["contract"]["vsa_tile_size"]))
+
+        locked = apply_recipe({f: getattr(job, f) for f in self.CONFIG_FIELDS}, recipe)
+        for field_name in (*recipe["locked_fields"], "recipe"):
+            setattr(job, field_name, locked[field_name])
+        self._persist_config(job, [*recipe["locked_fields"], "recipe"])
+
+        contract = recipe["contract"]
+        logger.info("Model directory: %s", model_dir)
+        logger.info("Export: %s%s | base: %s@%s", recipe["export"],
+                    f"@{recipe['export_revision']}" if recipe["export_revision"] else "", recipe["base"],
+                    recipe["base_revision"])
+        logger.info(
+            "Recipe (%s, sha256 %s): %d fused blocks of a %d-interval grid (%d transformer forwards), CFG %s, "
+            "%s sparsity %s, %d-token tiles, reference keep rate %s", recipe["source"], recipe["contract_sha256"][:12],
+            contract["num_inference_steps"], contract["pdd_steps"], contract["transformer_forwards"],
+            contract["guidance_scale"], contract["attention_backend"], contract["vsa_sparsity"],
+            contract["vsa_tile_size"], contract["vsa_ref_keep_rate"])
+        return str(model_dir), recipe
 
     def _run_job(self, job: Job):
         if job.job_type == "inference":
@@ -1080,22 +1169,34 @@ class JobRunner:
                 buf.phase = "stopped"
                 return
 
+            model_path = job.model_id
+            generator_overrides: dict[str, Any] = {
+                "override_pipeline_cls_name": (MINIMAX_H3_REF2VA_PIPELINE if job.references else None),
+                "vsa_sparsity": job.vsa_sparsity,
+            }
+            recipe_key = None
+            if is_omni_recipe(job.recipe):
+                model_path, recipe = self._prepare_omni(job)
+                generator_overrides = generator_settings(recipe)
+                recipe_key = recipe["contract_sha256"]
+                buf.phase = "loading model"
+
             generator = self._get_or_create_generator(
-                job.model_id,
+                model_path,
                 job.workload_type,
                 job.num_gpus,
                 dit_cpu_offload=job.dit_cpu_offload,
                 dit_layerwise_offload=job.dit_layerwise_offload,
-                override_pipeline_cls_name=(MINIMAX_H3_REF2VA_PIPELINE if job.references else None),
                 text_encoder_cpu_offload=(job.text_encoder_cpu_offload),
                 vae_cpu_offload=job.vae_cpu_offload,
                 image_encoder_cpu_offload=(job.image_encoder_cpu_offload),
                 use_fsdp_inference=job.use_fsdp_inference,
                 enable_torch_compile=(job.enable_torch_compile),
-                vsa_sparsity=job.vsa_sparsity,
                 tp_size=job.tp_size,
                 sp_size=job.sp_size,
                 log_queue=log_queue,
+                recipe_key=recipe_key,
+                **generator_overrides,
             )
             buf.phase = "generating"
             logger.info("Starting generation for job %s (model=%s)", job.id, job.model_id)
@@ -1160,6 +1261,7 @@ class JobRunner:
             error_msg = str(exception)
             logger.exception("Critical error in job thread: %s", error_msg)
             job.status = JobStatus.FAILED
+            job.error_category = classify_error(exception)
             job.error = f"Critical error ({type(exception).__name__}): {error_msg}"
             job.finished_at = time.time()
             self._save_job(job)

@@ -36,8 +36,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from fastvideo_studio.database import default_settings_dict
-from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest,
-                                     model_label)
+from fastvideo_studio.fasth3_omni import OmniExport, apply_recipe, validate_omni_job
+from fastvideo_studio.model_catalog import omni_entries, registered_entry
+from fastvideo_studio.models import (CreateDatasetRequest, CreateJobRequest, SettingsUpdate, UpdateCaptionRequest)
 
 # --- Config -----------------------------------------------------------------
 
@@ -54,14 +55,56 @@ _MODELS_BY_WORKLOAD: dict[str, list[str]] = {
     ],
     "i2v": [
         "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+        "MiniMaxAI/MiniMax-H3",
     ],
     "t2i": [
         "black-forest-labs/FLUX.1-schnell",
     ],
 }
 
+# A FastH3-Omni export as if passed with --fasth3-omni-export, on hardware that
+# cannot run its 128-token tiles (so starting it fails with a kernel error).
+MOCK_OMNI_ID = "/mock/models/fasth3_omni_export"
+_MOCK_OMNI_CONTRACT: dict[str, Any] = {
+    "attention_backend": "VIDEO_SPARSE_ATTN_H3",
+    "audio_scheduler_shift": 3.0,
+    "base_model_revision": "hf://MiniMaxAI/MiniMax-H3@9bfb6693f2cf6de171db46d1aa586f67d773a1da",
+    "conditioning": "fixed_ordered_references_target_only_flow",
+    "grid_max_t": 0.999,
+    "guidance_scale": 1.0,
+    "model_type": "ref2va",
+    "num_inference_steps": 8,
+    "pdd_step_indices": [0, 4, 8, 12, 16, 20, 24, 28, 32],
+    "pdd_steps": 32,
+    "schema": "fasth3-inference-contract-v1",
+    "schema_version": "fasth3-inference-contract-v1",
+    "transformer_component": "transformer_ref",
+    "transformer_forwards": 8,
+    "video_scheduler_shift": 12.0,
+    "vsa_ref_keep_rate": 0.1,
+    "vsa_ref_policy": "p2_multi_region",
+    "vsa_sparsity": 0.9,
+    "vsa_tile_size": 128,
+}
+_MOCK_OMNI_HARDWARE_ERROR = ("This recipe's 128-token VSA tiles run only on the sm_100a/sm_103a kernel (B200, B300, "
+                             "GB200, GB300); found NVIDIA Mock GPU (sm_89). There is no Triton fallback.")
+_MOCK_OMNI = OmniExport(id=MOCK_OMNI_ID,
+                        export=MOCK_OMNI_ID,
+                        export_revision=None,
+                        base=None,
+                        base_revision=None,
+                        contract=_MOCK_OMNI_CONTRACT,
+                        hardware={
+                            "supported": False,
+                            "reason": _MOCK_OMNI_HARDWARE_ERROR
+                        })
 
-def _models_for(workload_type: str | None) -> list[dict[str, str]]:
+
+class _MockOmniRegistry:
+    exports = {MOCK_OMNI_ID: _MOCK_OMNI}
+
+
+def _models_for(workload_type: str | None) -> list[dict[str, Any]]:
     if workload_type:
         paths = _MODELS_BY_WORKLOAD.get(workload_type, [])
     else:
@@ -70,7 +113,11 @@ def _models_for(workload_type: str | None) -> list[dict[str, str]]:
             for path in paths_for_workload:
                 seen.setdefault(path, None)
         paths = list(seen)
-    return [{"id": path, "label": model_label(path)} for path in paths]
+    workloads = {p: [w for w, ps in _MODELS_BY_WORKLOAD.items() if p in ps] for p in paths}
+    entries = [registered_entry(path, workloads[path]) for path in paths]
+    if workload_type in (None, "i2v"):
+        entries += omni_entries(_MockOmniRegistry())  # type: ignore[arg-type]
+    return entries
 
 
 # The real settings catalogue lives in database.py; the mock only pre-fills
@@ -175,6 +222,9 @@ def _new_job_dict(req: CreateJobRequest) -> dict[str, Any]:
         "workload_type": req.workload_type or "t2v",
         "job_type": req.job_type or "inference",
         "image_path": req.image_path or "",
+        "references": req.references or [],
+        "recipe": None,
+        "error_category": None,
         "status": "pending",
         "created_at": time.time(),
         "started_at": None,
@@ -208,6 +258,14 @@ def _advance_job(job: dict[str, Any]) -> None:
     if job["status"] != "running" or not job.get("started_at"):
         return
     elapsed = time.time() - job["started_at"]
+    if job.get("recipe") and elapsed >= 1.0:
+        # The mock Omni export's hardware check fails before any weights load.
+        job["status"] = "failed"
+        job["finished_at"] = job["started_at"] + 1.0
+        job["error"] = f"Critical error (OmniHardwareError): {_MOCK_OMNI_HARDWARE_ERROR}"
+        job["error_category"] = "kernel"
+        job["phase"] = "failed"
+        return
     if elapsed >= COMPLETE_AFTER_SECONDS:
         job["status"] = "completed"
         job["finished_at"] = job["started_at"] + COMPLETE_AFTER_SECONDS
@@ -423,6 +481,34 @@ async def upload_image(file: Annotated[UploadFile, File()]) -> dict[str, str]:
     return {"path": f"/mock/uploads/{uuid.uuid4().hex}_{os.path.basename(name)}"}
 
 
+_MEDIA_KINDS = {
+    **dict.fromkeys((".png", ".jpg", ".jpeg", ".webp", ".bmp"), "image"),
+    **dict.fromkeys((".mp4", ".mov", ".mkv", ".webm", ".avi"), "video"),
+    **dict.fromkeys((".wav", ".mp3", ".flac", ".m4a", ".ogg"), "audio"),
+}
+
+
+@app.post("/api/upload-media")
+async def upload_media(file: Annotated[UploadFile, File()]) -> dict[str, str]:
+    name = os.path.basename(file.filename or "upload.png")
+    media_type = _MEDIA_KINDS.get(os.path.splitext(name)[1].lower())
+    if media_type is None:
+        raise HTTPException(status_code=400, detail="Invalid file type.")
+    return {"path": f"/mock/uploads/{uuid.uuid4().hex}/{name}", "media_type": media_type}
+
+
+@app.get("/api/uploads/preview")
+def preview_upload(path: str) -> FileResponse:
+    """Every mock upload previews as the shared testsrc clip of its kind."""
+    kind = _MEDIA_KINDS.get(os.path.splitext(path)[1].lower())
+    if not path.startswith("/mock/uploads/") or kind is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if kind == "audio":
+        raise HTTPException(status_code=404, detail="No mock audio")
+    ext = "png" if kind == "image" else "mp4"
+    return FileResponse(_build_mock_media(ext), media_type="image/png" if ext == "png" else "video/mp4")
+
+
 @app.post("/api/upload-raw-dataset")
 async def upload_raw_dataset(files: Annotated[list[UploadFile], File()]) -> dict[str, Any]:
     video_exts = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
@@ -462,13 +548,67 @@ def get_job(job_id: str) -> dict[str, Any]:
         return _public_job(job)
 
 
+def _apply_omni(job: dict[str, Any]) -> dict[str, Any]:
+    """Mirror the real server: validate an Omni job and lock its recipe fields (400 on a bad request)."""
+    if job.get("model_id") != MOCK_OMNI_ID:
+        return job
+    try:
+        validate_omni_job(job)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    recipe = _MOCK_OMNI.recipe()
+    assert recipe is not None
+    return apply_recipe(job, recipe)
+
+
 @app.post("/api/jobs", status_code=201)
 def create_job(req: CreateJobRequest) -> dict[str, Any]:
-    job = _new_job_dict(req)
+    job = _apply_omni(_new_job_dict(req))
     with _state_lock:
         _jobs[job["id"]] = job
         if _settings.get("autoStartJob"):
             _start(job)
+        return _public_job(job)
+
+
+_EDITABLE = ("model_id", "name", "prompt", "workload_type", "image_path", "references", "negative_prompt",
+             "num_inference_steps", "num_frames", "height", "width", "guidance_scale", "guidance_rescale", "fps",
+             "seed", "num_gpus")
+
+
+@app.patch("/api/jobs/{job_id}")
+def update_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    with _state_lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        if job["status"] not in ("pending", "failed", "stopped"):
+            raise HTTPException(status_code=400, detail=f"Job is {job['status']}; duplicate it instead.")
+        edited = _apply_omni({**job, **{k: v for k, v in updates.items() if k in _EDITABLE}})
+        job.update(edited)
+        return _public_job(job)
+
+
+@app.post("/api/jobs/{job_id}/duplicate", status_code=201)
+def duplicate_job(job_id: str) -> dict[str, Any]:
+    with _state_lock:
+        source = _jobs.get(job_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        job = {
+            **source,
+            "id": str(uuid.uuid4()),
+            "status": "pending",
+            "created_at": time.time(),
+            "started_at": None,
+            "finished_at": None,
+            "error": None,
+            "error_category": None,
+            "output_path": None,
+            "log_file_path": None,
+            "references": [dict(r) for r in source.get("references") or []],
+        }
+        _jobs[job["id"]] = job
         return _public_job(job)
 
 
@@ -477,6 +617,7 @@ def _start(job: dict[str, Any]) -> None:
     job["started_at"] = time.time()
     job["finished_at"] = None
     job["error"] = None
+    job["error_category"] = None
     job["output_path"] = None
     # The real server assigns the log path once the job starts running; mirror
     # that so the Job Details "Download Log" button (gated on log_file_path) works.

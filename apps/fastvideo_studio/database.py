@@ -110,6 +110,9 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "jobs", "generator_update_interval", "INTEGER", "5")
     _add_column_if_missing(conn, "jobs", "real_score_model_path", "TEXT", "''")
     _add_column_if_missing(conn, "jobs", "fake_score_model_path", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "dit_layerwise_offload", "INTEGER", "0")
+    _add_column_if_missing(conn, "jobs", "recipe_json", "TEXT", "''")
+    _add_column_if_missing(conn, "jobs", "error_category", "TEXT", "''")
     # Settings table
     _add_column_if_missing(conn, "settings", "vae_cpu_offload", "INTEGER", "0")
     _add_column_if_missing(conn, "settings", "image_encoder_cpu_offload", "INTEGER", "0")
@@ -263,8 +266,9 @@ class Database:
                 num_latent_t, validation_dataset_file, lora_rank,
                 dmd_use_vsa, dmd_vsa_sparsity, dmd_denoising_steps,
                 real_score_guidance_scale,
-                generator_update_interval, real_score_model_path, fake_score_model_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                generator_update_interval, real_score_model_path, fake_score_model_path,
+                dit_layerwise_offload, recipe_json, error_category
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
@@ -316,6 +320,9 @@ class Database:
                 job.get("generator_update_interval", 5),
                 job.get("real_score_model_path", ""),
                 job.get("fake_score_model_path", ""),
+                1 if job.get("dit_layerwise_offload") else 0,
+                json.dumps(job["recipe"]) if job.get("recipe") else "",
+                job.get("error_category") or "",
             ),
         )
         self._commit()
@@ -331,6 +338,7 @@ class Database:
             "error",
             "output_path",
             "log_file_path",
+            "error_category",
         }
         cols = []
         vals = []
@@ -343,6 +351,26 @@ class Database:
         vals.append(job_id)
         sql = f"UPDATE jobs SET {', '.join(cols)} WHERE id = ?"
         self._execute(sql, tuple(vals))
+        self._commit()
+
+    def update_job_config(self, job_id: str, config: dict[str, Any]) -> None:
+        """Persist edited configuration fields (Job attribute names) of a job."""
+        cols = []
+        vals: list[Any] = []
+        for key, value in config.items():
+            column = _CONFIG_COLUMNS.get(key)
+            if column is None:
+                raise KeyError(f"No column stores job field {key!r}")
+            if key in ("references", "recipe"):
+                value = json.dumps(value) if value else ""
+            elif isinstance(value, bool):
+                value = 1 if value else 0
+            cols.append(f"{column} = ?")
+            vals.append(value)
+        if not cols:
+            return
+        vals.append(job_id)
+        self._execute(f"UPDATE jobs SET {', '.join(cols)} WHERE id = ?", tuple(vals))
         self._commit()
 
     def delete_job(self, job_id: str) -> bool:
@@ -528,6 +556,17 @@ class Database:
         self._commit()
 
 
+# Job config field -> jobs column. Only these two are stored under another name.
+_CONFIG_COLUMNS: dict[str, str] = {
+    **{
+        name: name
+        for name in ("model_id", "name", "prompt", "workload_type", "job_type", "image_path", "last_image_path", "negative_prompt", "num_inference_steps", "num_frames", "height", "width", "guidance_scale", "guidance_rescale", "fps", "seed", "num_gpus", "dit_cpu_offload", "dit_layerwise_offload", "text_encoder_cpu_offload", "vae_cpu_offload", "image_encoder_cpu_offload", "use_fsdp_inference", "enable_torch_compile", "vsa_sparsity", "tp_size", "sp_size", "data_path", "max_train_steps", "train_batch_size", "learning_rate", "num_latent_t", "validation_dataset_file", "lora_rank", "dmd_use_vsa", "dmd_vsa_sparsity", "dmd_denoising_steps", "real_score_guidance_scale", "generator_update_interval", "real_score_model_path", "fake_score_model_path")
+    },
+    "references": "references_json",
+    "recipe": "recipe_json",
+}
+
+
 def _row_to_dataset(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a DB row to dataset dict."""
     return {
@@ -584,7 +623,9 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "progress_msg": "",
         "phase": "initializing",
     }
-    for col in ("vae_cpu_offload", "image_encoder_cpu_offload", "enable_torch_compile"):
+    result["recipe"] = _sqlite_row_get(row, "recipe_json", "") or ""
+    result["error_category"] = _sqlite_row_get(row, "error_category", "") or None
+    for col in ("vae_cpu_offload", "image_encoder_cpu_offload", "enable_torch_compile", "dit_layerwise_offload"):
         if col in row:
             result[col] = bool(row[col])
     for col in ("vsa_sparsity", ):

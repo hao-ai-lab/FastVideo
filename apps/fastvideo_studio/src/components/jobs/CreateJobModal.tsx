@@ -35,11 +35,14 @@ import { WORKLOAD_OPTIONS } from '@/lib/jobConfig';
 import type { JobType } from '@/lib/types';
 import {
   H3_MAX_REFERENCES,
-  labelReferences,
+  moveReference,
   referencePromptSeed,
   validateReferences,
   type H3Reference,
 } from '@/lib/h3References';
+import { capabilitiesOf } from '@/lib/modelCapabilities';
+import RecipePanel from '@/components/jobs/RecipePanel';
+import ReferenceList from '@/components/jobs/ReferenceList';
 import {
   EMPTY_H3_PROMPT_FIELDS,
   H3_PROMPT_SECTIONS,
@@ -122,9 +125,20 @@ export default function CreateJobModal({
     React.useState(false);
   const [useFsdpInference, setUseFsdpInference] = React.useState(false);
 
-  // H3 is the only registered model with an end frame or references.
-  const supportsLastImage = modelId.toLowerCase().includes('minimax-h3');
-  const usingReferences = supportsLastImage && references.length > 0;
+  // What the selected model accepts comes from the API, not its name.
+  const selectedModel = models.find((m) => m.id === modelId);
+  const capabilities = capabilitiesOf(selectedModel);
+  const referenceCapability = capabilities.references;
+  const supportsReferences = referenceCapability !== null;
+  const supportsLastImage = capabilities.end_frame;
+  const usingReferences = supportsReferences && references.length > 0;
+  // A recipe model (FastH3-Omni) owns these fields; their controls are
+  // replaced by the read-only recipe panel.
+  const recipe = selectedModel?.recipe ?? null;
+  const locked = React.useMemo(
+    () => new Set(recipe?.locked_fields ?? []),
+    [recipe],
+  );
 
   // JobCard re-renders on every job-list poll, so `editingJob` is a fresh
   // object each time. Effects must depend on these, never on the object.
@@ -204,10 +218,13 @@ export default function CreateJobModal({
   // so a late `initDefaultOptions()` settings refresh can't clobber the user's
   // in-progress edits or desync the (already validated) model selection.
   const justOpenedRef = React.useRef(false);
+  // The recipe model whose values the form was last seeded with.
+  const recipeSeededForRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     const justOpened = isOpen && !justOpenedRef.current;
     justOpenedRef.current = isOpen;
     if (!justOpened) return;
+    recipeSeededForRef.current = null;
     if (editingJob) {
       // Must not fall through to the defaults below: a partially-seeded
       // form silently edits values the user never saw.
@@ -301,6 +318,70 @@ export default function CreateJobModal({
       setFakeScoreModelPath('');
     }
   }, [isOpen, workloadType, inferenceWorkload, options, editingJobId]);
+
+  // Selecting a recipe model seeds its locked values and starting defaults;
+  // leaving one restores the generic defaults it replaced. An edited job
+  // already carries the values the server locked, so it is left alone.
+  React.useEffect(() => {
+    if (!isOpen || !selectedModel) return;
+    const recipeModelId = selectedModel.recipe ? selectedModel.id : null;
+    const previous = recipeSeededForRef.current;
+    if (recipeModelId === previous) return;
+    recipeSeededForRef.current = recipeModelId;
+    if (editingJobModelId === selectedModel.id) return;
+    const modelRecipe = selectedModel.recipe;
+    if (modelRecipe) {
+      const contract = modelRecipe.contract;
+      const defaults = selectedModel.recipe_defaults;
+      const gpus = defaults?.num_gpus ?? 1;
+      setNumInferenceSteps(contract.num_inference_steps);
+      setGuidanceScale(contract.guidance_scale);
+      setGuidanceRescale(0);
+      setVsaSparsity(contract.vsa_sparsity);
+      setFps(selectedModel.capabilities?.fixed_fps ?? 24);
+      setNegativePrompt('');
+      setEnableTorchCompile(false);
+      setDitCpuOffload(false);
+      setDitLayerwiseOffload(false);
+      setImageEncoderCpuOffload(false);
+      setNumGpus(gpus);
+      setUseFsdpInference(gpus > 1);
+      setTpSize(1);
+      setSpSize(gpus);
+      if (defaults) {
+        setHeight(defaults.height);
+        setWidth(defaults.width);
+        setNumFrames(defaults.num_frames);
+        setTextEncoderCpuOffload(defaults.text_encoder_cpu_offload);
+        setVaeCpuOffload(defaults.vae_cpu_offload);
+      }
+    } else if (previous !== null) {
+      const opts = defaultOptionsStore.get().options;
+      setNumInferenceSteps(opts.numInferenceSteps);
+      setGuidanceScale(opts.guidanceScale);
+      setGuidanceRescale(opts.guidanceRescale);
+      setVsaSparsity(opts.vsaSparsity);
+      setFps(opts.fps);
+      setNumFrames(opts.numFrames);
+      setHeight(opts.height);
+      setWidth(opts.width);
+      setNumGpus(opts.numGpus);
+      setUseFsdpInference(opts.useFsdpInference);
+      setEnableTorchCompile(opts.enableTorchCompile);
+      setTextEncoderCpuOffload(opts.textEncoderCpuOffload);
+      setVaeCpuOffload(opts.vaeCpuOffload);
+      setTpSize(opts.tpSize);
+      setSpSize(opts.spSize);
+    }
+  }, [isOpen, selectedModel, editingJobModelId]);
+
+  // Recipe models split the sequence across the GPUs and shard the DiT.
+  const handleRecipeNumGpusChange = React.useCallback((next: number) => {
+    setNumGpus(next);
+    setTpSize(1);
+    setSpSize(next);
+    setUseFsdpInference(next > 1);
+  }, []);
 
   // Load the models available for this workload.
   React.useEffect(() => {
@@ -453,7 +534,7 @@ export default function CreateJobModal({
         },
       ];
       setReferences(next);
-      setReferenceError(validateReferences(next));
+      setReferenceError(validateReferences(next, referenceCapability));
     } catch (error) {
       console.error('Failed to upload reference:', error);
       setReferenceError(
@@ -467,7 +548,13 @@ export default function CreateJobModal({
   function removeReference(id: string) {
     const next = references.filter((r) => r.id !== id);
     setReferences(next);
-    setReferenceError(validateReferences(next));
+    setReferenceError(validateReferences(next, referenceCapability));
+  }
+
+  function handleMoveReference(index: number, delta: number) {
+    const next = moveReference(references, index, delta);
+    setReferences(next);
+    setReferenceError(validateReferences(next, referenceCapability));
   }
 
   function seedPromptFields() {
@@ -512,9 +599,29 @@ export default function CreateJobModal({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (isInference && workloadType === 'i2v' && !imagePath && !usingReferences)
+    if (isInference && selectedModel?.error) {
+      setSubmitError(`This model is unavailable: ${selectedModel.error}`);
       return;
-    if (usingReferences && validateReferences(references)) return;
+    }
+    if (
+      isInference &&
+      workloadType === 'i2v' &&
+      capabilities.start_frame &&
+      !imagePath &&
+      !usingReferences
+    )
+      return;
+    if (
+      isInference &&
+      supportsReferences &&
+      (usingReferences || referenceCapability?.required)
+    ) {
+      const problem = validateReferences(references, referenceCapability);
+      if (problem) {
+        setReferenceError(problem);
+        return;
+      }
+    }
     if (
       usingReferences &&
       useGuidedPrompt &&
@@ -547,7 +654,10 @@ export default function CreateJobModal({
               // Ref2VA and the FL2VA keyframes are mutually exclusive:
               // _prepare_ref2va rejects image_path/last_image_path outright
               // when references are present.
-              ...(workloadType === 'i2v' && !usingReferences && imagePath
+              ...(workloadType === 'i2v' &&
+              capabilities.start_frame &&
+              !usingReferences &&
+              imagePath
                 ? { image_path: imagePath }
                 : {}),
               ...(workloadType === 'i2v' &&
@@ -556,7 +666,7 @@ export default function CreateJobModal({
               lastImagePath
                 ? { last_image_path: lastImagePath }
                 : {}),
-              ...(workloadType === 'i2v' && supportsLastImage && references.length
+              ...(workloadType === 'i2v' && supportsReferences && references.length
                 ? {
                     references: references.map((r) => ({
                       source: r.source,
@@ -702,8 +812,12 @@ export default function CreateJobModal({
                     : 'Select a model…'}
               </option>
               {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.label} ({model.id})
+                <option
+                  key={model.id}
+                  value={model.id}
+                  disabled={!!model.error && model.id !== modelId}
+                >
+                  {model.label} ({model.id}){model.error ? ' — unavailable' : ''}
                 </option>
               ))}
             </NativeSelect>
@@ -716,9 +830,22 @@ export default function CreateJobModal({
                 {modelLoadError}
               </p>
             )}
+            {isInference && selectedModel?.error && (
+              <p role="alert" className="text-sm text-destructive">
+                This model is unavailable: {selectedModel.error}
+              </p>
+            )}
           </FieldRow>
 
-          {isInference && workloadType === 'i2v' && (
+          {isInference && recipe && (
+            <RecipePanel
+              recipe={recipe}
+              hardware={selectedModel?.hardware}
+              numGpus={numGpus}
+            />
+          )}
+
+          {isInference && workloadType === 'i2v' && capabilities.start_frame && (
             <FieldRow htmlFor="modal-image" label="Image">
               <Input
                 ref={imageInputRef}
@@ -798,8 +925,15 @@ export default function CreateJobModal({
             </FieldRow>
           )}
 
-          {isInference && workloadType === 'i2v' && supportsLastImage && (
-            <FieldRow htmlFor="modal-reference" label="References (Ref2VA)">
+          {isInference && workloadType === 'i2v' && referenceCapability && (
+            <FieldRow
+              htmlFor="modal-reference"
+              label={
+                referenceCapability.required
+                  ? 'References (required, in order)'
+                  : 'References (Ref2VA)'
+              }
+            >
               <Input
                 id="modal-reference"
                 type="file"
@@ -808,8 +942,10 @@ export default function CreateJobModal({
                 disabled={
                   isSubmitting ||
                   isUploadingReference ||
-                  references.length >= H3_MAX_REFERENCES
+                  references.length >=
+                    (referenceCapability.max_total ?? H3_MAX_REFERENCES)
                 }
+                aria-describedby="modal-reference-help"
                 className="h-auto py-2 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-1 file:text-sm file:text-secondary-foreground"
               />
               {isUploadingReference && (
@@ -817,29 +953,12 @@ export default function CreateJobModal({
                   Uploading…
                 </span>
               )}
-              {references.length > 0 && (
-                <ul className="mt-1 flex list-none flex-col gap-1 p-0">
-                  {references.map((reference, index) => (
-                    <li
-                      key={reference.id}
-                      className="flex items-center gap-2 text-xs text-muted-foreground"
-                    >
-                      <code className="font-mono text-accent-blue">
-                        {labelReferences(references)[index]}
-                      </code>
-                      <span className="truncate">{reference.fileName}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeReference(reference.id)}
-                        disabled={isSubmitting}
-                        className="ml-auto text-accent-blue underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <ReferenceList
+                references={references}
+                onMove={handleMoveReference}
+                onRemove={removeReference}
+                disabled={isSubmitting}
+              />
               {references.length > 0 && (
                 <button
                   type="button"
@@ -855,9 +974,20 @@ export default function CreateJobModal({
                   {referenceError}
                 </p>
               )}
-              <span className="mt-0.5 text-xs text-muted-foreground">
-                Ref2VA replaces the keyframes: up to 9 images, 3 videos, 3 audio
-                (12 total). Audio needs at least one image or video.
+              <span
+                id="modal-reference-help"
+                className="mt-0.5 text-xs text-muted-foreground"
+              >
+                {referenceCapability.required
+                  ? 'At least one image or video. '
+                  : 'Ref2VA replaces the keyframes. '}
+                Up to {referenceCapability.limits.image} images,{' '}
+                {referenceCapability.limits.video} videos,{' '}
+                {referenceCapability.limits.audio} audio (
+                {referenceCapability.max_total} total); audio needs an image or
+                video. The prompt refers to them by label, e.g.{' '}
+                <code>&lt;Picture 1&gt;</code>, numbered in list order —
+                reordering renumbers them.
               </span>
             </FieldRow>
           )}
@@ -923,7 +1053,7 @@ export default function CreateJobModal({
             </>
           )}
 
-          {isInference && (
+          {isInference && !locked.has('negative_prompt') && (
             <FieldRow htmlFor="modal-negative-prompt" label="Negative Prompt">
               <Textarea
                 id="modal-negative-prompt"
@@ -1176,7 +1306,7 @@ export default function CreateJobModal({
                     id="modal-num-frames"
                     label="Frames"
                     min={1}
-                    max={500}
+                    max={capabilities.max_frames ?? 500}
                     step={1}
                     value={numFrames}
                     onChange={setNumFrames}
@@ -1203,76 +1333,88 @@ export default function CreateJobModal({
                   onChange={setWidth}
                   disabled={isSubmitting}
                 />
-                <SliderRow
-                  id="modal-num-steps"
-                  label="Inference Steps"
-                  min={1}
-                  max={200}
-                  step={1}
-                  value={numInferenceSteps}
-                  onChange={setNumInferenceSteps}
-                  disabled={isSubmitting}
-                />
-                <SliderRow
-                  id="modal-vsa-sparsity"
-                  label="VSA Sparsity"
-                  title="VSA sparsity (0–1)"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={vsaSparsity}
-                  onChange={setVsaSparsity}
-                  disabled={isSubmitting}
-                  format={(v) => v.toFixed(2)}
-                />
-                <SliderRow
-                  id="modal-guidance"
-                  label="Guidance Scale"
-                  min={0}
-                  max={20}
-                  step={0.1}
-                  value={guidanceScale}
-                  onChange={setGuidanceScale}
-                  disabled={isSubmitting}
-                  format={(v) => v.toFixed(1)}
-                />
-                <SliderRow
-                  id="modal-guidance-rescale"
-                  label="Guidance Rescale"
-                  title="0 = disabled"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={guidanceRescale}
-                  onChange={setGuidanceRescale}
-                  disabled={isSubmitting}
-                  format={(v) => v.toFixed(2)}
-                />
-                <SliderRow
-                  id="modal-tp-size"
-                  label="TP Size"
-                  title="-1 = auto"
-                  min={-1}
-                  max={8}
-                  step={1}
-                  value={tpSize}
-                  onChange={setTpSize}
-                  disabled={isSubmitting}
-                  format={(v) => (v === -1 ? 'Auto' : String(v))}
-                />
-                <SliderRow
-                  id="modal-sp-size"
-                  label="SP Size"
-                  title="-1 = auto"
-                  min={-1}
-                  max={8}
-                  step={1}
-                  value={spSize}
-                  onChange={setSpSize}
-                  disabled={isSubmitting}
-                  format={(v) => (v === -1 ? 'Auto' : String(v))}
-                />
-                {workloadType !== 't2i' && (
+                {!locked.has('num_inference_steps') && (
+                  <SliderRow
+                    id="modal-num-steps"
+                    label="Inference Steps"
+                    min={1}
+                    max={200}
+                    step={1}
+                    value={numInferenceSteps}
+                    onChange={setNumInferenceSteps}
+                    disabled={isSubmitting}
+                  />
+                )}
+                {!locked.has('vsa_sparsity') && (
+                  <SliderRow
+                    id="modal-vsa-sparsity"
+                    label="VSA Sparsity"
+                    title="VSA sparsity (0–1)"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={vsaSparsity}
+                    onChange={setVsaSparsity}
+                    disabled={isSubmitting}
+                    format={(v) => v.toFixed(2)}
+                  />
+                )}
+                {!locked.has('guidance_scale') && (
+                  <SliderRow
+                    id="modal-guidance"
+                    label="Guidance Scale"
+                    min={0}
+                    max={20}
+                    step={0.1}
+                    value={guidanceScale}
+                    onChange={setGuidanceScale}
+                    disabled={isSubmitting}
+                    format={(v) => v.toFixed(1)}
+                  />
+                )}
+                {!locked.has('guidance_rescale') && (
+                  <SliderRow
+                    id="modal-guidance-rescale"
+                    label="Guidance Rescale"
+                    title="0 = disabled"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={guidanceRescale}
+                    onChange={setGuidanceRescale}
+                    disabled={isSubmitting}
+                    format={(v) => v.toFixed(2)}
+                  />
+                )}
+                {!locked.has('tp_size') && (
+                  <SliderRow
+                    id="modal-tp-size"
+                    label="TP Size"
+                    title="-1 = auto"
+                    min={-1}
+                    max={8}
+                    step={1}
+                    value={tpSize}
+                    onChange={setTpSize}
+                    disabled={isSubmitting}
+                    format={(v) => (v === -1 ? 'Auto' : String(v))}
+                  />
+                )}
+                {!locked.has('sp_size') && (
+                  <SliderRow
+                    id="modal-sp-size"
+                    label="SP Size"
+                    title="-1 = auto"
+                    min={-1}
+                    max={8}
+                    step={1}
+                    value={spSize}
+                    onChange={setSpSize}
+                    disabled={isSubmitting}
+                    format={(v) => (v === -1 ? 'Auto' : String(v))}
+                  />
+                )}
+                {workloadType !== 't2i' && !locked.has('fps') && (
                   <SliderRow
                     id="modal-fps"
                     label="FPS"
@@ -1284,20 +1426,24 @@ export default function CreateJobModal({
                     disabled={isSubmitting}
                   />
                 )}
-                <ToggleRow
-                  id="modal-dit-cpu-offload"
-                  label="DiT CPU Offload"
-                  checked={ditCpuOffload}
-                  onChange={setDitCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-dit-layerwise-offload"
-                  label="DiT Layerwise Offload"
-                  checked={ditLayerwiseOffload}
-                  onChange={handleDitLayerwiseOffloadChange}
-                  disabled={isSubmitting}
-                />
+                {!locked.has('dit_cpu_offload') && (
+                  <ToggleRow
+                    id="modal-dit-cpu-offload"
+                    label="DiT CPU Offload"
+                    checked={ditCpuOffload}
+                    onChange={setDitCpuOffload}
+                    disabled={isSubmitting}
+                  />
+                )}
+                {!locked.has('dit_layerwise_offload') && (
+                  <ToggleRow
+                    id="modal-dit-layerwise-offload"
+                    label="DiT Layerwise Offload"
+                    checked={ditLayerwiseOffload}
+                    onChange={handleDitLayerwiseOffloadChange}
+                    disabled={isSubmitting}
+                  />
+                )}
                 <ToggleRow
                   id="modal-text-encoder-cpu-offload"
                   label="Text Encoder CPU Offload"
@@ -1305,13 +1451,15 @@ export default function CreateJobModal({
                   onChange={setTextEncoderCpuOffload}
                   disabled={isSubmitting}
                 />
-                <ToggleRow
-                  id="modal-use-fsdp-inference"
-                  label="Use FSDP Inference"
-                  checked={useFsdpInference}
-                  onChange={handleUseFsdpInferenceChange}
-                  disabled={isSubmitting}
-                />
+                {!locked.has('use_fsdp_inference') && (
+                  <ToggleRow
+                    id="modal-use-fsdp-inference"
+                    label="Use FSDP Inference"
+                    checked={useFsdpInference}
+                    onChange={handleUseFsdpInferenceChange}
+                    disabled={isSubmitting}
+                  />
+                )}
                 <ToggleRow
                   id="modal-vae-cpu-offload"
                   label="VAE CPU Offload"
@@ -1319,30 +1467,53 @@ export default function CreateJobModal({
                   onChange={setVaeCpuOffload}
                   disabled={isSubmitting}
                 />
-                <ToggleRow
-                  id="modal-image-encoder-cpu-offload"
-                  label="Image Encoder CPU Offload"
-                  checked={imageEncoderCpuOffload}
-                  onChange={setImageEncoderCpuOffload}
-                  disabled={isSubmitting}
-                />
-                <ToggleRow
-                  id="modal-enable-torch-compile"
-                  label="Torch Compile"
-                  checked={enableTorchCompile}
-                  onChange={setEnableTorchCompile}
-                  disabled={isSubmitting}
-                />
-                <SliderRow
-                  id="modal-num-gpus"
-                  label="GPUs"
-                  min={1}
-                  max={8}
-                  step={1}
-                  value={numGpus}
-                  onChange={handleNumGpusChange}
-                  disabled={isSubmitting}
-                />
+                {!locked.has('image_encoder_cpu_offload') && (
+                  <ToggleRow
+                    id="modal-image-encoder-cpu-offload"
+                    label="Image Encoder CPU Offload"
+                    checked={imageEncoderCpuOffload}
+                    onChange={setImageEncoderCpuOffload}
+                    disabled={isSubmitting}
+                  />
+                )}
+                {!locked.has('enable_torch_compile') && (
+                  <ToggleRow
+                    id="modal-enable-torch-compile"
+                    label="Torch Compile"
+                    checked={enableTorchCompile}
+                    onChange={setEnableTorchCompile}
+                    disabled={isSubmitting}
+                  />
+                )}
+                {capabilities.num_gpus ? (
+                  <FieldRow htmlFor="modal-num-gpus" label="GPUs">
+                    <NativeSelect
+                      id="modal-num-gpus"
+                      value={String(numGpus)}
+                      onChange={(e) =>
+                        handleRecipeNumGpusChange(Number(e.target.value))
+                      }
+                      disabled={isSubmitting}
+                    >
+                      {capabilities.num_gpus.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </FieldRow>
+                ) : (
+                  <SliderRow
+                    id="modal-num-gpus"
+                    label="GPUs"
+                    min={1}
+                    max={8}
+                    step={1}
+                    value={numGpus}
+                    onChange={handleNumGpusChange}
+                    disabled={isSubmitting}
+                  />
+                )}
                 <NumberRow
                   id="modal-seed"
                   label="Seed"

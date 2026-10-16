@@ -14,6 +14,7 @@ import {
   startJob,
   stopJob,
 } from '@/lib/api';
+import { ERROR_CATEGORY_LABELS, recipeChip } from '@/lib/modelCapabilities';
 import type { Job } from '@/lib/types';
 import { cn, downloadBlob } from '@/lib/utils';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
@@ -202,6 +203,17 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
           ) : (
             <span>{job.workload_type?.replace(/_/g, ' ') ?? job.job_type}</span>
           )}
+          {job.recipe?.contract && (
+            <span title={`Locked by ${job.recipe.source}`}>
+              {recipeChip(job.recipe)}
+            </span>
+          )}
+          {(job.references?.length ?? 0) > 0 && (
+            <span>
+              {job.references!.length} reference
+              {job.references!.length === 1 ? '' : 's'}
+            </span>
+          )}
           {elapsedTime && (
             <span className="inline-flex items-center gap-1">
               <Timer className="size-3.5" aria-hidden />
@@ -209,6 +221,21 @@ export default function JobCard({ job, onJobUpdated }: JobCardProps) {
             </span>
           )}
         </span>
+        {job.status === 'failed' && job.error && (
+          <span
+            role="alert"
+            className="line-clamp-3 text-xs text-destructive"
+            title={job.error}
+          >
+            {job.error_category && (
+              <strong className="font-semibold">
+                {ERROR_CATEGORY_LABELS[job.error_category] ?? job.error_category}
+                {' error: '}
+              </strong>
+            )}
+            {job.error}
+          </span>
+        )}
       </button>
       <div className="flex flex-wrap items-center gap-1.5">
         {job.status === 'running' ? (

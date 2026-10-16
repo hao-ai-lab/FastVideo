@@ -5,6 +5,12 @@ import {
 	loadDefaultOptions,
 	type DefaultOptions,
 } from "./defaultOptions";
+import type {
+	ModelCapabilities,
+	ModelHardware,
+	ModelRecipe,
+	RecipeDefaults,
+} from "./modelCapabilities";
 import type { Job, JobType } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8189/api";
@@ -49,6 +55,11 @@ function stripTrailingSlash(url: string): string {
 	return url.replace(/\/+$/, "");
 }
 
+/** URL that serves a file uploaded via uploadMedia/uploadImage, for previews. */
+export function getUploadPreviewUrl(path: string): string {
+	return `${getApiBaseUrl()}/uploads/preview?path=${encodeURIComponent(path)}`;
+}
+
 /** Full URL for streaming a job's video/image output (for &lt;video&gt; or &lt;img&gt; src). */
 export function getJobVideoUrl(jobId: string): string {
 	return `${getApiBaseUrl()}/jobs/${jobId}/video`;
@@ -62,6 +73,9 @@ export interface CreateJobRequest {
 	workload_type?: string;
 	job_type?: JobType;
 	image_path?: string;
+	last_image_path?: string;
+	/** Ordered Ref2VA references; the order is the order the model sees. */
+	references?: { source: string; media_type: MediaType }[];
 	data_path?: string;
 	max_train_steps?: number;
 	train_batch_size?: number;
@@ -80,6 +94,7 @@ export interface CreateJobRequest {
 	seed?: number;
 	num_gpus?: number;
 	dit_cpu_offload?: boolean | null;
+	dit_layerwise_offload?: boolean | null;
 	text_encoder_cpu_offload?: boolean | null;
 	vae_cpu_offload?: boolean | null;
 	image_encoder_cpu_offload?: boolean | null;
@@ -101,6 +116,17 @@ export interface CreateJobRequest {
 export interface Model {
 	id: string;
 	label: string;
+	workload_types?: string[];
+	/** "registry" for FastVideo's registered models, "server" for exports configured on the API server. */
+	config_source?: "registry" | "server";
+	capabilities?: ModelCapabilities;
+	/** Locked sampling recipe (FastH3-Omni), read from the export's fastvideo_inference.json. */
+	recipe?: ModelRecipe | null;
+	/** Starting values for a new job with this model. */
+	recipe_defaults?: RecipeDefaults | null;
+	hardware?: ModelHardware | null;
+	/** Why the model cannot be used, when it cannot. */
+	error?: string | null;
 }
 
 export interface GpuInfo {
@@ -294,7 +320,12 @@ export async function createJob(job: CreateJobRequest): Promise<Job> {
 		body: JSON.stringify(job),
 	});
 	if (!response.ok) {
-		throw new Error("Failed to create job");
+		const err = await response
+			.json()
+			.catch(() => ({ detail: "Failed to create job" }));
+		throw new Error(
+			typeof err.detail === "string" ? err.detail : "Failed to create job",
+		);
 	}
 	return response.json();
 }

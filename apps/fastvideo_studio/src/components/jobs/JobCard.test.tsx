@@ -11,7 +11,7 @@ import {
 } from '@/lib/api';
 import type { Job } from '@/lib/types';
 import { activeJobStore, setActiveJobId } from '@/stores/activeJob';
-import { makeJob as makeBaseJob } from '@/test/factories';
+import { OMNI_RECIPE, makeJob as makeBaseJob } from '@/test/factories';
 
 vi.mock('@/lib/api', () => ({
   startJob: vi.fn(),
@@ -131,5 +131,36 @@ describe('JobCard', () => {
     render(<JobCard job={makeJob()} />);
     await userEvent.click(screen.getByText('Wan2.1-T2V'));
     expect(activeJobStore.get().activeJobId).toBe('job-1');
+  });
+
+  it('shows a failed job\'s error with its category', () => {
+    render(
+      <JobCard
+        job={makeJob({
+          status: 'failed',
+          error: 'This recipe needs sm_100a; found RTX 6000 Ada (sm_89).',
+          error_category: 'kernel',
+        })}
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Kernel / hardware error: This recipe needs sm_100a',
+    );
+  });
+
+  it('summarises a FastH3-Omni job\'s recipe and references', () => {
+    render(
+      <JobCard
+        job={makeJob({
+          recipe: OMNI_RECIPE,
+          references: [
+            { source: '/u/a.png', media_type: 'image' },
+            { source: '/u/b.mp4', media_type: 'video' },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText('8 forwards · VSA 0.9 · tile 128')).toBeInTheDocument();
+    expect(screen.getByText('2 references')).toBeInTheDocument();
   });
 });
