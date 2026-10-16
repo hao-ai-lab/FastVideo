@@ -37,7 +37,7 @@ export default function FastModels() {
                   View collection <span aria-hidden="true">↗</span>
                 </a>
                 <a href={local(group.guide)}>
-                  Setup guide <span aria-hidden="true">→</span>
+                  {group.name === "FastMetal" ? "MLX setup" : "Recipes and setup"} <span aria-hidden="true">→</span>
                 </a>
               </div>
             </div>

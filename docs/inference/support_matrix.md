@@ -260,6 +260,10 @@ Per the installation guides:
 Optimization-specific hardware constraints (e.g. STA requiring Hopper) are
 listed under [Special requirements](#special-requirements).
 
+For the platform overview, including AMD ROCm and the distinction between RTX,
+data center CUDA GPUs, DGX Spark and MLX, see
+[Hardware and runtimes](../getting_started/hardware.md).
+
 ## Special requirements
 
 ### Sliding Tile Attention

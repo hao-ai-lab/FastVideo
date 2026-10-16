@@ -1,72 +1,97 @@
-# Documentation structure and editorial plan
+# Documentation and cookbook plan
 
-The reader's path should be **install → generate → choose a model → configure
-and optimize → train or extend**. The sidebar previously put general tasks,
-hardware recipes, model releases, and development instructions at the same level.
+Readers should be able to choose a model, find their hardware path, generate a
+result, and then customize or train it without searching several sections for
+the same instructions.
 
-## Included in this PR
+## One home for each kind of information
 
-The sidebar now follows these groups, without moving existing URLs:
+| Area                  | Question it answers                      | Owns                                                                                                                                    |
+| --------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Fast Models           | Which FastVideo release should I choose? | Our released families, checkpoint exports, collections, short capability descriptions, links to recipes                                 |
+| Support matrix        | What else can FastVideo run?             | The wider supported model set and optimization compatibility                                                                            |
+| Hardware and runtimes | Where can I run it?                      | NVIDIA RTX/workstation and data center CUDA paths, DGX Spark, Apple MLX, AMD ROCm, platform requirements and limits                     |
+| Documentation         | How does FastVideo work?                 | Installation, the first generation, configuration, CLI, parallelism, offloading, integrations, training, architecture and API reference |
+| Cookbook              | How do I run this model for this task?   | One family home, runtime choices, runnable recipes, model-specific configuration, troubleshooting and evidence                          |
 
-| Group                                     | Reader's task                                     | Contents                                                               |
-| ----------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------- |
-| Get started                               | Generate the first result                         | Quick start, installation, Python API basics                           |
-| Fast Models                               | Pick a released checkpoint                        | Family cards, setup links, searchable exports and collections          |
-| Run inference                             | Configure a working pipeline                      | Configuration, CLI, support matrix, memory, performance, LoRA          |
-| Hardware                                  | Find platform-specific setup                      | NVIDIA GPUs, MLX, DGX Spark, paired Sparks, Spark tuning, RTX PRO 6000 |
-| Integrations                              | Use FastVideo in another application              | ComfyUI, server and API clients                                        |
-| Model guides                              | Follow model-specific instructions                | FastH3 schedules, LTX, Kandinsky generation and upscaling              |
-| Cookbook                                  | Configure a deployment or follow a family runbook | React editor and existing family URLs                                  |
-| Train and fine-tune                       | Adapt a model                                     | Data, fine-tuning, QAT, infrastructure, examples                       |
-| Distill models                            | Train a faster student                            | Preprocessing, DMD, AnyFlow                                            |
-| Attention research                        | Understand or use an attention method             | VSA, archived STA, backend development                                 |
-| Contribute / Architecture / API reference | Extend and understand FastVideo                   | Development, testing, contracts, source reference                      |
+Fast Models highlights our models without implying that FastVideo only supports
+those releases. CUDA and ROCm are runtimes; RTX, data center GPUs and DGX Spark
+are hardware paths. MLX is the Apple Silicon runtime. These distinctions should
+be visible before readers choose an installation command.
 
-Fast Models takes its selection-first structure, family cards, and consistent
-catalog rows from the OpenAI models page. It keeps FastVideo's neutral theme and
-links only to the maintained checkpoint catalog. It makes no new performance or
-memory-fit claims.
+## Included now
 
-## Consolidate next
+- One Hardware and runtimes overview links the five hardware paths. AMD is
+  explicitly source-backed support with incomplete installation/device coverage,
+  rather than a promise that CUDA recipes or kernels work on every AMD GPU.
+- The getting-started sidebar contains Quick start, Installation, Hardware and
+  runtimes, and Python API basics.
+- Run inference contains shared tasks. Hardware and Integrations are expandable
+  groups; individual hardware recipes do not interrupt onboarding.
+- Model-specific references sit beside their family recipes in the Cookbook
+  sidebar. There is no separate Model guides list competing with the cookbook.
+  Existing LTX, Kandinsky and FastH3 reference URLs remain intact.
+- Fast Models points FastH3 and FastWan readers to their cookbook families.
+  FastMetal also has a direct MLX setup entry.
+- Generated examples have one visible page title, with the source link below it.
+  Their previous heading fragments remain available.
 
-These are editorial proposals. This PR does not delete useful technical content
-or change runnable commands to make the sidebar shorter.
+## The intended reader flow
 
-| Current pages                                             | Recommendation                                                                                                                                           | Reason and URL handling                                                                                                                                                                                       |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Getting started quick start + inference quick start       | Keep one first-video tutorial. Turn the inference guide into a task-oriented follow-on for image conditioning and generation options.                    | Both currently repeat installation and first-video code. Keep the existing route until its unique examples are moved; then redirect it to the matching section.                                               |
-| Installation + NVIDIA GPU install                         | Make Installation a short platform chooser. Keep CUDA commands only in the GPU guide.                                                                    | Both contain environment and package setup. One owner per platform avoids drift.                                                                                                                              |
-| Spark install + paired Sparks + Spark tuning              | Keep one DGX Spark entry in Hardware with install, multi-node, and tuning subpages.                                                                      | Pairing is an advanced deployment task. It should not interrupt the universal onboarding sequence. Keep its detailed networking and Ray instructions.                                                         |
-| FastH3 on RTX PRO 6000                                    | Split the runnable hardware recipe from kernel internals and experiment history.                                                                         | The page mixes usage, per-block measurements, implementation details, and rejected experiments. Hardware owns the recipe; research/development owns the measurements. Preserve fragment links when splitting. |
-| ComfyUI                                                   | Replace the current two-sentence pointer with a maintained integration guide, or link directly to the canonical ComfyUI README from an integrations hub. | The current page adds no instructions beyond the README link. Retain its URL as a redirect if removed.                                                                                                        |
-| Optimizations + configuration                             | Let Configuration own supported settings. Split attention selection, quantization, distributed execution, and offloading into linked optimization tasks. | The optimization page is long and mixes mechanisms, hardware constraints, and release-specific flags. Avoid duplicating the offloading guide.                                                                 |
-| Model-specific inference pages + cookbook family runbooks | Keep model capabilities and limitations in model guides; keep runnable deployment configuration in the cookbook.                                         | LTX and Kandinsky are model tasks, not peers of general configuration. Share setup links instead of copying commands.                                                                                         |
-| `attention/developer` + `contributing/attention_backend`  | Reconcile into one backend-development guide under Contribute.                                                                                           | Both describe backend registration and implementation. Preserve the older URL as a redirect after checking for unique kernel instructions.                                                                    |
-| Design overview + coding agents guide                     | Let Architecture own the package/configuration explanation. Keep the agent guide focused on the porting workflow and pitfalls.                           | Both currently reproduce the project structure. Link to the architecture instead of maintaining two maps.                                                                                                     |
-| STA and mask-search examples                              | Keep in an explicitly archived research subsection.                                                                                                      | They describe an archive branch and should not look like a supported first-run path.                                                                                                                          |
-| Generated example indexes and 880 API pages               | Keep searchable and cross-linked, but out of the main sidebar.                                                                                           | They are reference material. Do not hand-maintain generated pages or expose hundreds of navigation entries.                                                                                                   |
+1. Start at **Fast Models** to choose a released model, or the support matrix for
+   the broader catalog.
+2. Check **Hardware and runtimes**, then follow the matching installation guide.
+3. Open the model's **Cookbook family**. Choose the task and runtime, configure
+   a recipe, and run it.
+4. Follow links to shared configuration, offloading or optimization docs when
+   more explanation is needed.
+5. Move to training, distillation or contributor guides for development work.
 
-## Per-page contract
+The quick start remains a short route for readers who want a first result before
+browsing the catalog.
 
-Use the [documentation authoring guide](../docs/contributing/documentation.md).
-Every task page should answer: what will I achieve, what do I need, what do I run,
-what output should I expect, what can go wrong, and where do I go next?
+## Next editorial pass
 
-Keep setup guides short enough to follow sequentially. Put platform exceptions
-next to the relevant step, and put performance evidence in a separate labeled
-section with its device, checkpoint, configuration, and measurement date.
+1. **Consolidate onboarding.** Keep one first-video tutorial. Remove repeated
+   installation blocks from the inference quick start after preserving its unique
+   image-conditioning examples. Make Installation a platform chooser and keep
+   installation commands in platform guides.
+2. **Give every model one family home.** Expand the cookbook family page with a
+   short capability overview, runtime/task recipes, checkpoint choices, limits,
+   troubleshooting and next steps. Fold overlapping model-specific guides into
+   that page or link a detailed reference from it. Preserve old routes with
+   redirects before deleting any page.
+3. **Separate explanation from recipes.** Hardware owns environment setup;
+   cookbook owns model commands; shared docs explain the options. The RTX PRO
+   6000 page's kernel internals and rejected experiments belong in research or
+   contributor material, separate from its runnable recipe.
+4. **Reduce pointer pages and duplicate references.** Replace the two-sentence
+   ComfyUI pointer with a useful integration guide, or link directly to its
+   maintained README. Reconcile the two attention-backend development guides.
+   Let Architecture own the package map instead of repeating it in the agent guide.
+5. **Split long optimization material by task.** Keep attention selection,
+   quantization, distributed execution and offloading cross-linked, with one
+   owner for each setting. Keep STA and mask search clearly archived.
+6. **Fill the ROCm evidence gap.** Document a complete AMD installation and model
+   run with GPU architecture, ROCm/PyTorch versions, model revision, attention
+   backend, expected output and measured memory. Source implementation alone
+   should not turn into a broad device-support claim.
 
-## Cutover and compatibility
+## Per-page structure
 
-This PR replaces the MkDocs site and build dependencies. Griffe reads Python
-source without importing the model runtime. Canonical Markdown still goes through
-Blume's pinned syntax normalizer so existing admonitions and tabs keep rendering.
-The frozen migration manifest checks old routes and heading fragments.
+Task guides follow: outcome → requirements → runnable example → expected output
+→ configuration → troubleshooting → next step. A model recipe adds its checkpoint,
+workload, runtime, hardware evidence and measured limitations. Detailed reference
+and implementation history should not interrupt setup commands.
 
-The existing GitHub Pages workflow uploads Blume's `dist/` and deploys only from
-`main` at `https://haoailab.com/FastVideo/`. There is one site and one publishing
-workflow. Existing cookbook family selectors remain available inside the Blume
-shell while their design is finished. All cookbook guide links stay on this site.
+See the [authoring guide](../docs/contributing/documentation.md). Examples and
+Python reference stay source-generated and searchable; they do not need hundreds
+of sidebar entries.
 
-Before merging, review the new catalog and sidebar, run the full documentation
-checks, and inspect CI. Any later page deletion needs a redirect and a link check.
+## Publishing
+
+Blume replaces MkDocs through the existing GitHub Pages workflow at
+`https://haoailab.com/FastVideo/`. Only `main` deploys. The migration manifest
+checks previous routes and heading fragments. This PR changes navigation and
+presentation while keeping the technical content available; the consolidation
+steps above remain editorial follow-ups.

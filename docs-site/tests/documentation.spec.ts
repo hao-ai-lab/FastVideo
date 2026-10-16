@@ -160,3 +160,53 @@ test("existing cookbook family recipes still load in the Blume shell", async ({ 
     /\/FastVideo\/cookbook\/?$/,
   );
 });
+
+test("generated example titles render once and retain their original fragment", async ({ page }) => {
+  await page.goto("/FastVideo/inference/examples/basic");
+  await expect(page.getByRole("heading", { name: "Basic Video Generation Tutorial", exact: true })).toHaveCount(1);
+  await expect(page.locator('[id="basic-video-generation-tutorial"]')).toHaveCount(1);
+  await expect(page.locator("article")).toContainText("examples/inference/basic");
+});
+
+test("hardware overview distinguishes runtime support and AMD documentation limits", async ({ page }) => {
+  await page.goto("/FastVideo/getting_started/hardware");
+  const table = page.getByRole("table");
+  for (const platform of ["RTX", "data center", "DGX Spark", "Apple Silicon", "AMD"]) {
+    await expect(table).toContainText(platform);
+  }
+  await page.getByRole("link", { name: "ROCm support and current limits", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("AMD and ROCm");
+  await expect(page.locator("article")).toContainText("not currently documented");
+});
+
+test("homepage project buttons have visible borders in dark mode", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/FastVideo");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const colors = await page.locator(".home-project-links a").evaluateAll((links) =>
+    links.map((link) => {
+      const style = getComputedStyle(link);
+      return {
+        border: style.borderTopColor,
+        width: style.borderTopWidth,
+        background: getComputedStyle(document.body).backgroundColor,
+      };
+    }),
+  );
+  expect(colors).toHaveLength(3);
+  for (const color of colors) {
+    expect(color.width).toBe("1px");
+    const luminance = (value: string) => {
+      const channels = value
+        .match(/[\d.]+/g)!
+        .slice(0, 3)
+        .map(Number)
+        .map((channel) => (value.startsWith("color(srgb") ? channel : channel / 255))
+        .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const border = luminance(color.border);
+    const background = luminance(color.background);
+    expect((Math.max(border, background) + 0.05) / (Math.min(border, background) + 0.05)).toBeGreaterThanOrEqual(3);
+  }
+});

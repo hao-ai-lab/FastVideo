@@ -85,6 +85,9 @@
   font-weight: 500;
   text-decoration: none;
 }
+[data-theme="dark"] .home-project-links a {
+  border-color: color-mix(in srgb, var(--blume-foreground) 38%, var(--blume-background));
+}
 .home-project-links a:hover {
   background: var(--blume-muted);
 }

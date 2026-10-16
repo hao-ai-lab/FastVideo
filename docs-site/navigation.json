@@ -21,6 +21,10 @@
         "href": "/getting_started/installation"
       },
       {
+        "label": "Hardware and runtimes",
+        "href": "/getting_started/hardware"
+      },
+      {
         "label": "Python API basics",
         "href": "/getting_started/v1_api"
       }
@@ -62,6 +66,10 @@
         "collapsed": true,
         "items": [
           {
+            "label": "Choose your runtime",
+            "href": "/getting_started/hardware"
+          },
+          {
             "label": "NVIDIA GPU setup",
             "href": "/getting_started/installation/gpu"
           },
@@ -84,6 +92,10 @@
           {
             "label": "DGX Spark tuning",
             "href": "/getting_started/installation/spark_performance"
+          },
+          {
+            "label": "AMD / ROCm",
+            "href": "/getting_started/installation/amd"
           }
         ],
         "display": "group"
@@ -99,29 +111,6 @@
           {
             "label": "Server and API clients",
             "href": "/cookbook/openai-api"
-          }
-        ],
-        "display": "group"
-      },
-      {
-        "label": "Model guides",
-        "collapsed": true,
-        "items": [
-          {
-            "label": "FastH3 schedules",
-            "href": "/inference/fasth3-distilled"
-          },
-          {
-            "label": "LTX-2.5",
-            "href": "/inference/ltx2_5"
-          },
-          {
-            "label": "Kandinsky 6 generation",
-            "href": "/inference/kandinsky6"
-          },
-          {
-            "label": "Kandinsky 6 upscaling",
-            "href": "/inference/kandinsky6_sr"
           }
         ],
         "display": "group"
@@ -146,7 +135,18 @@
       },
       {
         "label": "MiniMax H3",
-        "href": "/cookbook/minimax-h3"
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Recipes and setup",
+            "href": "/cookbook/minimax-h3"
+          },
+          {
+            "label": "Checkpoint schedules",
+            "href": "/inference/fasth3-distilled"
+          }
+        ]
       },
       {
         "label": "Wan",
@@ -154,7 +154,18 @@
       },
       {
         "label": "LTX",
-        "href": "/cookbook/ltx"
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Recipes and setup",
+            "href": "/cookbook/ltx"
+          },
+          {
+            "label": "LTX-2.5 reference",
+            "href": "/inference/ltx2_5"
+          }
+        ]
       },
       {
         "label": "Hunyuan",
@@ -166,7 +177,22 @@
       },
       {
         "label": "Kandinsky 6",
-        "href": "/cookbook/kandinsky6"
+        "display": "group",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Recipes and setup",
+            "href": "/cookbook/kandinsky6"
+          },
+          {
+            "label": "Generation reference",
+            "href": "/inference/kandinsky6"
+          },
+          {
+            "label": "Upscaling reference",
+            "href": "/inference/kandinsky6_sr"
+          }
+        ]
       },
       {
         "label": "FLUX",

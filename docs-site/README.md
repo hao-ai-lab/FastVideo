@@ -22,8 +22,9 @@ Preparation regenerates `.generated/` and `public/`; neither is an editable copy
 
 The [documentation structure plan](INFORMATION_ARCHITECTURE.md) records the new
 navigation and proposed page consolidations. URLs stay stable in this PR.
-Hardware, integrations, and model guides now sit beneath Run inference rather
-than interrupting the getting-started path.
+Hardware and integrations sit beneath Run inference. Model-specific references
+sit beside their family recipes in the Cookbook tab. Hardware and runtimes gives
+readers a single starting point for CUDA, MLX and ROCm.
 
 ## Build architecture
 

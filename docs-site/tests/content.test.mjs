@@ -46,3 +46,20 @@ test("Python API and generated examples contain the actual rendered source docum
   const example = await readFile(new URL("dist/inference/examples/basic/index.html", site), "utf8");
   assert.ok(example.includes("VideoGenerator"));
 });
+
+test("generated examples show their page title only once", async () => {
+  const failures = [];
+  for (const route of routes.filter((item) => item.includes("/examples/") || item.startsWith("/examples/"))) {
+    const html = await readFile(new URL(`dist${route}/index.html`, site), "utf8");
+    const headings = [...html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/g)].map((match) => ({
+      level: Number(match[1]),
+      text: match[2]
+        .replace(/<[^>]+>/g, "")
+        .replace(/[^\p{L}\p{N}]/gu, "")
+        .toLowerCase(),
+    }));
+    const title = headings.find((heading) => heading.level === 1)?.text;
+    if (!title || headings.filter((heading) => heading.text === title).length !== 1) failures.push(route);
+  }
+  assert.deepEqual(failures, []);
+});

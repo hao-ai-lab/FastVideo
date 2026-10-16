@@ -122,6 +122,44 @@ function pinHeadings(body, old, mdx) {
   return text;
 }
 
+/** Blume owns the page title, including examples whose Source link precedes their H1. */
+function extractPageTitle(body, data, deduplicate = false) {
+  const normalize = (text) => text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+  let fence;
+  let found = false;
+  return body
+    .split("\n")
+    .map((line) => {
+      const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+      if (marker) {
+        if (!fence) fence = marker;
+        else if (marker[0] === fence[0] && marker.length >= fence.length) fence = undefined;
+        return line;
+      }
+      if (fence || (found && !deduplicate)) return line;
+      const heading = (deduplicate ? /^(#{1,2})\s+(.+)$/ : /^(#)\s+(.+)$/).exec(line);
+      if (!heading) return line;
+      if (heading[1].length === 2 && !data.title) return line;
+      const anchor = /(?:\[#([^\]]+)\]|\{#([^}]+)\})\s*$/.exec(heading[2]);
+      const embedded = /<a\s+id="[^"]*"><\/a>/g;
+      const anchors = heading[2].match(embedded) ?? [];
+      const title = heading[2]
+        .replace(/\s*(?:\[#[^\]]+\]|\{#[^}]+\})\s*$/, "")
+        .replace(embedded, "")
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        .replace(/[`*_]/g, "")
+        .trim();
+      if (data.title && normalize(data.title) !== normalize(title)) return line;
+      if (heading[1].length === 1) {
+        data.title ??= title;
+        found = true;
+      }
+      if (anchor) anchors.push(`<a id="${anchor[1] ?? anchor[2]}"></a>`);
+      return anchors.join("\n");
+    })
+    .join("\n");
+}
+
 export async function transferDocs() {
   const localPython = join(site, ".venv/bin/python");
   const python = process.env.DOCS_PYTHON || (existsSync(localPython) ? localPython : "python3");
@@ -158,7 +196,11 @@ export async function transferDocs() {
     const { data, body } = splitPage(await readFile(path, "utf8"));
     delete data.noindex;
     data.slug = route.replace(/^\//, "") || "/";
-    const pinned = pinHeadings(body, oldHeadings[route.slice(1) || "."], path.endsWith(".mdx"));
+    const pinned = extractPageTitle(
+      pinHeadings(body, oldHeadings[route.slice(1) || "."], path.endsWith(".mdx")),
+      data,
+      rel.includes("/examples/") || rel.startsWith("examples/"),
+    );
     // GitHub's buttons remain ordinary links; no third-party script is needed in the new shell.
     let converted = rewriteLinks(pinned, rel).replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
     converted = converted.replace(/^(\s*`{3,})slurm\b/gm, "$1bash");

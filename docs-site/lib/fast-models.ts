@@ -4,7 +4,7 @@ export const families = [
     mark: "H3",
     summary: "Distilled MiniMax-H3 video with synchronized audio.",
     collection: "https://huggingface.co/collections/FastVideo/fasth3-v2",
-    guide: "/inference/fasth3_rtx_pro_6000",
+    guide: "/cookbook/minimax-h3",
     detail: "8-step V2 \u00b7 FP8 and NVFP4 exports",
     models: [
       {
@@ -54,7 +54,7 @@ export const families = [
     mark: "Wan",
     summary: "Distilled Wan models for text-to-video and image-to-video.",
     collection: "https://huggingface.co/collections/FastVideo/fastwan",
-    guide: "/inference/inference_quick_start",
+    guide: "/cookbook/wan",
     detail: "1.3B, 5B, and 14B releases",
     models: [
       {
