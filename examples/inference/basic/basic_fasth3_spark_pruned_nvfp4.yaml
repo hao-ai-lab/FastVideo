@@ -4,9 +4,16 @@
 #
 # GB10 uses Triton VSA. The release packs attention, FFN and VSA gate weights.
 # The NVFP4 encoder and lightweight VAE ship in the same repository.
+# The VAE decodes with its dense weights, 12 tiles per call and a compiled
+# decoder: on GB10 the INT8 ConvRot overlay is slower and less accurate.
+# NVFP4 GEMMs use FlashInfer's cuDNN backend, 2-3x faster than CUTLASS on the
+# H3 FFN shapes on GB10 with identical outputs.
+# Optional, off by default: FASTVIDEO_H3_VSA_FP4=1 runs VSA on the FP4 attention kernel
+# (fastvideo-kernel built for 12.1a). It is faster but changes the output for now;
+# see spark_performance.md.
 #
-# FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass \
-# FASTVIDEO_H3_VAE_TILE_BATCH=1 \
+# FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
+# FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 # FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml
@@ -31,7 +38,7 @@ generator:
       lazy_module_load: false
     compile:
       enabled: false
-      vae_enabled: false
+      vae_enabled: true
   pipeline:
     workload_type: t2v
     vae_tiling: true

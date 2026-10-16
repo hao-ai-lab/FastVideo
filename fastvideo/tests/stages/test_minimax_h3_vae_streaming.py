@@ -175,6 +175,57 @@ def test_decode_stage_requests_pin_fallback_output_buffer(monkeypatch) -> None:
     }
 
 
+def test_decode_stage_reuses_its_pixel_buffer(monkeypatch) -> None:
+    """Same-geometry requests reuse one pre-touched CPU buffer; returned frames never alias it."""
+    latent_shape = (1, 4, 2, 4, 4)
+    rows = patchify_video_latents(torch.randn(latent_shape), (1, 1, 1))
+    allocations = []
+    buffers = []
+
+    class VAE:
+
+        fill = 0.25
+
+        def to(self, device):
+            return self
+
+        def denormalize_latents(self, decoded_latents):
+            return decoded_latents
+
+        def decoded_pixel_shape(self, shape):
+            return (1, 3, 5, 16, 16)
+
+        def decode_to_pixels(self, decoded_latents, output):
+            buffers.append((output, bool(torch.isnan(output).any())))
+            output.fill_(VAE.fill)
+
+    def fake_allocate(size, *, dtype=None, pin_memory=False):
+        allocations.append(size)
+        return torch.full(size, float("nan"), dtype=dtype)
+
+    monkeypatch.setattr(minimax_h3_decoding, "get_local_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(minimax_h3_decoding, "allocate_cpu_tensor_with_pin_fallback", fake_allocate)
+    stage = MiniMaxH3VideoDecodingStage(VAE())
+    args = SimpleNamespace(output_type="pil",
+                           pin_cpu_memory=False,
+                           vae_cpu_offload=False,
+                           vae_parallel_decode=False,
+                           pipeline_config=SimpleNamespace(dit_config=SimpleNamespace(patch_size=(1, 1, 1))))
+
+    def decode():
+        batch = ForwardBatch(data_type="video", latents=rows.clone(), raw_latent_shape=latent_shape)
+        batch.extra[MINIMAX_H3_LAYOUT_KEY] = _layout(rows.shape[0], latent_shape)
+        return stage.forward(batch, args).output
+
+    first = decode()
+    VAE.fill = 0.5
+    second = decode()
+    assert allocations == [(1, 3, 5, 16, 16)]
+    assert buffers[0][0] is buffers[1][0]
+    assert not buffers[0][1]
+    assert torch.equal(first, torch.full_like(first, 63)) and torch.equal(second, torch.full_like(second, 127))
+
+
 def test_decode_stages_skip_vae_on_non_output_rank(monkeypatch) -> None:
     class VAE:
 
