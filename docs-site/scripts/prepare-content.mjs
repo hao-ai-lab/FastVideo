@@ -1,6 +1,10 @@
-/** Publish the existing catalogs without copying or reauthoring recipe definitions. */
+/** Prepare the docs transfer and publish the existing cookbook catalogs. */
 import { execFileSync } from "node:child_process";
 import { cp, mkdir, rm } from "node:fs/promises";
+
+import { transferDocs } from "./transfer-docs.mjs";
+
+await transferDocs();
 
 const repo = new URL("../../", import.meta.url);
 execFileSync("npm", ["run", "build:catalog", "--prefix", "docs"], {

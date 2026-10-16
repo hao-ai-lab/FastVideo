@@ -1,24 +1,28 @@
-# FastVideo Blume cookbook
+# FastVideo Blume documentation
 
-This is the initial Blume documentation app for [cookbook migration #1949](https://github.com/hao-ai-lab/FastVideo/issues/1949).
-It uses React islands and shadcn/ui. MkDocs continues to publish the full documentation.
+This Blume app previews the FastVideo documentation and the React cookbook from
+[cookbook migration #1949](https://github.com/hao-ai-lab/FastVideo/issues/1949).
+MkDocs continues to publish production while this transfer is reviewed.
 
-![Cookbook preview](preview.jpg)
+![Documentation preview](docs-preview.jpg)
 
 ## Run locally
 
-Use Node 22.19 or newer. From the repository root:
+Use Node 22.19 or newer and Python 3.12. From the repository root:
 
 ```bash
+uv venv docs-site/.venv --python 3.12
+uv pip install --python docs-site/.venv/bin/python -r requirements-mkdocs.txt
 npm ci --prefix docs
 npm ci --prefix docs-site
 npm run dev --prefix docs-site
 ```
 
-Open the URL printed by Blume, under `/FastVideo/cookbook`. The production prefix
-also applies locally. `predev` generates the shared cookbook catalogs and copies
-them into this app's ignored `public/` directory. No Python, model weights, or
-GPU runtime is needed.
+Open the URL printed by Blume, under `/FastVideo`. The production prefix also
+applies locally. The first preparation builds the Python reference and takes
+about a minute on a laptop. Subsequent runs reuse it until its source changes.
+You can select an existing docs environment with `DOCS_PYTHON=/path/to/python`.
+No FastVideo installation, model weights, or GPU runtime is needed.
 
 For a production build and preview:
 
@@ -31,6 +35,46 @@ npm run preview --prefix docs-site
 
 Build output is `docs-site/dist/`. This draft adds a CI build artifact, not a
 production deployment. The existing MkDocs Pages workflow remains authoritative.
+
+## Edit the documentation
+
+Keep editing handwritten guides under `docs/`. The Blume welcome page is
+`content/index.mdx`; it includes the original homepage material through generated
+partials. Run `npm run prepare:content --prefix docs-site`
+after changing those pages or Python sources, then restart the dev server. This
+transition build regenerates the Blume copy rather than maintaining two editable
+versions. Do not edit or commit `.generated/` or `public/`.
+
+The transfer has three parts:
+
+- `scripts/prepare-python-docs.py` runs the existing example generator and
+  `mkdocs-api-autonav` / `mkdocstrings` against source files. It caches the comparison
+  build by content hash and extracts the Python reference's semantic HTML, without
+  Material's navigation or page shell. It imports no FastVideo runtime modules.
+- `scripts/transfer-docs.mjs` copies non-cookbook Markdown, runs Blume's pinned
+  MkDocs codemod, preserves old routes and heading IDs, translates local links,
+  copies images, and recreates the declared navigation. It embeds the rendered
+  API in the Blume shell, with links to child modules for discovery.
+- Handwritten Blume pages under `content/`, including the cookbook, overlay the
+  generated tree. Cookbook runbook links continue to the existing production site.
+  The cookbook UI, manifests, and design are not changed by this transfer.
+
+The output includes the homepage, installation, inference, training, distillation,
+attention, utilities, design, contributor guides, contact page, generated examples,
+and Python API. Existing URLs and headings are checked against the comparison
+build. The conversion log is `.generated/conversion-report.log`, and Python build
+diagnostics are in `.generated/mkdocs-build.log`.
+
+MkDocs remains a build dependency for the Python reference during this transition.
+Replacing its renderer can happen later without losing the source-generated API.
+The ordinary content uses Blume Markdown/MDX. The welcome cards, visible search
+control, and quieter navigation take inspiration from
+[Specific's documentation](https://docs.specific.dev/) while keeping FastVideo's
+blue branding. Material buttons become plain links,
+Slurm blocks use Bash highlighting, and GitHub's homepage buttons keep their links
+without loading the external widget script. Search, code copying, image zoom, theme
+switching, and page feedback use Blume's built-ins. Production deployment stays on
+the existing workflow until the cookbook and full-site preview are approved.
 
 ## Extend the cookbook
 
@@ -83,6 +127,7 @@ npm run check --prefix docs-site
 npm run test:cookbook --prefix docs
 npm run build --prefix docs-site
 npm run validate --prefix docs-site
+npm run test:content --prefix docs-site
 cd docs-site
 npx playwright install chromium
 npm test
@@ -93,23 +138,11 @@ invalid-output suppression, reset, switching runtimes, retry, obsolete loads,
 keyboard editing, and mobile overflow under `/FastVideo`. Keep shared API tests
 in `docs/tests/`; add React interaction tests here. No serving process is launched.
 
-## Finish the documentation migration
+## Before switching production
 
-This is a cookbook-first setup, not a completed MkDocs content migration. Blume's
-`migrate mkdocs --codex` command launches an agent with its bundled migration
-skill; the initial setup follows that workflow directly. Full-site migration
-should proceed in reviewable batches:
-
-1. Inventory the current MkDocs sitemap, navigation, heading anchors, generated
-   examples, legacy cookbook URL state, assets, hooks, and plugins.
-2. Convert pages into `content/` using Blume's bundled MkDocs codemod. Review
-   admonitions, tabs, math, snippets, and raw HTML. Preserve old paths and anchors.
-3. Choose how to publish Python API docs. Blume does not replace `mkdocstrings`
-   or `api-autonav`. Keep the current reference reachable until a replacement works.
-4. Migrate remaining legacy cookbook recipes and interaction scenarios from
-   #1949. Keep runbooks, setup steps, environment variables, and hardware evidence.
-5. Compare old URLs against the built preview, review desktop/mobile and both
-   themes, then switch the Pages build. Retire legacy assets only after checking
-   their remaining consumers.
-
-No old pages, hooks, recipes, or deployment paths are removed by this setup.
+The transfer keeps the old documentation available. Before changing the Pages
+workflow, finish the cookbook design and remaining recipe migration from #1949,
+review the new docs at desktop and mobile widths, and resolve the dependency
+audit findings noted above. Keep the current Python renderer until a replacement
+preserves its API pages, aliases, and cross references. No old pages or recipes
+are removed by this preview.

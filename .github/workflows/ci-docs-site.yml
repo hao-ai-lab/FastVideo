@@ -6,14 +6,22 @@ on:
     paths:
       - 'docs-site/**'
       - 'docs/**'
-      - 'examples/serving/**'
+      - 'examples/**'
+      - 'scripts/inference/**'
+      - 'fastvideo/**'
+      - 'mkdocs.yml'
+      - 'requirements-mkdocs.txt'
       - '.github/workflows/ci-docs-site.yml'
   push:
     branches: [main]
     paths:
       - 'docs-site/**'
       - 'docs/**'
-      - 'examples/serving/**'
+      - 'examples/**'
+      - 'scripts/inference/**'
+      - 'fastvideo/**'
+      - 'mkdocs.yml'
+      - 'requirements-mkdocs.txt'
       - '.github/workflows/ci-docs-site.yml'
 
 permissions:
@@ -36,6 +44,12 @@ jobs:
           cache-dependency-path: |
             docs/package-lock.json
             docs-site/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v3
+      - name: Install Python documentation renderer
+        run: uv pip install --system -r requirements-mkdocs.txt
       - name: Install cookbook and site dependencies
         run: |
           npm ci --prefix docs
@@ -50,6 +64,8 @@ jobs:
         run: |
           npm run build --prefix docs-site
           npm run validate --prefix docs-site
+      - name: Check transferred routes and anchors
+        run: npm run test:content --prefix docs-site
       - name: Install browser
         working-directory: docs-site
         run: npx playwright install --with-deps chromium
@@ -60,6 +76,7 @@ jobs:
         with:
           name: fastvideo-blume-preview
           path: docs-site/dist
+          include-hidden-files: true
       - name: Upload browser failure traces
         if: failure()
         uses: actions/upload-artifact@v4

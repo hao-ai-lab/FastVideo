@@ -5,3 +5,5 @@ dist/
 public/
 test-results/
 playwright-report/
+.generated/
+.venv/

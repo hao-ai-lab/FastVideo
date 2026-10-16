@@ -8,8 +8,8 @@
   --secondary-foreground: var(--blume-foreground);
   --muted: var(--blume-muted);
   --muted-foreground: var(--blume-muted-foreground);
-  --accent: var(--blume-muted);
-  --accent-foreground: var(--blume-foreground);
+  --accent: var(--blume-accent);
+  --accent-foreground: var(--blume-accent-foreground);
   --border: var(--blume-border);
   --input: var(--blume-border);
   --ring: var(--blume-accent);
@@ -68,4 +68,59 @@
 }
 .cookbook [aria-invalid="true"] {
   border-color: var(--destructive);
+}
+
+/* The existing Python renderer supplies semantic HTML, without Material's page chrome. */
+.python-reference {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.python-reference .doc-contents {
+  margin-block: 1rem 2rem;
+}
+.python-reference pre {
+  overflow: auto;
+  padding: 1rem;
+  border-radius: var(--radius);
+  background: var(--blume-muted);
+}
+.python-reference .doc-labels {
+  margin-inline-start: 0.5rem;
+  color: var(--blume-muted-foreground);
+}
+.python-reference table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+}
+.python-reference details {
+  margin-block: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--blume-border);
+  border-radius: var(--radius);
+}
+.python-reference summary {
+  cursor: pointer;
+}
+.python-reference .linenos {
+  user-select: none;
+  color: var(--blume-muted-foreground);
+}
+
+/* Keep search visible on desktop, with the native compact control on smaller screens. */
+@media (min-width: 70rem) {
+  [data-blume-search-open] {
+    inline-size: 10.5rem;
+    justify-content: flex-start;
+    gap: 0.65rem;
+    padding-inline: 0.85rem;
+    border: 1px solid var(--blume-border);
+    background: var(--blume-muted);
+  }
+  [data-blume-search-open]::before {
+    content: "Search docs…";
+    order: 1;
+    font-size: 0.875rem;
+    font-weight: 400;
+  }
 }

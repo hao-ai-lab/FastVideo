@@ -1,17 +1,31 @@
 ---
-title: FastVideo cookbook
-description: Start from a maintained deployment and generate a serving configuration.
+title: Welcome to FastVideo
+description: Run, train, and accelerate video generation models with FastVideo.
 noindex: true
 ---
 
-Build a serving configuration for your model, runtime, and request defaults.
-The cookbook starts from the same YAML examples maintained in FastVideo.
+<a id="welcome-to-fastvideo"></a>
 
-<CardGroup>
-  <Card title="Configure a deployment" href="/cookbook" icon="book-open">
-    Choose a recipe, edit supported settings, and download a complete config.yaml.
+Start with an inference example, find the right setup for your hardware, or explore
+FastVideo's training and distillation workflows.
+
+<CardGroup cols={2}>
+  <Card title="Quick start" href="/getting_started/quick_start" icon="rocket">
+    Generate your first video with the Python API.
   </Card>
-  <Card title="Read the documentation" href="https://haoailab.com/FastVideo/" icon="file-text">
-    Installation, model guides, training, and the Python API reference.
+  <Card title="Installation" href="/getting_started/installation" icon="download">
+    Set up FastVideo on NVIDIA GPUs or Apple Silicon.
+  </Card>
+  <Card title="Supported models" href="/inference/support_matrix" icon="video">
+    Check available pipelines, capabilities, and optimizations.
+  </Card>
+  <Card title="Training and distillation" href="/training/overview" icon="layers">
+    Prepare data, fine-tune models, and build faster generators.
   </Card>
 </CardGroup>
+
+<Expandable title="About FastVideo and performance overview">
+  <include>/_snippets/home-introduction.mdx</include>
+</Expandable>
+
+<include>/_snippets/home-details.mdx</include>

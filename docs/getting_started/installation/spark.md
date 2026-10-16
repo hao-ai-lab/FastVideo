@@ -128,7 +128,7 @@ uv pip install "https://github.com/mjun0812/flash-attention-prebuild-wheels/rele
 |---|---|
 | `Could NOT find Python (missing: ... Development.Module)` | venv built from system Python without headers. Recreate with `--python-preference only-managed` (add `--clear` to reuse the path), or `sudo apt install python3.12-dev`. |
 | kernel build can't find cutlass headers | Submodules not initialised — run the `git submodule update` step. |
-| `fastvideo-kernel: could not determine the target CUDA architecture` | The build couldn't see a GPU and no arch was given. Build on the Spark itself, or pass `TORCH_CUDA_ARCH_LIST=12.1a` (see [Building without a visible GPU](#building-without-a-visible-gpu-ci--docker)). |
+| `fastvideo-kernel: could not determine the target CUDA architecture` | The build couldn't see a GPU and no arch was given. Build on the Spark itself, or pass `TORCH_CUDA_ARCH_LIST=12.1a` (see [Building without a visible GPU](#building-without-a-visible-gpu-ci-docker)). |
 | `sm_121a requires CUDA Toolkit 13.0+` | Confirm `nvcc --version` is 13.x and `CUDACXX=/usr/local/cuda/bin/nvcc`; architecture-specific sm_120a code cannot run on sm_121. |
 | `ninja: command not found` (manual build only) | `uv pip install scikit-build-core cmake ninja setuptools wheel`. |
 

@@ -620,9 +620,9 @@ When the rolling-baseline phase runs, it emits:
      "regression_thresholds": {
        "latency": { "threshold_percent": 0.10, "threshold_absolute": 1.0, "gated": true }
      }
-  }
+   }
 
-  ```
+   ```
 
    Legacy v1 configs without `config_schema_version` still load, but should not
    gain v2 identity or metadata fields until they are migrated to
