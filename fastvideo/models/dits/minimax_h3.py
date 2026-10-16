@@ -1035,7 +1035,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                         prepared_vsa_impls)
         if unsupported_reasons:
             return "; ".join(sorted(unsupported_reasons))
+        self._regional_compile_inputs = True
         return None
+
+    def _block_input(self, shard: torch.Tensor) -> torch.Tensor:
+        """Give a sequence-parallel shard standard strides under regional compile, so block 0 shares one graph."""
+        if getattr(self, "_regional_compile_inputs", False):
+            return shard.clone(memory_format=torch.contiguous_format)
+        return shard
 
     def materialize_non_persistent_buffers(
         self,
@@ -1136,7 +1143,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         text_original_seq_len = text_embeds.shape[1]
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if sp_world_size > 1:
-            text_embeds, _ = sequence_model_parallel_shard(text_embeds, dim=1)
+            text_embeds = self._block_input(sequence_model_parallel_shard(text_embeds, dim=1)[0])
         text_embeds = self.token_refiner(text_embeds, text_original_seq_len)
         if sp_world_size > 1:
             text_embeds = sequence_model_parallel_all_gather_with_unpad(
@@ -1201,7 +1208,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         original_seq_len = sequence_length
 
         if sp_world_size > 1:
-            packed_hidden_states, _ = sequence_model_parallel_shard(packed_hidden_states, dim=1)
+            packed_hidden_states = self._block_input(sequence_model_parallel_shard(packed_hidden_states, dim=1)[0])
             rotary_cos, _ = sequence_model_parallel_shard(rotary_emb[0], dim=0)
             rotary_sin, _ = sequence_model_parallel_shard(rotary_emb[1], dim=0)
             adaln_indices, _ = sequence_model_parallel_shard(adaln_indices, dim=0)

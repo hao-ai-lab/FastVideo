@@ -157,6 +157,21 @@ def _h3_vsa_sm100a_from_mask_compat_fake(
     return torch.empty_like(q)
 
 
+@torch.library.custom_op("fastvideo::h3_vsa_block_mask", mutates_args=())
+def _h3_vsa_block_mask(scores: torch.Tensor) -> torch.Tensor:
+    """``_build_block_mask`` reading the per-request geometry at run time, so compiled graphs don't guard on it."""
+    from fastvideo.forward_context import get_forward_context
+
+    metadata = get_forward_context().attn_metadata
+    return _build_block_mask(scores, metadata.num_prefix_tiles, metadata.VSA_sparsity, metadata.exempt,
+                             metadata.video_tile_spans, metadata.span_sparsities)
+
+
+@torch.library.register_fake("fastvideo::h3_vsa_block_mask")
+def _h3_vsa_block_mask_fake(scores: torch.Tensor) -> torch.Tensor:
+    return torch.empty_like(scores, dtype=torch.bool)
+
+
 def _sm100a_has_compile_safe_mask_route(sm100a_mod: Any) -> bool:
     return (callable(getattr(sm100a_mod, "block_sparse_attn_sm100a_from_mask", None))
             or (callable(getattr(sm100a_mod, "block_sparse_attn_sm100a", None)) and map_to_index is not None))
@@ -636,14 +651,14 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         additional all-zero tile internally; metadata and all observable
         outputs retain the logical geometry.
         """
-        if x.shape[1] != attn_metadata.total_seq_length:
+        compiling = torch.compiler.is_compiling()
+        regional_compiling = compiling and self._regional_compile_sm100a_enabled is True
+        if not regional_compiling and x.shape[1] != attn_metadata.total_seq_length:
             raise ValueError(f"VSA-H3 metadata was built for sequence length {attn_metadata.total_seq_length}, "
                              f"got {x.shape[1]}. A non-packed sequence (e.g. the token refiner) is "
                              "routed to the VSA-H3 backend; exclude it from the supported backends.")
         n_tiles = attn_metadata.variable_block_sizes.numel()
         grad_mode = torch.is_grad_enabled() and x.requires_grad
-        compiling = torch.compiler.is_compiling()
-        regional_compiling = compiling and self._regional_compile_sm100a_enabled is True
         if regional_compiling:
             sm100a_requested = bool(self._regional_compile_sm100a_enabled)
         elif compiling:
@@ -653,8 +668,12 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             sm100a_requested = envs.FASTVIDEO_VSA_SM100A.get()
         # Tile 128 has no route other than the sm100a CUDA kernel.
         sm100a_route = attn_metadata.tile_elems == 128 or (attn_metadata.tile_elems == 64 and sm100a_requested)
-        needs_sm100a_pair = n_tiles % 2 != 0 and not grad_mode and sm100a_route
-        kernel_tiles = n_tiles + int(needs_sm100a_pair)
+        if regional_compiling:
+            # Pad arithmetically so odd and even tile counts share one graph.
+            needs_sm100a_pair, kernel_tiles = False, n_tiles + n_tiles % 2
+        else:
+            needs_sm100a_pair = n_tiles % 2 != 0 and not grad_mode and sm100a_route
+            kernel_tiles = n_tiles + int(needs_sm100a_pair)
         target_shape = (x.shape[0], kernel_tiles * attn_metadata.tile_elems, x.shape[-2], x.shape[-1])
 
         # A grad-tracking forward must not reuse the builder-owned buffer. The
@@ -665,7 +684,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # autograd edges, and through them the activations they saved, for the
         # rest of training. This is the VSA-H3 counterpart of the Wan tile-cache
         # OOM (#1423), which training fixed with ``vsa_cache_tile_buf=False``.
-        if grad_mode:
+        if grad_mode or regional_compiling:
             return scatter_into_tile_buf(x, target_shape, attn_metadata.untile_combined_index, None)
 
         # ``untile_combined_index`` maps each packed row to a logical tile
@@ -750,14 +769,19 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # the logical prefix, and reject every other shape before a kernel sees it.
         n_tiles = attn_metadata.variable_block_sizes.numel()
         logical_seq_len = n_tiles * tile_elems
-        pair_pad_seq_len = logical_seq_len + tile_elems
-        pair_pad_is_valid = tile_elems in _SM100A_TILE_ELEMS and n_tiles % 2 != 0
-        allowed_seq_lengths = (logical_seq_len, pair_pad_seq_len) if pair_pad_is_valid else (logical_seq_len, )
-        if query.shape[1] not in allowed_seq_lengths:
-            expected = (f"the logical length {logical_seq_len} or one sm100a partner tile "
-                        f"({pair_pad_seq_len})" if pair_pad_is_valid else f"the logical length {logical_seq_len}")
-            raise ValueError(f"VSA-H3 tiled query has length {query.shape[1]}, expected {expected}.")
-        has_sm100a_pair = query.shape[1] == pair_pad_seq_len
+        if regional_compiling:
+            pair_tiles = query.shape[1] // tile_elems - n_tiles
+            has_sm100a_pair = True
+        else:
+            pair_pad_seq_len = logical_seq_len + tile_elems
+            pair_pad_is_valid = tile_elems in _SM100A_TILE_ELEMS and n_tiles % 2 != 0
+            allowed_seq_lengths = (logical_seq_len, pair_pad_seq_len) if pair_pad_is_valid else (logical_seq_len, )
+            if query.shape[1] not in allowed_seq_lengths:
+                expected = (f"the logical length {logical_seq_len} or one sm100a partner tile "
+                            f"({pair_pad_seq_len})" if pair_pad_is_valid else f"the logical length {logical_seq_len}")
+                raise ValueError(f"VSA-H3 tiled query has length {query.shape[1]}, expected {expected}.")
+            has_sm100a_pair = query.shape[1] == pair_pad_seq_len
+            pair_tiles = int(has_sm100a_pair)
         for name, tensor in (("key", key), ("value", value)):
             if tensor.shape[1] != query.shape[1]:
                 raise ValueError(f"VSA-H3 tiled {name} length {tensor.shape[1]} does not match query "
@@ -795,6 +819,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
 
         if scores is None:
             mask = torch.ones(query.shape[0], query.shape[2], n_tiles, n_tiles, dtype=torch.bool, device=query.device)
+        elif regional_compiling:
+            mask = _h3_vsa_block_mask(scores)
         else:
             mask = _build_block_mask(
                 scores,
@@ -834,10 +860,10 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                 # The synthetic tile is neither a logical query nor key. Its
                 # all-False row yields q2k_num=0, the all-False column keeps it
                 # out of real rows, and vbs=0 masks all of its key slots.
-                sm100a_mask = torch.nn.functional.pad(mask, (0, 1, 0, 1), value=False)
+                sm100a_mask = torch.nn.functional.pad(mask, (0, pair_tiles, 0, pair_tiles), value=False)
                 sm100a_variable_block_sizes = torch.nn.functional.pad(
                     attn_metadata.variable_block_sizes,
-                    (0, 1),
+                    (0, pair_tiles),
                     value=0,
                 )
 
