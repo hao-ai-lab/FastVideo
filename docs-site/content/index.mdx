@@ -1,13 +1,31 @@
 ---
 title: Welcome to FastVideo
 description: Run, train, and accelerate video generation models with FastVideo.
+mode: frame
 noindex: true
 ---
 
-<a id="welcome-to-fastvideo"></a>
+<div className="home-page">
+<header className="home-hero not-prose">
+  <h1 id="welcome-to-fastvideo" className="home-logo">
+    <img src="/assets/logos/logo.svg" alt="Welcome to FastVideo" width={252} height={105} />
+  </h1>
+  <p className="home-description">Run, train, and accelerate video generation models with FastVideo.</p>
+  <nav className="home-project-links" aria-label="About the project">
+    <a href="https://github.com/hao-ai-lab/FastVideo" title="4,612 GitHub stars, checked October 16, 2026">
+      <span aria-hidden="true">☆</span> 4.6k GitHub stars
+    </a>
+    <a href="https://haoailab.com/">Hao AI Lab</a>
+    <a href="https://trendshift.io/repositories/14509" title="Reached #6 on GitHub's daily Python Trending list on August 6, 2025">
+      #6 GitHub Trending <span className="home-badge-date">Aug 2025</span>
+    </a>
+  </nav>
+</header>
 
 Start with an inference example, find the right setup for your hardware, or explore
 FastVideo's training and distillation workflows.
+
+<include>/_snippets/home-news.mdx</include>
 
 <CardGroup cols={2}>
   <Card title="Quick start" href="/getting_started/quick_start" icon="rocket">
@@ -16,8 +34,8 @@ FastVideo's training and distillation workflows.
   <Card title="Installation" href="/getting_started/installation" icon="download">
     Set up FastVideo on NVIDIA GPUs or Apple Silicon.
   </Card>
-  <Card title="Supported models" href="/inference/support_matrix" icon="video">
-    Check available pipelines, capabilities, and optimizations.
+  <Card title="Cookbook" href="/cookbook" icon="book-open">
+    Choose a model recipe, customize its settings, and download a serving configuration.
   </Card>
   <Card title="Training and distillation" href="/training/overview" icon="layers">
     Prepare data, fine-tune models, and build faster generators.
@@ -29,3 +47,12 @@ FastVideo's training and distillation workflows.
 </Expandable>
 
 <include>/_snippets/home-details.mdx</include>
+
+<a id="documentation"></a>
+
+## Projects and research
+
+Explore work using FastVideo's code or the attention research behind it.
+
+<include>/_snippets/home-projects.mdx</include>
+</div>

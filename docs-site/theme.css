@@ -37,6 +37,121 @@
 .cookbook {
   min-width: 0;
 }
+
+/* The welcome page uses the stock theme with a centered, compact project introduction. */
+.home-page {
+  max-inline-size: 48rem;
+  margin-inline: auto;
+}
+.home-hero {
+  text-align: center;
+  padding-block-start: 0.5rem;
+}
+.home-logo {
+  margin: 0 0 1rem;
+}
+.home-logo img {
+  display: block;
+  inline-size: 15rem;
+  max-inline-size: 100%;
+  block-size: auto;
+  margin-inline: auto;
+}
+.home-description {
+  margin: 0 auto 1rem;
+  max-inline-size: 38rem;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  color: var(--blume-muted-foreground);
+}
+.home-project-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-block-end: 1.5rem;
+}
+.home-project-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-block-size: 2rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--blume-border);
+  border-radius: var(--radius);
+  color: var(--blume-foreground);
+  font-size: 0.8125rem;
+  text-decoration: none;
+}
+.home-project-links .home-badge-date {
+  color: var(--blume-muted-foreground);
+  font-size: 0.75rem;
+}
+.home-project-links a:hover {
+  background: var(--blume-muted);
+}
+.home-project-links p {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+.home-page a:focus-visible {
+  outline: 2px solid var(--blume-accent);
+  outline-offset: 3px;
+}
+.home-news {
+  margin-block: 1.25rem 1.5rem;
+  padding-block: 1rem;
+  border-block: 1px solid var(--blume-border);
+  font-size: 0.875rem;
+}
+.home-news h2 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.home-news-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-block-end: 0.75rem;
+}
+.home-news ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.home-news li {
+  display: grid;
+  grid-template-columns: 6.25rem minmax(0, 1fr);
+  gap: 0.75rem;
+  line-height: 1.5;
+}
+.home-news time,
+.home-news-more {
+  color: var(--blume-muted-foreground);
+  font-size: 0.8125rem;
+}
+.home-news a {
+  text-underline-offset: 0.2em;
+}
+.home-news-more {
+  display: inline-block;
+}
+@media (max-width: 30rem) {
+  .home-project-links a {
+    min-block-size: 2.75rem;
+  }
+  .home-news li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.1rem;
+  }
+}
 .cookbook select {
   min-height: 2.75rem;
   width: 100%;

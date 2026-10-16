@@ -45,6 +45,14 @@ after changing those pages or Python sources, then restart the dev server. This
 transition build regenerates the Blume copy rather than maintaining two editable
 versions. Do not edit or commit `.generated/` or `public/`.
 
+The welcome page uses Blume's `frame` mode to keep the sidebar while supplying its
+own centered logo and accessible heading. News headlines come from the first two
+dated entries under `NEWS` in the root README, using the first sentence or clause
+and the last linked source. The projects list comes from its "Awesome work"
+section. Update those README sections to refresh the homepage. The GitHub star
+badge is an approximate snapshot, last checked October 16, 2026; the dated #6
+badge links to the recorded GitHub Trending achievement.
+
 The transfer has three parts:
 
 - `scripts/prepare-python-docs.py` runs the existing example generator and

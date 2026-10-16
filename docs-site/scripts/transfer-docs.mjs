@@ -193,7 +193,36 @@ export async function transferDocs() {
     join(content, "_snippets/home-introduction.mdx"),
     asMdx(originalHome.slice(0, section).replace(/<a id="welcome-to-fastvideo"><\/a>/g, "")),
   );
-  await writeFile(join(content, "_snippets/home-details.mdx"), asMdx(originalHome.slice(section)));
+  const documentation = originalHome.indexOf("## Documentation", section);
+  if (documentation < 0) throw new Error("The homepage documentation section boundary needs updating.");
+  await writeFile(join(content, "_snippets/home-details.mdx"), asMdx(originalHome.slice(section, documentation)));
+
+  // The README owns announcements and the community list; the welcome page renders a short news digest.
+  const readme = await readFile(join(repo, "README.md"), "utf8");
+  const news = readme.match(/^## NEWS\n([\s\S]*?)(?=^##|^###)/m)?.[1];
+  const projects = readme.match(/^## Awesome work using FastVideo or our research projects\n([\s\S]*?)(?=^## )/m)?.[1];
+  if (!news || !projects) throw new Error("The README news or project section boundary needs updating.");
+  const recent = [...news.matchAll(/^- `([\d/]+)`: (.+)$/gm)].slice(0, 2).map(([, date, text]) => {
+    const links = [...text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)];
+    const headline = text
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .split(/:\s|\.\s/)[0]
+      .replace(/\.$/, "");
+    const href = links.at(-1)?.[2] ?? "https://github.com/hao-ai-lab/FastVideo#news";
+    const iso = date.replaceAll("/", "-");
+    const label = new Intl.DateTimeFormat("en", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(iso));
+    return `<li><time dateTime="${iso}">${label}</time><a href={${JSON.stringify(href)}}>{${JSON.stringify(headline)}}</a></li>`;
+  });
+  await writeFile(
+    join(content, "_snippets/home-news.mdx"),
+    `<section className="home-news not-prose" aria-labelledby="recent-news">\n<div className="home-news-heading"><h2 id="recent-news">Recent news</h2><a className="home-news-more" href="https://github.com/hao-ai-lab/FastVideo#news">All announcements →</a></div>\n<ul>\n${recent.join("\n")}\n</ul>\n</section>\n`,
+  );
+  await writeFile(join(content, "_snippets/home-projects.mdx"), asMdx(projects.trim()));
   await rm(join(content, "index.md"));
   await cp(join(site, "content"), content, { recursive: true });
   await cp(join(source, "assets"), join(publicDir, "assets"), {

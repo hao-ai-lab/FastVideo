@@ -8,6 +8,28 @@ test("documentation navigation opens transferred guides", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 });
 
+test("the welcome page introduces the project and opens the cookbook", async ({ page }) => {
+  await page.goto("/FastVideo");
+  const logo = page.getByRole("heading", { level: 1, name: "Welcome to FastVideo" }).getByRole("img");
+  await expect(logo).toBeVisible();
+  expect(await logo.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  const column = await page.locator(".home-page").boundingBox();
+  const image = await logo.boundingBox();
+  expect(Math.abs(image!.x + image!.width / 2 - (column!.x + column!.width / 2))).toBeLessThan(2);
+  await expect(page.getByRole("link", { name: "Hao AI Lab", exact: true })).toHaveAttribute(
+    "href",
+    "https://haoailab.com/",
+  );
+  await expect(page.locator(".home-news time")).toHaveCount(2);
+  await expect(page.locator(".home-news")).toContainText("Kandinsky 6");
+  await expect(page.getByRole("heading", { name: "Projects and research", exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: "DanceGRPO", exact: true })).toBeVisible();
+  await expect(page.getByText("Use the navigation menu on the left to explore different sections:")).toHaveCount(0);
+  await page.getByRole("link", { name: /^Cookbook Choose a model recipe/ }).click();
+  await expect(page).toHaveURL(/FastVideo\/cookbook/);
+  await expect(page.getByRole("heading", { name: "Configure a deployment", exact: true })).toBeVisible();
+});
+
 test("V1 API renders Python signatures within the Blume shell", async ({ page }) => {
   await page.goto("/FastVideo/getting_started/v1_api");
   await expect(page.getByRole("heading", { name: "V1 API", exact: true })).toBeVisible();
