@@ -37,19 +37,6 @@
 .cookbook {
   min-width: 0;
 }
-
-.welcome-brand img {
-  display: block;
-  inline-size: 15.75rem;
-  max-inline-size: 100%;
-  block-size: auto;
-  margin-block: 0 1.5rem;
-}
-
-/* Paper Mono's fixed-width text needs room to wrap in navigation and headings. */
-:is(h1, h2, h3) {
-  text-wrap: balance;
-}
 .cookbook select {
   min-height: 2.75rem;
   width: 100%;

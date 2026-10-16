@@ -7,4 +7,3 @@ test-results/
 playwright-report/
 .generated/
 .venv/
-!fonts/paper-mono/OFL.txt

@@ -76,13 +76,6 @@ without loading the external widget script. Search, code copying, image zoom, th
 switching, and page feedback use Blume's built-ins. Production deployment stays on
 the existing workflow until the cookbook and full-site preview are approved.
 
-The welcome page puts serving recipes before the task-based guides, with links to
-installation and model support for new users. Documentation and the cookbook use
-one shared sidebar. Header links replace section tabs so entering the cookbook
-does not hide the guides. Paper Mono is self-hosted from `fonts/paper-mono/` for
-body text, headings, and code. Its original SIL Open Font License is bundled with
-the build at `/FastVideo/fonts/paper-mono/OFL.txt`.
-
 ## Extend the cookbook
 
 `islands/Cookbook.tsx` owns the React UI and its loading/edit state. Shared
