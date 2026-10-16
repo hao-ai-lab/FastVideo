@@ -21,7 +21,7 @@ from torch.nn.modules.module import _IncompatibleKeys
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.lora_patch import DenseLoRAPatch
-from fastvideo.models.loader.utils import (get_param_names_mapping, hf_to_custom_state_dict)
+from fastvideo.models.loader.utils import (get_param_names_mapping, iter_hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 
@@ -941,26 +941,22 @@ def load_model_from_full_model_state_dict(
     named_parameters = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_parameters()}
     named_buffers = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_buffers()}
     sharded_sd = {}
-    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
-                                                                           param_names_mapping)  # type: ignore
+    reverse_param_names_mapping: dict[str, tuple[str, Any, Any]] = {}
     checkpoint_key_aliases = getattr(model, "_fastvideo_checkpoint_key_aliases", {})
-    if checkpoint_key_aliases:
-        for original_name, transformed_name in checkpoint_key_aliases.items():
-            if original_name not in custom_param_sd:
-                continue
-            if transformed_name in custom_param_sd:
-                raise ValueError(f"Checkpoint transform maps multiple tensors to {transformed_name!r}")
-            custom_param_sd[transformed_name] = custom_param_sd.pop(original_name)
-            reverse_param_names_mapping[transformed_name] = reverse_param_names_mapping.pop(original_name)
-
-    # Drain rather than iterate. Production safetensors values may retain
-    # memory-mapped shard storage, while mapped or merged parameters can own
-    # ordinary allocations. Keeping the dict retains all of that source
-    # storage until loading finishes; popping releases each reference as soon
-    # as its conversion completes and lowers the host/unified-memory working
-    # set.
-    for target_param_name in list(custom_param_sd):
-        full_tensor = custom_param_sd.pop(target_param_name)
+    alias_targets = set(checkpoint_key_aliases.values())
+    seen_alias_targets: set[str] = set()
+    # Stream so each tensor is cast and sharded before the next one is read: a full-precision checkpoint read
+    # straight onto the GPU must never be resident in full.
+    for target_param_name, full_tensor in iter_hf_to_custom_state_dict(full_sd_iterator, param_names_mapping,
+                                                                      reverse_param_names_mapping):  # type: ignore
+        if target_param_name in checkpoint_key_aliases:
+            transformed_name = checkpoint_key_aliases[target_param_name]
+            reverse_param_names_mapping[transformed_name] = reverse_param_names_mapping.pop(target_param_name)
+            target_param_name = transformed_name
+        if target_param_name in alias_targets:
+            if target_param_name in seen_alias_targets:
+                raise ValueError(f"Checkpoint transform maps multiple tensors to {target_param_name!r}")
+            seen_alias_targets.add(target_param_name)
         if skip_param_names and target_param_name in skip_param_names:
             continue
         if "::" in target_param_name:
