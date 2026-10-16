@@ -125,9 +125,14 @@ cross-attention; key and value must have the same sequence length.
 |---|---|
 | SM100, validated non-causal BF16 QAT configuration with head dimension 128 | Large-tile forward and split backward. Long equal-length sequences (at least 16,384 tokens) use 64x128 backward tiles with tuned launch parameters in every forward mode; in `fast` mode without exact-M they also use complete forward tiles without bounds masks and accumulator lifetime tuning. Other optimized cases use the masked forward loop and 64x64 backward. Optimized backward requires a 16-aligned KV length |
 | SM120, including RTX 5090 | Previous forward tiling with joined quantized/STE P@V operations and a shallower backward pipeline for long sequences |
+| SM121, including DGX Spark / GB10 | Previous forward tiling with split quantized/STE P@V operations and a shallower backward pipeline for long sequences |
 | Unsupported configurations | Previous Triton implementation |
 
-Warp specialization is disabled automatically on SM100 and SM120 because the
+On GB10, the joined P@V path does not preserve the split path's softmax
+statistics, outputs, or gradients. Joining is restricted to SM120, even when
+`FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV=1` is set on GB10.
+
+Warp specialization is disabled automatically on SM100, SM120, and SM121 because the
 Triton 3.7 NVWS compiler pass aborts for this kernel on Blackwell. No user
 setting is required.
 
@@ -139,7 +144,9 @@ The available tuning and comparison controls are:
 | `FASTVIDEO_ATTN_QAT_FWD_EXACT_M` | `0` | Set to `1` to recompute reference-order softmax statistics and keep `dV` bitwise-compatible on the SM100 optimized route |
 | `FASTVIDEO_ATTN_QAT_SM100_OPTIMIZED` | `1` | Set to `0` to force the previous SM100 forward and backward for comparison |
 | `FASTVIDEO_ATTN_QAT_SM100_WIDE_BWD` | `1` | Set to `0` to retain 64x64 backward tiles for long equal-length SM100 attention. Applies in every forward mode, including `reference` and `FWD_EXACT_M=1` |
-| `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV` | `1` | Set to `0` to compare SM120 against the split P@V path |
+| `FASTVIDEO_ATTN_QAT_SM120_JOIN_QAT_PV` | `1` | On SM120 only, set to `0` to compare against the split P@V path; GB10 always uses split P@V |
+| `FASTVIDEO_ATTN_QAT_SM121_FWD_DV` | `1` | On GB10 only, set to `0` to fall back to the legacy re-quantized-P dV (see *GB10 forward-consistent dV*) |
+| `FASTVIDEO_ATTN_QAT_SM121_DV_STATS` | `save` | On GB10 only: `save` keeps the forward's online maxima and denominators for backward; `recompute` replays the forward in backward instead |
 
 The first invocation JIT-compiles the selected configuration; later calls reuse
 the Triton cache. To measure the production shape, run
@@ -148,5 +155,47 @@ the Triton cache. To measure the production shape, run
 On two B200 GPUs with Wan2.1 1.3B, 31,200 tokens, full activation checkpointing,
 and AdamW, the default long-sequence SM100 route measured about 10% lower full-step
 latency than the previous SM100 optimized path in guarded SP2 acceptance runs.
+
+## GB10 forward-consistent dV
+
+On GB10 (SM121) the backward replaces the legacy dV computation for the
+validated training configuration: non-causal, contiguous BF16 QAT attention
+with head dimension 128, fake-quantized QKV in backward, P fake quantization
+enabled, both additional P scaling modes disabled, and K smoothing disabled.
+The public attention signature is unchanged; other configurations and other
+GPUs keep the legacy backward.
+
+The legacy backward re-quantizes the *normalized* probabilities. The E4M3
+block scale of a 16-key group rounds to zero once the group's largest
+probability drops below about `2^-10` (with uniform attention this happens
+from sequence length 171), and every key in that group then receives no V
+gradient. On real Wan2.1 activations at 8192 and 31200 tokens, 95-100% of the
+groups underflow and whole heads receive `dV = 0`. The forward-consistent
+path instead reconstructs the forward's quantized online probabilities from
+the saved per-tile running maxima and the final denominator, and applies
+those weights to the upstream gradient in FP32: V's fake quantizer uses an
+identity STE, so dV is built from the weights the forward actually used. For
+uniform self-attention the expected dV is therefore 1.03125, because
+`E4M3(1/6) * E2M1(1/E4M3(1/6)) = 0.171875 * 6`; this differs from the dense
+attention gradient of 1. Forward output, dQ, dK, the saved STE output and M
+are unchanged bit for bit.
+
+Cost: `save` retains `B * H * ceil(N_kv / 32) * N_q * 4` bytes of maxima plus
+`B * H * N_q * 4` bytes of denominators per layer; with non-reentrant
+activation checkpointing only one layer's statistics are live at a time.
+`recompute` does not retain them across the forward/backward boundary but
+still allocates them and scratch outputs during backward and adds a full
+forward replay. Both modes run the legacy backward for dQ/dK plus an
+additional dV kernel; measure the cost on the production shape with
+`python benchmarks/benchmark_attn_qat_train.py` from `fastvideo-kernel/`,
+comparing `FASTVIDEO_ATTN_QAT_SM121_FWD_DV=1` against `=0`.
+
+The contract tests in `fastvideo-kernel/tests/test_attn_qat_sm121_dv.py`
+cover the uniform dV value, an independent Torch forward and frozen-weight V
+gradient reference, bitwise parity of the unchanged tensors, determinism and
+non-reentrant activation checkpointing. They do not establish training
+convergence or behaviour on SM100 or SM120. The shared quantizer excludes
+explicitly masked values from scale selection and makes empty groups decode
+to a finite zero; callers must supply a correct validity mask.
 
 For import and backend-selection failures, see [Debugging](../utilities/debugging.md).
