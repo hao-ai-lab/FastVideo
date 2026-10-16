@@ -1,26 +1,39 @@
 ---
 title: Welcome to FastVideo
-description: Run, train, and accelerate video generation models with FastVideo.
+description: Video generation, serving, training, and distillation.
 noindex: true
 ---
 
 <a id="welcome-to-fastvideo"></a>
 
-Start with an inference example, find the right setup for your hardware, or explore
-FastVideo's training and distillation workflows.
+<div className="welcome-brand">
+  <img src="/assets/logos/logo.svg" alt="FastVideo" width={252} height={105} />
+</div>
+
+## Build with the cookbook
+
+<Card title="Open the cookbook" href="/cookbook" icon="book-open" cta="Configure a deployment" arrow type="tip">
+  Choose a maintained serving recipe, edit its settings, and download the YAML. Get the server command and client
+  instructions for your deployment.
+</Card>
+
+New to FastVideo? [Install for your hardware](/getting_started/installation) and
+check the [supported models](/inference/support_matrix) before choosing a recipe.
+
+## Explore the guides
 
 <CardGroup cols={2}>
-  <Card title="Quick start" href="/getting_started/quick_start" icon="rocket">
+  <Card title="Run your first video" href="/getting_started/quick_start" icon="rocket">
     Generate your first video with the Python API.
   </Card>
-  <Card title="Installation" href="/getting_started/installation" icon="download">
-    Set up FastVideo on NVIDIA GPUs or Apple Silicon.
-  </Card>
-  <Card title="Supported models" href="/inference/support_matrix" icon="video">
-    Check available pipelines, capabilities, and optimizations.
+  <Card title="Optimize inference" href="/inference/inference_quick_start" icon="video">
+    Configure inference, reduce memory use, and explore model examples.
   </Card>
   <Card title="Training and distillation" href="/training/overview" icon="layers">
     Prepare data, fine-tune models, and build faster generators.
+  </Card>
+  <Card title="Develop with FastVideo" href="/contributing/overview" icon="code">
+    Set up a development environment and contribute models or backends.
   </Card>
 </CardGroup>
 

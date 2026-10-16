@@ -19,3 +19,5 @@ await cp(new URL("docs/assets/cookbook-config/", repo), destination, {
   recursive: true,
 });
 await cp(new URL("docs/assets/logos/icon_simple.svg", repo), new URL("icon.svg", publicDir));
+await mkdir(new URL("fonts/paper-mono/", publicDir), { recursive: true });
+await cp(new URL("../fonts/paper-mono/OFL.txt", import.meta.url), new URL("fonts/paper-mono/OFL.txt", publicDir));
