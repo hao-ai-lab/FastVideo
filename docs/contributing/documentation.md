@@ -6,8 +6,8 @@ FastVideo documentation is built with Blume and published at
 ## Source ownership
 
 - Edit guides under `docs/`. Keep runnable examples under `examples/` and `scripts/`.
-- Edit the welcome page and Fast Models catalog under `docs-site/content/`,
-  `docs-site/islands/`, and `docs-site/lib/fast-models.ts`.
+- Edit the welcome page, Fast Models catalog, and cookbook model pages under
+  `docs-site/content/`, `docs-site/islands/`, and `docs-site/lib/`.
 - Edit sidebar labels and grouping in `docs-site/navigation.json`. Group by reader
   task. Hardware, integrations, and model-specific guides belong under Run inference.
 - Python reference pages are extracted from source with Griffe. They require no

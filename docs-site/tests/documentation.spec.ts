@@ -68,7 +68,7 @@ test("the welcome page introduces the project and opens the cookbook", async ({ 
   );
   await page.getByRole("link", { name: /^Cookbook Choose a model recipe/ }).click();
   await expect(page).toHaveURL(/FastVideo\/cookbook/);
-  await expect(page.getByRole("heading", { name: "Configure a deployment", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cookbook", exact: true })).toBeVisible();
 });
 
 test("Fast Models connects the homepage, family collections, and checkpoints", async ({ page }) => {

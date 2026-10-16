@@ -126,7 +126,7 @@
     "collapsed": true,
     "items": [
       {
-        "label": "Configure a deployment",
+        "label": "All recipes",
         "href": "/cookbook"
       },
       {
@@ -134,10 +134,14 @@
         "href": "/cookbook/openai-api"
       },
       {
-        "label": "MiniMax H3",
+        "label": "FastH3",
         "display": "group",
-        "collapsed": true,
+        "collapsed": false,
         "items": [
+          {
+            "label": "FastH3 8-Step V2",
+            "href": "/cookbook/minimax-h3/fasth3-8step"
+          },
           {
             "label": "Recipes and setup",
             "href": "/cookbook/minimax-h3"
@@ -150,13 +154,32 @@
       },
       {
         "label": "Wan",
-        "href": "/cookbook/wan"
+        "display": "group",
+        "collapsed": false,
+        "items": [
+          {
+            "label": "FastWan2.1 1.3B",
+            "href": "/cookbook/wan/fastwan21"
+          },
+          {
+            "label": "Wan2.1 I2V 14B",
+            "href": "/cookbook/wan/wan21-i2v"
+          },
+          {
+            "label": "Family guide",
+            "href": "/cookbook/wan"
+          }
+        ]
       },
       {
         "label": "LTX",
         "display": "group",
         "collapsed": true,
         "items": [
+          {
+            "label": "LTX2 Distilled",
+            "href": "/cookbook/ltx/ltx2-distilled"
+          },
           {
             "label": "Recipes and setup",
             "href": "/cookbook/ltx"

@@ -1,3 +1,4 @@
+import { modelDirectory } from "../lib/cookbook-pages.ts";
 /** Rebuild the Blume view from canonical Markdown and the existing Python reference renderer. */
 import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
@@ -280,6 +281,16 @@ export async function transferDocs() {
   await rm(join(content, "cookbook/index.md"), { force: true });
   await rm(join(content, "cookbook/index.mdx"), { force: true });
   await cp(join(site, "content"), content, { recursive: true });
+  // Model-specific inference pages come from the maintained recipe inventory.
+  for (const model of modelDirectory.filter((model) => !model.configurable)) {
+    const file = join(content, `${model.path.slice(1)}.mdx`);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      `---\ntitle: ${JSON.stringify(model.title)}\nmode: frame\n---\n\n<Cookbook modelId="${model.id}" />\n`,
+    );
+  }
+
   await cp(join(source, "assets"), join(publicDir, "assets"), {
     recursive: true,
     filter: (path) => !path.endsWith(".md"),
@@ -329,6 +340,30 @@ export async function transferDocs() {
       `---\n${stringify(data)}---\n${body.replaceAll("{", "&#123;").replaceAll("}", "&#125;")}${links ? `\n<h2>Submodules</h2>\n<ul>\n${links}\n</ul>\n` : ""}`,
     );
   }
+  function addModelPages(items) {
+    for (const item of items) {
+      const entries = modelDirectory.filter((model) => !model.configurable && model.familyPath === item.href);
+      if (entries.length && !/Family guide|Recipes and setup/.test(item.label)) {
+        const guide = { label: "Family guide", href: item.href };
+        delete item.href;
+        item.display = "group";
+        item.collapsed = true;
+        item.items = [...entries.map((model) => ({ label: model.title, href: model.path })), guide];
+      } else if (item.items) {
+        const guide = item.items.find((child) => /Family guide|Recipes and setup/.test(child.label));
+        if (guide) {
+          const extras = modelDirectory.filter((model) => !model.configurable && model.familyPath === guide.href);
+          item.items.splice(
+            item.items.indexOf(guide),
+            0,
+            ...extras.map((model) => ({ label: model.title, href: model.path })),
+          );
+        }
+        addModelPages(item.items);
+      }
+    }
+  }
+  addModelPages(navigation);
   await writeFile(join(generated, "navigation.json"), JSON.stringify(navigation));
   await writeFile(join(generated, "routes.json"), JSON.stringify([...routes].sort()));
   console.log(

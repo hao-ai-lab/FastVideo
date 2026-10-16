@@ -1,3 +1,4 @@
+import { sourceRecipes } from "../lib/cookbook-pages.ts";
 /** Prepare the docs transfer and publish the existing cookbook catalogs. */
 import { execFileSync } from "node:child_process";
 import { cp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
@@ -29,3 +30,14 @@ await writeFile(
   new URL("assets/cookbook-runbooks.css", publicDir),
   `${tokens}\n@scope (.legacy-cookbook) {\n${legacyCss.replaceAll(".md-typeset", ":scope")}\n}`,
 );
+
+// Publish exact checked-in YAML for inference-only model pages. No settings are synthesized.
+const sourceDir = new URL("assets/cookbook-sources/", publicDir);
+await rm(sourceDir, { recursive: true, force: true });
+await mkdir(sourceDir, { recursive: true });
+for (const recipe of sourceRecipes) {
+  if (/\.ya?ml$/.test(recipe.source))
+    await cp(new URL(recipe.source, repo), new URL(`${recipe.id}-inference.yaml`, sourceDir));
+  if (recipe.serving?.source)
+    await cp(new URL(recipe.serving.source, repo), new URL(`${recipe.id}-serving.yaml`, sourceDir));
+}

@@ -39,6 +39,7 @@ export interface Catalog {
   base_config: Record<string, Value>;
   runtime: {
     label: string;
+    backend: string;
     interface: string;
     install_url?: string;
     client_guide_url?: string;
@@ -83,8 +84,13 @@ export function parseField(field: Field, raw: string): Value {
 
 /** Keep catalog guide links on the current site and its deployment prefix. */
 export function guideUrl(path: string): string {
-  return new URL(
+  const url = new URL(
     path,
     new URL(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/assets/cookbook-config/index.json`, window.location.origin),
-  ).href;
+  );
+  if (url.origin === "https://haoailab.com" && url.pathname.startsWith("/FastVideo/")) {
+    url.host = window.location.host;
+    url.protocol = window.location.protocol;
+  }
+  return url.href;
 }

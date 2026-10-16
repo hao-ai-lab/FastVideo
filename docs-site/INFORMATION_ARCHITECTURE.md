@@ -95,3 +95,17 @@ Blume replaces MkDocs through the existing GitHub Pages workflow at
 checks previous routes and heading fragments. This PR changes navigation and
 presentation while keeping the technical content available; the consolidation
 steps above remain editorial follow-ups.
+
+## Cookbook model pages
+
+The cookbook catalog includes the maintained video, image, audio, and world
+models, with category and family filters. FastH3 appears first. Each checkpoint
+has its own page; related task or hardware recipes become variants on that page.
+Family groups hold the pages alongside their broader runbooks.
+
+FastH3 8-Step V2, FastWan2.1 1.3B, Wan2.1 I2V 14B, and LTX2 Distilled use the five
+existing editable serving deployments. Their pages have a model header, YAML
+actions, generated commands, and a compact hardware/options matrix. Other models
+publish existing source commands and YAML without inventing editable settings.
+Hardware-fit validation remains unverified. New quantization, encoder, or runtime
+choices require a backend recipe before becoming selectable.

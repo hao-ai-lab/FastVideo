@@ -9,7 +9,10 @@
     "skipLibCheck": true,
     "noEmit": true,
     "baseUrl": ".",
-    "paths": { "@/*": ["./*"] }
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "resolveJsonModule": true
   },
   "include": [
     "blume.config.ts",
