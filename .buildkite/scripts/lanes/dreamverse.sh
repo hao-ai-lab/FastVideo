@@ -75,7 +75,7 @@ if [[ $machine_arch =~ ^(aarch64|arm64)$ ]]; then
     npm run e2e -- \
       --project=chromium \
       --project=mobile-chromium \
-      --grep-invert='streams, plays, and surfaces a downloadable clip|starts a new project and switches back to the prior session|saved projects persist across a page reload'
+      --grep-invert='streams, plays, and surfaces a downloadable clip|starts a new project and switches back to the prior session|saved projects persist across a page reload|sends validated assets and plays a clearly labeled sample'
 else
   BACKEND_HOST=127.0.0.1 BACKEND_PORT="$BACKEND_PORT" CI=1 \
     npm run e2e -- \
