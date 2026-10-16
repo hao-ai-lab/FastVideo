@@ -1,0 +1,7 @@
+node_modules
+.blume
+dist
+public
+package-lock.json
+test-results
+playwright-report

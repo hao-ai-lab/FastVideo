@@ -1,0 +1,44 @@
+{
+  "name": "fastvideo-docs-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare:content": "node scripts/prepare-content.mjs",
+    "predev": "npm run prepare:content",
+    "dev": "blume dev",
+    "prebuild": "npm run prepare:content",
+    "build": "blume build",
+    "preview": "blume preview",
+    "prevalidate": "npm run prepare:content",
+    "validate": "blume validate --strict",
+    "check": "tsc --noEmit",
+    "test": "playwright test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "blume": "2.2.3",
+    "class-variance-authority": "0.7.1",
+    "cn": "^0.4.0",
+    "radix-ui": "^1.8.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "prettier": "3.9.9",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "overrides": {
+    "@astrojs/react": "7.0.0",
+    "@vitejs/plugin-react": "6.1.1"
+  },
+  "prettier": {
+    "printWidth": 120
+  }
+}

@@ -1,0 +1,71 @@
+/* shadcn tokens follow Blume's palette in both appearances. Blume provides Tailwind. */
+:root {
+  --background: var(--blume-background);
+  --foreground: var(--blume-foreground);
+  --primary: var(--blume-accent);
+  --primary-foreground: var(--blume-accent-foreground);
+  --secondary: var(--blume-muted);
+  --secondary-foreground: var(--blume-foreground);
+  --muted: var(--blume-muted);
+  --muted-foreground: var(--blume-muted-foreground);
+  --accent: var(--blume-muted);
+  --accent-foreground: var(--blume-foreground);
+  --border: var(--blume-border);
+  --input: var(--blume-border);
+  --ring: var(--blume-accent);
+  --radius: 0.5rem;
+  --destructive: #b91c1c;
+}
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius-md: var(--radius);
+}
+.cookbook {
+  min-width: 0;
+}
+.cookbook select {
+  min-height: 2.75rem;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+}
+.cookbook :is(input, textarea) {
+  font-size: 1rem;
+}
+.cookbook :is(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.cookbook pre {
+  max-height: 32rem;
+  overflow: auto;
+  white-space: pre;
+  padding: 1rem;
+  border-radius: var(--radius);
+  background: var(--muted);
+  font-size: 0.8rem;
+}
+.cookbook summary {
+  cursor: pointer;
+  padding-block: 0.75rem;
+}
+.cookbook [aria-invalid="true"] {
+  border-color: var(--destructive);
+}

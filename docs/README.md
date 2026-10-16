@@ -2,6 +2,12 @@
 
 This directory contains the FastVideo documentation built with MkDocs.
 
+## Blume cookbook preview
+
+The React cookbook app is in [docs-site](../docs-site/README.md). It consumes
+the same catalogs and configuration API. Its build is separate from the
+production MkDocs deployment while the migration is reviewed.
+
 ## Build the docs locally
 
 ```bash

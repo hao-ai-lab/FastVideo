@@ -1,0 +1,7 @@
+node_modules/
+.blume/
+dist/
+.env.local
+public/
+test-results/
+playwright-report/
