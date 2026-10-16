@@ -97,6 +97,7 @@ class EngineConfig:
     use_fsdp_inference: bool = False
     disable_autocast: bool = False
     quantization: QuantizationConfig | None = None
+    enable_causal_cuda_graph: bool = False
 
 
 @dataclass

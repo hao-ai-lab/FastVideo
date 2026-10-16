@@ -70,6 +70,40 @@ class CausalWanSelfAttention(nn.Module):
                                    supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
                                                                  AttentionBackendEnum.TORCH_SDPA))
 
+    @staticmethod
+    def _evict_and_write(kv_cache, key, value, *, current_end, global_end_index, local_end_index_prev, sink_tokens):
+        num_new_tokens = key.shape[1]
+        num_evicted_tokens = num_new_tokens + local_end_index_prev - kv_cache["k"].shape[1]
+        num_rolled_tokens = local_end_index_prev - num_evicted_tokens - sink_tokens
+        for name, fresh in (("k", key), ("v", value)):
+            kv_cache[name][:, sink_tokens:sink_tokens + num_rolled_tokens] = kv_cache[name][
+                :, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+        local_end_index = local_end_index_prev + current_end - global_end_index - num_evicted_tokens
+        local_start_index = local_end_index - num_new_tokens
+        kv_cache["k"][:, local_start_index:local_end_index] = key
+        kv_cache["v"][:, local_start_index:local_end_index] = value
+        return local_start_index, local_end_index
+
+    @staticmethod
+    def _write_in_place(kv_cache, key, value, *, current_end, global_end_index, local_end_index_prev,
+                        is_chunk_start=None):
+        local_end_index = (local_end_index_prev if is_chunk_start is False else
+                           local_end_index_prev + current_end - global_end_index)
+        local_start_index = local_end_index - key.shape[1]
+        kv_cache["k"] = kv_cache["k"].detach()
+        kv_cache["v"] = kv_cache["v"].detach()
+        kv_cache["k"][:, local_start_index:local_end_index] = key
+        kv_cache["v"][:, local_start_index:local_end_index] = value
+        return local_start_index, local_end_index
+
+    @staticmethod
+    def _update_cache_counters(kv_cache, current_end, local_end_index):
+        for name, position in (("global_end_index", current_end), ("local_end_index", local_end_index)):
+            if isinstance(kv_cache[name], torch.Tensor):
+                kv_cache[name].fill_(position)
+            else:
+                kv_cache[name] = position
+
     def forward(self,
                 q: torch.Tensor,
                 k: torch.Tensor,
@@ -79,7 +113,8 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache: dict | None = None,
                 current_start: int = 0,
                 cache_start: int | None = None,
-                frame_seqlen: int = 1560):
+                frame_seqlen: int = 1560,
+                is_chunk_start: bool | None = None):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
@@ -169,33 +204,16 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache["global_end_index"], torch.Tensor) else int(kv_cache["global_end_index"]))
             local_end_index_prev = (int(kv_cache["local_end_index"].item()) if isinstance(
                 kv_cache["local_end_index"], torch.Tensor) else int(kv_cache["local_end_index"]))
-            if self.local_attn_size != -1 and (current_end
-                                               > global_end_index) and (num_new_tokens + local_end_index_prev
-                                                                        > kv_cache_size):
-                # Calculate the number of new tokens added in this step
-                # Shift existing cache content left to discard oldest tokens
-                # Clone the source slice to avoid overlapping memory error
-                num_evicted_tokens = num_new_tokens + local_end_index_prev - kv_cache_size
-                num_rolled_tokens = local_end_index_prev - num_evicted_tokens - sink_tokens
-                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                # Insert the new keys/values at the end
-                local_end_index = local_end_index_prev + current_end - \
-                    global_end_index - num_evicted_tokens
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = stored_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+            starts_chunk = current_end > global_end_index if is_chunk_start is None else is_chunk_start
+            if (self.local_attn_size != -1 and starts_chunk
+                    and num_new_tokens + local_end_index_prev > kv_cache_size):
+                _, local_end_index = self._evict_and_write(
+                    kv_cache, stored_key, v, current_end=current_end, global_end_index=global_end_index,
+                    local_end_index_prev=local_end_index_prev, sink_tokens=sink_tokens)
             else:
-                # Assign new keys/values directly up to current_end
-                local_end_index = local_end_index_prev + current_end - global_end_index
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"] = kv_cache["k"].detach()
-                kv_cache["v"] = kv_cache["v"].detach()
-                # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
-                kv_cache["k"][:, local_start_index:local_end_index] = stored_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+                _, local_end_index = self._write_in_place(
+                    kv_cache, stored_key, v, current_end=current_end, global_end_index=global_end_index,
+                    local_end_index_prev=local_end_index_prev, is_chunk_start=is_chunk_start)
             key_window = kv_cache["k"][:, max(0, local_end_index - max_attention_size):local_end_index]
             value_window = kv_cache["v"][:, max(0, local_end_index - max_attention_size):local_end_index]
             if relativistic:
@@ -210,14 +228,7 @@ class CausalWanSelfAttention(nn.Module):
             if sp_world_size > 1:
                 # Gather per-rank head outputs back to the full head dimension.
                 x = sequence_model_parallel_all_gather(x.contiguous(), dim=2)
-            if isinstance(kv_cache["global_end_index"], torch.Tensor):
-                kv_cache["global_end_index"].fill_(current_end)
-            else:
-                kv_cache["global_end_index"] = current_end
-            if isinstance(kv_cache["local_end_index"], torch.Tensor):
-                kv_cache["local_end_index"].fill_(local_end_index)
-            else:
-                kv_cache["local_end_index"] = local_end_index
+            self._update_cache_counters(kv_cache, current_end, local_end_index)
 
         return x
 
@@ -301,6 +312,7 @@ class CausalWanTransformerBlock(nn.Module):
         current_start: int = 0,
         cache_start: int | None = None,
         frame_seqlen: int | None = None,
+        is_chunk_start: bool | None = None,
     ) -> torch.Tensor:
         # hidden_states.shape: [batch_size, seq_length, inner_dim]
         # temb.shape: [batch_size, temb_seq_len, 6, inner_dim]
@@ -348,6 +360,7 @@ class CausalWanTransformerBlock(nn.Module):
             current_start,
             cache_start,
             frame_seqlen=frame_seqlen,
+            is_chunk_start=is_chunk_start,
         )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
@@ -396,6 +409,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         self.patch_size = config.patch_size
         self.text_len = config.text_len
         self.local_attn_size = config.local_attn_size
+        self.sink_size = config.sink_size
         self.rope_cache_policy = config.arch_config.rope_cache_policy
 
         # 1. Patch & position embedding
@@ -448,6 +462,17 @@ class CausalWanTransformer3DModel(BaseDiT):
         self.independent_first_frame = False
 
         self.__post_init__()
+
+        self._causal_cuda_graph_enabled = False
+        self._causal_rope_cache = None
+
+    def prepare_causal_cuda_graph(self, enabled: bool) -> None:
+        """Own device-side tables for the lifetime of a serial graph request."""
+        self._causal_cuda_graph_enabled = enabled
+        self.condition_embedder.time_embedder.cache_frequencies = enabled
+        if not enabled:
+            self._causal_rope_cache = None
+            self.condition_embedder.time_embedder._frequency_cache = None
 
     @staticmethod
     def _prepare_blockwise_causal_attn_mask(device: torch.device | str,
@@ -586,6 +611,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                            current_start: int = 0,
                            cache_start: int = 0,
                            start_frame: int = 0,
+                           is_chunk_start: bool | None = None,
                            **kwargs) -> torch.Tensor:
         r"""
         Run the diffusion model with kv caching.
@@ -625,15 +651,22 @@ class CausalWanTransformer3DModel(BaseDiT):
         else:
             rope_num_frames = post_patch_num_frames
             rope_start_frame = start_frame  # 0 when kv_cache is None
-        freqs_cos, freqs_sin = get_rotary_pos_embed((rope_num_frames, post_patch_height, post_patch_width),
-                                                    self.hidden_size,
-                                                    self.num_attention_heads,
-                                                    rope_dim_list,
-                                                    dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-                                                    rope_theta=10000,
-                                                    start_frame=rope_start_frame)
-        freqs_cos = freqs_cos.to(hidden_states.device)
-        freqs_sin = freqs_sin.to(hidden_states.device)
+        rope_key = (rope_num_frames, post_patch_height, post_patch_width, rope_start_frame, hidden_states.device)
+        use_device_cache = self._causal_cuda_graph_enabled and self.rope_cache_policy == "relativistic"
+        if use_device_cache and self._causal_rope_cache is not None and self._causal_rope_cache[0] == rope_key:
+            freqs_cos, freqs_sin = self._causal_rope_cache[1]
+        else:
+            if use_device_cache and torch.cuda.is_current_stream_capturing():
+                raise RuntimeError("Prepare causal rotary tables before CUDA graph capture")
+            freqs_cos, freqs_sin = get_rotary_pos_embed(
+                (rope_num_frames, post_patch_height, post_patch_width), self.hidden_size,
+                self.num_attention_heads, rope_dim_list,
+                dtype=torch.float32 if current_platform.is_mps() else torch.float64,
+                rope_theta=10000, start_frame=rope_start_frame)
+            freqs_cos = freqs_cos.to(hidden_states.device)
+            freqs_sin = freqs_sin.to(hidden_states.device)
+            if use_device_cache:
+                self._causal_rope_cache = (rope_key, (freqs_cos, freqs_sin))
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         hidden_states = self.patch_embedding(hidden_states)
@@ -668,6 +701,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                     "cache_start": cache_start,
                     "block_mask": self.block_mask,
                     "frame_seqlen": post_patch_height * post_patch_width,
+                    "is_chunk_start": is_chunk_start,
                 }
                 hidden_states = self._gradient_checkpointing_func(block, hidden_states, encoder_hidden_states,
                                                                   timestep_proj, freqs_cis, **causal_kwargs)
@@ -679,6 +713,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                     "cache_start": cache_start,
                     "block_mask": self.block_mask,
                     "frame_seqlen": post_patch_height * post_patch_width,
+                    "is_chunk_start": is_chunk_start,
                 }
                 hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, freqs_cis, **causal_kwargs)
 

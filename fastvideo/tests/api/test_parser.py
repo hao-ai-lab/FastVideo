@@ -167,6 +167,7 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
                 "use_fsdp_inference": False,
                 "disable_autocast": False,
                 "quantization": None,
+                "enable_causal_cuda_graph": False,
             },
             "pipeline": {
                 "workload_type": None,
