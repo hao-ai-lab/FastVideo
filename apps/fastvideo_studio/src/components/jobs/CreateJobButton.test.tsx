@@ -3,11 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CreateJobButton from './CreateJobButton';
-import { getDatasets, getModels } from '@/lib/api';
+import { getDatasets, getModels, getInferenceOptions } from '@/lib/api';
 
 vi.mock('@/lib/api', () => ({
   createJob: vi.fn(),
   getModels: vi.fn(),
+  getInferenceOptions: vi.fn(),
   getDatasets: vi.fn(),
   uploadImage: vi.fn(),
   getSettings: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock('@/lib/api', () => ({
 }));
 
 beforeEach(() => {
+  vi.mocked(getInferenceOptions).mockResolvedValue({attention_backends: [], defaults: {}, source: null});
   vi.mocked(getModels).mockResolvedValue([
     { id: 'wan/t2v-1.3b', label: 'Wan T2V' },
   ]);

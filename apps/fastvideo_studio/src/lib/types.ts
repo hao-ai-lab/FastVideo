@@ -22,6 +22,8 @@ export interface Job {
 	width: number;
 	guidance_scale: number;
 	seed: number;
+	attention_backend?: string | null;
+	vsa_tile_size?: number | null;
 	num_gpus: number;
 	progress: number;
 	progress_msg: string;

@@ -72,3 +72,12 @@ describe("referenceFileName", () => {
 		expect(referenceFileName("c.mp4")).toBe("c.mp4");
 	});
 });
+
+
+it('restores explicit attention settings and treats old jobs as Auto', () => {
+  const fields = jobToFormFields({ ...job, attention_backend: 'VIDEO_SPARSE_ATTN_H3', vsa_tile_size: 64 });
+  expect(fields.attentionBackend).toBe('VIDEO_SPARSE_ATTN_H3');
+  expect(fields.vsaTileSize).toBe(64);
+  expect(jobToFormFields(job).attentionBackend).toBe('');
+  expect(jobToFormFields(job).vsaTileSize).toBeNull();
+});
