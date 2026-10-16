@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Input } from "@/components/ui/input";
 
 export default function HardwarePicker({
@@ -14,10 +14,11 @@ export default function HardwarePicker({
 }) {
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
-  const [custom, setCustom] = useState(() => {
+  const [custom, setCustom] = useState("");
+  useEffect(() => {
     const requested = new URL(window.location.href).searchParams.get("hardware");
-    return requested?.startsWith("custom:") ? requested.slice(7) : "";
-  });
+    setCustom(requested?.startsWith("custom:") ? requested.slice(7) : "");
+  }, []);
   const id = useId();
   const known = options.filter((option) => option.join(" ").toLowerCase().includes(search.toLowerCase()));
   function add() {

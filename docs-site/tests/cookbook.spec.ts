@@ -98,12 +98,12 @@ test("an obsolete deployment response cannot replace the selected deployment", a
   await output(page, "config.yaml");
   await expect(page.getByLabel("Generated YAML", { exact: true })).toBeVisible();
   await backend(page, "MLX");
-  await backend(page, "NVIDIA");
+  await backend(page, "CUDA");
   release();
   await output(page, "config.yaml");
   await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText("FastVideo-FastH3-8-Step-V2");
   await expect(
-    page.getByRole("group", { name: "Hardware backend" }).getByRole("button", { name: "NVIDIA", exact: true }),
+    page.getByRole("group", { name: "Hardware backend" }).getByRole("button", { name: "CUDA", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -226,10 +226,18 @@ test("image and audio models have logos and dedicated source recipe pages", asyn
   await card.click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("FLUX.2 Klein 4B");
   await expect(page.getByLabel("Inference command")).toContainText("flux");
-  await expect(page.getByText(/Interactive YAML configuration is not available for this model yet/)).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Run mode" }).getByRole("button", { name: "Python SDK", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Serving", exact: true })).toHaveCount(0);
+  await page.getByLabel("Seed", { exact: true }).fill("0");
+  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
   await page.goto("/FastVideo/cookbook");
   await page.getByRole("button", { name: "Audio", exact: true }).click();
   await expect(page.locator(".recipe-card")).toHaveCount(3);
+  await page.locator(".recipe-card").first().click();
+  await page.getByLabel("Audio duration", { exact: true }).fill("1.5");
+  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
 });
 
 test("provider labels match FastVideo logos and CompactH3 is replaced by FastH3 Trim", async ({ page }) => {
@@ -240,10 +248,92 @@ test("provider labels match FastVideo logos and CompactH3 is replaced by FastH3 
   await expect(page.locator(".recipe-card")).toHaveCount(1);
   await page.locator(".recipe-card").click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("FastH3 Trim");
-  await expect(page.getByRole("link", { name: "NVFP4 ↗", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "View on Hugging Face ↗", exact: true })).toHaveAttribute(
     "href",
     /FastVideo-FastH3-Trim-8-Step-NVFP4/,
   );
+  await expect(page.getByRole("button", { name: "Copy YAML", exact: true })).toBeEnabled();
+});
+
+test("FastH3 Trim edits drive inference, serving, and complete copyable launch scripts", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async (text: string) => {
+          (window as Window & { copiedCommand?: string }).copiedCommand = text;
+        },
+      },
+    });
+  });
+  await page.goto("/FastVideo/cookbook/minimax-h3/fasth3-trim");
+  await expect(page.getByRole("radio", { name: "DGX Spark GB10", exact: true })).toBeChecked();
+  await expect(page.getByRole("radio", { name: "H100 Data center", exact: true })).toHaveCount(0);
+  await page.getByLabel("Prompt", { exact: true }).fill("A potter finishes a blue bowl.");
+  await page.getByLabel("Seed", { exact: true }).fill("0");
+  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  const script = await page.evaluate(() => (window as Window & { copiedCommand?: string }).copiedCommand);
+  expect(script).toContain("cat > config.yaml <<'FASTVIDEO_CONFIG'");
+  expect(script).toContain("FastVideo-FastH3-Trim-8-Step-NVFP4");
+  expect(script).toContain('"seed": 0');
+  expect(script).toContain("FASTVIDEO_VSA_TRITON=1");
+  expect(script).toContain("fastvideo serve --config config.yaml");
+  await page.locator(".recipe-request-code summary").click();
+  await expect(page.getByLabel("Client command", { exact: true })).toContainText("A potter finishes a blue bowl.");
+  await chip(page, "Run mode", "CLI");
+  await expect(page.getByLabel("Inference command", { exact: true })).toContainText("fastvideo generate");
+  await output(page, "config.yaml");
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText("request:");
+  await expect(page.getByLabel("Generated YAML", { exact: true })).not.toContainText("server:");
+  await expect(page.getByLabel("Generated YAML", { exact: true })).toContainText("num_inference_steps: 9");
+  await chip(page, "Run mode", "Python SDK");
+  await output(page, "Commands");
+  await expect(page.getByLabel("SDK command", { exact: true })).toContainText("VideoGenerator.from_config");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("source-backed controls update the copied command without changing models", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/minimax-h3/models/minimax-h3-t2v");
+  await chip(page, "GPU count", "2");
+  await expect(page.getByLabel("Inference command", { exact: true })).toContainText("--num-gpus '2'");
+});
+
+test("source editors retain required model flags and preparation commands", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/wan/models/fastmetal-1-3b-mlx");
+  await expect(page.getByLabel("Height", { exact: true })).toHaveValue("480");
+  await expect(page.getByLabel("Inference command", { exact: true })).toContainText(
+    "hf download FastVideo/FastMetal-1.3B-QAD",
+  );
+  await expect(page.getByLabel("Inference command", { exact: true })).toContainText(
+    "--model-root ./FastMetal-1.3B-QAD",
+  );
+  await page.getByLabel("Seed", { exact: true }).fill("0");
+  await expect(page.getByLabel("Inference command", { exact: true })).toContainText("--seed '0'");
+  await page.getByRole("tab", { name: "Python example", exact: true }).click();
+  await expect(page.getByLabel("Source example", { exact: true })).toContainText("default=480");
+});
+
+test("source-backed serving pages expose their actual server settings", async ({ page }) => {
+  await page.goto("/FastVideo/cookbook/wan/models/wan22-t2v");
+  await chip(page, "Run mode", "Serving");
+  await page.locator(".matrix-advanced > summary").click();
+  await page.getByLabel("Port", { exact: true }).fill("9005");
+  await page.getByRole("button", { name: "cURL", exact: true }).click();
+  await expect(page.getByLabel("Client command", { exact: true })).toContainText(":9005/v1/videos/sync");
+  await page.getByRole("tab", { name: "config.yaml", exact: true }).click();
+  await expect(page.getByLabel("Source example", { exact: true })).toContainText("port: 9005");
+  await expect(page.getByLabel("Source example", { exact: true })).toContainText("Wan2.2-T2V-A14B");
+  await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeEnabled();
+});
+
+test("source model hardware preferences survive hydration and reload", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/FastVideo/cookbook/flux/models/flux2-klein-t2i?hardware=custom%3ARTX%204090");
+  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
+  await page.reload();
+  await expect(page.getByRole("radio", { name: "RTX 4090 Custom device", exact: true })).toBeChecked();
+  expect(errors).toEqual([]);
 });
 
 test("custom devices persist and component previews cannot silently generate incompatible YAML", async ({ page }) => {

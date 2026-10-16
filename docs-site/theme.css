@@ -687,6 +687,30 @@
   margin-block-end: 1rem;
   overflow: clip;
 }
+.recipe-run-modes {
+  margin-block-end: 1rem;
+}
+.recipe-command-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  order: 3;
+}
+.recipe-command-tools button {
+  min-block-size: 1.75rem;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.375rem;
+  color: var(--blume-foreground);
+  background: var(--blume-background);
+}
+.recipe-command-tools button[aria-pressed="true"] {
+  border-color: currentColor;
+}
+.recipe-environment {
+  padding: 1rem;
+  border-block-end: 1px solid var(--recipe-line);
+}
 .recipe-command-toolbar {
   display: flex;
   flex-wrap: wrap;

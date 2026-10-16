@@ -36,6 +36,7 @@ export interface Catalog {
   id: string;
   title: string;
   summary?: string;
+  env: Record<string, string>;
   base_config: Record<string, Value>;
   runtime: {
     label: string;
@@ -48,12 +49,21 @@ export interface Catalog {
   guide?: { url: string; label?: string };
 }
 export interface Result {
+  config: Record<string, Value>;
   yaml: string;
   command: string;
   clientCommand: string;
   websocketUrl?: string;
 }
 interface Api {
+  sampleRequest(
+    catalog: {
+      runtime: { interface: string; server_defaults: { host: string; port: number } };
+      model: { id: string };
+      workload: string;
+    },
+    config: Record<string, Value>,
+  ): { command: string };
   loadIndex(url: string, options?: { signal?: AbortSignal }): Promise<Index>;
   loadDeployment(index: Index, id: string, options?: { signal?: AbortSignal }): Promise<Catalog>;
   getOptions(catalog: Catalog, config?: Catalog["base_config"], edits?: Record<string, Value>): Field[];

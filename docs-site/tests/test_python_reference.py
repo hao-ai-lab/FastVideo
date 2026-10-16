@@ -1,4 +1,5 @@
 """Regression checks for source-only API rendering, without importing model code."""
+import ast
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -68,6 +69,24 @@ class Empty:
         rendered = renderer.symbol(self.module["generate"], "sample.generate")
         self.assertNotIn('[]', rendered)
         self.assertIn("&#91;", rendered)
+
+    def test_example_controls_edit_literals_without_imports_and_use_javascript_offsets(self):
+        source = '''raise RuntimeError("Never execute this example 🥣")
+PROMPT = "A bowl"
+generator = VideoGenerator.from_pretrained("Example/Model", num_gpus=1)
+parser.add_argument("--num-frames", type=int, default=124)
+parser.add_argument("--fps", type=float, default=24)
+generator.generate_video(height=480, prompt=PROMPT)
+'''
+        controls = renderer.source_controls(source)
+        self.assertEqual({item["name"] for item in controls}, {"prompt", "num_gpus", "num_frames", "height", "fps"})
+        self.assertFalse(next(item for item in controls if item["name"] == "fps")["integer"])
+        frames = next(item for item in controls if item["name"] == "num_frames")
+        self.assertEqual(frames["flag"], "--num-frames")
+        for item in controls:
+            for start, end in item["spans"]:
+                literal = source.encode("utf-16-le")[start * 2:end * 2].decode("utf-16-le")
+                self.assertEqual(ast.literal_eval(literal), item["value"])
 
     def test_class_includes_constructor_documentation_without_a_separate_method(self):
         for obj, path in [(self.module["Generator"], "sample.Generator"),

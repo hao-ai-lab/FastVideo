@@ -74,7 +74,7 @@ to documentation, not embedded HTML.
 
 ## Shared JavaScript API
 
-`docs/js/cookbook-config.mjs` exports the four functions below. The generated
+`docs/js/cookbook-config.mjs` exports the five functions below. The generated
 `assets/cookbook-config/cookbook-config.js` bundles them with Ajv and exposes
 the browser global `FastVideoConfigCookbook` and CommonJS exports:
 
@@ -84,6 +84,12 @@ the browser global `FastVideoConfigCookbook` and CommonJS exports:
 | `loadDeployment(index, id, {signal, fetcher} = {})` | Promise of the selected complete catalog |
 | `getOptions(catalog, config = catalog.base_config, edits = {})` | `[{path, schema, value}]`, including GPU-dependent degree limits |
 | `resolveConfig(catalog, edits = {})` | `config`, `yaml`, `argv`, `command`, `clientRequest`, `clientCommand`, optional `websocketUrl` |
+| `sampleRequest(metadata, config)` | `{body, command}` and optional `websocketUrl` for a native serving baseline |
+
+`sampleRequest()` is also used by model pages backed by a checked-in serving
+YAML rather than a full editable catalog. Its metadata supplies `model.id`,
+`workload`, and `runtime.interface`/`runtime.server_defaults`. It builds client
+instructions only; it does not validate the configuration or run a request.
 
 For WebSocket deployments, `clientRequest` is `null` and `websocketUrl` is
 present. REST deployments return a request object and omit `websocketUrl`.

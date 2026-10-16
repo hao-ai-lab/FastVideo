@@ -22,6 +22,9 @@ await cp(new URL("docs/assets/cookbook-config/", repo), destination, {
 await cp(new URL("docs/assets/logos/icon_simple.svg", repo), new URL("icon.svg", publicDir));
 
 await cp(new URL("../assets/hao-ai-lab.png", import.meta.url), new URL("assets/hao-ai-lab.png", publicDir));
+await cp(new URL("../.generated/source-examples/", import.meta.url), new URL("assets/cookbook-examples/", publicDir), {
+  recursive: true,
+});
 
 // Publish exact checked-in YAML for inference-only model pages. No settings are synthesized.
 const sourceDir = new URL("assets/cookbook-sources/", publicDir);

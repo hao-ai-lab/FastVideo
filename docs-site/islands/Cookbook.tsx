@@ -8,8 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import SourceRecipe from "./SourceRecipe";
 import ComponentPlan from "@/components/cookbook/ComponentPlan";
 import HardwarePicker from "@/components/cookbook/HardwarePicker";
-import ModelRelease from "@/components/cookbook/ModelRelease";
 import ModelHeader from "@/components/cookbook/ModelHeader";
+import { configAndLaunch, inferenceOutput, sdkCommand } from "@/lib/cookbook-commands";
 import {
   api,
   guideUrl,
@@ -194,8 +194,14 @@ function Editor({
 }) {
   const [advanced, setAdvanced] = useState(false);
   const [componentDraft, setComponentDraft] = useState(false);
+  const [runMode, setRunMode] = useState("serving");
+  const [showEnv, setShowEnv] = useState(false);
+  const [showClient, setShowClient] = useState(false);
+  const [outputTab, setOutputTab] = useState("commands");
   const [hardware, setHardware] = useState(
-    () => new URL(window.location.href).searchParams.get("hardware") ?? "unspecified",
+    () =>
+      new URL(window.location.href).searchParams.get("hardware") ??
+      (catalog.id.startsWith("fasth3-trim/") ? "spark" : "unspecified"),
   );
   const [edits, setEdits] = useState<Record<string, Value>>({});
   const [parseErrors, setParseErrors] = useState<Record<string, string>>({});
@@ -214,6 +220,12 @@ function Editor({
     failedPath = (error as { path?: string }).path;
   }
   const fields = api.getOptions(catalog, catalog.base_config, edits);
+  const output = result && (runMode !== "serving" ? inferenceOutput(result) : result);
+  const launchCommand =
+    output &&
+    (runMode === "sdk"
+      ? output.command.replace(/fastvideo generate --config config\.yaml$/, sdkCommand)
+      : output.command);
   const groups = [...new Set(fields.map((field) => field.path.split(".").slice(0, -1).join(".")))];
   function update(path: string, raw: string | undefined, field: Field) {
     setNotice("");
@@ -240,8 +252,8 @@ function Editor({
     }
   }
   function download() {
-    if (!result) return;
-    const url = URL.createObjectURL(new Blob([result.yaml], { type: "application/yaml" }));
+    if (!output) return;
+    const url = URL.createObjectURL(new Blob([output.yaml], { type: "application/yaml" }));
     const link = document.createElement("a");
     link.href = url;
     link.download = "config.yaml";
@@ -250,16 +262,20 @@ function Editor({
     setNotice("Downloaded config.yaml.");
   }
   const mlx = catalog.runtime.backend === "mlx";
-  const hardwareOptions = mlx
-    ? [["apple", "Apple Silicon", "Unified memory"]]
-    : [
-        ["b200", "B200", "Data center"],
-        ["gb200", "GB200", "Data center"],
-        ["h100", "H100", "Data center"],
-        ["rtx5090", "RTX 5090", "GeForce"],
-        ["rtx", "RTX PRO 6000", "Workstation"],
-        ["spark", "DGX Spark", "GB10"],
-      ];
+  const generator = catalog.base_config.generator as { engine?: { quantization?: { transformer_quant?: string } } };
+  const nvfp4 = generator?.engine?.quantization?.transformer_quant === "NVFP4";
+  const hardwareOptions = (
+    mlx
+      ? [["apple", "Apple Silicon", "Unified memory"]]
+      : [
+          ["b200", "B200", "Data center"],
+          ["gb200", "GB200", "Data center"],
+          ["h100", "H100", "Data center"],
+          ["rtx5090", "RTX 5090", "GeForce"],
+          ["rtx", "RTX PRO 6000", "Workstation"],
+          ["spark", "DGX Spark", "GB10"],
+        ]
+  ).filter(([id]) => !nvfp4 || id !== "h100");
   const selectedHardware = hardwareOptions.find(([value]) => value === hardware) ?? hardwareOptions[0];
   const model = modelDirectory.find((model) => model.id === catalog.id.split("/")[0])!;
   const renderField = (field: Field) => (
@@ -289,7 +305,7 @@ function Editor({
         model={model}
         actions={
           <>
-            <Button variant="outline" disabled={!result} onClick={() => result && copy(result.yaml)}>
+            <Button variant="outline" disabled={!output} onClick={() => output && copy(output.yaml)}>
               Copy YAML
             </Button>
             <Button disabled={!result} onClick={download}>
@@ -298,15 +314,69 @@ function Editor({
           </>
         }
       />
+      {
+        <div className="recipe-run-modes option-chips" role="group" aria-label="Run mode">
+          {(mlx ? ["serving"] : ["sdk", "inference", "serving"]).map((mode) => (
+            <button
+              type="button"
+              key={mode}
+              aria-pressed={runMode === mode}
+              onClick={() => {
+                setRunMode(mode);
+                setNotice("");
+              }}
+            >
+              {mode === "sdk" ? "Python SDK" : mode === "inference" ? "CLI" : "Serving"}
+            </button>
+          ))}
+        </div>
+      }
       <section className="recipe-command-box" aria-label="Generated configuration">
-        <Tabs.Root defaultValue="commands">
+        <Tabs.Root value={outputTab} onValueChange={setOutputTab}>
           <div className="recipe-command-toolbar">
             <span className="recipe-unverified">Unverified recipe</span>
+            <div className="recipe-command-tools">
+              <button
+                type="button"
+                disabled={!output}
+                onClick={() => output && copy(configAndLaunch(output.yaml, launchCommand!))}
+              >
+                Copy
+              </button>
+              {runMode === "serving" && (
+                <button
+                  type="button"
+                  disabled={!result}
+                  aria-expanded={showClient}
+                  aria-controls={`client-${catalog.id.replaceAll("/", "-")}`}
+                  onClick={() => {
+                    setOutputTab("commands");
+                    setShowClient(!showClient);
+                  }}
+                >
+                  cURL
+                </button>
+              )}
+              {Object.keys(catalog.env).length > 0 && (
+                <button type="button" aria-pressed={showEnv} onClick={() => setShowEnv(!showEnv)}>
+                  Env
+                </button>
+              )}
+            </div>
             <Tabs.List className="recipe-tabs" aria-label="Output format">
               <Tabs.Trigger value="commands">Commands</Tabs.Trigger>
               <Tabs.Trigger value="yaml">config.yaml</Tabs.Trigger>
             </Tabs.List>
           </div>
+          {showEnv && (
+            <pre className="recipe-environment" tabIndex={0} aria-label="Environment variables">
+              <code>
+                {Object.entries(catalog.env)
+                  .map(([name, value]) => `${name}=${value}`)
+                  .join("\n")}
+              </code>
+            </pre>
+          )}
           {failure && (
             <div role="alert" className="recipe-error">
               <p>{failure}</p>
@@ -316,38 +386,50 @@ function Editor({
             </div>
           )}
           <Tabs.Content value="commands" className="recipe-command-content">
-            {result && (
+            {result && output && (
               <>
                 <div className="recipe-code-heading">
-                  <span>Serve</span>
-                  <button type="button" onClick={() => copy(result.command)}>
-                    Copy server command
-                  </button>
+                  <span>{runMode === "sdk" ? "Python SDK" : runMode === "inference" ? "Generate" : "Serve"}</span>
                 </div>
-                <pre tabIndex={0} aria-label="Server command">
-                  <code>{result.command}</code>
+                <pre
+                  tabIndex={0}
+                  aria-label={
+                    runMode === "sdk" ? "SDK command" : runMode === "inference" ? "Inference command" : "Server command"
+                  }
+                >
+                  <code>{launchCommand}</code>
                 </pre>
-                <details className="recipe-request-code">
-                  <summary>{result.websocketUrl ? "Health check and WebSocket" : "Example request"}</summary>
-                  <button type="button" onClick={() => copy(result.clientCommand)}>
-                    Copy client command
-                  </button>
-                  <pre tabIndex={0} aria-label="Client command">
-                    <code>{result.clientCommand}</code>
-                  </pre>
-                  {result.websocketUrl && (
-                    <p>
-                      WebSocket URL: <code>{result.websocketUrl}</code>
-                    </p>
-                  )}
-                </details>
+                <p className="matrix-note">
+                  Includes your settings and writes config.yaml. Run from an installed FastVideo checkout.
+                </p>
+                {runMode === "serving" && (
+                  <details
+                    className="recipe-request-code"
+                    id={`client-${catalog.id.replaceAll("/", "-")}`}
+                    open={showClient}
+                    onToggle={(event) => setShowClient(event.currentTarget.open)}
+                  >
+                    <summary>{result.websocketUrl ? "Health check and WebSocket" : "Example request"}</summary>
+                    <button type="button" onClick={() => copy(result.clientCommand)}>
+                      Copy client command
+                    </button>
+                    <pre tabIndex={0} aria-label="Client command">
+                      <code>{result.clientCommand}</code>
+                    </pre>
+                    {result.websocketUrl && (
+                      <p>
+                        WebSocket URL: <code>{result.websocketUrl}</code>
+                      </p>
+                    )}
+                  </details>
+                )}
               </>
             )}
           </Tabs.Content>
           <Tabs.Content value="yaml" className="recipe-command-content">
-            {result && (
+            {output && (
               <pre tabIndex={0} aria-label="Generated YAML">
-                <code>{result.yaml}</code>
+                <code>{output.yaml}</code>
               </pre>
             )}
           </Tabs.Content>
@@ -358,7 +440,7 @@ function Editor({
       </section>
       <details className="recipe-install">
         <summary>
-          Installation <span>{catalog.runtime.label}</span>
+          Installation <span>{catalog.runtime.label.replace(/\s*REST/gi, "")}</span>
         </summary>
         {catalog.requirements?.length ? (
           <ul>
@@ -385,7 +467,7 @@ function Editor({
                   if (catalog.id !== deployment.id) selectRuntime(deployment.id);
                 }}
               >
-                {deployment.runtime.includes("mlx") ? "MLX" : "NVIDIA"}
+                {deployment.runtime.includes("mlx") ? "MLX" : "CUDA"}
               </button>
             ))}
           </div>
@@ -417,6 +499,17 @@ function Editor({
         </MatrixRow>
         {model.family === "FastH3" && (
           <MatrixRow title="Components">
+            {model.id === "fasth3-trim" && (
+              <div className="option-chips" aria-label="Recipe components">
+                {["NVFP4 transformer", "50-layer NVFP4 encoder", "Lightweight video VAE", "H3 audio VAE"].map(
+                  (name) => (
+                    <span className="option-chip-static" key={name}>
+                      {name}
+                    </span>
+                  ),
+                )}
+              </div>
+            )}
             <ComponentPlan key={reset} onDraftChange={setComponentDraft} />
           </MatrixRow>
         )}
@@ -461,7 +554,7 @@ function Editor({
         </details>
       </section>
       <div className="recipe-bottom-actions">
-        <span>Save config.yaml before running the server.</span>
+        <span>Copy config and launch together, or download config.yaml first.</span>
         <Button
           variant="ghost"
           onClick={() => {
@@ -489,6 +582,8 @@ function MatrixRow({ title, children }: { title: string; children: ReactNode }) 
 }
 
 export default function Cookbook({ modelId }: { modelId?: string }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [index, setIndex] = useState<Index>();
   const [selected, setSelected] = useState("");
   const [catalog, setCatalog] = useState<Catalog>();
@@ -555,8 +650,19 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
   const model = index?.models.find((model) => model.id === modelId);
   if (!modelId) return <RecipeDirectory index={index} error={error} retry={() => setRetry(retry + 1)} />;
   const directoryModel = modelDirectory.find((model) => model.id === modelId);
-  if (directoryModel?.releaseOnly) return <ModelRelease model={directoryModel} />;
-  if (directoryModel && !directoryModel.configurable) return <SourceRecipe model={directoryModel} />;
+  if (directoryModel && !directoryModel.configurable)
+    return mounted ? (
+      <SourceRecipe model={directoryModel} />
+    ) : (
+      <div className="cookbook not-prose recipe-detail">
+        <ModelHeader model={directoryModel} />
+        <p>{directoryModel.description}</p>
+        <p className="recipe-loading">Loading recipe…</p>
+        <a href={`https://github.com/hao-ai-lab/FastVideo/blob/main/${directoryModel.recipes[0].source}`}>
+          View maintained example ↗
+        </a>
+      </div>
+    );
   return (
     <div className="cookbook not-prose recipe-detail">
       {error ? (
@@ -586,7 +692,7 @@ export default function Cookbook({ modelId }: { modelId?: string }) {
                 aria-pressed={selected === deployment.id}
                 onClick={() => select(deployment.id)}
               >
-                {deployment.runtime.includes("mlx") ? "MLX" : "NVIDIA"}
+                {deployment.runtime.includes("mlx") ? "MLX" : "CUDA"}
               </button>
             ))}
           </div>

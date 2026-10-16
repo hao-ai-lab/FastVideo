@@ -13,6 +13,15 @@ export const recipePages = [
     featured: true,
   },
   {
+    id: "fasth3-trim",
+    family: "FastH3",
+    title: "FastH3 Trim",
+    mark: "H3",
+    path: "/cookbook/minimax-h3/fasth3-trim",
+    description: "The smaller FastH3 model for eight-step video generation with synchronized audio.",
+    tags: ["Text to video", "Audio", "NVFP4", "8-step"],
+  },
+  {
     id: "fastwan21",
     family: "Wan",
     title: "FastWan2.1 1.3B",
@@ -56,7 +65,15 @@ export interface SourceRecipe {
   command: string;
   gpu_types: string[];
   hardware?: { gpu_count?: number; platform?: string; accelerator?: string };
-  serving?: { source: string; install: string; env?: string };
+  serving?: { source: string; install: string; env?: string; prepare?: string };
+  knobs?: {
+    key: string;
+    label: string;
+    hint?: string;
+    flag: string;
+    default: string | number;
+    options: (string | number | { value: string | number; label: string })[];
+  }[];
 }
 export const sourceRecipes = sourceCatalog.recipes as SourceRecipe[];
 const familyInfo: Record<string, { title: string; path: string; logo: string; category: string }> = {
@@ -75,6 +92,7 @@ const familyInfo: Record<string, { title: string; path: string; logo: string; ca
 };
 const backendModels: Record<string, string> = {
   "FastVideo/FastVideo-FastH3-8-Step-V2": "fasth3-8step",
+  "FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4": "fasth3-trim",
   "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": "fastwan21",
   "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": "wan21-i2v",
   "FastVideo/LTX2-Distilled-Diffusers": "ltx2-distilled",
@@ -116,7 +134,6 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
       path: backend?.path ?? `/cookbook/${family.path}/models/${first.id}`,
       logo,
       provider: providers[logo],
-      releaseOnly: false,
       category: family.category,
       description: backend?.description ?? first.summary,
       tags: backend?.tags ?? [...new Set(recipes.map((recipe) => recipe.task))],
@@ -125,26 +142,6 @@ export const modelDirectory = [...new Set(sourceRecipes.map((recipe) => recipe.m
       featured: backend?.featured ?? false,
     };
   })
-  .concat([
-    {
-      id: "fasth3-trim",
-      model: "FastVideo/FastVideo-FastH3-Trim-8-Step",
-      recipes: [] as SourceRecipe[],
-      title: "FastH3 Trim",
-      family: "FastH3",
-      familyPath: "/cookbook/minimax-h3",
-      path: "/cookbook/minimax-h3/fasth3-trim",
-      logo: "fastvideo",
-      provider: "FastVideo",
-      releaseOnly: true,
-      category: "Video",
-      description: "The smaller FastH3 release, previously called CompactH3.",
-      tags: ["Text to video", "Audio", "8-step"],
-      platforms: ["NVIDIA", "Apple Silicon"],
-      configurable: false,
-      featured: false,
-    },
-  ])
   .sort(
     (a, b) =>
       Number(b.featured) - Number(a.featured) ||

@@ -103,6 +103,7 @@ test("browser bundle exposes reusable methods and its error class with no DOM or
     "loadDeployment",
     "loadIndex",
     "resolveConfig",
+    "sampleRequest",
   ]);
   const api = context.FastVideoConfigCookbook;
   assert.equal(api.resolveConfig(catalog(), { "server.port": 9000 }).config.server.port, 9000);
@@ -483,6 +484,14 @@ test("LoRA sample requests use the startup adapter instead of an edited server a
   assert.equal(Object.hasOwn(resolveConfig(data, edits).clientRequest, "model"), false);
   components.lora_path = null;
   assert.equal(resolveConfig(data, edits).clientRequest.model, "different-server-name");
+});
+
+test("sample requests honor an explicitly configured prompt", () => {
+  const data = catalog();
+  data.controls.push({ path: "default_request.prompt", schema: { type: "string" } });
+  const result = resolveConfig(data, { "default_request.prompt": "A potter finishes a blue bowl." });
+  assert.equal(result.clientRequest.prompt, "A potter finishes a blue bowl.");
+  assert.match(result.clientCommand, /A potter finishes a blue bowl/);
 });
 
 test("environment variables are present and shell quoted without evaluation", () => {

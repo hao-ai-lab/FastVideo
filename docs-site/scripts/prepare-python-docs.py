@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import html
+import ast
 import json
 import re
 import runpy
 import shutil
+import shlex
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -16,6 +18,68 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "docs-site"
 GENERATED = SITE / ".generated"
+
+
+def source_controls(source: str) -> list[dict]:
+    """Expose literal settings in maintained examples without importing them."""
+    labels = {
+        "prompt": "Prompt", "num_gpus": "GPU count", "height": "Height", "width": "Width",
+        "num_frames": "Frames", "seed": "Seed", "num_inference_steps": "Inference steps",
+        "guidance_scale": "Guidance scale", "fps": "FPS", "audio_end_in_s": "Audio duration",
+        "text_encoder_cpu_offload": "Offload text encoder", "vae_cpu_offload": "Offload VAE",
+        "dit_cpu_offload": "Offload transformer", "inference_torch_compile": "Compile transformer",
+        "video_decode_backend": "Video decoder",
+    }
+    lines = source.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+
+    def position(line, column):
+        prefix = source[:offsets[line - 1]] + lines[line - 1].encode()[:column].decode()
+        return len(prefix.encode("utf-16-le")) // 2
+
+    settings = {}
+
+    def add(name, value):
+        if name not in labels or not isinstance(value, ast.Constant) or type(value.value) not in (str, int, float, bool):
+            return
+        key = json.dumps([name, value.value])
+        entry = settings.setdefault(key, {"name": name, "label": labels[name], "value": value.value,
+                                          "integer": type(value.value) is int, "spans": []})
+        entry["spans"].append([position(value.lineno, value.col_offset), position(value.end_lineno, value.end_col_offset)])
+
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in {"from_pretrained", "generate_video"}:
+                for keyword in node.keywords:
+                    add(keyword.arg, keyword.value)
+            elif node.func.attr == "add_argument":
+                flags = [arg.value for arg in node.args if isinstance(arg, ast.Constant) and isinstance(arg.value, str)]
+                flag = next((flag for flag in flags if flag.startswith("--")), "")
+                for keyword in node.keywords:
+                    if keyword.arg == "default":
+                        add(flag.removeprefix("--").replace("-", "_"), keyword.value)
+                        key = json.dumps([flag.removeprefix("--").replace("-", "_"), getattr(keyword.value, "value", None)])
+                        if key in settings:
+                            settings[key]["flag"] = flag
+                            if any(item.arg == "type" and isinstance(item.value, ast.Name) and item.value.id == "float"
+                                   for item in node.keywords):
+                                settings[key]["integer"] = False
+                            settings[key]["booleanOptional"] = any(
+                                item.arg == "action" and isinstance(item.value, ast.Attribute) and item.value.attr == "BooleanOptionalAction"
+                                for item in node.keywords)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.isupper():
+                    add(target.id.lower(), node.value)
+    result = list(settings.values())
+    seen = {}
+    for field in result:
+        seen[field["label"]] = seen.get(field["label"], 0) + 1
+        if seen[field["label"]] > 1:
+            field["label"] += f' ({seen[field["label"]]})'
+    return result
 
 
 def signature(obj) -> str:
@@ -159,6 +223,27 @@ def prepare() -> None:
     examples = runpy.run_path(str(ROOT / "docs/generate_examples.py"))
     examples["validate_cookbook"]()
     examples["generate_examples"](generate_main_index=True)
+    source_dir = GENERATED / "source-examples"
+    shutil.rmtree(source_dir, ignore_errors=True)
+    source_dir.mkdir()
+    for recipe in json.loads((ROOT / "docs/assets/cookbook-recipes.json").read_text())["recipes"]:
+        path = ROOT / recipe["source"]
+        if path.suffix == ".py":
+            source = path.read_text()
+            controls = source_controls(source)
+            argv = shlex.split(recipe["command"])
+            for field in controls:
+                flag = field.get("flag")
+                positions = [i for i, argument in enumerate(argv[:-1]) if argument == flag]
+                if positions and type(field["value"]) is not bool:
+                    converter = float if isinstance(field["value"], (int, float)) and not field["integer"] else type(field["value"])
+                    field["value"] = converter(argv[positions[-1] + 1])
+                elif field.get("booleanOptional"):
+                    if flag in argv:
+                        field["value"] = True
+                    elif flag.replace("--", "--no-", 1) in argv:
+                        field["value"] = False
+            (source_dir / f'{recipe["id"]}.json').write_text(json.dumps({"source": source, "controls": controls}))
     anchors = json.loads((SITE / "migration-anchors.json").read_text())
     shutil.rmtree(GENERATED / "python-reference", ignore_errors=True)
     package = griffe.load("fastvideo", search_paths=[ROOT], allow_inspection=False, resolve_aliases=True,

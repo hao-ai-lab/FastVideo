@@ -328,8 +328,13 @@ sidebar family group.
 `docs-site/lib/cookbook-pages.ts` derives the inventory from
 `docs/assets/cookbook-recipes.json`. Recipes sharing a checkpoint become variants
 on one model page. `transfer-docs.mjs` generates source-recipe pages and sidebar
-entries. Preparation publishes exact checked-in YAML under
-`assets/cookbook-sources/`; it does not synthesize settings for these pages.
+entries. Preparation publishes checked-in YAML under `assets/cookbook-sources/`
+and Python examples with source locations for editable literals under
+`assets/cookbook-examples/`. Python examples are parsed with AST, never imported.
+Explicit values in the maintained launch command take priority over argparse
+defaults. The editor rewrites those literals and preserves required launch flags
+and preparation commands. Controls inherited from a helper may use an explicitly
+declared cookbook knob. Settings without a source binding stay hidden.
 
 For a model with an editable serving catalog, add its display metadata to
 `recipePages`, map the checkpoint in `backendModels`, and add an MDX overlay with
@@ -351,7 +356,22 @@ Old `/cookbook?deployment=<id>` links open the corresponding model page.
 
 Provider labels follow the displayed logo. FastVideo-owned releases and converted
 checkpoints using its mark display `FastVideo` as provider. FastH3 Trim replaces
-the obsolete CompactH3 catalog entry; do not restore its local assembly recipes.
+the obsolete CompactH3 catalog entry. Its editable NVFP4 deployment uses the
+released checkpoint and the maintained one-Spark inference configuration, with
+a serving adaptation under `examples/serving/`. Do not restore the old local
+assembly recipes or their four-forward sampling settings.
+
+Every model uses the same header, run modes, command toolbar, hardware matrix,
+settings, and reset controls. The top choices are Python SDK, CLI, and Serving,
+limited to supported routes. Hardware backends display CUDA or MLX. Serving
+appears only where a native server baseline exists.
+
+The toolbar's Copy action writes the edited YAML or Python example with a quoted
+heredoc, then runs the matching command. CUDA catalog pages use the same generator
+settings for SDK, CLI, and serving. Inference uses `request`; serving uses `server`
+and `default_request`. These commands assume the platform's installation guide
+has already been followed. cURL and environment tools appear where the recipe
+provides them. Do not invent CLI flags, serving support, or container commands.
 
 Custom hardware names can be added through the matrix and persist in the page
 URL. This is a device preference, not a memory lookup or compatibility result.

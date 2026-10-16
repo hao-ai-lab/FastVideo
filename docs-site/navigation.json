@@ -143,6 +143,10 @@
             "href": "/cookbook/minimax-h3/fasth3-8step"
           },
           {
+            "label": "FastH3 Trim",
+            "href": "/cookbook/minimax-h3/fasth3-trim"
+          },
+          {
             "label": "Recipes and setup",
             "href": "/cookbook/minimax-h3"
           },

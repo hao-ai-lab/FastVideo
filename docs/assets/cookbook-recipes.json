@@ -1,5 +1,5 @@
 {
-  "version": 16,
+  "version": 17,
   "recipes": [
     {
       "id": "fastwan21-t2v",
@@ -832,6 +832,31 @@
       "evidence": "Source-backed",
       "expected_artifact": "MP4 videos under video_samples_matrixgame3/",
       "related": ["matrix-game-2"]
+    },
+    {
+      "id": "fasth3-trim-spark",
+      "family": "minimax_h3",
+      "stage": "inference",
+      "task": "Text to video with audio",
+      "label": "FastH3 Trim",
+      "summary": "Eight-step video and synchronized audio with the released NVFP4 transformer, text encoder, and lightweight VAE.",
+      "model": "FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4",
+      "source": "examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml",
+      "command": "FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pruned_nvfp4.yaml",
+      "gpu_types": [
+        "NVIDIA"
+      ],
+      "hardware": {
+        "platform": "cuda",
+        "gpu_count": 1,
+        "device": "spark",
+        "evidence": "source-configured"
+      },
+      "evidence": "Source-backed",
+      "serving": {
+        "source": "examples/serving/openai_fasth3_trim_spark.yaml",
+        "install": "Install FastVideo following the DGX Spark installation guide."
+      }
     }
   ]
 }

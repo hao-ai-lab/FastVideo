@@ -336,7 +336,7 @@ function toYaml(value, depth = 0) {
 }
 
 /** Build same-machine client instructions; a bind-all address is not a client destination. */
-function sampleRequest(catalog, config) {
+export function sampleRequest(catalog, config) {
   const server = { ...catalog.runtime.server_defaults, ...config.server };
   let host = server.host;
   if (host === "0.0.0.0") host = "127.0.0.1";
@@ -351,7 +351,10 @@ function sampleRequest(catalog, config) {
   }
   const components = config.generator?.pipeline?.components;
   const model = components?.lora_path ? components.lora_nickname : server.served_model_name || catalog.model.id;
-  const body = { ...(model === undefined ? {} : { model }), prompt: "A river flowing through a peaceful forest" };
+  const body = {
+    ...(model === undefined ? {} : { model }),
+    prompt: config.default_request?.prompt ?? "A river flowing through a peaceful forest",
+  };
   if (catalog.workload === "i2v") body.input_reference = "/absolute/path/to/first-frame.png";
   const argv = [
     "curl",
