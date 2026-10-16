@@ -184,10 +184,14 @@ other than PDD students keep every conditioning row dense.
 
 ### Hardware
 
-The contract's 128-token tiles, `(4, 4, 8)`, run only on the sm_100a/sm_103a
+The contract's 128-token tiles, `(4, 4, 8)`, run on the sm_100a/sm_103a
 CUDA block-sparse kernel (B200, B300, GB200, GB300) of a fastvideo-kernel
-build with the Blackwell VSA extension. There is no Triton fallback for tile
-128: the backend raises instead. Tile 128 runs eagerly. Regional compile
+build with the Blackwell VSA extension. Elsewhere, including RTX PRO 6000
+(sm_120), each 128-token tile runs as two 64-token tiles of the Triton
+block-sparse kernels under the same block map; the output matches the dense
+oracle to the same tolerance as the CUDA kernel but is not bitwise equal to
+it. The backend raises only when neither kernel is installed. Tile 128 runs
+eagerly. Regional compile
 requires 64-token tiles. With `--num-gpus` above 1 the example shards the DiT
 across the GPUs (FSDP) and splits the sequence across them.
 
