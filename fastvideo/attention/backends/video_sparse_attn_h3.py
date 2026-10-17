@@ -52,11 +52,13 @@ the original logical tiles. Grad-tracking forwards and every backward stay
 on the Triton kernels. If the env is set but a precondition fails, the route
 logs one warning and falls back.
 
-Tile 128 has exactly one implementation: the same sm_100a/sm_103a CUDA
-forward, which carries a 128-token block instantiation. It needs no opt-in,
-pads an odd tile count with the same zero-valid partner tile, runs no-grad
-forwards only, and fails closed (no Triton fallback) when the extension or
-device cannot run it.
+Tile 128 prefers the same sm_100a/sm_103a CUDA forward, which carries a
+128-token block instantiation. It needs no opt-in, pads an odd tile count with
+the same zero-valid partner tile and runs no-grad forwards only. Where the
+extension or device cannot run it (e.g. sm_120), each 128-token tile runs as
+two 64-token tiles of the Triton forward, under the same block map: the first
+child keeps up to 64 of the tile's valid rows and the second the rest. That
+route drops the partner tile and is not bitwise equal to the CUDA kernel.
 """
 
 import functools
@@ -109,7 +111,8 @@ _TILE_ELEMS = math.prod(VSA_H3_TILE_SIZE)
 VSA_H3_TILE_SHAPES: dict[int, tuple[int, int, int]] = {
     _TILE_ELEMS: VSA_H3_TILE_SIZE,
     64: (4, 4, 4),
-    # sm_100a/sm_103a CUDA forward only (128-token block instantiation).
+    # sm_100a/sm_103a CUDA forward (128-token block instantiation); elsewhere
+    # two 64-token Triton tiles per tile. No-grad forwards only.
     128: (4, 4, 8),
 }
 # Tile sizes the sm_100a/sm_103a CUDA kernel runs natively; its CTAs own
@@ -538,6 +541,21 @@ def _sm100a_unavailable_reason(sm100a_mod: Any, query_bhsd: torch.Tensor, variab
     return None
 
 
+def _split_tile128_mask_and_sizes(mask: torch.Tensor,
+                                  variable_block_sizes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """A tile-128 block map and tile sizes as 64-token Triton tiles.
+
+    Each 128-token tile holds its valid rows first, so its first child keeps
+    up to 64 of them and the second the rest; every child inherits its
+    parent's row and column of the map.
+    """
+    child_mask = mask.repeat_interleave(2, dim=-2).repeat_interleave(2, dim=-1)
+    sizes = variable_block_sizes.to(torch.int32)
+    offsets = torch.tensor([0, 64], dtype=torch.int32, device=sizes.device)
+    child_sizes = torch.clamp(sizes[:, None] - offsets, min=0, max=64).reshape(-1)
+    return child_mask, child_sizes
+
+
 class MiniMaxH3VSAImpl(AttentionImpl):
 
     def __init__(
@@ -651,7 +669,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             sm100a_requested = False
         else:
             sm100a_requested = envs.FASTVIDEO_VSA_SM100A.get()
-        # Tile 128 has no route other than the sm100a CUDA kernel.
+        # Tile 128 always takes the sm100a layout; its Triton fallback drops the partner tile.
         sm100a_route = attn_metadata.tile_elems == 128 or (attn_metadata.tile_elems == 64 and sm100a_requested)
         needs_sm100a_pair = n_tiles % 2 != 0 and not grad_mode and sm100a_route
         kernel_tiles = n_tiles + int(needs_sm100a_pair)
@@ -848,9 +866,12 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # fwd/bwd pairing is possible, but it is not built here.
             grad_mode = torch.is_grad_enabled() and (query.requires_grad or key.requires_grad or value.requires_grad)
             use_sm100a = False
+            tile128_triton = False
             if tile_elems == 128:
-                # The CUDA kernel's 128-token instantiation is the only tile-128
-                # implementation, so it needs no opt-in and never falls back.
+                # The sm_100a/sm_103a CUDA kernel's 128-token instantiation is the
+                # preferred tile-128 route. Elsewhere (e.g. sm_120), each 128-token
+                # tile splits into two 64-token Triton tiles: the same mask, not
+                # bitwise equal to the CUDA kernel.
                 if grad_mode:
                     raise NotImplementedError("VSA-H3 tile 128 supports no-grad inference forwards only.")
                 route_key = (q_bhsd.device, q_bhsd.dtype, int(q_bhsd.shape[-1]))
@@ -860,10 +881,15 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                         reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
                     self._tile128_route[route_key] = reason
                 reason = self._tile128_route[route_key]
-                if reason is not None:
-                    raise RuntimeError(f"VSA-H3 tile 128 requires the sm_100a/sm_103a CUDA block-sparse kernel: "
-                                       f"{reason}. Use VSA_tile_size=64 or 256 elsewhere.")
-                use_sm100a = True
+                if reason is None:
+                    use_sm100a = True
+                elif block_sparse_attn_64_bhsd is None:
+                    raise RuntimeError(f"VSA-H3 tile 128 needs the sm_100a/sm_103a CUDA block-sparse kernel "
+                                       f"({reason}) or the Triton block-sparse kernels, which are not installed.")
+                else:
+                    logger.warning_once(f"VSA-H3 tile 128: sm_100a CUDA kernel unavailable ({reason}); "
+                                        "running each tile as two 64-token Triton tiles.")
+                    tile128_triton = True
             elif regional_compiling:
                 if self._regional_compile_sm100a_enabled is None:
                     raise RuntimeError(
@@ -928,7 +954,14 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                     v_bhsd = v_bhsd[:, :, :logical_seq_len]
                     if not sm89_strided:
                         q_bhsd, k_bhsd, v_bhsd = (t.contiguous() for t in (q_bhsd, k_bhsd, v_bhsd))
-                if sm89_route:
+                if tile128_triton:
+                    out_bhsd, _ = block_sparse_attn_64_bhsd(
+                        q_bhsd,
+                        k_bhsd,
+                        v_bhsd,
+                        *_split_tile128_mask_and_sizes(mask, attn_metadata.variable_block_sizes),
+                    )
+                elif sm89_route:
                     from fastvideo.attention.backends.minimax_h3_sparse_int8 import sparse_sm89_attention
                     logger.info_once(f"MiniMax-H3 VSA tile-64 forward: sm89 {self._sm89_kernel} QK / BF16 PV")
                     out_bhsd = sparse_sm89_attention(q_bhsd,

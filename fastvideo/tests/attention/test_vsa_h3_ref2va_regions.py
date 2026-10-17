@@ -479,18 +479,47 @@ def test_forward_tile128_even_tile_count_no_partner_tile(tile128):
     assert len(tile128.calls) == 1
 
 
-def test_forward_tile128_unavailable_cuda_kernel(tile128, monkeypatch):
+class _FakeTriton64:
+    """Stands in for fastvideo_kernel.block_sparse_attn (the 64-token Triton forward)."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, q, k, v, mask, variable_block_sizes):
+        self.calls.append(dict(q=q, mask=mask, vbs=variable_block_sizes))
+        return q.clone(), None
+
+
+def test_forward_tile128_unavailable_cuda_kernel_splits_into_triton64_tiles(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
+    n_tiles = meta.variable_block_sizes.numel()
+    triton64 = _FakeTriton64()
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", triton64)
     tile128.supported = False
-    with pytest.raises(RuntimeError, match="tile 128 requires the sm_100a/sm_103a CUDA block-sparse kernel"):
-        _run_tile128(meta)
-    monkeypatch.setattr(vsa_h3, "_sm100a", None)
-    with pytest.raises(RuntimeError, match="not installed"):
-        _run_tile128(meta)
+    _, out = _run_tile128(meta)
+    assert tile128.calls == [] and len(triton64.calls) == 1
+    call = triton64.calls[0]
+    # The partner tile is dropped: the Triton kernels see only logical tiles, each split in two.
+    assert call["q"].shape[2] == n_tiles * 128
+    assert call["mask"].shape[-2:] == (2 * n_tiles, 2 * n_tiles)
+    sizes = meta.variable_block_sizes
+    assert torch.equal(call["vbs"][0::2], sizes.clamp(max=64).to(torch.int32))
+    assert torch.equal(call["vbs"][1::2], (sizes - 64).clamp(min=0).to(torch.int32))
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
 
 
-def test_forward_tile128_route_resolved_once_per_device(tile128):
+def test_forward_tile128_without_any_kernel(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
+    monkeypatch.setattr(vsa_h3, "_sm100a", None)
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", None)
+    with pytest.raises(RuntimeError, match="Triton block-sparse kernels, which are not installed"):
+        _run_tile128(meta)
+
+
+def test_forward_tile128_route_resolved_once_per_device(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    triton64 = _FakeTriton64()
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", triton64)
     probes = []
     tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) or True
     impl = _impl(_DIM)
@@ -499,15 +528,15 @@ def test_forward_tile128_route_resolved_once_per_device(tile128):
         query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
         impl.forward(query, key, value, None, meta)
     assert len(tile128.calls) == 3 and probes == [_CPU]
-    # A failed probe is cached too, and every later call still fails closed.
+    # A failed probe is cached too, and every later call takes the Triton route.
     tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) and False
     impl = _impl(_DIM)
     raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
     query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
     for _ in range(2):
-        with pytest.raises(RuntimeError, match="tile 128 requires the sm_100a/sm_103a CUDA block-sparse kernel"):
-            impl.forward(query, key, value, None, meta)
+        impl.forward(query, key, value, None, meta)
     assert probes == [_CPU, _CPU]
+    assert len(tile128.calls) == 3 and len(triton64.calls) == 2
 
 
 def test_forward_tile128_requires_no_grad(tile128):
@@ -569,4 +598,34 @@ def test_forward_tile128_real_sm100a_kernel_matches_oracle(env_overrides, sparsi
             meta)
     torch.cuda.synchronize()
     assert actual.shape == (1, meta.total_seq_length, _HEADS, _DIM)
+    torch.testing.assert_close(actual.float(), expected, atol=0.04, rtol=0.02)
+
+
+@pytest.mark.parametrize("sparsity,ref_keep_rate", [(0.5, 0.25), (0.9, 0.1)])
+def test_forward_tile128_real_triton64_split_matches_oracle(env_overrides, monkeypatch, sparsity, ref_keep_rate):
+    """Tile 128 without the sm_100a kernel: two 64-token Triton tiles per tile against the FP32 oracle."""
+    if not torch.cuda.is_available() or vsa_h3.block_sparse_attn_64_bhsd is None:
+        pytest.skip("requires a CUDA GPU and the fastvideo_kernel Triton block-sparse kernels")
+    monkeypatch.setattr(vsa_h3, "_sm100a", None)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+    device = torch.device("cuda")
+    meta = _build_r2v(sparsity=sparsity, tile_size=128, ref_keep_rate=ref_keep_rate, device=device)
+    n_tiles = meta.variable_block_sizes.numel()
+    logical = n_tiles * 128
+    assert int(meta.variable_block_sizes.min()) < 64, "the layout must exercise a partial second child tile"
+    impl = _impl(_DIM)
+    torch.manual_seed(19)
+    raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, device=device, dtype=torch.bfloat16)
+    with torch.inference_mode():
+        query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
+        actual = impl.postprocess_output(impl.forward(query, key, value, None, meta), meta)
+        logical_query, logical_key, logical_value = (t[:, :logical] for t in (query, key, value))
+        scores = torch.matmul(_pool_tiles(logical_query, meta.variable_block_sizes, 128),
+                              _pool_tiles(logical_key, meta.variable_block_sizes, 128).transpose(-2, -1)) / _DIM**0.5
+        mask = _mask(meta, scores, sparsity)
+        assert not mask.all(), "the oracle must exercise a sparse mask"
+        expected = impl.postprocess_output(
+            _sparse_attention_oracle(logical_query.float(), logical_key.float(), logical_value.float(), mask, meta),
+            meta)
+    torch.cuda.synchronize()
     torch.testing.assert_close(actual.float(), expected, atol=0.04, rtol=0.02)
