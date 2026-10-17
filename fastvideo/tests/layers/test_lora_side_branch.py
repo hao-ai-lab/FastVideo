@@ -206,3 +206,52 @@ def test_forced_side_branch_over_unpacked_quantized_base_still_packs(monkeypatch
 
         base.register_buffer(buffer, torch.zeros(1), persistent=False)
         assert lora_pipeline._all_side_branch([layer]), f"{buffer}: once packed, repacking is skipped"
+
+
+def _attention_only_block(monkeypatch: pytest.MonkeyPatch):
+    """A block whose attention is LoRA-wrapped while its FFN linear still awaits the NVFP4 packing."""
+    from types import SimpleNamespace
+
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    monkeypatch.setenv("FASTVIDEO_LORA_SIDE_BRANCH", "1")
+    attention = get_lora_layer(_dense_linear())
+    ffn = _dense_linear(seed=2)
+    ffn.quant_method = object.__new__(NVFP4QuantizeMethod)
+    ffn.register_buffer("_nvfp4_weight", None, persistent=False)
+    block = torch.nn.Module()
+    block.attn = attention
+    block.ff = ffn
+    layers = SimpleNamespace(lora_layers_by_block=lambda: iter([(block, {"attn": attention})]))
+    pipeline = SimpleNamespace(lora_layers={"transformer": layers}, trainable_transformer_modules={})
+    return pipeline, block, ffn
+
+
+@pytest.mark.parametrize("method_name", ["merge_lora_weights", "unmerge_lora_weights"])
+def test_unwrapped_linear_awaiting_packing_blocks_the_repack_skip(monkeypatch: pytest.MonkeyPatch,
+                                                                  method_name: str) -> None:
+    from fastvideo.pipelines import lora_pipeline
+
+    pipeline, block, ffn = _attention_only_block(monkeypatch)
+    skips: list[bool] = []
+    monkeypatch.setattr(lora_pipeline, "_convert_quantized_weights_after_lora_change",
+                        lambda modules, skip=False: skips.append(skip))
+
+    getattr(lora_pipeline.LoRAPipeline, method_name)(pipeline)
+    assert skips == [False]
+
+    ffn.register_buffer("_nvfp4_weight", torch.zeros(1), persistent=False)
+    getattr(lora_pipeline.LoRAPipeline, method_name)(pipeline)
+    assert skips == [False, True]
+
+
+def test_attention_only_adapter_skips_repack_only_once_the_whole_block_is_packed(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastvideo.pipelines.lora_pipeline import _all_side_branch
+
+    pipeline, block, ffn = _attention_only_block(monkeypatch)
+    layers = list(pipeline.lora_layers["transformer"].lora_layers_by_block())[0][1].values()
+
+    assert not _all_side_branch(layers, [block])
+    ffn.register_buffer("_nvfp4_weight", torch.zeros(1), persistent=False)
+    assert _all_side_branch(layers, [block])

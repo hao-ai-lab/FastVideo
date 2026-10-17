@@ -312,9 +312,6 @@ def maybe_load_fsdp_model(
     packed_profiles = ("h3_dit", "h3_dit_ffn", "h3_dit_vsa")
     packed_nvfp4_export = (packed_candidate
                            if getattr(quant_config, "layer_profile", None) in packed_profiles else None)
-    if packed_nvfp4_export is not None and lora_path is not None:
-        raise ValueError("Packed MiniMax-H3 NVFP4 DiT export cannot be combined with lora_path; "
-                         "merge the adapter before exporting, or load without the packed file.")
 
     # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
     # manually casting the inputs to the model
@@ -424,6 +421,10 @@ def maybe_load_fsdp_model(
             lora_param_names_mapping=lora_param_names_mapping_fn,
             strength=lora_strength,
         )
+    if dense_lora_patch is not None and packed_nvfp4_export is not None:
+        raise ValueError("Packed MiniMax-H3 NVFP4 DiT export cannot take an adapter with dense "
+                         "(.diff/.set_weight) payloads: they would have to be merged into the packed weights. "
+                         "Merge the adapter before exporting, or load without the packed file.")
     if dense_lora_patch is not None:
         # H3's compression gate is created only by the VSA attention backend. Loading a
         # VSA student under dense attention would otherwise warn about 50 unmatched

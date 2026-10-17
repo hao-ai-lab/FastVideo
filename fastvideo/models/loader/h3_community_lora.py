@@ -92,9 +92,7 @@ class H3LoRAConversion:
     source_format: str  # "comfy-fused", "native", "mixed", or "unknown"
     source_modules: int = 0
     target_modules: int = 0
-    # Source keys the converter could not place; a non-empty list means the adapter is only partly supported.
     unrecognized: tuple[str, ...] = field(default_factory=tuple)
-    # Dense payload keys (``.diff``/``.set_weight``) the converter leaves for ``DenseLoRAPatch``.
     dense_keys: tuple[str, ...] = field(default_factory=tuple)
 
 

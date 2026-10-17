@@ -99,15 +99,18 @@ def _awaits_packing(layer: nn.Module) -> bool:
     return False
 
 
-def _all_side_branch(layers: Iterable[nn.Module]) -> bool:
-    """Return whether every LoRA layer left its base weights untouched and packed, so nothing needs repacking.
+def _all_side_branch(layers: Iterable[nn.Module], scope: Iterable[nn.Module] = ()) -> bool:
+    """Return whether every LoRA layer left its base weights untouched and nothing in ``scope`` awaits packing.
 
     A side-branch layer never changes its base weight, but with ``FASTVIDEO_LORA_SIDE_BRANCH=1`` over a dense
     checkpoint the base weight has not been packed yet (packing is deferred until after LoRA loading), so the
-    first pass must still pack it.
+    first pass must still pack it. ``scope`` is what the repack will walk (a whole block); it also holds linears
+    the adapter does not wrap, such as the FFN of an attention-only adapter.
     """
     layers = list(layers)
-    return bool(layers) and all(getattr(layer, "side_branch", False) and not _awaits_packing(layer) for layer in layers)
+    return bool(layers) and all(
+        getattr(layer, "side_branch", False) and not _awaits_packing(layer)
+        for layer in layers) and not any(_awaits_packing(module) for module in scope)
 
 
 def _convert_quantized_weights_after_lora_change(modules: Iterable[nn.Module], skip: bool = False) -> None:
@@ -607,8 +610,6 @@ class LoRAPipeline(ComposedPipelineBase):
                 if self.lora_strict_coverage:
                     self._check_adapter_coverage(lora_nickname, lora_path)
             except Exception:
-                # Keep the previous registration until loading, conversion, mapping and coverage all succeed;
-                # leave no emptied or half-registered adapter behind.
                 if previous_adapter is None:
                     self.lora_adapters.pop(lora_nickname, None)
                 else:
@@ -676,8 +677,9 @@ class LoRAPipeline(ComposedPipelineBase):
                                 )
                             layer.disable_lora = True
                     # Repack inside the offload scope, while the block's parameters are resident.
-                    _convert_quantized_weights_after_lora_change([module] if module is not None else layers.values(),
-                                                                 skip=_all_side_branch(layers.values()))
+                    repack_scope = [module] if module is not None else list(layers.values())
+                    _convert_quantized_weights_after_lora_change(repack_scope,
+                                                                 skip=_all_side_branch(layers.values(), repack_scope))
         logger.info(
             "Rank %d: LoRA adapter %s applied to %d layers",
             rank,
@@ -719,8 +721,9 @@ class LoRAPipeline(ComposedPipelineBase):
                     for name, layer in layers.items():
                         layer.merge_lora_weights()
                     # Repack inside the offload scope, while the block's parameters are resident.
-                    _convert_quantized_weights_after_lora_change([module] if module is not None else layers.values(),
-                                                                 skip=_all_side_branch(layers.values()))
+                    repack_scope = [module] if module is not None else list(layers.values())
+                    _convert_quantized_weights_after_lora_change(repack_scope,
+                                                                 skip=_all_side_branch(layers.values(), repack_scope))
 
     def unmerge_lora_weights(self) -> None:
         """Unmerge LoRA weights, then repack the packed quantized buffers for the unmerged state.
@@ -744,5 +747,6 @@ class LoRAPipeline(ComposedPipelineBase):
                     for name, layer in layers.items():
                         layer.unmerge_lora_weights()
                     # Repack inside the offload scope, while the block's parameters are resident.
-                    _convert_quantized_weights_after_lora_change([module] if module is not None else layers.values(),
-                                                                 skip=_all_side_branch(layers.values()))
+                    repack_scope = [module] if module is not None else list(layers.values())
+                    _convert_quantized_weights_after_lora_change(repack_scope,
+                                                                 skip=_all_side_branch(layers.values(), repack_scope))

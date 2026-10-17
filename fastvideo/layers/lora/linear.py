@@ -55,7 +55,6 @@ class BaseLayerWithLoRA(nn.Module):
         self.base_layer: nn.Module = base_layer
 
         self.merged: bool = False
-        # Side-branch layers never touch the base weight, so they need no unmerge snapshot.
         self.side_branch: bool = (self.supports_side_branch and not training_mode and requires_side_branch(base_layer))
         # A frozen CPU snapshot is needed only to undo inference-time merging.
         # Training never merges adapters; retaining every H3 projection here
