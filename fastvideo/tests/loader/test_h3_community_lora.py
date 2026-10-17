@@ -308,6 +308,38 @@ def test_failed_coverage_restores_the_previously_registered_adapter(monkeypatch:
     assert pipeline.lora_adapter_paths["default"] == "a.safetensors"
 
 
+def test_failed_conversion_keeps_the_previously_registered_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fastvideo.pipelines.lora_pipeline as lp
+
+    previous = {"transformer_blocks.0.attn.to_q.lora_A": torch.ones(1)}
+    monkeypatch.setattr(lp.dist, "get_rank", lambda: 0)
+    monkeypatch.setattr(lp, "maybe_download_lora", lambda path: path)
+    monkeypatch.setattr(lp, "load_file", lambda path: {"unet.down.0.lora_A.weight": torch.zeros(1)})
+
+    def reject(state, path):
+        raise ValueError("no MiniMax-H3 LoRA layers")
+
+    pipeline = SimpleNamespace(
+        lora_adapters={"default": previous},
+        lora_adapter_paths={"default": "a.safetensors"},
+        modules={"transformer": SimpleNamespace(param_names_mapping={}, lora_param_names_mapping={})},
+        cur_adapter_name="default",
+        cur_adapter_path="a.safetensors",
+        cur_adapter_strength=1.0,
+        lora_initialized=True,
+        lora_strict_coverage=True,
+        _setting_constructor_adapter=True,
+        _constructor_dense_lora_path=None,
+        device=torch.device("cpu"),
+        fastvideo_args=SimpleNamespace(training_mode=False),
+        convert_adapter_state_dict=reject,
+    )
+    with pytest.raises(ValueError, match="no MiniMax-H3 LoRA layers"):
+        LoRAPipeline.set_lora_adapter(pipeline, "default", "b.safetensors")
+    assert pipeline.lora_adapters["default"] is previous
+    assert pipeline.lora_adapter_paths["default"] == "a.safetensors"
+
+
 def test_h3_pipeline_converts_and_rejects_foreign_adapters() -> None:
     from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3BasePipeline
 

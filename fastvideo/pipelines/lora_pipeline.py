@@ -555,63 +555,65 @@ class LoRAPipeline(ComposedPipelineBase):
         rank = dist.get_rank()
         if lora_path is not None and self.lora_adapter_paths.get(lora_nickname) != lora_path:
             previous_adapter = self.lora_adapters.get(lora_nickname)
-            self.lora_adapters[lora_nickname] = {}
-            lora_local_path = maybe_download_lora(lora_path)
-            lora_state_dict = self.convert_adapter_state_dict(load_file(lora_local_path), lora_path)
+            try:
+                self.lora_adapters[lora_nickname] = {}
+                lora_local_path = maybe_download_lora(lora_path)
+                lora_state_dict = self.convert_adapter_state_dict(load_file(lora_local_path), lora_path)
 
-            # Map the hf layer names to our custom layer names
-            param_names_mapping_fn = get_param_names_mapping(self.modules["transformer"].param_names_mapping)
-            lora_param_names_mapping_fn = get_param_names_mapping(self.modules["transformer"].lora_param_names_mapping)
+                # Map the hf layer names to our custom layer names
+                param_names_mapping_fn = get_param_names_mapping(self.modules["transformer"].param_names_mapping)
+                lora_param_names_mapping_fn = get_param_names_mapping(
+                    self.modules["transformer"].lora_param_names_mapping)
 
-            # Extract alpha values and weights in a single pass
-            to_merge_params: defaultdict[Hashable, dict[Any, Any]] = (defaultdict(dict))
-            for name, weight in lora_state_dict.items():
-                # Extract weights (lora_A, lora_B, and lora_alpha)
-                normalized = normalize_lora_key(name)
-                if normalized is None:
-                    continue
-                name = normalized
-                name = name.replace(".weight", "")
+                # Extract alpha values and weights in a single pass
+                to_merge_params: defaultdict[Hashable, dict[Any, Any]] = (defaultdict(dict))
+                for name, weight in lora_state_dict.items():
+                    # Extract weights (lora_A, lora_B, and lora_alpha)
+                    normalized = normalize_lora_key(name)
+                    if normalized is None:
+                        continue
+                    name = normalized
+                    name = name.replace(".weight", "")
 
-                if "lora_alpha" in name:
-                    # Store alpha with minimal mapping - same processing as lora_A/lora_B
-                    # but store in lora_adapters with ".lora_alpha" suffix
-                    layer_name = name.replace(".lora_alpha", "")
-                    layer_name, _, _ = lora_param_names_mapping_fn(layer_name)
-                    target_name, _, _ = param_names_mapping_fn(layer_name)
-                    # Store alpha alongside weights with same target_name base
-                    alpha_key = target_name + ".lora_alpha"
-                    self.lora_adapters[lora_nickname][alpha_key] = (weight.item()
-                                                                    if weight.numel() == 1 else float(weight.mean()))
-                    continue
-
-                name, _, _ = lora_param_names_mapping_fn(name)
-                target_name, merge_index, num_params_to_merge = (param_names_mapping_fn(name))
-                # for (in_dim, r) @ (r, out_dim), we only merge (r, out_dim * n) where n is the number of linear layers to fuse
-                # see param mapping in HunyuanVideoArchConfig
-                if merge_index is not None and "lora_B" in name:
-                    to_merge_params[target_name][merge_index] = weight
-                    if len(to_merge_params[target_name]) == num_params_to_merge:
-                        # cat at output dim according to the merge_index order
-                        sorted_tensors = [to_merge_params[target_name][i] for i in range(num_params_to_merge)]
-                        weight = torch.cat(sorted_tensors, dim=1)
-                        del to_merge_params[target_name]
-                    else:
+                    if "lora_alpha" in name:
+                        # Store alpha with minimal mapping - same processing as lora_A/lora_B
+                        # but store in lora_adapters with ".lora_alpha" suffix
+                        layer_name = name.replace(".lora_alpha", "")
+                        layer_name, _, _ = lora_param_names_mapping_fn(layer_name)
+                        target_name, _, _ = param_names_mapping_fn(layer_name)
+                        # Store alpha alongside weights with same target_name base
+                        alpha_key = target_name + ".lora_alpha"
+                        self.lora_adapters[lora_nickname][alpha_key] = (weight.item() if weight.numel() == 1 else float(
+                            weight.mean()))
                         continue
 
-                if target_name in self.lora_adapters[lora_nickname]:
-                    raise ValueError(f"Target name {target_name} already exists in lora_adapters[{lora_nickname}]")
-                self.lora_adapters[lora_nickname][target_name] = weight.to(self.device)
-            if self.lora_strict_coverage:
-                try:
+                    name, _, _ = lora_param_names_mapping_fn(name)
+                    target_name, merge_index, num_params_to_merge = (param_names_mapping_fn(name))
+                    # for (in_dim, r) @ (r, out_dim), we only merge (r, out_dim * n) where n is the number of linear layers to fuse
+                    # see param mapping in HunyuanVideoArchConfig
+                    if merge_index is not None and "lora_B" in name:
+                        to_merge_params[target_name][merge_index] = weight
+                        if len(to_merge_params[target_name]) == num_params_to_merge:
+                            # cat at output dim according to the merge_index order
+                            sorted_tensors = [to_merge_params[target_name][i] for i in range(num_params_to_merge)]
+                            weight = torch.cat(sorted_tensors, dim=1)
+                            del to_merge_params[target_name]
+                        else:
+                            continue
+
+                    if target_name in self.lora_adapters[lora_nickname]:
+                        raise ValueError(f"Target name {target_name} already exists in lora_adapters[{lora_nickname}]")
+                    self.lora_adapters[lora_nickname][target_name] = weight.to(self.device)
+                if self.lora_strict_coverage:
                     self._check_adapter_coverage(lora_nickname, lora_path)
-                except ValueError:
-                    # Restore the previous registration; leave no half-registered adapter behind.
-                    if previous_adapter is None:
-                        self.lora_adapters.pop(lora_nickname, None)
-                    else:
-                        self.lora_adapters[lora_nickname] = previous_adapter
-                    raise
+            except Exception:
+                # Keep the previous registration until loading, conversion, mapping and coverage all succeed;
+                # leave no emptied or half-registered adapter behind.
+                if previous_adapter is None:
+                    self.lora_adapters.pop(lora_nickname, None)
+                else:
+                    self.lora_adapters[lora_nickname] = previous_adapter
+                raise
             adapter_updated = True
             self.cur_adapter_path = lora_path
             self.lora_adapter_paths[lora_nickname] = lora_path
