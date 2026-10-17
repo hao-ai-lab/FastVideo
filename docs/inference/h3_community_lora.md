@@ -76,9 +76,8 @@ samples in 8 steps. Stacking them on a distilled model is not supported.
 
 ## Quantized checkpoints
 
-An NVFP4 or FP8 linear stores a packed weight whose scales were calibrated for the original model. Merging a LoRA
-into it would mean quantizing the weight again, and the calibration would be lost. FastVideo therefore keeps the
-packed weight untouched and runs the adapter next to it:
+An NVFP4 or FP8 linear loaded from a packed export has no original dense weight to merge into. FastVideo keeps
+the packed weight and its calibration untouched and runs the adapter next to it:
 
 ```
 y = base(x) + strength * (alpha / rank) * B(A x)
@@ -89,6 +88,8 @@ The extra cost is two small matmuls per adapted linear.
 
 A dense bf16 checkpoint that FastVideo quantizes at load time (for example `transformer_quant: NVFP4` on a bf16
 export) still merges the adapter first and quantizes afterwards, so the quantized weight includes the adapter.
+If quantization retains the original dense weight, adapters continue to merge into that weight and FastVideo
+rebuilds the packed buffers after each adapter change.
 
 To make the adapter strength changeable at runtime on a dense checkpoint, set `FASTVIDEO_LORA_SIDE_BRANCH=1`. The
 adapter then runs as a side branch for every layer, at the cost of the extra matmuls. See

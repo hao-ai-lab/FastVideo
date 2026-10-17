@@ -621,8 +621,8 @@ FASTVIDEO_LORA_SIDE_BRANCH = EnvBool(False,
                                      category="performance",
                                      doc="Apply inference LoRA adapters as a bf16 side branch next to every "
                                      "target linear instead of merging them, so the adapter strength can change "
-                                     "at runtime. Linears with packed NVFP4 or FP8 weights always use the "
-                                     "side branch.")
+                                     "at runtime. Packed NVFP4 or FP8 linears without their original dense "
+                                     "weight always use the side branch.")
 FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
                                     category="performance",
                                     doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")

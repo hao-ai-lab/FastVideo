@@ -18,24 +18,18 @@ from fastvideo.utils import get_mixed_precision_state
 
 torch._dynamo.config.recompile_limit = 16
 
-# Buffers a quantization method registers once it has packed a linear's weight.
-_PACKED_WEIGHT_BUFFERS = ("_nvfp4_weight", "_fp8_weight")
-
 
 def requires_side_branch(layer: nn.Module) -> bool:
     """Return whether an adapter must run beside ``layer`` instead of being merged into it.
 
-    A linear whose weight was already packed (NVFP4 or FP8, from a pre-quantized export or by runtime
-    conversion) cannot absorb a low-rank delta without being re-quantized, which would discard the export's
-    calibration. Such a layer keeps its packed weight and the adapter is applied as
-    ``y = base(x) + strength * (alpha / rank) * B(A x)`` in the activation dtype. Linears that are still
-    dense bf16 merge as before, so a quantization that follows the merge sees the adapted weight.
+    A packed linear without its original dense weight cannot merge an adapter while preserving the export's
+    calibration. Its adapter runs as ``y = base(x) + strength * (alpha / rank) * B(A x)`` in the activation dtype.
+    When the original dense weight is retained, merge into it as before and let the pipeline repack the
+    quantized buffers after the adapter changes.
     ``FASTVIDEO_LORA_SIDE_BRANCH=1`` forces the side branch for every layer, which makes the adapter strength
     changeable at runtime without touching the base weights.
     """
     if envs.FASTVIDEO_LORA_SIDE_BRANCH.get():
-        return True
-    if any(getattr(layer, name, None) is not None for name in _PACKED_WEIGHT_BUFFERS):
         return True
     return getattr(layer, "weight", None) is None
 

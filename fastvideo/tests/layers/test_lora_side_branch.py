@@ -71,9 +71,14 @@ def test_packed_linear_selects_side_branch_and_dense_linear_merges() -> None:
     assert not get_lora_layer(_dense_linear()).side_branch
 
 
-def test_env_forces_side_branch_on_dense_linear() -> None:
+@pytest.mark.parametrize("packed", [False, True])
+def test_env_forces_side_branch_on_retained_dense_weight(packed: bool) -> None:
+    base = _dense_linear()
+    if packed:
+        base.register_buffer("_nvfp4_weight", torch.zeros(1), persistent=False)
+    assert not get_lora_layer(base).side_branch
     with envs.FASTVIDEO_LORA_SIDE_BRANCH.override(True):
-        assert get_lora_layer(_dense_linear()).side_branch
+        assert get_lora_layer(base).side_branch
 
 
 def test_side_branch_matches_base_plus_scaled_low_rank_product() -> None:
@@ -189,13 +194,13 @@ def test_packed_nvfp4_layers_behind_a_side_branch_do_not_block_adapter_changes()
     assert _all_side_branch([pipeline.lora_layers["transformer"].lora_layers_by_block().__next__()[1]["layer"]])
 
 
-def test_forced_side_branch_over_unpacked_quantized_base_still_packs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forced_side_branch_over_unpacked_quantized_base_still_packs(env_overrides) -> None:
     """FASTVIDEO_LORA_SIDE_BRANCH=1 over a dense checkpoint must still run the deferred NVFP4/MXFP8 packing."""
     from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
     from fastvideo.pipelines import lora_pipeline
 
-    monkeypatch.setenv("FASTVIDEO_LORA_SIDE_BRANCH", "1")
+    env_overrides.enter_context(envs.FASTVIDEO_LORA_SIDE_BRANCH.override(True))
     for method_cls, buffer in ((NVFP4QuantizeMethod, "_nvfp4_weight"), (MXFP8QuantizeMethod, "_mxfp8_weight")):
         base = _dense_linear()
         base.quant_method = object.__new__(method_cls)
@@ -208,13 +213,13 @@ def test_forced_side_branch_over_unpacked_quantized_base_still_packs(monkeypatch
         assert lora_pipeline._all_side_branch([layer]), f"{buffer}: once packed, repacking is skipped"
 
 
-def _attention_only_block(monkeypatch: pytest.MonkeyPatch):
+def _attention_only_block(env_overrides):
     """A block whose attention is LoRA-wrapped while its FFN linear still awaits the NVFP4 packing."""
     from types import SimpleNamespace
 
     from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
 
-    monkeypatch.setenv("FASTVIDEO_LORA_SIDE_BRANCH", "1")
+    env_overrides.enter_context(envs.FASTVIDEO_LORA_SIDE_BRANCH.override(True))
     attention = get_lora_layer(_dense_linear())
     ffn = _dense_linear(seed=2)
     ffn.quant_method = object.__new__(NVFP4QuantizeMethod)
@@ -229,10 +234,11 @@ def _attention_only_block(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.parametrize("method_name", ["merge_lora_weights", "unmerge_lora_weights"])
 def test_unwrapped_linear_awaiting_packing_blocks_the_repack_skip(monkeypatch: pytest.MonkeyPatch,
+                                                                  env_overrides,
                                                                   method_name: str) -> None:
     from fastvideo.pipelines import lora_pipeline
 
-    pipeline, block, ffn = _attention_only_block(monkeypatch)
+    pipeline, block, ffn = _attention_only_block(env_overrides)
     skips: list[bool] = []
     monkeypatch.setattr(lora_pipeline, "_convert_quantized_weights_after_lora_change",
                         lambda modules, skip=False: skips.append(skip))
@@ -246,10 +252,10 @@ def test_unwrapped_linear_awaiting_packing_blocks_the_repack_skip(monkeypatch: p
 
 
 def test_attention_only_adapter_skips_repack_only_once_the_whole_block_is_packed(
-        monkeypatch: pytest.MonkeyPatch) -> None:
+        env_overrides) -> None:
     from fastvideo.pipelines.lora_pipeline import _all_side_branch
 
-    pipeline, block, ffn = _attention_only_block(monkeypatch)
+    pipeline, block, ffn = _attention_only_block(env_overrides)
     layers = list(pipeline.lora_layers["transformer"].lora_layers_by_block())[0][1].values()
 
     assert not _all_side_branch(layers, [block])
