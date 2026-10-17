@@ -8,6 +8,7 @@ from torch import nn
 from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy, fully_shard)
 from torch.distributed.tensor import DTensor
 
+import fastvideo.envs as envs
 from fastvideo.distributed import (get_local_torch_device, get_tp_rank, split_tensor_along_last_dim,
                                    tensor_model_parallel_all_gather, tensor_model_parallel_all_reduce)
 from fastvideo.layers.linear import (ColumnParallelLinear, LinearBase, MergedColumnParallelLinear, QKVParallelLinear,
@@ -18,7 +19,24 @@ from fastvideo.utils import get_mixed_precision_state
 torch._dynamo.config.recompile_limit = 16
 
 
+def requires_side_branch(layer: nn.Module) -> bool:
+    """Return whether an adapter must run beside ``layer`` instead of being merged into it.
+
+    A packed linear without its original dense weight cannot merge an adapter while preserving the export's
+    calibration. Its adapter runs as ``y = base(x) + strength * (alpha / rank) * B(A x)`` in the activation dtype.
+    When the original dense weight is retained, merge into it as before and let the pipeline repack the
+    quantized buffers after the adapter changes.
+    ``FASTVIDEO_LORA_SIDE_BRANCH=1`` forces the side branch for every layer, which makes the adapter strength
+    changeable at runtime without touching the base weights.
+    """
+    if envs.FASTVIDEO_LORA_SIDE_BRANCH.get():
+        return True
+    return getattr(layer, "weight", None) is None
+
+
 class BaseLayerWithLoRA(nn.Module):
+    # Wrappers whose forward does not add the unmerged delta must keep merging.
+    supports_side_branch: bool = True
 
     def __init__(
         self,
@@ -31,15 +49,16 @@ class BaseLayerWithLoRA(nn.Module):
         self.base_layer: nn.Module = base_layer
 
         self.merged: bool = False
+        self.side_branch: bool = (self.supports_side_branch and not training_mode and requires_side_branch(base_layer))
         # A frozen CPU snapshot is needed only to undo inference-time merging.
         # Training never merges adapters; retaining every H3 projection here
         # otherwise adds several GiB of host memory per HSDP rank.
-        self.cpu_weight = None if training_mode else base_layer.weight.detach().to("cpu").clone()
+        self.cpu_weight = (None if training_mode or self.side_branch else base_layer.weight.detach().to("cpu").clone())
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
         self.lora_rank = lora_rank
-        self.lora_alpha = lora_alpha
+        self.lora_alpha: float | None = lora_alpha
         self.training_mode = training_mode
         self.lora_path: str | None = None
         self.lora_strength: float = 1.0
@@ -98,6 +117,10 @@ class BaseLayerWithLoRA(nn.Module):
             lora_B = self.lora_B.to_local()
             lora_A = self.lora_A.to_local()
 
+        if self.side_branch and (self.lora_A is None or self.lora_strength == 0.0):
+            # No adapter, or strength 0, is exactly the unadapted layer, down to the output dtype.
+            return self.base_layer(x)
+
         if not self.merged and not self.disable_lora:
             lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
             lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
@@ -127,6 +150,12 @@ class BaseLayerWithLoRA(nn.Module):
                          lora_path: str | None = None,
                          strength: float = 1.0,
                          accumulate: bool = False) -> None:
+        if self.side_branch:
+            if accumulate and self.lora_A is not None:
+                raise ValueError("Accumulating adapters is unsupported on a side-branch LoRA layer (packed or "
+                                 "forced side branch); load one adapter at a time.")
+            # Kept in bf16 so the branch matches the activation dtype of a packed base layer.
+            A, B = A.to(torch.bfloat16), B.to(torch.bfloat16)
         self.lora_A = torch.nn.Parameter(A)  # share storage with weights in the pipeline
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
@@ -134,16 +163,20 @@ class BaseLayerWithLoRA(nn.Module):
         # Store rank and alpha directly
         rank = A.shape[0]  # rank is the first dimension of A
         self.lora_rank = rank
-        self.lora_alpha = int(lora_alpha) if lora_alpha is not None else rank
+        self.lora_alpha = lora_alpha if lora_alpha is not None else rank
         self.lora_strength = float(strength)
 
+        if self.side_branch:
+            self.merged = False
+            self.lora_path = lora_path
+            return
         if not training_mode:
             self.merge_lora_weights(accumulate=accumulate)
         self.lora_path = lora_path
 
     @torch.no_grad()
     def merge_lora_weights(self, accumulate: bool = False) -> None:
-        if self.disable_lora:
+        if self.disable_lora or self.side_branch:
             return
 
         if self.merged and not accumulate:
@@ -200,7 +233,7 @@ class BaseLayerWithLoRA(nn.Module):
     @torch.no_grad()
     # @torch.compile(dynamic=True)
     def unmerge_lora_weights(self, *, if_merged_only: bool = True) -> None:
-        if self.disable_lora:
+        if self.disable_lora or self.side_branch:
             return
 
         if not self.merged:
@@ -228,6 +261,7 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
     This class behaves exactly the same as the base VocabParallelEmbedding.
     Future versions will integrate LoRA functionality to support efficient parameter fine-tuning.
     """
+    supports_side_branch = False
 
     def __init__(
         self,
@@ -240,6 +274,7 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
 
 
 class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
+    supports_side_branch = False
 
     def __init__(
         self,
@@ -326,6 +361,7 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
 
 
 class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
+    supports_side_branch = False
 
     def __init__(
         self,

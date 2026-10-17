@@ -62,6 +62,10 @@
         "href": "/utilities/lora"
       },
       {
+        "label": "Community LoRAs for MiniMax-H3",
+        "href": "/inference/h3_community_lora"
+      },
+      {
         "label": "Hardware",
         "collapsed": true,
         "items": [
