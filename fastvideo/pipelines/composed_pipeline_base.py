@@ -126,28 +126,39 @@ class ComposedPipelineBase(ABC):
                 module.requires_grad_(True)
                 module.train()
 
-                if self.fastvideo_args.activation_offloading:
-                    # Iterate through the actual model components
-                    for module_name, model_obj in self.modules.items():
-                        if not isinstance(model_obj, torch.nn.Module):
-                            continue
+            # Enable activation offloading exactly once, independent of the
+            # number of trainable transformer modules (e.g. transformer_2 in
+            # Wan2.2 MoE), so each layer is wrapped a single time.
+            self.enable_activation_offloading()
 
-                        # Scan each submodule within the model (blocks or layers etc.)
-                        for name, submodule in model_obj.named_modules():
-                            for attr_name in [
-                                    "blocks", "layers", "transformer_blocks"
-                            ]:
-                                blocks = getattr(submodule, attr_name, None)
+    def enable_activation_offloading(self) -> None:
+        """Offload saved activations of trainable transformer blocks to CPU.
 
-                                if isinstance(blocks, torch.nn.ModuleList):
-                                    for layer in blocks:
-                                        original_forward = layer.forward
-                                        layer.forward = functools.partial(
-                                            offloaded_forward, original_forward)
-
-                                    logger.info(
-                                        "Successfully enabled activation offloading for %d layers in %s.%s.",
-                                        len(blocks), module_name, name)
+        Wraps each block's forward with :func:`offloaded_forward` so tensors
+        saved by the autograd engine are packed to CPU and unpacked on demand.
+        Targets only the trainable transformer modules' block lists (not frozen
+        VAE/text-encoder). Idempotent: already-wrapped layers are skipped.
+        """
+        if not getattr(self.fastvideo_args, "activation_offloading", False):
+            return
+        for module_name, model_obj in self.trainable_transformer_modules.items():
+            if not isinstance(model_obj, torch.nn.Module):
+                continue
+            for name, submodule in model_obj.named_modules():
+                for attr_name in ["blocks", "layers", "transformer_blocks"]:
+                    blocks = getattr(submodule, attr_name, None)
+                    if isinstance(blocks, torch.nn.ModuleList):
+                        for layer in blocks:
+                            if getattr(layer, "_fv_activation_offload_wrapped",
+                                       False):
+                                continue
+                            original_forward = layer.forward
+                            layer.forward = functools.partial(
+                                offloaded_forward, original_forward)
+                            layer._fv_activation_offload_wrapped = True
+                        logger.info(
+                            "Successfully enabled activation offloading for %d layers in %s.%s.",
+                            len(blocks), module_name, name)
 
     @staticmethod
     def _compile_with_conditions(

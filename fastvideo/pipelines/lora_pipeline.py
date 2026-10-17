@@ -246,6 +246,10 @@ class LoRAPipeline(ComposedPipelineBase):
                     f"Transformer {transformer_name} should be trainable but not found in lora_layers"
                 )
 
+        # The base set_trainable() path is bypassed for LoRA training, so
+        # enable activation offloading here as well.
+        self.enable_activation_offloading()
+
     def convert_to_lora_layers(self) -> None:
         """
         Unified method to convert the transformer to a LoRA transformer.

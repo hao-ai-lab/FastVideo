@@ -859,6 +859,12 @@ class TrainingArgs(FastVideoArgs):
         metadata={
             "help": "Offload activations to CPU to save VRAM during training."
         })
+    log_every_n_steps: int = field(
+        default=10,
+        metadata={
+            "help":
+            "Log GPU memory stats every N steps when activation offloading is enabled."
+        })
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -1129,6 +1135,10 @@ class TrainingArgs(FastVideoArgs):
                             action=StoreBoolean,
                             default=False,
                             help="Offload activations to CPU to save VRAM.")
+        parser.add_argument("--log-every-n-steps",
+                            type=int,
+                            default=10,
+                            help="Log GPU memory stats every N steps when activation offloading is enabled.")
         parser.add_argument("--num-train-epochs",
                             type=int,
                             help="Number of training epochs")

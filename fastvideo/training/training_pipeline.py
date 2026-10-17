@@ -611,10 +611,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
 
-        # Reset stats before the training loop starts
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
-
         self.train_loader_iter = iter(self.train_dataloader)
 
         step_times: deque[float] = deque(maxlen=100)
@@ -651,13 +647,21 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = TrainingBatch()
             training_batch.current_timestep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
+
+            # Bracket the measured window tightly around train_one_step so the
+            # reported peak isolates activation memory (excludes checkpoint and
+            # validation allocations). Gated on activation offloading and a
+            # positive log interval.
+            measure_memory = (self.training_args.activation_offloading
+                              and self.training_args.log_every_n_steps > 0
+                              and step % self.training_args.log_every_n_steps
+                              == 0)
+            if measure_memory and torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
             training_batch = self.train_one_step(training_batch)
 
-            if step % self.training_args.log_every_n_steps == 0:
-                self._log_memory_stats(prefix=f"[Step {step}]")
-                # Reset the peak so the next log is for the next window
-                if torch.cuda.is_available():
-                    torch.cuda.reset_peak_memory_stats()
+            if measure_memory:
+                self._log_memory_stats(prefix=f"[Step {step}]", step=step)
 
             loss = training_batch.total_loss
             grad_norm = training_batch.grad_norm
@@ -785,22 +789,22 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_sparsity)
 
-    def _log_memory_stats(self, prefix: str = ""):
+    def _log_memory_stats(self, prefix: str = "", step: int = 0):
         """Logs peak VRAM usage to help quantify savings from activation offloading."""
         if torch.cuda.is_available():
             peak_gb = torch.cuda.max_memory_allocated() / (1024**3)
-            reserved_gb = torch.cuda.memory_reserved() / (1024**3)
+            peak_reserved_gb = torch.cuda.max_memory_reserved() / (1024**3)
 
-            log_msg = f"{prefix} Peak GPU Memory: {peak_gb:.2f} GB | Reserved: {reserved_gb:.2f} GB"
+            log_msg = f"{prefix} Peak GPU Memory: {peak_gb:.2f} GB | Peak Reserved: {peak_reserved_gb:.2f} GB"
             logger.info(log_msg)
 
             if self.global_rank == 0 and self.tracker:
                 self.tracker.log(
                     {
                         "memory/peak_gb": peak_gb,
-                        "memory/reserved_gb": reserved_gb
+                        "memory/peak_reserved_gb": peak_reserved_gb
                     },
-                    step=getattr(self, "current_step", 0))
+                    step=step)
 
     def _prepare_validation_batch(self, sampling_param: SamplingParam,
                                   training_args: TrainingArgs,
