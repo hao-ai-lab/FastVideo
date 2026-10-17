@@ -40,6 +40,8 @@ def test_passthrough_keys_cover_ltx2_audio_conditioning() -> None:
         "vsa_mode",
         "vsa_dense_first_n_steps",
         "vsa_dense_layers",
+        # MiniMax-H3 Ref2VA reference-image resize mode (consumed by MiniMaxH3InputPreparationStage)
+        "reference_resize_mode",
         # Kandinsky6 SR request options and inputs (Kandinsky6SROptions, read by the stages in
         # fastvideo/pipelines/stages/kandinsky6_sr.py). validate_request_batch_extra rejects them for every other
         # model. The raw-latent input and audio override are SR-prefixed so a bare "audio"/"audio_sample_rate"
