@@ -637,9 +637,11 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             logger.info("Restored MiniMax-H3 denoise modules to %s", device)
 
     def _run_condition_then_denoise(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        for name in ("input_preparation_stage", "conditioning_stage"):
-            batch = self._stage_name_mapping[name](batch, fastvideo_args)
-        self._release_text_encoder()
+        try:
+            for name in ("input_preparation_stage", "conditioning_stage"):
+                batch = self._stage_name_mapping[name](batch, fastvideo_args)
+        finally:
+            self._release_text_encoder()
         self._load_denoise_modules(fastvideo_args)
         if not self._unified_memory_host():
             self._restore_denoise_modules(fastvideo_args)
@@ -694,6 +696,10 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                 tokenizer=self.get_module("tokenizer"),
                 processor=self.get_module("processor"),
                 ref2va=ref2va,
+                # Sequential placement reuses one pinned encoder copy. A stage-level
+                # .to("cpu") would bypass it and allocate new host weights every request.
+                manage_cpu_offload=(h3_encoder_split_enabled(fastvideo_args)
+                                    or not self._defer_denoise_modules(fastvideo_args)),
             ),
         )
 
