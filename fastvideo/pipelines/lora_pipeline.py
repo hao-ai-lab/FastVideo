@@ -82,10 +82,32 @@ def _get_hook_ctx(module: nn.Module | None):
     return nullcontext()
 
 
+def _awaits_packing(layer: nn.Module) -> bool:
+    """Return whether a deferred NVFP4/MXFP8 linear still holds only its dense weight, never yet packed."""
+    from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    for submodule in getattr(layer, "base_layer", layer).modules():
+        quant_method = getattr(submodule, "quant_method", None)
+        has_weight = getattr(submodule, "weight", None) is not None
+        if isinstance(quant_method, NVFP4QuantizeMethod) and has_weight and getattr(submodule, "_nvfp4_weight",
+                                                                                    None) is None:
+            return True
+        if isinstance(quant_method, MXFP8QuantizeMethod) and has_weight and getattr(submodule, "_mxfp8_weight",
+                                                                                    None) is None:
+            return True
+    return False
+
+
 def _all_side_branch(layers: Iterable[nn.Module]) -> bool:
-    """Return whether every LoRA layer left its base weights untouched, so nothing needs repacking."""
+    """Return whether every LoRA layer left its base weights untouched and packed, so nothing needs repacking.
+
+    A side-branch layer never changes its base weight, but with ``FASTVIDEO_LORA_SIDE_BRANCH=1`` over a dense
+    checkpoint the base weight has not been packed yet (packing is deferred until after LoRA loading), so the
+    first pass must still pack it.
+    """
     layers = list(layers)
-    return bool(layers) and all(getattr(layer, "side_branch", False) for layer in layers)
+    return bool(layers) and all(getattr(layer, "side_branch", False) and not _awaits_packing(layer) for layer in layers)
 
 
 def _convert_quantized_weights_after_lora_change(modules: Iterable[nn.Module], skip: bool = False) -> None:
@@ -313,13 +335,20 @@ class LoRAPipeline(ComposedPipelineBase):
         warning per layer buried in the log.
         """
         adapter = self.lora_adapters[lora_nickname]
-        adapter_modules = {key[:-len(".lora_A")] for key in adapter if key.endswith(".lora_A")}
+        if not adapter and lora_path is not None and lora_path == self._constructor_dense_lora_path:
+            # A dense-only adapter (.diff/.set_weight) has no low-rank layers; DenseLoRAPatch applied it at load.
+            return
+        lora_a = {key[:-len(".lora_A")] for key in adapter if key.endswith(".lora_A")}
+        lora_b = {key[:-len(".lora_B")] for key in adapter if key.endswith(".lora_B")}
+        # A module with only one factor is never applied, so it counts as unmatched, not as covered.
+        adapter_modules = lora_a | lora_b
+        complete = lora_a & lora_b
         layer_names = {
             name
             for transformer_layers in self.lora_layers.values()
             for name, _ in transformer_layers.all_lora_layers()
         }
-        unmatched = sorted(adapter_modules - layer_names)
+        unmatched = sorted(adapter_modules - (complete & layer_names))
         matched = len(adapter_modules) - len(unmatched)
         fraction = matched / len(adapter_modules) if adapter_modules else 0.0
         if fraction >= self.lora_min_match_fraction and matched > 0:
@@ -525,6 +554,7 @@ class LoRAPipeline(ComposedPipelineBase):
         adapter_updated = False
         rank = dist.get_rank()
         if lora_path is not None and self.lora_adapter_paths.get(lora_nickname) != lora_path:
+            previous_adapter = self.lora_adapters.get(lora_nickname)
             self.lora_adapters[lora_nickname] = {}
             lora_local_path = maybe_download_lora(lora_path)
             lora_state_dict = self.convert_adapter_state_dict(load_file(lora_local_path), lora_path)
@@ -576,8 +606,11 @@ class LoRAPipeline(ComposedPipelineBase):
                 try:
                     self._check_adapter_coverage(lora_nickname, lora_path)
                 except ValueError:
-                    # Leave no half-registered adapter behind for a later call to find.
-                    self.lora_adapters.pop(lora_nickname, None)
+                    # Restore the previous registration; leave no half-registered adapter behind.
+                    if previous_adapter is None:
+                        self.lora_adapters.pop(lora_nickname, None)
+                    else:
+                        self.lora_adapters[lora_nickname] = previous_adapter
                     raise
             adapter_updated = True
             self.cur_adapter_path = lora_path

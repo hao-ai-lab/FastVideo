@@ -187,3 +187,22 @@ def test_packed_nvfp4_layers_behind_a_side_branch_do_not_block_adapter_changes()
 
     assert not _has_nvfp4_weights_without_bf16(pipeline, pipeline.trainable_transformer_modules)
     assert _all_side_branch([pipeline.lora_layers["transformer"].lora_layers_by_block().__next__()[1]["layer"]])
+
+
+def test_forced_side_branch_over_unpacked_quantized_base_still_packs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FASTVIDEO_LORA_SIDE_BRANCH=1 over a dense checkpoint must still run the deferred NVFP4/MXFP8 packing."""
+    from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+    from fastvideo.pipelines import lora_pipeline
+
+    monkeypatch.setenv("FASTVIDEO_LORA_SIDE_BRANCH", "1")
+    for method_cls, buffer in ((NVFP4QuantizeMethod, "_nvfp4_weight"), (MXFP8QuantizeMethod, "_mxfp8_weight")):
+        base = _dense_linear()
+        base.quant_method = object.__new__(method_cls)
+        base.register_buffer(buffer, None, persistent=False)
+        layer = get_lora_layer(base)
+        assert layer.side_branch
+        assert not lora_pipeline._all_side_branch([layer]), f"{buffer}: unpacked base must not skip packing"
+
+        base.register_buffer(buffer, torch.zeros(1), persistent=False)
+        assert lora_pipeline._all_side_branch([layer]), f"{buffer}: once packed, repacking is skipped"

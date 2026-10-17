@@ -234,6 +234,80 @@ def test_coverage_check_rejects_an_empty_adapter() -> None:
         LoRAPipeline._check_adapter_coverage(pipeline, "default", None)
 
 
+def test_coverage_check_does_not_count_a_lora_a_without_lora_b_as_applied() -> None:
+    names = [f"transformer_blocks.{i}.attn.to_q" for i in range(4)]
+    pipeline = _pipeline_with_layers(names, names[:1])
+    # Three native A-only entries: they match layers by name but would never be applied.
+    pipeline.lora_adapters["default"].update({f"{name}.lora_A": torch.zeros(1) for name in names[1:]})
+    with pytest.raises(ValueError, match=r"reaches 1 of 4 adapter modules"):
+        LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")
+
+
+def test_coverage_check_does_not_count_a_lora_b_without_lora_a_as_applied() -> None:
+    names = [f"transformer_blocks.{i}.attn.to_q" for i in range(2)]
+    pipeline = _pipeline_with_layers(names, names[:1])
+    pipeline.lora_adapters["default"][f"{names[1]}.lora_B"] = torch.zeros(1)
+    LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")  # 1 of 2 meets 50%
+    pipeline.lora_min_match_fraction = 0.6
+    with pytest.raises(ValueError, match=r"reaches 1 of 2"):
+        LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")
+
+
+def test_coverage_check_exempts_a_constructor_dense_only_adapter() -> None:
+    pipeline = _pipeline_with_layers(["transformer_blocks.0.attn.to_q"], [])
+    pipeline._constructor_dense_lora_path = "dense.safetensors"
+    LoRAPipeline._check_adapter_coverage(pipeline, "default", "dense.safetensors")
+    with pytest.raises(ValueError, match="reaches 0 of 0"):
+        LoRAPipeline._check_adapter_coverage(pipeline, "default", "other.safetensors")
+
+
+def test_dense_only_adapter_converts_to_nothing_instead_of_raising() -> None:
+    from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3BasePipeline
+
+    dense = {
+        "diffusion_model.blocks.0.attn.q_norm.diff": torch.zeros(2),
+        "diffusion_model.blocks.0.attn.out_proj.set_weight": torch.zeros(2, 2),
+    }
+    result = convert_h3_community_lora(dense)
+    assert result.tensors == {} and len(result.dense_keys) == 2
+    assert MiniMaxH3BasePipeline.convert_adapter_state_dict(SimpleNamespace(), dense, "dense") == {}
+
+
+def test_failed_coverage_restores_the_previously_registered_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fastvideo.pipelines.lora_pipeline as lp
+
+    previous = {"transformer_blocks.0.attn.to_q.lora_A": torch.ones(1)}
+    stale = {"unknown.0.lora_A.weight": torch.zeros(2, 2), "unknown.0.lora_B.weight": torch.zeros(2, 2)}
+    monkeypatch.setattr(lp.dist, "get_rank", lambda: 0)
+    monkeypatch.setattr(lp, "maybe_download_lora", lambda path: path)
+    monkeypatch.setattr(lp, "load_file", lambda path: dict(stale))
+    layers = SimpleNamespace(all_lora_layers=lambda: iter([("transformer_blocks.0.attn.to_q", object())]),
+                             lora_layers_by_block=lambda: iter(()))
+    pipeline = SimpleNamespace(
+        lora_adapters={"default": previous},
+        lora_adapter_paths={"default": "a.safetensors"},
+        lora_layers={"transformer": layers},
+        trainable_transformer_modules={},
+        modules={"transformer": SimpleNamespace(param_names_mapping={}, lora_param_names_mapping={})},
+        cur_adapter_name="default",
+        cur_adapter_path="a.safetensors",
+        cur_adapter_strength=1.0,
+        lora_initialized=True,
+        lora_strict_coverage=True,
+        lora_min_match_fraction=0.5,
+        _setting_constructor_adapter=True,
+        _constructor_dense_lora_path=None,
+        device=torch.device("cpu"),
+        fastvideo_args=SimpleNamespace(training_mode=False),
+        convert_adapter_state_dict=lambda state, path: state,
+    )
+    pipeline._check_adapter_coverage = lambda *a: LoRAPipeline._check_adapter_coverage(pipeline, *a)
+    with pytest.raises(ValueError, match="reaches 0 of 1"):
+        LoRAPipeline.set_lora_adapter(pipeline, "default", "b.safetensors")
+    assert pipeline.lora_adapters["default"] is previous
+    assert pipeline.lora_adapter_paths["default"] == "a.safetensors"
+
+
 def test_h3_pipeline_converts_and_rejects_foreign_adapters() -> None:
     from fastvideo.pipelines.basic.minimax_h3.minimax_h3_pipeline import MiniMaxH3BasePipeline
 

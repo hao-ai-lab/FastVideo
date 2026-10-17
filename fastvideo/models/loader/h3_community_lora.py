@@ -94,6 +94,8 @@ class H3LoRAConversion:
     target_modules: int = 0
     # Source keys the converter could not place; a non-empty list means the adapter is only partly supported.
     unrecognized: tuple[str, ...] = field(default_factory=tuple)
+    # Dense payload keys (``.diff``/``.set_weight``) the converter leaves for ``DenseLoRAPatch``.
+    dense_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _strip_prefix(key: str) -> tuple[str, bool]:
@@ -192,8 +194,10 @@ def convert_h3_community_lora(tensors: Mapping[str, torch.Tensor]) -> H3LoRAConv
     source_keys: dict[str, list[str]] = {}
     flattened_modules: set[str] = set()
     unrecognized: list[str] = []
+    dense_keys: list[str] = []
     for key, tensor in tensors.items():
         if key.endswith(_DENSE_SUFFIXES):
+            dense_keys.append(key)
             continue
         stripped, flattened = _strip_prefix(key)
         match = _KEY.match(stripped)
@@ -240,4 +244,5 @@ def convert_h3_community_lora(tensors: Mapping[str, torch.Tensor]) -> H3LoRAConv
         source_modules=len(grouped),
         target_modules=sum(1 for key in out if key.endswith(".lora_A.weight")),
         unrecognized=tuple(sorted(unrecognized)),
+        dense_keys=tuple(sorted(dense_keys)),
     )

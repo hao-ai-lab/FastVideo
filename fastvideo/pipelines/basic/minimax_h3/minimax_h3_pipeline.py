@@ -241,6 +241,12 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
                                    lora_path: str) -> dict[str, torch.Tensor]:
         """Translate community (ComfyUI, fal, musubi-tuner) H3 adapters to FastVideo's layout."""
         conversion = convert_h3_community_lora(state_dict)
+        if not conversion.tensors and conversion.dense_keys:
+            # Dense-only adapters (.diff/.set_weight) are applied by DenseLoRAPatch at checkpoint load; there is
+            # no low-rank part for the side-branch/merge path or the coverage check.
+            logger.info("LoRA %s: dense-only adapter (%d dense keys), no low-rank layers to attach.", lora_path,
+                        len(conversion.dense_keys))
+            return {}
         if not conversion.tensors:
             raise ValueError(f"{lora_path!r} holds no MiniMax-H3 LoRA layers FastVideo recognizes "
                              f"({len(state_dict)} keys, e.g. {sorted(state_dict)[:5]}).")

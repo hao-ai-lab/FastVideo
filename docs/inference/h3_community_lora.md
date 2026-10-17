@@ -75,6 +75,10 @@ adapter then runs as a side branch for every layer, at the cost of the extra mat
 
 ## Limitations
 
+- Block-pruned models (FastH3 Trim, 42 of 50 blocks) are not supported yet. Community LoRAs index the full
+  50-block model, so their block numbers do not line up with a renumbered pruned transformer. The Trim
+  `config.json` records `kept_block_indices`, but the loader does not read it, so do not load a community LoRA on a
+  pruned model.
 - Only low-rank factors are converted. Dense `.diff` and `.set_weight` payloads follow the existing
   [FastH3 adapter](fasth3-distilled.md) path and must be given at construction.
 - LoRA targets the attention projections, the feed-forward projections, and the AdaLN projections of the
