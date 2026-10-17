@@ -45,6 +45,18 @@ generator = VideoGenerator.from_config(
     ))
 ```
 
+The same works for packed NVFP4 and FP8 checkpoints, for example FastH3 V2.1:
+
+```python
+generator = VideoGenerator.from_config(
+    GeneratorConfig(
+        model_path="FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer",
+        pipeline=PipelineSelection(
+            components=ComponentConfig(lora_path="fal/MiniMax-H3-Realism-People-LoRA", lora_strength=0.8),
+        ),
+    ))
+```
+
 The FastH3 example scripts take the same options. `basic_fasth3_lora_preview.py` accepts `--lora-path` and
 `--lora-strength`, and `examples/serving/openai_fasth3_lora.yaml` shows the YAML form.
 
@@ -52,6 +64,15 @@ The FastH3 example scripts take the same options. `basic_fasth3_lora_preview.py`
 adapter. Values above `1.0` exaggerate the adapter and usually degrade quality. After construction, you can change
 the strength with `generator.set_lora_adapter(nickname, strength=...)` only when the adapter runs as a side branch, described
 next. Otherwise, create a new generator.
+
+## LoRAs trained on base H3
+
+Most community LoRAs are trained on base MiniMax-H3, which samples in 50 steps with classifier-free guidance. FastH3
+is distilled to 8 steps without guidance. Style, character and camera-motion adapters usually carry over, but the
+best strength can differ from the one recommended for base H3, so start at the published strength and adjust.
+
+Step-reduction adapters (for example "turbo" or "acceleration" LoRAs) are not needed on FastH3, which already
+samples in 8 steps. Stacking them on a distilled model is not supported.
 
 ## Quantized checkpoints
 
