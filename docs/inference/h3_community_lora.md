@@ -95,6 +95,14 @@ To make the adapter strength changeable at runtime on a dense checkpoint, set `F
 adapter then runs as a side branch for every layer, at the cost of the extra matmuls. See
 [Environment variables](../contributing/env_vars.md).
 
+## When the whole model does not fit
+
+On a 32 GB card, and on any GPU where the text encoder and the DiT do not fit together, FastVideo loads the
+conditioner first and the transformer afterward (`h3_sequential_load`). That is the same one-module-at-a-time path
+the consumer profiles already use, for packed NVFP4 and for bf16. Pass `lora_path` at construction as usual. The
+adapter is attached when the transformer arrives: as a bf16 side branch beside packed weights, or merged into a
+dense bf16 transformer. You do not load the LoRA as a separate resident copy of the model.
+
 ## Limitations
 
 - Block-pruned models (FastH3 Trim, 42 of 50 blocks) are not supported yet. Community LoRAs index the full

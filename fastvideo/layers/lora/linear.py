@@ -18,6 +18,29 @@ from fastvideo.utils import get_mixed_precision_state
 
 torch._dynamo.config.recompile_limit = 16
 
+# A full-sequence LoRA delta is the same size as the packed layer output. On a 32 GB card the base output
+# already occupies that space, so materializing the delta and then ``out + delta`` asks for the buffer a third time.
+_SIDE_BRANCH_CHUNK_BYTES = 256 * 1024 * 1024
+
+
+def _add_low_rank_inplace(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tensor, lora_b: torch.Tensor,
+                          scale: float) -> None:
+    """Add ``scale * B(Ax)`` into ``out`` without a second full-size activation."""
+    if scale == 0.0:
+        return
+    out_rows = out.reshape(-1, out.shape[-1])
+    x_rows = x.reshape(-1, x.shape[-1])
+    bytes_per_row = max(out_rows.shape[-1] * out_rows.element_size(), 1)
+    row_count = max(1, _SIDE_BRANCH_CHUNK_BYTES // bytes_per_row)
+    for start in range(0, x_rows.shape[0], row_count):
+        stop = start + row_count
+        update = x_rows[start:stop] @ lora_a.transpose(0, 1) @ lora_b.transpose(0, 1)
+        if scale != 1.0:
+            update = update * scale
+        if update.dtype != out_rows.dtype:
+            update = update.to(dtype=out_rows.dtype)
+        out_rows[start:stop].add_(update)
+
 
 def requires_side_branch(layer: nn.Module) -> bool:
     """Return whether an adapter must run beside ``layer`` instead of being merged into it.
@@ -124,13 +147,19 @@ class BaseLayerWithLoRA(nn.Module):
         if not self.merged and not self.disable_lora:
             lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
             lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
-            delta = x @ lora_A_sliced.T @ lora_B_sliced.T
+            scale = float(self.lora_strength)
             if self.lora_alpha != self.lora_rank:
-                delta = delta * (
-                    self.lora_alpha / self.lora_rank  # type: ignore
-                )  # type: ignore
-            delta = delta * self.lora_strength
+                scale *= float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
             out, output_bias = self.base_layer(x)
+            if self.side_branch:
+                # Leave the compiled base call, then add the update in token chunks. One full-size delta does not fit
+                # beside the packed output on a 32 GB card once reference tokens lengthen the sequence.
+                torch._dynamo.graph_break()
+                _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, scale)
+                return out, output_bias
+            delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)
+            if scale != 1.0:
+                delta = delta * scale
             return out + delta, output_bias
         else:
             out, output_bias = self.base_layer(x)

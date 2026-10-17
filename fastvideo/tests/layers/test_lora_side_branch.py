@@ -81,6 +81,20 @@ def test_env_forces_side_branch_on_retained_dense_weight(packed: bool) -> None:
         assert get_lora_layer(base).side_branch
 
 
+def test_side_branch_chunked_update_matches_the_full_product(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lora_linear, "_SIDE_BRANCH_CHUNK_BYTES", 64)
+    base = _packed_linear()
+    layer = get_lora_layer(base)
+    a, b = _factors()
+    layer.set_lora_weights(a, b, lora_alpha=8, strength=0.75)
+    x = _x()
+
+    out, _ = layer(x)
+
+    expected = base(x)[0].float() + 0.75 * (8 / RANK) * (x.float() @ a.bfloat16().float().T @ b.bfloat16().float().T)
+    torch.testing.assert_close(out.float(), expected, atol=0.15, rtol=0.05)
+
+
 def test_side_branch_matches_base_plus_scaled_low_rank_product() -> None:
     base = _packed_linear()
     layer = get_lora_layer(base)

@@ -221,6 +221,9 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_min_match_fraction: float = 0.5
     _constructor_dense_lora_path: str | None = None
     _setting_constructor_adapter: bool = False
+    # Sequential load (the 32 GB and other cards that cannot hold the text encoder and the DiT at once) omits
+    # the transformer from the first load. The adapter is applied when that module arrives.
+    _constructor_adapter_pending: bool = False
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -304,17 +307,34 @@ class LoRAPipeline(ComposedPipelineBase):
             self.convert_to_lora_layers()
         # Inference
         elif not self.training_mode and self.lora_path is not None:
+            self._constructor_adapter_pending = False
+            if not self.trainable_transformer_modules:
+                # The DiT is not in memory yet. ``add_module`` applies the adapter when sequential load brings it in.
+                self._constructor_adapter_pending = True
+                logger.info("LoRA %s waits until the transformer is loaded", self.lora_path)
+            else:
+                self.convert_to_lora_layers()
+                if not any(is_lazy_module(module) for module in self.trainable_transformer_modules.values()):
+                    self._apply_constructor_adapter()
+
+    def add_module(self, module_name: str, module: Any) -> None:
+        super().add_module(module_name, module)
+        if not getattr(self, "_constructor_adapter_pending", False):
+            return
+        if module is None or module_name not in self.trainable_transformer_names:
+            return
+        self.trainable_transformer_modules[module_name] = module
+        if is_lazy_module(module):
+            if not self.lora_initialized:
+                self.convert_to_lora_layers()
+            return
+        if self.lora_initialized:
+            self._convert_one_transformer(module_name, module)
+        else:
             self.convert_to_lora_layers()
-            if not any(is_lazy_module(module) for module in self.trainable_transformer_modules.values()):
-                self._setting_constructor_adapter = True
-                try:
-                    self.set_lora_adapter(
-                        self.lora_nickname,  # type: ignore
-                        self.lora_path,
-                        strength=self.lora_strength,
-                    )  # type: ignore
-                finally:
-                    self._setting_constructor_adapter = False
+        self._apply_constructor_adapter()
+        self._constructor_adapter_pending = False
+        logger.info("LoRA %s attached to %s after it loaded", self.lora_path, module_name)
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.lora_target_modules is None:
