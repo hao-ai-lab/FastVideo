@@ -417,7 +417,8 @@ def _mm_fp4(
 
 _SPLIT_MIN_ROWS = 16384
 _SPLIT_CANDIDATES = (1, 2, 4)
-_SPLIT_CHOICE: dict[tuple[int, int, int, str], int] = {}
+_SplitKey = tuple[int, int, int, str, int, bool, torch.dtype]
+_SPLIT_CHOICE: dict[_SplitKey, int] = {}
 # Measured on GB10 (cuDNN 9.20 via FlashInfer 0.6): (packed K, N) -> chunks. H3's FF down projection is the only
 # shape that falls off the plan heuristic; the others are fastest whole.
 _SPLIT_TABLE: dict[tuple[int, int], int] = {(7168, 5376): 2}

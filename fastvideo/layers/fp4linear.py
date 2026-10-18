@@ -25,8 +25,7 @@ def _global_sf(t: torch.Tensor) -> torch.Tensor:
     maxabs = torch.nan_to_num(t.abs()).amax().float()
     # The reduction above runs in the input dtype, so an infinite input becomes the
     # fp16/bf16 maximum. The reference reduction replaces it in float32.
-    maxabs = torch.where(torch.isinf(t).any(), torch.tensor(torch.finfo(torch.float32).max, device=t.device),
-                         maxabs)
+    maxabs = torch.where(torch.isinf(t).any(), torch.tensor(torch.finfo(torch.float32).max, device=t.device), maxabs)
     return (448.0 * 6.0) / maxabs.clamp(min=1e-12)
 
 
