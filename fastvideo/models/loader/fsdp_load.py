@@ -68,9 +68,10 @@ def _prequantized_fp8_prefixes(weight_files: list[str]) -> list[str]:
 
 def _load_prequantized_fp8(model: nn.Module, weight_files: list[str], targets: dict[str, str],
                            device: torch.device) -> None:
-    """Attach FP8 W8A8 checkpoint tensors to their FP8 linears as ``convert_model_to_fp8`` would (per channel)."""
+    """Load packed FP8 linears and preserve the checkpoint's dense linear weights."""
     from safetensors import safe_open
 
+    from fastvideo.layers.linear import UnquantizedLinearMethod
     from fastvideo.layers.quantization.fp8_config import FP8QuantizeMethod
 
     modules = dict(model.named_modules())
@@ -93,7 +94,17 @@ def _load_prequantized_fp8(model: nn.Module, weight_files: list[str], targets: d
                                tensors[f"{prefix}.weight_scale"].reshape(-1).to(device=device, dtype=torch.float32),
                                persistent=False)
         module._parameters.pop("weight", None)
-    logger.info("Loaded %d pre-quantized FP8 linears", len(targets))
+    # The packed entries define the export's FP8 scope. A broad FP8Config can
+    # also tag intentionally dense layers, such as H3's text refiner. Reset
+    # their method before post-load conversion also quantizes those layers.
+    packed_modules = {target[:-len(".weight")] for target in targets.values()}
+    dense_linears = 0
+    for name, module in modules.items():
+        if (name not in packed_modules and isinstance(getattr(module, "quant_method", None), FP8QuantizeMethod)
+                and getattr(module, "weight", None) is not None):
+            module.quant_method = UnquantizedLinearMethod()
+            dense_linears += 1
+    logger.info("Loaded %d pre-quantized FP8 linears; preserved %d dense linears", len(targets), dense_linears)
 
 
 def _maybe_quantize_model(model: nn.Module, *, defer_weight_conversion_until_lora_merge: bool = False) -> None:

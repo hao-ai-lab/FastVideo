@@ -97,6 +97,25 @@ python examples/inference/basic/basic_fasth3_omniref_pdd.py \
 Replace `./FastH3-OmniRef-Dense` with your dense or FP8 student export, including
 its Ref2VA PDD inference contract.
 
+### FP8 checkpoint precision
+
+For a pre-quantized FP8 export, the loader uses FP8 only for the linears stored as
+FP8 `weight` and float32 `weight_scale` pairs. It preserves the other linears
+at the loaded dense precision, even when the FP8 configuration's name matching
+would also select them. This keeps the OmniRef text refiner in BF16 when the
+export stores it in BF16. The refiner is part of the DiT, separate from the
+Qwen3-VL text encoder.
+
+The packed linears use per-channel FP8 weights and dynamic per-token FP8
+activations, or W8A8. This describes linear computation rather than the attention
+kernel. Dense checkpoints without packed FP8 pairs
+still use the configuration's runtime quantization rules.
+
+Existing FP8 exports with these weight/scale pairs and dense BF16 refiner
+weights can be reused without conversion or re-upload. Updating the loader
+prevents the extra refiner quantization; it does not guarantee artifact-free
+speech for every prompt and seed.
+
 ### What this does and does not buy
 
 Two things this first version does not do, so the numbers are not read as more
