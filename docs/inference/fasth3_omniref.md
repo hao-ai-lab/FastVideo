@@ -149,6 +149,18 @@ the decoder and activations. The encoder and decoder figures are measured; the
 rest are estimates. Both the RTX 5090 and RTX 4090 offload the encoder and load
 denoise modules on demand; the 4090 also uses the larger FP8 DiT weights.
 
+## Multiple Sparks
+
+Two Sparks run the same stack with `--num-gpus 2`, Ray and sequence
+parallelism over a direct link (`basic_fasth3_omniref_spark_pair.yaml`).
+Sequence parallelism cannot use three ranks: MiniMax-H3 has 56 attention
+heads, so `sp_size` must divide 56. For three Sparks, enable the encoder split
+(`FASTVIDEO_H3_ENCODER_SPLIT=1`, `FASTVIDEO_H3_ENCODER_NODES=1`): one node
+runs the Qwen3-VL conditioner and the other two run the DiT and VAEs with
+`sp_size=2`. The prompt-embedding broadcast still spans all three ranks, so
+all three nodes need a common fast link; the split does not fit a triangle of
+separate point-to-point subnets without routes between them.
+
 ## Apple Silicon
 
 `fastvideo/mlx_runtime` has an MLX MiniMax-H3 runtime, but its pipeline is
