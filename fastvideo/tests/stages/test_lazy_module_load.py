@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lazy_module import LazyModule, is_lazy_module
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -748,7 +749,7 @@ def test_building_the_real_h3_stages_materializes_nothing():
         "scheduler": object(),
         "audio_scheduler": object(),
     }
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    args = FastVideoArgs(model_path="unused", pipeline_config=MiniMaxH3PipelineConfig(), lazy_module_load=True)
 
     pipeline._add_stages(args, ref2va=False)
 
@@ -783,7 +784,7 @@ def test_h3_lazy_release_drops_dit_before_vae_decode():
         "scheduler": object(),
         "audio_scheduler": object(),
     }
-    args = SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig())
+    args = FastVideoArgs(model_path="unused", pipeline_config=MiniMaxH3PipelineConfig(), lazy_module_load=True)
     pipeline._add_stages(args, ref2va=False)
     schedule = pipeline._build_lazy_release_schedule()
     names = {pipeline._stages[index]._pipeline_stage_name: modules for index, modules in schedule.items()}
