@@ -525,7 +525,7 @@ def test_forward_tile128_route_resolved_once_per_device(tile128, monkeypatch):
     # A failed probe is cached too; later calls take the Triton fallback without probing again.
     calls = []
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd",
-                        lambda q, k, v, mask, vbs: (calls.append(q.shape), torch.zeros_like(q))[1])
+                        lambda q, k, v, mask, vbs: (calls.append(q.shape), (torch.zeros_like(q), None))[1])
     tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) and False
     impl = _impl(_DIM)
     raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)

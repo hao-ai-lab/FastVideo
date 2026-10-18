@@ -48,6 +48,7 @@ from typing import Any
 
 from fastvideo import VideoGenerator
 from fastvideo.api import (
+    CompileConfig,
     ComponentConfig,
     EngineConfig,
     GenerationRequest,
@@ -309,7 +310,12 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
         height=480,
         # 128 GB unified holds the encoder, the DiT and the decoder at once:
         # the same resident policy as the released Spark recipe.
-        offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=False, vae=False, pin_cpu_memory=False),
+        offload=OffloadConfig(dit=False,
+                              dit_layerwise=False,
+                              text_encoder=False,
+                              vae=False,
+                              pin_cpu_memory=False,
+                              lazy_module_load=False),
         env={
             **_CONSUMER_ENV,
             # cuDNN mm_fp4 is 2.7-3x faster than CUTLASS on the H3 FFN shapes on GB10.
@@ -323,7 +329,12 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
         width=1344,
         height=768,
         # 96 GB fits the encoder, the DiT and the decoder at once.
-        offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=False, vae=False, pin_cpu_memory=True),
+        offload=OffloadConfig(dit=False,
+                              dit_layerwise=False,
+                              text_encoder=False,
+                              vae=False,
+                              pin_cpu_memory=True,
+                              lazy_module_load=False),
         env={**_CONSUMER_ENV, "FASTVIDEO_H3_VAE_TILE_BATCH": "8"},
     ),
     "rtx-5090": DeviceProfile(
@@ -393,7 +404,11 @@ def build_generator_config(model_dir: Path,
         quantization = QuantizationConfig(transformer_quant=profile.transformer_quant,
                                           layer_profile=profile.layer_profile)
         offload = profile.offload
-        experimental = {"h3_sequential_load": True} if profile.sequential_load else {}
+        # Explicit: on unified memory the auto rule would defer the DiT and load
+        # 50+ GB at the first denoise call even when everything fits.
+        experimental = {"h3_sequential_load": profile.sequential_load}
+        if num_gpus > 1:
+            experimental.update({"vae_parallel_decode": True, "vae_parallel_encode": True})
     elif lossless_accel:
         # Resident encoders skip streaming the 63 GB text encoder (and the
         # VAEs) from host memory on every clip; pinned buffers copy the
@@ -408,18 +423,25 @@ def build_generator_config(model_dir: Path,
         model_path=str(model_dir),
         engine=EngineConfig(
             num_gpus=num_gpus,
-            # Shard the DiT across the GPUs rather than holding a full copy on each.
-            use_fsdp_inference=num_gpus > 1,
+            execution_backend="ray" if num_gpus > 1 else "mp",
+            # A packed NVFP4 export is replicated across GPUs; the tokens are split
+            # by sequence parallelism. Data-center checkpoints keep the FSDP path.
+            use_fsdp_inference=num_gpus > 1 and profile is None,
             parallelism=ParallelismConfig(tp_size=1, sp_size=num_gpus),
             offload=offload,
             quantization=quantization,
+            # The release decoders are eager; compile only the VAE, as the Spark recipes do.
+            compile=CompileConfig(enabled=False, vae_enabled=True) if profile is not None else CompileConfig(),
         ),
         pipeline=PipelineSelection(
             workload_type="i2v",
             # FastVideo reads the trained fused-block partition and attention
             # settings from the composed directory's fastvideo_inference.json.
             components=ComponentConfig(override_pipeline_cls_name="MiniMaxH3Ref2VAModularPipeline"),
-            experimental=experimental,
+            vae_tiling=profile is not None,
+            experimental={
+                **experimental, "video_decode_backend": "h3-vae"
+            } if profile is not None else experimental,
         ),
     )
 

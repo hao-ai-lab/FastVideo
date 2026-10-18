@@ -48,6 +48,7 @@ generator:
     experimental:
       attention_backend: VIDEO_SPARSE_ATTN_H3
       video_decode_backend: h3-vae
+      h3_sequential_load: false
 request:
   prompt: >-
     A person on a sofa, lit by a warm lamp, speaking to camera.

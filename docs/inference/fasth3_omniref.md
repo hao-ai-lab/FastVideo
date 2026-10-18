@@ -78,6 +78,13 @@ The RTX 4090 profile uses FP8 linears, the unquantized Triton emulator for the
 checkpoint's fixed 128-token VSA tiles and the VAE folder's dense decoder. The
 NVFP4 decoder's GEMMs need FP4 hardware, so `--decoder` does not apply there.
 
+The FP8 prefix split is the validated-quality mode. It runs the prefix rows
+densely in bf16 after 8-bit Q/K rounding, which costs about 35 s per 480p/5 s
+clip on one Spark; set `FASTVIDEO_H3_VSA_FP4_PREFIX=` (empty) to keep every row
+on the FP4 kernel for the fastest single-Spark path. At `sp_size` above 1 the
+split does not apply: the sequence-parallel path uses the FP4 kernel for every
+row.
+
 ## Environment
 
 The profiles set these; set them yourself when driving the YAML recipes.
