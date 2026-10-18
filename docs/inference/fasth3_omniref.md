@@ -80,10 +80,18 @@ NVFP4 decoder's GEMMs need FP4 hardware, so `--decoder` does not apply there.
 
 The FP8 prefix split is the validated-quality mode. It runs the prefix rows
 densely in bf16 after 8-bit Q/K rounding, which costs about 35 s per 480p/5 s
-clip on one Spark; set `FASTVIDEO_H3_VSA_FP4_PREFIX=` (empty) to keep every row
-on the FP4 kernel for the fastest single-Spark path. At `sp_size` above 1 the
-split does not apply: the sequence-parallel path uses the FP4 kernel for every
-row.
+clip on one Spark; set `FASTVIDEO_H3_VSA_FP4_PREFIX=` (empty), or pass
+`--attention-prefix fast` to the example, to keep every row on the FP4 kernel
+for the fastest single-Spark path. At `sp_size` above 1 the split does not
+apply: the sequence-parallel path uses the FP4 kernel for every row.
+
+Both modes are supported and selectable. The choice is a fidelity/speed
+tradeoff, not a broken-versus-clean switch: on a matched 480p/5 s clip (same
+prompt, seed and reference, 8L decoder) fast mode keeps the same scene, motion
+and faces, but sits **4.3 dB farther from the bf16 attention reference on every
+frame** (20.96 vs 25.26 dB PSNR; SSIM 0.785 vs 0.852; structural correlation
+0.864 vs 0.945). For the best-quality clip use the 36L decoder with the FP8
+split; for the fastest clip use the 8L decoder with fast mode.
 
 ## Environment
 

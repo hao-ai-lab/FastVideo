@@ -170,6 +170,26 @@ def test_lossless_accel_flag_parses():
     assert example.parse_args([*argv, "--lossless-accel"]).lossless_accel is True
 
 
+@pytest.mark.parametrize("choice", ["default", "fp8", "bf16", "fast"])
+def test_attention_prefix_flag_parses(choice):
+    argv = ["--model-path", "m", "--prompt", "p", "--image", "a.png", "--attention-prefix", choice]
+    assert example.parse_args(argv).attention_prefix == choice
+
+
+@pytest.mark.parametrize(("choice", "expected"), [
+    ("default", "fp8"),
+    ("fp8", "fp8"),
+    ("bf16", "bf16"),
+    ("fast", ""),
+])
+def test_attention_prefix_keeps_the_profile_default_or_overrides_it(choice, expected):
+    from fastvideo import envs
+
+    with envs.FASTVIDEO_H3_VSA_FP4_PREFIX.override("fp8"):
+        example.apply_attention_prefix(choice)
+        assert envs.FASTVIDEO_H3_VSA_FP4_PREFIX.get() == expected
+
+
 def test_4090_rejects_packed_export_before_downloading_base(tmp_path, monkeypatch):
     export = tmp_path / "packed"
     (export / "transformer_ref").mkdir(parents=True)
