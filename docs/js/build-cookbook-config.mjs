@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { parseDocument, stringify } from "yaml";
 import { createValidator } from "./cookbook-validator.mjs";
 import { resolveConfig } from "./cookbook-config.mjs";
+import { validateCapacityMetadata } from "./cookbook-capacity-schema.mjs";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -48,7 +49,7 @@ export function deepMerge(base, overlay) {
   );
 }
 
-function readYaml(path) {
+export function readYaml(path) {
   let source;
   try {
     source = readFileSync(path, "utf8");
@@ -240,7 +241,7 @@ function validateOptions(options, context) {
   }
 }
 
-function within(root, source, folder, extensions) {
+export function within(root, source, folder, extensions) {
   requireValue(text(source) && !isAbsolute(source), `Expected a repository-relative path under ${folder}`);
   let path;
   try {
@@ -368,7 +369,7 @@ export function buildCatalogs({
     requireValue(ID.test(modelKey) && !modelKeys.has(modelKey), `Invalid or duplicate model key: ${modelKey}`);
     modelKeys.add(modelKey);
     const manifest = readYaml(join(recipesDir, name));
-    keys(manifest, ["title", "deployments"], ["summary", "guide"], name);
+    keys(manifest, ["title", "deployments"], ["summary", "guide", "capacity"], name);
     requireValue(
       text(manifest.title) && object(manifest.deployments) && Object.keys(manifest.deployments).length,
       `${name}: title and at least one deployment are required`,
@@ -460,6 +461,8 @@ export function buildCatalogs({
         throw new Error(`${name}: ${id}: ${failure.message}`, { cause: failure });
       }
     }
+    if (manifest.capacity !== undefined)
+      validateCapacityMetadata(manifest.capacity, { modelId, context: `${name}: capacity` });
   }
   return catalogs;
 }

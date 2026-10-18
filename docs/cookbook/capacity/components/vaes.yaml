@@ -1,0 +1,19 @@
+vaes:
+  wan2.1-vae-decoder:
+    name: Wan2.1 VAE decoder
+    # The complete checkpoint has 126_892_531 parameters. Wan T2V constructs no encoder;
+    # retain decoder.*, post_quant_conv.*, and quant_conv.* when counting its loaded subset.
+    parameter_count: 73_296_659
+    loaded_subset: Decoder, post_quant_conv, and quant_conv; the encoder is not loaded for text-to-video.
+    geometry:
+      temporal_compression: 4
+      spatial_compression: 8
+      vae_decoder_channels: 96
+    # FastWan and vanilla Wan tensor names/shapes match at these pinned checkpoint revisions.
+    sources:
+      - https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/blob/0fad780a534b6463e45facd96134c9f345acfa5b/vae/config.json
+      - https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/blob/0fad780a534b6463e45facd96134c9f345acfa5b/vae/diffusion_pytorch_model.safetensors
+      - https://github.com/hao-ai-lab/FastVideo/blob/81b73f6b88b18803a24510a336b0bae1b0c2c4ef/fastvideo/models/wan/pipeline_config.py
+      - https://github.com/hao-ai-lab/FastVideo/blob/81b73f6b88b18803a24510a336b0bae1b0c2c4ef/fastvideo/models/wan/vae.py
+      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/blob/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/vae/config.json
+      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/blob/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/vae/diffusion_pytorch_model.safetensors

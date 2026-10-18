@@ -5,6 +5,11 @@ settings and download a serving YAML. A **deployment** is one named combination
 of a model, runtime and starting configuration, such as FastWan with CUDA REST.
 Ordinary additions use YAML; they require no custom UI or JavaScript changes.
 
+For shared hardware/component inventories and optional recorded GPU runs, see
+[Adding capacity metadata](capacity_metadata.md). Add optional `capacity` fields to the existing model manifest; component
+definitions remain shared, while examples and identity come from deployments.
+This metadata does not certify that an edited configuration fits.
+
 ## Before you start
 
 Choose a runnable serving configuration under `examples/serving/` and an existing
@@ -142,8 +147,13 @@ CI publication, see the [docs README](https://github.com/hao-ai-lab/FastVideo/bl
 
 | Level | Required | Optional |
 | --- | --- | --- |
-| Model | `title`, nonempty `deployments` | `summary`, `guide` |
+| Model | `title`, nonempty `deployments` | `summary`, `guide`, `capacity` |
 | Deployment | `runtime`, `workload`, `defaults`, `options` | `label`, `summary`, `guide`, `env`, `requirements`, `overrides` |
+
+The optional model-level `capacity` section contains shared component references,
+`memory_rules`, optional sources, and optional recorded runs. Its structure is
+validated alongside the manifest; shared references and hardware IDs are
+resolved by the capacity build. See the [capacity guide](capacity_metadata.md).
 
 Unknown keys fail validation. Paths are repository-relative: `defaults` must
 reference a YAML file under `examples/serving/`; a non-null `guide` must reference

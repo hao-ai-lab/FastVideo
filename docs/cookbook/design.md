@@ -211,9 +211,13 @@ recipe needs it. It is not implemented in this change:
   sibling fields. The current LTX2 baseline fixes refinement on and uses 64-pixel
   dimensions accordingly.
 
-Memory estimates, measured hardware support, format versioning and HTTP cache
-freshness remain separate follow-ups. No general arithmetic validator or CLI
-override workflow is introduced here.
+The [capacity metadata catalog](../contributing/capacity_metadata.md) supplies
+shared hardware/component facts and optional recorded runs through separate
+static loaders. Optional `capacity` sections extend existing model manifests;
+model identity and example configurations are derived from their deployments
+and native baseline YAML. Memory estimates, measured-hardware UI,
+format versioning and HTTP cache freshness remain separate follow-ups. No
+general arithmetic validator or CLI override workflow is introduced here.
 
 ## Cookbook interface
 
