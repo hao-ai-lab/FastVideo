@@ -422,12 +422,21 @@ def _rms_norm_args(norm: nn.Module, affine: bool) -> tuple[torch.Tensor | None, 
     return norm.weight, norm.eps if norm.eps is not None else torch.finfo(torch.float32).eps
 
 
+def _clear_block_plan(module: nn.Module) -> None:
+    """Drop a block's cached fused plan, whose tensors point at the previous weight storage."""
+    module.__dict__.pop("_nvfp4_fused_plan", None)
+
+
 def _block_plan(block: nn.Module) -> _BlockPlan | None:
     """The fused plan of one ``MiniMaxH3VideoTransformerBlock``, or None if it must run eagerly."""
     attn, ff = block.attn, block.ff
     linears = (attn.to_q, attn.to_k, attn.to_v, attn.to_out[0], ff.net[0].proj, ff.net[2])
     if not all(isinstance(layer, NVFP4DecoderLinear) for layer in linears):
         return None
+    # The plan holds views of the parameter storage, so the offload walk has to
+    # drop it when the module moves to the host (parameters/buffers alone miss it).
+    if "clear_offload_caches" not in block.__dict__:
+        block.__dict__["clear_offload_caches"] = lambda module=block: _clear_block_plan(module)
     states = [layer.fused_state() for layer in linears]
     if any(state is None for state in states):
         return None
@@ -438,9 +447,12 @@ def _block_plan(block: nn.Module) -> _BlockPlan | None:
     norm1, norm2 = _rms_norm_args(block.norm1, True), _rms_norm_args(block.norm2, True)
     norm_q, norm_k = _rms_norm_args(attn.norm_q, False), _rms_norm_args(attn.norm_k, False)
     dim = attn.heads * attn.dim_head
+    # The quantization kernels tile the inner dimension by 512 columns without a column mask.
+    ff_inner = ff.net[0].proj.out_features
     plan = None
     if (None not in (norm1, norm2, norm_q, norm_k) and norm_q[1] == norm_k[1] and attn.attn_impl is not None
             and attn.dim_head == 64 and attn.heads & (attn.heads - 1) == 0 and dim % 512 == 0
+            and ff_inner % 512 == 0
             and block.scale1.dtype == block.scale2.dtype == torch.float32
             and isinstance(ff.net[0].activation, nn.SiLU)
             and all(state.global_sf_x is states[0].global_sf_x or torch.equal(state.global_sf_x, states[0].global_sf_x)
@@ -523,8 +535,7 @@ def _gemm(quantized: tuple[torch.Tensor, torch.Tensor], state: NVFP4FusedState) 
 
     from fastvideo.models.vaes import minimax_h3_nvfp4_decoder
 
-    backend = minimax_h3_nvfp4_decoder.mm_fp4_backend(x_fp4.shape[0], state.out_features, 2 * x_fp4.shape[1],
-                                                      out.device)
+    backend = minimax_h3_nvfp4_decoder.mm_fp4_backend(out.device)
     flashinfer.mm_fp4(x_fp4,
                       state.packed.T,
                       x_inv_scale,
@@ -597,7 +608,7 @@ def _weight_pointers(blocks: nn.ModuleList) -> tuple[int, ...]:
     storage on every load, which changes them; including them in the cache key
     re-captures instead of replaying against freed addresses.
     """
-    return tuple(t.data_ptr() for t in blocks.parameters())
+    return tuple(t.data_ptr() for t in (*blocks.parameters(), *blocks.buffers()))
 
 
 def _trim_graphs(graphs: dict) -> None:

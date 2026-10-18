@@ -79,9 +79,6 @@ class FP4VSAFineAttention:
     def __init__(self, numerics: FP4AttentionNumerics) -> None:
         self.numerics = numerics
         self._reference, self._train = load_qat_vsa_modules()
-        # Listed 128x128 key blocks visited by dense-prefix query tiles vs all query tiles (FLOP share).
-        self.prefix_blocks = 0.0
-        self.total_blocks = 0.0
 
     def __call__(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, mask: torch.Tensor,
                  metadata: Any) -> torch.Tensor:
@@ -90,9 +87,6 @@ class FP4VSAFineAttention:
         q2k_idx, q2k_num, kv_valid = self._reference.tile128_mask_to_fp4_blocks(mask, metadata.variable_block_sizes)
         q, k, v = (t.transpose(1, 2) for t in (query, key, value))
         num_prefix_tiles = int(getattr(metadata, "num_prefix_tiles", 0) or 0)
-        if self.numerics.prefix_precision is not None:
-            self.prefix_blocks += float(q2k_num[..., :num_prefix_tiles].sum())
-            self.total_blocks += float(q2k_num.sum())
         out = self._train.fp4_vsa_attn_qat(q,
                                            k,
                                            v,
@@ -111,23 +105,4 @@ class FP4VSAFineAttention:
         return out.transpose(1, 2)
 
 
-def vsa_impls(transformer: torch.nn.Module) -> list[Any]:
-    """Every VSA-H3 attention implementation in a MiniMax-H3 transformer."""
-    impls = []
-    for module in transformer.modules():
-        impl = getattr(getattr(module, "distributed_attention", None), "attn_impl", None)
-        if impl is not None and hasattr(impl, "fine_attention_override"):
-            impls.append(impl)
-    return impls
-
-
-def install_fp4_vsa_attention(transformer: torch.nn.Module, numerics: FP4AttentionNumerics | None) -> int:
-    """Route every VSA-H3 layer's fine attention through the emulator (``None`` restores the kernels)."""
-    override = FP4VSAFineAttention(numerics) if numerics is not None else None
-    impls = vsa_impls(transformer)
-    for impl in impls:
-        impl.fine_attention_override = override
-    return len(impls)
-
-
-__all__ = ["FP4AttentionNumerics", "FP4VSAFineAttention", "install_fp4_vsa_attention", "load_qat_vsa_modules"]
+__all__ = ["FP4AttentionNumerics", "FP4VSAFineAttention", "load_qat_vsa_modules"]

@@ -15,14 +15,14 @@
 # NVFP4 one needs FP4 hardware too), a non-resident encoder and expandable segments
 # to reduce memory fragmentation.
 #
-# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3
-# FASTVIDEO_H3_VSA_FP4=0
-# FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16
-# PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-# FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt
+# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+# FASTVIDEO_H3_VSA_FP4=0 \
+# FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16 \
+# PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+# FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_rtx4090.yaml
 #
-# See docs/inference/fasth3_omniref_consumer.md.
+# See docs/inference/fasth3_omniref.md.
 generator:
   model_path: ./FastH3-OmniRef-Dense-Composed
   engine:

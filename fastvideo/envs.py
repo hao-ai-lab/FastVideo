@@ -599,13 +599,12 @@ FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
     "128-token tiles. Empty keeps every row on the FP4 kernel.")
 FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
     "",
-    choices=("", "fa4-mix8", "fa4-mixmx", "fa4-qk", "emulator-mix8", "emulator-mixmx", "emulator-qk", "emulator-bf16"),
+    choices=("", "emulator-mix8", "emulator-mixmx", "emulator-qk", "emulator-bf16"),
     category="attention",
-    doc="Replace tile-128 fine attention, preserving VSA selection and compression: "
-    "fa4-mix8 = NVFP4 Q/K video, per-token FP8 Q/K prefix; fa4-mixmx = MXFP8 prefix; "
-    "fa4-qk = NVFP4 Q/K everywhere. FA4 modes use BF16 P.V and K smoothing, need sm_100/sm_103 "
-    "and the patched FA4-FP4 package. emulator-* uses Triton with those numerics; emulator-bf16 "
-    "uses unquantized BF16 on consumer CUDA GPUs. Nonempty overrides take priority over "
+    doc="Replace tile-128 fine attention, preserving VSA selection and compression, with the Triton "
+    "emulator of the sparse FP4 kernel: emulator-mix8 = NVFP4 Q/K video, per-token FP8 Q/K prefix; "
+    "emulator-mixmx = MXFP8 prefix; emulator-qk = NVFP4 Q/K everywhere; emulator-bf16 = unquantized "
+    "BF16. emulator-bf16 runs on any CUDA GPU. Nonempty overrides take priority over "
     "FASTVIDEO_H3_VSA_FP4. Empty keeps the native route.")
 FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
                                             category="performance",
@@ -668,10 +667,6 @@ FASTVIDEO_H3_ADALN_TABLE = EnvPath(None,
                                    category="performance",
                                    doc="Precomputed MiniMax-H3 AdaLN modulation table; enables the cache and "
                                    "skips loading the AdaLN projection weights.")
-FASTVIDEO_H3_DUMP_DIR = EnvPath(None,
-                                category="debug",
-                                doc="Save each MiniMax-H3 request's final target video/audio rows and its text "
-                                "conditioning to this directory (evaluation of quantized components).")
 FASTVIDEO_H3_ADALN_DUMP = EnvPath(None,
                                   category="debug",
                                   doc="Write the MiniMax-H3 AdaLN modulation table to this path while sampling.")

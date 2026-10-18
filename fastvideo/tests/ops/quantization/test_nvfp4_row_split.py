@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from fastvideo.layers.quantization import nvfp4_config
 from fastvideo.layers.quantization.nvfp4_config import _mm_fp4_row_chunks
 
 
@@ -20,3 +21,19 @@ def test_row_chunks_cover_rows_in_order(rows: int, parts: int) -> None:
         assert chunk_scale[0, 0].item() == offset
         offset += chunk.shape[0]
     assert offset == rows
+
+
+@pytest.mark.parametrize(("use_8x4", "a_scale_rows"), [(True, 20000), (False, None)])
+def test_row_split_stays_whole_without_128x4_scale_rows(monkeypatch, use_8x4, a_scale_rows):
+    calls = []
+
+    def fake_chunked(*args):
+        calls.append(args[-1])
+        return None
+
+    monkeypatch.setattr(nvfp4_config, "_mm_fp4_chunked", fake_chunked)
+    a = torch.zeros(256, 64)
+    a_scale = torch.zeros(256, 1) if a_scale_rows else torch.zeros(256)
+    assert nvfp4_config._mm_fp4_row_split(a, torch.zeros(32, 64), a_scale, torch.zeros(32, 1), None,
+                                          torch.bfloat16, 16, use_8x4, "cudnn", True) is None
+    assert calls == [1]

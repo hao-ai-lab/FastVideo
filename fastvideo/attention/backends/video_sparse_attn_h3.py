@@ -52,11 +52,12 @@ the original logical tiles. Grad-tracking forwards and every backward stay
 on the Triton kernels. If the env is set but a precondition fails, the route
 logs one warning and falls back.
 
-Tile 128 has exactly one implementation: the same ptx_blackwell
-forward, which carries a 128-token block instantiation. It needs no opt-in,
-pads an odd tile count with the same zero-valid partner tile, runs no-grad
-forwards only, and fails closed (no Triton fallback) when the extension or
-device cannot run it.
+Tile 128 prefers the same ptx_blackwell forward, which carries a 128-token
+block instantiation. It needs no opt-in, pads an odd tile count with the same
+zero-valid partner tile, and runs no-grad forwards only. When the extension or
+device cannot run it, each 128-token tile splits into two contiguous 64-token
+halves on the Triton kernels; if those are not installed either, the call fails
+closed.
 """
 
 import functools
@@ -558,13 +559,10 @@ def _ptx_blackwell_unavailable_reason(ptx_blackwell_mod: Any, query_bhsd: torch.
 @functools.cache
 def _fine_attention_from_name(name: str) -> Any:
     kind, _, mode = name.partition("-")
-    modes = {"fa4": ("mix8", "mixmx", "qk"), "emulator": ("mix8", "mixmx", "qk", "bf16")}
+    modes = {"emulator": ("mix8", "mixmx", "qk", "bf16")}
     if kind not in modes or mode not in modes[kind]:
         accepted = ", ".join(f"{prefix}-{value}" for prefix, values in modes.items() for value in values)
         raise ValueError(f"Invalid FASTVIDEO_H3_VSA_FINE_ATTENTION={name!r}; accepted names: {accepted}")
-    if kind == "fa4":
-        from fastvideo.attention.backends.fa4_vsa_h3 import FA4VSAFineAttention
-        return FA4VSAFineAttention(mode)
     from fastvideo.attention.backends.fp4_vsa_qat import FP4AttentionNumerics, FP4VSAFineAttention
     if mode == "bf16":
         return FP4VSAFineAttention(FP4AttentionNumerics(quantize=False))
@@ -911,8 +909,8 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             use_ptx_blackwell = False
             split_tile128 = False
             if tile_elems == 128:
-                # The CUDA kernel's 128-token instantiation is the only tile-128
-                # implementation, so it needs no opt-in and never falls back.
+                # The CUDA kernel's 128-token instantiation needs no opt-in; without it,
+                # the Triton tile-64 kernels run each tile as two halves.
                 if grad_mode:
                     raise NotImplementedError("VSA-H3 tile 128 supports no-grad inference forwards only.")
                 route_key = (q_bhsd.device, q_bhsd.dtype, int(q_bhsd.shape[-1]))

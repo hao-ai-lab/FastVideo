@@ -1,14 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Host-copy layout changes and reference-keyed quality dumps, without model weights."""
+"""Host-copy layout changes for frozen offload, without model weights."""
 from types import SimpleNamespace
 
 import pytest
 import torch
-from PIL import Image
 
-from fastvideo import envs
 from fastvideo.models import pinned_offload
-from fastvideo.pipelines.basic.minimax_h3.reference import MiniMaxH3PreparedReference, prepared_reference_digest
 from fastvideo.pipelines.basic.minimax_h3.stages import minimax_h3_decoding as decoding
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
 
@@ -33,6 +30,18 @@ def test_resident_module_does_not_gain_host_mirror():
     _replace_master_with_packed(module)
     pinned_offload.refresh_host_copies(module, pin=False)
     assert not hasattr(module, pinned_offload._HOST_ATTR)
+
+
+def test_unload_runs_submodule_device_cache_hooks():
+    """Plain-attribute device caches (fused plans, CUDA graphs) must be released with the weights."""
+    module = torch.nn.Module()
+    child = torch.nn.Module()
+    module.add_module("child", child)
+    cleared = []
+    child.__dict__["clear_offload_caches"] = lambda: cleared.append(True)
+    setattr(module, pinned_offload._HOST_ATTR, {})
+    pinned_offload.unload(module)
+    assert cleared == [True]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="offload reload needs CUDA")
@@ -64,7 +73,6 @@ def test_decode_refreshes_mirror_before_first_unload(monkeypatch):
                            output_type="latent")
     monkeypatch.setattr(decoding, "_decode_participation", lambda *a: (None, True, False))
     monkeypatch.setattr(decoding, "_layout", lambda batch: layout)
-    monkeypatch.setattr(decoding, "_maybe_dump_generation", lambda *a: None)
     monkeypatch.setattr(decoding, "get_local_torch_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(decoding, "h3_dit_patch_size", lambda *a: (1, 1, 1))
     monkeypatch.setattr(decoding, "unpatchify_video_tokens", lambda tokens, *a: tokens)
@@ -82,47 +90,3 @@ def test_decode_refreshes_mirror_before_first_unload(monkeypatch):
     monkeypatch.setattr(nvfp4, "freeze_nvfp4_linears_on_device", freeze)
     monkeypatch.setattr(pinned_offload, "unload", unload)
     decoding.MiniMaxH3VideoDecodingStage(vae).forward(batch, args)
-
-
-def test_reference_contents_and_order_keep_all_quality_dumps(tmp_path, env_overrides):
-    red = MiniMaxH3PreparedReference(media_type="image", image=Image.new("RGB", (2, 2), "red"))
-    blue = MiniMaxH3PreparedReference(media_type="image", image=Image.new("RGB", (2, 2), "blue"))
-    env_overrides.enter_context(envs.FASTVIDEO_H3_DUMP_DIR.override(str(tmp_path)))
-    layout = SimpleNamespace(num_condition_video_rows=0, num_condition_audio_rows=0)
-    # References have already been freed by latent preparation at this boundary.
-    batch = SimpleNamespace(prompt="same prompt", seed=7, raw_latent_shape=(1, 2, 1, 1, 1),
-                            latents=torch.ones(1, 2), audio_latents=None, prompt_embeds=[], references=None, extra={})
-    digests = []
-    for references in ([red], [blue], [red, blue], [blue, red]):
-        digest = prepared_reference_digest(references)
-        digests.append(digest)
-        batch.extra["minimax_h3_reference_digest"] = digest
-        decoding._maybe_dump_generation(batch, layout)
-    assert len(set(digests)) == 4
-    paths = list(tmp_path.glob("*.pt"))
-    assert len(paths) == 4
-    assert {torch.load(path)["reference_digest"] for path in paths} == set(digests)
-
-
-def test_input_preparation_retains_digest_when_media_is_released(monkeypatch, tmp_path, env_overrides):
-    from fastvideo.pipelines.basic.minimax_h3.stages import minimax_h3_input_preparation as preparation
-
-    reference = MiniMaxH3PreparedReference(media_type="image", image=Image.new("RGB", (2, 2), "red"))
-    monkeypatch.setattr(preparation, "validate_references", lambda values: values)
-    monkeypatch.setattr(preparation, "prepare_reference", lambda *args: reference)
-    monkeypatch.setattr(preparation, "resolve_target_canvas", lambda *args: (480, 832, 16))
-    monkeypatch.setattr(preparation, "resolve_target_num_frames", lambda value: value)
-    stage = preparation.MiniMaxH3InputPreparationStage(
-        SimpleNamespace(latent_channels=2), SimpleNamespace(sampling_rate=24000), ref2va=True)
-    batch = SimpleNamespace(image_path=None, pil_image=None, last_image=None, references=["red.png"],
-                            num_frames=124, extra={})
-    env_overrides.enter_context(envs.FASTVIDEO_H3_DUMP_DIR.override(str(tmp_path)))
-    stage._prepare_ref2va(batch)
-    batch.references = None
-    assert batch.extra["minimax_h3_reference_digest"] == prepared_reference_digest([reference])
-
-
-def test_audio_content_changes_reference_digest():
-    first = MiniMaxH3PreparedReference(media_type="audio", has_audio=True, waveform=torch.zeros(2, 8))
-    second = MiniMaxH3PreparedReference(media_type="audio", has_audio=True, waveform=torch.ones(2, 8))
-    assert prepared_reference_digest([first]) != prepared_reference_digest([second])

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Export a ``train_qad.py`` checkpoint to an inference-only file.
+"""Export a QAD training checkpoint to an inference-only file.
 
 Drops the optimizer state and stores each ``NVFP4DecoderLinear`` master weight
 and bias in bf16: both the training forward and inference quantize from the
@@ -26,7 +26,7 @@ DECODER_BLOCK_LINEAR = re.compile(r"^transformer_blocks\.(\d+)\.(attn\.to_q|attn
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("checkpoint", help="train_qad.py best.pt / last.pt")
+    parser.add_argument("checkpoint", help="QAD training checkpoint (best.pt / last.pt)")
     parser.add_argument("output", help="destination .pt")
     parser.add_argument("--metadata", help="run metadata.json (default: next to the checkpoint)")
     args = parser.parse_args()

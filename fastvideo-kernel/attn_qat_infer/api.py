@@ -23,6 +23,10 @@ from torch.nn.functional import scaled_dot_product_attention as sdpa
 import fp4attn_cuda
 import fp4quant_cuda
 
+# ``sageattn_blackwell_sparse_bshd`` sizes its block lists and delta_s by the key length,
+# so its query may cover only part of the keys (the MiniMax-H3 FP4 prefix split).
+KEY_LENGTH_SIZING = True
+
 # Centralized block size configuration for sageattn_blackwell kernels
 # These should match the values in fastvideo/attention/backends/sageattn/blackwell/block_config.h
 BLOCK_M = 128  # Block size for M dimension (query sequence length)

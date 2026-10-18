@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import math
 
-import os
 
 import torch
 import triton
@@ -47,7 +46,7 @@ from .attn_qat_vsa_reference import BLOCK, LOG2_INV_TWO_LEVEL, LOG2E, invert_blo
 _ROWS = 64  # query rows per program
 _HALF = BLOCK // 2
 _QUANT_ROWS = 64  # fake-quant rows per program (a multiple of 16; L is a multiple of 128)
-_WARPS = int(os.environ.get("FASTVIDEO_QAT_VSA_WARPS", "8"))  # 8 beats 4 by 15-20% on GB200 at 35k-73k tokens
+_WARPS = 8  # 8 beats 4 by 15-20% on GB200 at 35k-73k tokens
 
 
 @triton.jit

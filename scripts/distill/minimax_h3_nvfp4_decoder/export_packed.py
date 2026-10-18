@@ -10,20 +10,35 @@ layers' packed tensors. The loader then skips the bf16 masters entirely.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
-import sys
-from pathlib import Path
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks" / "minimax_h3_vae"))
-from bench_decoder import load_h3_vae  # noqa: E402
-
-from fastvideo.models.vaes.minimax_h3_nvfp4_checkpoint import (  # noqa: E402
+from fastvideo.models.vaes.minimax_h3_nvfp4_checkpoint import (
     packed_nvfp4_decoder_checkpoint, write_nvfp4_decoder_safetensors)
-from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import (  # noqa: E402
+from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import (
     apply_nvfp4_decoder_checkpoint, load_nvfp4_decoder_checkpoint)
+
+
+def _load_h3_vae(vae_dir: str, device: torch.device) -> torch.nn.Module:
+    """The dense H3 VAE the decoder checkpoint was distilled against."""
+    from safetensors.torch import load_file
+
+    from fastvideo.configs.models.vaes.minimax_h3_video import MiniMaxH3VideoVAEConfig
+    from fastvideo.models.vaes.minimax_h3_int8_convrot import dense_vae_safetensors
+    from fastvideo.models.vaes.minimax_h3_video import AutoencoderKLMiniMaxH3
+
+    config = MiniMaxH3VideoVAEConfig()
+    with open(os.path.join(vae_dir, "config.json")) as handle:
+        config.update_model_arch(json.load(handle))
+    vae = AutoencoderKLMiniMaxH3(config).to(device)
+    state: dict[str, torch.Tensor] = {}
+    for path in dense_vae_safetensors(sorted(glob.glob(os.path.join(vae_dir, "*.safetensors")))):
+        state.update(load_file(path))
+    vae.load_state_dict(state, strict=True)
+    return vae.eval().requires_grad_(False)
 
 
 def main() -> None:
@@ -36,7 +51,7 @@ def main() -> None:
         raise SystemExit("packing needs a CUDA Blackwell GPU (FlashInfer FP4 quantization)")
 
     device = torch.device("cuda", torch.cuda.current_device())
-    vae = load_h3_vae(args.host_vae_dir, device)
+    vae = _load_h3_vae(args.host_vae_dir, device)
     metadata = apply_nvfp4_decoder_checkpoint(vae, load_nvfp4_decoder_checkpoint(args.decoder), freeze=True)
     import flashinfer
 

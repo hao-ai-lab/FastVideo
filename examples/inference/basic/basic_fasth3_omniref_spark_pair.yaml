@@ -1,6 +1,7 @@
 # FastH3 OmniRef (Ref2VA) across two DGX Sparks over QSFP RoCE, eight fused PDD
 # forwards per clip. Start Ray on both Sparks and source
-# examples/inference/optimizations/spark_pair_env.sh first; see spark_pair.md.
+# examples/inference/optimizations/spark_pair_env.sh first; see
+# docs/getting_started/installation/spark_pair.md.
 #
 # Point model_path at a composed OmniRef model directory (see
 # basic_fasth3_omniref_pdd.py): the distilled transformer_ref export, with its
@@ -17,14 +18,14 @@
 # FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
 # FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 # FASTVIDEO_MINIMAX_H3_FUSIONS=all \
-# FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0 \
+# FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 # FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt \
 # FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder-nvfp4.safetensors \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_spark_pair.yaml
 #
-# See docs/inference/fasth3_omniref_consumer.md.
+# See docs/inference/fasth3_omniref.md.
 generator:
-  model_path: ./FastH3-OmniRef-QAD120-NVFP4
+  model_path: ./FastH3-OmniRef-Composed
   engine:
     num_gpus: 2
     execution_backend: ray

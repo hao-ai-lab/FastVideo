@@ -119,7 +119,8 @@ def read_minimax_h3_nvfp4_dit_skip_blocks(path: str) -> tuple[int, ...]:
     if raw is None:
         return ()
     blocks = json.loads(raw)
-    if not isinstance(blocks, list) or not all(isinstance(b, int) and b >= 0 for b in blocks):
+    if not isinstance(blocks, list) or not all(
+            isinstance(b, int) and not isinstance(b, bool) and b >= 0 for b in blocks):
         raise ValueError(f"{path}: metadata {H3_NVFP4_DIT_SKIP_BLOCKS_KEY!r} must be a JSON list of block indices")
     return tuple(sorted(set(blocks)))
 
@@ -395,7 +396,7 @@ def _mm_fp4(
         raise TypeError(f"Unsupported kwargs for _mm_fp4: {sorted(kwargs)}")
     if alpha is not None and not torch.is_tensor(alpha):
         alpha = torch.tensor(alpha, device=a.device, dtype=torch.float32)
-    if (out is None and backend in ("cudnn", "auto") and a.shape[0] >= _SPLIT_MIN_ROWS
+    if (out is None and backend == "cudnn" and a.shape[0] >= _SPLIT_MIN_ROWS
             and envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.get() != "off" and not torch.compiler.is_compiling()):
         return _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend,
                                  use_nvfp4)
@@ -451,29 +452,29 @@ def _mm_fp4_row_split(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_
     the whole-matrix plan, so a few elements round one bf16 step differently (about 1e-8 of outputs,
     at massive-activation rows); ``auto`` times 1/2/4 chunks once per shape instead.
     """
-    key = (a.shape[0], a.shape[1], b.shape[1], backend)
+    key = (a.shape[0], a.shape[1], b.shape[1], backend, block_size, use_8x4_sf_layout, out_dtype)
+    args = (a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4)
+    # Splitting slices the 128x4 scale rows; an 8x4 layout packs them differently.
+    if use_8x4_sf_layout or a_scale.dim() != 2 or a_scale.shape[0] < a.shape[0]:
+        return _mm_fp4_chunked(*args, 1)
     if envs.FASTVIDEO_NVFP4_MM_ROW_SPLIT.get() == "table":
         _SPLIT_CHOICE.setdefault(key, _SPLIT_TABLE.get((a.shape[1], b.shape[1]), 1))
-    args = (a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4)
     if key not in _SPLIT_CHOICE:
-        if a_scale.dim() != 2 or a_scale.shape[0] < a.shape[0]:
-            _SPLIT_CHOICE[key] = 1
-        else:
-            import time
-            timings = {}
-            for parts in _SPLIT_CANDIDATES:
+        import time
+        timings = {}
+        for parts in _SPLIT_CANDIDATES:
+            _mm_fp4_chunked(*args, parts)
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            for _ in range(2):
                 _mm_fp4_chunked(*args, parts)
-                torch.cuda.synchronize()
-                start = time.perf_counter()
-                for _ in range(2):
-                    _mm_fp4_chunked(*args, parts)
-                torch.cuda.synchronize()
-                timings[parts] = time.perf_counter() - start
-            _SPLIT_CHOICE[key] = min(timings, key=timings.__getitem__)
-            logger.info("NVFP4 mm_fp4 row split for %s: %d chunk(s) (%s ms)", key, _SPLIT_CHOICE[key], {
-                k: round(v * 500, 1)
-                for k, v in timings.items()
-            })
+            torch.cuda.synchronize()
+            timings[parts] = time.perf_counter() - start
+        _SPLIT_CHOICE[key] = min(timings, key=timings.__getitem__)
+        logger.info("NVFP4 mm_fp4 row split for %s: %d chunk(s) (%s ms)", key, _SPLIT_CHOICE[key], {
+            k: round(v * 500, 1)
+            for k, v in timings.items()
+        })
     return _mm_fp4_chunked(*args, _SPLIT_CHOICE[key])
 
 

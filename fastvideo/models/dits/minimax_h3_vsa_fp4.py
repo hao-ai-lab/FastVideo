@@ -301,6 +301,10 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
                    if prefix_mode and layout.tile == _BLOCK and 0 < meta.num_prefix_tiles < layout.n_tiles else 0)
     with STAGES.span("fp4_attention"):
         if prefix_rows:
+            if not getattr(api, "KEY_LENGTH_SIZING", False):
+                raise RuntimeError("the MiniMax-H3 FP4 prefix split needs a fastvideo-kernel build whose "
+                                   "sageattn_blackwell_sparse_bshd sizes by key length; rebuild fastvideo-kernel "
+                                   "from this checkout")
             key_valid = _half_row_valid(kv_valid, api.HALF_N)
             head = meta.num_prefix_tiles
             with STAGES.span("prefix_attention"):
@@ -313,8 +317,6 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
                                               kv_valid,
                                               None if q2k_quad is None else q2k_quad[:, :, head:].contiguous())
             out = torch.cat((prefix_out, video_out), dim=2)
-            if layout.rows > logical:  # pad rows only feed the untile gather
-                out = torch.cat((out, query.new_zeros((query.shape[0], *query.shape[2:], layout.rows - logical))), dim=2)
         else:
             # Lists come from vsa_tile_mask_to_fp4_blocks and are in range; skip the per-call host sync.
             out = _sparse_fp4_attention(api, query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad)

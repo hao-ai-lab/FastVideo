@@ -27,7 +27,7 @@ one of those devices: a packed NVFP4 export, FP4 sparse attention with the dense
 prefix rows split off at 8-bit Q/K, and the pre-packed NVFP4 decoder, with the
 device's own offload policy and geometry. The 4090, having no FP4 hardware, runs
 the closest equivalent from a dense/FP8 export (FP8 linears, bf16 VSA, the dense decoder). See
-docs/inference/fasth3_omniref_consumer.md.
+docs/inference/fasth3_omniref.md.
 
 ``--lossless-accel`` turns on every bit-identical speed-up the pipeline has
 (LOSSLESS_ACCEL_ENV below, plus resident encoders, pinned host memory and the
@@ -138,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
                         choices=sorted(DEVICE_PROFILES),
                         default=None,
                         help="run the full NVFP4 consumer stack for one device, with its offload policy and "
-                        "environment (see docs/inference/fasth3_omniref_consumer.md); the checkpoint must be "
+                        "environment (see docs/inference/fasth3_omniref.md); the checkpoint must be "
                         "the packed NVFP4 export on Blackwell, or a dense/FP8 export on the 4090")
     parser.add_argument("--decoder",
                         default=None,
@@ -263,7 +263,7 @@ def apply_lossless_accel_env() -> None:
 
 
 # Device profiles for the full NVFP4 consumer stack; see
-# docs/inference/fasth3_omniref_consumer.md. Every profile keeps the validated
+# docs/inference/fasth3_omniref.md. Every profile keeps the validated
 # numerics: packed NVFP4 linears with the export's bf16 blocks, FP4 sparse
 # attention with the dense prefix rows split off at 8-bit Q/K, and the pre-packed
 # NVFP4 decoder. What differs per device is the offload policy and the Spark's
@@ -277,7 +277,7 @@ _CONSUMER_ENV = {
     # Bit-exact kernels, and none of the data-center-only routes.
     "FASTVIDEO_MINIMAX_H3_FUSIONS": "all",
     "FASTVIDEO_VSA_TRITON": "1",
-    "FASTVIDEO_VSA_SM100A": "0",
+    "FASTVIDEO_VSA_PTX_BLACKWELL": "0",
     "FASTVIDEO_FA4": "0",
 }
 
@@ -352,7 +352,7 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
             "FASTVIDEO_H3_VSA_FINE_ATTENTION": "emulator-bf16",
             "FASTVIDEO_MINIMAX_H3_FUSIONS": "all",
             "FASTVIDEO_VSA_TRITON": "1",
-            "FASTVIDEO_VSA_SM100A": "0",
+            "FASTVIDEO_VSA_PTX_BLACKWELL": "0",
             "FASTVIDEO_FA4": "0",
             # A 24 GB card fragments easily once the DiT is streamed.
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",

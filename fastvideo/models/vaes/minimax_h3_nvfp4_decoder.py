@@ -48,7 +48,7 @@ def _quantized_weight(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor,
     return packed, inv_scale, global_sf
 
 
-def mm_fp4_backend(rows: int, out_features: int, in_features: int, device: torch.device) -> str:
+def mm_fp4_backend(device: torch.device) -> str:
     """FlashInfer ``mm_fp4`` backend for one decoder GEMM; the backends return identical outputs.
 
     DGX Spark (GB10, sm_121) uses cuDNN: up to 1.4x faster than CUTLASS on the tile-batched
@@ -90,7 +90,7 @@ def nvfp4_linear_inference(x: torch.Tensor, packed: torch.Tensor, inv_scale: tor
         out,
         block_size=NVFP4_BLOCK_SIZE,
         use_8x4_sf_layout=False,
-        backend=mm_fp4_backend(x2d.shape[0], out_features, orig_shape[-1], x.device),
+        backend=mm_fp4_backend(x.device),
     )
     if bias is not None:
         out.add_(bias.to(x.dtype))
@@ -377,18 +377,6 @@ def calibrate_static_scales(module: nn.Module, run_batches, margin: float = 1.0)
             raise RuntimeError("an NVFP4 decoder linear saw no activations during calibration")
         layer.input_amax.mul_(margin)
     return len(layers)
-
-
-def nvfp4_decoder_metadata(names: list[str], rotation_group: int | None, skip_blocks: tuple[int, ...],
-                           act_scale: str = "dynamic") -> dict[str, Any]:
-    return {
-        "format": "fastvideo_h3_decoder_nvfp4_qad",
-        "block_size": NVFP4_BLOCK_SIZE,
-        "rotation_group": rotation_group,
-        "skip_blocks": list(skip_blocks),
-        "act_scale": act_scale,
-        "num_linears": len(names),
-    }
 
 
 def freeze_nvfp4_linears(module: nn.Module) -> int:

@@ -42,9 +42,8 @@ on the bf16 ``transformer_ref``).
 ``--skip-blocks 42-49`` keeps every linear of those main blocks in bf16: they
 stay in the dense shards, are absent from the packed file, and the export's
 safetensors metadata lists them (``skip_blocks``) so the loader leaves them
-unquantized. FastH3 OmniRef QAD ships this way: ``scripts/quantization/
-minimax_h3_omniref/export_omniref_qad.py`` writes the student's bf16
-``transformer_ref`` that this converter then packs.
+unquantized. FastH3 OmniRef QAD ships this way: this converter packs its
+student's bf16 ``transformer_ref``.
 
 Every exported linear is probed on random BF16 rows through the same
 ``mm_fp4`` path the loader runs; the relative error against a BF16 matmul with
@@ -92,7 +91,7 @@ def fastvideo_module_name(diffusers_prefix: str) -> str:
 def act_amax_for(module: str, amax_table: dict[str, float], required: bool) -> float | None:
     """The calibrated input amax of ``module``, or None for the unit scale.
 
-    Keys are ``b<block>.<sub>`` or the full module name (the Stage A / QAD tables use the latter).
+    Keys are ``b<block>.<sub>`` or the full module name (the QAD exports use the latter).
     FFN linears must have an entry; attention projections and gates without one keep the unit
     activation scale (the V2 Consumer layout calibrates the FFN only).
     """

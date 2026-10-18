@@ -11,19 +11,19 @@
 # picks the device's offload policy and its environment:
 #
 # GB10: everything stays resident; cuDNN mm_fp4 and the dense batched decoder.
-# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3
-# FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_H3_VSA_FP4_PREFIX=fp8
-# FASTVIDEO_MINIMAX_H3_FUSIONS=all
-# FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_SM100A=0 FASTVIDEO_FA4=0
+# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+# FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_H3_VSA_FP4_PREFIX=fp8 \
+# FASTVIDEO_MINIMAX_H3_FUSIONS=all \
+# FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 # FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt \
-# FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder-nvfp4.safetensors
-# FASTVIDEO_NVFP4_MM_BACKEND=cudnn
-# FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0
+# FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder-nvfp4.safetensors \
+# FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
+# FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_spark.yaml
 #
-# See docs/inference/fasth3_omniref_consumer.md.
+# See docs/inference/fasth3_omniref.md.
 generator:
-  model_path: ./FastH3-OmniRef-QAD120-NVFP4
+  model_path: ./FastH3-OmniRef-Composed
   engine:
     num_gpus: 1
     use_fsdp_inference: false

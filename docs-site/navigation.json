@@ -94,6 +94,10 @@
             "href": "/inference/fasth3_rtx_pro_6000"
           },
           {
+            "label": "FastH3 OmniRef on consumer GPUs",
+            "href": "/inference/fasth3_omniref"
+          },
+          {
             "label": "DGX Spark tuning",
             "href": "/getting_started/installation/spark_performance"
           },

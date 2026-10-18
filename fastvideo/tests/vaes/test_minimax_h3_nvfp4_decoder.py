@@ -561,7 +561,7 @@ def test_decoder_gemm_backend_matches_cutlass(rows, out_features, in_features):
     from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import _quantized_weight, mm_fp4_backend
     from fastvideo.models.vaes.minimax_h3_nvfp4_fused import quantize
 
-    backend = mm_fp4_backend(rows, out_features, in_features, torch.device("cuda"))
+    backend = mm_fp4_backend(torch.device("cuda"))
     if backend == "cutlass":
         pytest.skip("this GPU decodes with the CUTLASS backend")
     torch.manual_seed(0)
