@@ -430,8 +430,9 @@ def build_generator_config(model_dir: Path,
             parallelism=ParallelismConfig(tp_size=1, sp_size=num_gpus),
             offload=offload,
             quantization=quantization,
-            # The release decoders are eager; compile only the VAE, as the Spark recipes do.
-            compile=CompileConfig(enabled=False, vae_enabled=True) if profile is not None else CompileConfig(),
+            # The NVFP4 decoder installs its own fused CUDA graphs; compiling the VAE
+            # on top trips an inductor cudagraph assertion at 768p with the 36-block student.
+            compile=CompileConfig(),
         ),
         pipeline=PipelineSelection(
             workload_type="i2v",
