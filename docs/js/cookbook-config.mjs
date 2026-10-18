@@ -433,3 +433,4 @@ function getOptions(catalog, config = catalog.base_config, selections = {}) {
 }
 
 export { loadIndex, loadDeployment, getOptions, resolveConfig };
+export { estimateMemory } from "./cookbook-memory.mjs";
