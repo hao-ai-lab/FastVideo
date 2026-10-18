@@ -22,8 +22,12 @@ def _global_sf(t: torch.Tensor) -> torch.Tensor:
     # Triton kernel (~38 ms for a 21k x 2048 activation on GB200). Max is exact
     # in any order, so finite input gives the same scale bit for bit; NaN and inf
     # keep the elementwise reduction's behavior. No host sync.
-    maxabs = torch.nan_to_num(t.abs()).amax().float().clamp(min=1e-12)
-    return (448.0 * 6.0) / maxabs
+    maxabs = torch.nan_to_num(t.abs()).amax().float()
+    # The reduction above runs in the input dtype, so an infinite input becomes the
+    # fp16/bf16 maximum. The reference reduction replaces it in float32.
+    maxabs = torch.where(torch.isinf(t).any(), torch.tensor(torch.finfo(torch.float32).max, device=t.device),
+                         maxabs)
+    return (448.0 * 6.0) / maxabs.clamp(min=1e-12)
 
 
 class _LinearFWD4BWD16Fn(torch.autograd.Function):

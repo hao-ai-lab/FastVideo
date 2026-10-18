@@ -428,7 +428,15 @@ def _mm_fp4_row_chunks(a: torch.Tensor, a_scale: torch.Tensor, parts: int) -> li
     rows = a.shape[0]
     step = max(rows // parts // 128 * 128, 128)
     bounds = [i * step for i in range(parts)] + [rows]
-    return [(a[lo:hi], a_scale[lo:hi]) for lo, hi in zip(bounds[:-1], bounds[1:], strict=True) if hi > lo]
+    chunks = []
+    for lo, hi in zip(bounds[:-1], bounds[1:], strict=True):
+        if hi <= lo:
+            continue
+        # The 128x4 layout interleaves rows within a tile, so the last chunk needs
+        # the whole final scale tile even though its activation slice ends at `hi`.
+        scale_hi = min(((hi + 127) // 128) * 128, a_scale.shape[0])
+        chunks.append((a[lo:hi], a_scale[lo:scale_hi]))
+    return chunks
 
 
 def _mm_fp4_chunked(a, b, a_scale, b_scale, alpha, out_dtype, block_size, use_8x4_sf_layout, backend, use_nvfp4,

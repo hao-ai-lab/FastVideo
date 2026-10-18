@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Row chunking for the NVFP4 mm_fp4 wrapper: chunks must tile the rows exactly, on 128-row boundaries."""
+import math
+
 import pytest
 import torch
 
@@ -19,6 +21,8 @@ def test_row_chunks_cover_rows_in_order(rows: int, parts: int) -> None:
     for chunk, chunk_scale in chunks:
         assert offset % 128 == 0
         assert chunk_scale[0, 0].item() == offset
+        scale_hi = min(math.ceil((offset + chunk.shape[0]) / 128) * 128, scale.shape[0])
+        assert chunk_scale.shape[0] == scale_hi - offset
         offset += chunk.shape[0]
     assert offset == rows
 

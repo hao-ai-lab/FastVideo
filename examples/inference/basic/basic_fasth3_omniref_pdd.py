@@ -65,8 +65,6 @@ from fastvideo.configs.pipelines.minimax_h3 import parse_base_model_revision
 from fastvideo.pipelines.basic.minimax_h3 import MiniMaxH3Reference
 
 CONTRACT = "fastvideo_inference.json"
-# The default shape, and the one a device profile overrides when a run leaves the
-# geometry alone (profiles only choose between 480p and 768p).
 DEFAULT_HEIGHT, DEFAULT_WIDTH = 480, 832
 # Components the distilled export replaces, and the ones it shares with base MiniMax-H3.
 EXPORT_COMPONENTS = ("transformer_ref", "scheduler", "audio_scheduler")
@@ -271,12 +269,6 @@ def apply_lossless_accel_env() -> None:
         os.environ.setdefault(name, value)
 
 
-# Device profiles for the full NVFP4 consumer stack; see
-# docs/inference/fasth3_omniref.md. Every profile keeps the validated
-# numerics: packed NVFP4 linears with the export's bf16 blocks, FP4 sparse
-# attention with the dense prefix rows split off at 8-bit Q/K, and the pre-packed
-# NVFP4 decoder. What differs per device is the offload policy and the Spark's
-# GEMM/VAE settings.
 _CONSUMER_ENV = {
     # The checkpoint's trained attention backend; the contract fixes the tile size.
     "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3",
