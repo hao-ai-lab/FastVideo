@@ -8,7 +8,6 @@ from typing import Any
 
 import torch
 
-import fastvideo.envs as envs
 from fastvideo.attention.selector import component_attention_backend, get_attn_backend
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -361,9 +360,6 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     )[0]
                     batch.step_index = index
                     batch.timestep = video_timestep
-                    if envs.FASTVIDEO_H3_SP_PROFILE.get():
-                        from fastvideo.models.dits.minimax_h3_vsa_fp4 import STAGES
-                        logger.info("MiniMax-H3 stage times (step %d): %s", index, STAGES.flush())
         finally:
             if bool(getattr(fastvideo_args, "dit_layerwise_offload", False)):
                 manager = getattr(self.transformer, "_layerwise_offload_manager", None)
