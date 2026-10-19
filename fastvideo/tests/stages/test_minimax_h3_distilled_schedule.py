@@ -234,3 +234,27 @@ def test_sidecar_without_shift_fields_uses_the_checkpoint_schedulers(tmp_path):
     (tmp_path / "fastvideo_inference.json").write_text(json.dumps({**four_step, "video_scheduler_shift": 10.0}))
     with pytest.raises(ValueError, match="disagrees"):
         _pipeline(tmp_path, video_shift=12.0).initialize_pipeline(SimpleNamespace(pipeline_config=MiniMaxH3PipelineConfig()))
+
+
+
+def test_training_validation_applies_explicit_modality_shifts(tmp_path):
+    pipeline = _pipeline(tmp_path, video_shift=12.0)
+    config = MiniMaxH3PipelineConfig(video_scheduler_shift=10.0, audio_scheduler_shift=3.0)
+    pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=config))
+    assert pipeline.modules["scheduler"].shift == 10.0
+    assert pipeline.modules["audio_scheduler"].shift == 3.0
+
+
+def test_distilled_checkpoint_rejects_conflicting_explicit_shift(tmp_path):
+    (tmp_path / "fastvideo_inference.json").write_text(json.dumps(CONTRACT))
+    pipeline = _pipeline(tmp_path)
+    config = MiniMaxH3PipelineConfig(video_scheduler_shift=12.0)
+    with pytest.raises(ValueError, match="disagrees with the distilled checkpoint"):
+        pipeline.initialize_pipeline(SimpleNamespace(pipeline_config=config))
+
+
+@pytest.mark.parametrize("shift", [True, 0.0, -1.0, float("nan"), float("inf")])
+def test_explicit_pipeline_shifts_must_be_positive_finite(tmp_path, shift):
+    config = MiniMaxH3PipelineConfig(video_scheduler_shift=shift)
+    with pytest.raises(ValueError, match="positive finite"):
+        _pipeline(tmp_path).initialize_pipeline(SimpleNamespace(pipeline_config=config))

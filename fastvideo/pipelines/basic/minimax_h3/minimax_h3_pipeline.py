@@ -281,6 +281,19 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             shift = getattr(self.get_module(module_name), "shift", None)
             if shift is None or not math.isfinite(float(shift)) or float(shift) <= 0:
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose a positive finite shift, got {shift}.")
+        # Training validation reuses base components with an explicit trained
+        # clock. A published distilled checkpoint's clock remains authoritative.
+        for module_name, modality in (("scheduler", "video"), ("audio_scheduler", "audio")):
+            override = getattr(fastvideo_args.pipeline_config, f"{modality}_scheduler_shift", None)
+            if override is None:
+                continue
+            if (isinstance(override, bool) or not isinstance(override, int | float) or not math.isfinite(override)
+                    or override <= 0):
+                raise ValueError(f"MiniMax-H3 {modality} scheduler override must be a positive finite shift")
+            scheduler = self.get_module(module_name)
+            if self._checkpoint_contract() is not None and float(override) != float(scheduler.shift):
+                raise ValueError(f"Explicit {modality} scheduler shift disagrees with the distilled checkpoint")
+            scheduler.set_shift(float(override))
         self._load_checkpoint_schedule(fastvideo_args)
         transformer = self.get_module("transformer")
         if transformer is not None:

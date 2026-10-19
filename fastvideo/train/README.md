@@ -32,3 +32,5 @@ See `examples/train/` for configs and launch scripts.
 ## Guides
 
 - [Attn-QAT on the modular trainer](../../docs/training/attn_qat.md)
+
+- [FastH3 T2AV DMD training](../../docs/training/minimax_h3_t2av_dmd.md)

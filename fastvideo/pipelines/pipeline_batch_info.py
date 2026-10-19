@@ -375,6 +375,16 @@ class TrainingBatch:
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
 
+    # Immutable native video/audio shapes for the flattened DMD rollout state.
+    minimax_h3_dmd_layout: Any | None = None
+
+    # Text refinement excludes joint-stream capacity padding.
+    minimax_h3_text_attn_metadata: AttentionMetadata | None = None
+
+    sequence_packing_num_tokens: int = 0
+    sequence_padded_num_tokens: int = 0
+    sequence_padding_ratio: float | None = None
+
 
 @dataclass
 class PreprocessBatch(ForwardBatch):

@@ -78,8 +78,11 @@ class Trainer:
         )
         self.performance_monitor = TrainingPerformanceMonitor()
 
-    def _iter_dataloader(self, dataloader: Any) -> Iterator[dict[str, Any]]:
-        data_iter = iter(dataloader)
+    def _iter_dataloader(self,
+                         dataloader: Any,
+                         *,
+                         initial_iterator: Iterator[dict[str, Any]] | None = None) -> Iterator[dict[str, Any]]:
+        data_iter = initial_iterator if initial_iterator is not None else iter(dataloader)
         while True:
             batch = next(data_iter, None)
             if batch is None:
@@ -139,6 +142,11 @@ class Trainer:
             resumed_step = (checkpoint_manager.maybe_resume(resume_from_checkpoint=(resume_from_checkpoint)))
             if resumed_step is not None:
                 start_step = int(resumed_step)
+                if tc.checkpoint.reset_lr_on_resume:
+                    method.apply_configured_lrs()
+        if checkpoint_manager is not None:
+            checkpoint_manager.maybe_save_inference(start_step,
+                                                    validation_scheduled=self.callbacks.will_run_validation(start_step))
         self.callbacks.on_validation_begin(
             method,
             iteration=start_step,
@@ -146,7 +154,8 @@ class Trainer:
         self._run_method_validation(method, start_step)
         method.optimizers_zero_grad(start_step)
 
-        data_stream = self._iter_dataloader(dataloader)
+        data_stream = self._iter_dataloader(dataloader,
+                                            initial_iterator=iter(dataloader) if resume_from_checkpoint else None)
 
         # Restore the RNG snapshot LAST — after dcp.load,
         # after iter(dataloader), after everything that may
@@ -196,7 +205,12 @@ class Trainer:
                                f".metrics[{k!r}]"),
                     )
             else:
+                use_no_sync = grad_accum > 1 and method.supports_gradient_accumulation_no_sync(step)
                 for accum_iter in range(grad_accum):
+                    if use_no_sync:
+                        method.set_requires_gradient_sync(step, accum_iter == grad_accum - 1)
+                    elif grad_accum > 1 and tc.loop.fsdp_defer_backward_finalize:
+                        method.set_is_last_backward(step, accum_iter == grad_accum - 1)
                     batch = next(data_stream)
                     loss_map, outputs, step_metrics = (method.single_train_step(
                         batch,
@@ -232,6 +246,7 @@ class Trainer:
                     iteration=step,
                 )
                 method.optimizers_schedulers_step(step)
+                self.callbacks.on_after_optimizer_step(method, iteration=step)
                 method.optimizers_zero_grad(step)
 
             # Single CPU sync point: materialise GPU tensors
@@ -271,6 +286,8 @@ class Trainer:
 
             if checkpoint_manager is not None:
                 checkpoint_manager.maybe_save(step)
+                checkpoint_manager.maybe_save_inference(step,
+                                                        validation_scheduled=self.callbacks.will_run_validation(step))
 
             self.callbacks.on_validation_begin(
                 method,

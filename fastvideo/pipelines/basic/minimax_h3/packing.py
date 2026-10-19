@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -91,12 +91,61 @@ class MiniMaxH3PackedLayout:
     num_audio_latents: int
     # Per-reference conditioning spans in packed order (Ref2VA only; empty
     # elsewhere): (kind, row_count, latent_shape) covering exactly the rows
-    # between the text tokens and the target audio. kind is "audio", "image",
-    # or "video"; latent_shape is the reference's raw latent (frames, height,
-    # width) for visual kinds and (0, 0, 0) for audio. A video reference with
-    # sound contributes two entries, its audio rows first. VSA-H3 uses them to
-    # tile (and sparsify) reference-video regions in place.
+    # between the text tokens and the target audio. kind is "audio" / "image"
+    # / "video"; latent_shape is the reference's raw latent (frames, height,
+    # width) for visual kinds and (0, 0, 0) for audio rows. A video reference
+    # with sound contributes two entries — its audio rows precede its video
+    # rows. Retained so VSA-H3 can 3-D-tile (and sparsify) reference-video
+    # regions instead of exempting them wholesale.
     reference_segments: tuple[tuple[str, int, tuple[int, int, int]], ...] = ()
+    # Capacity rows trail all real modalities and have no output indices.
+    pad_tokens: int = 0
+
+    @property
+    def real_sequence_length(self) -> int:
+        return self.sequence_length - self.pad_tokens
+
+    @property
+    def valid(self) -> torch.Tensor:
+        return torch.arange(self.sequence_length, device=self.token_tags.device) < self.real_sequence_length
+
+    def __post_init__(self) -> None:
+        _validate_packed_rows(self)
+
+
+def _validate_packed_rows(layout: MiniMaxH3PackedLayout) -> None:
+    if type(layout.pad_tokens) is not int or layout.pad_tokens < 0:
+        raise ValueError("pad_tokens must be a non-negative integer")
+    real_tokens = sum(indices.numel() for indices in (layout.video_indices, layout.audio_indices, layout.text_indices))
+    if real_tokens != layout.real_sequence_length or real_tokens <= 0:
+        raise ValueError("H3 real token counts must be exact, with capacity padding appended")
+    if layout.position_ids.shape != (layout.sequence_length,
+                                     3) or layout.token_tags.shape != (layout.sequence_length, ):
+        raise ValueError("H3 positions and token tags must cover real tokens and trailing padding")
+
+
+def pad_packed_sequence(
+    layout: MiniMaxH3PackedLayout,
+    pad_tokens: int,
+) -> MiniMaxH3PackedLayout:
+    """Append inert rows without changing any real position or modality index.
+
+    Padding uses an existing AdaLN tag/time, not a new learned modality. Its
+    validity comes from the layout/attention boundaries, never from token tags.
+    """
+    if type(pad_tokens) is not int or pad_tokens < 0:
+        raise ValueError("pad_tokens must be a non-negative integer")
+    if layout.pad_tokens:
+        raise ValueError("The H3 sequence already has capacity padding")
+    if not pad_tokens:
+        return layout
+    return replace(
+        layout,
+        sequence_length=layout.sequence_length + pad_tokens,
+        pad_tokens=pad_tokens,
+        position_ids=torch.nn.functional.pad(layout.position_ids, (0, 0, 0, pad_tokens)),
+        token_tags=torch.nn.functional.pad(layout.token_tags, (0, pad_tokens)),
+    )
 
 
 def resolve_canvas_size(aspect_width: float, aspect_height: float) -> tuple[int, int]:
@@ -287,7 +336,7 @@ def build_packed_sequence(
     audio_indices = torch.arange(audio_start, video_start)
     text_indices = torch.arange(num_text_tokens)
     token_tags = torch.empty(sequence_length, dtype=torch.long)
-    token_tags[text_indices] = text_token_tags.to(torch.long)
+    token_tags[text_indices] = text_token_tags.to(device=token_tags.device, dtype=torch.long)
     token_tags[audio_indices] = MINIMAX_H3_AUDIO_TAG
     token_tags[video_indices] = MINIMAX_H3_VIDEO_TAG
     return MiniMaxH3PackedLayout(
@@ -481,7 +530,7 @@ def build_ref2va_packed_sequence(
     packed_audio_indices = torch.cat(audio_indices)
     text_indices = torch.arange(num_text_tokens)
     token_tags = torch.empty(sequence_length, dtype=torch.long)
-    token_tags[text_indices] = text_token_tags.to(torch.long)
+    token_tags[text_indices] = text_token_tags.to(device=token_tags.device, dtype=torch.long)
     token_tags[packed_audio_indices] = MINIMAX_H3_AUDIO_TAG
     token_tags[packed_video_indices] = MINIMAX_H3_VIDEO_TAG
 
@@ -504,16 +553,22 @@ def build_ref2va_packed_sequence(
 
 def build_row_timesteps(
     layout: MiniMaxH3PackedLayout,
-    video_timestep: float,
-    audio_timestep: float,
-    condition_video_timestep: float,
-    condition_audio_timestep: float,
+    video_timestep: float | tuple[float, ...],
+    audio_timestep: float | tuple[float, ...],
+    condition_video_timestep: float | tuple[float, ...],
+    condition_audio_timestep: float | tuple[float, ...],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    row_timesteps = torch.full((layout.sequence_length, ), video_timestep, dtype=torch.float32)
+
+    if any(
+            isinstance(value, tuple)
+            for value in (video_timestep, audio_timestep, condition_video_timestep, condition_audio_timestep)):
+        raise ValueError("Single-document H3 timestep inputs must be scalars")
+    row_timesteps = torch.full((layout.real_sequence_length, ), video_timestep, dtype=torch.float32)
     row_timesteps[layout.video_indices[:layout.num_condition_video_rows]] = condition_video_timestep
     row_timesteps[layout.audio_indices[layout.num_condition_audio_rows:]] = audio_timestep
     row_timesteps[layout.audio_indices[:layout.num_condition_audio_rows]] = condition_audio_timestep
-    return torch.unique(row_timesteps, sorted=True, return_inverse=True)
+    unique, inverse = torch.unique(row_timesteps, sorted=True, return_inverse=True)
+    return unique, torch.nn.functional.pad(inverse, (0, layout.pad_tokens))
 
 
 def keyframe_condition_noise(

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from fastvideo.configs.pipelines.base import PipelineConfig
@@ -35,6 +35,27 @@ class DataConfig:
     num_latent_t: int = 0
     num_frames: int = 0
 
+    # Preserve each T2VA row's native temporal/spatial latent geometry and
+    # schedule exact-shape global microbatches across data-parallel ranks.
+    # False retains the legacy fixed-shape/truncation contract.
+    native_shape_bucketing: bool = False
+
+    # Pad H3 joint text, video and audio streams
+    # to the smallest fitting capacity. Positive multiples of 256; None is off.
+    # Requires native_shape_bucketing and train_batch_size=1; does not opt into
+    # packing across samples or change sample-repeat loss weights.
+    fixed_sequence_capacities: list[int] | None = None
+
+    # Bound native variable-length conditioning without truncation.
+    max_presentation_tokens: int | None = None
+
+    # Fail closed instead of rescanning/writing the published file-info index.
+    require_existing_parquet_cache: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.require_existing_parquet_cache) is not bool:
+            raise ValueError("training.data.require_existing_parquet_cache must be a boolean")
+
 
 @dataclass(slots=True)
 class OptimizerConfig:
@@ -59,6 +80,12 @@ class TrainingLoopConfig:
     max_train_steps: int = 0
     gradient_accumulation_steps: int = 1
 
+    # Opt-in FSDP2 microbatch scheduling. Keep gradient reductions enabled,
+    # but wait for their completion/finalize prefetch state only on the last
+    # backward in an optimizer step. Unlike no-sync, this retains sharded
+    # gradients. Benchmark and check numerical parity before enabling it.
+    fsdp_defer_backward_finalize: bool = False
+
 
 @dataclass(slots=True)
 class CheckpointConfig:
@@ -66,6 +93,33 @@ class CheckpointConfig:
     resume_from_checkpoint: str = ""
     training_state_checkpointing_steps: int = 0
     checkpoints_total_limit: int = 0
+
+    # Deployable, model-only checkpoints are saved for every scheduled
+    # validation event and are independent from rolling resumable state.
+    save_inference_checkpoint_on_validation: bool = False
+
+    inference_checkpoint_role: str = "student"
+
+    inference_checkpoint_dtype: str = "bfloat16"
+
+    # Opt in to resumable checkpoints published only after DCP state and every
+    # rank's RNG snapshot are complete. False keeps legacy checkpoints usable.
+    require_complete_training_checkpoint: bool = False
+
+    checkpointing_start_step: int = 0
+
+    # DCP checkpoints restore optimizer param-group LRs and scheduler
+    # base_lrs, silently overriding the YAML on resume. Set true to re-apply
+    # the configured learning rates after loading (LR-change experiments).
+    reset_lr_on_resume: bool = False
+
+    # Independent opt-in export limit; zero preserves unlimited retention.
+    # Pruning occurs only after a complete replacement is published.
+    inference_checkpoints_total_limit: int = 0
+
+    def __post_init__(self) -> None:
+        if type(self.inference_checkpoints_total_limit) is not int or self.inference_checkpoints_total_limit < 0:
+            raise ValueError("training.checkpoint.inference_checkpoints_total_limit must be a non-negative integer")
 
 
 @dataclass(slots=True)
@@ -103,6 +157,36 @@ class ModelTrainingConfig:
     # torch.compile kwargs shared by both compile options above.
     torch_compile_kwargs: dict = field(default_factory=dict)
 
+    # Opt-in H3 activation offload for long packed sequences. Zero disables it;
+    # shorter sequences and no-grad calls retain GPU activation storage.
+    minimax_h3_activation_offload_min_tokens: int = 0
+
+    # Optimizer steps applied to bf16/fp16 parameter storage round away
+    # updates smaller than ~half an ulp of each weight's magnitude —
+    # O(1)-magnitude parameters (norm gains) freeze entirely at typical
+    # distillation LRs. The trainer refuses to start unless master weights
+    # are fp32 (training.dit_precision: fp32) or this explicit opt-in
+    # acknowledges the effect (memory-constrained topologies).
+    allow_low_precision_master_weights: bool = False
+
+    minimax_h3_student_compile: Literal["off", "grad_only_full_block"] = "off"
+
+    # Retain cached graphs after exhaustion; pin eager/compiled checkpoint replay.
+    minimax_h3_compile_limit_fallback: bool = False
+
+    minimax_h3_accumulated_recompile_limit: int = 1024
+
+    def __post_init__(self) -> None:
+        if self.minimax_h3_student_compile not in ("off", "grad_only_full_block"):
+            raise ValueError("training.model.minimax_h3_student_compile must be off or grad_only_full_block")
+        if type(self.minimax_h3_compile_limit_fallback) is not bool:
+            raise ValueError("training.model.minimax_h3_compile_limit_fallback must be a boolean")
+        if (type(self.minimax_h3_accumulated_recompile_limit) is not int
+                or self.minimax_h3_accumulated_recompile_limit <= 0):
+            raise ValueError("training.model.minimax_h3_accumulated_recompile_limit must be a positive integer")
+        if self.minimax_h3_compile_limit_fallback and self.minimax_h3_student_compile != "grad_only_full_block":
+            raise ValueError("H3 compile limit fallback requires grad_only_full_block")
+
 
 @dataclass(slots=True)
 class TrainingConfig:
@@ -124,3 +208,11 @@ class TrainingConfig:
     pipeline_config: PipelineConfig | None = None
     model_path: str = ""
     dit_precision: str = "fp32"
+
+    # Tokens per sparse-attention tile for the VSA student. 256 (default)
+    # keeps the (4,8,8) tiles and today's VSA-256 CuTe/Triton routing; 64
+    # selects (4,4,4) tiles on the native 64-token CUDA/Triton block-sparse
+    # kernels (forward and backward). 128 selects (4,4,8) tiles and requires
+    # native Blackwell CUDA forward/backward. Consumed by the VSA-H3 (MiniMax H3)
+    # backend; Wan's VSA path ignores it.
+    vsa_tile_size: int = 256

@@ -1,0 +1,123 @@
+# Eight-forward carried DMD for text-to-audio/video. Supply your preprocessed
+# prompt embeddings and native target shapes; no video/audio training latents
+# are required. See docs/training/minimax_h3_t2av_dmd.md for setup and export.
+# Baseline topology: 64 GPUs / SP4 x microbatch1 x accumulation4 = global batch64.
+# Changing topology or accumulation changes the training experiment.
+# Optional validation must use this exact ladder and sampling_steps: [9]:
+# public H3 inference counts the terminal sigma-grid point (8 forwards + zero).
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: /path/to/MiniMax-H3
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: VIDEO_SPARSE_ATTN_H3
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: /path/to/MiniMax-H3
+    trainable: false
+    disable_custom_init_weights: true
+    attention_backend: FLASH_ATTN
+  critic:
+    _target_: fastvideo.train.models.minimax_h3.MiniMaxH3DMDModel
+    init_from: /path/to/MiniMax-H3
+    trainable: true
+    disable_custom_init_weights: true
+    enable_gradient_checkpointing_type: full
+    attention_backend: FLASH_ATTN
+method:
+  _target_: fastvideo.train.methods.distribution_matching.carried_dmd.CarriedDMDMethod
+  rollout_mode: simulate
+  rollout_carry: true
+  rollout_carry_slots: 4
+  rollout_sample_type: ode
+  generator_update_interval: 5
+  real_score_guidance_scale: 1.0
+  dmd_denoising_steps:
+  - 999
+  - 874
+  - 749
+  - 624
+  - 500
+  - 375
+  - 250
+  - 125
+  min_timestep_ratio: 0.001
+  max_timestep_ratio: 0.999
+  score_timestep_shift: 2.4
+  score_timestep_warp_max: 0.999
+  score_timestep_continuous: true
+  fake_score_loss_space: x0
+  cfg_uncond:
+    text: zero
+  fake_score_learning_rate: 2.0e-06
+  fake_score_betas:
+  - 0.9
+  - 0.999
+  fake_score_lr_scheduler: constant
+training:
+  distributed:
+    num_gpus: 64
+    sp_size: 4
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 64
+  data:
+    data_path: /path/to/h3-prompts/shard_00000
+    preprocessed_data_type: text_only
+    native_shape_bucketing: true
+    max_presentation_tokens: 65536
+    require_existing_parquet_cache: true
+    dataloader_num_workers: 0
+    train_batch_size: 1
+    training_cfg_rate: 0.0
+    seed: 42
+    num_latent_t: 37
+    num_height: 768
+    num_width: 1344
+    num_frames: 124
+  optimizer:
+    learning_rate: 2.0e-06
+    betas:
+    - 0.9
+    - 0.999
+    weight_decay: 0.01
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+  loop:
+    max_train_steps: 4000
+    gradient_accumulation_steps: 4
+  checkpoint:
+    output_dir: outputs/h3_t2av_dmd
+    resume_from_checkpoint: null
+    inference_checkpoint_role: student
+    inference_checkpoint_dtype: bfloat16
+    training_state_checkpointing_steps: 100
+    require_complete_training_checkpoint: true
+    checkpointing_start_step: 100
+    checkpoints_total_limit: 3
+  tracker:
+    trackers: []
+    project_name: h3-t2av-dmd
+    run_name: carried-dmd-eight-forward
+  model:
+    precondition_outputs: false
+    enable_gradient_checkpointing_type: full
+    enable_torch_compile: true
+    torch_compile_kwargs:
+      dynamic: true
+      recompile_limit: 32
+    minimax_h3_student_compile: 'off'
+  dit_precision: fp32
+  vsa:
+    sparsity: 0.8
+    tile_size: 64
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+pipeline:
+  video_scheduler_shift: 10.0
+  audio_scheduler_shift: 3.0
+  dit_config:
+    uniform_parameter_dtype: false
