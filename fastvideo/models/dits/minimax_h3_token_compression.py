@@ -6,8 +6,8 @@ original RoPE coordinates and AdaLN row; after the last compressed block every v
 its nearest kept token: ``H_out = H + expand(F(P H) - P H)`` where ``P`` is the compression operator. With
 compression off nothing changes (no hook acts), so the student equals the teacher bit for bit.
 
-Unlike ``scripts/benchmarks/minimax_h3_realtime/h3_levers.py`` (which replaces the block list), this installs
-forward hooks, so module names, FSDP sharding, activation checkpointing and QAD linears are untouched:
+Rather than replacing the block list, this installs forward hooks, so module names, FSDP sharding, activation
+checkpointing and QAD linears are untouched:
 
 * block ``start`` pre-hook compresses the hidden states and swaps AdaLN rows / RoPE / sequence length;
 * every block in the range gets the compressed AdaLN rows / RoPE;

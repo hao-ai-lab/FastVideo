@@ -104,7 +104,13 @@ def _reference_plan(groups: dict[tuple[str, str], list[dict]], seed: int, per_gr
     for index in range(max(len(entries) for entries in picked)):
         for entries in picked:
             if index < len(entries):
-                plan.append(entries[index])
+                entry = entries[index]
+                source = entry["id"].split(":", 1)[-1]
+                plan.append({
+                    **entry,
+                    "id": f"omniref-{entry['case']}-{source}-{entry['resolution']}",
+                    "source": source,
+                })
     return plan
 
 
@@ -510,27 +516,6 @@ def test_pinned_amax_checks_sha_and_copies(tmp_path, single_process_group):  # n
 def test_skip_blocks_keep_whole_blocks_bf16(cpu_loader, single_process_group):  # noqa: F811
     methods = install_nvfp4_qad(_tiny_model(), _amax_table(), NVFP4QADPlan(skip_blocks=(1, )))
     assert methods and all(name.startswith("transformer_blocks.0.") for name in methods)
-
-
-def test_audio_stats_and_seed_floor_gate():
-    from fastvideo.train.methods.knowledge_distillation.pdd_qad_audio_stats import (audio_stats, log_mel_distance,
-                                                                                    seed_floor_gate)
-    rate = 32000
-    t = torch.arange(rate) / rate
-    low, high = torch.sin(2 * math.pi * 1000 * t), torch.sin(2 * math.pi * 10000 * t)
-    stats_low, stats_high = audio_stats(low, rate), audio_stats(high[:, None].repeat(1, 2), rate)
-    assert stats_low["spectral_centroid_hz"] == pytest.approx(1000, rel=0.05)
-    assert stats_low["share_above_8khz"] < 0.01 and stats_high["share_above_8khz"] > 0.99
-    assert log_mel_distance(low, low, rate) == 0.0 and log_mel_distance(low, high, rate) > 1.0
-    teacher = [{"spectral_centroid_hz": 950.0, "share_above_8khz": 0.1, "dynamic_range_db": 30.0,
-                "loudness_iqr_db": 6.0}] * 3
-    other = [{**row, "spectral_centroid_hz": 900.0, "dynamic_range_db": 28.0, "loudness_iqr_db": 5.0,
-              "share_above_8khz": 0.09} for row in teacher]
-    good = [{**row, "spectral_centroid_hz": 930.0, "share_above_8khz": 0.095} for row in teacher]
-    dull = [{**row, "spectral_centroid_hz": 530.0} for row in teacher]
-    assert seed_floor_gate(good, teacher, other)["pass"]
-    result = seed_floor_gate(dull, teacher, other)
-    assert not result["pass"] and not result["spectral_centroid_hz/pass"]
 
 
 def test_fp32_boundary_modules_match_inference_and_stay_frozen(cpu_loader, single_process_group):  # noqa: F811

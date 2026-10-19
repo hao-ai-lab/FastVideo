@@ -5,12 +5,12 @@ Same contract as ``omniref_pdd.MiniMaxH3OmniRefPDDModel`` so ``OmniRefPDDQADMeth
 ("rungs", one per DMD step), ``rung_scope`` / ``forward_rung`` / ``schedulers`` / ``prepare`` / ``quantization``.
 
 Differences from OmniRef: plain ``transformer`` module (no PDD head fusion), V2 sampling contract (video shift 10,
-audio shift 3, ``dmd_denoising_steps``), VSA tile 64 with sparsity 0.8 in bf16 (native Triton fwd+bwd, no FP4
-attention emulation), text-only rows (``v2_data``), and the optional middle-block spatial token compression
-(``v2_compression``).
+audio shift 3, ``dmd_denoising_steps``), VSA tile 64 with sparsity 0.8 (BF16 Triton kernels by default;
+``qad.fp4_attention`` installs the same FP4 emulator as the shared recipe), text-only rows (``v2_data``), and the
+optional middle-block spatial token compression (``v2_compression``).
 
-``quantization(linears=, attention=)``: ``linears`` toggles the NVFP4 QAD linears; ``attention=False`` also switches
-off the token compression (the student's only non-linear deviation), so ``quantization(False, False)`` is the teacher.
+``quantization(linears=, attention=)``: ``linears`` toggles the NVFP4 QAD linears; ``attention=False`` switches off
+the FP4 attention emulator and the token compression, so ``quantization(False, False)`` is the BF16 teacher.
 """
 from __future__ import annotations
 

@@ -175,13 +175,20 @@ def _fwd_kernel(Q, K, V, O, OHP, LSE, MRUN, Q2K_IDX, Q2K_NUM, KV_VALID, Q2K_QUAD
         if FLOOR:
             group_max = tl.where(it == 0, tl.maximum(group_max, FLOOR_VALUE), group_max)
         m_new = tl.maximum(m_i, tl.max(group_max, axis=1))
+        # A valid mask can list a block that has no selected keys for one query
+        # half (tile 64 pairs two halves per block). Both maxima are then -inf;
+        # exp2(-inf - -inf) is NaN, so keep the running state unchanged and
+        # emit zero probabilities for that half.
+        empty = m_new == float("-inf")
         m_scaled = m_new * scale_log2 + OFFSET
-        alpha = tl.math.exp2((m_i - m_new) * scale_log2)
+        alpha = tl.where(empty, 0.0, tl.math.exp2((m_i - m_new) * scale_log2))
         if QUANT:
             p_tilde, p_hat = _quantized_p(s, m_scaled, it == 0, scale_log2, FLOOR, FLOOR_VALUE, ROWS, BLOCK_N)
         else:
             p_tilde = tl.math.exp2(s * scale_log2 - m_scaled[:, None])
             p_hat = p_tilde
+        p_tilde = tl.where(empty[:, None], 0.0, p_tilde)
+        p_hat = tl.where(empty[:, None], 0.0, p_hat)
         l_i = l_i * alpha + tl.sum(p_tilde, axis=1)
         v = tl.load(V + base + keys[:, None] * D + offs_d[None, :])
         acc = acc * alpha[:, None] + tl.dot(p_hat.to(tl.bfloat16), v)
@@ -228,7 +235,10 @@ def _bwd_dq_kernel(Q, K, V, DO, LSE, DELTA, DQ, Q2K_IDX, Q2K_NUM, KV_VALID, Q2K_
             quad = tl.load(Q2K_QUAD + meta * list_width + (it // halves)).to(tl.int32)
             bit = (quad >> ((pid % halves) * 2 + (it % halves))) & 1
             ok = ok & (bit != 0)
-        p = tl.where(ok[None, :], tl.math.exp2(s * scale_log2 - lse[:, None]), 0.0)
+        # A row with no valid keys at all has lse = -inf; clamp it so an empty
+        # half contributes zero instead of exp2(-inf - -inf) = NaN.
+        lse_safe = tl.where(lse == float("-inf"), 0.0, lse)
+        p = tl.where(ok[None, :], tl.math.exp2(s * scale_log2 - lse_safe[:, None]), 0.0)
         dp = tl.dot(do, tl.trans(v))
         ds = p * (dp - delta[:, None])
         dq += tl.dot(ds.to(tl.bfloat16), k)
@@ -274,14 +284,16 @@ def _bwd_dkdv_kernel(Q, K, V, DO, LSE, DELTA, MRUN, DK, DV, K2Q_IDX, K2Q_SLOT, K
             s = tl.where(ok[None, :] & (bit != 0), s, float("-inf"))
         else:
             s = tl.where(ok[None, :], s, float("-inf"))
-        p = tl.math.exp2(s * scale_log2 - lse[:, None])
+        lse_safe = tl.where(lse == float("-inf"), 0.0, lse)
+        p = tl.math.exp2(s * scale_log2 - lse_safe[:, None])
         if QUANT:
             qmeta = bh * n_qblocks + m_block
             first_visit = slot == tl.load(Q2K_NUM + qmeta) - 1
             m_run = tl.load(MRUN + (qmeta * list_width + slot) * BLOCK_N + row0 + offs_r)
-            m_scaled = m_run * scale_log2 + OFFSET
+            m_ok = m_run != float("-inf")
+            m_scaled = tl.where(m_ok, m_run * scale_log2 + OFFSET, 0.0)
             _, p_hat = _quantized_p(s, m_scaled, first_visit, scale_log2, FLOOR, FLOOR_VALUE, ROWS, ROWS)
-            weight = p_hat * tl.math.exp2(m_scaled - lse)[:, None]
+            weight = tl.where(m_ok[:, None], p_hat * tl.math.exp2(m_scaled - lse_safe)[:, None], 0.0)
         else:
             weight = p
         dv += tl.dot(tl.trans(weight.to(tl.bfloat16)), do)

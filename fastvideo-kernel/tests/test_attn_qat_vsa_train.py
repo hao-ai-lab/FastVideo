@@ -205,6 +205,30 @@ def test_tile128_route_is_the_general_route_without_quadrants():
     assert torch.equal(q2k_idx, old_idx) and torch.equal(q2k_num, old_num) and torch.equal(kv_valid, old_valid)
 
 
+def test_tile64_first_listed_block_can_be_empty_for_one_half():
+    """Regression: an empty half in the first visited block must not poison later blocks."""
+    n_tiles = 4
+    gen = torch.Generator().manual_seed(7)
+    seq_len = (n_tiles // 2) * ref.BLOCK
+    q, k, v = (torch.randn(1, 1, seq_len, 128, generator=gen).bfloat16() for _ in range(3))
+    tile_mask = torch.zeros(1, 1, n_tiles, n_tiles, dtype=torch.bool)
+    tile_mask[0, 0, 1, 2] = True  # query tile 1 lists block 1 (empty for query tile 0)
+    tile_mask[0, 0, 0, 0] = True  # query tile 0 lists block 0 (valid)
+    tile_mask[0, 0, 2, 2] = True
+    tile_mask[0, 0, 3, 3] = True
+    tile_valid = torch.full((n_tiles, ), 64, dtype=torch.int32)
+    q2k_idx, q2k_num, kv_valid, q2k_quad = ref.tile_mask_to_fp4_blocks(tile_mask, 64, tile_valid)
+    assert int(q2k_num[0, 0, 0]) == 2 and int(q2k_idx[0, 0, 0, 0]) == 1
+    assert int(q2k_quad[0, 0, 0, 0]) & 3 == 0  # first slot is block 1, empty for query half 0
+
+    out = ref.fp4_vsa_attention_reference(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, quantize=False)
+    assert torch.isfinite(out).all()
+    mask = _dense_quad_mask(q2k_idx, q2k_num, q2k_quad, seq_len)
+    scores = (q.float() @ k.float().transpose(-1, -2)) / math.sqrt(128)
+    expected = torch.softmax(scores.masked_fill(~mask, -math.inf), dim=-1) @ v.float()
+    torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-5)
+
+
 def test_tile64_quadrant_mask_is_exact_masked_softmax():
     q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, _, _ = _problem64(5, seed=5)
     out = ref.fp4_vsa_attention_reference(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, quantize=False)

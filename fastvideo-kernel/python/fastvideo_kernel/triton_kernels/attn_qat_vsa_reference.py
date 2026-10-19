@@ -260,9 +260,15 @@ def fp4_vsa_attention_reference(q: torch.Tensor,
                     if position == 0 and first_block_max_floor is not None:
                         group_max = group_max.clamp(min=first_block_max_floor)
                     new_max = torch.maximum(row_max, group_max.amax(dim=-1))
-                    m_scaled = new_max * scale_log2 + offset
-                    p_tilde = torch.exp2(scores * scale_log2 - m_scaled[:, None])
-                    alpha = torch.exp2((row_max - new_max) * scale_log2)
+                    # A listed block can have no selected keys for this query
+                    # half; both maxima are -inf and the usual exp2 terms are
+                    # NaN, so emit zeros and keep the running state unchanged.
+                    empty = torch.isinf(new_max) & (new_max < 0)
+                    m_scaled = torch.where(empty, torch.zeros_like(new_max), new_max * scale_log2 + offset)
+                    p_tilde = torch.where(empty[:, None], torch.zeros_like(scores),
+                                          torch.exp2(scores * scale_log2 - m_scaled[:, None]))
+                    alpha = torch.where(empty, torch.zeros_like(new_max),
+                                        torch.exp2((row_max - new_max) * scale_log2))
                     alpha = torch.where(torch.isinf(row_max), torch.zeros_like(alpha), alpha)
                     row_sum = row_sum * alpha + p_tilde.sum(dim=-1)
                     if quantize:
@@ -279,7 +285,9 @@ def fp4_vsa_attention_reference(q: torch.Tensor,
                 out[b, h, rows] = acc * inv[:, None]
                 if weights is not None:
                     for n, p_hat, block_max in visited:
-                        decay = torch.exp2((block_max - row_max) * scale_log2) * inv
+                        finite = torch.isfinite(block_max) & torch.isfinite(row_max)
+                        decay = torch.where(finite, torch.exp2((block_max - row_max) * scale_log2) * inv,
+                                            torch.zeros_like(inv))
                         weights[b, h, rows, n * BLOCK:(n + 1) * BLOCK] = p_hat * decay[:, None]
     if weights is not None:
         return out, weights

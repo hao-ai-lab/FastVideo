@@ -429,6 +429,15 @@ def _strict_reload_verify(
     logger.info("Strict reload verification passed.")
 
 
+def _resolve_export_checkpoint(checkpoint_dir: str) -> Path:
+    """A DCP image directory, including a tagged weights-only one, or a regular checkpoint path."""
+    raw_path = Path(os.path.expanduser(checkpoint_dir)).resolve()
+    if (raw_path / "dcp" / ".metadata").is_file():
+        return raw_path
+    from fastvideo.train.utils.checkpoint import _resolve_resume_checkpoint
+    return _resolve_resume_checkpoint(checkpoint_dir, output_dir=checkpoint_dir)
+
+
 def convert(
     *,
     checkpoint_dir: str,
@@ -447,10 +456,7 @@ def convert(
     from fastvideo.distributed import (
         maybe_init_distributed_environment_and_model_parallel, )
     from fastvideo.train.utils.builder import build_from_config
-    from fastvideo.train.utils.checkpoint import (
-        CheckpointManager,
-        _resolve_resume_checkpoint,
-    )
+    from fastvideo.train.utils.checkpoint import CheckpointManager
     from fastvideo.train.utils.config import (
         RunConfig,
         load_run_config,
@@ -459,13 +465,7 @@ def convert(
     import torch.distributed.checkpoint as dcp
 
     # -- Resolve checkpoint directory --
-    # A tagged (weights-only) checkpoint is not named checkpoint-<step>, so it
-    # bypasses the resume resolver; any directory carrying a DCP image works.
-    raw_path = Path(os.path.expanduser(checkpoint_dir)).resolve()
-    resolved = raw_path if (raw_path / "dcp" / ".metadata").is_file() else _resolve_resume_checkpoint(
-        checkpoint_dir,
-        output_dir=checkpoint_dir,
-    )
+    resolved = _resolve_export_checkpoint(checkpoint_dir)
     dcp_dir = resolved / "dcp"
     if not dcp_dir.is_dir():
         raise FileNotFoundError(f"Missing dcp/ under {resolved}")

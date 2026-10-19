@@ -221,7 +221,6 @@ python -m fastvideo.train.entrypoint.dcp_to_diffusers \
 | `fastvideo/train/methods/knowledge_distillation/pdd_qad_metrics.py` | Rung aggregation and score |
 | `fastvideo/train/methods/knowledge_distillation/pdd_qad_recon.py` | Layer-wise reconstruction hooks |
 | `fastvideo/train/methods/knowledge_distillation/pdd_qad_step0.py` | Step-0 baseline cache |
-| `fastvideo/train/methods/knowledge_distillation/pdd_qad_audio_stats.py` | Audio guard statistics |
 | `fastvideo/train/models/minimax_h3/omniref_pdd.py` | OmniRef Ref2VA profile |
 | `fastvideo/train/models/minimax_h3/v2_t2v.py` | V2/V2.1 T2VA profile |
 | `fastvideo/layers/quantization/nvfp4_qad.py` | NVFP4 linear emulation and STE |
