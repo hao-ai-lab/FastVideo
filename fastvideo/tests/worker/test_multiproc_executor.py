@@ -15,6 +15,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.multiproc_executor import (
     _RPC_ERROR_KEY,
     _WORKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+    _prepare_worker_output_for_parent,
     _raise_for_rpc_errors,
     _shutdown_torch_compile_workers,
     MultiprocExecutor,
@@ -468,3 +469,21 @@ def test_streaming_generator_from_fastvideo_args_forwards_log_queue(monkeypatch)
     assert seen[0][1] is sentinel  # VideoGenerator.from_config's log_queue= call site works again
     assert seen[0][0] is not args and seen[0][0].enable_streaming_ipc_queues is True
     assert args.enable_streaming_ipc_queues is False
+
+
+def test_prepare_worker_output_keeps_non_latent_tensor_on_device():
+    result = torch.empty((1, 2))
+    args = SimpleNamespace(output_type="pil")
+
+    assert _prepare_worker_output_for_parent(result, args) is result
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_prepare_worker_output_moves_latent_cuda_tensor_to_cpu():
+    result = torch.empty((1, 16, 1, 8, 8), device="cuda")
+    args = SimpleNamespace(output_type="latent")
+
+    prepared = _prepare_worker_output_for_parent(result, args)
+
+    assert prepared.device.type == "cpu"
+    assert prepared.shape == result.shape
