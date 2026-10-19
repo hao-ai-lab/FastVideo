@@ -63,7 +63,7 @@ _BLOCK = (rf"(?:(?P<refiner>token{_S}refiner{_S}(?:refiner{_S})?blocks)|(?:trans
 _BLOCK_SUBLAYER = re.compile(rf"^{_BLOCK}(?P<layer>"
                              rf"attn{_S}qkv{_S}proj|attn{_S}out{_S}proj|attn{_S}to{_S}q|attn{_S}to{_S}k|attn{_S}to{_S}v|"
                              rf"attn{_S}to{_S}out(?:{_S}0)?|mlp{_S}fc1|mlp{_S}fc2|ff{_S}net{_S}0{_S}proj|ff{_S}net{_S}2|"
-                             rf"ff{_S}fc{_S}in|ff{_S}fc{_S}out)$")
+                             rf"ff{_S}fc{_S}in|ff{_S}fc{_S}out|adaln{_S}proj{_S}linear)$")
 
 # Boundary projections of the joint audio-video model, original name -> FastVideo module.
 _TOP_LEVEL = {
@@ -153,6 +153,7 @@ _LAYER_PLAN: dict[str, tuple[tuple[str, ...], Callable[[torch.Tensor], list[torc
     "ff.net.2": (("ff.fc_out", ), _identity),
     "ff.fc_in": (("ff.fc_in", ), _identity),
     "ff.fc_out": (("ff.fc_out", ), _identity),
+    "adaln_proj.linear": (("adaln_proj.linear", ), _identity),
 }
 # Separator-free spelling -> canonical layer name, so ``attn.to_q`` and ``attn_to_q`` resolve alike.
 _LAYER_BY_COLLAPSED_NAME = {re.sub(_S, "", name): name for name in _LAYER_PLAN}

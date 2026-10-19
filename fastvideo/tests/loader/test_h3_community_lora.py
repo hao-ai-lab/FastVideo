@@ -128,6 +128,18 @@ def test_kohya_flattened_names_are_resolved() -> None:
     assert "token_refiner.refiner_blocks.0.ff.fc_out.lora_A.weight" in result.tensors
 
 
+@pytest.mark.parametrize("module", ["diffusion_model.blocks.4.adaln_proj.linear", "lora_unet_blocks_4_adaln_proj_linear"])
+def test_per_block_adaln_projection_is_mapped(module: str) -> None:
+    a, b = _pair(6 * HIDDEN, HIDDEN, 9)
+    result = convert_h3_community_lora({f"{module}.lora_down.weight": a, f"{module}.lora_up.weight": b})
+    assert result.unrecognized == ()
+    assert result.tensors.keys() == {
+        "transformer_blocks.4.adaln_proj.linear.lora_A.weight",
+        "transformer_blocks.4.adaln_proj.linear.lora_B.weight",
+    }
+    assert torch.equal(result.tensors["transformer_blocks.4.adaln_proj.linear.lora_B.weight"], b)
+
+
 def test_alpha_is_carried_to_every_split_projection_and_absent_alpha_is_not_invented() -> None:
     qkv_a, qkv_b = _pair(3 * PROJ, HIDDEN, 7)
     with_alpha = convert_h3_community_lora({
