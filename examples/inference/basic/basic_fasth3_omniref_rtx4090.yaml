@@ -13,11 +13,17 @@
 # sm_89 has no FP4 hardware, so this profile is the closest equivalent rather than
 # the FP4 stack: FP8 linears, bf16 VSA attention, the dense light VAE decoder (the
 # NVFP4 one needs FP4 hardware too), a non-resident encoder and expandable segments
-# to reduce memory fragmentation.
+# to reduce memory fragmentation. Layerwise offload is mandatory: the 47 GB FP8
+# DiT cannot be resident on 24 GB. Run one process per clip; repeated requests in
+# one process exceed the 24 GB GPU and the host cgroup when the encoder reloads.
 #
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
 # FASTVIDEO_H3_VSA_FP4=0 \
 # FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16 \
+# FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS=1 \
+# FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=16 \
+# FASTVIDEO_H3_FFN_CHUNK_TOKENS=16384 \
+# FASTVIDEO_H3_PINNED_SWAP=0 \
 # PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 # FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_rtx4090.yaml
@@ -35,7 +41,7 @@ generator:
       sp_size: 1
     offload:
       dit: false
-      dit_layerwise: false
+      dit_layerwise: true
       text_encoder: true
       vae: false
       pin_cpu_memory: true

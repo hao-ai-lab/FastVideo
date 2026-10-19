@@ -53,11 +53,12 @@ every device. Only the memory policy and the geometry differ.
 | `spark` | DGX Spark, GB10, 128 GB unified | 480p | none: encoder, DiT and decoder resident |
 | `rtx-pro-6000` | RTX PRO 6000, sm_120, 96 GB | 768p | none: encoder, DiT and decoder resident |
 | `rtx-5090` | RTX 5090, sm_120, 32 GB | 480p | non-resident encoder, sequential denoise-module load, AdaLN table |
-| `rtx-4090` | RTX 4090, sm_89, 24 GB | 480p | as the 5090, plus expandable segments |
+| `rtx-4090` | RTX 4090, sm_89, 24 GB | 480p | layerwise DiT stream (16 blocks resident), non-resident encoder, FFN chunk 16384, expandable segments |
 
-The DiT stays whole on every profile. The 24 and 32 GB cards offload the text
-encoder and replace the AdaLN projections (a third of the DiT's bytes on disk)
-with a precomputed table.
+The 96 GB and 128 GB profiles keep the DiT whole. The 32 GB 5090 also keeps it
+resident but offloads the text encoder; the 24 GB 4090 streams the FP8 DiT
+layerwise with 16 blocks resident. The 24 and 32 GB cards replace the AdaLN
+projections (a third of the DiT's bytes on disk) with a precomputed table.
 
 The Blackwell stack is:
 
@@ -77,6 +78,11 @@ The Blackwell stack is:
 The RTX 4090 profile uses FP8 linears, the unquantized Triton emulator for the
 checkpoint's fixed 128-token VSA tiles and the VAE folder's dense decoder. The
 NVFP4 decoder's GEMMs need FP4 hardware, so `--decoder` does not apply there.
+Layerwise offload is mandatory: the 47 GB FP8 DiT cannot be resident on 24 GB.
+The profile keeps 16 blocks resident, chunks the FFN at 16384 tokens and
+disables pinned swap. Repeated requests in one process exceed the 24 GB GPU and
+the 57.7 GiB host cgroup once the 16 GB text encoder reloads; run one process
+per clip on this card.
 
 The FP8 prefix split is the release mode: it reproduces the attention numerics
 the student was trained with, and every device profile selects it. It runs the
@@ -100,8 +106,9 @@ The profiles set these; set them yourself when driving the YAML recipes.
 |---|---|---|
 | `FASTVIDEO_H3_ADALN_TABLE` | path, every device | drops the 26 GB of `adaln_proj`; the 24/32 GB profiles need it |
 | `FASTVIDEO_ATTENTION_BACKEND` | `VIDEO_SPARSE_ATTN_H3` | the trained backend; the contract fixes the tile size |
-| `FASTVIDEO_H3_VSA_FP4` | `1` | FP4 sparse attention (sm_120/sm_121) |
+| `FASTVIDEO_H3_VSA_FP4` | `1` on Blackwell, `0` on the 4090 | FP4 sparse attention; sm_89 has no FP4 |
 | `FASTVIDEO_H3_VSA_FP4_PREFIX` | `fp8` | the prefix split; `bf16` is the higher-precision variant |
+| `FASTVIDEO_H3_VSA_FINE_ATTENTION` | `emulator-bf16` on the 4090 | bf16 VSA on sm_89 |
 | `FASTVIDEO_H3_VAE_NVFP4_DECODER` | path to `decoder-nvfp4.safetensors` | the pre-packed NVFP4 decoder |
 | `FASTVIDEO_MINIMAX_H3_FUSIONS` | `all` | bit-exact fused kernels |
 | `FASTVIDEO_VSA_TRITON` | `1` | Triton VSA on the consumer parts |
@@ -109,6 +116,8 @@ The profiles set these; set them yourself when driving the YAML recipes.
 | `FASTVIDEO_NVFP4_MM_BACKEND` | `cudnn` on Spark | faster than CUTLASS on the H3 FFN shapes on GB10, bit-identical |
 | `FASTVIDEO_H3_VAE_TILE_BATCH` | `12` Spark, `4` 5090/4090 | decoder tiles per call |
 | `FASTVIDEO_H3_VAE_INT8_OVERLAY` | `0` on Spark | the INT8 ConvRot overlay is slower on GB10 |
+| `FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS`, `FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS` | `1`, `16` on the 4090 | stream the packed FP8 weights; keep 16 blocks resident |
+| `FASTVIDEO_H3_FFN_CHUNK_TOKENS`, `FASTVIDEO_H3_PINNED_SWAP` | `16384`, `0` on the 4090 | bound the FFN activation and avoid pinned host duplicates |
 | `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` on the 4090 | reduces allocator fragmentation |
 
 `fastvideo-kernel` must be built for the device: `12.0a` on sm_120 and `12.1a`
