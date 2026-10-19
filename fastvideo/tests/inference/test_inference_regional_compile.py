@@ -431,6 +431,36 @@ def test_compile_model_regions_rejects_mode_kwargs() -> None:
         _compile_model_regions(_Toy(), {"mode": "reduce-overhead"})
 
 
+def test_variable_rank_lora_regions_do_not_share_a_recompile_budget() -> None:
+    from fastvideo.layers.lora.linear import get_lora_layer
+    from fastvideo.tests.layers.test_lora_side_branch import _packed_linear, IN
+
+    class AdapterBlock(nn.Module):
+        def __init__(self, rank):
+            super().__init__()
+            self.proj = get_lora_layer(_packed_linear())
+            self.proj.set_lora_weights(torch.randn(rank, IN), torch.randn(12, rank))
+
+        def forward(self, x):
+            return self.proj(x)[0]
+
+    model = nn.Module()
+    model.blocks = nn.ModuleList([AdapterBlock(rank) for rank in (2, 3, 4)])
+    model._compile_conditions = [lambda name, module: name.startswith("blocks.") and name.count(".") == 1]
+    x = torch.randn(2, 5, IN, dtype=torch.bfloat16)
+    torch._dynamo.reset()
+    try:
+        with torch.inference_mode():
+            expected = [block(x) for block in model.blocks]
+            torch._dynamo.reset()
+            with torch._dynamo.config.patch(recompile_limit=2):
+                _compile_model_regions(model, {"backend": "eager"}, isolate_regions=True)
+                for block, reference in zip(model.blocks, expected, strict=True):
+                    torch.testing.assert_close(block(x), reference, rtol=0, atol=0)
+    finally:
+        torch._dynamo.reset()
+
+
 def test_compile_model_regions_requires_conditions_and_matches(monkeypatch) -> None:
     monkeypatch.setattr(fsdp_load.torch, "compile", lambda fn, **kwargs: fn)
     plain = nn.Linear(4, 4)
