@@ -91,9 +91,9 @@ disables pinned swap. Repeated requests in one process exceed the 24 GB GPU and
 the 57.7 GiB host cgroup once the 16 GB text encoder reloads; run one process
 per clip on this card.
 
-The FP8 prefix split is the release mode: it reproduces the attention numerics
-the student was trained with, and every device profile selects it. It runs the
-prefix rows densely in bf16 after 8-bit Q/K rounding, which costs about 24% of
+The Blackwell profiles select the FP8 prefix split to protect the conditioning
+queries from FP4 rounding. The split runs prefix rows densely in bf16 after
+8-bit Q/K rounding, which costs about 24% of
 denoise time on one Spark. The split applies at `sp_size` 1 and above; the
 sequence-parallel path keeps the same prefix and video row split.
 
@@ -153,11 +153,15 @@ A nonempty fine-attention override takes priority over
 `FASTVIDEO_H3_VSA_FP4=1`. These overrides use the eager path; disable inference
 compilation when using them.
 
-Two limits of this first version are worth knowing. The 8-bit prefix rows are
-simulated: they are rounded to FP8 and attended in bf16, so the gain is quality,
-not time. And the released kernel does not reproduce the trained attention
-numerics exactly: the student was trained with two-level P quantization and K
-smoothing, while the shipped kernel uses single-level P without K smoothing.
+The prefix rows are rounded to FP8 and attended in bf16; this protects their
+precision rather than accelerating them. For the FP4 video-query kernel, the
+Blackwell profiles enable two-level probability quantization
+(`FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P=1`) and key smoothing
+(`FASTVIDEO_H3_VSA_FP4_K_SMOOTH=1`), matching those settings in the OmniRef QAD
+v2 training recipe. The kernel defaults to single-level probability
+quantization without key smoothing when these switches are unset. Matching
+these two settings does not establish exact parity for the entire attention
+path, including the protected prefix and sequence-parallel exchanges.
 
 ## Memory
 
