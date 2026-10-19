@@ -10,8 +10,8 @@
 #
 # GB10 uses Triton VSA. The two nodes share the sequence (sp_size 2), which is
 # the only split this pipeline has: H3 generates a clip at a time, so there is
-# no depth to pipeline. The FP4 prefix split is single-rank only for now; with
-# sp_size above 1 the FP4 kernel still quantizes every row.
+# no depth to pipeline. The FP8 prefix split runs on the sequence-parallel path
+# too: prefix rows stay dense and video rows stay on the FP4 kernel.
 #
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
 # FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_H3_VSA_FP4_PREFIX=fp8 \

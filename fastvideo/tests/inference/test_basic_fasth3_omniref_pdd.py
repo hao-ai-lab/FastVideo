@@ -170,7 +170,7 @@ def test_lossless_accel_flag_parses():
     assert example.parse_args([*argv, "--lossless-accel"]).lossless_accel is True
 
 
-@pytest.mark.parametrize("choice", ["default", "fp8", "bf16", "fast"])
+@pytest.mark.parametrize("choice", ["default", "fp8", "bf16"])
 def test_attention_prefix_flag_parses(choice):
     argv = ["--model-path", "m", "--prompt", "p", "--image", "a.png", "--attention-prefix", choice]
     assert example.parse_args(argv).attention_prefix == choice
@@ -180,7 +180,6 @@ def test_attention_prefix_flag_parses(choice):
     ("default", "fp8"),
     ("fp8", "fp8"),
     ("bf16", "bf16"),
-    ("fast", ""),
 ])
 def test_attention_prefix_keeps_the_profile_default_or_overrides_it(choice, expected):
     from fastvideo import envs

@@ -140,13 +140,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "environment (see docs/inference/fasth3_omniref.md); the checkpoint must be "
                         "the packed NVFP4 export on Blackwell, or a dense/FP8 export on the 4090")
     parser.add_argument("--attention-prefix",
-                        choices=("default", "fp8", "bf16", "fast"),
+                        choices=("default", "fp8", "bf16"),
                         default="default",
                         help="numerics for the dense attention prefix rows (text, reference and audio). "
                         "'fp8' is the validated-quality mode and the device-profile default; 'bf16' is "
-                        "higher precision but slower; 'fast' keeps every row on the FP4 kernel, which is "
-                        "faster but measurably farther from full precision; 'default' keeps the profile's "
-                        "choice")
+                        "higher precision but slower; 'default' keeps the profile's choice")
     parser.add_argument("--decoder",
                         default=None,
                         help="pre-packed NVFP4 VAE decoder (decoder-nvfp4.safetensors) used by --profile "
@@ -379,7 +377,7 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
 def apply_attention_prefix(choice: str) -> None:
     """Apply ``--attention-prefix``; ``default`` keeps the profile's choice."""
     if choice != "default":
-        os.environ["FASTVIDEO_H3_VSA_FP4_PREFIX"] = "" if choice == "fast" else choice
+        os.environ["FASTVIDEO_H3_VSA_FP4_PREFIX"] = choice
 
 
 def apply_profile(profile: DeviceProfile, decoder: str | None, adaln_table: str | None = None) -> None:

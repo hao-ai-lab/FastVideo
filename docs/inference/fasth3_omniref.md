@@ -67,8 +67,8 @@ The Blackwell stack is:
 - **Attention:** VSA sparsity 0.9, 128-token tiles, reference keep 0.1. Video
   query tiles run on the FP4 sparse kernel. Dense prefix query tiles - the
   text, reference and audio rows - are split off and run at 8-bit Q/K with bf16
-  P.V, keeping the conditioning out of the FP4 rounding. The split is
-  single-rank; at `sp_size` above 1 every row goes through the FP4 kernel.
+  P.V, keeping the conditioning out of the FP4 rounding. The split applies on
+  the single-rank and sequence-parallel paths alike.
 - **Text encoder:** the NVFP4 Qwen3-VL encoder, including reference vision
   tokens.
 - **Decoder:** the pre-packed NVFP4 decoder (`decoder-nvfp4.safetensors`), read
@@ -78,20 +78,19 @@ The RTX 4090 profile uses FP8 linears, the unquantized Triton emulator for the
 checkpoint's fixed 128-token VSA tiles and the VAE folder's dense decoder. The
 NVFP4 decoder's GEMMs need FP4 hardware, so `--decoder` does not apply there.
 
-The FP8 prefix split is the validated-quality mode. It runs the prefix rows
-densely in bf16 after 8-bit Q/K rounding, which costs about 35 s per 480p/5 s
-clip on one Spark; set `FASTVIDEO_H3_VSA_FP4_PREFIX=` (empty), or pass
-`--attention-prefix fast` to the example, to keep every row on the FP4 kernel
-for the fastest single-Spark path. At `sp_size` above 1 the split does not
-apply: the sequence-parallel path uses the FP4 kernel for every row.
+The FP8 prefix split is the release mode: it reproduces the attention numerics
+the student was trained with, and every device profile selects it. It runs the
+prefix rows densely in bf16 after 8-bit Q/K rounding, which costs about 24% of
+denoise time on one Spark. The split applies at `sp_size` 1 and above; the
+sequence-parallel path keeps the same prefix and video row split.
 
-Both modes are supported and selectable. The choice is a fidelity/speed
-tradeoff, not a broken-versus-clean switch: on a matched 480p/5 s clip (same
-prompt, seed and reference, 8L decoder) fast mode keeps the same scene, motion
-and faces, but sits **4.3 dB farther from the bf16 attention reference on every
-frame** (20.96 vs 25.26 dB PSNR; SSIM 0.785 vs 0.852; structural correlation
-0.864 vs 0.945). For the best-quality clip use the 36L decoder with the FP8
-split; for the fastest clip use the 8L decoder with fast mode.
+`--attention-prefix bf16` is a higher-precision diagnostic mode, not a faster
+one. Keeping every row on the FP4 kernel (`FASTVIDEO_H3_VSA_FP4_PREFIX=` empty)
+is a low-level escape hatch, not a release mode: on a matched 480p/5 s clip it
+sits 4.3 dB farther from the bf16 attention reference on every frame (20.96 vs
+25.26 dB PSNR; SSIM 0.785 vs 0.852; structural correlation 0.864 vs 0.945).
+Use the 36L decoder for the best-quality clip and the 8L decoder on memory-bound
+devices; both run the FP8 split.
 
 ## Environment
 
