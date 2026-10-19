@@ -626,6 +626,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
     def prepare_for_compile(self, device: torch.device) -> None:
         """Tensorize per-layer state shared by every torch.compile route."""
         self._compile_layer_idx = torch.tensor(self.layer_idx, device=device, dtype=torch.int64)
+        if self.fine_attention_override is not None:
+            # forward() cannot run the emulator inside a traced graph, and logging there
+            # would break fullgraph capture, so say it here.
+            logger.warning_once("FASTVIDEO_H3_VSA_FINE_ATTENTION is ignored inside torch.compile; compiled "
+                                "VSA-H3 layers run the native fine attention. Keep the DiT eager to use it.")
 
     def prepare_for_regional_compile(self, device: torch.device) -> str | None:
         """Resolve the inference-only ptx_blackwell route before fullgraph capture.

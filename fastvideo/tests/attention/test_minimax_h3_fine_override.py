@@ -65,6 +65,18 @@ def test_bf16_override_keeps_tile128_without_quantization(monkeypatch, env_overr
         video_sparse_attn_h3._fine_attention_from_name.cache_clear()
 
 
+@pytest.mark.parametrize("override", [None, object()])
+def test_compile_warns_that_the_fine_override_is_ignored(monkeypatch, override):
+    warnings = []
+    monkeypatch.setattr(video_sparse_attn_h3.logger, "warning_once", warnings.append)
+    impl = SimpleNamespace(fine_attention_override=override, layer_idx=3)
+    video_sparse_attn_h3.MiniMaxH3VSAImpl.prepare_for_compile(impl, torch.device("cpu"))
+    assert impl._compile_layer_idx.item() == 3
+    assert len(warnings) == (override is not None)
+    if override is not None:
+        assert "FASTVIDEO_H3_VSA_FINE_ATTENTION is ignored inside torch.compile" in warnings[0]
+
+
 @pytest.mark.parametrize("name", ["", "emulator", "mix8", "emulator-", "other-mix8", "other-bf16",
                                 "emulator-unknown"])
 def test_invalid_fine_attention_names_raise_actionable_value_error(name):
