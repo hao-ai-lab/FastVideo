@@ -11,7 +11,7 @@
 # (V2.1 Consumer) profile, calibration, and the checkpoint contract.
 #
 # Released result: FastVideo/FastH3-Omni-NVFP4-QAD-v2 (step 120 of 200).
-# `init_from` is the calibrated step-3500 OmniRef checkpoint used as QAD step 0,
+# `init_from` is the calibrated OmniRef checkpoint used as QAD step 0,
 # not that released result. The calibrated amax table is vendored under
 # examples/train/calibration/fasth3/ and pinned by sha256 below.
 models:

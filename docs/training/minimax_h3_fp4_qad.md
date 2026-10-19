@@ -30,9 +30,9 @@ The runnable configs are:
 | V2 bf16 teacher / starting weights | `FastVideo/FastVideo-FastH3-8-Step-V2` |
 | NVFP4 consumer baseline | `FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer` |
 
-The OmniRef config starts from the **calibrated step-3500 OmniRef checkpoint
-used as QAD step 0**, not from the released `-v2` result; point `init_from` at
-that checkpoint. The V2 config starts from the bf16 V2 snapshot.
+The OmniRef config starts from the **calibrated OmniRef checkpoint used as QAD
+step 0**, not from the released `-v2` result; point `init_from` at that
+checkpoint. The V2 config starts from the bf16 V2 snapshot.
 
 The published V2.1 checkpoint is the **linears-only variant** of this
 schedule: NVFP4 W4A4 linears with BF16 VSA attention, 300 steps. The shared
