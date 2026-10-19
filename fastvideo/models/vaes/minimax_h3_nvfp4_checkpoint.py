@@ -41,7 +41,7 @@ PACKED_LAYOUT = {
     "weight_inv_scale": "E4M3 per-16-element block scales, FlashInfer SfLayout.layout_128x4 (swizzled)",
     "weight_global_sf": "fp32 scalar, (448 * 6) / amax(bf16 weight)",
     "bias": "compute dtype (bf16)",
-    "input_amax": "fp32 scalar static activation range (unused when act_scale == 'unit')",
+    "input_amax": "fp32 scalar static activation range (required only when act_scale == 'static')",
     "other_tensors": "stored dtype of the trained decoder (fp32 norms, projections, registers, post_quant_conv)",
 }
 
@@ -118,8 +118,13 @@ def apply_packed_nvfp4_decoder(vae: nn.Module, checkpoint: dict[str, Any]) -> No
     state = dict(checkpoint["decoder"])
     names = nvfp4_decoder_linear_names(decoder, tuple(metadata.get("skip_blocks") or ()))
     check_num_linears(metadata, len(names))
+    act_scale = metadata.get("act_scale", "dynamic")
     for name in names:
-        missing = [f"{name}.{buffer}" for buffer in PACKED_BUFFERS if f"{name}.{buffer}" not in state]
+        if act_scale != "static":
+            # Only static scaling reads input_amax, so a file may omit it; the strict load still needs the key.
+            state.setdefault(f"{name}.input_amax", torch.zeros((), dtype=torch.float32))
+        required = PACKED_BUFFERS + ("input_amax", )
+        missing = [f"{name}.{buffer}" for buffer in required if f"{name}.{buffer}" not in state]
         if missing:
             raise ValueError(f"the packed NVFP4 decoder does not fit this VAE's architecture: missing {missing}")
         parent_name, _, child = name.rpartition(".")
@@ -133,11 +138,11 @@ def apply_packed_nvfp4_decoder(vae: nn.Module, checkpoint: dict[str, Any]) -> No
                                                state.pop(f"{name}.weight_inv_scale"),
                                                state.pop(f"{name}.weight_global_sf"),
                                                state.get(f"{name}.bias"),
-                                               state.get(f"{name}.input_amax", torch.zeros((), device=packed.device)),
+                                               state[f"{name}.input_amax"],
                                                in_features=dense.in_features,
                                                rotation_group=metadata.get("rotation_group"),
                                                compute_dtype=torch.bfloat16,
-                                               act_scale=metadata.get("act_scale", "dynamic"))
+                                               act_scale=act_scale)
         if child.isdigit():
             parent[int(child)] = layer
         else:

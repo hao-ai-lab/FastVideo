@@ -687,6 +687,23 @@ def test_packed_loader_refuses_mismatched_architecture(tmp_path):
         apply_nvfp4_decoder_checkpoint(_tiny_h3_vae(_tiny_vae_arch(2)), checkpoint, freeze=True)
 
 
+@pytest.mark.parametrize("act_scale", ["unit", "dynamic", "static"])
+def test_packed_loader_needs_input_amax_only_for_static_scales(act_scale):
+    from fastvideo.models.vaes.minimax_h3_nvfp4_decoder import apply_nvfp4_decoder_checkpoint, nvfp4_linears
+
+    checkpoint = _fake_packed_checkpoint(_tiny_h3_vae(_tiny_vae_arch(2)), act_scale=act_scale)
+    for key in [key for key in checkpoint["decoder"] if key.endswith(".input_amax")]:
+        del checkpoint["decoder"][key]
+    vae = _tiny_h3_vae(_tiny_vae_arch(2))
+    if act_scale == "static":
+        with pytest.raises(ValueError, match="missing.*input_amax"):
+            apply_nvfp4_decoder_checkpoint(vae, checkpoint, freeze=True)
+        return
+    apply_nvfp4_decoder_checkpoint(vae, checkpoint, freeze=True)
+    layers = nvfp4_linears(vae.decoder)
+    assert layers and all(layer.input_amax.item() == 0 for layer in layers)
+
+
 class _DecoderHost(nn.Module):
     """The two VAE submodules an NVFP4 decoder export covers."""
 
