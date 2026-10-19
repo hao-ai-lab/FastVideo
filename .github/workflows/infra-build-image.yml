@@ -56,7 +56,9 @@ jobs:
   # CUDA matrix: Python 3.12 x {12.6.3, 13.0.0} x {amd64, arm64}. Each architecture
   # builds natively and pushes only by digest; publish-cuda-manifests is the sole
   # owner of the shared tags. CUDA 12.6 arm64 targets Hopper (sm_90a / GH200 class),
-  # because CUDA 12.6 cannot compile sm_121. CUDA 13 arm64 targets GB10 (sm_121).
+  # because CUDA 12.6 cannot compile sm_121. CUDA 13 arm64 targets GB10 as 12.1a
+  # (sm_121a), as a native Spark build does: the plain 12.1 target drops the
+  # arch-specific attn_qat_infer FP4 kernels.
   # 12.6.3/cu126 owns the default `py3.12`/`latest` tags and keeps its versioned
   # aliases; 13.0.0/cu130 is published under explicit versioned tags. Flash-attn
   # 2.8.3 comes from the architecture-specific prebuilt releases.
@@ -85,7 +87,7 @@ jobs:
             cmake_build_parallel_level: '1'
             torch_cuda_arch_list:
               amd64: '9.0a'
-              arm64: '12.1'
+              arm64: '12.1a'
         architecture:
           - name: amd64
             runner: ubuntu-latest
