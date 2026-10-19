@@ -351,7 +351,7 @@ reference (0.002 for Triton BF16).
 
 The V2.1 recipes, `basic_fasth3_spark_v21_nvfp4.yaml` and
 `basic_fasth3_spark_pair_v21_nvfp4.yaml`, select
-`FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer` explicitly. The older
+`FastVideo/FastH3-QAD-v2` explicitly. The older
 `v2` files continue to select V2. Both recipes enable FP4 in YAML through
 `pipeline.experimental.h3_vsa_fp4.enabled`; shell flags are not required for
 that selection. V2.1 keeps its 64-token tiles and sparsity 0.8, and protects

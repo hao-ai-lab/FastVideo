@@ -14,7 +14,7 @@
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_spark_v21_nvfp4.yaml
 generator:
-  model_path: FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer
+  model_path: FastVideo/FastH3-QAD-v2
   engine:
     num_gpus: 1
     use_fsdp_inference: false
