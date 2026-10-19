@@ -201,6 +201,23 @@ def test_regional_compile_prepare_prefers_specialized_hook() -> None:
     assert impl.regional_devices == [expected_device]
 
 
+def test_h3_regional_compile_resolves_nvfp4_activation_policies(env_overrides) -> None:
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_ACT_AMAX.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_DYNAMIC_ACT.override(""))
+    model = _gate_model(2.0)
+    method = object.__new__(NVFP4QuantizeMethod)
+    method.layer_prefix = "minimax_h3.transformer_blocks.0.attn.to_q"
+    model.transformer_blocks[0].attn.to_q.quant_method = method
+
+    assert not method._static_sf_checked
+    assert not hasattr(method, "_dynamic_act_cached")
+    assert _prepare_model_for_compile(model, regional=True) is None
+    assert method._static_sf_checked
+    assert method._dynamic_act_cached is False
+
+
 def test_minimax_h3_prepare_for_regional_compile_does_not_require_quantized_q_weight() -> None:
     model = _gate_model(2.0)
     attention = model.transformer_blocks[0].attn

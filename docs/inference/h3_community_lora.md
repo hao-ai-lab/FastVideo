@@ -122,5 +122,8 @@ dense bf16 transformer. You do not load the LoRA as a separate resident copy of 
   `condition_proj`, `final_layer.video_out`, `final_layer.audio_out`) are mapped by name but are not adapted;
   they appear in the log as unmatched keys.
 - A side-branch layer holds one adapter at a time; accumulating a second adapter on a packed layer raises an error.
+- Adapters that require additional conditioning need that input path in FastVideo. For example, character-swap
+  adapters trained with aligned guide latents cannot reproduce their full workflow using native references alone;
+  the ComfyUI Add Guide path is not supported. Loading an adapter successfully does not establish task quality.
 - Adapters trained against another base model are not checked for semantic compatibility. FastVideo verifies layer
   names and tensor shapes only.

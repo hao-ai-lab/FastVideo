@@ -1019,6 +1019,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_regional_compile(self) -> str | None:
         """Resolve state used only by inference regional fullgraph compile."""
         self.prepare_for_compile()
+        from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+        # Lazy policy resolution inside capture guards on each layer's unique prefix and mutates the first graph.
+        for module in self.modules():
+            method = getattr(module, "quant_method", None)
+            if isinstance(method, NVFP4QuantizeMethod):
+                method._static_activation_global_sf()
+                method._dynamic_activation_scale()
         prepared_vsa_impls = 0
         unsupported_reasons: set[str] = set()
         for block in self.transformer_blocks:
