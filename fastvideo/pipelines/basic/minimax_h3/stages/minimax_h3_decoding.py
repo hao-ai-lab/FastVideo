@@ -27,6 +27,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.platforms import current_platform
 from fastvideo.utils import allocate_cpu_tensor_with_pin_fallback
 
 logger = init_logger(__name__)
@@ -68,16 +69,22 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
         super().__init__()
         self.vae = vae
         self._output_buffer: tuple[tuple[tuple[int, ...], bool], torch.Tensor] | None = None
+        self._unified_memory: bool | None = None
 
-    def _pixel_buffer(self, shape: tuple[int, ...], pin_memory: bool) -> torch.Tensor:
-        """The CPU FP32 pixel buffer, reused across requests of the same geometry.
+    def _pixel_buffer(self, shape: tuple[int, ...], pin_memory: bool, device: torch.device) -> torch.Tensor:
+        """The CPU FP32 pixel buffer, reused across requests of the same geometry on unified memory.
 
         The stage returns a uint8 copy, so the buffer never escapes. Reuse matters on
         unified-memory GPUs (DGX Spark): device-to-host copies into never-touched pageable
         pages fault through the driver at ~150 MB/s (+3-7 s per 480p-768p clip whenever the
         allocator hands back fresh pages), while populated pages copy at full speed.
-        ``zero_`` populates a new buffer from the CPU once.
+        ``zero_`` populates a new buffer from the CPU once. Discrete GPUs gain nothing from
+        holding up to 4.27 GB of host memory between requests, so they allocate per request.
         """
+        if self._unified_memory is None:
+            self._unified_memory = current_platform.has_unified_memory(device.index or 0)
+        if not self._unified_memory:
+            return allocate_cpu_tensor_with_pin_fallback(shape, dtype=torch.float32, pin_memory=pin_memory)
         key = (tuple(shape), bool(pin_memory))
         if self._output_buffer is None or self._output_buffer[0] != key:
             self._output_buffer = None
@@ -164,7 +171,7 @@ class MiniMaxH3VideoDecodingStage(PipelineStage):
             output = None
             if is_output_rank:
                 output = self._pixel_buffer(tuple(self.vae.decoded_pixel_shape(latents.shape)),
-                                            fastvideo_args.pin_cpu_memory)
+                                            fastvideo_args.pin_cpu_memory, device)
             # Attribute the streamed decoder computation while retaining
             # per-chunk device-to-host transfer and pinned-buffer reuse.
             # fp16 for the release decoders; NVFP4 decoders were trained under bf16.

@@ -239,6 +239,8 @@ def nvfp4_quantize_fenced(
 
 
 _OPS_REGISTERED = False
+# Cleared the first time FlashInfer returns 128x4 scales without row padding.
+_FLASHINFER_PADS_128X4_SCALES = True
 
 
 def _register_ops_once() -> None:
@@ -269,10 +271,20 @@ def _register_ops_once() -> None:
         sf_layout: int,
         do_shuffle: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        del global_sf, sf_layout, do_shuffle
+        del global_sf
+        SfLayout, _, _ = _require_flashinfer()
         m, k = x.shape
         quantized = torch.empty((m, (k + 1) // 2), device=x.device, dtype=torch.uint8)
-        scales = torch.empty((m, (k + 15) // 16), device=x.device, dtype=torch.uint8)
+        # Mirror FlashInfer's shapes: swizzled scale layouts pad rows to the
+        # tile (128 or 8) and scale columns to 4; linear (and shuffled 128x4)
+        # scales are unpadded. ``_nvfp4_quantize`` relies on the 128x4 padding.
+        if do_shuffle or sf_layout == SfLayout.layout_linear.value:
+            scales = torch.empty((m, (k + 15) // 16), device=x.device, dtype=torch.uint8)
+        else:
+            row_tile = 8 if sf_layout == SfLayout.layout_8x4.value else 128
+            scales = torch.empty((m + (-m) % row_tile, ((k + 15) // 16 + 3) // 4 * 4),
+                                 device=x.device,
+                                 dtype=torch.uint8)
         return quantized, scales
 
     @torch.library.custom_op(
@@ -364,14 +376,21 @@ def _nvfp4_quantize(
     row_tile = 8 if sf_layout == SfLayout.layout_8x4.value else 128
     logical_rows = x.shape[0]
     padded_rows = logical_rows + (-logical_rows) % row_tile
-    if sf_layout == SfLayout.layout_128x4.value:
+    global _FLASHINFER_PADS_128X4_SCALES
+    if sf_layout == SfLayout.layout_128x4.value and not do_shuffle and _FLASHINFER_PADS_128X4_SCALES:
         # FlashInfer pads 128x4 scale factors to whole row tiles itself, and
         # quantizes the logical rows bit for bit like a zero-padded copy, so
-        # skip that copy (a full activation write per linear) when the
-        # returned scales already span the padded tile.
+        # skip that copy (a full activation write per linear). The fake op
+        # reports the same padded scales, so a compiled graph takes this
+        # path unconditionally, without a guard on the row count.
         quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x, global_sf, sf_layout, do_shuffle)
-        if scales.numel() >= padded_rows * (x.shape[-1] // 16):
+        if torch.compiler.is_compiling() or scales.numel() >= padded_rows * (x.shape[-1] // 16):
             return quantized, scales
+        # Only an unexpected FlashInfer build gets here; quantize it padded
+        # from now on rather than quantizing every activation twice.
+        logger.warning("FlashInfer returned unpadded 128x4 NVFP4 scales; "
+                       "falling back to quantizing a row-padded activation copy.")
+        _FLASHINFER_PADS_128X4_SCALES = False
     x_for_quant = F.pad(x, (0, 0, 0, padded_rows - logical_rows))
     quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x_for_quant, global_sf, sf_layout, do_shuffle)
     return quantized.narrow(0, 0, logical_rows), scales
