@@ -501,6 +501,20 @@ def test_forward_tile128_falls_back_to_triton_when_cuda_kernel_unavailable(tile1
     assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
 
 
+@pytest.mark.parametrize("datacenter", [False, True])
+def test_forward_tile128_fallback_warns_only_on_datacenter_blackwell(tile128, monkeypatch, datacenter):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    tile128.supported = False
+    warnings = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", lambda q, k, v, mask, vbs: (torch.zeros_like(q), None))
+    monkeypatch.setattr(vsa_h3, "_is_datacenter_blackwell", lambda device: datacenter)
+    monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
+    _run_tile128(meta)
+    assert len(warnings) == int(datacenter)
+    if datacenter:
+        assert "falling back to the slower Triton tile-64 kernels" in warnings[0]
+
+
 def test_forward_tile128_unavailable_cuda_kernel_and_triton(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     tile128.supported = False

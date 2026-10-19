@@ -556,6 +556,11 @@ def _ptx_blackwell_unavailable_reason(ptx_blackwell_mod: Any, query_bhsd: torch.
     return None
 
 
+def _is_datacenter_blackwell(device: torch.device) -> bool:
+    """sm_100/sm_103 (B200, GB200, B300), the devices the ptx_blackwell kernel targets."""
+    return device.type == "cuda" and torch.cuda.get_device_capability(device)[0] == 10
+
+
 @functools.cache
 def _fine_attention_from_name(name: str) -> Any:
     kind, _, mode = name.partition("-")
@@ -919,6 +924,11 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                                                                ptx_blackwell_variable_block_sizes, grad_mode)
                     if reason is None and map_to_index is None:
                         reason = "fastvideo_kernel.triton_kernels.index (map_to_index) is not importable"
+                    if reason is not None and not compiling and _is_datacenter_blackwell(q_bhsd.device):
+                        # These GPUs should have the native kernel; a broken build
+                        # would otherwise only show up as a slow run.
+                        logger.warning_once(f"VSA-H3 tile 128 on a data-center Blackwell GPU is falling back to "
+                                            f"the slower Triton tile-64 kernels: {reason}.")
                     self._tile128_route[route_key] = reason
                 reason = self._tile128_route[route_key]
                 if reason is None:
