@@ -120,8 +120,8 @@ def test_swizzled_quantize_skips_the_pad_copy_bit_exactly(monkeypatch, rows: int
 def test_fake_quantize_reports_flashinfer_shapes(rows: int, layout: str, do_shuffle: bool) -> None:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-    if do_shuffle and layout != "layout_128x4":
-        pytest.skip("FlashInfer only shuffles 128x4")
+    if do_shuffle and (layout != "layout_128x4" or rows % 128):
+        pytest.skip("FlashInfer only shuffles 128x4, and _nvfp4_quantize row-pads shuffled inputs")
     sf_layout = getattr(flashinfer.SfLayout, layout).value
     nv._register_ops_once()
     torch.manual_seed(3)
