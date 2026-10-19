@@ -23,7 +23,8 @@
 #   # DGX Spark / GB10 (aarch64, Blackwell sm_121a): the matching arm64
 #   # prebuilt flash-attn wheel is selected automatically from TARGETARCH.
 #   docker build --platform linux/arm64 -f docker/Dockerfile \
-#       --build-arg TORCH_CUDA_ARCH_LIST=12.1a --build-arg INSTALL_FA4_CUTE=0 \
+#       --build-arg TORCH_CUDA_ARCH_LIST=12.1a \
+#       --build-arg INSTALL_FLASH_ATTN=0 --build-arg INSTALL_FA4_CUTE=0 \
 #       -t fastvideo-dev:spark .
 #
 # The ARG defaults below are the source of truth for the default image.
@@ -61,6 +62,9 @@ ARG CMAKE_BUILD_PARALLEL_LEVEL=1
 # cuXXXtorchY.Y tag must match UV_TORCH_BACKEND (below): cu130torch2.12 for the
 # default 13.0 base, cu126torch2.12 for 12.6 (both backends are on torch 2.12).
 ARG FLASH_ATTN_VERSION=2.8.3
+# INSTALL_FLASH_ATTN=0 leaves FA2 out (the DGX Spark image): on GB10 it gives no
+# measured speedup and changes the output relative to a native Spark install.
+ARG INSTALL_FLASH_ATTN=1
 ARG FLASH_ATTN_WHEEL_TAG=cu130torch2.12
 ARG FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
 ARG FLASH_ATTN_WHEEL_RELEASE_ARM64=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.22
@@ -178,7 +182,9 @@ RUN --mount=type=cache,target=/opt/uv/cache \
             exit 1 \
             ;; \
     esac && \
-    if [ -n "${FLASH_ATTN_WHEEL_TAG}" ]; then \
+    if [ "${INSTALL_FLASH_ATTN}" != "1" ]; then \
+        echo "Skipping flash-attn (INSTALL_FLASH_ATTN=${INSTALL_FLASH_ATTN})"; \
+    elif [ -n "${FLASH_ATTN_WHEEL_TAG}" ]; then \
         echo "Installing prebuilt flash-attn wheel (${FLASH_ATTN_WHEEL_TAG}, ${PYTAG}, ${FLASH_ATTN_WHEEL_PLATFORM})" && \
         uv pip install "${FLASH_ATTN_TARGET_RELEASE}/flash_attn-${FLASH_ATTN_VERSION}+${FLASH_ATTN_WHEEL_TAG}-${PYTAG}-${PYTAG}-${FLASH_ATTN_WHEEL_PLATFORM}.whl"; \
     else \
@@ -197,17 +203,23 @@ RUN --mount=type=cache,target=/opt/uv/cache \
 # an FA2-less image. The pinned stack is validated on ARM64 GB200 (sm_100) as well
 # as x86; FA4 remains opt-in through FASTVIDEO_FA4=1 so lanes with FA2 baselines
 # keep their existing numerics.
-# With INSTALL_FA4_CUTE=0 the wheel's stale cute is still removed, so
+# With INSTALL_FA4_CUTE=0 any wheel's stale cute is still removed, so
 # `import flash_attn.cute` fails cleanly and FastVideo's guarded import falls back.
 RUN --mount=type=cache,target=/opt/uv/cache \
     source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
     python -c "import glob, shutil; [shutil.rmtree(d, ignore_errors=True) for d in glob.glob('/opt/venv/lib/python*/site-packages/flash_attn/cute')]" && \
-    if [ "${INSTALL_FA4_CUTE}" = "1" ]; then \
+    if [ "${INSTALL_FA4_CUTE}" = "1" ] && [ "${INSTALL_FLASH_ATTN}" != "1" ]; then \
+        echo "INSTALL_FA4_CUTE=1 overlays the FA2 install; it requires INSTALL_FLASH_ATTN=1" >&2; \
+        exit 1; \
+    elif [ "${INSTALL_FA4_CUTE}" = "1" ]; then \
         uv pip install "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@${FA4_CUTE_REF}#subdirectory=flash_attn/cute" && \
         python -c "import flash_attn; assert hasattr(flash_attn, 'flash_attn_func'), 'FA2 was clobbered by the cute overlay'; import flash_attn.cute; print('FA2 + FA4 cute OK')"; \
     else \
-        python -c "import flash_attn, flashinfer; assert hasattr(flash_attn, 'flash_attn_func'); print('FA2 + flashinfer', flashinfer.__version__, 'OK; FA4 cute skipped')"; \
+        python -c "import flashinfer; print('flashinfer', flashinfer.__version__, 'OK; FA4 cute skipped')" && \
+        if [ "${INSTALL_FLASH_ATTN}" = "1" ]; then \
+            python -c "import flash_attn; assert hasattr(flash_attn, 'flash_attn_func'); print('FA2 OK')"; \
+        fi; \
     fi
 
 COPY . .

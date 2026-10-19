@@ -37,18 +37,32 @@ native ARM64 host, build the CUDA 13 DGX Spark image with:
 
 ```bash
 docker build --platform linux/arm64 -f docker/Dockerfile \
-  --build-arg TORCH_CUDA_ARCH_LIST=12.1a --build-arg INSTALL_FA4_CUTE=0 \
+  --build-arg TORCH_CUDA_ARCH_LIST=12.1a \
+  --build-arg INSTALL_FLASH_ATTN=0 --build-arg INSTALL_FA4_CUTE=0 \
   -t fastvideo-dev:spark .
 ```
 
-This uses the prebuilt Linux ARM64 FlashAttention wheel. FastVideo's in-tree
-CUDA kernel is still compiled for `sm_121a` as part of the image build, including
-the FP4 attention kernels that `FASTVIDEO_H3_VSA_FP4=1` uses.
+FastVideo's in-tree CUDA kernel is compiled for `sm_121a` as part of the image
+build, including the FP4 attention kernels that `FASTVIDEO_H3_VSA_FP4=1` uses.
+These settings match the published DGX Spark image, which in turn matches a
+native Spark install:
 
-`INSTALL_FA4_CUTE=0` (set for the published DGX Spark image) leaves
-out the FA4 `flash_attn.cute` overlay: FA4 supports SM 9/10/11 only, and its pinned
-`nvidia-cutlass-dsl` would break FlashInfer, which the NVFP4 paths need. FA2 is
-still installed.
+- **No FlashAttention (`INSTALL_FLASH_ATTN=0`).** It gives no measured speedup on
+  GB10, and with it installed the output no longer matches a native install
+  bit for bit.
+- **No FA4 cute overlay (`INSTALL_FA4_CUTE=0`).** FA4 supports SM 9/10/11 only,
+  and its pinned `nvidia-cutlass-dsl` breaks FlashInfer, which the NVFP4 paths need.
+
+The first NVFP4 generation in a fresh container compiles FlashInfer's GB10 FP4
+kernels (about 3.5 minutes). Persist the cache and cap the compile jobs; at full
+parallelism the compile can be killed for lack of memory once a model is loaded:
+
+```bash
+docker run --gpus all --ipc=host -e MAX_JOBS=4 \
+  -v ~/.cache/flashinfer:/root/.cache/flashinfer \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -it ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-cuda13.0.0-latest
+```
 
 ## Using the container
 
