@@ -51,6 +51,11 @@ generator:
       override_pipeline_cls_name: MiniMaxH3Ref2VAModularPipeline
     experimental:
       attention_backend: VIDEO_SPARSE_ATTN_H3
+      h3_vsa_fp4:
+        enabled: true
+        prefix_precision: fp8
+        two_level_p: true
+        smooth_k: true
       video_decode_backend: h3-vae
       h3_sequential_load: true
 request:

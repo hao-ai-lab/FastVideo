@@ -263,7 +263,7 @@ It does not use frame dropping or spatial upscaling.
 ```bash
 FASTVIDEO_H3_VSA_FP4=1 \
 FASTVIDEO_MINIMAX_H3_FUSIONS=all \
-FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
+FASTVIDEO_NVFP4_MM_BACKEND=cudnn FASTVIDEO_NVFP4_MM_ROW_SPLIT=table \
 FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
@@ -343,13 +343,23 @@ FFN projections, and both backends return identical outputs. FlashInfer
 
 `FASTVIDEO_H3_VSA_FP4=1` runs VSA-H3's block-sparse attention on the FP4
 SageAttention3 kernel, as on RTX Blackwell. It needs `fastvideo-kernel` built for
-`12.1a` on GB10 or `12.0a` on sm_120; without that extension the flag falls back
-to Triton BF16 and the fast path does not apply. On a captured FastH3 Trim
+`12.1a` on GB10 or `12.0a` on sm_120. A missing extension raises an error;
+select BF16 VSA explicitly by setting `h3_vsa_fp4.enabled: false` in the YAML. On a captured FastH3 Trim
 attention input (19,392 tokens, 56 heads, 64-token tiles) it runs in 29 ms
 against 59 ms for Triton VSA, with a relative L2 error of 0.13 versus an FP32
 reference (0.002 for Triton BF16).
 
-The V2.1 recipe enables it by default. It is faster (on a 5090, 480p5 8L
+The V2.1 recipes, `basic_fasth3_spark_v21_nvfp4.yaml` and
+`basic_fasth3_spark_pair_v21_nvfp4.yaml`, select
+`FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer` explicitly. The older
+`v2` files continue to select V2. Both recipes enable FP4 in YAML through
+`pipeline.experimental.h3_vsa_fp4.enabled`; shell flags are not required for
+that selection. V2.1 keeps its 64-token tiles and sparsity 0.8, and protects
+text and audio query rows with FP8 Q/K and BF16 dense attention. These are
+inference settings. The published V2.1 checkpoint used linears-only QAD with
+BF16 attention, so this does not reproduce its training attention numerics.
+
+The earlier unprotected FP4 path is faster (on a 5090, 480p5 8L
 measured about 12.6 s versus 19 s on bf16 VSA) but changes the output. On V2 at
 832x480 with four prompts, denoising was 24-33% faster (60-68 s to 43-51 s) and
 the clips scored LPIPS 0.39-0.55 against the BF16-attention clips. Validate clips
@@ -370,6 +380,10 @@ output:
 
 Within each configuration, repeated calls produced bit-identical frames
 except the previous V2 recipe, whose repeated calls diverged.
+
+Row splitting is off globally. The single-Spark cuDNN recipe opts into
+`FASTVIDEO_NVFP4_MM_ROW_SPLIT=table` for the shapes measured on GB10. Leave it
+off on other GPUs unless a matched benchmark validates the split there.
 
 ### Optional NVFP4 video decoder
 

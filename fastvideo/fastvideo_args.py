@@ -292,6 +292,8 @@ class FastVideoArgs:
     # which keeps the pipeline-level compile semantics.
     inference_torch_compile: bool = False
 
+    h3_vsa_fp4: dict[str, Any] = field(default_factory=dict)
+
     disable_autocast: bool = False
 
     # VSA parameters. None means unset: __post_init__ fills the checkpoint's
@@ -438,6 +440,16 @@ class FastVideoArgs:
             env_backend = envs.FASTVIDEO_ATTENTION_BACKEND.get()
             if env_backend is not None and backend_name_to_enum(env_backend) is not None:
                 self.attention_backend = env_backend
+        allowed_fp4 = {"enabled", "prefix_precision", "two_level_p", "smooth_k"}
+        if not isinstance(self.h3_vsa_fp4, dict) or self.h3_vsa_fp4.keys() - allowed_fp4:
+            raise ValueError(f"h3_vsa_fp4 must be a mapping with keys from {sorted(allowed_fp4)}")
+        for key in ("enabled", "two_level_p", "smooth_k"):
+            if key in self.h3_vsa_fp4 and not isinstance(self.h3_vsa_fp4[key], bool):
+                raise ValueError(f"h3_vsa_fp4.{key} must be a boolean")
+        if self.h3_vsa_fp4.get("prefix_precision", "") not in ("", "fp8", "bf16"):
+            raise ValueError("h3_vsa_fp4.prefix_precision must be empty, fp8 or bf16")
+        if self.h3_vsa_fp4.get("enabled") and (self.inference_torch_compile or self.enable_torch_compile):
+            raise ValueError("h3_vsa_fp4 requires eager DiT inference; disable DiT torch.compile")
         self._fold_vae_parallel_env()
         self._fold_h3_encoder_split_env()
         # Runs after FASTVIDEO_ATTENTION_BACKEND is copied into attention_backend,

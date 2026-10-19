@@ -143,3 +143,130 @@ def test_prefix_dense_attention_ignores_invalid_keys() -> None:
                                         torch.ones(valid_len, dtype=torch.bool), "bf16")
 
     assert (masked.float() - truncated.float()).norm() / truncated.float().norm() < 5e-3
+
+
+@pytest.mark.parametrize("tile,prefix_tiles,n_tiles", [(64, 1, 5), (64, 2, 5), (64, 3, 6), (128, 1, 3)])
+@pytest.mark.parametrize("heads", [1, 4])
+def test_prefix_split_keeps_original_video_rows_and_quadrants(monkeypatch, tile, prefix_tiles, n_tiles, heads):
+    from types import SimpleNamespace
+    from fastvideo.models.dits import minimax_h3_vsa_fp4 as impl
+
+    logical = tile * n_tiles
+    padded = (logical + 127) // 128 * 128
+    prefix_rows = prefix_tiles * tile
+    head = prefix_rows // 128
+    query = torch.arange(padded).view(1, padded, 1, 1).expand(1, padded, heads, 8).float()
+    key, value = torch.randn_like(query), torch.randn_like(query)
+    blocks = padded // 128
+    indices = torch.arange(heads * blocks * blocks, dtype=torch.int32).view(1, heads, blocks, blocks)
+    counts = torch.ones(1, heads, blocks, dtype=torch.int32)
+    quadrants = (indices % 15 + 1).to(torch.uint8) if tile == 64 else None
+    valid = torch.full((padded // 64,), 64, dtype=torch.int32)
+    valid[logical // 64 - 1] = 17
+    valid[logical // 64:] = 0
+    calls = []
+
+    def native(q, k, v, idx, num, kv, quad, **kwargs):
+        calls.append(q.shape[1])
+        assert q.shape[1] % 128 == 0
+        assert k is key and v is value and kv is valid
+        assert torch.equal(q, query[:, head * 128:])
+        assert torch.equal(idx, indices[:, :, head:]) and idx.is_contiguous()
+        assert torch.equal(num, counts[:, :, head:]) and num.is_contiguous()
+        if quadrants is None:
+            assert quad is None
+        else:
+            assert torch.equal(quad, quadrants[:, :, head:]) and quad.is_contiguous()
+        return q.transpose(1, 2)
+
+    monkeypatch.setattr(impl, "_sparse_fp4_attention", lambda api, *args, **kwargs: native(*args, **kwargs))
+    api = SimpleNamespace(KEY_LENGTH_SIZING=True, HALF_N=64)
+    result = impl._fp4_fine_attention(api, query, key, value, indices, counts, valid, quadrants,
+                                      logical=logical, prefix_rows=prefix_rows, precision="bf16", options={})
+    expected_prefix = impl._prefix_dense_attention(query, key, value, prefix_rows, logical,
+                                                    impl._half_row_valid(valid, 64), "bf16")
+    torch.testing.assert_close(result[:, :, :prefix_rows], expected_prefix)
+    torch.testing.assert_close(result[:, :, prefix_rows:], query[:, prefix_rows:logical].transpose(1, 2))
+    assert result.shape == (1, heads, logical, 8)
+    assert calls == [padded - head * 128]
+
+
+@pytest.mark.parametrize("tile", [64, 128])
+def test_explicit_prefix_precision_overrides_environment(tile):
+    from types import SimpleNamespace
+    from fastvideo import envs
+    from fastvideo.models.dits.minimax_h3_vsa_fp4 import _prefix_settings
+
+    meta = SimpleNamespace(tile_elems=tile, num_prefix_tiles=3, current_timestep=0)
+    with envs.FASTVIDEO_H3_VSA_FP4_PREFIX.override(""), envs.FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS.override(-1):
+        assert _prefix_settings(SimpleNamespace(_vsa_fp4_options={"prefix_precision": "fp8"}), meta, 5) == (
+            "fp8", 3 * tile)
+        assert _prefix_settings(SimpleNamespace(), meta, 5) == ("", 0)
+    with envs.FASTVIDEO_H3_VSA_FP4_PREFIX.override("fp8"), envs.FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS.override(0):
+        assert _prefix_settings(SimpleNamespace(), meta, 5) == ("", 0)
+
+
+def test_explicit_video_numerics_override_environment():
+    from types import SimpleNamespace
+    from fastvideo import envs
+    from fastvideo.models.dits.minimax_h3_vsa_fp4 import _sparse_fp4_attention
+
+    key = torch.randn(1, 128, 2, 8)
+    captured = []
+    api = SimpleNamespace(sageattn_blackwell_sparse_bshd=lambda *args, **kwargs: captured.append((args, kwargs)))
+    with envs.FASTVIDEO_H3_VSA_FP4_K_SMOOTH.override(False), envs.FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P.override(False):
+        _sparse_fp4_attention(api, key, key, key, two_level_p=True, smooth_k=True)
+    torch.testing.assert_close(captured[0][0][1], key - key.mean(dim=1, keepdim=True))
+    assert captured[0][1] == {"validate": False, "single_level_p_quant": False}
+    captured.clear()
+    with envs.FASTVIDEO_H3_VSA_FP4_K_SMOOTH.override(True), envs.FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P.override(True):
+        _sparse_fp4_attention(api, key, key, key, two_level_p=False, smooth_k=False)
+    assert captured[0][0][1] is key
+    assert captured[0][1] == {"validate": False}
+
+
+def test_missing_native_extension_reports_required_build(monkeypatch):
+    import builtins
+    from fastvideo.models.dits import minimax_h3_vsa_fp4 as impl
+
+    original = builtins.__import__
+
+    def missing(name, *args, **kwargs):
+        if name == "attn_qat_infer.api":
+            raise ImportError("test missing extension")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(impl, "_fp4_api", None)
+    monkeypatch.setattr(builtins, "__import__", missing)
+    with pytest.raises(RuntimeError, match="Build fastvideo-kernel"):
+        impl._api()
+
+
+@pytest.mark.parametrize("tile,prefix_tiles,n_tiles", [(64, 1, 5), (64, 3, 6), (128, 1, 3)])
+def test_native_prefix_split_preserves_video_attention(tile, prefix_tiles, n_tiles):
+    """Requires consumer Blackwell and the native sparse FP4 extension from this checkout."""
+    if not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 12:
+        pytest.skip("requires sm_120 or sm_121 native FP4 attention")
+    api = pytest.importorskip("attn_qat_infer.api")
+    from fastvideo.models.dits import minimax_h3_vsa_fp4 as impl
+
+    torch.manual_seed(1234)
+    logical, prefix_rows = n_tiles * tile, prefix_tiles * tile
+    padded = (logical + 127) // 128 * 128
+    query, key, value = [torch.randn(1, padded, 4, 128, device="cuda", dtype=torch.bfloat16) for _ in range(3)]
+    valid = torch.full((n_tiles,), tile, device="cuda", dtype=torch.int32)
+    valid[-1] = tile // 2
+    mask = torch.eye(n_tiles, device="cuda", dtype=torch.bool).expand(1, 4, -1, -1).clone()
+    mask[:, :, :prefix_tiles] = True
+    mask[:, :, :, :prefix_tiles] = True
+    lists = api.vsa_tile_mask_to_fp4_blocks(mask, tile, valid)
+    options = {"two_level_p": True, "smooth_k": True}
+    baseline = impl._fp4_fine_attention(api, query, key, value, *lists, logical=logical, prefix_rows=0,
+                                        precision="", options=options)
+    split = impl._fp4_fine_attention(api, query, key, value, *lists, logical=logical, prefix_rows=prefix_rows,
+                                     precision="fp8", options=options)
+    assert split.isfinite().all()
+    torch.testing.assert_close(split[:, :, prefix_rows:], baseline[:, :, prefix_rows:logical], rtol=0, atol=0)
+    expected = impl._prefix_dense_attention(query, key, value, prefix_rows, logical,
+                                             impl._half_row_valid(lists[2], 64), "fp8")
+    torch.testing.assert_close(split[:, :, :prefix_rows], expected, rtol=0, atol=0)

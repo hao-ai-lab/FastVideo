@@ -326,6 +326,7 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
             **LOSSLESS_ACCEL_ENV,
             # cuDNN mm_fp4 is 2.7-3x faster than CUTLASS on the H3 FFN shapes on GB10.
             "FASTVIDEO_NVFP4_MM_BACKEND": "cudnn",
+            "FASTVIDEO_NVFP4_MM_ROW_SPLIT": "table",
             "FASTVIDEO_H3_VAE_TILE_BATCH": "12",
             "FASTVIDEO_H3_VAE_INT8_OVERLAY": "0",
         },

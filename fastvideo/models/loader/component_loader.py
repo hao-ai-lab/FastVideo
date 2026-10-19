@@ -1232,6 +1232,11 @@ class TransformerLoader(ComponentLoader):
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
+        if getattr(fastvideo_args, "h3_vsa_fp4", None):
+            from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3Config
+            if not isinstance(dit_config, MiniMaxH3Config):
+                raise ValueError("h3_vsa_fp4 is only supported by MiniMax-H3")
+            dit_config.vsa_fp4 = dict(fastvideo_args.h3_vsa_fp4)
 
         # Generator-only QAT for DMD distillation: the teacher (real_score) and
         # critic (fake_score) transformers load with this flag set and must stay

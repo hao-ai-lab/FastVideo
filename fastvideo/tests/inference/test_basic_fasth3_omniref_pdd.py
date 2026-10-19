@@ -264,3 +264,72 @@ def test_main_preserves_explicit_dimensions_before_profile_defaults(tmp_path, mo
     example.main()
     assert (requests[0].sampling.width, requests[0].sampling.height) == expected
     assert shutdown == [True]
+
+
+@pytest.mark.parametrize("profile", ["spark", "spark_pair"])
+@pytest.mark.parametrize("version", ["v2", "v21"])
+def test_spark_recipe_selects_its_checkpoint_and_fp4(profile, version, monkeypatch, tmp_path):
+    import yaml
+    from fastvideo.api.compat import generator_config_to_fastvideo_args
+    from fastvideo.api.parser import parse_config
+    from fastvideo.api.schema import GeneratorConfig
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.fastvideo_args import FastVideoArgs
+
+    path = EXAMPLE_PATH.with_name(f"basic_fasth3_{profile}_{version}_nvfp4.yaml")
+    raw = yaml.safe_load(path.read_text())["generator"]
+    expected_version = "V2.1" if version == "v21" else "V2"
+    assert raw["model_path"] == f"FastVideo/FastVideo-FastH3-8-Step-{expected_version}-NVFP4-Consumer"
+    monkeypatch.setattr("fastvideo.registry.get_pipeline_config_cls_from_name", lambda path: MiniMaxH3PipelineConfig)
+    original_from_kwargs = FastVideoArgs.from_kwargs
+
+    def from_kwargs(**kwargs):
+        kwargs["model_path"] = str(tmp_path)
+        kwargs["pipeline_config"] = MiniMaxH3PipelineConfig()
+        return original_from_kwargs(**kwargs)
+
+    # Supply the pipeline locally so this configuration test never downloads a checkpoint.
+    monkeypatch.setattr(FastVideoArgs, "from_kwargs", from_kwargs)
+    args = generator_config_to_fastvideo_args(parse_config(GeneratorConfig, raw))
+    assert args.h3_vsa_fp4["enabled"] is True
+    assert args.VSA_tile_size == 64 and args.VSA_sparsity == 0.8
+    assert args.sp_size == (2 if profile == "spark_pair" else 1)
+    if version == "v21":
+        assert args.h3_vsa_fp4 == {"enabled": True, "prefix_precision": "fp8", "two_level_p": True, "smooth_k": True}
+
+
+@pytest.mark.parametrize("device", ["spark", "spark_pair", "rtx5090", "rtx_pro6000"])
+def test_blackwell_omniref_yaml_enables_protected_fp4(device):
+    import yaml
+
+    raw = yaml.safe_load(EXAMPLE_PATH.with_name(f"basic_fasth3_omniref_{device}.yaml").read_text())
+    assert raw["generator"]["pipeline"]["experimental"]["h3_vsa_fp4"] == {
+        "enabled": True, "prefix_precision": "fp8", "two_level_p": True, "smooth_k": True}
+
+
+@pytest.mark.parametrize("options", [None, {"unknown": True}, {"enabled": "true"}, {"smooth_k": 1},
+                                    {"prefix_precision": "fp4"}])
+def test_invalid_fp4_config_is_rejected_before_loading(options):
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.fastvideo_args import FastVideoArgs
+
+    with pytest.raises(ValueError, match="h3_vsa_fp4"):
+        FastVideoArgs(model_path="unused", pipeline_config=MiniMaxH3PipelineConfig(), h3_vsa_fp4=options)
+
+
+@pytest.mark.parametrize("compile_flag", ["inference_torch_compile", "enable_torch_compile"])
+def test_explicit_fp4_cannot_silently_compile_to_bf16(compile_flag):
+    from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
+    from fastvideo.fastvideo_args import FastVideoArgs
+
+    with pytest.raises(ValueError, match="eager DiT inference"):
+        FastVideoArgs(model_path="unused", pipeline_config=MiniMaxH3PipelineConfig(), h3_vsa_fp4={"enabled": True},
+                      **{compile_flag: True})
+
+
+def test_row_split_is_an_explicit_spark_opt_in():
+    from fastvideo import envs
+
+    assert envs.environment_variables["FASTVIDEO_NVFP4_MM_ROW_SPLIT"].default == "off"
+    assert example.DEVICE_PROFILES["spark"].env["FASTVIDEO_NVFP4_MM_ROW_SPLIT"] == "table"
+    assert "FASTVIDEO_NVFP4_MM_ROW_SPLIT" not in example.DEVICE_PROFILES["rtx-pro-6000"].env

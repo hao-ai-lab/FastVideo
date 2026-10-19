@@ -206,6 +206,7 @@ class MiniMaxH3Attention(nn.Module):
         fuse_qknorm_rope: bool = False,
         fa4_packed_varlen: bool = False,
         exact_rope: bool = False,
+        vsa_fp4: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -264,7 +265,11 @@ class MiniMaxH3Attention(nn.Module):
         # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
         self._layer_idx = layer_idx_from_prefix(prefix, default=-1)
-        self._vsa_fp4 = use_vsa and vsa_fp4_requested()
+        self._vsa_fp4_options = dict(vsa_fp4 or {})
+        requested = self._vsa_fp4_options.get("enabled")
+        if requested and not use_vsa:
+            raise ValueError("h3_vsa_fp4 requires the VIDEO_SPARSE_ATTN_H3 attention backend")
+        self._vsa_fp4 = use_vsa and (vsa_fp4_requested() if requested is None else requested)
         self._vsa_tile_first = use_vsa and envs.FASTVIDEO_H3_VSA_TILE_FIRST.get()
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
@@ -633,6 +638,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_swiglu: bool = False,
         fa4_packed_varlen: bool = False,
         exact_kernels: frozenset[str] = frozenset(),
+        vsa_fp4: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -647,6 +653,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             fuse_qknorm_rope=fuse_qknorm_rope,
             fa4_packed_varlen=fa4_packed_varlen,
             exact_rope="rope" in exact_kernels,
+            vsa_fp4=vsa_fp4,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -908,6 +915,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_swiglu="swiglu" in self.enabled_fusions,
                 fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN.get(),
                 exact_kernels=self.enabled_exact_kernels,
+                vsa_fp4=config.vsa_fp4,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(

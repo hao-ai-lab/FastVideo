@@ -587,7 +587,7 @@ FASTVIDEO_FAD_REF_FEATURES = EnvStr(None,
 FASTVIDEO_H3_VSA_FP4 = EnvBool(False,
                                category="attention",
                                doc="Run MiniMax-H3 VSA attention on the block-sparse SageAttention3 FP4 kernel "
-                               "(sm_120 or GB10 sm_121, no-grad, single sequence-parallel rank).")
+                               "(sm_120 or GB10 sm_121, no-grad, eager inference).")
 FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
     "",
     choices=("", "fp8", "bf16"),
@@ -595,8 +595,8 @@ FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
     doc="Prefix split for the FP4 sparse attention kernel: keep the dense prefix query tiles (text, "
     "reference and audio rows) off the FP4 kernel and run those rows densely with fp8 or bf16 Q/K and "
     "bf16 P.V, while video query tiles stay on the FP4 kernel. The fp8 variant is the validated "
-    "training-time numerics and recovers most of the audio error that FP4 quantizes away. Needs "
-    "128-token tiles. Empty keeps every row on the FP4 kernel.")
+    "training-time numerics and recovers most of the audio error that FP4 quantizes away. Use "
+    "64/128-token tiles. Empty keeps each row on the FP4 kernel.")
 FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS = EnvInt(
     -1,
     category="attention",
@@ -669,7 +669,7 @@ FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
                                     category="performance",
                                     doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
 FASTVIDEO_NVFP4_MM_ROW_SPLIT = EnvChoice(
-    "table",
+    "off",
     choices=("off", "table", "auto"),
     category="performance",
     doc="Run large cuDNN NVFP4 GEMMs over row chunks where its plan heuristic is slow: off, table (fixed "

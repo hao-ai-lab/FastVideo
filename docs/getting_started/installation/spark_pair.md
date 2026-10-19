@@ -149,7 +149,7 @@ fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair.yam
 
 Stop the cluster when you are done: `ray stop` on both nodes.
 
-## Released V2 and Trim NVFP4 stacks
+## Released V2, V2.1 and Trim NVFP4 stacks
 
 The public eight-forward V2 and Trim stacks include the NVFP4 encoder and
 lightweight video VAE. Use the environment above plus the release kernel
@@ -161,10 +161,14 @@ export FASTVIDEO_H3_VAE_TILE_BATCH=1 FASTVIDEO_VSA_TRITON=1
 export FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1
 fastvideo generate --config examples/inference/basic/basic_fasth3_spark_pair_v2_nvfp4.yaml
+# Or basic_fasth3_spark_pair_v21_nvfp4.yaml for V2.1.
 # Or basic_fasth3_spark_pair_pruned_nvfp4.yaml for FastH3 Trim.
 ```
 
-Both configs use their released Hugging Face model paths, `h3_dit_vsa`,
+The configs select separate Hugging Face checkpoints for V2, V2.1 and Trim.
+V2 and V2.1 enable native FP4 attention in YAML; the extension must be built
+for GB10. V2.1 also selects the FP8 prefix split for text and audio queries.
+The examples use `h3_dit_vsa`,
 832x480, 124 frames, seed 1234, VSA 0.8 and 64-token tiles. All components
 stay resident; lazy/sequential loading and compilation are disabled for
 these compact stacks. The older BF16/Preview memory guidance below applies

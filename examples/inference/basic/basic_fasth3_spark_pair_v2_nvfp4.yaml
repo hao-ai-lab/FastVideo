@@ -3,9 +3,8 @@
 # Download the complete release checkpoint as described in
 # docs/getting_started/installation/spark_performance.md.
 #
-# GB10 uses the FP4 attention kernel by default; build fastvideo-kernel for 12.1a.
-# Without the extension the flag falls back to Triton. The release packs attention,
-# FFN and VSA gate weights.
+# FP4 attention needs fastvideo-kernel built for 12.1a and eager DiT inference.
+# A missing extension is an error. Set h3_vsa_fp4.enabled to false for BF16 VSA.
 # The NVFP4 encoder and lightweight VAE ship in the same repository.
 #
 # FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cutlass \
@@ -41,6 +40,8 @@ generator:
     vae_tiling: true
     experimental:
       attention_backend: VIDEO_SPARSE_ATTN_H3
+      h3_vsa_fp4:
+        enabled: true
       VSA_sparsity: 0.8
       VSA_tile_size: 64
       h3_sequential_load: false

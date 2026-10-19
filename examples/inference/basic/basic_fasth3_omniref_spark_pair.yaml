@@ -59,6 +59,11 @@ generator:
     vae_tiling: true
     experimental:
       attention_backend: VIDEO_SPARSE_ATTN_H3
+      h3_vsa_fp4:
+        enabled: true
+        prefix_precision: fp8
+        two_level_p: true
+        smooth_k: true
       vae_parallel_decode: true
       vae_parallel_encode: true
       video_decode_backend: h3-vae

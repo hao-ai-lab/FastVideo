@@ -91,6 +91,13 @@ disables pinned swap. Repeated requests in one process exceed the 24 GB GPU and
 the 57.7 GiB host cgroup once the 16 GB text encoder reloads; run one process
 per clip on this card.
 
+The Blackwell YAML examples also select FP4 attention and the prefix precision
+through `pipeline.experimental.h3_vsa_fp4`. Explicit YAML values take precedence
+over the corresponding environment flags. A missing native extension raises an
+error. To choose BF16 VSA for OmniRef's 128-token tiles, set
+`h3_vsa_fp4.enabled: false` and
+`FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16`.
+
 The Blackwell profiles select the FP8 prefix split to protect the conditioning
 queries from FP4 rounding. The split runs prefix rows densely in bf16 after
 8-bit Q/K rounding, which costs about 24% of
@@ -123,6 +130,7 @@ The profiles set these; set them yourself when driving the YAML recipes.
 | `FASTVIDEO_MINIMAX_H3_FUSIONS` | `all` | bit-exact fused kernels |
 | `FASTVIDEO_VSA_TRITON` | `1` | Triton VSA on the consumer parts |
 | `FASTVIDEO_VSA_PTX_BLACKWELL`, `FASTVIDEO_FA4` | `0` | no data-center kernel and no FlashAttention 4 |
+| `FASTVIDEO_NVFP4_MM_ROW_SPLIT` | `table` on Spark, globally `off` | opt into the cuDNN row chunks measured on GB10 |
 | `FASTVIDEO_NVFP4_MM_BACKEND` | `cudnn` on Spark | faster than CUTLASS on the H3 FFN shapes on GB10, bit-identical |
 | `FASTVIDEO_H3_VAE_TILE_BATCH` | `12` Spark, `4` 5090/4090 | decoder tiles per call |
 | `FASTVIDEO_H3_VAE_INT8_OVERLAY` | `0` on Spark | the INT8 ConvRot overlay is slower on GB10 |

@@ -22,7 +22,7 @@
 # FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 # FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt \
 # FASTVIDEO_H3_VAE_NVFP4_DECODER=/path/to/decoder-nvfp4.safetensors \
-# FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
+# FASTVIDEO_NVFP4_MM_BACKEND=cudnn FASTVIDEO_NVFP4_MM_ROW_SPLIT=table \
 # FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 # fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_spark.yaml
 #
@@ -52,6 +52,11 @@ generator:
       override_pipeline_cls_name: MiniMaxH3Ref2VAModularPipeline
     experimental:
       attention_backend: VIDEO_SPARSE_ATTN_H3
+      h3_vsa_fp4:
+        enabled: true
+        prefix_precision: fp8
+        two_level_p: true
+        smooth_k: true
       video_decode_backend: h3-vae
       h3_sequential_load: false
 request:
