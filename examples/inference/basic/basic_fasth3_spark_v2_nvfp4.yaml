@@ -10,17 +10,16 @@
 # decoder: on GB10 the INT8 ConvRot overlay is slower and less accurate.
 # NVFP4 GEMMs use FlashInfer's cuDNN backend, 2-3x faster than CUTLASS on the
 # H3 FFN shapes on GB10 with identical outputs.
-# The default V2.1 recipe uses bf16 Triton VSA. The optional FP4 lane
-# (FASTVIDEO_H3_VSA_FP4=1) routes the sparse video tiles through the attn_qat_infer
-# FP4 kernel (fastvideo-kernel built for 12.1a on GB10, 12.0a on sm_120). It is
-# faster but changes the output versus bf16 VSA; it stays off by default for V2.1
-# because the checkpoint was not trained with it. Without the built extension the
-# flag falls back to Triton.
+# The V2.1 recipe uses the FP4 attention kernel by default: FASTVIDEO_H3_VSA_FP4=1
+# routes the sparse video tiles through the attn_qat_infer FP4 kernel
+# (fastvideo-kernel built for 12.1a on GB10, 12.0a on sm_120). It is the measured
+# fast path and changes the output versus bf16 VSA; validate clips before a quality
+# comparison. Without the built extension the flag falls back to Triton.
 #
 # On a 32 GB RTX 5090, also set FASTVIDEO_H3_ENCODER_LAYERWISE=1 and
 # FASTVIDEO_H3_PARK_MODULES=vae,audio_vae; they are part of the measured 5090 recipe.
 #
-# FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
+# FASTVIDEO_H3_VSA_FP4=1 FASTVIDEO_MINIMAX_H3_FUSIONS=all FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
 # FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
 # FASTVIDEO_VSA_TRITON=1 FASTVIDEO_VSA_PTX_BLACKWELL=0 FASTVIDEO_FA4=0 \
 # FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 FASTVIDEO_STAGE_LOGGING=1 \

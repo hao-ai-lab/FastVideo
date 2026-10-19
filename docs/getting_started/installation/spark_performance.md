@@ -261,6 +261,7 @@ repository root. It uses 832x480, 124 frames and seed 1234, VSA sparsity 0.8 wit
 It does not use frame dropping or spatial upscaling.
 
 ```bash
+FASTVIDEO_H3_VSA_FP4=1 \
 FASTVIDEO_MINIMAX_H3_FUSIONS=all \
 FASTVIDEO_NVFP4_MM_BACKEND=cudnn \
 FASTVIDEO_H3_VAE_TILE_BATCH=12 FASTVIDEO_H3_VAE_INT8_OVERLAY=0 \
@@ -348,11 +349,10 @@ attention input (19,392 tokens, 56 heads, 64-token tiles) it runs in 29 ms
 against 59 ms for Triton VSA, with a relative L2 error of 0.13 versus an FP32
 reference (0.002 for Triton BF16).
 
-The default V2.1 recipe keeps it off because the checkpoint was not trained with
-FP4 attention. The optional FP4 lane is faster (on a 5090, 480p5 8L measured
-about 12.6 s versus 19 s on bf16 VSA) but changes the output. On V2 at 832x480
-with four prompts, denoising was 24-33% faster (60-68 s to 43-51 s) and the
-clips scored LPIPS 0.39-0.55 against the BF16-attention clips. Validate clips
+The V2.1 recipe enables it by default. It is faster (on a 5090, 480p5 8L
+measured about 12.6 s versus 19 s on bf16 VSA) but changes the output. On V2 at
+832x480 with four prompts, denoising was 24-33% faster (60-68 s to 43-51 s) and
+the clips scored LPIPS 0.39-0.55 against the BF16-attention clips. Validate clips
 before a quality comparison. On a 32 GB RTX 5090 the measured recipe also sets
 `FASTVIDEO_H3_ENCODER_LAYERWISE=1` and `FASTVIDEO_H3_PARK_MODULES=vae,audio_vae`.
 
