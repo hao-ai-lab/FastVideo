@@ -181,3 +181,15 @@ def test_unpadded_flashinfer_scales_fall_back_to_the_pad_copy_once(monkeypatch, 
     calls.clear()
     nv._nvfp4_quantize(x, global_sf, sfLayout=LAYOUT_128X4)
     assert calls == [256]
+
+
+def test_global_sf_does_not_sync() -> None:
+    x = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
+    x[3, 5] = float("inf")
+    torch.cuda.synchronize()
+    torch.cuda.set_sync_debug_mode("error")
+    try:
+        scale = fp4linear._global_sf(x)
+    finally:
+        torch.cuda.set_sync_debug_mode("default")
+    assert scale.item() == pytest.approx((448.0 * 6.0) / torch.finfo(torch.float32).max)
