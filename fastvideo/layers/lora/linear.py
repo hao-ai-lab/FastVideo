@@ -25,8 +25,9 @@ _SIDE_BRANCH_CHUNK_BYTES = 256 * 1024 * 1024
 
 @torch.library.custom_op("fastvideo::lora_add_low_rank_inplace", mutates_args=("out", ))
 def _add_low_rank_inplace(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tensor, lora_b: torch.Tensor,
-                          scale: float) -> None:
-    """Add ``scale * B(Ax)`` into ``out`` without a second full-size activation."""
+                          strength: torch.Tensor, alpha_over_rank: float) -> None:
+    """Add ``strength * alpha_over_rank * B(Ax)`` into ``out`` without a second full-size activation."""
+    scale = float(strength) * alpha_over_rank
     if scale == 0.0:
         return
     out_rows = out.reshape(-1, out.shape[-1])
@@ -45,7 +46,7 @@ def _add_low_rank_inplace(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tens
 
 @_add_low_rank_inplace.register_fake
 def _add_low_rank_inplace_fake(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tensor, lora_b: torch.Tensor,
-                               scale: float) -> None:
+                               strength: torch.Tensor, alpha_over_rank: float) -> None:
     return None
 
 
@@ -91,7 +92,12 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_alpha: float | None = lora_alpha
         self.training_mode = training_mode
         self.lora_path: str | None = None
-        self.lora_strength: float = 1.0
+        # The side branch reads the strength from this CPU scalar, so compiled regions take it as an input. A Python
+        # float would be guarded by value, and each new strength would recompile until fullgraph hits the limit.
+        with torch.inference_mode(False):
+            self._side_branch_strength = torch.ones((), dtype=torch.float64)
+        self._strength_is_zero = False
+        self.lora_strength = 1.0
 
         if training_mode:
             assert self.lora_rank is not None, "LoRA rank  must be set for training mode"
@@ -115,6 +121,16 @@ class BaseLayerWithLoRA(nn.Module):
         else:
             self.lora_A = None
             self.lora_B = None
+
+    @property
+    def lora_strength(self) -> float:
+        return self._lora_strength
+
+    @lora_strength.setter
+    def lora_strength(self, strength: float) -> None:
+        self._lora_strength = float(strength)
+        self._side_branch_strength.fill_(self._lora_strength)
+        self._strength_is_zero = self._lora_strength == 0.0
 
     @property
     def weight(self) -> torch.Tensor:
@@ -147,21 +163,22 @@ class BaseLayerWithLoRA(nn.Module):
             lora_B = self.lora_B.to_local()
             lora_A = self.lora_A.to_local()
 
-        if self.side_branch and (self.lora_A is None or self.lora_strength == 0.0):
+        if self.side_branch and (self.lora_A is None or self._strength_is_zero):
             # No adapter, or strength 0, is exactly the unadapted layer, down to the output dtype.
             return self.base_layer(x)
 
         if not self.merged and not self.disable_lora:
             lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
             lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
-            scale = float(self.lora_strength)
+            alpha_over_rank = 1.0
             if self.lora_alpha != self.lora_rank:
-                scale *= float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
+                alpha_over_rank = float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
             out, output_bias = self.base_layer(x)
             if self.side_branch:
                 # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
-                _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, scale)
+                _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, self._side_branch_strength, alpha_over_rank)
                 return out, output_bias
+            scale = float(self.lora_strength) * alpha_over_rank
             delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)
             if scale != 1.0:
                 delta = delta * scale

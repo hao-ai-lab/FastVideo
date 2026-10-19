@@ -138,6 +138,34 @@ def test_side_branch_chunked_update_compiles_fullgraph(monkeypatch: pytest.Monke
         torch._dynamo.reset()
 
 
+def test_side_branch_strength_changes_do_not_recompile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A float strength is guarded by value, so fullgraph would fail after ``recompile_limit`` distinct strengths."""
+    monkeypatch.setattr(torch._dynamo.config, "disable", False)
+    torch._dynamo.reset()
+    base = _packed_linear()
+    layer = get_lora_layer(base)
+    a, b = _factors()
+    layer.set_lora_weights(a, b, lora_alpha=8)
+    graphs = []
+
+    def backend(graph_module, example_inputs):
+        graphs.append(graph_module)
+        return graph_module
+
+    compiled = torch.compile(lambda x: layer(x)[0], backend=backend, fullgraph=True)
+    x = torch.randn(3, 5, IN, dtype=torch.bfloat16)
+    delta = x.float() @ a.bfloat16().float().T @ b.bfloat16().float().T
+    try:
+        with torch.inference_mode(), torch._dynamo.config.patch(recompile_limit=2):
+            for step in range(1, 21):
+                layer.lora_strength = step / 20
+                expected = base(x)[0].float() + step / 20 * (8 / RANK) * delta
+                torch.testing.assert_close(compiled(x).float(), expected, atol=0.2, rtol=0.05)
+        assert len(graphs) == 1
+    finally:
+        torch._dynamo.reset()
+
+
 def test_side_branch_matches_base_plus_scaled_low_rank_product() -> None:
     base = _packed_linear()
     layer = get_lora_layer(base)
