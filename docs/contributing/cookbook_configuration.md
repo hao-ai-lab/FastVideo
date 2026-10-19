@@ -359,9 +359,12 @@ Offload follows the native runtime:
   the weights outside the blocks plus two blocks.
 - Without FSDP, whole-model DiT offload leaves the transformer on the GPU.
 - Packed NVFP4 weights are buffers, so layerwise offload keeps them resident.
+- `lazy_module_load` defers only the components a pipeline lists in
+  `_lazy_module_names`. Wan lists none, so the switch changes nothing.
 
-Multiple GPUs, FSDP, unified memory, image-to-video, text-encoder quantization
-and loading peaks return `unknown`. With VAE tiling enabled, a note says the
+Multiple GPUs, FSDP, unified memory, image-to-video, more than one video per
+prompt, missing parameter counts, text-encoder quantization and loading peaks
+return `unknown`. With VAE tiling enabled, a note says the
 decode estimate assumes untiled decoding.
 
 `WAN_RULE` holds the uncalibrated tensor counts. To calibrate them, run with

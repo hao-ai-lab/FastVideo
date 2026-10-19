@@ -133,9 +133,9 @@ test("whole-model DiT offload without layerwise streaming keeps the transformer 
   close(result.phases.decoding.weightsGiB, gib(DIT, "bf16") + gib(VAE, "fp32"));
 });
 
-test("lazy loading frees every component outside its own phase", () => {
-  const result = estimate({ config: config({ offload: { ...NO_OFFLOAD, lazy_module_load: true } }) });
-  assertWeights(result, { encoding: gib(TEXT, "fp32"), denoising: gib(DIT, "bf16"), decoding: gib(VAE, "fp32") });
+test("lazy loading changes nothing for Wan because its pipeline defers no components", () => {
+  const lazy = estimate({ config: config({ offload: { ...NO_OFFLOAD, lazy_module_load: true } }) });
+  assert.deepEqual(lazy.phases, estimate().phases);
 });
 
 test("Wan working memory scales with tokens, hidden size, FFN size and decoded pixels", () => {
@@ -199,12 +199,17 @@ test("requests outside the modeled coverage are unknown with a reason", () => {
     "no supported weight types": { hardware: { ...gpu(80), supported_dtypes: undefined } },
     "image to video": { workload: "i2v" },
     "missing request size": { config: config({ sampling: {} }) },
+    "several videos per prompt": {
+      config: config({ sampling: { num_frames: 81, height: 480, width: 832, num_videos_per_prompt: 2 } }),
+    },
     "unknown working-memory rule": withModel((model) => (model.memory_rules = "ltx2")),
     "missing geometry": withModel((model) => delete model.geometry.ffn_size),
     "unmodeled component": withModel((model) =>
       model.components.push({ role: "image_encoder", parameter_count: 1, dtype: "fp16" }),
     ),
     "missing VAE": withModel((model) => model.components.pop()),
+    "missing parameter count": withModel((model) => delete model.components[2].parameter_count),
+    "blocks without a block parameter count": withModel((model) => delete model.components[1].block_parameter_count),
     "unknown precision": withModel((model) => (model.components[1].dtype = "int4")),
     "text-encoder quantization": { config: config({ engine: { quantization: { text_encoder_quant: "fp8" } } }) },
   };

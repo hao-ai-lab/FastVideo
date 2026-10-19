@@ -26,9 +26,10 @@ export const WAN_RULE = {
 const PHASES = ["encoding", "denoising", "decoding"];
 const COMPONENT_PHASE = { text_encoder: "encoding", transformer: "denoising", vae: "decoding" };
 const SAMPLING_FIELDS = ["num_frames", "height", "width"];
+const isCount = (value) => Number.isInteger(value) && value > 0;
 
 /** Unset switches default on, matching OffloadConfig in fastvideo/api/schema.py. */
-const OFFLOAD_DEFAULTS = { dit_layerwise: true, text_encoder: true, vae: true, lazy_module_load: false };
+const OFFLOAD_DEFAULTS = { dit_layerwise: true, text_encoder: true, vae: true };
 
 /** Streaming offload holds the running block and one prefetched block. */
 const STREAMED_BLOCKS = 2;
@@ -78,11 +79,10 @@ function residentBytes(component, phase, offload, bytes) {
   const streamed = withoutBlocks + bytes.denseBlocks * share;
   const active = COMPONENT_PHASE[component.role] === phase;
   if (component.role === "transformer") {
-    if (offload.lazy_module_load && !active) return 0;
     if (offload.dit_layerwise) return active ? streamed : withoutBlocks;
     return full;
   }
-  if (!active) return offload[component.role] || offload.lazy_module_load ? 0 : full;
+  if (!active) return offload[component.role] ? 0 : full;
   const streams = component.role === "text_encoder" && offload.text_encoder && component.streams_when_offloaded;
   return streams ? streamed : full;
 }
@@ -113,14 +113,12 @@ function wanWorkingMemory(geometry, sampling, components) {
       WAN_RULE.attentionHiddenTensors * hidden,
       WAN_RULE.ffnHiddenTensors * hidden + WAN_RULE.ffnTensors * ffn,
     ),
-    // Decoded RGB frames are held twice while chunks are concatenated, then once more as float32.
     decoding:
       WAN_RULE.decodeFrameFeatures * vae_decoder_channels * pixels * vae +
       outputFrames * 3 * pixels * (2 * vae + BYTES_PER_WEIGHT.fp32),
   };
 }
 
-/** Return an unknown or unsupported result when the request falls outside what the estimator models. */
 function checkCoverage({ engine, sampling, workload, model, hardware, quantization }) {
   const unknown = (reason) => ({ status: "unknown", reason });
   const components = model.components ?? [];
@@ -134,12 +132,20 @@ function checkCoverage({ engine, sampling, workload, model, hardware, quantizati
   if (!rule) return unknown(`No working-memory rule for ${model.memory_rules}.`);
   const missing = rule.geometry.filter((field) => model.geometry?.[field] === undefined);
   if (missing.length) return unknown(`Model geometry lacks ${missing.join(", ")}.`);
-  if (!SAMPLING_FIELDS.every((field) => Number.isInteger(sampling[field]) && sampling[field] > 0))
+  if (!SAMPLING_FIELDS.every((field) => isCount(sampling[field])))
     return unknown("Frames, height and width must be set.");
+  if ((sampling.num_videos_per_prompt ?? 1) !== 1) return unknown("Only one video per prompt is modeled.");
   const unmodeled = components.find((component) => !COMPONENT_PHASE[component.role]);
   if (unmodeled) return unknown(`The ${unmodeled.role} component is not modeled yet.`);
   if (!["transformer", "vae"].every((role) => components.some((component) => component.role === role)))
     return unknown("The model needs a transformer and a VAE.");
+  const uncounted = components.find(
+    (component) =>
+      !isCount(component.parameter_count) ||
+      (component.block_count !== undefined &&
+        !(isCount(component.block_count) && isCount(component.block_parameter_count))),
+  );
+  if (uncounted) return unknown(`The ${uncounted.role} parameter counts are incomplete.`);
   const unsized = components.find(
     (component) =>
       !BYTES_PER_WEIGHT[component.dtype] || !BYTES_PER_WEIGHT[component.activation_dtype ?? component.dtype],
