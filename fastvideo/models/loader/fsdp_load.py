@@ -450,11 +450,13 @@ def maybe_load_fsdp_model(
     # while each rank materializes its shard, or the full checkpoint and shards
     # peak together on the accelerator. Training keeps GPU-direct loading.
     # A packed NVFP4 export is always staged on CPU.
-    load_weights_to_cpu = _should_stage_transformer_weights_on_cpu(
+    # Layerwise offload passes device=cpu but disables dit_cpu_offload, so the
+    # device itself must select CPU staging or the iterator would fill the GPU.
+    load_weights_to_cpu = (device.type == "cpu" or _should_stage_transformer_weights_on_cpu(
         cpu_offload=cpu_offload,
         fsdp_inference=fsdp_inference,
         has_unified_memory=has_unified_memory,
-    ) or packed_nvfp4_export is not None
+    ) or packed_nvfp4_export is not None)
     weight_iterator = safetensors_weights_iterator(weight_dir_list, to_cpu=load_weights_to_cpu)
     logger.info("Loading transformer weights with to_cpu=%s", load_weights_to_cpu)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
@@ -999,8 +1001,8 @@ def load_model_from_full_model_state_dict(
     named_parameters = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_parameters()}
     named_buffers = {_strip_checkpoint_wrapper_prefix(k): v for k, v in model.named_buffers()}
     sharded_sd = {}
-    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(full_sd_iterator,
-                                                                           param_names_mapping)  # type: ignore
+    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
+        full_sd_iterator, param_names_mapping, skip_names=skip_param_names)  # type: ignore
     checkpoint_key_aliases = getattr(model, "_fastvideo_checkpoint_key_aliases", {})
     if checkpoint_key_aliases:
         for original_name, transformed_name in checkpoint_key_aliases.items():

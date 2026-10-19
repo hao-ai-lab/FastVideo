@@ -58,7 +58,8 @@ def get_param_names_mapping(mapping_dict: dict[str, str]) -> Callable[[str], tup
 
 def hf_to_custom_state_dict(
     hf_param_sd: dict[str, torch.Tensor] | Iterator[tuple[str, torch.Tensor]],
-    param_names_mapping: Callable[[str], tuple[str, Any, Any]]
+    param_names_mapping: Callable[[str], tuple[str, Any, Any]],
+    skip_names: set[str] | None = None,
 ) -> tuple[dict[str, torch.Tensor], dict[str, tuple[str, Any, Any]]]:
     """
     Converts a Hugging Face parameter state dictionary to a custom parameter state dictionary.
@@ -78,6 +79,10 @@ def hf_to_custom_state_dict(
         hf_param_sd = hf_param_sd.items()  # type: ignore
     for source_param_name, full_tensor in hf_param_sd:  # type: ignore
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(source_param_name)
+        if skip_names and target_param_name in skip_names:
+            # Release the source tensor immediately instead of retaining every
+            # skipped AdaLN projection in the drained dict (24 GiB on OmniRef).
+            continue
         reverse_param_names_mapping[target_param_name] = (source_param_name, merge_index, num_params_to_merge)
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
