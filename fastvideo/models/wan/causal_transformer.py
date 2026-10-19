@@ -105,17 +105,14 @@ class CausalWanSelfAttention(nn.Module):
             roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
             roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
-        # Ulysses sequence-parallel (SP): the causal pipeline replicates the full
-        # (unsharded) token sequence on every rank, so RoPE, the block mask and
-        # the KV cache are all full-length here. We parallelize the attention
-        # across the head dimension (à la Ulysses): each rank computes attention
-        # for its own slice of heads over the full sequence, then all-gathers the
-        # per-head outputs to reconstruct all heads. This is numerically identical
-        # to single-GPU attention (heads are independent) and avoids a sequence
-        # all-to-all that would be incompatible with the causal KV-cache windowing
-        # (expressed in global token coordinates). Applied uniformly to all three
-        # attention paths below (flex, relativistic window, and the standard
-        # KV-cache path).
+        # Sequence parallelism over heads. By default every rank holds the full
+        # token sequence, so RoPE, the block mask and the KV cache are full
+        # length here. Each rank computes attention for its slice of heads and
+        # all-gathers the per-head outputs; this applies to all three paths
+        # below. With sequence_sharded, used only by the training forward
+        # without a KV cache, the rank instead holds a token shard, and the
+        # all-to-all in the flex path gives it every token for its heads.
+        # Heads are independent, so both match single-GPU attention.
         sp_world_size = get_sp_world_size()
         sp_rank = get_sp_parallel_rank()
         if sp_world_size > 1:
@@ -788,11 +785,11 @@ class CausalWanTransformer3DModel(BaseDiT):
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            # No multiplication by the sequence-parallel world size: the causal
-            # pipeline replicates the full (unsharded) sequence on every rank, so
-            # RoPE must cover the full local sequence length. Attention is
-            # parallelized across heads instead (see
-            # CausalWanSelfAttention.forward).
+            # No multiplication by the sequence-parallel world size: RoPE covers
+            # the full sequence. Without token-sharded SP every rank holds the
+            # full sequence and attention is split across heads (see
+            # CausalWanSelfAttention.forward). With it, _shard_for_token_sp
+            # slices these tables to the rank's token shard.
             (post_patch_num_frames, post_patch_height, post_patch_width),
             self.hidden_size,
             self.num_attention_heads,
@@ -861,9 +858,9 @@ class CausalWanTransformer3DModel(BaseDiT):
             timestep_proj = torch.cat([timestep_proj_clean, timestep_proj], dim=1)
             freqs_cis = (torch.cat([freqs_cos, freqs_cos], dim=0), torch.cat([freqs_sin, freqs_sin], dim=0))
 
-        # Opt-in token-sharded sequence parallelism. This path has no KV cache, so
-        # every rank can keep a contiguous shard of the token sequence; only
-        # self-attention needs the full sequence (see CausalWanSelfAttention).
+        # Opt-in token-sharded sequence parallelism: every rank keeps a contiguous
+        # shard of the token sequence, and only self-attention sees the full
+        # sequence, through an all-to-all (see CausalWanSelfAttention).
         sequence_sharded = self._use_token_sharded_sp(hidden_states.shape[1])
         if sequence_sharded:
             hidden_states, timestep_proj, freqs_cis = self._shard_for_token_sp(hidden_states, timestep_proj, freqs_cis)
