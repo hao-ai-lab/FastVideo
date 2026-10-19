@@ -343,7 +343,13 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
         # sampler needs them. The DiT itself stays whole: no layerwise streaming.
         offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=False, pin_cpu_memory=True),
         sequential_load=True,
-        env={**_CONSUMER_ENV, "FASTVIDEO_H3_VAE_TILE_BATCH": "4"},
+        env={
+            **_CONSUMER_ENV,
+            # Bit-identical at both shapes and both decoders on the 5090; the
+            # reference memo and VAE paths save 3-5 s on repeated requests.
+            **LOSSLESS_ACCEL_ENV,
+            "FASTVIDEO_H3_VAE_TILE_BATCH": "4",
+        },
     ),
     "rtx-4090": DeviceProfile(
         label="NVIDIA RTX 4090 (24 GB, sm_89, no FP4)",
