@@ -31,12 +31,13 @@ One process per GPU (each its own single-rank external launcher), e.g.::
 
     CUDA_VISIBLE_DEVICES=0 MASTER_PORT=29500 python generate_omniref_latents.py \\
         --model-path /models/fasth3_omniref_composed --manifest /data/omniref/MANIFEST.jsonl \\
-        --vae-dir /models/MiniMax-H3/vae --output-dir /data/gen-latents/omniref/data \\
+        --output-dir /data/gen-latents/omniref/data \\
         --per-group 300 --shard 0 --num-shards 4
 """
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -390,6 +391,22 @@ def write_preview(driver: OmniRefLatentGenerator, clip: dict[str, Any], row: dic
 
 
 # --------------------------------------------------------------------------- main
+def append_eval_manifest(path: Path, entry: dict[str, Any]) -> None:
+    """Append one row under an exclusive lock, rereading so shard processes don't drop each other's rows."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_suffix(".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            current = json.loads(path.read_text()) if path.is_file() else []
+            if entry["id"] not in {item["id"] for item in current}:
+                current.append(entry)
+            tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(current, indent=1))
+            tmp.replace(path)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def run_eval(args: argparse.Namespace, plan: list[dict[str, Any]]) -> None:
     """Write raw (denormalized) ``[1, 24, T, H, W]`` latents, as the decode stage decodes them, plus a manifest."""
     eval_dir = Path(args.eval_dir)
@@ -417,20 +434,18 @@ def run_eval(args: argparse.Namespace, plan: list[dict[str, Any]]) -> None:
             tmp = eval_dir / f"{name}.tmp"
             torch.save(raw, tmp)
             tmp.replace(eval_dir / name)
-            manifest.append({
-                "file": name,
-                **{key: clip[key] for key in ("id", "source", "case", "resolution", "parquet", "seed")},
-                "width": int(row["width"]),
-                "height": int(row["height"]),
-                "num_frames": int(row["num_frames"]),
-                "shape": list(raw.shape),
-                "dtype": "float32",
-                "space": "raw (denormalized; decode-stage input)",
-                "generator": args.generator_name,
-            })
-            tmp_manifest = manifest_path.with_suffix(".tmp")
-            tmp_manifest.write_text(json.dumps(manifest, indent=1))
-            tmp_manifest.replace(manifest_path)
+            append_eval_manifest(
+                manifest_path, {
+                    "file": name,
+                    **{key: clip[key] for key in ("id", "source", "case", "resolution", "parquet", "seed")},
+                    "width": int(row["width"]),
+                    "height": int(row["height"]),
+                    "num_frames": int(row["num_frames"]),
+                    "shape": list(raw.shape),
+                    "dtype": "float32",
+                    "space": "raw (denormalized; decode-stage input)",
+                    "generator": args.generator_name,
+                })
         print(json.dumps({"id": clip["id"], "shape": list(raw.shape), "seconds": round(time.perf_counter() - start, 1)}),
               flush=True)
     driver.shutdown()
