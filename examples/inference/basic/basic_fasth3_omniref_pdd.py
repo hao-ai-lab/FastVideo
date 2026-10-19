@@ -321,6 +321,9 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
                               lazy_module_load=False),
         env={
             **_CONSUMER_ENV,
+            # Byte-identical at both shapes and both decoders; the reference
+            # memo saves 5-16% of warm wall time on repeated references.
+            **LOSSLESS_ACCEL_ENV,
             # cuDNN mm_fp4 is 2.7-3x faster than CUTLASS on the H3 FFN shapes on GB10.
             "FASTVIDEO_NVFP4_MM_BACKEND": "cudnn",
             "FASTVIDEO_H3_VAE_TILE_BATCH": "12",

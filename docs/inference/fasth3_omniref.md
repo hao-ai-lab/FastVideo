@@ -60,6 +60,13 @@ resident but offloads the text encoder; the 24 GB 4090 streams the FP8 DiT
 layerwise with 16 blocks resident. The 24 and 32 GB cards replace the AdaLN
 projections (a third of the DiT's bytes on disk) with a precomputed table.
 
+The `spark` and `rtx-5090` profiles enable the bit-identical lossless set by
+default: exact fused kernels, heads-first VSA tiles, parallel VAE paths, and the
+content-keyed reference memo. On a repeated reference this removes conditioning
+and latent preparation from the warm path, worth 5-16% of warm wall time on
+Spark and 3-5 s on the 5090; a first-time reference sees no regression.
+`--lossless-accel` enables the same set on the other profiles.
+
 The Blackwell stack is:
 
 - **Linears:** NVFP4 from the packed export. Blocks the calibration kept in
@@ -121,6 +128,7 @@ The profiles set these; set them yourself when driving the YAML recipes.
 | `FASTVIDEO_H3_VAE_INT8_OVERLAY` | `0` on Spark | the INT8 ConvRot overlay is slower on GB10 |
 | `FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS`, `FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS` | `1`, `16` on the 4090 | stream the packed FP8 weights; keep 16 blocks resident |
 | `FASTVIDEO_H3_FFN_CHUNK_TOKENS`, `FASTVIDEO_H3_PINNED_SWAP` | `16384`, `0` on the 4090 | bound the FFN activation and avoid pinned host duplicates |
+| `FASTVIDEO_ULYSSES_A2A`, `FASTVIDEO_MINIMAX_H3_EXACT_KERNELS`, `FASTVIDEO_H3_VSA_HEADS_FIRST_TILE`, `FASTVIDEO_H3_VAE_TILE_PARALLEL`, `FASTVIDEO_H3_REF2VA_MEMO_ENTRIES` | lossless set, on for Spark/5090 | bit-identical speed-ups; the memo helps repeated references |
 | `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` on the 4090 | reduces allocator fragmentation |
 
 `fastvideo-kernel` must be built for the device: `12.0a` on sm_120 and `12.1a`
