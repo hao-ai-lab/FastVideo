@@ -45,12 +45,12 @@ generator = VideoGenerator.from_config(
     ))
 ```
 
-The same works for packed NVFP4 and FP8 checkpoints, for example FastH3 V2.1:
+The same works for packed NVFP4 and FP8 checkpoints, for example FastH3-QAD-v2:
 
 ```python
 generator = VideoGenerator.from_config(
     GeneratorConfig(
-        model_path="FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer",
+        model_path="FastVideo/FastH3-QAD-v2",
         engine=EngineConfig(
             quantization=QuantizationConfig(transformer_quant="NVFP4", layer_profile="h3_dit_vsa"),
         ),
@@ -60,7 +60,7 @@ generator = VideoGenerator.from_config(
     ))
 ```
 
-Packed NVFP4 exports require an explicit quantization profile. V2.1 uses `h3_dit_vsa` for attention, MLP, and
+Packed NVFP4 exports require an explicit quantization profile. FastH3-QAD-v2 uses `h3_dit_vsa` for attention, MLP, and
 compression-gate weights; the FFN-only V2 export uses `h3_dit_ffn`.
 
 The FastH3 example scripts take the same options. `basic_fasth3_lora_preview.py` accepts `--lora-path` and
