@@ -238,6 +238,26 @@ def test_triton_tile64_forward_matches_reference(two_level_p, smooth_k):
 
 
 @needs_gpu
+@pytest.mark.parametrize("two_level_p", [False, True])
+def test_triton_tile64_backward_matches_ste_reference(two_level_p):
+    q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad, _, _ = _problem64(6, heads=2, seed=11, device="cuda")
+    q, k, v = (t.clone().requires_grad_(True) for t in (q, k, v))
+    out = _triton().fp4_vsa_attn_qat(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad=q2k_quad,
+                                     two_level_p=two_level_p)
+    grad_out = torch.randn_like(out)
+    dq, dk, dv = torch.autograd.grad(out, (q, k, v), grad_out)
+    _, weights = ref.fp4_vsa_attention_reference(q, k, v, q2k_idx, q2k_num, kv_valid, q2k_quad,
+                                                 two_level_p=two_level_p, return_dv_weights=True)
+    q_hat, k_hat, v_hat = ref.fake_quant_qkv(q.detach(), k.detach(), v.detach())
+    token_mask = _dense_quad_mask(q2k_idx, q2k_num, q2k_quad, q.shape[2])
+    valid = ref.key_valid_mask(kv_valid, q2k_idx.shape[-1], q.device).reshape(-1)
+    token_mask = token_mask & valid[None, None, None, :]
+    expected = ref.ste_gradients_reference(q_hat, k_hat, v_hat, token_mask, weights, grad_out, 1 / math.sqrt(128))
+    for name, got, want in zip("qkv", (dq, dk, dv), expected, strict=True):
+        assert _rel(got, want) < 2e-2, name
+
+
+@needs_gpu
 @pytest.mark.parametrize("two_level_p,smooth_k", [(False, False), (True, False), (False, True), (True, True)])
 def test_triton_forward_matches_reference(two_level_p, smooth_k):
     q, k, v, q2k_idx, q2k_num, kv_valid, _, _ = _problem(6, heads=2, seed=4, device="cuda")

@@ -23,9 +23,9 @@ METHOD_KEYS = ("init_student_dcp", "max_eval_rows", "max_rollout_rows", "noise_f
                "eligibility_keys", "fidelity_tolerance", "objective", "recon_normalize", "recon_norm_rows",
                "recon_group_weights", "rungs_per_row")
 DATA_KEYS = ("manifests", "cases", "max_frames", "eval_manifest", "eval_resolutions", "eval_per_group",
-             "eval_max_frames", "eval_seed")
+             "eval_max_frames", "eval_seed", "width", "height", "num_frames")
 # The training-row plan; it only reaches step 0 through provisional FFN calibration (no amax_json).
-PROVISIONAL_DATA_KEYS = ("seed", "per_group", "max_train_rows")
+PROVISIONAL_DATA_KEYS = ("seed", "per_group", "max_train_rows", "train_manifest")
 QAD_KEYS = ("linears", "fp4_attention")
 # Logged per evaluation but not part of the step-0 result.
 VOLATILE = ("eval/seconds", "eval/score_vs_ptq")

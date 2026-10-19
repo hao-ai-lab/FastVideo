@@ -240,7 +240,8 @@ class MiniMaxH3V2T2VModel(MiniMaxH3OmniRefPDDModel):
         with contextlib.ExitStack() as stack:
             stack.enter_context(set_forward_context(current_timestep=rung, attn_metadata=self._metadata(prepared,
                                                                                                         rung)))
-            if self.compression is not None and self._compression_on:
+            first_steps = self.compression.spec.first_steps if self.compression is not None else None
+            if self.compression is not None and self._compression_on and (first_steps is None or rung < first_steps):
                 grid = self._token_grid(prepared)
                 sub = compressed_grid(self.compression.spec.mode, grid)
                 stack.enter_context(self.compression.scope(grid, self._metadata(prepared, rung, sub)))

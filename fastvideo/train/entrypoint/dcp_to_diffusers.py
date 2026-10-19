@@ -40,6 +40,7 @@ import gc
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import fastvideo.envs as envs
@@ -458,20 +459,24 @@ def convert(
     import torch.distributed.checkpoint as dcp
 
     # -- Resolve checkpoint directory --
-    resolved = _resolve_resume_checkpoint(
+    # A tagged (weights-only) checkpoint is not named checkpoint-<step>, so it
+    # bypasses the resume resolver; any directory carrying a DCP image works.
+    raw_path = Path(os.path.expanduser(checkpoint_dir)).resolve()
+    resolved = raw_path if (raw_path / "dcp" / ".metadata").is_file() else _resolve_resume_checkpoint(
         checkpoint_dir,
         output_dir=checkpoint_dir,
     )
     dcp_dir = resolved / "dcp"
     if not dcp_dir.is_dir():
         raise FileNotFoundError(f"Missing dcp/ under {resolved}")
+    metadata = CheckpointManager.load_metadata(resolved)
+    weights_only = bool(metadata.get("weights_only", False))
 
     # -- Obtain config --
     cfg: RunConfig
     if config_path is not None:
         cfg = load_run_config(config_path)
     else:
-        metadata = CheckpointManager.load_metadata(resolved)
         raw_config = metadata.get("config")
         if raw_config is None:
             raise ValueError("Checkpoint metadata.json does not "
@@ -500,6 +505,8 @@ def convert(
 
     # -- Load DCP weights into the model --
     states = method.checkpoint_state()
+    if weights_only:
+        states = {key: value for key, value in states.items() if key.startswith("roles.")}
     logger.info(
         "Loading DCP checkpoint from %s",
         resolved,

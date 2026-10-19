@@ -301,7 +301,7 @@ class CheckpointManager:
             if tagged_dir.exists():
                 shutil.rmtree(tagged_dir)
             os.makedirs(dcp_dir, exist_ok=True)
-            self._write_metadata(tagged_dir, step)
+            self._write_metadata(tagged_dir, step, weights_only=True)
             logger.info("Saving %s weights (step %d) to %s", tag, step, tagged_dir)
         _barrier()
         states = {key: value for key, value in self.method.checkpoint_state().items() if key.startswith("roles.")}
@@ -315,8 +315,12 @@ class CheckpointManager:
         self,
         checkpoint_dir: Path,
         step: int,
+        *,
+        weights_only: bool = False,
     ) -> None:
         metadata: dict[str, Any] = {"step": step}
+        if weights_only:
+            metadata["weights_only"] = True
         if self._raw_config is not None:
             metadata["config"] = self._raw_config
         meta_path = checkpoint_dir / "metadata.json"

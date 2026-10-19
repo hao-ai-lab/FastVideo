@@ -131,7 +131,8 @@ directory:
 The saved state is the bf16 master plus the quantization plan, not packed NVFP4
 weights; inference applies the same converter used for the released model. Use
 `fastvideo/train/entrypoint/dcp_to_diffusers.py` to export a checkpoint if your
-deployment path expects Diffusers weights:
+deployment path expects Diffusers weights. It detects the weights-only marker
+on a tagged checkpoint, so `best/` can be exported directly:
 
 ```bash
 python -m fastvideo.train.entrypoint.dcp_to_diffusers \
