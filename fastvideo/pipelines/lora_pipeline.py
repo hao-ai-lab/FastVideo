@@ -361,6 +361,11 @@ class LoRAPipeline(ComposedPipelineBase):
         if not adapter and lora_path is not None and lora_path == self._constructor_dense_lora_path:
             # A dense-only adapter (.diff/.set_weight) has no low-rank layers; DenseLoRAPatch applied it at load.
             return
+        released = sorted(set(self.trainable_transformer_modules) - set(self.lora_layers))
+        if released:
+            # A released lazy transformer has no LoRA layers until it loads again, so nothing can be matched yet.
+            logger.info("Skipping the LoRA coverage check for %r: %s not loaded", lora_path, ", ".join(released))
+            return
         lora_a = {key[:-len(".lora_A")] for key in adapter if key.endswith(".lora_A")}
         lora_b = {key[:-len(".lora_B")] for key in adapter if key.endswith(".lora_B")}
         # A module with only one factor is never applied, so it counts as unmatched, not as covered.

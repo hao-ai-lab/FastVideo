@@ -218,7 +218,8 @@ def _pipeline_with_layers(names: list[str], adapter_modules: list[str], min_frac
     adapter.update({f"{name}.lora_B": torch.zeros(1) for name in adapter_modules})
     return SimpleNamespace(lora_adapters={"default": adapter},
                            lora_layers={"transformer": layers},
-                           lora_min_match_fraction=min_fraction)
+                           lora_min_match_fraction=min_fraction,
+                           trainable_transformer_modules={"transformer": object()})
 
 
 def test_coverage_check_accepts_a_fully_matched_adapter() -> None:
@@ -231,6 +232,13 @@ def test_coverage_check_fails_loudly_and_lists_unmatched_modules() -> None:
     pipeline = _pipeline_with_layers(["transformer_blocks.0.attn.to_q"], ["blocks.0.attn.q", "blocks.1.attn.q"])
     with pytest.raises(ValueError, match=r"reaches 0 of 2 adapter modules.*blocks\.0\.attn\.q"):
         LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")
+
+
+def test_coverage_check_waits_for_a_released_lazy_transformer() -> None:
+    pipeline = _pipeline_with_layers([], ["transformer_blocks.0.attn.to_q"])
+    # A released lazy DiT drops its LoRA layers, so a valid adapter has nothing to match yet.
+    pipeline.lora_layers.pop("transformer")
+    LoRAPipeline._check_adapter_coverage(pipeline, "default", "adapter.safetensors")
 
 
 def test_coverage_check_rejects_a_mostly_unmatched_adapter() -> None:
