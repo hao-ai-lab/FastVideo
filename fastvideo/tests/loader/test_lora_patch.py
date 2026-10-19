@@ -371,11 +371,13 @@ def test_a_fully_applied_payload_warns_about_nothing(tmp_path, caplog):
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
 
 
-def _stub_packed_nvfp4_export(monkeypatch):
+def _stub_packed_nvfp4_export(monkeypatch, tmp_path):
     from fastvideo.layers.quantization import nvfp4_config
 
+    packed_path = tmp_path / "packed.safetensors"
+    save_file({"placeholder": torch.zeros(1)}, str(packed_path))
     loaded = []
-    monkeypatch.setattr(nvfp4_config, "find_minimax_h3_nvfp4_dit_export", lambda _paths: "packed.safetensors")
+    monkeypatch.setattr(nvfp4_config, "find_minimax_h3_nvfp4_dit_export", lambda _paths: str(packed_path))
     monkeypatch.setattr(nvfp4_config, "nvfp4_linear_weight_param_names", lambda _model: {"linear.weight"})
     monkeypatch.setattr(nvfp4_config, "load_minimax_h3_nvfp4_dit_export",
                         lambda _model, path, device: loaded.append(path))
@@ -395,17 +397,17 @@ def _packed_init_params():
     return {"config": SimpleNamespace(quant_config=SimpleNamespace(layer_profile="h3_dit"))}
 
 
-def test_packed_nvfp4_export_loads_with_a_low_rank_only_adapter(monkeypatch):
-    loaded = _stub_packed_nvfp4_export(monkeypatch)
+def test_packed_nvfp4_export_loads_with_a_low_rank_only_adapter(monkeypatch, tmp_path):
+    loaded = _stub_packed_nvfp4_export(monkeypatch, tmp_path)
     monkeypatch.setattr(DenseLoRAPatch, "from_adapter", classmethod(lambda *_args, **_kwargs: None))
 
     _load_tiny_model(_PackedTinyModel, lora_path="adapter.safetensors", init_params=_packed_init_params())
 
-    assert loaded == ["packed.safetensors"]
+    assert loaded == [str(tmp_path / "packed.safetensors")]
 
 
-def test_packed_nvfp4_export_rejects_an_adapter_with_dense_payload(monkeypatch):
-    loaded = _stub_packed_nvfp4_export(monkeypatch)
+def test_packed_nvfp4_export_rejects_an_adapter_with_dense_payload(monkeypatch, tmp_path):
+    loaded = _stub_packed_nvfp4_export(monkeypatch, tmp_path)
     patch = DenseLoRAPatch([], {"linear.weight": ("adapter.safetensors", "linear.diff")}, {}, 1.0)
     monkeypatch.setattr(DenseLoRAPatch, "from_adapter", classmethod(lambda *_args, **_kwargs: patch))
 
