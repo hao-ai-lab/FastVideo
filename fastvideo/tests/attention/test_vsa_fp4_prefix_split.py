@@ -13,7 +13,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from fastvideo.models.dits.minimax_h3_vsa_fp4 import _fp8_per_token, _half_row_valid, _prefix_dense_attention
+from fastvideo.models.dits.minimax_h3_vsa_fp4 import (_fp8_per_token, _half_row_valid, _prefix_dense_attention,
+                                                      _resolve_prefix_mode)
 
 HALF = 64
 
@@ -75,6 +76,19 @@ def test_half_row_valid_expands_counts_to_rows() -> None:
     assert valid.sum().item() == 2 * HALF + 3
     assert valid[:HALF].all() and not valid[HALF + 3:HALF + HALF].any()
     assert not valid[2 * HALF:3 * HALF].any()
+
+
+@pytest.mark.parametrize(("mode", "steps", "step", "expected"), [
+    ("fp8", -1, 0, "fp8"),
+    ("fp8", -1, 7, "fp8"),
+    ("bf16", 3, 2, "bf16"),
+    ("fp8", 3, 3, ""),
+    ("fp8", 0, 0, ""),
+    ("", 4, 0, ""),
+])
+def test_prefix_mode_step_cutoff(mode: str, steps: int, step: int, expected: str) -> None:
+    """A non-negative step limit applies the split only to the leading steps."""
+    assert _resolve_prefix_mode(mode, steps, step) == expected
 
 
 @pytest.mark.parametrize("precision", ["fp8", "bf16"])

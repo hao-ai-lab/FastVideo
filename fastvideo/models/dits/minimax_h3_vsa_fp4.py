@@ -44,6 +44,11 @@ def _sparse_fp4_attention(api: Any, *args: Any) -> torch.Tensor:
 _BLOCK = 128
 
 
+def _resolve_prefix_mode(mode: str, steps: int, step: int) -> str:
+    """The prefix split for one denoising step; ``steps < 0`` applies it to every step."""
+    return mode if steps < 0 or step < steps else ""
+
+
 class _StageTimer:
     """Opt-in (``FASTVIDEO_H3_SP_PROFILE=1``) CUDA-event spans summed per stage over one DiT forward.
 
@@ -53,13 +58,17 @@ class _StageTimer:
 
     def __init__(self) -> None:
         self.enabled = envs.FASTVIDEO_H3_SP_PROFILE.get()
+        self.nvtx = envs.FASTVIDEO_NVTX_PROFILE.get() and torch.cuda.is_available()
         self._spans: list[tuple[str, torch.cuda.Event, torch.cuda.Event]] = []
 
     def span(self, name: str):
         import contextlib
-        if not self.enabled:
-            return contextlib.nullcontext()
-        return self._record(name)
+        if self.enabled:
+            return self._record(name)
+        if self.nvtx:
+            from fastvideo.profiler import nvtx_range
+            return nvtx_range(f"h3.{name}")
+        return contextlib.nullcontext()
 
     def _record(self, name: str):
         import contextlib
@@ -294,7 +303,9 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
         mask = _build_block_mask(scores, meta.num_prefix_tiles, sparsity, meta.exempt, meta.video_tile_spans,
                                  meta.span_sparsities)
         q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
-    prefix_mode = envs.FASTVIDEO_H3_VSA_FP4_PREFIX.get()
+    prefix_mode = _resolve_prefix_mode(envs.FASTVIDEO_H3_VSA_FP4_PREFIX.get(),
+                                       envs.FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS.get(),
+                                       int(meta.current_timestep))
     # The split needs 128-token tiles, so that a kernel query block is exactly one VSA
     # tile and the first `num_prefix_tiles` blocks are the dense prefix queries.
     prefix_rows = (meta.num_prefix_tiles * layout.tile
@@ -477,6 +488,13 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
 
     vbs = meta.variable_block_sizes
     logical = layout.n_tiles * layout.tile
+    prefix_mode = _resolve_prefix_mode(envs.FASTVIDEO_H3_VSA_FP4_PREFIX.get(),
+                                       envs.FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS.get(),
+                                       int(meta.current_timestep))
+    # The split needs 128-token tiles, so that a kernel query block is exactly one VSA
+    # tile and the first `num_prefix_tiles` blocks are the dense prefix queries.
+    prefix_rows = (meta.num_prefix_tiles * layout.tile
+                   if prefix_mode and layout.tile == _BLOCK and 0 < meta.num_prefix_tiles < layout.n_tiles else 0)
     with STAGES.span("select_mask"):
         scores = torch.matmul(_pool_tiles(q_t[:, :logical], vbs, layout.tile),
                               _pool_tiles(k_t[:, :logical], vbs, layout.tile).transpose(-2, -1)) / (dim**0.5)
@@ -485,7 +503,22 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
                                  meta.span_sparsities)
         q2k_idx, q2k_num, kv_valid, q2k_quad = api.vsa_tile_mask_to_fp4_blocks(mask, layout.tile, vbs)
     with STAGES.span("fp4_attention"):
-        out_bhsd = _sparse_fp4_attention(api, q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad)
+        if prefix_rows:
+            if not getattr(api, "KEY_LENGTH_SIZING", False):
+                raise RuntimeError("the MiniMax-H3 FP4 prefix split needs a fastvideo-kernel build whose "
+                                   "sageattn_blackwell_sparse_bshd sizes by key length; rebuild fastvideo-kernel "
+                                   "from this checkout")
+            key_valid = _half_row_valid(kv_valid, api.HALF_N)
+            head = meta.num_prefix_tiles
+            with STAGES.span("prefix_attention"):
+                prefix_out = _prefix_dense_attention(q_t, k_t, v_t, prefix_rows, logical, key_valid, prefix_mode)
+            video_out = _sparse_fp4_attention(api, q_t[:, prefix_rows:logical], k_t, v_t,
+                                              q2k_idx[:, :, head:].contiguous(), q2k_num[:, :, head:].contiguous(),
+                                              kv_valid,
+                                              None if q2k_quad is None else q2k_quad[:, :, head:].contiguous())
+            out_bhsd = torch.cat((prefix_out, video_out), dim=2)
+        else:
+            out_bhsd = _sparse_fp4_attention(api, q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad)
 
     with STAGES.span("out_pack"):
         payload, scale = _pack_seq_fp8(out_bhsd, layout.untile, world, local_rows)

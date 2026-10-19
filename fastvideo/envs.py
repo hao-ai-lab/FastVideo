@@ -597,6 +597,13 @@ FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
     "bf16 P.V, while video query tiles stay on the FP4 kernel. The fp8 variant is the validated "
     "training-time numerics and recovers most of the audio error that FP4 quantizes away. Needs "
     "128-token tiles. Empty keeps every row on the FP4 kernel.")
+FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS = EnvInt(
+    -1,
+    category="attention",
+    doc="Number of leading denoising steps that use the FP4 prefix split (see "
+    "FASTVIDEO_H3_VSA_FP4_PREFIX). -1 applies it to every step; 0 disables it. Early steps set the "
+    "global structure, so a small value keeps most of the split's quality benefit for a fraction of "
+    "its cost.")
 FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
     "",
     choices=("", "emulator-mix8", "emulator-mixmx", "emulator-qk", "emulator-bf16"),
