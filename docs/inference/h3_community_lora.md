@@ -31,7 +31,7 @@ Pass the adapter when you construct the generator. This applies to both Python a
 
 ```python
 from fastvideo import VideoGenerator
-from fastvideo.api import ComponentConfig, GeneratorConfig, PipelineSelection
+from fastvideo.api import ComponentConfig, EngineConfig, GeneratorConfig, PipelineSelection, QuantizationConfig
 
 generator = VideoGenerator.from_config(
     GeneratorConfig(
@@ -51,11 +51,17 @@ The same works for packed NVFP4 and FP8 checkpoints, for example FastH3 V2.1:
 generator = VideoGenerator.from_config(
     GeneratorConfig(
         model_path="FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer",
+        engine=EngineConfig(
+            quantization=QuantizationConfig(transformer_quant="NVFP4", layer_profile="h3_dit_vsa"),
+        ),
         pipeline=PipelineSelection(
             components=ComponentConfig(lora_path="fal/MiniMax-H3-Realism-People-LoRA", lora_strength=0.8),
         ),
     ))
 ```
+
+Packed NVFP4 exports require an explicit quantization profile. V2.1 uses `h3_dit_vsa` for attention, MLP, and
+compression-gate weights; the FFN-only V2 export uses `h3_dit_ffn`.
 
 The FastH3 example scripts take the same options. `basic_fasth3_lora_preview.py` accepts `--lora-path` and
 `--lora-strength`, and `examples/serving/openai_fasth3_lora.yaml` shows the YAML form.
