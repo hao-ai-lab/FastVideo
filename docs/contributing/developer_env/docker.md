@@ -37,13 +37,18 @@ native ARM64 host, build the CUDA 13 DGX Spark image with:
 
 ```bash
 docker build --platform linux/arm64 -f docker/Dockerfile \
-  --build-arg TORCH_CUDA_ARCH_LIST=12.1a \
+  --build-arg TORCH_CUDA_ARCH_LIST=12.1a --build-arg INSTALL_FA4_CUTE=0 \
   -t fastvideo-dev:spark .
 ```
 
 This uses the prebuilt Linux ARM64 FlashAttention wheel. FastVideo's in-tree
 CUDA kernel is still compiled for `sm_121a` as part of the image build, including
 the FP4 attention kernels that `FASTVIDEO_H3_VSA_FP4=1` uses.
+
+`INSTALL_FA4_CUTE=0` (set for the published DGX Spark image) leaves
+out the FA4 `flash_attn.cute` overlay: FA4 supports SM 9/10/11 only, and its pinned
+`nvidia-cutlass-dsl` would break FlashInfer, which the NVFP4 paths need. FA2 is
+still installed.
 
 ## Using the container
 
