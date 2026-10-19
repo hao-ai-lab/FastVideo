@@ -80,6 +80,9 @@ jobs:
             torch_cuda_arch_list:
               amd64: '9.0a'
               arm64: '9.0a'
+            install_fa4_cute:
+              amd64: '1'
+              arm64: '1'
           - version: '13.0.0'
             suffix: '-cuda13.0.0'
             torch_backend: 'cu130'
@@ -88,6 +91,11 @@ jobs:
             torch_cuda_arch_list:
               amd64: '9.0a'
               arm64: '12.1a'
+            # FA4 cute does not run on GB10 (sm_12x), and its cutlass-dsl pin
+            # breaks flashinfer there; GB10 FP4 attention uses fastvideo-kernel.
+            install_fa4_cute:
+              amd64: '1'
+              arm64: '0'
         architecture:
           - name: amd64
             runner: ubuntu-latest
@@ -107,6 +115,7 @@ jobs:
         CUDA_VERSION=${{ matrix.cuda.version }}
         UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
         TORCH_CUDA_ARCH_LIST=${{ matrix.cuda.torch_cuda_arch_list[matrix.architecture.name] }}
+        INSTALL_FA4_CUTE=${{ matrix.cuda.install_fa4_cute[matrix.architecture.name] }}
         CMAKE_BUILD_PARALLEL_LEVEL=${{ matrix.cuda.cmake_build_parallel_level }}
         FLASH_ATTN_WHEEL_TAG=${{ matrix.cuda.fa_tag }}
         FLASH_ATTN_WHEEL_RELEASE=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.17
