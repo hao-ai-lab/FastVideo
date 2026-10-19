@@ -23,6 +23,7 @@ torch._dynamo.config.recompile_limit = 16
 _SIDE_BRANCH_CHUNK_BYTES = 256 * 1024 * 1024
 
 
+@torch.library.custom_op("fastvideo::lora_add_low_rank_inplace", mutates_args=("out", ))
 def _add_low_rank_inplace(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tensor, lora_b: torch.Tensor,
                           scale: float) -> None:
     """Add ``scale * B(Ax)`` into ``out`` without a second full-size activation."""
@@ -40,6 +41,12 @@ def _add_low_rank_inplace(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tens
         if update.dtype != out_rows.dtype:
             update = update.to(dtype=out_rows.dtype)
         out_rows[start:stop].add_(update)
+
+
+@_add_low_rank_inplace.register_fake
+def _add_low_rank_inplace_fake(out: torch.Tensor, x: torch.Tensor, lora_a: torch.Tensor, lora_b: torch.Tensor,
+                               scale: float) -> None:
+    return None
 
 
 def requires_side_branch(layer: nn.Module) -> bool:
@@ -152,9 +159,7 @@ class BaseLayerWithLoRA(nn.Module):
                 scale *= float(self.lora_alpha) / float(self.lora_rank)  # type: ignore[arg-type]
             out, output_bias = self.base_layer(x)
             if self.side_branch:
-                # Leave the compiled base call, then add the update in token chunks. One full-size delta does not fit
-                # beside the packed output on a 32 GB card once reference tokens lengthen the sequence.
-                torch._dynamo.graph_break()
+                # Keep chunk temporaries opaque to Inductor so fullgraph capture cannot retain a full-size delta.
                 _add_low_rank_inplace(out, x, lora_A_sliced, lora_B_sliced, scale)
                 return out, output_bias
             delta = x @ lora_A_sliced.transpose(0, 1) @ lora_B_sliced.transpose(0, 1)

@@ -111,9 +111,10 @@ dense bf16 transformer. You do not load the LoRA as a separate resident copy of 
   pruned model.
 - Only low-rank factors are converted. Dense `.diff` and `.set_weight` payloads follow the existing
   [FastH3 adapter](fasth3-distilled.md) path and must be given at construction.
-- LoRA targets the attention projections, the feed-forward projections, and the AdaLN projections of the
-  transformer and token refiner. Boundary projections (`audio_patch_proj`, `condition_proj`, `final_layer.*`) are
-  mapped by name but are not adapted; they appear in the log as unmatched keys.
+- LoRA targets the attention, feed-forward, and AdaLN projections of the transformer and token refiner, plus
+  the final AdaLN projection (`final_layer.adaln_proj.linear`). The input/output projections (`audio_patch_proj`,
+  `condition_proj`, `final_layer.video_out`, `final_layer.audio_out`) are mapped by name but are not adapted;
+  they appear in the log as unmatched keys.
 - A side-branch layer holds one adapter at a time; accumulating a second adapter on a packed layer raises an error.
 - Adapters trained against another base model are not checked for semantic compatibility. FastVideo verifies layer
   names and tensor shapes only.

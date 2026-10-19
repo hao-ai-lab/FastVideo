@@ -95,6 +95,49 @@ def test_side_branch_chunked_update_matches_the_full_product(monkeypatch: pytest
     torch.testing.assert_close(out.float(), expected, atol=0.15, rtol=0.05)
 
 
+@pytest.mark.parametrize("backend", ["eager", "inductor"])
+def test_side_branch_chunked_update_compiles_fullgraph(monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
+    if backend == "inductor" and not torch.cuda.is_available():
+        pytest.skip("Inductor execution requires a CUDA GPU for this regression")
+    device = torch.device("cuda" if backend == "inductor" else "cpu")
+    monkeypatch.setattr(torch._dynamo.config, "disable", False)
+    monkeypatch.setattr(lora_linear, "_SIDE_BRANCH_CHUNK_BYTES", 64)
+    torch._dynamo.reset()
+    base = _packed_linear().to(device)
+    packed_before = base._nvfp4_weight.clone()
+    layer = get_lora_layer(base)
+    a, b = (factor.to(device) for factor in _factors())
+    layer.set_lora_weights(a, b, lora_alpha=8, strength=0.75)
+
+    class Block(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.proj = layer
+
+        def forward(self, x):
+            return self.proj(x)[0] + x[..., :OUT]
+
+    block = Block()
+    compiled = torch.compile(block, backend=backend, fullgraph=True)
+    try:
+        with torch.inference_mode():
+            for tokens in (5, 7):
+                x = torch.randn(3, tokens, IN, device=device, dtype=torch.bfloat16)
+                base_out = base(x)[0].float()
+                delta = x.float() @ a.bfloat16().float().T @ b.bfloat16().float().T
+                expected = base_out + 0.75 * (8 / RANK) * delta + x[..., :OUT].float()
+                out = compiled(x)
+                torch.testing.assert_close(out.float(), expected, atol=0.2, rtol=0.05)
+            layer.lora_strength = 0.0
+            torch.testing.assert_close(compiled(x), base(x)[0] + x[..., :OUT], rtol=0, atol=0)
+            layer.lora_strength = 0.5
+            expected = base_out + 0.5 * (8 / RANK) * delta + x[..., :OUT].float()
+            torch.testing.assert_close(compiled(x).float(), expected, atol=0.2, rtol=0.05)
+        assert torch.equal(base._nvfp4_weight, packed_before)
+    finally:
+        torch._dynamo.reset()
+
+
 def test_side_branch_matches_base_plus_scaled_low_rank_product() -> None:
     base = _packed_linear()
     layer = get_lora_layer(base)
