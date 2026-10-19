@@ -8,9 +8,9 @@
 # teacher is the same checkpoint in bf16.
 #
 # See docs/training/minimax_h3_fp4_qad.md for the recipe shared with the V2
-# (V2.1 Consumer) profile, calibration, and the checkpoint contract.
+# (T2AV QAD) profile, calibration, and the checkpoint contract.
 #
-# Released result: FastVideo/FastH3-Omni-NVFP4-QAD-v2 (step 120 of 200).
+# Released result: FastVideo/FastH3-OmniRef-NVFP4-QAD (step 120 of 200).
 # `init_from` is the calibrated OmniRef checkpoint used as QAD step 0,
 # not that released result. The calibrated amax table is vendored under
 # examples/train/calibration/fasth3/ and pinned by sha256 below.

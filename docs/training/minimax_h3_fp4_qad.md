@@ -6,14 +6,14 @@ the FastH3 (MiniMax-H3) family. One recipe covers two model profiles:
 | Profile | Model plugin | Task | Sampling | VSA tile |
 |---|---|---|---|---|
 | OmniRef | `omniref_pdd.MiniMaxH3OmniRefPDDModel` | Ref2VA | 8-forward PDD ladder | 128 |
-| V2 / V2.1 Consumer | `v2_t2v.MiniMaxH3V2T2VModel` | T2VA | 8-step DMD | 64 |
+| V2 T2AV QAD | `v2_t2v.MiniMaxH3V2T2VModel` | T2VA | 8-step DMD | 64 |
 
 Both profiles use the same shared recipe: NVFP4 W4A4 linears in all 50 blocks,
 the FP4 sparse-attention emulator, and the same objective and guards. QAD
 trains the student against a frozen bf16 teacher so that quantization error is
 absorbed by the weights instead of appearing as drift, ghosting or audio loss
-at inference. OmniRef's published v2 checkpoint includes FP4 attention; the
-published V2.1 checkpoint predates it and keeps BF16 VSA attention (see
+at inference. The published OmniRef QAD checkpoint includes FP4 attention; the
+published FastH3-QAD-v2 checkpoint predates it and keeps BF16 VSA attention (see
 [Released checkpoints](#released-checkpoints)).
 
 The runnable configs are:
@@ -25,20 +25,20 @@ The runnable configs are:
 
 | Role | Checkpoint |
 |---|---|
-| OmniRef QAD v2 result | `FastVideo/FastH3-Omni-NVFP4-QAD-v2` |
-| V2.1 result | `FastVideo/FastH3-QAD-v2` |
+| OmniRef QAD result | `FastVideo/FastH3-OmniRef-NVFP4-QAD` |
+| FastH3-QAD-v2 result | `FastVideo/FastH3-QAD-v2` |
 | V2 bf16 teacher / starting weights | `FastVideo/FastVideo-FastH3-8-Step-V2` |
 | NVFP4 consumer baseline | `FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer` |
 
 The OmniRef config starts from the **calibrated OmniRef checkpoint used as QAD
-step 0**, not from the released `-v2` result; point `init_from` at that
+step 0**, not from the released OmniRef QAD result; point `init_from` at that
 checkpoint. The V2 config starts from the bf16 V2 snapshot.
 
-The published V2.1 checkpoint is the **linears-only variant** of this
+The published FastH3-QAD-v2 checkpoint is the **linears-only variant** of this
 schedule: NVFP4 W4A4 linears with BF16 VSA attention, 300 steps. The shared
 FP4 recipe on this page additionally runs the FP4 attention emulator from step
 0; it is the same training code and objective, but it does not reproduce the
-published V2.1 checkpoint bit for bit. Set
+published FastH3-QAD-v2 checkpoint bit for bit. Set
 `models.student.qad.fp4_attention.enabled: false` to get the published
 linears-only variant.
 
@@ -55,7 +55,7 @@ trained to absorb.
     entries are optional.
   - `skip_blocks` is empty: no block falls back to bf16 linears.
 - **Attention:** the FP4 sparse-attention emulator for VSA tile 128 (OmniRef)
-  or tile 64 (V2/V2.1). Two-level P quantization and K smoothing are on. The
+  or tile 64 (V2 T2AV). Two-level P quantization and K smoothing are on. The
   emulator reproduces the deployed kernel's block order and rounding on any
   CUDA GPU and provides straight-through gradients.
 - **Kept frozen:** the VSA compression gates and every norm stay at their
@@ -114,7 +114,7 @@ in the sampled output.
 
 ## Data preparation
 
-V2/V2.1 is data-free: it needs prompts and their Qwen3-VL text embeddings, not
+V2 T2AV is data-free: it needs prompts and their Qwen3-VL text embeddings, not
 VAE latents.
 
 1. Build the split manifests from prompt sources (parquet shards with a
@@ -163,7 +163,7 @@ torchrun --nnodes=4 --nproc_per_node=4 --node_rank=$NODE_RANK \
   --config examples/train/configs/knowledge_distillation/minimax_h3/omniref_nvfp4_qad.yaml
 ```
 
-V2/V2.1, 4 nodes x 4 GPUs (16-way HSDP, lr 5e-6, 300 steps):
+V2 T2AV, 4 nodes x 4 GPUs (16-way HSDP, lr 5e-6, 300 steps):
 
 ```bash
 torchrun --nnodes=4 --nproc_per_node=4 --node_rank=$NODE_RANK \
@@ -172,7 +172,7 @@ torchrun --nnodes=4 --nproc_per_node=4 --node_rank=$NODE_RANK \
   --config examples/train/configs/knowledge_distillation/minimax_h3/v2_nvfp4_qad.yaml
 ```
 
-To reproduce the published V2.1 linears-only checkpoint, disable FP4 attention
+To reproduce the published FastH3-QAD-v2 linears-only checkpoint, disable FP4 attention
 for the same schedule:
 
 ```bash
@@ -188,7 +188,7 @@ linears-only checkpoint to FP4 attention**, not a second epoch of the FP4
 stage 1 above: the source checkpoint's attention numerics were BF16, and the
 continuation needs a DCP of that linears-only model (the packed HF release is
 not one). It is therefore not part of the public reproduction path, and the
-published V2.1 checkpoint remains the linears-only result. The exact overrides
+published FastH3-QAD-v2 checkpoint remains the linears-only result. The exact overrides
 are listed at the bottom of the V2 config.
 
 ## Checkpoints
@@ -222,7 +222,7 @@ python -m fastvideo.train.entrypoint.dcp_to_diffusers \
 | `fastvideo/train/methods/knowledge_distillation/pdd_qad_recon.py` | Layer-wise reconstruction hooks |
 | `fastvideo/train/methods/knowledge_distillation/pdd_qad_step0.py` | Step-0 baseline cache |
 | `fastvideo/train/models/minimax_h3/omniref_pdd.py` | OmniRef Ref2VA profile |
-| `fastvideo/train/models/minimax_h3/v2_t2v.py` | V2/V2.1 T2VA profile |
+| `fastvideo/train/models/minimax_h3/v2_t2v.py` | V2 T2AV profile |
 | `fastvideo/layers/quantization/nvfp4_qad.py` | NVFP4 linear emulation and STE |
 | `fastvideo/attention/backends/fp4_vsa_qat.py` | VSA fine-attention override |
 | `fastvideo-kernel/python/fastvideo_kernel/triton_kernels/attn_qat_vsa_train.py` | Tile 64/128 FP4 block-sparse Triton kernel |
@@ -246,8 +246,8 @@ Released reference points (lower is better):
 
 | Run | Metric | Baseline | Selected |
 |---|---|---|---|
-| V2.1 (linears-only) | mean per-forward x0 rel-L2 | 0.431 | 0.351 (video 0.382, audio 0.319) |
-| OmniRef QAD v2 | teacher-forced score | 0.362 | 0.303 at step 120 (video 0.198, audio 0.409) |
+| FastH3-QAD-v2 (linears-only) | mean per-forward x0 rel-L2 | 0.431 | 0.351 (video 0.382, audio 0.319) |
+| OmniRef QAD | teacher-forced score | 0.362 | 0.303 at step 120 (video 0.198, audio 0.409) |
 
-The V2.1 baseline is the NVFP4 Consumer model before QAD; the OmniRef baseline
+The FastH3-QAD-v2 baseline is the NVFP4 Consumer model before QAD; the OmniRef baseline
 is the calibrated checkpoint at QAD step 0.

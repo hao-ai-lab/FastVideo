@@ -1,4 +1,4 @@
-# FastH3 V2 (V2.1 Consumer) NVFP4 QAD (the shared FP4 QAD recipe, T2VA profile).
+# FastH3 V2 NVFP4 QAD (the shared FP4 QAD recipe, T2VA profile).
 #
 # Student: V2 bf16 weights with the deployed NVFP4 numerics active from step 0:
 # NVFP4 W4A4 q/k/v/out plus FFN fc_in/fc_out in all 50 blocks, and the FP4
