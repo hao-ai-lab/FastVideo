@@ -39,6 +39,17 @@ def _rank() -> int:
     return 0
 
 
+_CPU_GROUP: Any = None
+
+
+def _cpu_group() -> Any:
+    """A gloo group over all ranks (created once, collectively) for checkpoint coordination."""
+    global _CPU_GROUP
+    if _CPU_GROUP is None and dist.is_available() and dist.is_initialized():
+        _CPU_GROUP = dist.new_group(backend="gloo")
+    return _CPU_GROUP
+
+
 def _barrier() -> None:
     if dist.is_available() and dist.is_initialized():
         dist.barrier()
@@ -272,6 +283,33 @@ class CheckpointManager:
         self._last_saved_step = step
 
         self._cleanup_old_checkpoints()
+
+    def save_tagged(self, tag: str, step: int) -> None:
+        """Save the trainable roles' model weights only to ``<output_dir>/<tag>`` (overwritten).
+
+        Tagged directories are not ``checkpoint-<step>`` and are never pruned;
+        they hold no optimizer state (resume from regular checkpoints).
+        """
+        # A leading alphanumeric excludes "." and ".." (the run directory and its parent, which rmtree would delete).
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", tag) or _CHECKPOINT_DIR_RE.match(tag):
+            raise ValueError(f"invalid checkpoint tag {tag!r}")
+        tagged_dir = Path(self.output_dir) / tag
+        if tagged_dir.resolve().parent != Path(self.output_dir).resolve():
+            raise ValueError(f"checkpoint tag {tag!r} does not name a directory directly inside {self.output_dir}")
+        dcp_dir = tagged_dir / "dcp"
+        if _rank() == 0:
+            if tagged_dir.exists():
+                shutil.rmtree(tagged_dir)
+            os.makedirs(dcp_dir, exist_ok=True)
+            self._write_metadata(tagged_dir, step)
+            logger.info("Saving %s weights (step %d) to %s", tag, step, tagged_dir)
+        _barrier()
+        states = {key: value for key, value in self.method.checkpoint_state().items() if key.startswith("roles.")}
+        # Coordinate over a CPU group: DCP's metadata gather over NCCL needs device memory, and right after an
+        # evaluation the GPUs can be nearly full (seen as "NCCL Error 1: unhandled cuda error" in gather).
+        torch.cuda.empty_cache()
+        dcp.save(states, checkpoint_id=str(dcp_dir), process_group=_cpu_group())
+        _barrier()
 
     def _write_metadata(
         self,

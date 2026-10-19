@@ -281,14 +281,28 @@ class Trainer:
                 method,
                 iteration=step,
             )
+            last_step = step
+
+            # Opt-in method hooks: a tagged checkpoint (e.g. the best evaluation
+            # so far) and an early stop (e.g. guardrail patience exhausted).
+            request_hook = getattr(method, "consume_checkpoint_request", None)
+            tag = request_hook() if callable(request_hook) else None
+            if tag and checkpoint_manager is not None:
+                checkpoint_manager.save_tagged(str(tag), step)
+            if bool(getattr(method, "stop_requested", False)):
+                if self.global_rank == 0:
+                    self.tracker.log({"stopped_early_at": float(step)}, step)
+                break
+        else:
+            last_step = max_steps
 
         self.callbacks.on_train_end(
             method,
-            iteration=max_steps,
+            iteration=last_step,
         )
 
         if checkpoint_manager is not None:
-            checkpoint_manager.save_final(max_steps)
+            checkpoint_manager.save_final(last_step)
 
         self.performance_monitor.close()
         self.tracker.finish()

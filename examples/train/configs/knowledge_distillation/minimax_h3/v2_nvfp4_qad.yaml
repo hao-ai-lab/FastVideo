@@ -1,0 +1,137 @@
+# FastH3 V2 (V2.1 Consumer) NVFP4 QAD (the shared FP4 QAD recipe, T2VA profile).
+#
+# Student: V2 bf16 weights with the deployed NVFP4 numerics active from step 0:
+# NVFP4 W4A4 q/k/v/out plus FFN fc_in/fc_out in all 50 blocks, and the FP4
+# sparse-attention emulator at VSA tile 64. The VSA compression gates and every
+# norm stay frozen at the V2 bf16 values. The teacher is the same weights in
+# bf16. Middle-block token compression is disabled: pure QAD.
+#
+# This is one recipe with two profiles; see docs/training/minimax_h3_fp4_qad.md
+# for the shared objective, evaluation and checkpoint contract, and for the
+# OmniRef (Ref2VA, tile 128) config.
+#
+# Paths are placeholders. Fill in the bf16 V2 model, the calibration table
+# shipped with it, the latent manifests and the output dir.
+models:
+  student:
+    _target_: fastvideo.train.models.minimax_h3.v2_t2v.MiniMaxH3V2T2VModel
+    init_from: data/models/FastH3-V2-train
+    trainable: true
+    enable_gradient_checkpointing_type: full
+    qad:
+      enabled: true
+      linears:
+        enabled: true
+        amax_json: data/calibration/amax-consumer.json
+        # Attention and gate linears use the unit activation scale; only the
+        # FFN linears read their calibrated amax from this table.
+        attention: true
+        gate: true
+        ffn: true
+        skip_blocks: []
+        amax_sha256: null
+      fp4_attention:
+        enabled: true
+        two_level_p: true
+        smooth_k: true
+        first_block_max_floor: null
+    compression:
+      enabled: false
+      start: 3
+      end: 41
+      mode: subsample
+    data:
+      train_manifest: data/fasth3-v2/train.jsonl
+      eval_manifest: data/fasth3-v2/eval.jsonl
+      width: 832
+      height: 480
+      num_frames: 124
+    # Only the projections and FFN linears train: the same set the deployed
+    # NVFP4 export quantizes. Gates, norms and modulation stay frozen.
+    trainable_patterns: transformer_blocks\.\d+\.(attn\.(to_q|to_k|to_v|to_out)|ff\.(fc_in|fc_out))\.
+  teacher:
+    _target_: fastvideo.train.models.minimax_h3.v2_t2v.MiniMaxH3V2T2VModel
+    init_from: data/models/FastH3-V2-train
+    trainable: false
+
+method:
+  _target_: fastvideo.train.methods.knowledge_distillation.pdd_qad.OmniRefPDDQADMethod
+  video_weight: 1.0
+  audio_weight: 1.0
+  rollout_fraction: 0.25
+  rollout_start_step: 20
+  rungs_per_row: 4
+  eval_every: 25
+  full_eval_every: 50
+  patience: 3
+  fidelity_tolerance: 0.05
+  require_bitwise_init: true
+  save_best: true
+  select_metric: score
+  eval_save_dir: outputs/v2_1_nvfp4_qad/samples
+  objective: output+recon
+  recon_lambda: 1.0
+  recon_normalize: step0
+  max_rollout_rows: 8
+  noise_floor_eval: true
+  # A checkpoint is eligible for "best" only if audio stays inside its
+  # step-0 guardrail; the ELBO-style score alone can trade audio for video.
+  eligibility_keys:
+  - endpoint/audio
+  - x0_rel_l2/audio/mean
+  step0_cache: outputs/v2_1_nvfp4_qad/step0_cache.json
+
+training:
+  distributed:
+    num_gpus: 4
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 4
+    pin_cpu_memory: false
+  data:
+    train_batch_size: 1
+    seed: 1234
+  optimizer:
+    learning_rate: 5.0e-06
+    betas: [0.9, 0.999]
+    eps: 1.0e-08
+    weight_decay: 0.0
+    lr_scheduler: cosine_with_min_lr
+    lr_warmup_steps: 0
+    min_lr_ratio: 1.0
+  loop:
+    max_train_steps: 300
+    gradient_accumulation_steps: 1
+  checkpoint:
+    output_dir: outputs/v2_1_nvfp4_qad
+    training_state_checkpointing_steps: 50
+    checkpoints_total_limit: 1
+    resume_from_checkpoint: ''
+  tracker:
+    trackers: [wandb]
+    project_name: fasth3-v2-nvfp4-qad
+    run_name: v2-nvfp4-qad
+  model:
+    enable_gradient_checkpointing_type: full
+  dit_precision: fp32
+  vsa_sparsity: 0.0
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+pipeline: {}
+
+# Continuation stage (optional). If the released V2.1 checkpoint was refined
+# past the 300-step stage above, it was resumed from that stage's `best` DCP
+# with the same numerics and a lower learning rate. The stage keeps the full
+# recipe above and changes only these knobs:
+#
+#   method.init_student_dcp=outputs/v2_1_nvfp4_qad/best
+#   training.optimizer.learning_rate=1.5e-06
+#   training.loop.max_train_steps=300
+#   training.distributed.num_gpus=16
+#   training.distributed.hsdp_shard_dim=16
+#   training.checkpoint.output_dir=outputs/v2_1_nvfp4_qad_continuation
