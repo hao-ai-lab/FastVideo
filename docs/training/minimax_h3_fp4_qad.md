@@ -26,7 +26,7 @@ The runnable configs are:
 | Role | Checkpoint |
 |---|---|
 | OmniRef QAD v2 result | `FastVideo/FastH3-Omni-NVFP4-QAD-v2` |
-| V2.1 result | `FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer` |
+| V2.1 result | `FastVideo/FastH3-QAD-v2` |
 | V2 bf16 teacher / starting weights | `FastVideo/FastVideo-FastH3-8-Step-V2` |
 | NVFP4 consumer baseline | `FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer` |
 
