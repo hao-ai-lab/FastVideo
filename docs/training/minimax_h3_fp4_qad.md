@@ -185,7 +185,7 @@ The internal follow-up that this recipe tracks started from a linears-only
 300-step DCP, enabled FP4 attention, and trained 300 more steps at lr 1.5e-6
 with no warmup and a constant LR on 16 GPUs. It is an **adaptation of the
 linears-only checkpoint to FP4 attention**, not a second epoch of the FP4
-stage 1 above: the first stage's attention numerics were BF16, and the
+stage 1 above: the source checkpoint's attention numerics were BF16, and the
 continuation needs a DCP of that linears-only model (the packed HF release is
 not one). It is therefore not part of the public reproduction path, and the
 published V2.1 checkpoint remains the linears-only result. The exact overrides
