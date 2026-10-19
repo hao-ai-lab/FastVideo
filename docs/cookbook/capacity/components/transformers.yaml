@@ -11,7 +11,7 @@ transformers:
       hidden_size: 1536
       ffn_size: 8960
       patch_size: [1, 2, 2]
+      gated_ffn: false
     sources:
-      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/blob/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/transformer/config.json
-      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/blob/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/transformer/diffusion_pytorch_model.safetensors
+      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/tree/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/transformer
       - https://github.com/hao-ai-lab/FastVideo/blob/81b73f6b88b18803a24510a336b0bae1b0c2c4ef/fastvideo/models/wan/transformer.py

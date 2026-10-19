@@ -211,7 +211,7 @@ recipe needs it. It is not implemented in this change:
   sibling fields. The current LTX2 baseline fixes refinement on and uses 64-pixel
   dimensions accordingly.
 
-The [capacity metadata catalog](../contributing/capacity_metadata.md) supplies
+The [capacity metadata catalog](../contributing/capacity_estimation.md) supplies
 shared hardware/component facts and optional recorded runs through separate
 static loaders. Optional `capacity` sections extend existing model manifests;
 model identity and example configurations are derived from their deployments

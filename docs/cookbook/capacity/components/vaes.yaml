@@ -8,12 +8,14 @@ vaes:
     geometry:
       temporal_compression: 4
       spatial_compression: 8
-      vae_decoder_channels: 96
-    # FastWan and vanilla Wan tensor names/shapes match at these pinned checkpoint revisions.
+      latent_channels: 16 # Channels in the compressed video.
+      output_channels: 3 # Channels in the final RGB frames.
+      vae_decoder_channels: 96 # Base channel width inside the decoder.
+    # Rough, uncalibrated Wan feature/cache allowance from PR #1978; not a count of RGB frames.
+    # feature_cache_bytes ≈ multiplier * batch * vae_decoder_channels * height * width * activation_bytes.
+    # Decoded output buffers and resident weights are separate costs; cache/tiling mode affects applicability.
+    decode_feature_multiplier: 48
     sources:
-      - https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/blob/0fad780a534b6463e45facd96134c9f345acfa5b/vae/config.json
-      - https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/blob/0fad780a534b6463e45facd96134c9f345acfa5b/vae/diffusion_pytorch_model.safetensors
+      - https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/tree/0fad780a534b6463e45facd96134c9f345acfa5b/vae
       - https://github.com/hao-ai-lab/FastVideo/blob/81b73f6b88b18803a24510a336b0bae1b0c2c4ef/fastvideo/models/wan/pipeline_config.py
       - https://github.com/hao-ai-lab/FastVideo/blob/81b73f6b88b18803a24510a336b0bae1b0c2c4ef/fastvideo/models/wan/vae.py
-      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/blob/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/vae/config.json
-      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/blob/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/vae/diffusion_pytorch_model.safetensors

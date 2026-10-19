@@ -5,11 +5,11 @@ for authors integrating the calculator proposal in
 [PR #1978](https://github.com/hao-ai-lab/FastVideo/pull/1978/changes).
 It adds no calculator API. **TODO: delete this exact file,
 `docs/cookbook/capacity-api-contract.review.md`, and its discoverability link in
-`docs/contributing/capacity_metadata.md` when integration lands and essential
+`docs/contributing/capacity_estimation.md` when integration lands and essential
 stable API behavior has moved into that contributor guide.** Keep the API
 modules, authored metadata, and catalog generation.
 
-The [contributor guide](../contributing/capacity_metadata.md) owns authoring and
+The [contributor guide](../contributing/capacity_estimation.md) owns authoring and
 recorded-run requirements. The implementation is
 [`cookbook-capacity.mjs`](../js/cookbook-capacity.mjs); generated JSON is build
 output, not a second source to edit.
@@ -106,13 +106,43 @@ been expanded, retaining its `ref`:
 | `vae` | `wan2.1-vae-decoder` | `vae` | 73,296,659 |
 
 Components also have `name`, `sources`, and optional `block_count`,
-`block_parameter_count`, `loaded_subset`, and `geometry`. Counts are numbers
+`block_parameter_count`, `loaded_subset`, `geometry`, and VAE-only
+`decode_feature_multiplier`. Counts are numbers
 for the loaded subset. The transformer has 30 blocks with 1,464,046,080 block
-parameters; its geometry is `{hidden_size: 1536, ffn_size: 8960,
-patch_size: [1, 2, 2]}`. The VAE geometry is `{temporal_compression: 4,
-spatial_compression: 8, vae_decoder_channels: 96}`. The text encoder has no
-geometry object in this record. Optional `alternatives`, when authored, are
-expanded component objects; the loader does not select one.
+parameters; its geometry includes `hidden_size: 1536`, `ffn_size: 8960`,
+`patch_size: [1, 2, 2]`, and `gated_ffn: false`. The text encoder records weight
+and block counts and its loaded subset, with no geometry object. Detailed
+encoder geometry remains optional for future activation rules. VAE geometry is:
+
+```javascript
+{
+  temporal_compression: 4,
+  spatial_compression: 8,
+  latent_channels: 16,
+  output_channels: 3,
+  vae_decoder_channels: 96,
+}
+```
+
+Compression determines the latent grid. Optional `latent_channels` sizes the
+compressed buffer; `output_channels` counts final decoded channels, not raw
+convolution channels before any unpatching. Neither changes video-token count.
+Decoder width scales decode working memory. The VAE exports an optional
+top-level `decode_feature_multiplier: 48`, a positive finite number supplying
+an **uncalibrated feature/cache heuristic** borrowed from PR #1978. It means
+equivalent internal feature buffers, not 48 RGB frames or an architecture-config
+fact. The builder preserves omission rather than supplying a default. See the
+[decode feature multiplier](../contributing/capacity_estimation.md#vae-decode-feature-multiplier)
+for its approximate formula and limits. Output/merge buffers and resident
+weights remain separate. Actual batch, size, precision, cache/tiling mode,
+buffer placement, and workspace still need execution-specific rules; catalog
+loading does not resolve them or establish full VAE peak coverage.
+See the
+[authoring reference](../contributing/capacity_estimation.md#authoring-reference)
+for field meanings and validation. Tile/cache/precision selections remain
+execution inputs from native configuration and runtime defaults, not component
+geometry. Optional `alternatives`, when authored, are expanded component objects;
+the loader does not select one.
 
 Each manifest deployment becomes an example. Its `defaults` YAML is resolved
 into `base_config`; its launch environment becomes `env`. FastWan currently has:
@@ -166,8 +196,10 @@ support**. Missing capability metadata means unknown.
 ## Illustrative bridge to PR #1978
 
 The following is **consumer-side illustration, not an implemented/exported
-adapter**. It matches the proposal's flat geometry/component array and hardware
-shape at [revision 349cc0b](https://github.com/Ishxn20/FastVideo/blob/349cc0b184ffcb10027234bd86b53316a93f580b/docs/js/cookbook-memory.mjs#L168).
+adapter**. It illustrates the proposal's flat geometry/component array and hardware
+shape at [revision 349cc0b](https://github.com/Ishxn20/FastVideo/blob/349cc0b184ffcb10027234bd86b53316a93f580b/docs/js/cookbook-memory.mjs#L168),
+passing through optional component metadata for later rules. This does not
+implement consumption of `decode_feature_multiplier` in that proposal.
 Do not pass this output to an estimator until its coverage has been checked.
 `runtimePrecision` must be supplied from actual execution resolution; never
 infer weight or activation precision from parameter counts or geometry.
@@ -185,6 +217,8 @@ function illustrateInputs(model, device, runtimePrecision) {
       parameter_count: component.parameter_count,
       block_count: component.block_count,
       block_parameter_count: component.block_parameter_count,
+      geometry: component.geometry,
+      decode_feature_multiplier: component.decode_feature_multiplier,
       dtype: precision.dtype,
       activation_dtype: precision.activation_dtype,
     };
@@ -204,6 +238,12 @@ function illustrateInputs(model, device, runtimePrecision) {
   };
 }
 ```
+
+When supplied, per-component geometry preserves encoder dimensions without
+colliding with transformer dimensions in the flat model geometry. The initial
+encoder inventory contains weight counts only; an approximate encoding-stage
+allowance must be explicit rather than deriving zero activations from absent
+geometry. Detailed encoder rules can consume optional geometry later.
 
 This illustration is specific to the shown Wan composition. Quantized parameter
 subsets, retained original weights, streaming/offload behavior, batching,

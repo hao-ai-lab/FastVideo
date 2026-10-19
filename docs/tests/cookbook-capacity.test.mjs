@@ -61,14 +61,19 @@ function fixture(t) {
         parameter_count: "1_418_996_800",
         block_count: 30,
         block_parameter_count: "1_393_221_120",
-        geometry: { hidden_size: 1536, ffn_size: 8960, patch_size: [1, 2, 2] },
+        geometry: { hidden_size: 1536, ffn_size: 8960, patch_size: [1, 2, 2], gated_ffn: false },
         sources: [SOURCE],
       },
     },
   };
   const encoders = {
     encoders: {
-      "example-encoder": { name: "Fixture encoder", parameter_count: 1000, sources: [SOURCE] },
+      "example-encoder": {
+        name: "Fixture encoder",
+        parameter_count: 1000,
+        geometry: { hidden_size: 32, ffn_size: 128, num_attention_heads: 4, attention_head_dim: 8, gated_ffn: true },
+        sources: [SOURCE],
+      },
     },
   };
   const vaes = {
@@ -77,7 +82,14 @@ function fixture(t) {
         name: "Fixture VAE decoder",
         parameter_count: 2000,
         loaded_subset: "Decoder only",
-        geometry: { temporal_compression: 4, spatial_compression: 8, vae_decoder_channels: 96 },
+        geometry: {
+          temporal_compression: 4,
+          spatial_compression: 8,
+          latent_channels: 16,
+          output_channels: 3,
+          vae_decoder_channels: 96,
+        },
+        decode_feature_multiplier: 48,
         sources: [SOURCE],
       },
     },
@@ -306,6 +318,113 @@ test("Wan model geometry is complete, while other families can catalog component
   assert.equal(buildCapacityCatalog({ root: f.root }).models[0].memory_rules, "future-family");
 });
 
+test("VAE geometry validates compression, latent/output channels and decoder width", (t) => {
+  const f = fixture(t);
+  const vae = f.vaes.vaes["example-vae"];
+  const original = clone(vae.geometry);
+  for (const [key, value, expected = new RegExp(key)] of [
+    ["temporal_compression", 0],
+    ["temporal_compression", "4"],
+    ["spatial_compression", -1],
+    ["spatial_compression", 1.5],
+    ["latent_channels", 0],
+    ["latent_channels", "16"],
+    ["latent_channels", 1.5],
+    ["output_channels", 0],
+    ["output_channels", "3"],
+    ["output_channels", true],
+    ["vae_decoder_channels", 0],
+    ["vae_decoder_channels", true],
+    ["vae_decoder_channels", 9007199254740992, /browser-safe range/],
+  ]) {
+    vae.geometry = { ...clone(original), [key]: value };
+    f.save();
+    assert.throws(() => buildCapacityCatalog({ root: f.root }), expected, `${key}: ${JSON.stringify(value)}`);
+  }
+});
+
+test("gated FFN metadata requires booleans for both encoders and transformers", (t) => {
+  const f = fixture(t);
+  for (const component of [transformer(f), f.encoders.encoders["example-encoder"]]) {
+    for (const value of ["true", 1, null, {}]) {
+      component.geometry.gated_ffn = value;
+      f.save();
+      assert.throws(() => buildCapacityCatalog({ root: f.root }), /gated_ffn.*boolean/);
+    }
+    component.geometry.gated_ffn = false;
+  }
+  f.save();
+  const { components } = buildCapacityCatalog({ root: f.root }).models[0];
+  assert.equal(components.transformer.geometry.gated_ffn, false);
+  assert.equal(components.text_encoder.geometry.gated_ffn, false);
+});
+
+test("VAE decode feature multipliers require positive finite numbers and a VAE component", (t) => {
+  const f = fixture(t);
+  const vae = f.vaes.vaes["example-vae"];
+  for (const value of [0, -1, NaN, Infinity, "48", null, true, {}, []]) {
+    vae.decode_feature_multiplier = value;
+    f.save();
+    assert.throws(
+      () => buildCapacityCatalog({ root: f.root }),
+      /decode_feature_multiplier.*positive finite|non-finite number/,
+    );
+  }
+  vae.decode_feature_multiplier = 48;
+  for (const component of [transformer(f), f.encoders.encoders["example-encoder"]]) {
+    component.decode_feature_multiplier = 48;
+    f.save();
+    assert.throws(() => buildCapacityCatalog({ root: f.root }), /decode_feature_multiplier is only supported for VAE/);
+    delete component.decode_feature_multiplier;
+  }
+});
+
+test("new activation fields are optional for existing catalog entries", (t) => {
+  const f = fixture(t);
+  f.vaes.vaes["example-vae"].geometry = {
+    temporal_compression: 4,
+    spatial_compression: 8,
+    vae_decoder_channels: 96,
+  };
+  delete transformer(f).geometry.gated_ffn;
+  delete f.encoders.encoders["example-encoder"].geometry;
+  delete f.vaes.vaes["example-vae"].decode_feature_multiplier;
+  f.save();
+  const { models } = buildCapacityCatalog({ root: f.root });
+  assert.equal(models.length, 1);
+  assert.equal(Object.hasOwn(models[0].components.vae, "decode_feature_multiplier"), false);
+});
+
+test("VAE geometry excludes execution settings and unused architecture details", (t) => {
+  const f = fixture(t);
+  const vae = f.vaes.vaes["example-vae"];
+  f.config.generator.pipeline.vae_tiling = true;
+  Object.assign(f.config.generator.pipeline.experimental, {
+    "vae_config.use_feature_cache": false,
+    "vae_config.tile_sample_min_height": 512,
+    "vae_config.tile_sample_min_width": 512,
+    "vae_config.tile_sample_stride_height": 384,
+    "vae_config.tile_sample_stride_width": 384,
+  });
+  f.save();
+  assert.deepEqual(buildCapacityCatalog({ root: f.root }).models[0].examples[0].base_config, f.config);
+  for (const [key, value] of [
+    ["tiling", { enabled: true }],
+    ["tile_size", [32, 32]],
+    ["use_feature_cache", true],
+    ["dtype", "bf16"],
+    ["feature_multiplier", 48],
+    ["decoder_channel_multipliers", [1, 2, 4, 4]],
+    ["unrecognized_dimension", 4],
+    ["gated_ffn", true],
+  ]) {
+    vae.geometry[key] = value;
+    f.save();
+    assert.throws(() => buildCapacityCatalog({ root: f.root }), new RegExp(`unknown key ${key}`));
+    delete vae.geometry[key];
+  }
+});
+
 test("hardware and components require source URLs and do not fix a runtime dtype", (t) => {
   const f = fixture(t);
   transformer(f).sources = [];
@@ -394,6 +513,14 @@ test("shipped FastWan capacity preserves the existing VSA and DMD serving recipe
   assert.equal(model.components.transformer.block_parameter_count, 1_464_046_080);
   assert.equal(model.components.text_encoder.parameter_count, 5_680_910_336);
   assert.equal(model.components.vae.parameter_count, 73_296_659);
+  assert.deepEqual(model.components.vae.geometry, {
+    temporal_compression: 4,
+    spatial_compression: 8,
+    latent_channels: 16,
+    output_channels: 3,
+    vae_decoder_channels: 96,
+  });
+  assert.equal(model.components.vae.decode_feature_multiplier, 48);
   assert.deepEqual(model.reference_runs, []);
 });
 
@@ -464,6 +591,10 @@ test("exports use relative URLs and browser loaders resolve them under a deploym
   assert.equal(loadedIndex.url, indexUrl);
   const model = await loadCapacityModel(loadedIndex, "example-model", { fetcher, signal });
   assert.equal(model.model_id, "Example/Video");
+  assert.deepEqual(model.components.transformer.geometry, transformer(f).geometry);
+  assert.deepEqual(model.components.text_encoder.geometry, f.encoders.encoders["example-encoder"].geometry);
+  assert.deepEqual(model.components.vae.geometry, f.vaes.vaes["example-vae"].geometry);
+  assert.equal(model.components.vae.decode_feature_multiplier, f.vaes.vaes["example-vae"].decode_feature_multiplier);
   assert.deepEqual(model.examples[0].base_config, f.config);
   const hardware = await loadCapacityHardware(loadedIndex, { fetcher, signal });
   assert.deepEqual(hardware["example-gpu"], f.hardware.hardware["example-gpu"]);

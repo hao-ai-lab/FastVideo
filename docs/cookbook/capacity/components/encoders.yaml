@@ -7,10 +7,6 @@ encoders:
     block_count: 24
     block_parameter_count: 4_630_757_376
     loaded_subset: Encoder and shared token embeddings, excluding the decoder and language modeling head.
-    # FastWan and vanilla Wan tensor names/shapes match at these pinned checkpoint revisions.
     sources:
-      - https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/blob/0fad780a534b6463e45facd96134c9f345acfa5b/text_encoder/config.json
-      - https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/blob/0fad780a534b6463e45facd96134c9f345acfa5b/text_encoder/model.safetensors.index.json
+      - https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/tree/0fad780a534b6463e45facd96134c9f345acfa5b/text_encoder
       - https://github.com/hao-ai-lab/FastVideo/blob/81b73f6b88b18803a24510a336b0bae1b0c2c4ef/fastvideo/models/encoders/t5.py
-      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/blob/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/text_encoder/config.json
-      - https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers/blob/25e7ed7f41fd8ce2fdd108688c65e8caf0ce3aef/text_encoder/model.safetensors.index.json

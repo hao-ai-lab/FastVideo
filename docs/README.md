@@ -27,6 +27,6 @@ under `assets/cookbook-config/`. Do not hand-edit or commit those outputs.
 The site preparation builds and copies them into Blume's public assets.
 See the [recipe authoring guide](contributing/cookbook_configuration.md) and
 [configuration API contract](cookbook/design.md) before changing the schema.
-The [capacity metadata guide](contributing/capacity_metadata.md) covers reusable
+The [capacity estimation guide](contributing/capacity_estimation.md) covers reusable
 hardware/component catalogs and optional recorded inference runs in existing
 model manifests.

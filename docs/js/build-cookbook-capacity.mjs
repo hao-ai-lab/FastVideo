@@ -9,9 +9,9 @@ import { CAPACITY_ROLES, validateCapacityMetadata } from "./cookbook-capacity-sc
 const ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const GROUPS = { transformers: "transformer", encoders: "encoder", vaes: "vae" };
 const GEOMETRY = {
-  transformer: ["hidden_size", "ffn_size", "patch_size", "num_attention_heads", "attention_head_dim"],
-  encoder: ["hidden_size", "ffn_size", "num_attention_heads", "attention_head_dim"],
-  vae: ["temporal_compression", "spatial_compression", "vae_decoder_channels"],
+  transformer: ["hidden_size", "ffn_size", "patch_size", "num_attention_heads", "attention_head_dim", "gated_ffn"],
+  encoder: ["hidden_size", "ffn_size", "num_attention_heads", "attention_head_dim", "gated_ffn"],
+  vae: ["temporal_compression", "spatial_compression", "latent_channels", "output_channels", "vae_decoder_channels"],
 };
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const text = (value) => typeof value === "string" && value.trim().length > 0;
@@ -102,7 +102,7 @@ function componentRecords(root, catalogDir) {
       keys(
         record,
         ["name", "parameter_count", "sources"],
-        ["block_count", "block_parameter_count", "loaded_subset", "geometry"],
+        ["block_count", "block_parameter_count", "loaded_subset", "geometry", "decode_feature_multiplier"],
         at,
       );
       requireValue(text(record.name), `${at}: name must be text`);
@@ -124,6 +124,13 @@ function componentRecords(root, catalogDir) {
       }
       if (record.loaded_subset !== undefined)
         requireValue(text(record.loaded_subset), `${at}: loaded_subset must be text`);
+      if (record.decode_feature_multiplier !== undefined) {
+        requireValue(kind === "vae", `${at}: decode_feature_multiplier is only supported for VAE components`);
+        requireValue(
+          positive(record.decode_feature_multiplier),
+          `${at}.decode_feature_multiplier: expected a positive finite number`,
+        );
+      }
       if (record.geometry !== undefined) {
         keys(record.geometry, [], GEOMETRY[kind], `${at}.geometry`);
         for (const [key, value] of Object.entries(record.geometry)) {
@@ -132,6 +139,8 @@ function componentRecords(root, catalogDir) {
               Array.isArray(value) && value.length === 3 && value.every(integer),
               `${at}: patch_size needs three positive integers`,
             );
+          else if (key === "gated_ffn")
+            requireValue(typeof value === "boolean", `${at}.geometry.${key}: expected a boolean`);
           else requireValue(integer(value), `${at}.geometry.${key}: expected a positive safe integer`);
         }
       }
