@@ -448,9 +448,10 @@ def build_generator_config(model_dir: Path,
         model_path=str(model_dir),
         engine=EngineConfig(
             num_gpus=num_gpus,
-            execution_backend="ray" if num_gpus > 1 else "mp",
+            # Multi-GPU device profiles run on Ray (the Spark pair spans two hosts).
+            execution_backend="ray" if num_gpus > 1 and profile is not None else "mp",
             # A packed NVFP4 export is replicated across GPUs; the tokens are split
-            # by sequence parallelism. Data-center checkpoints keep the FSDP path.
+            # by sequence parallelism. Data-center checkpoints keep mp and FSDP.
             use_fsdp_inference=num_gpus > 1 and profile is None,
             parallelism=ParallelismConfig(tp_size=1, sp_size=num_gpus),
             offload=offload,

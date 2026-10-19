@@ -128,8 +128,21 @@ def test_build_generator_config_leaves_trained_settings_to_checkpoint(tmp_path):
 def test_build_generator_config_multi_gpu_shards_dit(tmp_path, num_gpus, sharded):
     config = example.build_generator_config(tmp_path, num_gpus)
     assert config.engine.use_fsdp_inference is sharded
+    assert config.engine.execution_backend == "mp"
     assert config.engine.parallelism.sp_size == num_gpus
     assert config.pipeline.components.override_pipeline_cls_name == "MiniMaxH3Ref2VAModularPipeline"
+
+
+@pytest.mark.parametrize("num_gpus,backend", [(1, "mp"), (2, "ray")])
+def test_multi_gpu_profile_runs_on_ray_without_fsdp(tmp_path, num_gpus, backend):
+    config = example.build_generator_config(tmp_path, num_gpus, profile=example.DEVICE_PROFILES["spark"])
+    assert config.engine.execution_backend == backend
+    assert config.engine.use_fsdp_inference is False
+
+
+@pytest.mark.parametrize("num_gpus", [1, 4])
+def test_lossless_accel_config_keeps_mp(tmp_path, num_gpus):
+    assert example.build_generator_config(tmp_path, num_gpus, lossless_accel=True).engine.execution_backend == "mp"
 
 
 def test_default_config_offloads_the_encoders(tmp_path):
