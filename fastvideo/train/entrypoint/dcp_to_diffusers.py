@@ -382,6 +382,13 @@ def _save_role_pretrained(
                 written_weights = [legacy_name]
             logger.info("Saved %s weight artifacts: %s", module_name, written_weights)
 
+            config_overrides = getattr(modules[module_name], "inference_config_overrides", None)
+            if callable(config_overrides):
+                from fastvideo.train.utils.inference_checkpoint import _apply_config_overrides
+                overrides = config_overrides()
+                if overrides:
+                    _apply_config_overrides(module_dir / "config.json", overrides)
+
             metadata_path = dst / "fastvideo_training_export.json"
             metadata_path.write_text(
                 json.dumps(

@@ -550,9 +550,10 @@ def test_forward_tile128_route_resolved_once_per_device(tile128, monkeypatch):
     assert probes == [_CPU, _CPU]
 
 
-def test_forward_tile128_requires_no_grad(tile128):
+def test_forward_tile128_requires_native_backward(tile128, monkeypatch):
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell_backward_is_supported", lambda *_: False)
     meta = _build_r2v(sparsity=0.5, tile_size=128)
-    with pytest.raises(NotImplementedError, match="no-grad inference"):
+    with pytest.raises(RuntimeError, match="forward and backward"):
         _run_tile128(meta, requires_grad=True)
     assert tile128.calls == []
 

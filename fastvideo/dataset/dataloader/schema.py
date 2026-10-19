@@ -119,6 +119,59 @@ pyarrow_schema_t2va = pa.schema([
     pa.field("audio_sample_rate", pa.int64()),
 ])
 
+# Ref2VA training consumes the same paired target tensors as T2VA plus the
+# inference-equivalent, ordered reference presentation. Reference visual
+# latents are stored after channel-major patchification as clean [rows, 96]
+# tensors; audio latents use [rows, 32]. Keeping them precomputed avoids
+# loading either VAE or Qwen3-VL in every training worker. The ordered list
+# metadata is sufficient to rebuild exactly the same RoPE/layout contract as
+# build_ref2va_packed_sequence. `reference_noise_seed` makes the 0.999 visual
+# noise augmentation stable when a carried DMD trajectory rebuilds its batch.
+pyarrow_schema_ref2va = pa.schema([
+    pa.field("id", pa.string()),
+    # --- Target video/audio latents (may be empty for simulated rollout) ---
+    pa.field("vae_latent_bytes", pa.binary()),
+    pa.field("vae_latent_shape", pa.list_(pa.int64())),
+    pa.field("vae_latent_dtype", pa.string()),
+    pa.field("audio_latent_bytes", pa.binary()),
+    pa.field("audio_latent_shape", pa.list_(pa.int64())),
+    pa.field("audio_latent_dtype", pa.string()),
+    # --- Qwen3-VL Ref2VA presentation ---
+    pa.field("text_embedding_bytes", pa.binary()),
+    pa.field("text_embedding_shape", pa.list_(pa.int64())),
+    pa.field("text_embedding_dtype", pa.string()),
+    # Tags are stored as float32 values 0/1 for compatibility with existing
+    # packed-training rows and cast to long after model-side validation.
+    pa.field("text_token_tags_bytes", pa.binary()),
+    pa.field("text_token_tags_shape", pa.list_(pa.int64())),
+    pa.field("text_token_tags_dtype", pa.string()),
+    # --- Clean, normalized reference latent rows ---
+    pa.field("reference_video_latent_rows_bytes", pa.binary()),
+    pa.field("reference_video_latent_rows_shape", pa.list_(pa.int64())),
+    pa.field("reference_video_latent_rows_dtype", pa.string()),
+    pa.field("reference_audio_latent_rows_bytes", pa.binary()),
+    pa.field("reference_audio_latent_rows_shape", pa.list_(pa.int64())),
+    pa.field("reference_audio_latent_rows_dtype", pa.string()),
+    # --- Ordered reference geometry ---
+    pa.field("reference_media_types", pa.list_(pa.string())),
+    pa.field("reference_has_audio", pa.list_(pa.bool_())),
+    pa.field("reference_num_latent_frames", pa.list_(pa.int64())),
+    pa.field("reference_latent_heights", pa.list_(pa.int64())),
+    pa.field("reference_latent_widths", pa.list_(pa.int64())),
+    pa.field("reference_num_audio_latents", pa.list_(pa.int64())),
+    pa.field("reference_noise_seed", pa.int64()),
+    # --- Paired audio-video metadata ---
+    pa.field("file_name", pa.string()),
+    pa.field("caption", pa.string()),
+    pa.field("media_type", pa.string()),
+    pa.field("width", pa.int64()),
+    pa.field("height", pa.int64()),
+    pa.field("num_frames", pa.int64()),
+    pa.field("duration_sec", pa.float64()),
+    pa.field("fps", pa.float64()),
+    pa.field("audio_sample_rate", pa.int64()),
+])
+
 pyarrow_schema_ode_trajectory_text_only = pa.schema([
     pa.field("id", pa.string()),
     # --- Text encoder output tensor ---

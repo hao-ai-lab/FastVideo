@@ -13,6 +13,7 @@ import yaml
 from fastvideo.logger import init_logger
 from fastvideo.train.utils.training_config import (
     CheckpointConfig,
+    CrossSampleSequencePackingConfig,
     DataConfig,
     TrainingConfig,
     DistributedConfig,
@@ -380,10 +381,114 @@ def _build_training_config(
         data_path = str(raw_data_path)
 
     preprocessed_data_type = str(da.get("preprocessed_data_type", "t2v") or "t2v").strip().lower()
-    if preprocessed_data_type not in {"t2v", "t2va", "text_only", "mmaudio_features"}:
+    if preprocessed_data_type not in {"t2v", "t2va", "ref2va", "text_only", "mmaudio_features"}:
         raise ValueError("training.data.preprocessed_data_type must be one of "
-                         "{'t2v', 't2va', 'text_only', 'mmaudio_features'}, got "
+                         "{'t2v', 't2va', 'ref2va', 'text_only', 'mmaudio_features'}, got "
                          f"{preprocessed_data_type!r}")
+
+    raw_max_presentation_tokens = da.get("max_presentation_tokens")
+    if raw_max_presentation_tokens is None:
+        max_presentation_tokens = None
+    elif isinstance(raw_max_presentation_tokens,
+                    bool) or not isinstance(raw_max_presentation_tokens, int) or raw_max_presentation_tokens <= 0:
+        raise ValueError("training.data.max_presentation_tokens must be a positive integer, got "
+                         f"{raw_max_presentation_tokens!r}")
+    else:
+        max_presentation_tokens = raw_max_presentation_tokens
+
+    packing_where = "training.data.cross_sample_sequence_packing"
+    packing_raw_value = da.get("cross_sample_sequence_packing", {})
+    packing_raw = _require_mapping(packing_raw_value, where=packing_where)
+    unknown_packing_keys = set(packing_raw) - {
+        "enabled",
+        "max_joint_tokens",
+        "max_samples_per_pack",
+    }
+    if unknown_packing_keys:
+        raise ValueError(f"Unknown key(s) at {packing_where}: {sorted(unknown_packing_keys)}")
+    packing_enabled = require_bool(
+        packing_raw,
+        "enabled",
+        default=False,
+        where=f"{packing_where}.enabled",
+    )
+
+    def _strict_optional_positive_packing_int(key: str) -> int | None:
+        value = packing_raw.get(key)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{packing_where}.{key} must be a positive YAML integer, got {value!r}")
+        return value
+
+    packing_max_joint_tokens = _strict_optional_positive_packing_int("max_joint_tokens")
+    packing_max_samples_per_pack = _strict_optional_positive_packing_int("max_samples_per_pack")
+    native_shape_bucketing = require_bool(
+        da,
+        "native_shape_bucketing",
+        default=False,
+        where="training.data.native_shape_bucketing",
+    )
+    train_batch_size = int(da.get("train_batch_size", 1) or 1)
+    from fastvideo.dataset.sequence_capacity import validate_fixed_sequence_capacities
+
+    capacities = validate_fixed_sequence_capacities(da.get("fixed_sequence_capacities"))
+    if capacities:
+        if not native_shape_bucketing:
+            raise ValueError("training.data.fixed_sequence_capacities requires native_shape_bucketing: true")
+        raw_train_batch_size = da.get("train_batch_size", 1)
+        if (isinstance(raw_train_batch_size, bool) or not isinstance(raw_train_batch_size, int)
+                or raw_train_batch_size != 1):
+            raise ValueError(
+                "training.data.fixed_sequence_capacities requires train_batch_size to be the YAML integer 1")
+        if preprocessed_data_type not in {"text_only", "t2va", "ref2va"}:
+            raise ValueError("training.data.fixed_sequence_capacities supports only text_only, t2va and ref2va")
+        if packing_enabled and packing_max_joint_tokens is not None and packing_max_joint_tokens > capacities[-1]:
+            raise ValueError("cross_sample_sequence_packing.max_joint_tokens exceeds largest fixed_sequence_capacities "
+                             "value")
+    if packing_enabled:
+        if packing_max_joint_tokens is None:
+            raise ValueError(f"{packing_where}.max_joint_tokens is required when packing is enabled")
+        if not native_shape_bucketing:
+            raise ValueError(f"{packing_where} requires training.data.native_shape_bucketing: true")
+        raw_train_batch_size = da.get("train_batch_size", 1)
+        if isinstance(raw_train_batch_size, bool) or not isinstance(raw_train_batch_size, int):
+            raise ValueError(f"{packing_where} requires training.data.train_batch_size to be the YAML integer 1")
+        if train_batch_size != 1:
+            raise ValueError(f"{packing_where} requires training.data.train_batch_size: 1")
+        if preprocessed_data_type not in {"text_only", "t2va"}:
+            raise ValueError(f"{packing_where} currently supports only text_only and t2va data, got "
+                             f"{preprocessed_data_type!r}")
+
+    vsa_tile_size = int(vs.get("tile_size", 256) or 256)
+    if vsa_tile_size not in (64, 128, 256):
+        raise ValueError(f"training.vsa.tile_size must be 64, 128 or 256, got {vsa_tile_size!r}")
+    vsa_ref_keep_rate = get_optional_float(vs, "ref_keep_rate", where="training.vsa.ref_keep_rate")
+    if vsa_ref_keep_rate is not None and not 0.0 < vsa_ref_keep_rate <= 1.0:
+        raise ValueError("training.vsa.ref_keep_rate must be in (0, 1], got "
+                         f"{vsa_ref_keep_rate!r}")
+
+    save_inference_checkpoint_on_validation = require_bool(
+        ck,
+        "save_inference_checkpoint_on_validation",
+        default=False,
+        where="training.checkpoint.save_inference_checkpoint_on_validation",
+    )
+    inference_checkpoint_role = str(ck.get("inference_checkpoint_role", "student") or "").strip()
+    if save_inference_checkpoint_on_validation and not inference_checkpoint_role:
+        raise ValueError("training.checkpoint.inference_checkpoint_role must be non-empty "
+                         "when validation inference checkpointing is enabled")
+    inference_checkpoint_dtype = str(ck.get("inference_checkpoint_dtype", "bfloat16") or "bfloat16").strip().lower()
+    if inference_checkpoint_dtype not in {"bfloat16", "float16", "float32"}:
+        raise ValueError("training.checkpoint.inference_checkpoint_dtype must be one of "
+                         "['bfloat16', 'float16', 'float32'], got "
+                         f"{inference_checkpoint_dtype!r}")
+    require_complete_training_checkpoint = require_bool(
+        ck,
+        "require_complete_training_checkpoint",
+        default=False,
+        where="training.checkpoint.require_complete_training_checkpoint",
+    )
 
     peak_tflops = get_optional_float(
         perf,
@@ -418,6 +523,15 @@ def _build_training_config(
             num_width=int(da.get("num_width", 0) or 0),
             num_latent_t=int(da.get("num_latent_t", 0) or 0),
             num_frames=int(da.get("num_frames", 0) or 0),
+            native_shape_bucketing=native_shape_bucketing,
+            require_existing_parquet_cache=da.get("require_existing_parquet_cache", False),
+            fixed_sequence_capacities=list(capacities) if capacities else None,
+            max_presentation_tokens=max_presentation_tokens,
+            cross_sample_sequence_packing=CrossSampleSequencePackingConfig(
+                enabled=packing_enabled,
+                max_joint_tokens=packing_max_joint_tokens,
+                max_samples_per_pack=packing_max_samples_per_pack,
+            ),
         ),
         optimizer=OptimizerConfig(
             learning_rate=float(o.get("learning_rate", 0.0) or 0.0),
@@ -436,12 +550,25 @@ def _build_training_config(
         loop=TrainingLoopConfig(
             max_train_steps=int(lo.get("max_train_steps", 0) or 0),
             gradient_accumulation_steps=int(lo.get("gradient_accumulation_steps", 1) or 1),
+            fsdp_defer_backward_finalize=require_bool(
+                lo,
+                "fsdp_defer_backward_finalize",
+                default=False,
+                where="training.loop.fsdp_defer_backward_finalize",
+            ),
         ),
         checkpoint=CheckpointConfig(
             output_dir=str(ck.get("output_dir", "") or ""),
             resume_from_checkpoint=str(ck.get("resume_from_checkpoint", "") or ""),
+            save_inference_checkpoint_on_validation=save_inference_checkpoint_on_validation,
+            inference_checkpoint_role=inference_checkpoint_role or "student",
+            inference_checkpoint_dtype=inference_checkpoint_dtype,
+            inference_checkpoints_total_limit=ck.get("inference_checkpoints_total_limit", 0),
             training_state_checkpointing_steps=int(ck.get("training_state_checkpointing_steps", 0) or 0),
+            require_complete_training_checkpoint=require_complete_training_checkpoint,
             checkpoints_total_limit=int(ck.get("checkpoints_total_limit", 0) or 0),
+            checkpointing_start_step=int(ck.get("checkpointing_start_step", 0) or 0),
+            reset_lr_on_resume=bool(ck.get("reset_lr_on_resume", False)),
         ),
         tracker=TrackerConfig(
             trackers=list(tr.get("trackers", []) or []),
@@ -454,6 +581,8 @@ def _build_training_config(
             peak_tflops_per_gpu=peak_tflops,
         ),
         vsa_sparsity=float(vs.get("sparsity", 0.0) or 0.0),
+        vsa_ref_keep_rate=vsa_ref_keep_rate,
+        vsa_tile_size=vsa_tile_size,
         vsa_cache_tile_buf=bool(vs.get("cache_tile_buf", False) or False),
         model=ModelTrainingConfig(
             weighting_scheme=str(m.get("weighting_scheme", "uniform") or "uniform"),
@@ -463,6 +592,11 @@ def _build_training_config(
             precondition_outputs=bool(m.get("precondition_outputs", False)),
             moba_config=dict(m.get("moba_config", {}) or {}),
             enable_gradient_checkpointing_type=(m.get("enable_gradient_checkpointing_type")),
+            allow_low_precision_master_weights=bool(m.get("allow_low_precision_master_weights", False)),
+            minimax_h3_activation_offload_min_tokens=int(m.get("minimax_h3_activation_offload_min_tokens", 0)),
+            minimax_h3_student_compile=m.get("minimax_h3_student_compile", "off"),
+            minimax_h3_compile_limit_fallback=m.get("minimax_h3_compile_limit_fallback", False),
+            minimax_h3_accumulated_recompile_limit=m.get("minimax_h3_accumulated_recompile_limit", 1024),
             enable_torch_compile=bool(m.get("enable_torch_compile", False)),
             compile_train_fn=bool(m.get("compile_train_fn", False)),
             torch_compile_kwargs=dict(m.get("torch_compile_kwargs", {}) or {}),
@@ -608,3 +742,122 @@ def load_run_config(
         callbacks=callbacks,
         raw=cfg,
     )
+
+
+def parse_cfg_uncond(method_config: dict[str, Any]) -> dict[str, Any] | None:
+    """Validate ``method.cfg_uncond``, the unconditional-branch policy per channel.
+
+    Shared by DMD2 and the PDD family, whose teachers apply the same
+    classifier-free guidance contract (``{"text": "zero"}`` for MiniMax-H3).
+    ``None`` (unset) means the model's default negative-prompt conditioning.
+    """
+    raw = method_config.get("cfg_uncond")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("method_config.cfg_uncond must be a dict "
+                         f"when set, got {type(raw).__name__}")
+
+    cfg: dict[str, Any] = dict(raw)
+
+    on_missing_raw = cfg.get("on_missing", "error")
+    if on_missing_raw is None:
+        on_missing_raw = "error"
+    if not isinstance(on_missing_raw, str):
+        raise ValueError("method_config.cfg_uncond.on_missing must "
+                         "be a string, got "
+                         f"{type(on_missing_raw).__name__}")
+    on_missing = on_missing_raw.strip().lower()
+    if on_missing not in {"error", "ignore"}:
+        raise ValueError("method_config.cfg_uncond.on_missing must "
+                         "be one of {error, ignore}, got "
+                         f"{on_missing_raw!r}")
+    cfg["on_missing"] = on_missing
+
+    for channel, policy_raw in list(cfg.items()):
+        if channel == "on_missing":
+            continue
+        if policy_raw is None:
+            continue
+        if not isinstance(policy_raw, str):
+            raise ValueError("method_config.cfg_uncond values must "
+                             "be strings, got "
+                             f"{channel}="
+                             f"{type(policy_raw).__name__}")
+        policy = policy_raw.strip().lower()
+        allowed = {"keep", "zero", "drop"}
+        if channel == "text":
+            allowed = {*allowed, "negative_prompt"}
+        if policy not in allowed:
+            raise ValueError("method_config.cfg_uncond values must "
+                             "be one of "
+                             f"{sorted(allowed)}, got "
+                             f"{channel}={policy_raw!r}")
+        cfg[channel] = policy
+
+    return cfg
+
+
+def parse_rollout_mode(method_config: dict[str, Any], *, where: str = "method.rollout_mode") -> str:
+    """Parse how a distillation method obtains the student's input point.
+
+    ``simulate`` starts from fresh noise and lets the student create its own
+    trajectory, so it can run on text-only data; ``data_latent`` perturbs
+    preprocessed VAE latents at a sampled point. Returns the canonical name.
+    """
+    raw = method_config.get("rollout_mode")
+    if raw is None:
+        raise ValueError(f"{where} must be set: 'simulate' (the student's own trajectory from fresh noise) "
+                         "or 'data_latent' (noised real latents)")
+    if not isinstance(raw, str):
+        raise ValueError(f"{where} must be a string, got {type(raw).__name__}")
+    mode = raw.strip().lower()
+    if mode in ("simulate", "sim"):
+        return "simulate"
+    if mode in ("data_latent", "data", "vae_latent"):
+        return "data_latent"
+    raise ValueError(f"{where} must be one of {{simulate, data_latent}}, got {raw!r}")
+
+
+def validate_text_only_rollout(preprocessed_data_type: Any, rollout_mode: str) -> None:
+    """Text-only data carries no latents, so only simulated rollouts can consume it."""
+    if str(preprocessed_data_type).strip().lower() == "text_only" and rollout_mode != "simulate":
+        raise ValueError("training.data.preprocessed_data_type='text_only' requires "
+                         "method.rollout_mode='simulate'; data_latent rollout requires vae_latent data.")
+
+
+def uses_negative_prompt_conditioning(cfg_uncond: dict[str, Any] | None) -> bool:
+    """Whether the unconditional branch needs an encoded negative prompt."""
+    if cfg_uncond is None:
+        return True
+    text_policy = cfg_uncond.get("text", None)
+    if text_policy is None:
+        return True
+    return str(text_policy).strip().lower() == "negative_prompt"
+
+
+def parse_torch_dtype(
+    mapping: dict[str, Any],
+    key: str,
+    *,
+    default: str,
+    where: str | None = None,
+) -> Any:
+    """Read a floating-point torch dtype by short (``fp32``/``bf16``) or torch name."""
+    import torch
+
+    from fastvideo.utils import PRECISION_TO_TYPE
+
+    loc = where or key
+    raw = mapping.get(key, default)
+    if isinstance(raw, torch.dtype):
+        dtype = raw
+    else:
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError(f"{loc} must name a torch dtype, got {raw!r}")
+        name = raw.strip().lower().removeprefix("torch.")
+        dtype = PRECISION_TO_TYPE.get(name) or getattr(torch, name, None)
+    if not isinstance(dtype, torch.dtype) or not dtype.is_floating_point:
+        raise ValueError(f"{loc} must name a floating-point torch dtype (fp32, bf16, fp16, float64, ...), "
+                         f"got {raw!r}")
+    return dtype
