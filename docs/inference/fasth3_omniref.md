@@ -14,10 +14,12 @@ which has no FP4 hardware.
 
 ## Composing the model directory
 
-An OmniRef export carries only what distillation changed: `transformer_ref/`,
-the two scheduler configs and `fastvideo_inference.json`. Everything else is
-base MiniMax-H3. `basic_fasth3_omniref_pdd.py` composes them into one directory
-of symlinks and runs the stack:
+The NVFP4 checkpoint is
+[FastH3 OmniRef QAD](https://huggingface.co/FastVideo/FastH3-OmniRef-NVFP4-QAD).
+`basic_fasth3_omniref_pdd.py` accepts a complete checkpoint or a transformer-only
+export. For an export containing `transformer_ref/`, the two scheduler configs
+and `fastvideo_inference.json`, it composes the missing components from base
+MiniMax-H3 into one directory of symlinks and runs the stack:
 
 ```bash
 python examples/inference/basic/basic_fasth3_omniref_pdd.py \

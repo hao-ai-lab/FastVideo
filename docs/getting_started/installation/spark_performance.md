@@ -349,14 +349,14 @@ attention input (19,392 tokens, 56 heads, 64-token tiles) it runs in 29 ms
 against 59 ms for Triton VSA, with a relative L2 error of 0.13 versus an FP32
 reference (0.002 for Triton BF16).
 
-The V2.1 recipes, `basic_fasth3_spark_v21_nvfp4.yaml` and
-`basic_fasth3_spark_pair_v21_nvfp4.yaml`, select
+The FastH3-QAD-v2 recipes, `basic_fasth3_spark_qad_v2_nvfp4.yaml` and
+`basic_fasth3_spark_pair_qad_v2_nvfp4.yaml`, select
 `FastVideo/FastH3-QAD-v2` explicitly. The older
 `v2` files continue to select V2. Both recipes enable FP4 in YAML through
 `pipeline.experimental.h3_vsa_fp4.enabled`; shell flags are not required for
-that selection. V2.1 keeps its 64-token tiles and sparsity 0.8, and protects
+that selection. FastH3-QAD-v2 keeps its 64-token tiles and sparsity 0.8, and protects
 text and audio query rows with FP8 Q/K and BF16 dense attention. These are
-inference settings. The published V2.1 checkpoint used linears-only QAD with
+inference settings. The published FastH3-QAD-v2 checkpoint used linears-only QAD with
 BF16 attention, so this does not reproduce its training attention numerics.
 
 The earlier unprotected FP4 path is faster (on a 5090, 480p5 8L

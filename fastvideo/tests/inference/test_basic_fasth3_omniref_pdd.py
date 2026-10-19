@@ -267,7 +267,7 @@ def test_main_preserves_explicit_dimensions_before_profile_defaults(tmp_path, mo
 
 
 @pytest.mark.parametrize("profile", ["spark", "spark_pair"])
-@pytest.mark.parametrize("version", ["v2", "v21"])
+@pytest.mark.parametrize("version", ["v2", "qad_v2"])
 def test_spark_recipe_selects_its_checkpoint_and_fp4(profile, version, monkeypatch, tmp_path):
     import yaml
     from fastvideo.api.compat import generator_config_to_fastvideo_args
@@ -278,8 +278,11 @@ def test_spark_recipe_selects_its_checkpoint_and_fp4(profile, version, monkeypat
 
     path = EXAMPLE_PATH.with_name(f"basic_fasth3_{profile}_{version}_nvfp4.yaml")
     raw = yaml.safe_load(path.read_text())["generator"]
-    expected_version = "V2.1" if version == "v21" else "V2"
-    assert raw["model_path"] == f"FastVideo/FastVideo-FastH3-8-Step-{expected_version}-NVFP4-Consumer"
+    expected_model = {
+        "v2": "FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer",
+        "qad_v2": "FastVideo/FastH3-QAD-v2",
+    }[version]
+    assert raw["model_path"] == expected_model
     monkeypatch.setattr("fastvideo.registry.get_pipeline_config_cls_from_name", lambda path: MiniMaxH3PipelineConfig)
     original_from_kwargs = FastVideoArgs.from_kwargs
 
@@ -294,7 +297,7 @@ def test_spark_recipe_selects_its_checkpoint_and_fp4(profile, version, monkeypat
     assert args.h3_vsa_fp4["enabled"] is True
     assert args.VSA_tile_size == 64 and args.VSA_sparsity == 0.8
     assert args.sp_size == (2 if profile == "spark_pair" else 1)
-    if version == "v21":
+    if version == "qad_v2":
         assert args.h3_vsa_fp4 == {"enabled": True, "prefix_precision": "fp8", "two_level_p": True, "smooth_k": True}
 
 
