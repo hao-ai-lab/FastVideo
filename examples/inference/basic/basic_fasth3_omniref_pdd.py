@@ -355,9 +355,9 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
         label="NVIDIA RTX 4090 (24 GB, sm_89, no FP4)",
         width=832,
         height=480,
-        # As the 5090, but 24 GB and FP8 linears (double the bytes of NVFP4):
-        # set FASTVIDEO_DIT_LAYERWISE to stream blocks if this still OOMs.
-        offload=OffloadConfig(dit=False, dit_layerwise=False, text_encoder=True, vae=False, pin_cpu_memory=True),
+        # The 47 GB FP8 DiT cannot be resident on 24 GB: stream it, keeping the
+        # validated 16 blocks resident. The encoder stays non-resident.
+        offload=OffloadConfig(dit=False, dit_layerwise=True, text_encoder=True, vae=False, pin_cpu_memory=True),
         sequential_load=True,
         env={
             # No FP4 hardware: FP8 linears and bf16 VSA attention instead, and the
@@ -369,6 +369,12 @@ DEVICE_PROFILES: dict[str, DeviceProfile] = {
             "FASTVIDEO_VSA_TRITON": "1",
             "FASTVIDEO_VSA_PTX_BLACKWELL": "0",
             "FASTVIDEO_FA4": "0",
+            # Validated 24 GB layerwise configuration: stream the packed weights
+            # too, keep 16 blocks resident, and chunk the FFN.
+            "FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS": "1",
+            "FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS": "16",
+            "FASTVIDEO_H3_FFN_CHUNK_TOKENS": "16384",
+            "FASTVIDEO_H3_PINNED_SWAP": "0",
             # A 24 GB card fragments easily once the DiT is streamed.
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
             "FASTVIDEO_H3_VAE_TILE_BATCH": "4",
