@@ -64,6 +64,9 @@ FastVideo supports several training approaches:
 | **VSA finetune** | Finetune with Variable Sparse Attention for efficiency |
 | **Attn-QAT** | Train with fake-quantized attention, optionally followed by DMD2 distillation |
 
+For data-free joint video/audio distillation, see
+[FastH3 T2AV DMD training](minimax_h3_t2av_dmd.md).
+
 ## Next Steps
 
 1. **Get started**: Pick an example from the [training examples index](examples/examples_training_index.md)

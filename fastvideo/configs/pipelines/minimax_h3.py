@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import TYPE_CHECKING, Any
 
 from fastvideo.configs.models import EncoderConfig, VAEConfig
@@ -155,6 +156,10 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
     text_encoder_configs: tuple[EncoderConfig, ...] = field(default_factory=lambda: (MiniMaxH3Qwen3VLConfig(), ))
 
     flow_shift: float | None = None
+    # Explicit clocks for training and its validation; None preserves the
+    # loaded scheduler. Published distilled contracts reject conflicting values.
+    video_scheduler_shift: float | None = None
+    audio_scheduler_shift: float | None = None
     embedded_cfg_scale: float | None = None
     dit_precision: str = "bf16"
     vae_precision: str = "fp32"
@@ -172,6 +177,11 @@ class MiniMaxH3PipelineConfig(PipelineConfig):
 
     def check_pipeline_config(self) -> None:
         super().check_pipeline_config()
+        for name in ("video_scheduler_shift", "audio_scheduler_shift"):
+            value = getattr(self, name)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)
+                                      or not math.isfinite(value) or value <= 0):
+                raise ValueError(f"{name} must be a positive finite number")
         if self.flow_shift is not None:
             raise ValueError("MiniMax-H3 uses separate checkpoint-defined video/audio scheduler shifts; "
                              "flow_shift must remain unset.")

@@ -303,6 +303,9 @@ class ValidationCallback(Callback):
         if tracker is not None:
             self.tracker = tracker
 
+    def will_run_validation(self, iteration: int = 0) -> bool:
+        return (self.every_steps > 0 and (iteration != 0 or self.run_at_start) and iteration % self.every_steps == 0)
+
     def on_validation_begin(
         self,
         method: TrainingMethod,

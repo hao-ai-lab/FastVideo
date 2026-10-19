@@ -1,10 +1,13 @@
 import functools
 import math
+from numbers import Integral
 import random
 from typing import Any, cast
 
 import numpy as np
 import torch
+
+_PYARROW_BINARY_MAX_VALUE_BYTES = (1 << 31) - 1
 
 _DTYPE_ALIASES = {
     "float": "float32",
@@ -166,7 +169,9 @@ def collate_rows_from_parquet_schema(rows,
                                      text_padding_length,
                                      cfg_rate=0.0,
                                      rng=None,
-                                     seed=0) -> dict[str, Any]:
+                                     seed=0,
+                                     *,
+                                     max_presentation_tokens: int | None = None) -> dict[str, Any]:
     """
     Collate rows from parquet files based on the provided schema.
     Dynamically processes tensor fields based on schema and returns batched data.
@@ -180,6 +185,48 @@ def collate_rows_from_parquet_schema(rows,
     """
     if not rows:
         return cast(dict[str, Any], {})
+
+    if text_padding_length is None:
+        if (isinstance(max_presentation_tokens, bool) or not isinstance(max_presentation_tokens, Integral)
+                or int(max_presentation_tokens) <= 0):
+            raise ValueError("Dynamic text collation requires max_presentation_tokens to be a positive integer")
+        presentation_lengths: list[int] = []
+        for row_index, row in enumerate(rows):
+            embedding_shape = row.get("text_embedding_shape")
+            if (not isinstance(embedding_shape, list | tuple) or len(embedding_shape) != 2
+                    or any(isinstance(dim, bool) or not isinstance(dim, Integral) or int(dim) <= 0
+                           for dim in embedding_shape)):
+                raise ValueError("Dynamic text collation requires text_embedding_shape=[length, feature_dim] "
+                                 f"with positive integers; row {row_index} has {embedding_shape!r}")
+            presentation_length = int(embedding_shape[0])
+            presentation_width = int(embedding_shape[1])
+            dtype_name = _normalize_tensor_dtype(row.get("text_embedding_dtype", "float32"))
+            itemsize = 2 if dtype_name == "bfloat16" else np.dtype(dtype_name).itemsize
+            expected_embedding_bytes = presentation_length * presentation_width * itemsize
+            if expected_embedding_bytes > _PYARROW_BINARY_MAX_VALUE_BYTES:
+                sample_id = row.get("id", row_index)
+                raise ValueError(
+                    f"Text embedding {sample_id!r} shape {list(embedding_shape)!r} requires "
+                    f"{expected_embedding_bytes} bytes, exceeding the pa.binary per-value envelope of "
+                    f"{_PYARROW_BINARY_MAX_VALUE_BYTES} bytes; use chunked or external presentation storage")
+            if presentation_length > int(max_presentation_tokens):
+                sample_id = row.get("id", row_index)
+                raise ValueError(f"Text embedding {sample_id!r} stores {presentation_length} tokens, exceeding "
+                                 f"max_presentation_tokens={int(max_presentation_tokens)}; the presentation will not "
+                                 "be truncated")
+
+            embedding_bytes = row.get("text_embedding_bytes")
+            if (not isinstance(embedding_bytes, (bytes, bytearray, memoryview))
+                    or len(embedding_bytes) != expected_embedding_bytes):
+                raise ValueError(f"Text embedding for row {row_index} must contain {expected_embedding_bytes} bytes "
+                                 "matching its declared shape and dtype")
+
+            presentation_lengths.append(presentation_length)
+        effective_text_padding_length = max(presentation_lengths)
+    else:
+        # Preserve the fixed-length crop/pad contract for existing T2V/T2VA
+        # callers, including their configured text encoder length.
+        effective_text_padding_length = text_padding_length
 
     # Initialize containers for different data types
     batch_data: dict[str, Any] = {}
@@ -288,14 +335,14 @@ def collate_rows_from_parquet_schema(rows,
 
             for tensor in tensor_list:
                 if tensor.numel() > 0:
-                    padded_tensor, mask = pad(tensor, text_padding_length)
+                    padded_tensor, mask = pad(tensor, effective_text_padding_length)
                     padded_tensors.append(padded_tensor)
                     attention_masks.append(mask)
                 else:
                     # Handle empty embeddings - assume default embedding dimension
                     width = (int(tensor.shape[1]) if tensor.dim() > 1 else empty_width)
-                    padded_tensors.append(torch.zeros(text_padding_length, width, dtype=empty_dtype))
-                    attention_masks.append(torch.zeros(text_padding_length))
+                    padded_tensors.append(torch.zeros(effective_text_padding_length, width, dtype=empty_dtype))
+                    attention_masks.append(torch.zeros(effective_text_padding_length))
 
             batch_data[tensor_name] = torch.stack(padded_tensors)
             batch_data[_TEXT_STREAM_MASKS[tensor_name]] = torch.stack(attention_masks)

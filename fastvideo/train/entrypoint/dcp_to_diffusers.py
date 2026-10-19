@@ -218,6 +218,7 @@ def _save_role_pretrained(
     module_names: list[str] | None = None,
     overwrite: bool = False,
     model: Any,
+    json_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Export a role's modules into a diffusers-style model dir.
 
@@ -382,6 +383,13 @@ def _save_role_pretrained(
                 written_weights = [legacy_name]
             logger.info("Saved %s weight artifacts: %s", module_name, written_weights)
 
+            config_overrides = getattr(modules[module_name], "inference_config_overrides", None)
+            if callable(config_overrides):
+                from fastvideo.train.utils.inference_checkpoint import _apply_config_overrides
+                overrides = config_overrides()
+                if overrides:
+                    _apply_config_overrides(module_dir / "config.json", overrides)
+
             metadata_path = dst / "fastvideo_training_export.json"
             metadata_path.write_text(
                 json.dumps(
@@ -399,6 +407,10 @@ def _save_role_pretrained(
 
         _barrier()
 
+    if _rank() == 0 and json_overrides:
+        from fastvideo.train.utils.inference_checkpoint import apply_export_json_overrides
+        apply_export_json_overrides(dst, json_overrides)
+    _barrier()
     return str(dst)
 
 
@@ -527,6 +539,7 @@ def convert(
         output_dir=output_dir,
         overwrite=overwrite,
         model=model,
+        json_overrides=method.inference_checkpoint_json_overrides(role),
     )
     logger.info("Export complete: %s", result)
 

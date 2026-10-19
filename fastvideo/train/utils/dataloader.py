@@ -12,9 +12,10 @@ if TYPE_CHECKING:
 def build_parquet_t2v_train_dataloader(
     data_config: DataConfig,
     *,
-    text_len: int,
+    text_len: int | None,
     parquet_schema: Any,
     cfg_rate: float | None = None,
+    max_presentation_tokens: int | None = None,
 ) -> Any:
     """Build a parquet dataloader for T2V-style datasets.
 
@@ -34,7 +35,10 @@ def build_parquet_t2v_train_dataloader(
         parquet_schema=parquet_schema,
         cfg_rate=(float(data_config.training_cfg_rate or 0.0) if cfg_rate is None else float(cfg_rate)),
         drop_last=True,
-        text_padding_length=int(text_len),
+        text_padding_length=None if text_len is None else int(text_len),
+        max_presentation_tokens=max_presentation_tokens,
+        native_shape_bucketing=bool(getattr(data_config, "native_shape_bucketing", False)),
+        require_existing_parquet_cache=getattr(data_config, "require_existing_parquet_cache", False),
         seed=int(data_config.seed or 0),
     ))
     return dataloader
