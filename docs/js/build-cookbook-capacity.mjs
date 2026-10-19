@@ -48,7 +48,6 @@ function sources(values, context) {
   values.forEach((value) => url(value, context));
 }
 
-/** Separators are accepted only in count fields, never by partially parsing a scalar. */
 function count(value, context) {
   if (typeof value === "string") {
     requireValue(/^[1-9]\d{0,2}(?:_\d{3})+$/.test(value), `${context}: invalid underscore-separated count`);
@@ -162,7 +161,6 @@ export function buildCapacityCatalog({
   const hardware = hardwareRecords(readYaml(hardwarePath), hardwarePath);
   const components = componentRecords(root, catalogDir),
     used = new Set();
-  // Deployment validation owns identity, baseline paths, options and launch environment.
   const deployments = buildCatalogs({ root, recipesDir, catalogPath });
   const models = [];
   for (const name of readdirSync(recipesDir)

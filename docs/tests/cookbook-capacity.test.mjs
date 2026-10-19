@@ -162,7 +162,6 @@ function transformer(f) {
   return f.transformers.transformers["example-transformer"];
 }
 
-// Synthetic measurement records exercise the schema; they are never authored evidence.
 function referenceRun(f) {
   const config = clone(f.config);
   config.generator.engine.num_gpus = 2;
