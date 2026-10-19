@@ -134,7 +134,23 @@ def _api() -> Any:
     return _fp4_api
 
 
-class _TileLayout:
+class _KeyIndexCache:
+    """The prefix split's valid-key positions, computed once per step layout.
+
+    ``kv_valid`` comes from the tile sizes alone, so every block of the forward
+    gets the same index; only the first block pays the host sync.
+    """
+    tile: int
+    n_tiles: int
+    _valid_key_index: torch.Tensor | None = None
+
+    def valid_key_index(self, kv_valid: torch.Tensor, half: int) -> torch.Tensor:
+        if self._valid_key_index is None:
+            self._valid_key_index = _valid_key_index(kv_valid, half, self.n_tiles * self.tile)
+        return self._valid_key_index
+
+
+class _TileLayout(_KeyIndexCache):
     """Per-step tile-order state shared by every block of one forward."""
 
     def __init__(self, meta: MiniMaxH3VSAMetadata, rotary_emb: tuple[torch.Tensor, torch.Tensor]) -> None:
@@ -210,8 +226,13 @@ def _half_row_valid(kv_valid: torch.Tensor, half: int) -> torch.Tensor:
     return (torch.arange(half, device=kv_valid.device).unsqueeze(0) < kv_valid.unsqueeze(1)).reshape(-1)
 
 
+def _valid_key_index(kv_valid: torch.Tensor, half: int, logical: int) -> torch.Tensor:
+    """Positions of the valid keys among the first ``logical`` tile-ordered rows (a host sync)."""
+    return _half_row_valid(kv_valid, half)[:logical].nonzero().squeeze(1)
+
+
 def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, prefix_rows: int,
-                            logical: int, key_valid: torch.Tensor, precision: str) -> torch.Tensor:
+                            logical: int, valid_index: torch.Tensor, precision: str) -> torch.Tensor:
     """Dense attention for the prefix query rows, ``[B, H, prefix_rows, D]``.
 
     VSA gives every prefix (non-video) query tile every key column, so those rows need no
@@ -230,7 +251,6 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
         q, k = _fp8_per_token(q), _fp8_per_token(k)
     # Attend only the valid keys. Gathering them keeps SDPA on its unmasked (flash) kernel; a boolean
     # mask over all rows falls back to the memory-efficient kernel, 3-4x slower at OmniRef prefix sizes.
-    valid_index = key_valid[:logical].nonzero().squeeze(1)
     k, v = k.index_select(1, valid_index), v.index_select(1, valid_index)
     return F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
                                           scale=1.0 / math.sqrt(q.shape[-1]))
@@ -239,7 +259,7 @@ def _prefix_dense_attention(query: torch.Tensor, key: torch.Tensor, value: torch
 def _fp4_fine_attention(api: Any, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
                         q2k_idx: torch.Tensor, q2k_num: torch.Tensor, kv_valid: torch.Tensor,
                         q2k_quad: torch.Tensor | None, *, logical: int, prefix_rows: int, precision: str,
-                        options: dict[str, Any]) -> torch.Tensor:
+                        options: dict[str, Any], layout: _KeyIndexCache | None = None) -> torch.Tensor:
     numerics = {"two_level_p": options.get("two_level_p"), "smooth_k": options.get("smooth_k")}
     if not prefix_rows:
         return _sparse_fp4_attention(api, query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad, **numerics)
@@ -247,9 +267,12 @@ def _fp4_fine_attention(api: Any, query: torch.Tensor, key: torch.Tensor, value:
         raise RuntimeError("the MiniMax-H3 FP4 prefix split needs a fastvideo-kernel build whose "
                            "sageattn_blackwell_sparse_bshd sizes by key length; rebuild fastvideo-kernel "
                            "from this checkout")
-    key_valid = _half_row_valid(kv_valid, api.HALF_N)
+    if layout is not None:
+        valid_index = layout.valid_key_index(kv_valid, api.HALF_N)
+    else:
+        valid_index = _valid_key_index(kv_valid, api.HALF_N, logical)
     with STAGES.span("prefix_attention"):
-        prefix_out = _prefix_dense_attention(query, key, value, prefix_rows, logical, key_valid, precision)
+        prefix_out = _prefix_dense_attention(query, key, value, prefix_rows, logical, valid_index, precision)
     # A tile-64 prefix can end halfway through a native 128-row block. Keep that whole query block and its
     # original quadrant mask, then discard the overlapping prefix half and trailing padding from its output.
     head = prefix_rows // _BLOCK
@@ -367,7 +390,7 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
     with STAGES.span("fp4_attention"):
         out = _fp4_fine_attention(api, query, key, value, q2k_idx, q2k_num, kv_valid, q2k_quad,
                                   logical=logical, prefix_rows=prefix_rows, precision=prefix_mode,
-                                  options=getattr(attn, "_vsa_fp4_options", {}))
+                                  options=getattr(attn, "_vsa_fp4_options", {}), layout=layout)
     with STAGES.span("out_untile"):
         out = out.transpose(1, 2).index_select(1, layout.untile)  # [B, L, H, D], packed order
     if sim_fp8:
@@ -476,7 +499,7 @@ def _all_to_all(payload: torch.Tensor, scale: torch.Tensor, group: Any) -> tuple
     return recv, recv_scale
 
 
-class _SPTileLayout:
+class _SPTileLayout(_KeyIndexCache):
     """Per-step tile-order state for one rank's head subset."""
 
     def __init__(self, meta: MiniMaxH3VSAMetadata, rank: int, local_rows: int) -> None:
@@ -546,7 +569,7 @@ def vsa_fp4_attention_sp(attn: Any, hidden_states: torch.Tensor, rotary_emb: tup
     with STAGES.span("fp4_attention"):
         out_bhsd = _fp4_fine_attention(api, q_t, k_t, v_t, q2k_idx, q2k_num, kv_valid, q2k_quad,
                                        logical=logical, prefix_rows=prefix_rows, precision=prefix_mode,
-                                       options=getattr(attn, "_vsa_fp4_options", {}))
+                                       options=getattr(attn, "_vsa_fp4_options", {}), layout=layout)
 
     with STAGES.span("out_pack"):
         payload, scale = _pack_seq_fp8(out_bhsd, layout.untile, world, local_rows)

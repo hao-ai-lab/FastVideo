@@ -19,6 +19,10 @@ from fastvideo.models.dits.minimax_h3_vsa_fp4 import (_fp8_per_token, _half_row_
 HALF = 64
 
 
+def _index(valid: torch.Tensor) -> torch.Tensor:
+    return valid.nonzero().squeeze(1)
+
+
 def _emulator_fp8(x: torch.Tensor) -> torch.Tensor:
     """The emulator's per-token E4M3 fake quant; it needs Triton to import."""
     try:
@@ -96,7 +100,7 @@ def test_prefix_dense_attention_matches_the_emulator_numerics(precision: str) ->
     """Smooth K, then round it - the order the emulator and the student use."""
     q, k, v, valid, dim = _case()
 
-    out = _prefix_dense_attention(q, k, v, q.shape[1], k.shape[1], valid, precision)
+    out = _prefix_dense_attention(q, k, v, q.shape[1], k.shape[1], _index(valid), precision)
 
     assert out.shape == (1, 2, 8, dim) and out.dtype == torch.bfloat16
     k_ref = k - k.mean(dim=1, keepdim=True)
@@ -115,7 +119,7 @@ def test_smoothing_happens_before_the_fp8_rounding() -> None:
     round_then_smooth = _emulator_fp8(k) - _emulator_fp8(k).mean(dim=1, keepdim=True)
     assert not torch.equal(smooth_then_round, round_then_smooth)
 
-    out = _prefix_dense_attention(q, k, v, q.shape[1], k.shape[1], valid, "fp8")
+    out = _prefix_dense_attention(q, k, v, q.shape[1], k.shape[1], _index(valid), "fp8")
     expected = _reference_dense_attention(q, smooth_then_round, v, valid, k.shape[-1]**-0.5).transpose(1, 2)
     wrong = _reference_dense_attention(q, round_then_smooth, v, valid, k.shape[-1]**-0.5).transpose(1, 2)
 
@@ -133,14 +137,14 @@ def test_prefix_dense_attention_ignores_invalid_keys() -> None:
     valid = torch.ones(valid_len + 2, dtype=torch.bfloat16).bool()
     valid[valid_len:] = False
 
-    masked = _prefix_dense_attention(q, k, v, prefix, valid_len + 2, valid, "bf16")
+    masked = _prefix_dense_attention(q, k, v, prefix, valid_len + 2, _index(valid), "bf16")
 
     # Truncating to the valid rows changes only the smoothing mean, an exact shift.
     k[:, valid_len:] = 0.0
     v[:, valid_len:] = 0.0
     k = k - (k[:, :valid_len].mean(dim=1, keepdim=True) - k.mean(dim=1, keepdim=True))
     truncated = _prefix_dense_attention(q, k[:, :valid_len], v[:, :valid_len], prefix, valid_len,
-                                        torch.ones(valid_len, dtype=torch.bool), "bf16")
+                                        torch.arange(valid_len), "bf16")
 
     assert (masked.float() - truncated.float()).norm() / truncated.float().norm() < 5e-3
 
@@ -184,11 +188,32 @@ def test_prefix_split_keeps_original_video_rows_and_quadrants(monkeypatch, tile,
     result = impl._fp4_fine_attention(api, query, key, value, indices, counts, valid, quadrants,
                                       logical=logical, prefix_rows=prefix_rows, precision="bf16", options={})
     expected_prefix = impl._prefix_dense_attention(query, key, value, prefix_rows, logical,
-                                                    impl._half_row_valid(valid, 64), "bf16")
+                                                    _index(impl._half_row_valid(valid, 64)[:logical]), "bf16")
     torch.testing.assert_close(result[:, :, :prefix_rows], expected_prefix)
     torch.testing.assert_close(result[:, :, prefix_rows:], query[:, prefix_rows:logical].transpose(1, 2))
     assert result.shape == (1, heads, logical, 8)
     assert calls == [padded - head * 128]
+    layout = impl._KeyIndexCache()
+    layout.tile, layout.n_tiles = tile, n_tiles
+    cached = impl._fp4_fine_attention(api, query, key, value, indices, counts, valid, quadrants, logical=logical,
+                                      prefix_rows=prefix_rows, precision="bf16", options={}, layout=layout)
+    assert torch.equal(cached, result)
+
+
+def test_layout_computes_the_valid_key_index_once(monkeypatch) -> None:
+    """kv_valid depends only on the tile sizes, so every block of a step shares one index (one host sync)."""
+    from fastvideo.models.dits import minimax_h3_vsa_fp4 as impl
+
+    calls = []
+    real = impl._valid_key_index
+    monkeypatch.setattr(impl, "_valid_key_index", lambda *args: calls.append(args) or real(*args))
+    layout = impl._KeyIndexCache()
+    layout.tile, layout.n_tiles = HALF, 3
+    kv_valid = torch.tensor([HALF, 17, 0, 0], dtype=torch.int32)
+    first = layout.valid_key_index(kv_valid, HALF)
+    assert layout.valid_key_index(kv_valid.clone(), HALF) is first
+    assert len(calls) == 1
+    assert torch.equal(first, torch.arange(HALF + 17))
 
 
 @pytest.mark.parametrize("tile", [64, 128])
@@ -268,5 +293,5 @@ def test_native_prefix_split_preserves_video_attention(tile, prefix_tiles, n_til
     assert split.isfinite().all()
     torch.testing.assert_close(split[:, :, prefix_rows:], baseline[:, :, prefix_rows:logical], rtol=0, atol=0)
     expected = impl._prefix_dense_attention(query, key, value, prefix_rows, logical,
-                                             impl._half_row_valid(lists[2], 64), "fp8")
+                                             impl._valid_key_index(lists[2], 64, logical), "fp8")
     torch.testing.assert_close(split[:, :, :prefix_rows], expected, rtol=0, atol=0)
