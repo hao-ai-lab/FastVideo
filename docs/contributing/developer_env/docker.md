@@ -11,7 +11,7 @@ The published FastVideo tags are multi-platform Linux images for `amd64` and
 PyTorch backend. `py3.12-cuda12.6.3-latest` is the explicit alias for that
 same image; use `py3.12-cuda13.0.0-latest` for CUDA 13 with `cu130`.
 
-On ARM64, the CUDA 13 image targets DGX Spark (`sm_121`), while the CUDA 12.6
+On ARM64, the CUDA 13 image targets DGX Spark (`sm_121a`), while the CUDA 12.6
 image targets GH200-class hardware (`sm_90a`). These published-tag defaults
 are distinct from an unparameterized local `docker build`: `docker/Dockerfile`
 itself still defaults to CUDA 13 and `cu130`.
@@ -37,12 +37,13 @@ native ARM64 host, build the CUDA 13 DGX Spark image with:
 
 ```bash
 docker build --platform linux/arm64 -f docker/Dockerfile \
-  --build-arg TORCH_CUDA_ARCH_LIST=12.1 \
+  --build-arg TORCH_CUDA_ARCH_LIST=12.1a \
   -t fastvideo-dev:spark .
 ```
 
 This uses the prebuilt Linux ARM64 FlashAttention wheel. FastVideo's in-tree
-CUDA kernel is still compiled for `sm_121` as part of the image build.
+CUDA kernel is still compiled for `sm_121a` as part of the image build, including
+the FP4 attention kernels that `FASTVIDEO_H3_VSA_FP4=1` uses.
 
 ## Using the container
 

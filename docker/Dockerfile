@@ -20,10 +20,10 @@
 #       --build-arg FLASH_ATTN_WHEEL_TAG=cu130torch2.12 \
 #       -t fastvideo-dev:py3.12-cuda13.0.0 .
 #
-#   # DGX Spark / GB10 (aarch64, Blackwell sm_121): the matching arm64
+#   # DGX Spark / GB10 (aarch64, Blackwell sm_121a): the matching arm64
 #   # prebuilt flash-attn wheel is selected automatically from TARGETARCH.
 #   docker build --platform linux/arm64 -f docker/Dockerfile \
-#       --build-arg TORCH_CUDA_ARCH_LIST=12.1 -t fastvideo-dev:spark .
+#       --build-arg TORCH_CUDA_ARCH_LIST=12.1a -t fastvideo-dev:spark .
 #
 # The ARG defaults below are the source of truth for the default image.
 # ROCm builds use docker/rocm7_1.Dockerfile (different base + flow).
@@ -45,7 +45,7 @@ ARG PYTHON_VERSION=3.12
 
 # CUDA arch fastvideo-kernel is compiled for. Build machines have no GPU, so
 # build.sh uses this instead of probing a live device. Default Hopper (sm_90a),
-# matching the released kernel wheel; override e.g. TORCH_CUDA_ARCH_LIST=12.1
+# matching the released kernel wheel; override e.g. TORCH_CUDA_ARCH_LIST=12.1a
 # for GB10/Blackwell (DGX Spark).
 ARG TORCH_CUDA_ARCH_LIST=9.0a
 
