@@ -36,8 +36,11 @@ def main() -> None:
     metadata = {**state.get("metadata", {}), **json.loads(metadata_path.read_text())}
     decoder = {}
     for key, value in state["decoder"].items():
+        # A wrapped training linear stores its tensors under ``.base_layer``; the
+        # inference decoder names them without it and loads strictly.
+        key = re.sub(r"\.base_layer(\.[^.]+)$", r"\1", key)
         module, _, param = key.rpartition(".")
-        nvfp4 = DECODER_BLOCK_LINEAR.match(re.sub(r"\.base_layer$", "", module)) is not None
+        nvfp4 = DECODER_BLOCK_LINEAR.match(module) is not None
         decoder[key] = value.to(torch.bfloat16) if nvfp4 and param in ("weight", "bias") else value.clone()
     exported = {
         "format": "fastvideo_h3_decoder_nvfp4_deploy_v1",

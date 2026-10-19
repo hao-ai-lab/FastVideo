@@ -704,6 +704,37 @@ def test_packed_loader_needs_input_amax_only_for_static_scales(act_scale):
     assert layers and all(layer.input_amax.item() == 0 for layer in layers)
 
 
+def test_export_deploy_strips_base_layer_from_wrapped_training_keys(tmp_path, monkeypatch):
+    import importlib.util
+    import json
+    import sys
+    from pathlib import Path
+
+    expected = _write_deploy_checkpoint(tmp_path / "reference.pt", student_layers=2, base_layers=2)
+    reference = torch.load(tmp_path / "reference.pt", weights_only=False)
+    names = nvfp4_decoder_linear_names(_tiny_h3_vae(_tiny_vae_arch(2)).decoder)
+    wrapped = {}
+    for key, value in expected.items():
+        module, _, param = key.rpartition(".")
+        # Store the training master in fp32 under a wrapper's base_layer, as a QAD run may.
+        wrapped[f"{module}.base_layer.{param}" if module in names else key] = value.float()
+    torch.save({"decoder": wrapped, "post_quant_conv": reference["post_quant_conv"], "step": 7}, tmp_path / "last.pt")
+    (tmp_path / "metadata.json").write_text(json.dumps(reference["metadata"]))
+    script = Path(__file__).parents[3] / "scripts/distill/minimax_h3_nvfp4_decoder/export_deploy.py"
+    spec = importlib.util.spec_from_file_location("export_deploy", script)
+    export_deploy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(export_deploy)
+    monkeypatch.setattr(sys, "argv", ["export_deploy", str(tmp_path / "last.pt"), str(tmp_path / "deploy.pt")])
+    export_deploy.main()
+
+    exported = torch.load(tmp_path / "deploy.pt", weights_only=False)["decoder"]
+    assert exported.keys() == expected.keys()
+    for key, value in expected.items():
+        module, _, param = key.rpartition(".")
+        dtype = torch.bfloat16 if module in names and param in ("weight", "bias") else torch.float32
+        assert exported[key].dtype == dtype and torch.equal(exported[key], value.float().to(dtype)), key
+
+
 class _DecoderHost(nn.Module):
     """The two VAE submodules an NVFP4 decoder export covers."""
 
