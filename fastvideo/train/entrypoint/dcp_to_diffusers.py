@@ -469,7 +469,7 @@ def convert(
     dcp_dir = resolved / "dcp"
     if not dcp_dir.is_dir():
         raise FileNotFoundError(f"Missing dcp/ under {resolved}")
-    metadata = CheckpointManager.load_metadata(resolved)
+    metadata = CheckpointManager.load_metadata(resolved) if (resolved / "metadata.json").is_file() else {}
     weights_only = bool(metadata.get("weights_only", False))
 
     # -- Obtain config --
