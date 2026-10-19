@@ -341,17 +341,21 @@ FFN projections, and both backends return identical outputs. FlashInfer
 | FFN out (14336→5376) | 26.6 ms | 8.9 ms | 9.0 ms |
 
 `FASTVIDEO_H3_VSA_FP4=1` runs VSA-H3's block-sparse attention on the FP4
-SageAttention3 kernel, as on RTX Blackwell. It is off by default and needs
-`fastvideo-kernel` built for `12.1a` (the default when building on a Spark).
-On a captured FastH3 Trim attention input (19,392 tokens, 56 heads, 64-token
-tiles) it runs in 29 ms against 59 ms for Triton VSA, with a relative L2 error
-of 0.13 versus an FP32 reference (0.002 for Triton BF16).
+SageAttention3 kernel, as on RTX Blackwell. It needs `fastvideo-kernel` built for
+`12.1a` on GB10 or `12.0a` on sm_120; without that extension the flag falls back
+to Triton BF16 and the fast path does not apply. On a captured FastH3 Trim
+attention input (19,392 tokens, 56 heads, 64-token tiles) it runs in 29 ms
+against 59 ms for Triton VSA, with a relative L2 error of 0.13 versus an FP32
+reference (0.002 for Triton BF16).
 
-It changes the output for now. The released FastH3 checkpoints were not trained with
-FP4 attention, so the same seed gives a different, though coherent, clip. On V2
-at 832x480 with four prompts, denoising was 24-33% faster (60-68 s to 43-51 s)
-and the clips scored LPIPS 0.39-0.55 against the BF16-attention clips. The
-recipes leave it off; review outputs before enabling it.
+The V2.1 headline recipe enables it; the V2 recipe leaves it off unless you opt
+in. It changes the output for now. The released FastH3 checkpoints were not
+trained with FP4 attention, so the same seed gives a different, though coherent,
+clip. On V2 at 832x480 with four prompts, denoising was 24-33% faster (60-68 s
+to 43-51 s) and the clips scored LPIPS 0.39-0.55 against the BF16-attention
+clips. Validate clips before a quality comparison. On a 32 GB RTX 5090 the
+measured recipe also sets `FASTVIDEO_H3_ENCODER_LAYERWISE=1` and
+`FASTVIDEO_H3_PARK_MODULES=vae,audio_vae`.
 
 Measured on one Spark (832x480, 124 frames, seed 1234, the ceramics release
 prompt), timing warm `generate()` calls in one process through finished MP4
