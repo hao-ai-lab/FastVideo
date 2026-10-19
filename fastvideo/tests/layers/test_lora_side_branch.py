@@ -251,6 +251,41 @@ def test_packed_nvfp4_layers_behind_a_side_branch_do_not_block_adapter_changes()
     assert _all_side_branch([pipeline.lora_layers["transformer"].lora_layers_by_block().__next__()[1]["layer"]])
 
 
+def test_runtime_adapter_on_packed_nvfp4_without_constructor_lora_is_not_blocked() -> None:
+    """Wrapping runs before the NVFP4 check, so packed linears that become side branches do not block it."""
+    from types import SimpleNamespace
+
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+    from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+
+    base = _packed_linear()
+    base.quant_method = object.__new__(NVFP4QuantizeMethod)
+    transformer = torch.nn.Module()
+    transformer.layer = base
+    pipeline = SimpleNamespace(_setting_constructor_adapter=False,
+                               _constructor_dense_lora_path=None,
+                               cur_adapter_name="",
+                               cur_adapter_path="",
+                               cur_adapter_strength=1.0,
+                               lora_adapter_paths={},
+                               lora_adapters={},
+                               lora_initialized=False,
+                               lora_layers={},
+                               trainable_transformer_modules={"transformer": transformer})
+
+    def convert_to_lora_layers() -> None:
+        transformer.layer = get_lora_layer(base)
+        layers = SimpleNamespace(lora_layers_by_block=lambda: iter([(None, {"layer": transformer.layer})]))
+        pipeline.lora_layers["transformer"] = layers
+        pipeline.lora_initialized = True
+
+    pipeline.convert_to_lora_layers = convert_to_lora_layers
+    # The adapter is unknown and has no path, so the call stops at the lookup that follows the NVFP4 check.
+    with pytest.raises(ValueError, match="not found in the pipeline"):
+        LoRAPipeline.set_lora_adapter(pipeline, "runtime-adapter")
+    assert transformer.layer.side_branch
+
+
 def test_forced_side_branch_over_unpacked_quantized_base_still_packs(env_overrides) -> None:
     """FASTVIDEO_LORA_SIDE_BRANCH=1 over a dense checkpoint must still run the deferred NVFP4/MXFP8 packing."""
     from fastvideo.layers.quantization.mxfp8_config import MXFP8QuantizeMethod

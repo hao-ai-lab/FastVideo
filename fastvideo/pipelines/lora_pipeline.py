@@ -36,15 +36,15 @@ def _merge_mode_modules(pipeline: Any, transformer_modules: dict[str, nn.Module]
     """Yield the modules an adapter change has to rewrite in place.
 
     Side-branch LoRA layers leave their base weights alone, so packed NVFP4/FP8 linears behind them never
-    block an adapter or strength change. Once the pipeline has LoRA layers only the merge-mode ones can
-    block it; before that, every module is a candidate.
+    block an adapter or strength change. In a transformer that has LoRA layers only the merge-mode ones can
+    block it; in a transformer without them, every module is a candidate.
     """
-    lora_layers = getattr(pipeline, "lora_layers", None)
-    if not lora_layers:
-        for transformer in transformer_modules.values():
+    lora_layers = getattr(pipeline, "lora_layers", None) or {}
+    for transformer_name, transformer in transformer_modules.items():
+        transformer_layers = lora_layers.get(transformer_name)
+        if transformer_layers is None:
             yield from transformer.modules()
-        return
-    for transformer_layers in lora_layers.values():
+            continue
         for _, layers in transformer_layers.lora_layers_by_block():
             for layer in layers.values():
                 if not getattr(layer, "side_branch", False):
@@ -552,6 +552,10 @@ class LoRAPipeline(ComposedPipelineBase):
         if exact_current_adapter:
             return
 
+        if not self.lora_initialized:
+            # Wrap the layers first, so the NVFP4 check skips packed linears that will run as side branches.
+            self.convert_to_lora_layers()
+
         if not self._setting_constructor_adapter and _has_nvfp4_weights_without_bf16(
                 self, self.trainable_transformer_modules):
             # TODO(David): Restore the BF16 weights and requantize them after an NVFP4 LoRA adapter change.
@@ -572,8 +576,6 @@ class LoRAPipeline(ComposedPipelineBase):
 
         if lora_nickname not in self.lora_adapters and lora_path is None:
             raise ValueError(f"Adapter {lora_nickname} not found in the pipeline. Please provide lora_path to load it.")
-        if not self.lora_initialized:
-            self.convert_to_lora_layers()
         adapter_updated = False
         rank = dist.get_rank()
         if lora_path is not None and self.lora_adapter_paths.get(lora_nickname) != lora_path:
