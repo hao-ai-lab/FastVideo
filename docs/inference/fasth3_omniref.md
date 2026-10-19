@@ -108,6 +108,9 @@ The profiles set these; set them yourself when driving the YAML recipes.
 | `FASTVIDEO_ATTENTION_BACKEND` | `VIDEO_SPARSE_ATTN_H3` | the trained backend; the contract fixes the tile size |
 | `FASTVIDEO_H3_VSA_FP4` | `1` on Blackwell, `0` on the 4090 | FP4 sparse attention; sm_89 has no FP4 |
 | `FASTVIDEO_H3_VSA_FP4_PREFIX` | `fp8` | the prefix split; `bf16` is the higher-precision variant |
+| `FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P` | `1` on QAD profiles | the P quantizer QAD trained with |
+| `FASTVIDEO_H3_VSA_FP4_K_SMOOTH` | `1` on QAD profiles | subtract the per-head key mean before FP4 quantization, as QAD trained |
+| `FASTVIDEO_H3_GATE_CHUNK_ROWS` | `8192` on QAD profiles | bit-identical gate chunking; caps the 768p10 transient |
 | `FASTVIDEO_H3_VSA_FINE_ATTENTION` | `emulator-bf16` on the 4090 | bf16 VSA on sm_89 |
 | `FASTVIDEO_H3_VAE_NVFP4_DECODER` | path to `decoder-nvfp4.safetensors` | the pre-packed NVFP4 decoder |
 | `FASTVIDEO_MINIMAX_H3_FUSIONS` | `all` | bit-exact fused kernels |

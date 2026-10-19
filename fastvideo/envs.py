@@ -604,6 +604,22 @@ FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS = EnvInt(
     "FASTVIDEO_H3_VSA_FP4_PREFIX). -1 applies it to every step; 0 disables it. Early steps set the "
     "global structure, so a small value keeps most of the split's quality benefit for a fraction of "
     "its cost.")
+FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P = EnvBool(
+    False,
+    category="attention",
+    doc="Quantize the FP4 attention probabilities with the two-level scheme the QAD student trained "
+    "with (rowmax-derived s_P1, then per-block s_P2) instead of the kernel's single-level default.")
+FASTVIDEO_H3_VSA_FP4_K_SMOOTH = EnvBool(
+    False,
+    category="attention",
+    doc="Subtract the per-head key mean before FP4 key quantization, matching the emulator and QAD "
+    "training numerics. Exact for the softmax; it only changes quantization error.")
+FASTVIDEO_H3_GATE_CHUNK_ROWS = EnvInt(
+    0,
+    category="performance",
+    doc="Rows per chunk when the VSA FP4 gate branch expands the pooled compression output back "
+    "to token rows. 0 keeps the single full-size index_select; a positive value caps the transient "
+    "at chunk_rows*heads*head_dim and is bit-identical.")
 FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
     "",
     choices=("", "emulator-mix8", "emulator-mixmx", "emulator-qk", "emulator-bf16"),

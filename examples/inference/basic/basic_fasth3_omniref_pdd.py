@@ -273,6 +273,11 @@ _CONSUMER_ENV = {
     # FP4 sparse attention on the consumer-Blackwell kernel, with the prefix split.
     "FASTVIDEO_H3_VSA_FP4": "1",
     "FASTVIDEO_H3_VSA_FP4_PREFIX": "fp8",
+    # QAD trained the video rows with two-level P and K smoothing; match it.
+    "FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P": "1",
+    "FASTVIDEO_H3_VSA_FP4_K_SMOOTH": "1",
+    # Bit-identical gate chunking; caps the 1.2 GiB transient at 768p10.
+    "FASTVIDEO_H3_GATE_CHUNK_ROWS": "8192",
     # Bit-exact kernels, and none of the data-center-only routes.
     "FASTVIDEO_MINIMAX_H3_FUSIONS": "all",
     "FASTVIDEO_VSA_TRITON": "1",

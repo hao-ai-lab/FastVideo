@@ -28,18 +28,35 @@ import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn_h3 import (MiniMaxH3VSAMetadata, _build_block_mask, _pool_tiles)
 
 
+def _fp4_kernel_kwargs() -> dict[str, object]:
+    """Quantization options for the FP4 video kernel.
+
+    The native route defaults to single-level P; the QAD student trained with
+    two-level P, selected here by an inference-only switch.
+    """
+    kwargs: dict[str, object] = {}
+    if envs.FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P.get():
+        kwargs["single_level_p_quant"] = False
+    return kwargs
+
+
 def _sparse_fp4_attention(api: Any, *args: Any) -> torch.Tensor:
     """Run the block-sparse FP4 kernel on lists built by vsa_tile_mask_to_fp4_blocks.
 
     Those lists are in range by construction, so skip the host-sync validation where the installed
     fastvideo-kernel supports turning it off; older releases have no ``validate`` argument.
+
+    ``FASTVIDEO_H3_VSA_FP4_K_SMOOTH`` subtracts the per-head key mean before the kernel
+    quantizes K. The shift is exact under softmax, so it only changes quantization error.
     """
+    if envs.FASTVIDEO_H3_VSA_FP4_K_SMOOTH.get():
+        args = (args[0], args[1] - args[1].mean(dim=1, keepdim=True), *args[2:])
     try:
-        return api.sageattn_blackwell_sparse_bshd(*args, validate=False)
+        return api.sageattn_blackwell_sparse_bshd(*args, validate=False, **_fp4_kernel_kwargs())
     except TypeError as error:
         if "validate" not in str(error):
             raise
-        return api.sageattn_blackwell_sparse_bshd(*args)
+        return api.sageattn_blackwell_sparse_bshd(*args, **_fp4_kernel_kwargs())
 
 _BLOCK = 128
 
@@ -341,7 +358,17 @@ def vsa_fp4_attention(attn: Any, hidden_states: torch.Tensor, rotary_emb: tuple[
             gate, _ = attn.to_gate_compress(hidden_states)
             v_pooled = _pool_tiles(value[:, :logical], vbs, layout.tile)
             out_c = torch.matmul(torch.softmax(scores, dim=-1), v_pooled).permute(0, 2, 1, 3).to(out.dtype)
-            out = out.addcmul_(out_c.index_select(1, layout.row_tile), gate.unflatten(-1, (heads, dim)))
+            gate = gate.unflatten(-1, (heads, dim))
+            chunk = envs.FASTVIDEO_H3_GATE_CHUNK_ROWS.get()
+            if chunk > 0 and out.shape[1] > chunk:
+                # The full gather materializes [B, L, H, D] (1.2 GiB at 768p10) beside the 36L
+                # decoder. Chunked gathers and the same elementwise FMA are bit-identical.
+                for start in range(0, out.shape[1], chunk):
+                    stop = min(start + chunk, out.shape[1])
+                    out[:, start:stop].addcmul_(out_c.index_select(1, layout.row_tile[start:stop]),
+                                                gate[:, start:stop])
+            else:
+                out = out.addcmul_(out_c.index_select(1, layout.row_tile), gate)
     return out.flatten(2, 3)
 
 
