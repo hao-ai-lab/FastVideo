@@ -589,6 +589,12 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         # 128-token blocks, an even tile count with the partner tile, integer
         # tile sizes), which every call meets, so it is evaluated once.
         self._tile128_route: dict[tuple[torch.device, torch.dtype, int], str | None] = {}
+        # Optional replacement of the fine block-sparse kernel only (selection,
+        # mask and the gated compression branch are unchanged). Called as
+        # ``fn(query, key, value, mask, metadata) -> [B, S, H, D]`` on the
+        # logical tile-ordered rows. Quantization-aware training installs its
+        # FP4 emulator here; it is also the only grad-capable tile-128 route.
+        self.fine_attention_override: Any = None
 
     def prepare_for_compile(self, device: torch.device) -> None:
         """Tensorize per-layer state shared by every torch.compile route."""
@@ -758,7 +764,7 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             raise RuntimeError("VSA-H3 regional fullgraph compile requires 64-token tiles; disable "
                                "inference_torch_compile for tile-128/256 runs.")
         if tile_elems == 64:
-            if block_sparse_attn_64_bhsd is None:
+            if block_sparse_attn_64_bhsd is None and self.fine_attention_override is None:
                 raise NotImplementedError("fastvideo_kernel.block_sparse_attn is not installed")
         elif tile_elems == 256 and block_sparse_attn_256_bshd is None:
             raise NotImplementedError("fastvideo_kernel.block_sparse_attn_256 is not installed")
@@ -838,7 +844,9 @@ class MiniMaxH3VSAImpl(AttentionImpl):
             # preserves the eager dense-layer contract without a Python branch.
             mask = mask | force_dense
 
-        if tile_elems in _PTX_BLACKWELL_TILE_ELEMS:
+        if self.fine_attention_override is not None and not compiling:
+            out = self.fine_attention_override(logical_query, logical_key, logical_value, mask, attn_metadata)
+        elif tile_elems in _PTX_BLACKWELL_TILE_ELEMS:
             # Native 64/128-token path: the block map is already at the
             # kernels' granularity. These entries take BHSD ([B, H, S_pad, D]);
             # mirror block_sparse_attn_256_bshd's Triton branch and transpose
