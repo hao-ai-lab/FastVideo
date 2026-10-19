@@ -325,12 +325,13 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     # CUDAGraphs that has been overwritten" (surfaces at sp=1;
                     # sp>1 is masked by collective-induced graph breaks).
                     torch.compiler.cudagraph_mark_step_begin()
-                    with self._pdd_head_fusion(pdd_plan, index), trace_step(index), nvtx_range(
-                            f"minimax_h3.step{index}"), set_forward_context(
-                            current_timestep=index,
-                            attn_metadata=attn_metadata,
-                            forward_batch=batch,
-                    ):
+                    with self._pdd_head_fusion(
+                            pdd_plan,
+                            index), trace_step(index), nvtx_range(f"minimax_h3.step{index}"), set_forward_context(
+                                current_timestep=index,
+                                attn_metadata=attn_metadata,
+                                forward_batch=batch,
+                            ):
                         video_velocity, audio_velocity = self.transformer(
                             hidden_states=batch.latents[None],
                             audio_hidden_states=batch.audio_latents[None],
