@@ -12,24 +12,28 @@
 #
 # Paths are placeholders. Fill in the bf16 V2 model, the calibration table
 # shipped with it, the latent manifests and the output dir.
+# Starting weights: FastVideo/FastVideo-FastH3-8-Step-V2 (bf16). The released
+# QAD result is FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer; the
+# NVFP4 baseline it replaces is
+# FastVideo/FastVideo-FastH3-8-Step-V2-NVFP4-Consumer.
 models:
   student:
     _target_: fastvideo.train.models.minimax_h3.v2_t2v.MiniMaxH3V2T2VModel
-    init_from: data/models/FastH3-V2-train
+    init_from: data/models/FastH3-V2
     trainable: true
     enable_gradient_checkpointing_type: full
     qad:
       enabled: true
       linears:
         enabled: true
-        amax_json: data/calibration/amax-consumer.json
+        amax_json: examples/train/calibration/fasth3/amax-consumer.json
         # Attention and gate linears use the unit activation scale; only the
         # FFN linears read their calibrated amax from this table.
         attention: true
         gate: true
         ffn: true
         skip_blocks: []
-        amax_sha256: null
+        amax_sha256: 0800516caec04ec829d21c45ca8b18eede6b81008c040997c0b84d48e0d39e52
       fp4_attention:
         enabled: true
         two_level_p: true
@@ -51,7 +55,7 @@ models:
     trainable_patterns: transformer_blocks\.\d+\.(attn\.(to_q|to_k|to_v|to_out)|ff\.(fc_in|fc_out))\.
   teacher:
     _target_: fastvideo.train.models.minimax_h3.v2_t2v.MiniMaxH3V2T2VModel
-    init_from: data/models/FastH3-V2-train
+    init_from: data/models/FastH3-V2
     trainable: false
 
 method:
@@ -83,11 +87,11 @@ method:
 
 training:
   distributed:
-    num_gpus: 4
+    num_gpus: 16
     sp_size: 1
     tp_size: 1
     hsdp_replicate_dim: 1
-    hsdp_shard_dim: 4
+    hsdp_shard_dim: 16
     pin_cpu_memory: false
   data:
     train_batch_size: 1
@@ -98,8 +102,8 @@ training:
     eps: 1.0e-08
     weight_decay: 0.0
     lr_scheduler: cosine_with_min_lr
-    lr_warmup_steps: 0
-    min_lr_ratio: 1.0
+    lr_warmup_steps: 10
+    min_lr_ratio: 0.3
   loop:
     max_train_steps: 300
     gradient_accumulation_steps: 1
@@ -124,14 +128,22 @@ callbacks:
 
 pipeline: {}
 
-# Continuation stage (optional). If the released V2.1 checkpoint was refined
-# past the 300-step stage above, it was resumed from that stage's `best` DCP
-# with the same numerics and a lower learning rate. The stage keeps the full
-# recipe above and changes only these knobs:
+# The published FastVideo/FastVideo-FastH3-8-Step-V2.1-NVFP4-Consumer
+# checkpoint is the linears-only variant of this schedule: NVFP4 linears with
+# BF16 VSA attention, i.e. the same config with fp4_attention.enabled=false.
+# The shared FP4 recipe above adds FP4 attention from step 0 and does not
+# reproduce that checkpoint bit for bit.
 #
-#   method.init_student_dcp=outputs/v2_1_nvfp4_qad/best
+# FP4-attention adaptation (provenance note, not part of the public
+# reproduction). The internal follow-up started from a linears-only 300-step
+# DCP, enabled FP4 attention, and trained 300 more steps at lr 1.5e-6 with no
+# warmup and a constant LR. It is an adaptation of the linears-only checkpoint
+# to FP4 attention, not a second epoch of the FP4 stage 1 above, and it needs
+# a DCP of the linears-only model (the packed HF release is not one):
+#
+#   method.init_student_dcp=<linears-only 300-step DCP>
 #   training.optimizer.learning_rate=1.5e-06
+#   training.optimizer.lr_warmup_steps=0
+#   training.optimizer.min_lr_ratio=1.0
 #   training.loop.max_train_steps=300
-#   training.distributed.num_gpus=16
-#   training.distributed.hsdp_shard_dim=16
-#   training.checkpoint.output_dir=outputs/v2_1_nvfp4_qad_continuation
+#   training.checkpoint.output_dir=outputs/v2_1_nvfp4_qad_fp4_adapt

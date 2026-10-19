@@ -10,19 +10,21 @@
 # See docs/training/minimax_h3_fp4_qad.md for the recipe shared with the V2
 # (V2.1 Consumer) profile, calibration, and the checkpoint contract.
 #
-# Paths are placeholders. Fill in the calibrated starting checkpoint, the
-# pinned amax table shipped with it, the latent manifests and the output dir.
+# Released result: FastVideo/FastH3-Omni-NVFP4-QAD-v2 (step 120 of 200).
+# `init_from` is the calibrated step-3500 OmniRef checkpoint used as QAD step 0,
+# not that released result. The calibrated amax table is vendored under
+# examples/train/calibration/fasth3/ and pinned by sha256 below.
 models:
   student:
     _target_: fastvideo.train.models.minimax_h3.omniref_pdd.MiniMaxH3OmniRefPDDModel
-    init_from: data/models/omniref
+    init_from: data/models/omniref-nvfp4-ptq
     trainable: true
     enable_gradient_checkpointing_type: full
     qad:
       enabled: true
       linears:
         enabled: true
-        amax_json: data/calibration/amax-omniref-mse-bf16-top8.json
+        amax_json: examples/train/calibration/fasth3/amax-omniref-mse-bf16-top8.json
         # Attention and gate linears use the unit activation scale; only the
         # FFN linears read their calibrated amax from this table.
         attention: true
@@ -63,7 +65,7 @@ models:
     trainable_patterns: transformer_blocks\.\d+\.(attn\.(to_q|to_k|to_v|to_out)|ff\.(fc_in|fc_out))\.
   teacher:
     _target_: fastvideo.train.models.minimax_h3.omniref_pdd.MiniMaxH3OmniRefPDDModel
-    init_from: data/models/omniref
+    init_from: data/models/omniref-nvfp4-ptq
     trainable: false
     frozen_bf16: true
 

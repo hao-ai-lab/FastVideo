@@ -233,6 +233,15 @@ def test_write_metadata_roundtrip_with_step(tmp_path: Path) -> None:
     assert loaded == {"step": 7}
 
 
+def test_write_metadata_marks_tagged_weights_only(tmp_path: Path) -> None:
+    mgr = _make_manager(tmp_path)
+    tagged = tmp_path / "best"
+    tagged.mkdir()
+    mgr._write_metadata(tagged, step=30, weights_only=True)
+    loaded = CheckpointManager.load_metadata(tagged)
+    assert loaded == {"step": 30, "weights_only": True}
+
+
 def test_write_metadata_includes_raw_config(tmp_path: Path) -> None:
     raw = {
         "models": {
