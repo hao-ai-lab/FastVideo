@@ -384,7 +384,10 @@ def _nvfp4_quantize(
         # reports the same padded scales, so a compiled graph takes this
         # path unconditionally, without a guard on the row count.
         quantized, scales = torch.ops.fastvideo_fp4.nvfp4_quantize(x, global_sf, sf_layout, do_shuffle)
-        if torch.compiler.is_compiling() or scales.numel() >= padded_rows * (x.shape[-1] // 16):
+        # Columns are padded to whole 4-wide tiles too, so compare against the
+        # fully padded size; logical rows alone can reach the unpadded column count.
+        padded_cols = ((x.shape[-1] + 15) // 16 + 3) // 4 * 4
+        if torch.compiler.is_compiling() or scales.numel() >= padded_rows * padded_cols:
             return quantized, scales
         # Only an unexpected FlashInfer build gets here; quantize it padded
         # from now on rather than quantizing every activation twice.

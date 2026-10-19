@@ -159,7 +159,10 @@ def test_compiled_swizzled_quantize_quantizes_once_without_row_guards(monkeypatc
     torch._dynamo.reset()
 
 
-def test_unpadded_flashinfer_scales_fall_back_to_the_pad_copy_once(monkeypatch) -> None:
+# (255, 2064): K/16 = 129 pads to 132 scale columns, so 255 unpadded rows already
+# hold more scales than 256 rows x 129 logical columns.
+@pytest.mark.parametrize("rows,k", [(200, 256), (255, 2064)])
+def test_unpadded_flashinfer_scales_fall_back_to_the_pad_copy_once(monkeypatch, rows: int, k: int) -> None:
     monkeypatch.setattr(nv, "_FLASHINFER_PADS_128X4_SCALES", True)
     real_fenced = nv.nvfp4_quantize_fenced
     calls = []
@@ -170,9 +173,11 @@ def test_unpadded_flashinfer_scales_fall_back_to_the_pad_copy_once(monkeypatch) 
         return quantized, scales[:x.shape[0]]
 
     monkeypatch.setattr(nv, "nvfp4_quantize_fenced", unpadded)
-    x, global_sf = _activation()
+    torch.manual_seed(0)
+    x = torch.randn(rows, k, device="cuda", dtype=torch.bfloat16)
+    global_sf = (448.0 * 6.0) / x.float().abs().amax()
     nv._nvfp4_quantize(x, global_sf, sfLayout=LAYOUT_128X4)
-    assert calls == [200, 256] and nv._FLASHINFER_PADS_128X4_SCALES is False
+    assert calls == [rows, 256] and nv._FLASHINFER_PADS_128X4_SCALES is False
     calls.clear()
     nv._nvfp4_quantize(x, global_sf, sfLayout=LAYOUT_128X4)
     assert calls == [256]
