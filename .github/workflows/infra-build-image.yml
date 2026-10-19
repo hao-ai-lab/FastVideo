@@ -80,6 +80,9 @@ jobs:
             torch_cuda_arch_list:
               amd64: '9.0a'
               arm64: '9.0a'
+            install_flash_attn:
+              amd64: '1'
+              arm64: '1'
             install_fa4_cute:
               amd64: '1'
               arm64: '1'
@@ -93,6 +96,11 @@ jobs:
               arm64: '12.1a'
             # FA4 cute does not run on GB10 (sm_12x), and its cutlass-dsl pin
             # breaks flashinfer there; GB10 FP4 attention uses fastvideo-kernel.
+            # FA2 gives no measured GB10 speedup and changes the output relative
+            # to a native Spark install, so the GB10 image matches that install.
+            install_flash_attn:
+              amd64: '1'
+              arm64: '0'
             install_fa4_cute:
               amd64: '1'
               arm64: '0'
@@ -115,6 +123,7 @@ jobs:
         CUDA_VERSION=${{ matrix.cuda.version }}
         UV_TORCH_BACKEND=${{ matrix.cuda.torch_backend }}
         TORCH_CUDA_ARCH_LIST=${{ matrix.cuda.torch_cuda_arch_list[matrix.architecture.name] }}
+        INSTALL_FLASH_ATTN=${{ matrix.cuda.install_flash_attn[matrix.architecture.name] }}
         INSTALL_FA4_CUTE=${{ matrix.cuda.install_fa4_cute[matrix.architecture.name] }}
         CMAKE_BUILD_PARALLEL_LEVEL=${{ matrix.cuda.cmake_build_parallel_level }}
         FLASH_ATTN_WHEEL_TAG=${{ matrix.cuda.fa_tag }}
