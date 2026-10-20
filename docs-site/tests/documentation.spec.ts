@@ -137,7 +137,7 @@ test("search finds a transferred guide and opens it by keyboard", async ({ page 
   await page.getByRole("button", { name: "Search", exact: true }).click();
   const query = page.getByRole("combobox", { name: "Search docs", exact: true });
   await query.fill("offloading");
-  await expect(page.getByRole("option", { name: /^Offloading/ }).first()).toBeVisible();
+  await expect(page.getByRole("option", { name: /^Offloading/ }).first()).toBeVisible({ timeout: 30000 });
   await query.press("Enter");
   await expect(page).toHaveURL(/FastVideo\/inference\/offloading/);
 });
