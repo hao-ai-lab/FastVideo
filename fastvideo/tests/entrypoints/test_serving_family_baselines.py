@@ -21,6 +21,7 @@ from fastvideo.entrypoints.openai.request_adapter import (
     discard_materialized_media,
     prepare_reference_media,
 )
+from fastvideo.pipelines.basic.hunyuan15.presets import HUNYUAN15_I2V_480P_DISTILLED
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -63,6 +64,34 @@ def test_family_baseline_declares_workload_and_parses(name: str, workload: str) 
     config = _load(name)
     assert config.generator.pipeline.workload_type == workload
     assert config.server.served_model_name
+
+
+def test_hunyuan_i2v_480p_keeps_the_registered_checkpoint_semantics(tmp_path: Path) -> None:
+    """The checkpoint is named 480p, but its registered preset renders 720x1280."""
+    config = _load("openai_hunyuan15_i2v_480p.yaml")
+    defaults = HUNYUAN15_I2V_480P_DISTILLED.defaults
+    sampling = config.default_request.sampling
+
+    assert config.generator.model_path.endswith("480p_i2v_step_distilled")
+    for field in ("height", "width", "num_frames", "fps", "num_inference_steps", "guidance_scale"):
+        assert getattr(sampling, field) == defaults[field]
+    assert config.default_request.negative_prompt == defaults["negative_prompt"]
+
+    image = tmp_path / "first-frame.png"
+    image.write_bytes(b"not-decoded-at-admission")
+    request = VideoGenerationRequest(prompt="a red fox", image_reference={"image_url": str(image)})
+    adapted = build_generation_request(
+        "i2v_test",
+        request,
+        _args(config, "i2v"),
+        served_model_name=config.server.served_model_name or "",
+        output_dir=str(tmp_path),
+        default_request=config.default_request,
+    )
+    assert adapted.sampling.height == 720
+    assert adapted.sampling.width == 1280
+    assert adapted.inputs.image_path == str(image)
+    assert adapted.output.output_path.endswith(".mp4")
 
 
 def test_stable_audio_seconds_override_produces_wav(tmp_path: Path) -> None:

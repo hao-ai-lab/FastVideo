@@ -98,6 +98,10 @@ uncovered registry families.
 | `openai_stable_audio.yaml` | Stable Audio Open 1.0 | text-to-audio | 1 |
 | `openai_mmaudio.yaml` | MMAudio large-44k-v2 | video-to-audio | 1 |
 
+The HunyuanVideo 1.5 I2V 480p checkpoint's registered preset renders at
+720x1280; "480p" is the checkpoint identity, not a claim that every output is
+480p.
+
 Image servers use `/v1/images/generations` and `/v1/images/edits`. Send the
 model's advertised alias as `model` and set `FASTVIDEO_MODEL` for the sample
 clients. SD3.5 Medium is gated; accept its license and authenticate before
