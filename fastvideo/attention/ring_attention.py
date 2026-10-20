@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 
 from fastvideo.attention.ring import ring_flash_attn_func
-from fastvideo.attention.ring.capabilities import HAS_FLASH_ATTN as HAS_FLASH_ATTN_2
+from fastvideo.attention.ring.capabilities import load_flash_attn
 from fastvideo.distributed.communication_op import ulysses_all_to_all_4D
 from fastvideo.distributed.parallel_state import (get_ring_group, get_ring_rank, get_ring_size, get_sp_world_size,
                                                   get_ulysses_group)
@@ -60,40 +60,33 @@ class RingAttention:
         causal: bool,
         backend: AttentionBackendEnum,
     ) -> None:
-        self.ring_size = get_ring_size()
+        ring_size = get_ring_size()
         sp_world_size = get_sp_world_size()
-        if sp_world_size % self.ring_size != 0:
+        if sp_world_size % ring_size != 0:
             raise RuntimeError("Ring Attention requires ring_size to evenly divide the SP world size. "
-                               f"Got ring_size={self.ring_size}, sp_world_size={sp_world_size}.")
+                               f"Got ring_size={ring_size}, sp_world_size={sp_world_size}.")
         if backend != AttentionBackendEnum.FLASH_ATTN:
             raise NotImplementedError("The initial Ring Attention implementation only supports the "
                                       f"FlashAttention backend, got backend={backend}.")
         if num_heads != num_kv_heads:
             raise NotImplementedError("The initial Ring Attention implementation does not support GQA. "
                                       f"num_heads={num_heads}, num_kv_heads={num_kv_heads}.")
-        ulysses_size = sp_world_size // self.ring_size
+        ulysses_size = sp_world_size // ring_size
         if ulysses_size > 1 and num_heads % ulysses_size != 0:
             raise NotImplementedError("The Ring+Ulysses (USP) hybrid requires num_heads to be divisible by the Ulysses "
                                       f"subgroup size. Got num_heads={num_heads}, ulysses_size={ulysses_size} "
-                                      f"(sp_world_size={sp_world_size} // ring_size={self.ring_size}).")
-        # FLASH_ATTN identifies a backend family, not the installed FA version.
-        # The vendored Ring kernel currently calls FA2's private interface.
-        if not HAS_FLASH_ATTN_2:
-            raise RuntimeError("Ring Attention currently requires FlashAttention-2 "
-                               "(flash_attn.flash_attn_interface). The FLASH_ATTN backend may use FA3/FA4, "
-                               "but those implementations are not supported by this Ring kernel. "
-                               "Install a compatible FlashAttention-2 package or disable Ring Attention "
-                               "with ring_size=1.")
+                                      f"(sp_world_size={sp_world_size} // ring_size={ring_size}).")
+        if causal:
+            raise NotImplementedError("Ring Attention only supports non-causal self-attention.")
+        load_flash_attn()
         logger.info_once("Ring Attention uses FlashAttention-2, independently of the local FLASH_ATTN implementation.")
         self.softmax_scale = softmax_scale
-        self.causal = causal
 
     def _validate_ring_inputs(
         self,
         q: torch.Tensor,
         *,
         training: bool,
-        original_seq_len: int | None,
         replicated_q: torch.Tensor | None,
         replicated_k: torch.Tensor | None,
         replicated_v: torch.Tensor | None,
@@ -105,17 +98,6 @@ class RingAttention:
         if replicated_q is not None or replicated_k is not None or replicated_v is not None:
             raise NotImplementedError("Ring Attention does not yet support replicated Q/K/V tokens "
                                       "(e.g. text tokens concatenated onto the visual sequence).")
-
-        if self.causal:
-            raise NotImplementedError("The initial Ring Attention integration only supports non-causal "
-                                      "self-attention.")
-
-        if original_seq_len is not None:
-            local_seq_len = q.shape[1]
-            global_seq_len = local_seq_len * get_sp_world_size()
-            if not 0 < original_seq_len <= global_seq_len:
-                raise ValueError("original_seq_len must be positive and no larger than the padded SP sequence. "
-                                 f"Got original_seq_len={original_seq_len}, padded_seq_len={global_seq_len}.")
 
         if q.dtype not in (torch.float16, torch.bfloat16):
             raise NotImplementedError(
@@ -197,7 +179,6 @@ class RingAttention:
         self._validate_ring_inputs(
             q,
             training=training,
-            original_seq_len=original_seq_len,
             replicated_q=replicated_q,
             replicated_k=replicated_k,
             replicated_v=replicated_v,

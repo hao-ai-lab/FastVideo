@@ -3,20 +3,15 @@ from typing import Any
 
 import torch
 
-from ..capabilities import HAS_FLASH_ATTN
+from ..capabilities import load_flash_attn
 
-if HAS_FLASH_ATTN:
-    import flash_attn
-    from flash_attn.flash_attn_interface import _flash_attn_backward, _flash_attn_forward
 
-    def _parse_version(version: str) -> tuple[int, ...]:
-        parts = []
-        for part in version.split(".")[:3]:
-            match = re.match(r"\d+", part)
-            parts.append(int(match.group()) if match else 0)
-        return tuple(parts)
-
-    _FLASH_ATTN_VERSION = _parse_version(flash_attn.__version__)
+def _parse_version(version: str) -> tuple[int, ...]:
+    parts = []
+    for part in version.split(".")[:3]:
+        match = re.match(r"\d+", part)
+        parts.append(int(match.group()) if match else 0)
+    return tuple(parts)
 
 
 def flash_attn_forward(q: torch.Tensor,
@@ -29,10 +24,11 @@ def flash_attn_forward(q: torch.Tensor,
                        softcap: float | None = None,
                        alibi_slopes: torch.Tensor | None = None,
                        return_softmax: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
-    assert HAS_FLASH_ATTN, "FlashAttention-2 is not available"
+    flash_attn, _flash_attn_forward, _ = load_flash_attn()
+    version = _parse_version(flash_attn.__version__)
     if softmax_scale is None:
         softmax_scale = q.shape[-1]**(-0.5)
-    if _FLASH_ATTN_VERSION <= (2, 6, 3):
+    if version <= (2, 6, 3):
         block_out, _, _, _, _, block_lse, _, _ = _flash_attn_forward(
             q,
             k,
@@ -69,8 +65,9 @@ def flash_attn_backward(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v:
                         deterministic: bool, rng_state: Any) -> None:
     if softmax_scale is None:
         softmax_scale = q.shape[-1]**(-0.5)
-    assert HAS_FLASH_ATTN
-    if _FLASH_ATTN_VERSION <= (2, 6, 3):
+    flash_attn, _, _flash_attn_backward = load_flash_attn()
+    version = _parse_version(flash_attn.__version__)
+    if version <= (2, 6, 3):
         _flash_attn_backward(
             dout,
             q,

@@ -1086,6 +1086,7 @@ class FastVideoArgs:
             self.tp_size = 1
         if self.sp_size == -1:
             self.sp_size = self.num_gpus
+        self.num_gpus = max(self.num_gpus, self.tp_size, self.sp_size)
         if self.hsdp_shard_dim == -1:
             self.hsdp_shard_dim = self.num_gpus
 
@@ -1228,6 +1229,9 @@ class FastVideoArgs:
 
         if self.ring_size == 1:
             return
+
+        if self.h3_encoder_split:
+            raise ValueError("Ring Attention does not support h3_encoder_split; set ring_size=1.")
 
         if self.sp_size <= 1:
             raise ValueError(f"Ring Attention requires sequence parallelism. Got ring_size={self.ring_size}, "

@@ -30,6 +30,7 @@ class ServerConfig:
 class ParallelismConfig:
     tp_size: int = -1
     sp_size: int = -1
+    ring_size: int = 1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # positive process-group timeout in seconds

@@ -883,6 +883,9 @@ def initialize_model_parallel(
         ring_size: Ring Attention ranks per SP group; the remaining
             ``sp_size // ring_size`` factor is Ulysses. ``1`` disables Ring.
     """
+    if sp_group_ranks is not None and ring_size > 1:
+        raise ValueError("Ring Attention does not support custom sp_group_ranks; set ring_size=1.")
+
     # Get world size and rank. Ensure some consistencies.
     assert _WORLD is not None, "world group is not initialized, please call init_distributed_environment first"
     world_size: int = get_world_size()

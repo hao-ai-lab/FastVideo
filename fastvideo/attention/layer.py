@@ -110,7 +110,6 @@ class DistributedAttention(nn.Module):
                                                                softmax_scale=self.softmax_scale,
                                                                causal=causal,
                                                                backend=self.backend)
-        self.use_ring_attention = self._ring_attention is not None
         # Preserve the historical compiler-disabled default. The regional
         # inference loader may enable this one instance after validating the
         # transformer's resolved backend; no process-global default changes.

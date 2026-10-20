@@ -34,7 +34,7 @@ from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard,
 )
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.parallel_state import get_sp_world_size, get_ulysses_size
 from fastvideo.layers.layernorm import FP32LayerNorm, RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.visual_embedding import Timesteps
@@ -510,9 +510,9 @@ class HeliosTransformer3DModel(BaseDiT):
         self.zero_history_timestep = config.zero_history_timestep
         self.quant_config = config.quant_config
 
-        if config.num_attention_heads % get_sp_world_size() != 0:
+        if config.num_attention_heads % get_ulysses_size() != 0:
             raise ValueError(f"Helios heads ({config.num_attention_heads}) must be divisible by "
-                             f"sequence parallel size ({get_sp_world_size()})")
+                             f"Ulysses size ({get_ulysses_size()})")
         inner_dim = config.hidden_size
         self.rope = HeliosRotaryPosEmbed(tuple(config.rope_dim), config.rope_theta)
         self.patch_embedding = nn.Conv3d(

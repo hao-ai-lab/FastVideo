@@ -115,7 +115,7 @@ def legacy_from_pretrained_to_config(
             engine["num_gpus"] = value
         elif key == "distributed_executor_backend":
             engine["execution_backend"] = value
-        elif key in {"tp_size", "sp_size", "hsdp_replicate_dim", "hsdp_shard_dim", "dist_timeout"}:
+        elif key in {"tp_size", "sp_size", "ring_size", "hsdp_replicate_dim", "hsdp_shard_dim", "dist_timeout"}:
             parallelism[key] = value
         elif key == "dit_cpu_offload":
             offload["dit"] = value
@@ -249,6 +249,7 @@ def generator_config_to_fastvideo_args(config: GeneratorConfig | Mapping[str, An
         "distributed_executor_backend": engine.execution_backend,
         "tp_size": engine.parallelism.tp_size,
         "sp_size": engine.parallelism.sp_size,
+        "ring_size": engine.parallelism.ring_size,
         "hsdp_replicate_dim": engine.parallelism.hsdp_replicate_dim,
         "hsdp_shard_dim": engine.parallelism.hsdp_shard_dim,
         "dist_timeout": engine.parallelism.dist_timeout,

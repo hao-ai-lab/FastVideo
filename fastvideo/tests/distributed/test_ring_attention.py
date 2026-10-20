@@ -348,7 +348,7 @@ def _run_production_worker(output_path: Path, *, hybrid: bool) -> None:
                 num_heads=NUM_HEADS, head_size=HEAD_SIZE,
                 supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,),
             ).eval()
-        assert attention.use_ring_attention
+        assert attention._ring_attention is not None
 
         # The last case leaves whole Ring chunks empty. It catches accidental
         # empty-KV kernel calls and NaNs from merging two -inf LSE blocks.

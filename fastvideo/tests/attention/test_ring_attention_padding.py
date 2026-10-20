@@ -42,7 +42,7 @@ def test_ring_padding_matches_dense_attention(monkeypatch, seq_len, rank):
 
     monkeypatch.setattr(ring, "RingComm", FakeRingComm)
     monkeypatch.setattr(ring, "_FIRST_RING_LOG", False)
-    monkeypatch.setattr(ring, "select_flash_attn_impl", lambda *a, **kw: dense_block)
+    monkeypatch.setattr(ring, "flash_attn_forward", dense_block)
     actual, lse = ring.ring_flash_attn_forward(
         None, *local, softmax_scale=8**-0.5, causal=False, original_seq_len=seq_len,
     )

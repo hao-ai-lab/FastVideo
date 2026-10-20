@@ -80,3 +80,12 @@ def test_ring_size_must_divide_sp_size() -> None:
             local_rank=0,
             backend="gloo",
         )
+
+
+def test_custom_sp_layout_rejected_before_group_creation(monkeypatch):
+    from fastvideo.distributed import parallel_state
+    monkeypatch.setattr(parallel_state, "_WORLD", None)
+    with pytest.raises(ValueError, match="custom sp_group_ranks"):
+        parallel_state.initialize_model_parallel(
+            sequence_model_parallel_size=2, ring_size=2,
+            sp_group_ranks=[[0], [1], [2, 3]])

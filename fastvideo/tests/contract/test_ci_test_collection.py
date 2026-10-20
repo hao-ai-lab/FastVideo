@@ -501,3 +501,13 @@ def test_arm64_chromium_filters_generation_mode_playback_but_keeps_uploads():
     firefox_command = re.search(r'npm run e2e(?:\\\n|[^\n])*', arm_branch).group(0)
     assert '--project=firefox' in firefox_command
     assert '--grep' not in firefox_command
+
+
+def test_ring_parity_runs_in_four_gpu_inference_lane():
+    lane_root = REPO_ROOT / ".buildkite/scripts/lanes"
+    inference = (lane_root / "ssim.sh").read_text()
+    training = (lane_root / "training.sh").read_text()
+    parity_test = "fastvideo/tests/distributed/test_ring_attention.py"
+    assert parity_test not in training
+    assert inference.index("torch.cuda.device_count() < 4") < inference.index(parity_test)
+    assert inference.index(parity_test) < inference.index("exec python fastvideo/tests/ssim/ci_runner.py")

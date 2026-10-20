@@ -80,6 +80,7 @@ _FROM_PRETRAINED_CONVENIENCE_KWARGS = frozenset({
     "distributed_executor_backend",
     "tp_size",
     "sp_size",
+    "ring_size",
     "hsdp_replicate_dim",
     "hsdp_shard_dim",
     "dist_timeout",

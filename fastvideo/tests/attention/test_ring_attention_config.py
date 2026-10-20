@@ -77,13 +77,10 @@ def test_invalid_ring_size_rejected(ring_size: int) -> None:
         )
 
 
-def test_sp_size_cannot_exceed_num_gpus() -> None:
-    with pytest.raises(ValueError, match="cannot exceed"):
-        FastVideoArgs(
-            model_path=MODEL_PATH,
-            num_gpus=2,
-            sp_size=4,
-        )
+@pytest.mark.parametrize("tp_size,sp_size", [(1, 4), (4, 1)])
+def test_num_gpus_expands_for_parallelism(tp_size, sp_size) -> None:
+    args = FastVideoArgs(model_path=MODEL_PATH, num_gpus=1, tp_size=tp_size, sp_size=sp_size)
+    assert args.num_gpus == 4
 
 
 def test_num_gpus_must_be_divisible_by_sp_size() -> None:
@@ -119,3 +116,22 @@ def test_ring_size_must_divide_sp_size() -> None:
             sp_size=6,
             ring_size=4,
         )
+
+def test_h3_encoder_split_rejects_ring() -> None:
+    with pytest.raises(ValueError, match="does not support h3_encoder_split"):
+        FastVideoArgs(model_path=MODEL_PATH, num_gpus=4, sp_size=4, ring_size=2,
+                      h3_encoder_split=True, distributed_executor_backend="ray")
+
+
+def test_h3_encoder_split_allows_ulysses() -> None:
+    args = FastVideoArgs(model_path=MODEL_PATH, num_gpus=4, ring_size=1,
+                         h3_encoder_split=True, distributed_executor_backend="ray")
+    assert args.ring_size == 1
+
+
+def test_training_rejects_ring_during_configuration() -> None:
+    from fastvideo.fastvideo_args import ExecutionMode
+    with pytest.raises(NotImplementedError, match="training/backward"):
+        FastVideoArgs(model_path=MODEL_PATH, num_gpus=2, sp_size=2, ring_size=2,
+                      mode=ExecutionMode.FINETUNING, inference_mode=False,
+                      hsdp_replicate_dim=1, hsdp_shard_dim=2)

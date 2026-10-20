@@ -799,7 +799,6 @@ FASTVIDEO_TEST_RING_DEBUG = EnvBool(
     False,
     category="test",
     doc="Enable default NCCL and PyTorch distributed debug logging for Ring test workers.",
-    deprecated_names=("FASTVIDEO_RING_TEST_DEBUG", ),
 )
 
 FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR = EnvStr("data/cats",

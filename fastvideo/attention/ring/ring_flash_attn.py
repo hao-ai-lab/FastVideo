@@ -6,20 +6,13 @@
 # which itself derives from ring-flash-attention:
 #   https://github.com/zhuzilin/ring-flash-attention
 #
-# FastVideo adaptations:
-# - ``select_flash_attn_impl`` / ``AttnType`` are imported from the local
-#   ``kernels`` shim instead of the ``yunchang`` package, so FastVideo does
-#   not pick up ``yunchang`` as a runtime dependency. Only ``AttnType.FA`` is
-#   implemented.
-# - wiring into FastVideo's Ring Attention process group happens in
-#   fastvideo/attention/ring_attention.py.
 
 import torch
 import torch.distributed as dist
 
 from fastvideo.logger import init_logger
 
-from .kernels import AttnType, select_flash_attn_impl
+from .kernels.attention import flash_attn_backward, flash_attn_forward
 from .utils import RingComm, update_out_and_lse
 
 logger = init_logger(__name__)
@@ -28,19 +21,18 @@ _FIRST_RING_LOG = True
 
 
 def ring_flash_attn_forward(
-    process_group,
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    softmax_scale,
-    dropout_p=0,
-    causal=True,
-    window_size=(-1, -1),
-    softcap=0.0,
-    alibi_slopes=None,
-    deterministic=False,
-    attn_type: AttnType = AttnType.FA,
-    original_seq_len: int | None = None,
+        process_group,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        softmax_scale,
+        dropout_p=0,
+        causal=True,
+        window_size=(-1, -1),
+        softcap=0.0,
+        alibi_slopes=None,
+        deterministic=False,
+        original_seq_len: int | None = None,
 ):
 
     global _FIRST_RING_LOG
@@ -81,8 +73,7 @@ def ring_flash_attn_forward(
         valid_k = shard_len if original_seq_len is None else max(0, min(shard_len, original_seq_len -
                                                                         owner * shard_len))
         if valid_k > 0 and (not causal or step <= comm.rank):
-            fn = select_flash_attn_impl(attn_type, stage="fwd-only")
-            block_out, block_lse = fn(
+            block_out, block_lse = flash_attn_forward(
                 q,
                 k[:, :valid_k],
                 v[:, :valid_k],
@@ -112,7 +103,7 @@ def ring_flash_attn_forward(
 
 def ring_flash_attn_backward(
         process_group,
-        dout,
+        dout: torch.Tensor,
         q,
         k,
         v,
@@ -125,7 +116,6 @@ def ring_flash_attn_backward(
         softcap=0.0,
         alibi_slopes=None,
         deterministic=False,
-        attn_type: AttnType = AttnType.FA,
 ):
     kv_comm = RingComm(process_group)
     d_kv_comm = RingComm(process_group)
@@ -146,8 +136,7 @@ def ring_flash_attn_backward(
             kv_comm.commit()
         if step <= kv_comm.rank or not causal:
             bwd_causal = causal and step == 0
-            fn = select_flash_attn_impl(attn_type, stage="bwd-only")
-            fn(
+            flash_attn_backward(
                 dout,
                 q,
                 k,
@@ -212,7 +201,6 @@ class RingFlashAttnFunc(torch.autograd.Function):
         deterministic,
         return_softmax,
         group,
-        attn_type,
         original_seq_len,
     ):
         if softmax_scale is None:
@@ -233,10 +221,8 @@ class RingFlashAttnFunc(torch.autograd.Function):
             softcap=softcap,
             alibi_slopes=alibi_slopes,
             deterministic=False,
-            attn_type=attn_type,
             original_seq_len=original_seq_len,
         )
-        # this should be out_padded
         ctx.save_for_backward(q, k, v, out, softmax_lse)
         ctx.dropout_p = dropout_p
         ctx.softmax_scale = softmax_scale
@@ -246,7 +232,6 @@ class RingFlashAttnFunc(torch.autograd.Function):
         ctx.alibi_slopes = alibi_slopes
         ctx.deterministic = deterministic
         ctx.group = group
-        ctx.attn_type = attn_type
         return out if not return_softmax else (out, softmax_lse, None)
 
     @staticmethod
@@ -267,9 +252,8 @@ class RingFlashAttnFunc(torch.autograd.Function):
             softcap=ctx.softcap,
             alibi_slopes=ctx.alibi_slopes,
             deterministic=ctx.deterministic,
-            attn_type=ctx.attn_type,
         )
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
 
 
 def ring_flash_attn_func(
@@ -285,7 +269,6 @@ def ring_flash_attn_func(
     deterministic=False,
     return_attn_probs=False,
     group=None,
-    attn_type: AttnType = AttnType.FA,
     original_seq_len: int | None = None,
 ):
     padded = original_seq_len is not None and original_seq_len != k.shape[1] * dist.get_world_size(group)
@@ -308,6 +291,5 @@ def ring_flash_attn_func(
         deterministic,
         return_attn_probs,
         group,
-        attn_type,
         original_seq_len,
     )
