@@ -34,6 +34,7 @@ from fastvideo.entrypoints.openai.request_adapter import (
 )
 from fastvideo.entrypoints.openai.state import (
     get_default_request,
+    get_media_reference_max_bytes,
     get_output_dir,
     get_served_model_name,
     get_server_args,
@@ -358,7 +359,10 @@ async def _adapt_request(request_id: str, request: VideoGenerationRequest) -> tu
     try:
         get_serving_engine().validate_video_request(request)
         validate_model_and_lora(request, get_server_args(), get_served_model_name())
-        materialized_media = await prepare_reference_media(request_id, request, get_output_dir())
+        materialized_media = await prepare_reference_media(request_id,
+                                                           request,
+                                                           get_output_dir(),
+                                                           max_bytes=get_media_reference_max_bytes())
         generation_request = await asyncio.to_thread(
             build_generation_request,
             request_id,

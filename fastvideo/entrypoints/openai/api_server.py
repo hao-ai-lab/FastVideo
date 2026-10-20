@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from fastvideo.api.presets import validate_preset_selection
-from fastvideo.api.schema import GenerationRequest
+from fastvideo.api.schema import DEFAULT_MEDIA_REFERENCE_MAX_BYTES, GenerationRequest
 from fastvideo.entrypoints.openai.state import (
     DEFAULT_OUTPUT_DIR,
     clear_state,
@@ -61,6 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     output_dir: str = app.state.output_dir
     served_model_name: str | None = app.state.served_model_name
     default_request: GenerationRequest | None = getattr(app.state, "default_request", None)
+    media_reference_max_bytes: int = getattr(app.state, "media_reference_max_bytes", DEFAULT_MEDIA_REFERENCE_MAX_BYTES)
 
     logger.info("Initializing %s generation runtime for %s ...", app.state.runtime, args.model_path)
     factory = app.state.generator_factory
@@ -75,6 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         output_dir,
         default_request=default_request,
         served_model_name=served_model_name,
+        media_reference_max_bytes=media_reference_max_bytes,
     )
 
     try:
@@ -98,6 +100,7 @@ def create_app(
     generator_factory: Callable[[], ServingGenerator] | None = None,
     video_request_validator: Callable[[VideoGenerationRequest], None] | None = None,
     runtime: str = "cuda",
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
 ) -> FastAPI:
     """Build the FastAPI application with all routers mounted"""
 
@@ -117,6 +120,7 @@ def create_app(
     app.state.output_dir = output_dir
     app.state.default_request = default_request
     app.state.served_model_name = served_model_name
+    app.state.media_reference_max_bytes = media_reference_max_bytes
     app.state.generator_factory = generator_factory
     app.state.video_request_validator = video_request_validator
     app.state.runtime = runtime
@@ -211,6 +215,7 @@ def run_server(
     output_dir: str = DEFAULT_OUTPUT_DIR,
     default_request: GenerationRequest | None = None,
     served_model_name: str | None = None,
+    media_reference_max_bytes: int = DEFAULT_MEDIA_REFERENCE_MAX_BYTES,
 ):
     """Create the app and run it with uvicorn"""
     os.environ.setdefault("FASTVIDEO_STAGE_LOGGING", "1")
@@ -222,6 +227,7 @@ def run_server(
         output_dir=output_dir,
         default_request=default_request,
         served_model_name=served_model_name,
+        media_reference_max_bytes=media_reference_max_bytes,
     )
 
     logger.info("Starting FastVideo server on %s:%d", host, port)

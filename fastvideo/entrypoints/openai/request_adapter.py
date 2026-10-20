@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import aiofiles
 import httpx
 
-import fastvideo.envs as envs
+from fastvideo.entrypoints.openai.state import get_media_reference_max_bytes
 from fastvideo.api.compat import (
     REQUEST_BATCH_EXTRA_PASSTHROUGH_FIELDS,
     explicit_request_updates,
@@ -73,8 +73,8 @@ def discard_materialized_media(paths: list[str]) -> None:
             pass
 
 
-async def _download_media(source: str, target: str) -> None:
-    max_bytes = envs.FASTVIDEO_MEDIA_REFERENCE_MAX_BYTES.get()
+async def _download_media(source: str, target: str, *, max_bytes: int | None = None) -> None:
+    max_bytes = get_media_reference_max_bytes() if max_bytes is None else max_bytes
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client, \
                 client.stream("GET", source) as response:
@@ -84,16 +84,16 @@ async def _download_media(source: str, target: str) -> None:
                 async for chunk in response.aiter_bytes():
                     written += len(chunk)
                     if written > max_bytes:
-                        raise RequestAdaptationError(
-                            f"Video reference is larger than the {max_bytes}-byte limit; "
-                            "raise FASTVIDEO_MEDIA_REFERENCE_MAX_BYTES or provide a smaller clip.")
+                        raise RequestAdaptationError(f"Video reference is larger than the {max_bytes}-byte limit; "
+                                                     "raise server.media_reference_max_bytes in the serve config or "
+                                                     "provide a smaller clip.")
                     await output.write(chunk)
     except Exception:
         discard_materialized_media([target])
         raise
 
 
-async def _materialize_video(source: str, target_base: str) -> str:
+async def _materialize_video(source: str, target_base: str, *, max_bytes: int | None = None) -> str:
     source = source.strip()
     if not source:
         raise RequestAdaptationError("Video references must not be empty.")
@@ -104,7 +104,7 @@ async def _materialize_video(source: str, target_base: str) -> str:
         target = f"{target_base}{suffix}"
         os.makedirs(os.path.dirname(target), exist_ok=True)
         try:
-            await _download_media(source, target)
+            await _download_media(source, target, max_bytes=max_bytes)
         except RequestAdaptationError:
             raise
         except Exception as error:
@@ -122,6 +122,8 @@ async def prepare_reference_media(
     request_id: str,
     request: VideoGenerationRequest,
     output_dir: str,
+    *,
+    max_bytes: int | None = None,
 ) -> list[str]:
     """Materialize media references and return the files created for this request."""
     _image_sources(request)
@@ -178,19 +180,22 @@ async def prepare_reference_media(
             if isinstance(reference, UrlVideoReference):
                 remote = is_remote(reference.video_url)
                 reference.video_url = await _materialize_video(reference.video_url,
-                                                               os.path.join(uploads_dir, f"{request_id}_video_{index}"))
+                                                               os.path.join(uploads_dir, f"{request_id}_video_{index}"),
+                                                               max_bytes=max_bytes)
                 if remote:
                     track(reference.video_url)
         if request.video_path:
             remote = is_remote(request.video_path)
             request.video_path = await _materialize_video(request.video_path,
-                                                          os.path.join(uploads_dir, f"{request_id}_video_path"))
+                                                          os.path.join(uploads_dir, f"{request_id}_video_path"),
+                                                          max_bytes=max_bytes)
             if remote:
                 track(request.video_path)
         if request.video_url:
             remote = is_remote(request.video_url)
             request.video_url = await _materialize_video(request.video_url,
-                                                         os.path.join(uploads_dir, f"{request_id}_video_url"))
+                                                         os.path.join(uploads_dir, f"{request_id}_video_url"),
+                                                         max_bytes=max_bytes)
             if remote:
                 track(request.video_url)
     except Exception:
