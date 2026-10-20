@@ -17,7 +17,11 @@ export interface HardwareRecord {
   ui_id?: string;
   aliases?: string[];
   vendor?: string;
+  kind?: string;
+  family?: string;
+  variant?: string;
   form_factor?: string;
+  gpu_count?: number;
   host_ram_gb?: number;
   usable_budget_gb?: number;
 }
@@ -75,45 +79,78 @@ function backend(value: unknown, fallback = "cuda"): string {
   return value === "mlx" || value === "cuda" ? value : fallback;
 }
 
-/** Catalog assets use `{ hardware: { id: record } }` in YAML and `{ id: record }` in JSON. */
+/** Accepts the generated `{ version, devices: [] }` asset and the older mapping forms. */
 function recordsFrom(payload: unknown): HardwareRecord[] {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
   const container = payload as Record<string, unknown>;
-  const source =
-    container.hardware && typeof container.hardware === "object" && !Array.isArray(container.hardware)
-      ? (container.hardware as Record<string, unknown>)
-      : container;
+  let entries: Array<[string, unknown]> = [];
+  if (Array.isArray(container.devices)) {
+    entries = container.devices.map((entry) => {
+      const item = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+      return [text(item.id, 120) ?? "", entry];
+    });
+  } else {
+    const source =
+      container.hardware && typeof container.hardware === "object" && !Array.isArray(container.hardware)
+        ? (container.hardware as Record<string, unknown>)
+        : container;
+    entries = Object.entries(source);
+  }
   const records: HardwareRecord[] = [];
-  for (const [id, value] of Object.entries(source)) {
+  for (const [fallbackId, value] of entries) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const item = value as Record<string, unknown>;
+    const id = text(item.id, 120) ?? text(fallbackId, 120);
     const name = text(item.name, 120);
-    const capacity = positive(item.memory_gb);
-    const type = memoryType(item.memory_type);
-    if (!name || !capacity || !type) continue;
+    const memory =
+      item.memory && typeof item.memory === "object" ? (item.memory as Record<string, unknown>) : undefined;
+    const nominal =
+      memory?.nominal && typeof memory.nominal === "object" ? (memory.nominal as Record<string, unknown>) : undefined;
+    const capacity = positive(nominal?.value) ?? positive(item.memory_gb);
+    const type = memoryType(memory?.type) ?? memoryType(item.memory_type);
+    if (!id || !name || !capacity || !type) continue;
+    const usable =
+      memory?.usable && typeof memory.usable === "object" ? (memory.usable as Record<string, unknown>) : undefined;
+    const host =
+      item.host_memory && typeof item.host_memory === "object"
+        ? (item.host_memory as Record<string, unknown>)
+        : undefined;
     const aliases = Array.isArray(item.aliases)
       ? item.aliases.map((alias) => text(alias, 80)).filter((alias): alias is string => !!alias)
+      : undefined;
+    const sources = Array.isArray(item.sources)
+      ? item.sources
+          .map((source) =>
+            typeof source === "string"
+              ? text(source, 500)
+              : source && typeof source === "object"
+                ? text((source as Record<string, unknown>).url, 500)
+                : undefined,
+          )
+          .filter((url): url is string => !!url)
       : undefined;
     records.push({
       id,
       name,
       memory_type: type,
       memory_gb: capacity,
-      memory_unit: memoryUnit(item.memory_unit),
+      memory_unit: memoryUnit(nominal?.unit ?? item.memory_unit),
       backend: backend(item.backend),
       supported_dtypes: Array.isArray(item.supported_dtypes)
         ? item.supported_dtypes.filter((dtype): dtype is string => typeof dtype === "string")
         : undefined,
-      sources: Array.isArray(item.sources)
-        ? item.sources.filter((url): url is string => typeof url === "string")
-        : undefined,
+      sources,
       notes: text(item.notes, 600),
       ui_id: text(item.ui_id, 40),
       aliases,
       vendor: text(item.vendor, 80),
+      kind: text(item.kind, 40),
+      family: text(item.family, 80),
+      variant: text(item.variant, 80),
       form_factor: text(item.form_factor, 40),
-      host_ram_gb: positive(item.host_ram_gb),
-      usable_budget_gb: positive(item.usable_budget_gb),
+      gpu_count: positive(item.gpu_count),
+      host_ram_gb: positive(host?.value) ?? positive(item.host_ram_gb),
+      usable_budget_gb: positive(usable?.value) ?? positive(item.usable_budget_gb),
     });
   }
   return records.sort((a, b) => a.name.localeCompare(b.name));
@@ -237,7 +274,11 @@ export function searchHardware(records: HardwareRecord[], query: string): Hardwa
       record.id,
       record.ui_id,
       record.vendor,
+      record.kind,
+      record.family,
+      record.variant,
       record.form_factor,
+      record.gpu_count ? `${record.gpu_count}gpu` : undefined,
       record.backend,
       record.memory_type,
       `${record.memory_gb}gb`,

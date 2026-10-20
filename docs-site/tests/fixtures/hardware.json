@@ -1,64 +1,180 @@
 {
-  "h100-sxm-80gb": {
-    "name": "NVIDIA H100 SXM 80 GB",
-    "ui_id": "h100",
-    "memory_type": "dedicated",
-    "memory_gb": 80,
-    "backend": "cuda",
-    "supported_dtypes": ["fp32", "fp16", "bf16", "fp8"],
-    "aliases": ["H100 SXM", "H100 80GB"],
-    "form_factor": "SXM",
-    "sources": ["https://www.nvidia.com/en-us/data-center/h100/"]
-  },
-  "geforce-rtx-5090-32gb": {
-    "name": "NVIDIA GeForce RTX 5090 32 GB (desktop)",
-    "ui_id": "rtx5090",
-    "memory_type": "dedicated",
-    "memory_gb": 32,
-    "backend": "cuda",
-    "supported_dtypes": ["fp32", "fp16", "bf16", "fp8", "nvfp4"],
-    "aliases": ["RTX 5090", "5090"],
-    "form_factor": "desktop",
-    "sources": ["https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/"]
-  },
-  "rtx-pro-6000-blackwell-workstation-96gb": {
-    "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition 96 GB",
-    "ui_id": "rtx",
-    "memory_type": "dedicated",
-    "memory_gb": 96,
-    "backend": "cuda",
-    "supported_dtypes": ["fp32", "fp16", "bf16", "fp8", "nvfp4"],
-    "aliases": ["RTX 6000", "PRO 6000", "Blackwell Workstation"],
-    "form_factor": "workstation",
-    "sources": ["https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000/"]
-  },
-  "dgx-spark-gb10-128gb": {
-    "name": "NVIDIA DGX Spark GB10 128 GB",
-    "ui_id": "spark",
-    "memory_type": "unified",
-    "memory_gb": 128,
-    "backend": "cuda",
-    "supported_dtypes": ["fp32", "fp16", "bf16", "fp8", "nvfp4"],
-    "aliases": ["DGX Spark", "GB10", "Spark"],
-    "form_factor": "desktop",
-    "sources": ["https://www.nvidia.com/en-us/products/workstations/dgx-spark/"]
-  },
-  "apple-m4-max-128gb": {
-    "name": "Apple M4 Max 128 GB",
-    "memory_type": "unified",
-    "memory_gb": 128,
-    "backend": "mlx",
-    "aliases": ["M4 Max", "Apple Silicon"],
-    "form_factor": "laptop or desktop",
-    "sources": ["https://support.apple.com/en-us/121553"]
-  },
-  "apple-m3-ultra-192gb": {
-    "name": "Apple M3 Ultra 192 GB",
-    "memory_type": "unified",
-    "memory_gb": 192,
-    "backend": "mlx",
-    "aliases": ["M3 Ultra", "Mac Studio"],
-    "form_factor": "desktop",
-    "sources": ["https://www.apple.com/mac-studio/specs/"]
-  }
+  "version": 1,
+  "devices": [
+    {
+      "id": "h100-sxm-80gb",
+      "name": "NVIDIA H100 SXM 80 GB",
+      "vendor": "nvidia",
+      "kind": "gpu",
+      "family": "nvidia-h100",
+      "variant": "SXM 80 GB",
+      "form_factor": "sxm",
+      "memory": {
+        "type": "dedicated",
+        "nominal": {
+          "value": 80,
+          "unit": "GB"
+        }
+      },
+      "backend": "cuda",
+      "gpu_count": 1,
+      "partitionable": true,
+      "partitions": [
+        {
+          "id": "1g.10gb",
+          "label": "1g.10gb",
+          "memory": {
+            "value": 10,
+            "unit": "GB"
+          }
+        },
+        {
+          "id": "3g.40gb",
+          "label": "3g.40gb",
+          "memory": {
+            "value": 40,
+            "unit": "GB"
+          }
+        }
+      ],
+      "aliases": ["h100"],
+      "supported_dtypes": ["fp32", "fp16", "bf16", "fp8"],
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/data-center/h100/",
+          "checked": "2026-10-19"
+        }
+      ]
+    },
+    {
+      "id": "geforce-rtx-5090-32gb",
+      "name": "NVIDIA GeForce RTX 5090 32 GB (desktop)",
+      "vendor": "nvidia",
+      "kind": "gpu",
+      "family": "geforce-rtx-50",
+      "variant": "5090 desktop",
+      "form_factor": "desktop",
+      "memory": {
+        "type": "dedicated",
+        "nominal": {
+          "value": 32,
+          "unit": "GB"
+        }
+      },
+      "backend": "cuda",
+      "gpu_count": 1,
+      "aliases": ["rtx 5090", "5090"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/rtx-5090/",
+          "checked": "2026-10-19"
+        }
+      ]
+    },
+    {
+      "id": "rtx-pro-6000-blackwell-workstation-96gb",
+      "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition 96 GB",
+      "vendor": "nvidia",
+      "kind": "gpu",
+      "family": "rtx-pro-6000",
+      "variant": "Blackwell Workstation Edition",
+      "form_factor": "workstation",
+      "memory": {
+        "type": "dedicated",
+        "nominal": {
+          "value": 96,
+          "unit": "GB"
+        }
+      },
+      "backend": "cuda",
+      "gpu_count": 1,
+      "aliases": ["pro 6000", "rtx pro 6000"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/design-visualization/desktop-graphics/",
+          "checked": "2026-10-19"
+        }
+      ]
+    },
+    {
+      "id": "dgx-spark-gb10-128gb",
+      "name": "NVIDIA DGX Spark GB10 128 GB",
+      "vendor": "nvidia",
+      "kind": "system",
+      "family": "dgx-spark",
+      "variant": "GB10",
+      "form_factor": "desktop",
+      "memory": {
+        "type": "unified",
+        "nominal": {
+          "value": 128,
+          "unit": "GB"
+        }
+      },
+      "backend": "cuda",
+      "gpu_count": 1,
+      "aliases": ["spark", "gb10"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/products/workstations/dgx-spark/",
+          "checked": "2026-10-19"
+        }
+      ]
+    },
+    {
+      "id": "apple-m4-max-128gb",
+      "name": "Apple M4 Max 128 GB",
+      "vendor": "apple",
+      "kind": "soc",
+      "family": "apple-m4",
+      "variant": "M4 Max",
+      "form_factor": "laptop or desktop",
+      "memory": {
+        "type": "unified",
+        "nominal": {
+          "value": 128,
+          "unit": "GB"
+        }
+      },
+      "backend": "mlx",
+      "gpu_count": 1,
+      "aliases": ["m4 max", "macbook m4 max"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.apple.com/macbook-pro/specs/",
+          "checked": "2026-10-19"
+        }
+      ]
+    },
+    {
+      "id": "apple-m3-ultra-192gb",
+      "name": "Apple M3 Ultra 192 GB",
+      "vendor": "apple",
+      "kind": "soc",
+      "family": "apple-m3",
+      "variant": "M3 Ultra",
+      "form_factor": "desktop",
+      "memory": {
+        "type": "unified",
+        "nominal": {
+          "value": 192,
+          "unit": "GB"
+        }
+      },
+      "backend": "mlx",
+      "gpu_count": 1,
+      "aliases": ["m3 ultra", "mac studio m3 ultra"],
+      "supported_dtypes": ["fp32", "fp16", "bf16"],
+      "sources": [
+        {
+          "url": "https://www.apple.com/mac-studio/specs/",
+          "checked": "2026-10-19"
+        }
+      ]
+    }
+  ]
 }
