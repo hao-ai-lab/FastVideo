@@ -9,6 +9,14 @@ import RecipeFacts from "@/components/cookbook/RecipeFacts";
 import { configAndLaunch, fileAndLaunch, sdkCommand, pythonSource } from "@/lib/cookbook-commands";
 import { sitePath, type DirectoryModel } from "@/lib/cookbook-pages";
 import { api } from "@/lib/cookbook";
+import {
+  gpuCountFrom,
+  readHardwareSelection,
+  resolveHardware,
+  useHardwareCatalog,
+  writeHardwareSelection,
+  type HardwareSelection,
+} from "@/lib/hardware";
 
 interface Control {
   name: string;
@@ -51,14 +59,10 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
   const [outputTab, setOutputTab] = useState("commands");
   const [error, setError] = useState("");
   const [edits, setEdits] = useState<Record<number, string | number | boolean>>({});
-  const [hardware, setHardware] = useState(() => {
-    const requested = new URL(window.location.href).searchParams.get("hardware");
-    return requested && requested !== "unspecified" ? requested : "";
-  });
-  useEffect(() => {
-    const requested = new URL(window.location.href).searchParams.get("hardware");
-    setHardware(requested && requested !== "unspecified" ? requested : "");
-  }, []);
+  const [hardware, setHardware] = useState<HardwareSelection>(() =>
+    readHardwareSelection(new URL(window.location.href).searchParams),
+  );
+  const hardwareCatalog = useHardwareCatalog();
   const recipe = model.recipes.find((recipe) => recipe.id === selected)!;
   const yamlSource =
     mode === "serving" ? recipe.serving?.source : /\.ya?ml$/.test(recipe.source) ? recipe.source : undefined;
@@ -212,23 +216,12 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
     .map((match) => match[1])
     .join("\n");
   const mlx = recipe.gpu_types.includes("Apple Silicon");
-  const devices = mlx
-    ? [["apple", "Apple Silicon", "Unified memory"]]
-    : [
-        ["b200", "B200", "Data center"],
-        ["h100", "H100", "Data center"],
-        ["rtx5090", "RTX 5090", "GeForce"],
-        ["rtx", "RTX PRO 6000", "Workstation"],
-        ["spark", "DGX Spark", "GB10"],
-      ];
-  const hardwareLabel = hardware.startsWith("custom:")
-    ? hardware.slice(7)
-    : devices.find(([id]) => id === hardware)?.[1];
-  const chooseHardware = (value: string) => {
-    setHardware(value);
+  const hardwareRecord = resolveHardware(hardware, hardwareCatalog.records);
+  const gpuCount = config ? gpuCountFrom(config) : (recipe.hardware?.gpu_count ?? 1);
+  const chooseHardware = (selection: HardwareSelection) => {
+    setHardware(selection);
     const url = new URL(window.location.href);
-    if (value) url.searchParams.set("hardware", value);
-    else url.searchParams.delete("hardware");
+    writeHardwareSelection(url, selection);
     window.history.replaceState(null, "", url);
   };
   const control = (field: Control, index: number) => {
@@ -468,10 +461,14 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
             </div>
             <div className="hardware-resource-grid">
               <HardwarePicker
-                backend={mlx ? "mlx" : "nvidia"}
-                options={devices}
+                backend={mlx ? "mlx" : "cuda"}
+                catalog={hardwareCatalog.records}
+                status={hardwareCatalog.status}
+                error={hardwareCatalog.error}
+                reload={hardwareCatalog.reload}
                 value={hardware}
                 onChange={chooseHardware}
+                gpuCount={gpuCount}
               />
               <div className="matrix-resources">
                 <span className="matrix-resource-title">Resources</span>
@@ -484,13 +481,6 @@ export default function SourceRecipe({ model }: { model: DirectoryModel }) {
                 </a>
               </div>
             </div>
-            {hardwareLabel ? (
-              <p className="matrix-note">
-                {mlx
-                  ? `${hardwareLabel} is saved as your target. Apple Silicon uses unified memory; dedicated GPU memory does not apply.`
-                  : `${hardwareLabel} is saved as your target. It does not change the example; use GPU count in the source settings.`}
-              </p>
-            ) : null}
             <RecipeFacts
               validity={failure ? "invalid" : example ? "valid" : "loading"}
               validityText={yamlSource ? "YAML parses" : "Example settings applied"}
