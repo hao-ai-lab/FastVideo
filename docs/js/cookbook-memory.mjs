@@ -745,6 +745,40 @@ export function matchEvidence({ model, example, config, request, env = {}, hardw
     if (run.hardware !== hardware?.id) {
       differences.push({ path: "hardware", recorded: run.hardware, current: hardware?.id });
     }
+    const partition = hardware?.partition?.id ?? hardware?.partition_id ?? null;
+    const recordedPartition = run.hardware_partition ?? null;
+    if (partition !== recordedPartition) {
+      differences.push({ path: "hardware_partition", recorded: recordedPartition, current: partition });
+    }
+    const allocationGiB = Number.isFinite(hardware?.allocationGiB)
+      ? hardware.allocationGiB
+      : Number.isFinite(hardware?.allocationMemoryGb)
+        ? (hardware.allocationMemoryGb * 1e9) / GIB
+        : null;
+    const recordedAllocationGb = run.hardware_allocation_gb ?? null;
+    if (partition === null && (allocationGiB !== null || recordedAllocationGb !== null)) {
+      const allocationGb = allocationGiB === null ? null : (allocationGiB * GIB) / 1e9;
+      if (
+        allocationGb === null ||
+        recordedAllocationGb === null ||
+        Math.abs(allocationGb - recordedAllocationGb) > 1e-6
+      ) {
+        differences.push({
+          path: "hardware_allocation_gb",
+          recorded: recordedAllocationGb,
+          current: allocationGb,
+        });
+      }
+    } else if (partition !== null && recordedAllocationGb !== null && allocationGiB !== null) {
+      const allocationGb = (allocationGiB * GIB) / 1e9;
+      if (Math.abs(allocationGb - recordedAllocationGb) > 1e-6) {
+        differences.push({
+          path: "hardware_allocation_gb",
+          recorded: recordedAllocationGb,
+          current: allocationGb,
+        });
+      }
+    }
     if (run.gpu_count !== (currentConfig?.generator?.engine?.num_gpus ?? 1)) {
       differences.push({
         path: "gpu_count",
@@ -844,7 +878,15 @@ export function assessCapacity({
     partitionId,
     hostMemoryGb,
   });
-  const evidence = matchEvidence({ model, example, config, request: { sampling }, env, hardware, revisions });
+  const evidence = matchEvidence({
+    model,
+    example,
+    config,
+    request: { sampling },
+    env,
+    hardware: device ?? hardware,
+    revisions,
+  });
   const measured = analytical.status === "unsupported" ? null : measuredDevicePeak(evidence, device);
   const compatibility = evidence.applicable.length
     ? "completed"

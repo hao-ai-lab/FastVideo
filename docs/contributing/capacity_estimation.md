@@ -341,6 +341,7 @@ load alone is insufficient. Record the effective request, including inherited de
 | --- | --- |
 | `id`, `date` | Unique run ID within the model; date as `YYYY-MM-DD` |
 | `hardware`, `gpu_count` | Hardware catalog ID and actual device count |
+| `hardware_partition`, `hardware_allocation_gb` | Optional MIG/vGPU partition ID and provisioned allocation in decimal GB; a full-card run does not apply to a partition |
 | `outcome`, `execution` | `completed`; `first_request` or `warm_request` |
 | `evidence_url` | Accessible HTTP(S) logs or benchmark evidence |
 | `context.runtime`, `context.deployment` | Serving runtime ID and the cookbook deployment ID used for the run; the deployment must exist and use that runtime |
