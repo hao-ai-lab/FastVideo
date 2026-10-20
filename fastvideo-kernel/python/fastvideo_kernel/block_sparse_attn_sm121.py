@@ -10,6 +10,12 @@ backward and is never reached by grad-tracking calls.
 It is a separate module, not another capability in ``block_sparse_attn_ptx_blackwell``, because
 that module's ``is_supported`` also gates ``block_sparse_attn_from_indices``'s autograd op, which
 always asks for the LSE.
+
+Replacing the kernel: callers (the VSA-H3 backend) use only ``is_supported``,
+``within_launch_limits`` and ``block_sparse_attn_sm121``. A new kernel keeps them, together with the
+``block_sparse_sm121_blk128_fwd`` binding, by providing ``vsa_sm121::Vsa128Args``, the ``Max*``
+limits and ``vsa_sm121::launch`` in the header; ``fastvideo-kernel/tests/test_block_sparse_sm121.py``
+is its acceptance test.
 """
 
 from typing import Tuple
@@ -28,8 +34,7 @@ _HAS_VSA_SM121 = _FWD is not None
 _SUPPORTED_COMPUTE_CAPABILITIES = {(12, 1)}
 BLOCK = 128
 HEAD_DIM = 128
-# Launch limits: the grid's y dimension is batch * heads; TMA addresses K and V by int32 row; the
-# kernel packs a walk's start entry (< num_blocks) into 22 bits.
+# Launch limits, mirroring vsa_sm121::MaxBatchHeads, MaxRows and MaxTiles in the kernel header.
 _MAX_BATCH_HEADS = 65535
 _MAX_ROWS = 2**31 - 1
 _MAX_BLOCKS = 2**22 - 1

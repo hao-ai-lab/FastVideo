@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#include <limits>
 #include <vector>
 
 #include "block_sparse_kernel_blk128_sm121.cuh"
@@ -38,6 +37,11 @@ std::vector<torch::Tensor> block_sparse_sm121_blk128_fwd(torch::Tensor q, torch:
   check_tensor(q, "q", at::kBFloat16, device);
   check_tensor(k, "k", at::kBFloat16, device);
   check_tensor(v, "v", at::kBFloat16, device);
+  // Other archs in the same build get an empty kernel (it is compiled for sm_121a only), which would return
+  // empty_like garbage without an error.
+  const cudaDeviceProp* prop = at::cuda::getDeviceProperties(device.index());
+  TORCH_CHECK(prop->major == 12 && prop->minor == 1, "block_sparse_sm121_blk128_fwd needs a GB10 (sm_121), got sm_",
+              prop->major, prop->minor);
   TORCH_CHECK(q.dim() == 4, "q must be [batch, heads, seq, 128], got ", q.sizes());
   TORCH_CHECK(k.sizes() == q.sizes() && v.sizes() == q.sizes(), "q, k and v must have one shape, got ", q.sizes(),
               ", ", k.sizes(), " and ", v.sizes());
@@ -56,13 +60,12 @@ std::vector<torch::Tensor> block_sparse_sm121_blk128_fwd(torch::Tensor q, torch:
               "q2k_idx must be [", batch, ", ", heads, ", ", blocks, ", max_kv], got ", q2k_idx.sizes());
   TORCH_CHECK(q2k_num.dim() == 3 && q2k_num.size(0) == batch && q2k_num.size(1) == heads && q2k_num.size(2) == blocks,
               "q2k_num must be [", batch, ", ", heads, ", ", blocks, "], got ", q2k_num.sizes());
-  // The grid is (num_blocks, batch * heads).
-  TORCH_CHECK(batch * heads <= 65535, "batch * heads must be at most 65535, got ", batch * heads);
-  // TMA addresses K and V by int32 row, and the walker packs its start entry into 22 bits.
-  TORCH_CHECK(batch * heads * seq <= std::numeric_limits<int32_t>::max(),
-              "batch * heads * seqlen must be below 2^31, got ", batch * heads * seq);
-  TORCH_CHECK(blocks < (int64_t{1} << 22) && q2k_idx.size(3) < (int64_t{1} << 22), "too many blocks: ", blocks,
-              " (max_kv ", q2k_idx.size(3), "); both must be below 2^22");
+  TORCH_CHECK(batch * heads <= vsa_sm121::MaxBatchHeads, "batch * heads must be at most ", vsa_sm121::MaxBatchHeads,
+              ", got ", batch * heads);
+  TORCH_CHECK(batch * heads * seq <= vsa_sm121::MaxRows, "batch * heads * seqlen must be at most ",
+              vsa_sm121::MaxRows, ", got ", batch * heads * seq);
+  TORCH_CHECK(blocks <= vsa_sm121::MaxTiles && q2k_idx.size(3) <= vsa_sm121::MaxTiles, "too many blocks: ", blocks,
+              " (max_kv ", q2k_idx.size(3), "); both must be at most ", vsa_sm121::MaxTiles);
 
   auto out = torch::empty_like(q);
   if (q.numel() == 0) return {out};

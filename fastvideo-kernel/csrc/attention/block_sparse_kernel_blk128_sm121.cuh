@@ -11,9 +11,9 @@
 // How, on mma.sync (the GB10 has no wgmma, tcgen05 or tensor memory): one CTA of 512 threads per (query tile,
 // batch * head), one CTA per SM (99 KB of shared memory).
 //   - Two groups of eight warps, 16 query rows each: the QK group computes S = Q K^T and the online softmax and
-//     publishes P (bf16) and the rescale factors through shared memory; the PV group accumulates O += P V. Each
-//     PV warp waits for its QK partner half-way through the partner's next QK burst, so the two groups' mma
-//     bursts overlap instead of finishing together.
+//     publishes P (bf16) and the rescale factors through shared memory; the PV group accumulates O += P V. A
+//     QK warp computes the next chunk's scores while its PV partner multiplies the previous P by V; the pair
+//     meets (pair_sync) only before P is overwritten, so the two groups' mma bursts overlap.
 //   - K and V stream in 64-key chunks through TMA (two 64x64 boxes, 128-byte swizzle) into separate rings;
 //     the last warp to finish reading a slot refills it.
 //   - Each CTA walks its selection starting (launch index mod SMs) / SMs of the way through, so the CTAs that
@@ -49,6 +49,12 @@ struct Vsa128Args {
 	int max_kv;                 // the last dimension of q2k_idx
 };
 
+// The largest call one launch covers. The binding checks them before launching, and
+// fastvideo_kernel/block_sparse_attn_sm121.py's _MAX_* mirror them for the callers that route around a launch.
+constexpr int64_t MaxBatchHeads = 65535;     // batch_heads: the grid's y dimension
+constexpr int64_t MaxRows = INT32_MAX;       // batch_heads * tiles * 128: TMA addresses K and V by int32 row
+constexpr int64_t MaxTiles = (1 << 22) - 1;  // tiles and max_kv: the walker packs its start entry into 22 bits
+
 
 namespace ptx {
 
@@ -59,12 +65,7 @@ __device__ __forceinline__ void cp_async_16(uint32_t dst, const void* src, uint3
 }
 
 // Closes the group of the cp.async copies this thread issued since the last commit (an empty group if none).
-// UNUSED by the current kernel, deliberately. The main loop publishes a stage's copies through that stage's
-// mbarrier (`cp.async.mbarrier.arrive.noinc`), which waits for every thread's copies into the stage and makes
-// them visible -- something a commit group cannot do, because a group is private to the thread that issued it
-// and `cp.async.wait_group` below retires only this thread's own. Both wrappers stay because they are the right
-// tool for a thread-private wait; re-introducing cp_async_wait() beside the loop's per-stage waits would not
-// restore anything, it would only add a wait that cannot see the other warps' copies.
+// Only the Q load uses cp.async; K and V stream through TMA.
 __device__ __forceinline__ void cp_async_commit() {
 	asm volatile("cp.async.commit_group;\n" ::: "memory");
 }
@@ -92,12 +93,6 @@ __device__ __forceinline__ void mbar_arrive(uint32_t addr) {
 	asm volatile("mbarrier.arrive.shared::cta.b64 %0, [%1];\n" : "=l"(state) : "r"(addr) : "memory");
 }
 
-// The mbarrier `addr` is signalled when this thread's prior cp.async copies have completed and are visible to
-// the threads that observe the barrier's phase flip. One arrival per thread per pass.
-__device__ __forceinline__ void cp_async_mbar_arrive(uint32_t addr) {
-	asm volatile("cp.async.mbarrier.arrive.noinc.shared::cta.b64 [%0];\n" ::"r"(addr) : "memory");
-}
-
 // True once phase `phase` (0 or 1, alternating) of the mbarrier `addr` has completed; does not block.
 __device__ __forceinline__ bool mbar_try_wait(uint32_t addr, uint32_t phase) {
 	uint32_t done;
@@ -116,11 +111,6 @@ __device__ __forceinline__ bool mbar_try_wait(uint32_t addr, uint32_t phase) {
 __device__ __forceinline__ void mbar_wait(uint32_t addr, uint32_t phase) {
 	while (!mbar_try_wait(addr, phase)) {
 	}
-}
-
-// Brings the 128-byte line holding `p` into L2.
-__device__ __forceinline__ void prefetch_l2(const void* p) {
-	asm volatile("prefetch.global.L2 [%0];\n" ::"l"(p));
 }
 
 // Loads four 8x8 matrices of 16-bit elements: lanes 8i..8i+7 give the addresses of the 8 rows (16 bytes each)
@@ -169,6 +159,7 @@ __device__ __forceinline__ float exp2_approx(float x) {
 namespace split128 {
 using bf16 = __nv_bfloat16;
 constexpr int Tile = 128, Dim = 128, Chunk = 64;
+// QK k-steps (of 8) a warp issues before waiting for its PV partner to release P; 8 waits after the whole burst.
 constexpr int PhaseLead = 8;
 constexpr int GroupThreads = 256, Threads = 512;
 constexpr int OperandBytes = 16384, BoxBytes = 8192;
@@ -399,7 +390,7 @@ __device__ __forceinline__ void output(bf16* out, uint8_t* staging, const float 
 #pragma unroll
     for (int r=0; r<2; ++r) {
         const float l=sums[row0+8*r];
-        keep[r]=row0+8*r<rows && l>0.f;
+        keep[r]=row0+8*r<rows && l!=0.f; // NaN stays NaN, as on the other routes
         inv[r]=keep[r]?1.f/l:0.f;
     }
 #pragma unroll
@@ -423,7 +414,7 @@ __device__ __forceinline__ void pair_sync(int warp) {
     asm volatile("bar.sync %0, 64;" :: "r"(warp+1) : "memory");
 }
 // slots: the CTAs that run at once, one per SM; it sets the walks' phases.
-__global__ __launch_bounds__(Threads,1) void forward(const Vsa128Args args,
+static __global__ __launch_bounds__(Threads,1) void forward(const Vsa128Args args,
         const __grid_constant__ CUtensorMap kmap, const __grid_constant__ CUtensorMap vmap, const int slots) {
 #if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ == 1210
     // 128B TMA swizzle repeats over 1024B; all slot starts are multiples of 16KB.
@@ -603,7 +594,7 @@ __global__ __launch_bounds__(Threads,1) void forward(const Vsa128Args args,
 #endif  // sm_121: every other device pass compiles an empty kernel
 }
 
-CUresult encode_map(CUtensorMap* map, const void* ptr, int64_t rows) {
+static CUresult encode_map(CUtensorMap* map, const void* ptr, int64_t rows) {
     const cuuint64_t dims[2]={Dim,static_cast<cuuint64_t>(rows)};
     const cuuint64_t strides[1]={Dim*2};
     const cuuint32_t box[2]={64,64}, elem_strides[2]={1,1};
@@ -613,12 +604,14 @@ CUresult encode_map(CUtensorMap* map, const void* ptr, int64_t rows) {
 }
 } // namespace split128
 
-inline cudaError_t launch(const Vsa128Args& args,cudaStream_t stream) {
+// The kernel's whole host interface. Internal linkage, like the kernel and its helpers: a translation unit that
+// includes this header gets its own copy, so a second includer (a benchmark, a newer kernel built beside this
+// one) links without duplicate symbols.
+static cudaError_t launch(const Vsa128Args& args,cudaStream_t stream) {
     if (args.batch_heads<=0 || args.tiles<=0) return cudaSuccess;
     const int64_t rows=int64_t(args.batch_heads)*args.tiles*split128::Tile;
-    if (rows>INT32_MAX) return cudaErrorInvalidValue;
-    // The walker keeps its start entry (< count <= tiles) in bits 9..30 of an int.
-    if (args.tiles>=(1<<22) || args.max_kv>=(1<<22)) return cudaErrorInvalidValue;
+    if (args.batch_heads>MaxBatchHeads || rows>MaxRows || args.tiles>MaxTiles || args.max_kv>MaxTiles)
+        return cudaErrorInvalidValue;
     CUtensorMap kmap,vmap;
     if (split128::encode_map(&kmap,args.k,rows)!=CUDA_SUCCESS ||
         split128::encode_map(&vmap,args.v,rows)!=CUDA_SUCCESS) return cudaErrorInvalidValue;

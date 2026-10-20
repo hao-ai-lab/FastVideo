@@ -150,6 +150,19 @@ def test_padding_keys_holding_nan_or_inf_do_not_leak(fill):
     torch.testing.assert_close(out.float()[has], expected[has], atol=0.02, rtol=0.02)
 
 
+def test_nan_in_a_valid_query_row_reaches_its_output_row():
+    """Like the other routes, a NaN input row gives a NaN output row instead of a silent zero."""
+    q, k, v, idx, num, vbs = make_case(num_blocks=4, topk=2, seed=29)
+    expected, has = reference(q, k, v, idx, num, vbs)
+    q[0, 0, 5] = float("nan")
+    out = run_with_nan_pool(q, k, v, idx, num, vbs)
+    assert torch.isnan(out[0, 0, 5]).all()
+    rest = has.clone()
+    rest[0, 0, 5] = False
+    assert torch.isfinite(out[rest]).all() and (out[~has] == 0).all()
+    torch.testing.assert_close(out.float()[rest], expected[rest], atol=0.02, rtol=0.02)
+
+
 def test_launch_limits(monkeypatch):
     """Sizes one launch cannot cover: is_supported says so instead of the binding raising."""
     def meta(*shape):

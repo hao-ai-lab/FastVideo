@@ -558,6 +558,40 @@ def test_forward_tile128_sm121_call_past_launch_limits_runs_split(tile128, monke
     assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
 
 
+def test_forward_tile128_odd_call_without_partner_tile_runs_split(tile128, monkeypatch):
+    """ptx_blackwell needs an even tile count; a call that skipped tile()'s partner tile falls back to Triton."""
+    meta = _build_r2v(sparsity=0.5, tile_size=128, ref_keep_rate=0.25)
+    n_tiles = meta.variable_block_sizes.numel()
+    assert n_tiles % 2 == 1
+    calls = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd",
+                        lambda q, k, v, mask, vbs: (calls.append(q.shape), (torch.zeros_like(q), None))[1])
+    impl = _impl(_DIM)
+    raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+    query, key, value = impl.preprocess_qkv(raw, meta)[:, :n_tiles * 128].chunk(3, dim=0)
+    out = impl.forward(query, key, value, None, meta)
+    assert tile128.calls == [] and len(calls) == 1 and calls[0][2] == n_tiles * 128
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+def test_tile128_fine_attention_override_skips_kernel_routing(tile128):
+    """An eager override runs no kernel: tile() neither probes the route nor adds the partner tile."""
+    meta = _build_r2v(sparsity=0.5, tile_size=128, ref_keep_rate=0.25)
+    n_tiles = meta.variable_block_sizes.numel()
+    assert n_tiles % 2 == 1
+    probes, calls = [], []
+    tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) or True
+    impl = _impl(_DIM)
+    impl.fine_attention_override = lambda q, k, v, mask, metadata: calls.append(q.shape) or torch.zeros_like(q)
+    raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+    tiled = impl.preprocess_qkv(raw, meta)
+    assert tiled.shape[1] == n_tiles * 128 and probes == []
+    query, key, value = tiled.chunk(3, dim=0)
+    out = impl.forward(query, key, value, None, meta)
+    assert len(calls) == 1 and tile128.calls == [] and probes == []
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
 def test_forward_tile128_prefers_ptx_blackwell_over_sm121(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     sm121 = _FakeSm121()

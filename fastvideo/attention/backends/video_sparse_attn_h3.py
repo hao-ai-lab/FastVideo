@@ -774,7 +774,10 @@ class MiniMaxH3VSAImpl(AttentionImpl):
         else:
             ptx_blackwell_requested = envs.FASTVIDEO_VSA_PTX_BLACKWELL.get()
         # Tile 128 picks its kernel by device; only ptx_blackwell needs the partner tile.
-        if attn_metadata.tile_elems == 128:
+        # An eager fine-attention override reads the logical rows and runs no kernel.
+        if attn_metadata.tile_elems == 128 and self.fine_attention_override is not None and not compiling:
+            ptx_blackwell_route = False
+        elif attn_metadata.tile_elems == 128:
             ptx_blackwell_route = (not grad_mode and not regional_compiling and self._tile128_route(
                 x.device, x.dtype, int(x.shape[-1]), compiling)[0] == "ptx_blackwell")
         else:
@@ -1002,6 +1005,9 @@ class MiniMaxH3VSAImpl(AttentionImpl):
                         logger.warning_once("VSA-H3 tile 128: a call exceeds the GB10 kernel's launch limits; "
                                             "it runs on the Triton tile-64 kernels")
                     kernel, reason = "split", f"{reason}; sm_121a: the call exceeds its launch limits"
+                if kernel == "ptx_blackwell" and (n_tiles + pair_tiles) % 2 != 0:
+                    # Only tile() adds the partner tile; a call that skipped it cannot run there.
+                    kernel, reason = "split", "ptx_blackwell: an odd tile count without the partner tile"
                 if kernel == "ptx_blackwell":
                     use_ptx_blackwell = True
                 elif kernel == "sm121":

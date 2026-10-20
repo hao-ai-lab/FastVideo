@@ -40,6 +40,7 @@ def _impl() -> vsa.MiniMaxH3VSAImpl:
     impl._regional_compile_ptx_blackwell_enabled = None
     # tile() resolves the tile-128 route to decide on the ptx_blackwell partner tile.
     impl._tile128_routes = {}
+    impl.fine_attention_override = None
     return impl
 
 
