@@ -227,7 +227,7 @@ export default function HardwarePicker({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
-              <div className="hardware-result-list" role="radiogroup" aria-label="Hardware catalog matches">
+              <div className="hardware-result-list" role="radiogroup" aria-label="Matching devices">
                 {matches.map((item) => (
                   <label key={item.id} className="hardware-result" data-selected={value.id === item.id}>
                     <input
