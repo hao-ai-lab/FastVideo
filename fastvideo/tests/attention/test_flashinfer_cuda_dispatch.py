@@ -129,3 +129,19 @@ def test_flashinfer_cudnn_resolves_for_head_size_128(env_overrides, monkeypatch)
     _install_fake_flashinfer_with_cudnn(monkeypatch)
     backend_cls = CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
     assert backend_cls == "fastvideo.attention.backends.flashinfer.FlashInferBackend"
+
+
+@pytest.mark.parametrize("capability,prefill_backend,allowed", [
+    (89, "single", True), (89, "cudnn", False), (90, "cudnn", True),
+])
+def test_flashinfer_prefill_gpu_requirements(env_overrides, monkeypatch, capability, prefill_backend, allowed):
+    env_overrides.enter_context(envs.FASTVIDEO_FLASHINFER_PREFILL_BACKEND.override(prefill_backend))
+    monkeypatch.setattr(CudaPlatformBase, "has_device_capability",
+                        classmethod(lambda cls, required, device_id=0: capability >= required))
+    _install_fake_flashinfer_with_cudnn(monkeypatch)
+    if allowed:
+        result = CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
+        assert result == "fastvideo.attention.backends.flashinfer.FlashInferBackend"
+    else:
+        with pytest.raises(RuntimeError, match="Hopper.*sm90"):
+            CudaPlatformBase.get_attn_backend_cls(AttentionBackendEnum.FLASHINFER, 128, torch.bfloat16)
