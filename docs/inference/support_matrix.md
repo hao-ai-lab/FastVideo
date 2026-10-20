@@ -242,6 +242,17 @@ resolve default pipeline and sampling configuration for it.
 `FastVideo/GEN3C-Cosmos-7B-Diffusers`) or convert locally with
 `scripts/checkpoint_conversion/convert_gen3c_to_fastvideo.py`.
 
+## FastH3 OmniRef on consumer devices
+
+OmniRef (Ref2VA) runs the same NVFP4 stack on one consumer Blackwell device -
+RTX 5090, RTX PRO 6000 and DGX Spark - with a packed NVFP4 export, FP4 sparse
+attention with the dense prefix rows split off, and the pre-packed NVFP4
+decoder. An RTX 4090 runs the closest sm_89 equivalent (FP8 linears, bf16 VSA).
+Per-device profiles, recipes and the environment are in
+[FastH3 OmniRef inference](fasth3_omniref.md).
+
+There is no MLX Ref2VA path yet: the Apple Silicon rows above are T2V/FL2VA.
+
 ## Hardware and OS
 
 Per the installation guides:

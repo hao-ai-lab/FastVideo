@@ -37,6 +37,7 @@ class _TinyTransformer(torch.nn.Module):
         super().__init__()
         self.config = _Config()
         self.to_q = ReplicatedLinear(4, 4, bias=False)
+        torch.nn.init.normal_(self.to_q.weight)
 
     def forward(self, value: torch.Tensor) -> torch.Tensor:
         return self.to_q(value)[0]

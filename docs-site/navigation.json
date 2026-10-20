@@ -62,6 +62,10 @@
         "href": "/utilities/lora"
       },
       {
+        "label": "Community LoRAs for MiniMax-H3",
+        "href": "/inference/h3_community_lora"
+      },
+      {
         "label": "Hardware",
         "collapsed": true,
         "items": [
@@ -88,6 +92,10 @@
           {
             "label": "RTX PRO 6000 / FastH3",
             "href": "/inference/fasth3_rtx_pro_6000"
+          },
+          {
+            "label": "FastH3 OmniRef on consumer GPUs",
+            "href": "/inference/fasth3_omniref"
           },
           {
             "label": "DGX Spark tuning",

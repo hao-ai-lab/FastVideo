@@ -74,7 +74,7 @@ to documentation, not embedded HTML.
 
 ## Shared JavaScript API
 
-`docs/js/cookbook-config.mjs` exports the five functions below. The generated
+`docs/js/cookbook-config.mjs` exports the six functions below. The generated
 `assets/cookbook-config/cookbook-config.js` bundles them with Ajv and exposes
 the browser global `FastVideoConfigCookbook` and CommonJS exports:
 
@@ -85,6 +85,7 @@ the browser global `FastVideoConfigCookbook` and CommonJS exports:
 | `getOptions(catalog, config = catalog.base_config, edits = {})` | `[{path, schema, value}]`, including GPU-dependent degree limits |
 | `resolveConfig(catalog, edits = {})` | `config`, `yaml`, `argv`, `command`, `clientRequest`, `clientCommand`, optional `websocketUrl` |
 | `sampleRequest(metadata, config)` | `{body, command}` and optional `websocketUrl` for a native serving baseline |
+| `estimateMemory({config, workload, model, hardware, headroom})` | Analytical one-GPU memory estimate; see [memory estimates](../contributing/cookbook_configuration.md#memory-estimates) |
 
 `sampleRequest()` is also used by model pages backed by a checked-in serving
 YAML rather than a full editable catalog. Its metadata supplies `model.id`,
@@ -215,9 +216,10 @@ The [capacity metadata catalog](../contributing/capacity_estimation.md) supplies
 shared hardware/component facts and optional recorded runs through separate
 static loaders. Optional `capacity` sections extend existing model manifests;
 model identity and example configurations are derived from their deployments
-and native baseline YAML. Memory estimates, measured-hardware UI,
-format versioning and HTTP cache freshness remain separate follow-ups. No
-general arithmetic validator or CLI override workflow is introduced here.
+and native baseline YAML. `estimateMemory()` is analytical and never verifies a
+recipe. Measured-hardware UI, format versioning and HTTP cache freshness remain
+separate follow-ups. No general arithmetic validator or CLI override workflow is
+introduced here.
 
 ## Cookbook interface
 

@@ -206,6 +206,7 @@ class MiniMaxH3Attention(nn.Module):
         fuse_qknorm_rope: bool = False,
         fa4_packed_varlen: bool = False,
         exact_rope: bool = False,
+        vsa_fp4: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -264,7 +265,11 @@ class MiniMaxH3Attention(nn.Module):
         # Opt-in inference route: VSA-H3 selection on the block-sparse FP4
         # kernel (see minimax_h3_vsa_fp4); grad and compile keep the generic path.
         self._layer_idx = layer_idx_from_prefix(prefix, default=-1)
-        self._vsa_fp4 = use_vsa and vsa_fp4_requested()
+        self._vsa_fp4_options = dict(vsa_fp4 or {})
+        requested = self._vsa_fp4_options.get("enabled")
+        if requested and not use_vsa:
+            raise ValueError("h3_vsa_fp4 requires the VIDEO_SPARSE_ATTN_H3 attention backend")
+        self._vsa_fp4 = use_vsa and (vsa_fp4_requested() if requested is None else requested)
         self._vsa_tile_first = use_vsa and envs.FASTVIDEO_H3_VSA_TILE_FIRST.get()
         self.to_gate_compress: ReplicatedLinear | None = None
         # None = unchecked; the first forward tests the loaded weight once and
@@ -350,7 +355,8 @@ class MiniMaxH3Attention(nn.Module):
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None,
         original_seq_len: int,
     ) -> torch.Tensor:
-        if (self._vsa_fp4 and rotary_emb is not None and not torch.is_grad_enabled()
+        fine_override = getattr(getattr(self.distributed_attention, "attn_impl", None), "fine_attention_override", None)
+        if (self._vsa_fp4 and fine_override is None and rotary_emb is not None and not torch.is_grad_enabled()
                 and not torch.compiler.is_compiling()):
             meta = get_forward_context().attn_metadata
             # Exempt mode lists the first prefix tile for every query, which the
@@ -632,6 +638,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
         fuse_swiglu: bool = False,
         fa4_packed_varlen: bool = False,
         exact_kernels: frozenset[str] = frozenset(),
+        vsa_fp4: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.norm1 = nn.RMSNorm(hidden_size, eps=norm_eps)
@@ -646,6 +653,7 @@ class MiniMaxH3TransformerBlock(nn.Module):
             fuse_qknorm_rope=fuse_qknorm_rope,
             fa4_packed_varlen=fa4_packed_varlen,
             exact_rope="rope" in exact_kernels,
+            vsa_fp4=vsa_fp4,
         )
         self.norm2 = nn.RMSNorm(hidden_size, eps=norm_eps)
         self.ff = MiniMaxH3FeedForward(
@@ -907,6 +915,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                 fuse_swiglu="swiglu" in self.enabled_fusions,
                 fa4_packed_varlen=envs.FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN.get(),
                 exact_kernels=self.enabled_exact_kernels,
+                vsa_fp4=config.vsa_fp4,
             ) for index in range(arch.num_layers)
         ])
         self.norm_out = MiniMaxH3AdaLayerNormOut(
@@ -1019,6 +1028,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
     def prepare_for_regional_compile(self) -> str | None:
         """Resolve state used only by inference regional fullgraph compile."""
         self.prepare_for_compile()
+        from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+        # Lazy policy resolution inside capture guards on each layer's unique prefix and mutates the first graph.
+        for module in self.modules():
+            method = getattr(module, "quant_method", None)
+            if isinstance(method, NVFP4QuantizeMethod):
+                method._static_activation_global_sf()
+                method._dynamic_activation_scale()
         prepared_vsa_impls = 0
         unsupported_reasons: set[str] = set()
         for block in self.transformer_blocks:
@@ -1035,7 +1052,14 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
                         prepared_vsa_impls)
         if unsupported_reasons:
             return "; ".join(sorted(unsupported_reasons))
+        self._regional_compile_inputs = True
         return None
+
+    def _block_input(self, shard: torch.Tensor) -> torch.Tensor:
+        """Give a sequence-parallel shard standard strides under regional compile, so block 0 shares one graph."""
+        if getattr(self, "_regional_compile_inputs", False):
+            return shard.clone(memory_format=torch.contiguous_format)
+        return shard
 
     def materialize_non_persistent_buffers(
         self,
@@ -1136,7 +1160,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         text_original_seq_len = text_embeds.shape[1]
         sp_world_size = get_sp_world_size() if model_parallel_is_initialized() else 1
         if sp_world_size > 1:
-            text_embeds, _ = sequence_model_parallel_shard(text_embeds, dim=1)
+            text_embeds = self._block_input(sequence_model_parallel_shard(text_embeds, dim=1)[0])
         text_embeds = self.token_refiner(text_embeds, text_original_seq_len)
         if sp_world_size > 1:
             text_embeds = sequence_model_parallel_all_gather_with_unpad(
@@ -1201,7 +1225,7 @@ class MiniMaxH3Transformer3DModel(BaseDiT):
         original_seq_len = sequence_length
 
         if sp_world_size > 1:
-            packed_hidden_states, _ = sequence_model_parallel_shard(packed_hidden_states, dim=1)
+            packed_hidden_states = self._block_input(sequence_model_parallel_shard(packed_hidden_states, dim=1)[0])
             rotary_cos, _ = sequence_model_parallel_shard(rotary_emb[0], dim=0)
             rotary_sin, _ = sequence_model_parallel_shard(rotary_emb[1], dim=0)
             adaln_indices, _ = sequence_model_parallel_shard(adaln_indices, dim=0)

@@ -479,9 +479,46 @@ def test_forward_tile128_even_tile_count_no_partner_tile(tile128):
     assert len(tile128.calls) == 1
 
 
-def test_forward_tile128_unavailable_cuda_kernel(tile128, monkeypatch):
+def test_forward_tile128_falls_back_to_triton_when_cuda_kernel_unavailable(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    n_tiles = meta.variable_block_sizes.numel()
+    tile128.supported = False
+    calls = []
+
+    def triton(q, k, v, mask, variable_block_sizes):
+        calls.append((q, mask, variable_block_sizes))
+        return torch.zeros_like(q), None
+
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", triton)
+    _, out = _run_tile128(meta)
+    assert len(calls) == 1
+    q, mask, vbs = calls[0]
+    assert q.shape[2] == n_tiles * 128
+    assert mask.shape[-2:] == (2 * n_tiles, 2 * n_tiles)
+    expected_vbs = torch.stack((meta.variable_block_sizes.clamp(max=64),
+                                (meta.variable_block_sizes - 64).clamp(min=0)), dim=-1).flatten()
+    torch.testing.assert_close(vbs, expected_vbs)
+    assert out.shape == (1, n_tiles * 128, _HEADS, _DIM)
+
+
+@pytest.mark.parametrize("datacenter", [False, True])
+def test_forward_tile128_fallback_warns_only_on_datacenter_blackwell(tile128, monkeypatch, datacenter):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     tile128.supported = False
+    warnings = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", lambda q, k, v, mask, vbs: (torch.zeros_like(q), None))
+    monkeypatch.setattr(vsa_h3, "_is_datacenter_blackwell", lambda device: datacenter)
+    monkeypatch.setattr(vsa_h3.logger, "warning_once", warnings.append)
+    _run_tile128(meta)
+    assert len(warnings) == int(datacenter)
+    if datacenter:
+        assert "falling back to the slower Triton tile-64 kernels" in warnings[0]
+
+
+def test_forward_tile128_unavailable_cuda_kernel_and_triton(tile128, monkeypatch):
+    meta = _build_r2v(sparsity=0.5, tile_size=128)
+    tile128.supported = False
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", None)
     with pytest.raises(RuntimeError, match="tile 128 requires the ptx_blackwell block-sparse kernel"):
         _run_tile128(meta)
     monkeypatch.setattr(vsa_h3, "_ptx_blackwell", None)
@@ -489,7 +526,7 @@ def test_forward_tile128_unavailable_cuda_kernel(tile128, monkeypatch):
         _run_tile128(meta)
 
 
-def test_forward_tile128_route_resolved_once_per_device(tile128):
+def test_forward_tile128_route_resolved_once_per_device(tile128, monkeypatch):
     meta = _build_r2v(sparsity=0.5, tile_size=128)
     probes = []
     tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) or True
@@ -499,14 +536,17 @@ def test_forward_tile128_route_resolved_once_per_device(tile128):
         query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
         impl.forward(query, key, value, None, meta)
     assert len(tile128.calls) == 3 and probes == [_CPU]
-    # A failed probe is cached too, and every later call still fails closed.
+    # A failed probe is cached too; later calls take the Triton fallback without probing again.
+    calls = []
+    monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd",
+                        lambda q, k, v, mask, vbs: (calls.append(q.shape), (torch.zeros_like(q), None))[1])
     tile128.is_supported = lambda q, variable_block_sizes: probes.append(q.device) and False
     impl = _impl(_DIM)
     raw = torch.randn(3, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
     query, key, value = impl.preprocess_qkv(raw, meta).chunk(3, dim=0)
     for _ in range(2):
-        with pytest.raises(RuntimeError, match="tile 128 requires the ptx_blackwell block-sparse kernel"):
-            impl.forward(query, key, value, None, meta)
+        impl.forward(query, key, value, None, meta)
+    assert len(calls) == 2
     assert probes == [_CPU, _CPU]
 
 

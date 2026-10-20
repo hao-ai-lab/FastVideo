@@ -296,10 +296,12 @@ def test_prepared_route_reuses_graph_across_layer_indices_and_preserves_dense_ov
     monkeypatch.setattr(vsa_h3, "_ptx_blackwell_unavailable_reason", fail_eager_dispatch)
     monkeypatch.setattr(vsa_h3, "block_sparse_attn_64_bhsd", fail_eager_dispatch)
 
+    from fastvideo.forward_context import set_forward_context
+
     torch._dynamo.reset()
     try:
         compiled = [torch.compile(impl.forward, backend="eager", fullgraph=True) for impl in implementations]
-        with torch.inference_mode():
+        with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
             for layer_idx, run in enumerate(compiled):
                 actual = run(q, k, v, None, meta)
                 expected_delta = 1.0 if layer_idx in meta.dense_layers else 0.0
@@ -664,9 +666,11 @@ def test_real_ptx_blackwell_odd_preprocess_forward_postprocess_fullgraph(env_ove
         output = impl.forward(query, key, value, None, meta)
         return impl.postprocess_output(output, meta)
 
+    from fastvideo.forward_context import set_forward_context
+
     torch._dynamo.reset()
     try:
-        with torch.inference_mode():
+        with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=meta):
             compiled = torch.compile(run, fullgraph=True)
             output = compiled(raw_qkv)
             torch.cuda.synchronize()
@@ -675,3 +679,125 @@ def test_real_ptx_blackwell_odd_preprocess_forward_postprocess_fullgraph(env_ove
 
     assert output.shape == (1, meta.total_seq_length, _HEADS, _DIM)
     assert torch.isfinite(output).all()
+
+
+def test_regional_compile_reuses_graphs_across_prompt_lengths(monkeypatch, env_overrides):
+    """Unseen prompt lengths reuse warm graphs and match the eager route exactly (#1940)."""
+    from torch._dynamo.testing import CompileCounter
+
+    from fastvideo.forward_context import set_forward_context
+
+    def mask_count(q, num):
+        return q + num.repeat_interleave(q.shape[2] // num.shape[-1], dim=-1).unsqueeze(-1).to(q.dtype)
+
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell",
+                        lambda q, k, v, q2k_idx, q2k_num, vbs, need_lse=True: (mask_count(q, q2k_num), None))
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell_from_mask",
+                        lambda q, k, v, block_map, vbs: (mask_count(q, block_map.sum(-1)), None))
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    assert impl.prepare_for_regional_compile(torch.device("cpu")) is None
+    builder = MiniMaxH3VSAMetadataBuilder()
+    counter = CompileCounter()
+
+    def run(raw, meta):
+        tiled = impl.preprocess_qkv(raw, meta)
+        query, key, value, gate = tiled.chunk(4, dim=0)
+        return impl.postprocess_output(impl.forward(query, key, value, gate, meta), meta)
+
+    def check(text_rows_list):
+        parities = set()
+        for text_rows in text_rows_list:
+            meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
+            parities.add(meta.variable_block_sizes.numel() % 2)
+            raw = torch.randn(4, meta.total_seq_length, _HEADS, _DIM, dtype=torch.bfloat16)
+            with set_forward_context(current_timestep=0, attn_metadata=meta):
+                actual = compiled(raw, meta)
+                expected = run(raw.clone(), meta)
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        return parities
+
+    torch._dynamo.reset()
+    try:
+        compiled = torch.compile(run, backend=counter, fullgraph=True)
+        with torch.no_grad():
+            # Dynamo may still specialize on bounded shape classes (tile-count
+            # parity); once both are warm, unseen lengths must reuse a graph.
+            assert check((17, 40, 64, 81, 100, 130)) == {0, 1}
+            warm_graphs = counter.frame_count
+            assert check((151, 200, 233, 300, 47, 113)) == {0, 1}
+        assert counter.frame_count == warm_graphs, (
+            f"unseen prompt lengths compiled {counter.frame_count - warm_graphs} new graphs")
+    finally:
+        torch._dynamo.reset()
+
+
+def test_regional_compile_reuses_graphs_across_sp_padding_lengths(monkeypatch, env_overrides):
+    """Sequence lengths that do and don't divide by the SP degree reuse warm graphs (#1940).
+
+    ``DistributedAttention_VSA`` slices the SP padding off before the backend and pads the output back, so the
+    padded length (a function of ``total_seq_length % sp``) must not leak into the compiled graph's guards.
+    """
+    from torch._dynamo.testing import CompileCounter
+
+    from fastvideo.attention import layer as attn_layer
+    from fastvideo.forward_context import set_forward_context
+
+    sp_degree = 4
+
+    def mask_count(q, num):
+        return q + num.repeat_interleave(q.shape[2] // num.shape[-1], dim=-1).unsqueeze(-1).to(q.dtype)
+
+    fake_sm = _FakePtxBlackwell(supported=True)
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell",
+                        lambda q, k, v, q2k_idx, q2k_num, vbs, need_lse=True: (mask_count(q, q2k_num), None))
+    monkeypatch.setattr(fake_sm, "block_sparse_attn_ptx_blackwell_from_mask",
+                        lambda q, k, v, block_map, vbs: (mask_count(q, block_map.sum(-1)), None))
+    monkeypatch.setattr(vsa_h3, "_ptx_blackwell", fake_sm)
+    monkeypatch.setattr(vsa_h3, "map_to_index", _fake_map_to_index)
+    monkeypatch.setattr(attn_layer, "sequence_model_parallel_all_to_all_4D", lambda x, **_: x)
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
+    monkeypatch.setattr(vsa_h3, "probe_enabled", lambda: None)
+    impl = MiniMaxH3VSAImpl(num_heads=_HEADS, head_size=_DIM, causal=False, softmax_scale=_DIM**-0.5)
+    assert impl.prepare_for_regional_compile(torch.device("cpu")) is None
+    layer = attn_layer.DistributedAttention_VSA.__new__(attn_layer.DistributedAttention_VSA)
+    torch.nn.Module.__init__(layer)
+    layer.attn_impl = impl
+    layer._compile_forward_enabled = True
+    builder = MiniMaxH3VSAMetadataBuilder()
+    counter = CompileCounter()
+
+    def run(q, k, v, total):
+        return layer(q, k, v, total)[0]
+
+    def check(text_rows_list):
+        pads = set()
+        for text_rows in text_rows_list:
+            meta = _build_meta(prefix_segments=(text_rows, 30), sparsity=0.5, builder=builder)
+            total = meta.total_seq_length
+            pad = -total % sp_degree
+            pads.add(pad)
+            q, k, v = (torch.randn(1, total + pad, _HEADS, _DIM, dtype=torch.bfloat16) for _ in range(3))
+            with set_forward_context(current_timestep=0, attn_metadata=meta):
+                actual = compiled(q, k, v, total)
+                expected = run(q, k, v, total)
+            assert actual.shape == (1, total + pad, _HEADS, _DIM)
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        return pads
+
+    torch._dynamo.reset()
+    try:
+        compiled = torch.compile(run, backend=counter, fullgraph=True)
+        with torch.no_grad():
+            warm_pads = check((17, 40, 64, 81, 100, 130))
+            assert 0 in warm_pads and len(warm_pads) > 1, "need lengths that do and don't divide by the SP degree"
+            warm_graphs = counter.frame_count
+            check((151, 200, 233, 300, 47, 113, 18, 19, 20))
+        assert counter.frame_count == warm_graphs, (
+            f"unseen padded lengths compiled {counter.frame_count - warm_graphs} new graphs")
+    finally:
+        torch._dynamo.reset()

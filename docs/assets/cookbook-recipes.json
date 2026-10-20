@@ -855,7 +855,8 @@
       "evidence": "Source-backed",
       "serving": {
         "source": "examples/serving/openai_fasth3_trim_spark.yaml",
-        "install": "Install FastVideo following the DGX Spark installation guide."
+        "install": "Install FastVideo following the DGX Spark installation guide.",
+        "audio": true
       }
     }
   ]

@@ -329,6 +329,65 @@ For reusable UI methods and configuration guarantees, see the
 follow the [WebSocket contract](../design/server_contracts/streaming.md); a health
 response alone does not establish generation readiness.
 
+## Memory estimates
+
+`estimateMemory()` in `docs/js/cookbook-memory.mjs` estimates one request's peak
+memory on one GPU from a resolved configuration. It is analytical: a result is
+not a measurement and never marks a recipe as verified.
+
+```javascript
+const { config } = api.resolveConfig(catalog, edits);
+const result = api.estimateMemory({ config, workload: catalog.workload, model, hardware });
+```
+
+Each phase (encoding, denoising, decoding) adds the weights resident on the GPU
+to that phase's working memory. The largest phase plus headroom (10% and 1 GiB
+by default) is compared with the device memory. `status` is `fits`, `exceeds`,
+`unsupported` when the device lacks a weight type, or `unknown` with a `reason`.
+The result also reports each phase's weights and working memory in GiB.
+
+| Model field | Meaning |
+| --- | --- |
+| `memory_rules` | Working-memory rule; `wan` is the only rule |
+| `geometry` | For `wan`: `temporal_compression`, `spatial_compression`, `patch_size`, `hidden_size`, `ffn_size` and `vae_decoder_channels` |
+| `components[].role` | `text_encoder`, `transformer` or `vae` |
+| `components[].parameter_count` | Parameters of the loaded subset |
+| `components[].dtype` | Weight precision; optional `activation_dtype` sets the compute precision |
+| `components[].block_count`, `block_parameter_count` | Repeated blocks and their total parameters, for streaming offload |
+| `components[].streams_when_offloaded` | The text encoder streams its blocks through FSDP when offloaded |
+| `components[].quantized_parameter_count` | Transformer parameters stored in the requested quantized format |
+
+A hardware entry has `name`, `type: discrete_gpu`, `memory_per_device` with a
+`value` and a `GiB` or `GB` unit, and `supported_dtypes`.
+
+Offload follows the native runtime:
+
+- Unset offload switches are on (`OffloadConfig` in `fastvideo/api/schema.py`).
+  Layerwise DiT offload replaces whole-model DiT offload.
+- An offloaded component leaves the GPU outside its own phase and is complete
+  during it. Layerwise DiT offload and FSDP text-encoder offload instead keep
+  the weights outside the blocks plus two blocks.
+- Without FSDP, whole-model DiT offload leaves the transformer on the GPU.
+- Packed NVFP4 weights are buffers, so layerwise offload keeps them resident.
+- `lazy_module_load` defers only the components a pipeline lists in
+  `_lazy_module_names`. Wan lists none, so the switch changes nothing.
+
+Multiple GPUs, FSDP, unified memory, image-to-video, more than one video per
+prompt, missing parameter counts, text-encoder quantization and loading peaks
+return `unknown`. With VAE tiling enabled, a note says the
+decode estimate assumes untiled decoding.
+
+`WAN_RULE` holds the uncalibrated tensor counts. To calibrate them, run with
+`FASTVIDEO_STAGE_LOGGING=1`: each stage then records `peak_allocated_mb` and
+`peak_reserved_mb` and resets the peak counter. The request-level
+`peak_memory_mb` is read after those resets, so it does not cover earlier
+stages. Allocator figures exclude the CUDA context, which the headroom covers.
+
+To add a model family, write a function that returns working-memory bytes per
+phase, register it in `WORKING_MEMORY` with its required geometry fields, and
+add cases to `docs/tests/cookbook-memory.test.mjs`. Run the tests with
+`npm run test:cookbook --prefix docs`.
+
 ## Model pages in the cookbook
 
 The Blume cookbook starts at `/cookbook` with model cards filtered by Video,
