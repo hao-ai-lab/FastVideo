@@ -411,6 +411,7 @@ test("custom devices persist and no preview control can block generated YAML", a
 
 test("hardware is never preselected and a target does not change generated YAML", async ({ page }) => {
   await page.goto(route);
+  await expect(page.locator(".hardware-picker")).toBeVisible({ timeout: 30000 });
   await expect(page.locator('input[type="radio"]:checked')).toHaveCount(0);
   await expect(page.getByText("No hardware target selected.", { exact: true })).toBeVisible();
   await output(page, "config.yaml");
