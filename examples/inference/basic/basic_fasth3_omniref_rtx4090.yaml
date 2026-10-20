@@ -1,0 +1,78 @@
+# FastH3 OmniRef (Ref2VA) on one RTX 4090 (24 GB, no FP4): the FP8/bf16 equivalent, one clip per prompt.
+#
+# Point model_path at a composed OmniRef model directory: the distilled
+# dense or FP8 transformer_ref export (without nvfp4_weights.safetensors) symlinked
+# together with base MiniMax-H3's text_encoder, tokenizer, processor, vae and
+# audio_vae. examples/inference/basic/basic_fasth3_omniref_pdd.py builds that
+# directory and runs it with --profile rtx-4090.
+#
+# The contract in the export's fastvideo_inference.json fixes the attention
+# backend, the VSA tile size and the eight-forward PDD partition; the run only
+# picks the device's offload policy and its environment:
+#
+# sm_89 has no FP4 hardware, so this profile is the closest equivalent rather than
+# the FP4 stack: FP8 linears, bf16 VSA attention, the dense light VAE decoder (the
+# NVFP4 one needs FP4 hardware too), a non-resident encoder and expandable segments
+# to reduce memory fragmentation. Layerwise offload is mandatory: the 47 GB FP8
+# DiT cannot be resident on 24 GB. Run one process per clip; repeated requests in
+# one process exceed the 24 GB GPU and the host cgroup when the encoder reloads.
+#
+# FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN_H3 \
+# FASTVIDEO_H3_VSA_FP4=0 \
+# FASTVIDEO_H3_VSA_FINE_ATTENTION=emulator-bf16 \
+# FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS=1 \
+# FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS=16 \
+# FASTVIDEO_H3_FFN_CHUNK_TOKENS=16384 \
+# FASTVIDEO_H3_PINNED_SWAP=0 \
+# PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+# FASTVIDEO_H3_ADALN_TABLE=/path/to/adaln_table.pt \
+# fastvideo generate --config examples/inference/basic/basic_fasth3_omniref_rtx4090.yaml
+#
+# See docs/inference/fasth3_omniref.md.
+generator:
+  model_path: ./FastH3-OmniRef-Dense-Composed
+  engine:
+    num_gpus: 1
+    use_fsdp_inference: false
+    quantization:
+      transformer_quant: FP8
+    parallelism:
+      tp_size: 1
+      sp_size: 1
+    offload:
+      dit: false
+      dit_layerwise: true
+      text_encoder: true
+      vae: false
+      pin_cpu_memory: true
+      lazy_module_load: false
+  pipeline:
+    workload_type: i2v
+    components:
+      override_pipeline_cls_name: MiniMaxH3Ref2VAModularPipeline
+    experimental:
+      attention_backend: VIDEO_SPARSE_ATTN_H3
+      video_decode_backend: h3-vae
+      h3_sequential_load: true
+request:
+  prompt: >-
+    A person on a sofa, lit by a warm lamp, speaking to camera.
+  negative_prompt: ""
+  inputs:
+    references:
+      # Ordered: the clip is conditioned on these. Replace with your own media.
+      - source: assets/images/couple.jpg
+        media_type: image
+  sampling:
+    seed: 1234
+    height: 480
+    width: 832
+    num_frames: 124
+    fps: 24
+    num_inference_steps: 8  # eight fused PDD blocks; the contract sets it
+    guidance_scale: 1.0
+    batch_cfg: false
+  output:
+    output_path: outputs/basic_fasth3_omniref_rtx4090/
+    save_video: true
+    return_frames: false

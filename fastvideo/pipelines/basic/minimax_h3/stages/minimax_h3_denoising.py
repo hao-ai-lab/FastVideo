@@ -22,6 +22,8 @@ from fastvideo.pipelines.basic.minimax_h3.packing import (
     build_row_timesteps,
 )
 from fastvideo.pipelines.basic.minimax_h3.stages.minimax_h3_latent_preparation import MINIMAX_H3_LAYOUT_KEY
+from fastvideo.pipelines.basic.minimax_h3.vsa_guard import refuse_zero_initialized_h3_vsa
+from fastvideo.pipelines.lazy_module import is_lazy_module
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -191,6 +193,10 @@ class MiniMaxH3DenoisingStage(PipelineStage):
     @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """Denoise the packed H3 video and audio streams over one shared schedule."""
+        transformer = self.transformer
+        if is_lazy_module(transformer):
+            transformer.materialize()
+        refuse_zero_initialized_h3_vsa(transformer)
         layout = batch.extra.get(MINIMAX_H3_LAYOUT_KEY)
         if not isinstance(layout, MiniMaxH3PackedLayout):
             raise ValueError("MiniMax-H3 packed layout is missing before denoising.")
@@ -264,7 +270,7 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             vsa_dense_layers = tuple(batch.extra.get("vsa_dense_layers", ()))
             vsa_dense_first_n = int(batch.extra.get("vsa_dense_first_n_steps", 0))
             # Run-level tile geometry (256 default, 64 = native Triton path,
-            # 128 = sm_100a CUDA), plumbed like the run-level sparsity; the
+            # 128 = ptx_blackwell), plumbed like the run-level sparsity; the
             # builder validates the value against VSA_H3_TILE_SHAPES.
             vsa_tile_size = int(fastvideo_args.VSA_tile_size)
             if vsa_ref_keep_rate is not None:
@@ -291,6 +297,9 @@ class MiniMaxH3DenoisingStage(PipelineStage):
             with profiler_region("inference_denoising"), nvtx_range("minimax_h3.dit"):
                 for index, (video_timestep,
                             audio_timestep) in enumerate(zip(video_timesteps, audio_timesteps, strict=True)):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     unique_timesteps, timestep_indices = row_timestep_plan[index]
                     attn_metadata = None
                     if vsa_metadata_builder is not None:
@@ -315,11 +324,13 @@ class MiniMaxH3DenoisingStage(PipelineStage):
                     # CUDAGraphs that has been overwritten" (surfaces at sp=1;
                     # sp>1 is masked by collective-induced graph breaks).
                     torch.compiler.cudagraph_mark_step_begin()
-                    with self._pdd_head_fusion(pdd_plan, index), trace_step(index), set_forward_context(
-                            current_timestep=index,
-                            attn_metadata=attn_metadata,
-                            forward_batch=batch,
-                    ):
+                    with self._pdd_head_fusion(
+                            pdd_plan,
+                            index), trace_step(index), nvtx_range(f"minimax_h3.step{index}"), set_forward_context(
+                                current_timestep=index,
+                                attn_metadata=attn_metadata,
+                                forward_batch=batch,
+                            ):
                         video_velocity, audio_velocity = self.transformer(
                             hidden_states=batch.latents[None],
                             audio_hidden_states=batch.audio_latents[None],

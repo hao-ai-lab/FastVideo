@@ -29,7 +29,9 @@ VALIDATION_FILE="$(dirname "$0")/../crush_smol/validation.json"
 NUM_GPUS=${NUM_GPUS:-4}
 
 torchrun --nnodes 1 --nproc_per_node "${NUM_GPUS}" \
-    fastvideo/training/wan_distillation_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanDistillationPipeline \
+    --pipeline-module fastvideo.training.wan_distillation_pipeline \
     --num_gpus "${NUM_GPUS}" --sp_size 1 --tp_size 1 \
     --hsdp_replicate_dim "${NUM_GPUS}" --hsdp_shard_dim 1 \
     --model_path "${BASE}" --pretrained_model_name_or_path "${BASE}" \

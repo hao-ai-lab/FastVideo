@@ -1,0 +1,1280 @@
+/* shadcn tokens follow Blume's palette in both appearances. Blume provides Tailwind. */
+:root {
+  --background: var(--blume-background);
+  --foreground: var(--blume-foreground);
+  --primary: var(--blume-accent);
+  --primary-foreground: var(--blume-accent-foreground);
+  --secondary: var(--blume-muted);
+  --secondary-foreground: var(--blume-foreground);
+  --muted: var(--blume-muted);
+  --muted-foreground: var(--blume-muted-foreground);
+  --accent: var(--blume-accent);
+  --accent-foreground: var(--blume-accent-foreground);
+  --border: var(--blume-border);
+  --input: var(--blume-border);
+  --ring: var(--blume-accent);
+  --radius: 0.5rem;
+  --destructive: #b91c1c;
+}
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius-md: var(--radius);
+}
+.cookbook {
+  min-width: 0;
+}
+
+/* The welcome page uses the stock theme with a centered, compact project introduction. */
+.home-page {
+  max-inline-size: 48rem;
+  margin-inline: auto;
+}
+.home-hero {
+  text-align: center;
+  padding-block-start: 0.5rem;
+}
+.home-logo {
+  margin: 0 0 1rem;
+}
+.home-logo img {
+  display: block;
+  inline-size: 15rem;
+  max-inline-size: 100%;
+  block-size: auto;
+  margin-inline: auto;
+}
+.home-description {
+  margin: 0 auto 1rem;
+  max-inline-size: 38rem;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  color: var(--blume-muted-foreground);
+}
+.home-project-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block-end: 0.75rem;
+}
+.home-project-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-block-size: 2.75rem;
+  padding: 0.35rem 0.875rem;
+  border: 1px solid var(--blume-border);
+  border-radius: var(--radius);
+  color: var(--blume-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+[data-theme="dark"] .home-project-links a {
+  border-color: color-mix(in srgb, var(--blume-foreground) 38%, var(--blume-background));
+}
+.home-project-links a:hover {
+  background: var(--blume-muted);
+}
+.home-project-links svg {
+  flex-shrink: 0;
+}
+.home-github-stars {
+  font-variant-numeric: tabular-nums;
+}
+.home-star {
+  color: #eab308;
+}
+.home-lab-link img {
+  display: block;
+  object-fit: contain;
+  background: white;
+  border-radius: 3px;
+}
+.home-trendshift {
+  display: flex;
+  justify-content: center;
+  margin-block-end: 1.5rem;
+}
+.home-trendshift a {
+  display: block;
+  border-radius: 0.5rem;
+}
+.home-trendshift img {
+  display: block;
+  inline-size: 250px;
+  max-inline-size: 100%;
+  block-size: 55px;
+}
+.home-project-links p {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+.home-page a:focus-visible {
+  outline: 2px solid var(--blume-accent);
+  outline-offset: 3px;
+}
+.home-news {
+  margin-block: 1.25rem 1.5rem;
+  padding-block: 1rem;
+  border-block: 1px solid var(--blume-border);
+  font-size: 0.875rem;
+}
+.home-news h2 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.home-news-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-block-end: 0.75rem;
+}
+.home-news ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.home-news li {
+  display: grid;
+  grid-template-columns: 6.25rem minmax(0, 1fr);
+  gap: 0.75rem;
+  line-height: 1.5;
+}
+.home-news time,
+.home-news-more {
+  color: var(--blume-muted-foreground);
+  font-size: 0.8125rem;
+}
+.home-news a {
+  text-underline-offset: 0.2em;
+}
+.home-news-more {
+  display: inline-block;
+}
+@media (max-width: 30rem) {
+  .home-news li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.1rem;
+  }
+}
+.cookbook select {
+  min-height: 2.75rem;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+}
+.cookbook :is(input, textarea) {
+  font-size: 1rem;
+}
+.cookbook :is(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.cookbook pre {
+  max-height: 32rem;
+  overflow: auto;
+  white-space: pre;
+  padding: 1rem;
+  border-radius: var(--radius);
+  background: var(--muted);
+  font-size: 0.8rem;
+}
+.cookbook summary {
+  cursor: pointer;
+  padding-block: 0.75rem;
+}
+.cookbook [aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+
+/* The existing Python renderer supplies semantic HTML, without Material's page chrome. */
+.python-reference {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.python-reference .doc-contents {
+  margin-block: 1rem 2rem;
+}
+.python-reference pre {
+  overflow: auto;
+  padding: 1rem;
+  border-radius: var(--radius);
+  background: var(--blume-muted);
+}
+.python-reference .doc-labels {
+  margin-inline-start: 0.5rem;
+  color: var(--blume-muted-foreground);
+}
+.python-reference table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+}
+.python-reference details {
+  margin-block: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--blume-border);
+  border-radius: var(--radius);
+}
+.python-reference summary {
+  cursor: pointer;
+}
+.python-reference .linenos {
+  user-select: none;
+  color: var(--blume-muted-foreground);
+}
+
+/* Keep search visible on desktop, with the native compact control on smaller screens. */
+@media (min-width: 70rem) {
+  [data-blume-search-open] {
+    inline-size: 10.5rem;
+    justify-content: flex-start;
+    gap: 0.65rem;
+    padding-inline: 0.85rem;
+    border: 1px solid var(--blume-border);
+    background: var(--blume-muted);
+  }
+  [data-blume-search-open]::before {
+    content: "Search docs…";
+    order: 1;
+    font-size: 0.875rem;
+    font-weight: 400;
+  }
+}
+
+/* The model catalog keeps the documentation palette and emphasizes release structure. */
+.models-page {
+  max-inline-size: 72rem;
+}
+.model-families {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 1rem;
+  margin-block: 1.5rem 3rem;
+}
+.model-family {
+  min-inline-size: 0;
+  border: 1px solid var(--blume-border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+.model-family-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 9rem;
+  background: var(--blume-muted);
+  color: var(--blume-foreground);
+  text-decoration: none;
+}
+.model-family-visual > span {
+  font-size: 3.5rem;
+  font-weight: 600;
+  letter-spacing: -0.05em;
+}
+.model-family-visual img {
+  position: absolute;
+  inset-block-start: 1rem;
+  inset-inline-start: 1rem;
+}
+.model-family-visual:hover > span {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  text-decoration-thickness: 1px;
+}
+.model-family-body {
+  padding: 1.25rem;
+}
+.model-family h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+.model-family p {
+  margin-block: 0.5rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--blume-muted-foreground);
+}
+.model-family .model-family-detail {
+  font-size: 0.75rem;
+}
+.model-family-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.8125rem;
+}
+.model-family-links a,
+.model-catalog-heading a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-block-size: 2rem;
+  color: var(--blume-foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.model-catalog-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block-end: 1.25rem;
+}
+.model-catalog h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+.model-catalog-heading p {
+  margin-block: 0.5rem 0;
+  color: var(--blume-muted-foreground);
+  font-size: 0.875rem;
+}
+.model-catalog-heading > a {
+  font-size: 0.8125rem;
+}
+.model-catalog-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.model-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.model-filters button,
+.model-empty button {
+  min-block-size: 2.75rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--blume-border);
+  background: var(--blume-background);
+  color: var(--blume-foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.model-filters button[aria-pressed="true"],
+.model-filters button:hover {
+  background: var(--blume-muted);
+}
+.model-filters button[aria-pressed="true"] {
+  border-color: var(--blume-muted-foreground);
+  font-weight: 600;
+}
+.model-search {
+  display: grid;
+  flex: 1 1 14rem;
+  max-inline-size: 22rem;
+  gap: 0.375rem;
+}
+.model-search label {
+  font-size: 0.75rem;
+  color: var(--blume-muted-foreground);
+}
+.model-search input {
+  inline-size: 100%;
+  min-block-size: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--blume-border);
+  border-radius: 0.5rem;
+  color: var(--blume-foreground);
+  background: var(--blume-background);
+  font: inherit;
+  font-size: 1rem;
+}
+.model-result-count {
+  margin-block: 1rem;
+  color: var(--blume-muted-foreground);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.model-checkpoints {
+  margin-block: 1.5rem 2rem;
+}
+.model-checkpoints h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.model-checkpoints ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.model-checkpoints li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding-block: 1rem;
+  border-block-end: 1px solid var(--blume-border);
+}
+.model-checkpoints li > div {
+  flex: 1 1 22rem;
+  min-inline-size: 0;
+}
+.model-checkpoints li > div > a {
+  display: block;
+  color: var(--blume-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.model-checkpoints code {
+  display: block;
+  margin-block-start: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--blume-muted-foreground);
+  overflow-wrap: anywhere;
+}
+.model-checkpoint-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-block-size: 2.75rem;
+  color: var(--blume-muted-foreground);
+  font-size: 0.8125rem;
+}
+.model-empty {
+  padding-block: 2rem;
+  text-align: center;
+}
+.models-page a:focus-visible,
+.models-page button:focus-visible,
+.models-page input:focus-visible {
+  outline: 2px solid var(--blume-accent);
+  outline-offset: 3px;
+}
+
+/* Model discovery and the recipe matrix use the same neutral documentation palette. */
+.recipe-directory,
+.recipe-detail {
+  --recipe-line: var(--blume-border);
+  --recipe-soft: color-mix(in srgb, var(--blume-foreground) 3%, var(--blume-background));
+  --recipe-control: color-mix(in srgb, var(--blume-foreground) 42%, var(--blume-background));
+  color: var(--blume-foreground);
+  min-inline-size: 0;
+}
+[data-theme="dark"] .recipe-directory,
+[data-theme="dark"] .recipe-detail {
+  --recipe-line: color-mix(in srgb, var(--blume-foreground) 23%, var(--blume-background));
+}
+.recipe-directory-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding-block-start: 0.5rem;
+}
+.recipe-directory-tools input {
+  max-inline-size: 16rem;
+}
+.recipe-family-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.recipe-family-filters button {
+  border-radius: 0.5rem;
+  min-block-size: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--blume-muted-foreground);
+  cursor: pointer;
+}
+.recipe-family-filters button[aria-pressed="true"] {
+  color: var(--blume-foreground);
+  background: var(--blume-muted);
+  font-weight: 500;
+}
+.recipe-directory-subbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding-block: 1.25rem 0.75rem;
+  color: var(--blume-muted-foreground);
+  font-size: 0.75rem;
+}
+.recipe-directory-subbar select {
+  max-inline-size: 12rem;
+  background: var(--blume-background);
+  padding: 0.5rem;
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.375rem;
+}
+.recipe-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 1rem;
+}
+.recipe-card {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.75rem;
+  text-decoration: none;
+  color: inherit;
+}
+.recipe-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-block-end: 1.25rem;
+}
+.recipe-card-top img {
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  object-fit: contain;
+  border-radius: 0.5rem;
+  background: white;
+  outline: 1px solid oklch(0 0 0 / 0.1);
+}
+.recipe-card-kicker {
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  flex: 1;
+}
+.recipe-featured {
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.375rem;
+  font-size: 0.625rem;
+  padding: 0.25rem 0.375rem;
+}
+.recipe-card h2 {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.recipe-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-block: 0.75rem 1.25rem;
+}
+.recipe-tags span {
+  font-size: 0.625rem;
+  padding: 0.25rem 0.375rem;
+  border-radius: 0.25rem;
+  background: var(--recipe-soft);
+  color: var(--blume-muted-foreground);
+}
+.recipe-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-block-start: auto;
+  padding-block-start: 0.875rem;
+  border-block-start: 1px solid var(--recipe-line);
+  font-size: 0.6875rem;
+}
+.recipe-card footer span:first-child {
+  color: var(--blume-muted-foreground);
+}
+.recipe-empty {
+  padding-block: 2rem;
+  text-align: center;
+}
+.recipe-empty h2 {
+  margin-block-end: 1rem;
+  font-weight: 600;
+}
+.recipe-detail {
+  max-inline-size: 68rem;
+  margin-inline: auto;
+}
+.recipe-back {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: var(--blume-muted-foreground);
+  margin-block: 0 1.5rem;
+}
+.recipe-model-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 1rem;
+  margin-block-end: 1.5rem;
+}
+.recipe-model-header > img {
+  inline-size: 3rem;
+  block-size: 3rem;
+  object-fit: contain;
+  background: white;
+  border-radius: 0.625rem;
+  outline: 1px solid oklch(0 0 0 / 0.1);
+}
+.recipe-model-header > div:first-of-type {
+  flex: 1;
+  min-inline-size: min(100%, 14rem);
+}
+.recipe-publisher {
+  font-size: 0.75rem;
+  color: var(--blume-muted-foreground);
+  margin: 0 0 0.25rem;
+}
+.recipe-model-header h1 {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.recipe-model-task {
+  margin-block: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--blume-muted-foreground);
+}
+.recipe-model-header a {
+  font-size: 0.75rem;
+}
+.recipe-model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-block-start: 0.25rem;
+}
+.recipe-model-actions button {
+  font-size: 0.75rem;
+}
+.recipe-command-box {
+  min-inline-size: 0;
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.75rem;
+  background: var(--recipe-soft);
+  margin-block-end: 1rem;
+  overflow: clip;
+}
+.recipe-run-modes {
+  margin-block-end: 1rem;
+}
+.recipe-command-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  order: 3;
+}
+.recipe-command-tools button {
+  min-block-size: 1.75rem;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.375rem;
+  color: var(--blume-foreground);
+  background: var(--blume-background);
+}
+.recipe-command-tools button[aria-pressed="true"] {
+  border-color: currentColor;
+}
+.recipe-environment {
+  padding: 1rem;
+  border-block-end: 1px solid var(--recipe-line);
+}
+.recipe-command-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-block-end: 1px solid var(--recipe-line);
+  font-size: 0.6875rem;
+}
+.recipe-unverified {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--blume-muted-foreground);
+}
+.recipe-unverified::before {
+  content: "";
+  inline-size: 0.375rem;
+  block-size: 0.375rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+.recipe-tabs {
+  display: flex;
+  gap: 1rem;
+}
+.recipe-tabs button {
+  min-block-size: 2rem;
+  color: var(--blume-muted-foreground);
+  cursor: pointer;
+  border-block-end: 1px solid transparent;
+}
+.recipe-tabs button[data-state="active"] {
+  border-block-end-color: var(--blume-foreground);
+  color: var(--blume-foreground);
+}
+.recipe-command-content {
+  padding: 1rem;
+}
+.recipe-code-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.6875rem;
+  color: var(--blume-muted-foreground);
+}
+.recipe-command-box pre {
+  margin-block: 0.75rem;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  max-block-size: 25rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  line-height: 1.8;
+}
+.recipe-command-box
+  :is([aria-label="Server command"], [aria-label="Client command"], [aria-label="Inference command"]) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.recipe-command-box button {
+  cursor: pointer;
+}
+.recipe-request-code {
+  border-block-start: 1px solid var(--recipe-line);
+  padding-block-start: 0.75rem;
+  font-size: 0.6875rem;
+}
+.recipe-request-code summary {
+  cursor: pointer;
+  color: var(--blume-muted-foreground);
+}
+.recipe-request-code > button {
+  margin-block-start: 0.75rem;
+}
+.recipe-request-code p {
+  overflow-wrap: anywhere;
+}
+.recipe-copy-status {
+  font-size: 0.6875rem;
+  color: var(--blume-muted-foreground);
+  padding-inline: 1rem;
+}
+.recipe-copy-status:not(:empty) {
+  padding-block-end: 0.75rem;
+}
+.recipe-install {
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.625rem;
+  padding: 0.75rem 1rem;
+  margin-block: 0 1rem;
+  font-size: 0.75rem;
+}
+.recipe-install summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.recipe-install summary span {
+  color: var(--blume-muted-foreground);
+  margin-inline-start: 0.75rem;
+  font-size: 0.6875rem;
+  font-weight: 400;
+}
+.recipe-install ul {
+  list-style: disc;
+  padding-inline-start: 1.25rem;
+  margin-block-start: 1rem;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.recipe-guide-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-block-start: 1rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.recipe-matrix {
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.75rem;
+  overflow: clip;
+}
+.matrix-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 1rem;
+  padding: 1rem;
+  border-block-end: 1px solid var(--recipe-line);
+}
+.matrix-row:last-child {
+  border-block-end: 0;
+}
+.matrix-row > h2 {
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  margin: 0;
+  padding-block-start: 0.5rem;
+}
+.matrix-row-content {
+  min-inline-size: 0;
+}
+.matrix-baseline {
+  display: inline-block;
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  margin-inline-start: 0.75rem;
+}
+.recipe-detail select {
+  max-inline-size: 100%;
+  min-block-size: 2.25rem;
+  padding: 0.375rem 2rem 0.375rem 0.625rem;
+  border: 1px solid var(--recipe-control);
+  border-radius: 0.5rem;
+  background-color: var(--blume-background);
+  color: var(--blume-foreground);
+  font-size: 0.75rem;
+}
+.option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.option-chips button,
+.option-chip-static {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 2.25rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.5rem;
+  color: var(--blume-muted-foreground);
+  background: var(--blume-background);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.option-chips button[aria-pressed="true"],
+.option-chip-static {
+  color: var(--blume-foreground);
+  border-color: var(--blume-foreground);
+  background: var(--recipe-soft);
+}
+.hardware-backends {
+  margin-block-end: 1rem;
+}
+.hardware-resource-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+.hardware-matrix {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  background: var(--recipe-soft);
+  border: 1px solid var(--recipe-line);
+  border-radius: 0.625rem;
+  padding: 0.25rem;
+  min-inline-size: 0;
+}
+.hardware-matrix label {
+  position: relative;
+  padding: 0.625rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+.hardware-matrix label[data-selected="true"] {
+  background: var(--blume-background);
+  border-color: var(--recipe-control);
+}
+.hardware-matrix label:has(:focus-visible) {
+  outline: 2px solid var(--blume-accent);
+  outline-offset: 1px;
+}
+.hardware-matrix input {
+  position: absolute;
+  opacity: 0;
+  inline-size: 1px;
+  block-size: 1px;
+}
+.hardware-matrix strong {
+  display: block;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 500;
+}
+.hardware-matrix small {
+  display: block;
+  color: var(--blume-muted-foreground);
+  font-size: 0.625rem;
+  margin-block-start: 0.25rem;
+}
+.matrix-resource-title {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-block-end: 0.75rem;
+}
+.matrix-resources > a {
+  display: inline-block;
+  margin-block-start: 0.75rem;
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.matrix-resources > p {
+  font-size: 0.75rem;
+}
+.matrix-note {
+  color: var(--blume-muted-foreground);
+  margin-block: 0.75rem 0;
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
+.matrix-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: 1rem;
+}
+.matrix-field {
+  min-inline-size: 0;
+}
+.matrix-field-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-block-end: 0.375rem;
+  font-size: 0.6875rem;
+}
+.matrix-field-label button,
+.matrix-null {
+  color: var(--blume-muted-foreground);
+  cursor: pointer;
+  font-size: 0.625rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.matrix-null {
+  display: inline-block;
+  margin-block-start: 0.375rem;
+  min-block-size: 1.5rem;
+}
+.matrix-field input,
+.matrix-field textarea {
+  background: var(--blume-background);
+  font-size: 0.75rem;
+  border-color: var(--recipe-control);
+}
+.resource-stepper {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--recipe-control);
+  border-radius: 0.5rem;
+  overflow: clip;
+}
+.resource-stepper input {
+  border: 0;
+  box-shadow: none;
+  text-align: center;
+  min-inline-size: 0;
+  appearance: textfield;
+}
+.resource-stepper input::-webkit-inner-spin-button {
+  appearance: none;
+}
+.resource-stepper > button {
+  min-inline-size: 2.25rem;
+  align-self: stretch;
+  cursor: pointer;
+}
+.resource-stepper > button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.matrix-advanced summary {
+  padding: 0.875rem 1rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--blume-foreground);
+}
+.matrix-advanced summary span {
+  color: var(--blume-muted-foreground);
+  margin-inline-start: 0.5rem;
+  font-size: 0.6875rem;
+}
+.matrix-advanced[open] summary {
+  border-block-end: 1px solid var(--recipe-line);
+}
+.matrix-auto {
+  font-size: 0.6875rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  min-block-size: 2.25rem;
+  margin-block-start: 0.5rem;
+  cursor: pointer;
+}
+.matrix-field-error,
+.recipe-error {
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.recipe-error {
+  padding: 1rem;
+}
+.recipe-error button {
+  margin-block-start: 0.5rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.matrix-field-error {
+  margin-block-start: 0.5rem;
+}
+.recipe-bottom-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-block-start: 0.75rem;
+  font-size: 0.6875rem;
+  color: var(--blume-muted-foreground);
+}
+.recipe-bottom-actions button {
+  font-size: 0.6875rem;
+}
+.recipe-source-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1rem;
+  margin-block-start: 1.25rem;
+  font-size: 0.75rem;
+}
+.recipe-source-links span {
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+}
+.recipe-directory :is(a, button, input, select):focus-visible,
+.recipe-detail :is(a, button, input, select, textarea, summary, pre):focus-visible {
+  outline: 2px solid var(--blume-accent);
+  outline-offset: 3px;
+}
+@media (max-width: 49rem) {
+  .hardware-resource-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+  .matrix-row {
+    grid-template-columns: 5rem minmax(0, 1fr);
+  }
+}
+@media (max-width: 35rem) {
+  .recipe-directory-tools input {
+    max-inline-size: none;
+  }
+  .recipe-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .recipe-model-header {
+    gap: 0.75rem;
+  }
+  .recipe-model-header > div:first-of-type {
+    min-inline-size: 0;
+  }
+  .recipe-model-actions {
+    inline-size: 100%;
+  }
+  .matrix-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+  .matrix-row > h2 {
+    padding-block-start: 0;
+  }
+  .matrix-baseline {
+    margin-inline-start: 0;
+    margin-block-start: 0.5rem;
+    display: block;
+  }
+  .hardware-matrix {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .matrix-advanced summary span {
+    display: block;
+    margin-inline-start: 0;
+    margin-block-start: 0.25rem;
+  }
+}
+@media (hover: hover) {
+  .recipe-card:hover {
+    border-color: var(--blume-muted-foreground);
+    background: var(--recipe-soft);
+  }
+  .recipe-family-filters button:hover,
+  .option-chips button:hover {
+    color: var(--blume-foreground);
+  }
+}
+
+/* Compact component experiments and custom hardware stay inside the recipe matrix. */
+.recipe-detail [data-variant="outline"] {
+  color: var(--blume-foreground);
+  background: var(--blume-background);
+  border-color: var(--recipe-control);
+}
+.hardware-add {
+  margin-block-start: 0.5rem;
+  min-block-size: 2rem;
+  font-size: 0.6875rem;
+  color: var(--blume-muted-foreground);
+  cursor: pointer;
+}
+.hardware-search {
+  display: grid;
+  gap: 0.5rem;
+  margin-block-start: 0.5rem;
+  font-size: 0.75rem;
+}
+.hardware-search p {
+  font-size: 0.6875rem;
+  color: var(--blume-muted-foreground);
+  line-height: 1.6;
+}
+.hardware-search button {
+  justify-self: start;
+  min-block-size: 2.25rem;
+  border: 1px solid var(--recipe-control);
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+.hardware-search button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.hardware-matrix strong {
+  overflow-wrap: anywhere;
+}
+.component-plan > summary {
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+.component-plan > summary span {
+  margin-inline-start: 0.5rem;
+  color: var(--blume-muted-foreground);
+  font-size: 0.625rem;
+}
+.component-plan-fields {
+  display: grid;
+  gap: 1rem;
+  margin-block: 1rem;
+}
+.component-plan-label {
+  display: block;
+  margin-block-end: 0.5rem;
+  font-size: 0.6875rem;
+}
+.component-plan > p {
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
+.component-plan-reset {
+  margin-block-start: 0.5rem;
+  font-size: 0.6875rem;
+  min-block-size: 2rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.release-intro {
+  font-size: 0.875rem;
+  color: var(--blume-muted-foreground);
+  line-height: 1.7;
+  margin-block-end: 1.5rem;
+}
+.release-intro p + p {
+  margin-block-start: 0.5rem;
+}
+.home-featured-model {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 1rem;
+  margin-block: 1.25rem;
+  border: 1px solid var(--blume-border);
+  border-radius: 0.625rem;
+  color: var(--blume-foreground);
+  text-decoration: none;
+}
+.home-featured-model img {
+  display: block;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  border-radius: 0.5rem;
+}
+.home-featured-model > span:first-of-type {
+  flex: 1;
+}
+.home-featured-model small {
+  display: block;
+  color: var(--blume-muted-foreground);
+  font-size: 0.6875rem;
+  margin-block-end: 0.25rem;
+}
+.home-featured-model strong {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.home-featured-action {
+  font-size: 0.75rem;
+}
+.recipe-request-code summary {
+  padding-block: 0.25rem;
+}

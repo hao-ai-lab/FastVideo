@@ -73,7 +73,11 @@ def test_dq_gemm_matches_qmm_for_supported_bit_widths(bits: int, group_size: int
     ref_np = np.asarray(ref.astype(mx.float32))
     got_np = np.asarray(got.astype(mx.float32))
     scale = max(float(np.max(np.abs(ref_np))), 1e-3)
-    assert rel < 2e-2, rel
+    # MLX's CPU backend accumulates the BF16 dense GEMM less precisely than Metal; at group size 128
+    # (512 inputs) its error against qmm reaches about 2.6% for every bit width, including 8, so the
+    # gap is accumulation rather than quantization.
+    rel_limit = 3e-2 if mx.default_device() == mx.cpu else 2e-2
+    assert rel < rel_limit, rel
     assert float(np.max(np.abs(got_np - ref_np))) / scale < 0.08
 
 

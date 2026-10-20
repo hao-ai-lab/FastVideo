@@ -39,11 +39,21 @@ from fastvideo.models.loader.fsdp_load import (
     _prepare_model_for_compile,
     _regional_compile_unsupported_reason,
 )
+from fastvideo.platforms import AttentionBackendEnum
 
 
 def _init_params_for(backend_name: str | None) -> dict:
     resolved = None if backend_name is None else SimpleNamespace(name=backend_name)
     return {"config": SimpleNamespace(_resolved_attention_backend=resolved)}
+
+
+def _model_with_actual_backend(backend: AttentionBackendEnum) -> nn.Module:
+    attention = DistributedAttention.__new__(DistributedAttention)
+    nn.Module.__init__(attention)
+    attention.backend = backend
+    model = nn.Module()
+    model.add_module("attention", attention)
+    return model
 
 
 def test_legacy_vsa_backend_degrades_to_eager(env_overrides) -> None:
@@ -62,10 +72,10 @@ def test_supported_backends_allow_compile(backend_name, env_overrides) -> None:
     assert _regional_compile_unsupported_reason(_init_params_for(backend_name)) is None
 
 
-def test_h3_vsa_sm100a_tile64_allows_compile(env_overrides) -> None:
+def test_h3_vsa_ptx_blackwell_tile64_allows_compile(env_overrides) -> None:
     env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
     env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_PROBE.override(None))
-    env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
 
     reason = _regional_compile_unsupported_reason(
         _init_params_for("VIDEO_SPARSE_ATTN_H3"),
@@ -75,14 +85,14 @@ def test_h3_vsa_sm100a_tile64_allows_compile(env_overrides) -> None:
     assert reason is None
 
 
-@pytest.mark.parametrize(("sm100a", "tile_size"), [(False, 64), (True, 256), (True, None)])
-def test_h3_vsa_unsupported_compile_route_degrades_to_eager(sm100a, tile_size, env_overrides) -> None:
+@pytest.mark.parametrize(("ptx_blackwell", "tile_size"), [(False, 64), (True, 256), (True, None)])
+def test_h3_vsa_unsupported_compile_route_degrades_to_eager(ptx_blackwell, tile_size, env_overrides) -> None:
     env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
     env_overrides.enter_context(envs.FASTVIDEO_H3_VSA_PROBE.override(None))
-    if sm100a:
-        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(True))
+    if ptx_blackwell:
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(True))
     else:
-        env_overrides.enter_context(envs.FASTVIDEO_VSA_SM100A.override(None))
+        env_overrides.enter_context(envs.FASTVIDEO_VSA_PTX_BLACKWELL.override(None))
 
     reason = _regional_compile_unsupported_reason(
         _init_params_for("VIDEO_SPARSE_ATTN_H3"),
@@ -191,6 +201,23 @@ def test_regional_compile_prepare_prefers_specialized_hook() -> None:
     assert impl.regional_devices == [expected_device]
 
 
+def test_h3_regional_compile_resolves_nvfp4_activation_policies(env_overrides) -> None:
+    from fastvideo.layers.quantization.nvfp4_config import NVFP4QuantizeMethod
+
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_ACT_AMAX.override(None))
+    env_overrides.enter_context(envs.FASTVIDEO_NVFP4_DYNAMIC_ACT.override(""))
+    model = _gate_model(2.0)
+    method = object.__new__(NVFP4QuantizeMethod)
+    method.layer_prefix = "minimax_h3.transformer_blocks.0.attn.to_q"
+    model.transformer_blocks[0].attn.to_q.quant_method = method
+
+    assert not method._static_sf_checked
+    assert not hasattr(method, "_dynamic_act_cached")
+    assert _prepare_model_for_compile(model, regional=True) is None
+    assert method._static_sf_checked
+    assert method._dynamic_act_cached is False
+
+
 def test_minimax_h3_prepare_for_regional_compile_does_not_require_quantized_q_weight() -> None:
     model = _gate_model(2.0)
     attention = model.transformer_blocks[0].attn
@@ -209,11 +236,11 @@ def test_minimax_h3_prepare_for_regional_compile_does_not_require_quantized_q_we
 def test_minimax_h3_prepare_for_regional_compile_propagates_backend_rejection() -> None:
     model = _gate_model(2.0)
     impl = model.transformer_blocks[0].attn.distributed_attention.attn_impl
-    impl.unsupported = "sm100a probe failed"
+    impl.unsupported = "ptx_blackwell probe failed"
 
     reason = model.prepare_for_regional_compile()
 
-    assert reason == "sm100a probe failed"
+    assert reason == "ptx_blackwell probe failed"
 
 
 def test_unprepared_vsa_gate_cannot_mutate_cache_during_compile(monkeypatch) -> None:
@@ -267,6 +294,37 @@ def test_dense_flash_attention_inference_allows_compile(fa_version, monkeypatch,
     monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
 
     assert _regional_compile_unsupported_reason(_init_params_for("FLASH_ATTN")) is None
+
+
+def test_automatic_flash_attention_fa3_training_degrades_to_eager(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    fake_module = ModuleType("fastvideo.attention.utils.flash_attn_default")
+    fake_module.fa_version = "3"
+    monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
+    model = _model_with_actual_backend(AttentionBackendEnum.FLASH_ATTN)
+
+    reason = _regional_compile_unsupported_reason(
+        _init_params_for(None),
+        model=model,
+        training=True,
+    )
+
+    assert reason is not None
+    assert "flash-attn 3" in reason
+
+
+def test_actual_sdpa_backend_overrides_flash_request_for_fa3_guard(monkeypatch, env_overrides) -> None:
+    env_overrides.enter_context(envs.FASTVIDEO_DISABLE_ATTENTION_COMPILE.override(None))
+    fake_module = ModuleType("fastvideo.attention.utils.flash_attn_default")
+    fake_module.fa_version = "3"
+    monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
+    model = _model_with_actual_backend(AttentionBackendEnum.TORCH_SDPA)
+
+    assert _regional_compile_unsupported_reason(
+        _init_params_for("FLASH_ATTN"),
+        model=model,
+        training=True,
+    ) is None
 
 
 def test_default_attention_dispatch_stays_compiler_disabled(monkeypatch, env_overrides) -> None:
@@ -388,6 +446,36 @@ def test_compile_model_regions_injects_fullgraph_and_precision_casts(monkeypatch
 def test_compile_model_regions_rejects_mode_kwargs() -> None:
     with pytest.raises(ValueError, match="mode"):
         _compile_model_regions(_Toy(), {"mode": "reduce-overhead"})
+
+
+def test_variable_rank_lora_regions_do_not_share_a_recompile_budget() -> None:
+    from fastvideo.layers.lora.linear import get_lora_layer
+    from fastvideo.tests.layers.test_lora_side_branch import _packed_linear, IN
+
+    class AdapterBlock(nn.Module):
+        def __init__(self, rank):
+            super().__init__()
+            self.proj = get_lora_layer(_packed_linear())
+            self.proj.set_lora_weights(torch.randn(rank, IN), torch.randn(12, rank))
+
+        def forward(self, x):
+            return self.proj(x)[0]
+
+    model = nn.Module()
+    model.blocks = nn.ModuleList([AdapterBlock(rank) for rank in (2, 3, 4)])
+    model._compile_conditions = [lambda name, module: name.startswith("blocks.") and name.count(".") == 1]
+    x = torch.randn(2, 5, IN, dtype=torch.bfloat16)
+    torch._dynamo.reset()
+    try:
+        with torch.inference_mode():
+            expected = [block(x) for block in model.blocks]
+            torch._dynamo.reset()
+            with torch._dynamo.config.patch(recompile_limit=2):
+                _compile_model_regions(model, {"backend": "eager"}, isolate_regions=True)
+                for block, reference in zip(model.blocks, expected, strict=True):
+                    torch.testing.assert_close(block(x), reference, rtol=0, atol=0)
+    finally:
+        torch._dynamo.reset()
 
 
 def test_compile_model_regions_requires_conditions_and_matches(monkeypatch) -> None:

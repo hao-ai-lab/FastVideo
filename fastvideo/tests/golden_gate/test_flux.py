@@ -14,6 +14,7 @@ is a GATED HF repo; FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR can point at a local check
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 import fastvideo.envs as envs
@@ -82,5 +83,6 @@ SPEC = GateSpec(
 )
 
 
+@pytest.mark.skip(reason="FLUX.1-dev golden gate is paused while gated-model access is not provisioned for CI.")
 def test_flux_golden_gate(distributed_runtime) -> None:
     run_gate(SPEC)

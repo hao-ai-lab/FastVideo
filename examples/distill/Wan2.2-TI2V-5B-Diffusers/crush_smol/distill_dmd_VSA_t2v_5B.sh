@@ -104,7 +104,9 @@ torchrun \
 --nnodes 1 \
 --nproc_per_node $NUM_GPUS \
 --master_port $MASTER_PORT \
-    fastvideo/training/wan_distillation_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanDistillationPipeline \
+    --pipeline-module fastvideo.training.wan_distillation_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

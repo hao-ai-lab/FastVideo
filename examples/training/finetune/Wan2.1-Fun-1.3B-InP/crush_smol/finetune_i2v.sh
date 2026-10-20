@@ -84,7 +84,9 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/wan_i2v_training_pipeline.py \
+    fastvideo/training/runner.py \
+    --pipeline-class WanI2VTrainingPipeline \
+    --pipeline-module fastvideo.training.wan_i2v_training_pipeline \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

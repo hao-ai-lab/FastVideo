@@ -61,6 +61,10 @@ class WanCausalDenoisingBase(DenoisingStage):
     def _initialize_kv_cache(self, batch_size, dtype, device) -> list[dict]:
         """
         Initialize a Per-GPU KV cache aligned with the Wan model assumptions.
+
+        The window offsets are plain Python ints rather than device tensors.
+        The attention block reads them back on every layer to slice the cache,
+        so keeping them on device would force a host sync per layer per step.
         """
         kv_cache1 = []
         num_attention_heads = self.transformer.num_attention_heads
@@ -81,9 +85,9 @@ class WanCausalDenoisingBase(DenoisingStage):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
             })
 
         return kv_cache1
@@ -265,6 +269,9 @@ class CausalDMDDenosingStage(WanCausalDenoisingBase):
                 video_raw_latent_shape = noise_latents_btchw.shape
 
                 for i, t_cur in enumerate(timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     if boundary_timestep is not None and t_cur < boundary_timestep:
                         current_model = self.transformer_2
                     else:
@@ -495,6 +502,9 @@ class CausalDenoisingStage(WanCausalDenoisingBase):
                 timesteps = self.scheduler.timesteps
 
                 for i, t_cur in enumerate(timesteps):
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     latent_model_input = current_latents.to(target_dtype)
                     t_expanded = t_cur * torch.ones(
                         (b, 1),

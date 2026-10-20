@@ -2,6 +2,8 @@ from typing import Any
 
 import torch
 
+from fastvideo.layers.quantization.nvfp4_config import nvfp4_quantize_fenced
+
 try:
     import flashinfer
 except ImportError:
@@ -15,11 +17,17 @@ def _require_flashinfer() -> Any:
     return flashinfer
 
 
-@torch.compile
 def _global_sf(t: torch.Tensor) -> torch.Tensor:
-    maxabs = t.float().abs().nan_to_num().max()
-    maxabs = maxabs.clamp(min=1e-12)
-    return (448.0 * 6.0) / maxabs
+    # Eager amax: the previous torch.compile'd reduction lowered to a single-block
+    # Triton kernel (~38 ms for a 21k x 2048 activation on GB200). Max is exact
+    # in any order, so finite input gives the same scale bit for bit; NaN and inf
+    # keep the elementwise reduction's behavior. No host sync.
+    maxabs = torch.nan_to_num(t.abs()).amax().float()
+    # The reduction above runs in the input dtype, so an infinite input becomes the
+    # fp16/bf16 maximum. The reference reduction replaces it in float32.
+    # new_full fills on the device; torch.tensor would copy from the host and sync.
+    maxabs = torch.where(torch.isinf(t).any(), maxabs.new_full((), torch.finfo(torch.float32).max), maxabs)
+    return (448.0 * 6.0) / maxabs.clamp(min=1e-12)
 
 
 class _LinearFWD4BWD16Fn(torch.autograd.Function):
@@ -50,18 +58,9 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
         global_sf_a = _global_sf(x2d)
         global_sf_b = _global_sf(weight_cast)
 
-        a_fp4, a_inv_s = flashinfer_mod.nvfp4_quantize(
-            x2d,
-            global_sf_a,
-            sfLayout=a_sf_layout,
-            do_shuffle=False,
-        )
-        b_fp4, b_inv_s = flashinfer_mod.nvfp4_quantize(
-            weight_cast,
-            global_sf_b,
-            sfLayout=flashinfer_mod.SfLayout.layout_128x4,
-            do_shuffle=False,
-        )
+        # Shared helper: carries the DGX Spark (GB10) ordering fence.
+        a_fp4, a_inv_s = nvfp4_quantize_fenced(x2d, global_sf_a, a_sf_layout.value)
+        b_fp4, b_inv_s = nvfp4_quantize_fenced(weight_cast, global_sf_b, flashinfer_mod.SfLayout.layout_128x4.value)
 
         alpha = 1.0 / (global_sf_a * global_sf_b)
 

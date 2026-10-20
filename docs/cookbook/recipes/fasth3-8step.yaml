@@ -1,0 +1,66 @@
+# TODO(cookbook-review): Design sample only. Before merge, double-check the
+# selected options, schema types/ranges, and baseline values for each deployment.
+# TODO: Recheck field paths and choices when the typed API in PR #1913 is finalized.
+title: FastH3 8-Step V2
+summary: Distilled text-to-video serving with CUDA or native Apple Silicon MLX.
+
+deployments:
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    guide: docs/cookbook/openai-api.md
+    workload: t2v
+    defaults: examples/serving/openai_fasth3_8step.yaml
+    # Existing FastH3 V2 installation command: docs/cookbook/openai-api.md.
+    requirements:
+      - 'UV_TORCH_BACKEND=cu130 uv pip install -e ".[fasth3]"'
+    options:
+      - server.*
+      - generator.engine.num_gpus
+      - generator.engine.parallelism.*
+      - "!generator.engine.parallelism.hsdp_*"
+      - generator.engine.offload.text_encoder
+      - generator.engine.offload.vae
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.seed
+    overrides:
+      default_request.sampling.num_frames:
+        minimum: 108
+        maximum: 362
+        description: Configured frame counts align upward to the next 17n+5 value, up to 362.
+      default_request.sampling.height:
+        minimum: 32
+        multipleOf: 32
+        default: 768
+        description: H3 canvas dimensions use multiples of 32; the runtime's canvas-area limit also applies.
+      default_request.sampling.width:
+        minimum: 32
+        multipleOf: 32
+
+  mlx-rest:
+    runtime: fastvideo-mlx-rest
+    guide: docs/cookbook/openai-api.md
+    workload: t2v
+    defaults: examples/serving/mlx_fasth3_8step.yaml
+    # Existing MLX / FastH3 V2 setup notes: docs/cookbook/openai-api.md.
+    requirements:
+      - 'uv pip install -e ".[mlx]"'
+      - For FastH3 V2, convert that checkpoint's transformer with --include-vsa and start the 8-step config. Do not overwrite a V1 export.
+      - Paths are relative to the directory where you launch the server.
+    options:
+      - server.*
+      - generator.model_root
+      - generator.mlx_checkpoint
+      - generator.prompt_cache_dir
+      - generator.vae_dtype
+      - generator.vsa_sparsity
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.seed
+    overrides:
+      generator.vae_dtype:
+        # Keep MLXGeneratorConfig's enum/default; customize only its explanation.
+        title: VAE compute precision
+        description: Precision used by the native MLX VAE; the serving baseline uses fp32.

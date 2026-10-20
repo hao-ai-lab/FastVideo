@@ -31,6 +31,22 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Wan-Animate driving inputs: paths to the *preprocessed* artifacts the
+    # official preprocessing pipeline produces (src_pose.mp4, src_face.mp4;
+    # replace mode adds src_bg.mp4 + src_mask.mp4). `animate_mode` selects
+    # animation (character on the reference image's background) vs replace
+    # (character composited into the background video).
+    pose_video_path: str | None = None
+    face_video_path: str | None = None
+    background_video_path: str | None = None
+    mask_video_path: str | None = None
+    animate_mode: str | None = None
+
+    # Audio inputs. `audio_path` drives audio-conditioned generation (Wan S2V):
+    # the waveform is encoded and cross-attended to per video frame. Distinct
+    # from the Stable Audio `init_audio` fields below, which seed audio output.
+    audio_path: str | None = None
+
     # Optional pre-generated diffusion latents. Used by parity/debug harnesses
     # and advanced callers that need deterministic latent reuse.
     latents: Any | None = None
@@ -46,28 +62,13 @@ class SamplingParam:
     prompt_attention_mask: list = field(default_factory=list)
     negative_attention_mask: list = field(default_factory=list)
 
-    # Camera/action control inputs (GameCraft)
-    camera_states: Any | None = None  # Plücker coordinates [B, T_video, 6, H, W]
-    camera_trajectory: str | None = None
-    action_list: list[str] | None = None
-    action_speed_list: list[float] | None = None
-    gt_latents: Any | None = None  # Ground truth latents [B, 16, T, H, W]
-    conditioning_mask: Any | None = None  # Mask [B, 1, T, H, W]
-
     # Camera control inputs (LingBotWorld and LingBotWorld2)
     c2ws_plucker_emb: Any | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
     action_path: str | None = None  # Directory containing poses.npy and intrinsics.npy
 
-    # Refine inputs (LongCat 480p->720p upscaling)
-    # Path-based refine (load stage1 video from disk, e.g. MP4)
-    refine_from: str | None = None  # Path to stage1 video (480p output from distill)
+    # Refine / conditioning-frame inputs
     t_thresh: float = 0.5  # Threshold for timestep scheduling in refinement
-    spatial_refine_only: bool = False  # If True, only spatial (no temporal doubling)
     num_cond_frames: int = 0  # Number of conditioning frames
-    # In-memory refine input (for two-stage pipeline where stage1 frames are already in memory)
-    # This mirrors LongCat's demo where a list of frames (e.g. np.ndarray or PIL.Image)
-    # is passed directly to the refinement pipeline instead of reloading from disk.
-    stage1_video: Any | None = None
 
     # Text inputs
     prompt: str | list[str] | None = None
@@ -95,11 +96,6 @@ class SamplingParam:
     guidance_scale: float = 1.0
     batch_cfg: bool = False
     guidance_scale_2: float | None = None
-    # Z-Image CFG controls. ``cfg_normalization=True`` caps the guided
-    # prediction norm at the positive-prediction norm; ``cfg_truncation``
-    # disables CFG above the normalized-noise threshold.
-    cfg_normalization: bool = False
-    cfg_truncation: float | None = 1.0
     # Embedded guidance (FLUX): do not treat ``guidance_scale > 1`` as classic CFG.
     use_embedded_guidance: bool = False
     # Diffusers-style true CFG for FLUX when > 1 (requires negative prompt encoding).
@@ -107,6 +103,18 @@ class SamplingParam:
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
+
+    # Helios autoregressive spatial-pyramid sampling.
+    pyramid_num_inference_steps_list: list[int] | None = None
+    history_sizes: list[int] | None = None
+    num_latent_frames_per_chunk: int = 9
+    keep_first_frame: bool = True
+    is_skip_first_chunk: bool = False
+    # Diffusers-signature compatibility only: the pinned Helios-Distilled model
+    # index declares ``is_cfg_zero_star=false``, so neither value changes sampling.
+    use_zero_init: bool = True
+    zero_steps: int = 1
+    is_amplify_first_chunk: bool = False
 
     # TeaCache parameters
     enable_teacache: bool = False
@@ -135,6 +143,9 @@ class SamplingParam:
     ltx2_stg_scale_audio: float = 0.0
     ltx2_stg_blocks_video: list[int] = field(default_factory=lambda: [29])
     ltx2_stg_blocks_audio: list[int] = field(default_factory=lambda: [29])
+    # LTX-2.5 distilled stage 1 uses the official variance-preserving
+    # ancestral Euler update. Older LTX generations remain deterministic.
+    ltx2_use_ancestral_sampler: bool = False
 
     # LTX-2 image / video / continuation conditioning. These flow from
     # generate_video(...) kwargs through ``sampling_param.update(kwargs)``
@@ -184,13 +195,14 @@ class SamplingParam:
     # Misc
     save_video: bool = True
     return_frames: bool = True
+    return_samples: bool = field(default=False, kw_only=True)
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
 
-    def check_sampling_param(self):
+    def check_sampling_param(self) -> None:
         if self.prompt_path and not self.prompt_path.endswith(".txt"):
             raise ValueError("prompt_path must be a txt file")
 
@@ -334,18 +346,6 @@ class SamplingParam:
             help="Classifier-free guidance scale",
         )
         parser.add_argument(
-            "--cfg-normalization",
-            action=StoreBoolean,
-            default=SamplingParam.cfg_normalization,
-            help="Cap Z-Image CFG prediction norm to the positive-prediction norm",
-        )
-        parser.add_argument(
-            "--cfg-truncation",
-            type=float,
-            default=SamplingParam.cfg_truncation,
-            help="Disable Z-Image CFG above this normalized-noise threshold",
-        )
-        parser.add_argument(
             "--batch-cfg",
             action=StoreBoolean,
             default=SamplingParam.batch_cfg,
@@ -374,6 +374,56 @@ class SamplingParam:
             type=float,
             default=SamplingParam.boundary_ratio,
             help="Boundary timestep ratio",
+        )
+        parser.add_argument(
+            "--pyramid-num-inference-steps-list",
+            nargs=3,
+            type=int,
+            default=SamplingParam.pyramid_num_inference_steps_list,
+            help="Denoising steps for the three Helios pyramid stages",
+        )
+        parser.add_argument(
+            "--history-sizes",
+            nargs=3,
+            type=int,
+            default=SamplingParam.history_sizes,
+            help="Long, mid, and short Helios latent history sizes",
+        )
+        parser.add_argument(
+            "--num-latent-frames-per-chunk",
+            type=int,
+            default=SamplingParam.num_latent_frames_per_chunk,
+            help="Helios autoregressive latent frames per chunk",
+        )
+        parser.add_argument(
+            "--keep-first-frame",
+            action=StoreBoolean,
+            default=SamplingParam.keep_first_frame,
+            help="Keep the first Helios latent frame as prefix conditioning",
+        )
+        parser.add_argument(
+            "--is-skip-first-chunk",
+            action=StoreBoolean,
+            default=SamplingParam.is_skip_first_chunk,
+            help="Skip the first Helios autoregressive chunk",
+        )
+        parser.add_argument(
+            "--use-zero-init",
+            action=StoreBoolean,
+            default=SamplingParam.use_zero_init,
+            help="Enable Helios CFG zero initialization when supported",
+        )
+        parser.add_argument(
+            "--zero-steps",
+            type=int,
+            default=SamplingParam.zero_steps,
+            help="Number of Helios CFG zero-initialization steps",
+        )
+        parser.add_argument(
+            "--is-amplify-first-chunk",
+            action=StoreBoolean,
+            default=SamplingParam.is_amplify_first_chunk,
+            help="Use the amplified DMD schedule for the first Helios chunk",
         )
         parser.add_argument(
             "--save-video",
@@ -406,22 +456,16 @@ class SamplingParam:
             help="Path to input video for video-to-video generation",
         )
         parser.add_argument(
-            "--refine-from",
+            "--audio-path",
             type=str,
-            default=SamplingParam.refine_from,
-            help="Path to stage1 video for refinement (LongCat 480p->720p)",
+            default=SamplingParam.audio_path,
+            help="Path to input audio for speech-driven generation (Wan S2V)",
         )
         parser.add_argument(
             "--t-thresh",
             type=float,
             default=SamplingParam.t_thresh,
             help="Threshold for timestep scheduling in refinement (default: 0.5)",
-        )
-        parser.add_argument(
-            "--spatial-refine-only",
-            action=StoreBoolean,
-            default=SamplingParam.spatial_refine_only,
-            help="Only perform spatial super-resolution (no temporal doubling)",
         )
         parser.add_argument(
             "--num-cond-frames",

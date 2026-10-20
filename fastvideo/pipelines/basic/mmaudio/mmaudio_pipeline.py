@@ -14,7 +14,16 @@ from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 
 
 class MMAudioPipeline(ComposedPipelineBase):
-    """MMAudio large-44k-v2 V2A/T2A inference pipeline."""
+    """MMAudio large-44k-v2 V2A/T2A inference pipeline.
+
+    ``text_encoder``, ``tokenizer``, ``image_encoder`` and ``image_encoder_2``
+    are required modules, but the direct-feature path of the conditioning
+    stages returns before dereferencing them. Callers that pass cached
+    ``mmaudio_clip_features``/``mmaudio_sync_features`` (and
+    ``mmaudio_text_features``) may therefore inject a placeholder for those
+    four modules; callers that pass ``video_path`` or omit the cached features
+    must supply the real modules.
+    """
 
     _required_config_modules = [
         "transformer",

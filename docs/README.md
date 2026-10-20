@@ -1,50 +1,29 @@
-# FastVideo Documentation
+# FastVideo documentation
 
-This directory contains the FastVideo documentation built with MkDocs.
+Canonical guides live in this directory. The Blume application in
+[docs-site](../docs-site/README.md) builds and publishes them at
+[haoailab.com/FastVideo](https://haoailab.com/FastVideo/).
 
-## Build the docs locally
+See [Documenting FastVideo](contributing/documentation.md) for local setup,
+source ownership, page structure, validation, and deployment. The existing
+GitHub Pages workflow publishes Blume from `main` with the same domain and base
+path. MkDocs is no longer part of the build.
 
-```bash
-# Install dependencies
-uv pip install -r requirements-mkdocs.txt
+## Cookbook sources
 
-# Serve docs with live reload (recommended for development)
-mkdocs serve
-
-# Or build static site
-mkdocs build
-```
-
-## View the docs
-
-### Development server (with live reload)
+Recipe metadata, shared JavaScript, and tests remain under `docs/`. From the
+repository root:
 
 ```bash
-mkdocs serve
+npm ci --prefix docs
+npm run build:catalog --prefix docs
+npm run check:cookbook --prefix docs
+npm run test:cookbook --prefix docs
+python -m unittest discover -s docs/tests -p 'test_*.py'
 ```
 
-Then open your browser to: http://127.0.0.1:8000
-
-### Static build
-
-```bash
-mkdocs build
-python -m http.server -d site/
-```
-
-Then open your browser to: http://localhost:8000
-
-## Automatic Deployment
-
-Documentation is automatically built and deployed to GitHub Pages when changes are pushed to the `main` branch via the `.github/workflows/infra-docs.yml` workflow.
-
-## Update documentation dependencies
-
-Edit `requirements-mkdocs.in`, then regenerate the pinned Linux/Python 3.12 lock file:
-
-```bash
-uv pip compile requirements-mkdocs.in \
-  -o requirements-mkdocs.txt \
-  --python-platform x86_64-manylinux_2_28 \
-  --python-version 3.12
-```
+The combined browser bundle, notices, index and catalogs are generated together
+under `assets/cookbook-config/`. Do not hand-edit or commit those outputs.
+The site preparation builds and copies them into Blume's public assets.
+See the [recipe authoring guide](contributing/cookbook_configuration.md) and
+[configuration API contract](cookbook/design.md) before changing the schema.

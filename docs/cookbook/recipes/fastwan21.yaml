@@ -1,0 +1,38 @@
+# TODO(cookbook-review): Design sample only. Before merge, double-check the
+# selected options, schema types/ranges, and baseline values for each deployment.
+# TODO: Recheck field paths and choices when the typed API in PR #1913 is finalized.
+title: FastWan2.1 1.3B
+summary: Distilled text-to-video serving with sparse attention.
+
+deployments:
+  cuda-rest:
+    runtime: fastvideo-cuda-rest
+    workload: t2v
+    defaults: examples/serving/openai_fastwan21_1_3b.yaml
+    env:
+      FASTVIDEO_ATTENTION_BACKEND: "VIDEO_SPARSE_ATTN"
+    options:
+      - server.*
+      - generator.engine.num_gpus
+      - generator.engine.parallelism.*
+      - "!generator.engine.parallelism.hsdp_*"
+      - generator.engine.offload.dit_layerwise
+      - generator.engine.offload.text_encoder
+      - generator.engine.offload.vae
+      - generator.engine.compile.enabled
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.fps
+      - default_request.sampling.seed
+    overrides:
+      # Wan uses an 8-pixel VAE stride and a 2x2 spatial DiT patch.
+      default_request.sampling.height:
+        minimum: 16
+        multipleOf: 16
+      default_request.sampling.width:
+        minimum: 16
+        multipleOf: 16
+      # Generic stage verification accepts nonnegative seeds, including zero.
+      default_request.sampling.seed:
+        minimum: 0

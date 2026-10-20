@@ -1,6 +1,7 @@
 The reference videos are used as part of e2e SSIM regression tests.
-Wan inference coverage now lives in `test_wan_t2v_similarity.py` and
-`test_wan_i2v_similarity.py` alongside the other model-specific SSIM files.
+Wan inference coverage now lives in `test_wan_t2v_similarity.py`,
+`test_wan_i2v_similarity.py` and `test_wan_ti2v_similarity.py` alongside the
+other model-specific SSIM files.
 These tests compare newly generated videos against references to detect quality
 regressions.
 
@@ -88,8 +89,9 @@ into one subprocess per model id by setting `FASTVIDEO_SSIM_MODEL_ID`.
 ## Bootstrapping New References
 
 Normal SSIM runs are strict: missing references fail the test. For a new model
-PR, add `[new-model]` to the PR title or set `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1`
-for the Buildkite job. CI then passes `--ssim-bootstrap-mode` to pytest.
+PR, a maintainer sets `FASTVIDEO_SSIM_BOOTSTRAP_MODE=1` for the Buildkite SSIM
+job (the Slurm lane does not read the PR title). CI then passes
+`--ssim-bootstrap-mode` to pytest.
 
 In bootstrap mode, a missing pixel `.mp4` or latent `.pt` reference is treated
 as an expected draft-reference case after the generated artifact has been

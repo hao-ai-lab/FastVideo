@@ -4,7 +4,8 @@ In-process evaluation suite for video generations. Includes pixel
 metrics (SSIM, PSNR, LPIPS), Fréchet Video Distance (FVD), optical-flow
 comparisons, the full VBench suite, Physics-IQ, audio metrics, an
 absolute VLM scorer (`videoscore2`), and a pairwise VLM judge
-(`judge.third_person_separation`) — all behind a single registry-driven API.
+(`judge.third_person_separation`), plus VQeval long-video failure scoring —
+all behind a single registry-driven API.
 
 ## Install
 
@@ -12,9 +13,10 @@ absolute VLM scorer (`videoscore2`), and a pairwise VLM judge
 |---|---|
 | Default (common, optical_flow, vbench, physics_iq, videoscore2) | `uv pip install -e .[eval]` |
 | Just VBench (11 of 16 by default; +4 with detectron2) | `uv pip install -e .[eval-vbench]` |
+| VQeval long-video composite | `uv pip install -e .[eval-vqeval]` |
 | Just Physics-IQ (covered by `[eval]`) | `uv pip install -e .[eval-physics-iq]` |
 | Audio metrics (CLAP, FAD, KL, WER, AudioBox, DeSync, ImageBind) | `uv pip install -e .[eval-audio]` |
-| Everything: `[eval]` + `[eval-audio]` + `vbench.scene` (AVoCaDO) | `uv pip install -e .[eval-full]` |
+| Everything: `[eval]` + `[eval-audio]` + `[eval-vqeval]` + `vbench.scene` | `uv pip install -e .[eval-full]` |
 | Optional faster video decode (x86_64 only; opt-in) | `uv pip install -e .[eval-fast-decode]` |
 
 `[eval-audio]` covers every `audio.*` metric. ImageBind
@@ -81,6 +83,47 @@ transformers/numpy/timm versions is applied at import time in
 `fastvideo/eval/metrics/vbench/__init__.py` via attribute-level
 monkey-patches; the submodule files are unchanged.
 
+### VQeval long-video scoring
+
+`vqeval.composite` wraps the six VQeval dimensions behind one metric so
+CLIP, DINOv2, pyiqa, and optical-flow state are shared. The composite score is
+0–100 (higher is better); individual dimension scores and raw metrics are
+returned under `MetricResult.details["dimensions"]`.
+
+Pull the pinned source and install the optional dependencies:
+
+```bash
+git submodule update --init fastvideo/third_party/eval/vqeval
+uv pip install -e '.[eval-vqeval]'
+```
+
+MediaPipe is intentionally not part of `[eval-vqeval]`: VQeval's
+anatomical-error detector wants the legacy `mp.solutions` API, which only
+exists in `mediapipe` 0.10.x, and every 0.10.x pins `protobuf<5` —
+unsatisfiable next to FastVideo's `protobuf>=5.28.3`. Upstream reports zero
+anatomical errors without MediaPipe (its import degrades gracefully), and
+`spatial_quality` falls back to pyiqa's BRISQUE when `cv2.quality`
+(opencv-contrib) is absent. An environment that can relax the protobuf pin
+can install `mediapipe<1` manually to enable the anatomical checks.
+
+Frame rate is required because VQeval scores every frame through five seconds
+and samples longer videos at approximately 2 fps. Text alignment is included
+only when `--text-prompt` is provided.
+
+```bash
+fastvideo eval run \
+    --videos outputs/*.mp4 \
+    --metrics vqeval.composite \
+    --fps 16 \
+    --text-prompt "A dog running through a forest" \
+    --output vqeval.json
+```
+
+The upstream source is pinned as a submodule rather than copied into FastVideo.
+The LVSA root license and VQeval package metadata say Apache-2.0, while the
+VQeval README says MIT; keeping an unmodified gitlink preserves the exact
+upstream provenance while that documentation inconsistency remains.
+
 ## Public API
 
 ```python
@@ -113,6 +156,13 @@ reference set while paired metrics like LPIPS only score the first N
 pairs. Per-sample attachments (`text_prompt(s)`, `fps`,
 `auxiliary_info`, `extras=`) attach by kwarg; `extract_audio=True` pulls
 audio tracks off video sources for audio metrics.
+
+Samples whose `video` is a path (or a `Video` without frames) are decoded in
+the worker that picks them up. When the caller did not attach `fps`, the pool
+probes the container's frame rate and attaches it as `sample["fps"]` so
+fps-aware metrics see real timing; an explicit `fps` (for example `--fps` on
+`fastvideo eval run`) always wins and skips the probe. Scores recorded before
+this probe existed can therefore shift unless `--fps` is passed.
 
 `evaluate` also accepts a pre-loaded `(T, C, H, W)` tensor or a path
 string under `video` / `reference`. Paths are decoded inside the worker
@@ -197,12 +247,14 @@ fastvideo/
 │       ├── videoscore2/           # VideoScore-2 (Qwen2.5-VL)
 │       ├── judge/                 # pairwise VLM judges (third_person_separation)
 │       ├── physics_iq/            # PhysicsIQ + sub-metrics
-│       └── vbench/                # adapter: sys.path bootstrap + shims
-│           ├── __init__.py
-│           └── <16 sub-metric pkgs>
+│       ├── vbench/                # adapter: sys.path bootstrap + shims
+│       │   ├── __init__.py
+│       │   └── <16 sub-metric pkgs>
+│       └── vqeval/                 # shared six-dimension composite adapter
 └── third_party/
     └── eval/
         ├── vbench/                # git submodule (Vchitect/VBench)
+        ├── vqeval/                 # git submodule (JiusiServe/LVSA)
         ├── synchformer/           # vendored (MIT), used by audio.desync
         └── glmasr/                # vendored (Apache-2.0), used by audio.wer (glm_asr)
 ```
@@ -383,6 +435,55 @@ The judge separates best when the control yields genuine parallax (e.g.
 translation); rigid whole-frame motion (e.g. pure camera rotation) is harder. To
 sweep several baselines into a table, see
 `examples/inference/eval/eval_third_person_separation.py`.
+
+## Exact V2A corpus evaluation
+
+`fastvideo eval v2a` is a dedicated corpus-level entry point for
+video-to-audio benchmarks. Unlike `fastvideo eval run`, which composes native
+per-sample and set metrics through the registry, the V2A command can launch an
+upstream benchmark as one protocol-preserving unit.
+
+The `av-benchmark` backend calls the official `av_bench.extract` and
+`av_bench.evaluate` functions. Its dependency stack is intentionally not part
+of any standard FastVideo extra. Point the command at a Python interpreter from
+an isolated av-benchmark environment:
+
+```bash
+fastvideo eval v2a \
+  --backend av-benchmark \
+  --audio-dir outputs/v2a/audio \
+  --gt-cache /path/to/official/ground-truth-cache \
+  --prediction-cache outputs/v2a/av_benchmark_cache \
+  --output outputs/v2a/av_benchmark_results.json \
+  --python-executable /path/to/av-benchmark/.venv/bin/python \
+  --audio-length 8 \
+  --batch-size 32 \
+  --num-workers 0
+```
+
+The backend is model-independent: generated filenames only need to match the
+keys in the selected official cache. It can therefore evaluate MMAudio or any
+other V2A model. A complete prediction cache is reused automatically;
+`--recompute` forces extraction again.
+
+Some official dataset caches sanitize filenames. For such a cache,
+`--align-prediction-keys` atomically remaps only prediction keys having a
+unique match after leading underscores are ignored. The source audio is never
+renamed, ambiguous keys remain unmatched, and alignment counts are serialized
+in the result JSON.
+
+The official VGGSound cache reports:
+
+```text
+FD-VGG, FD-PANN, FD-PASST
+KL-PANNS-softmax, KL-PASST-softmax
+ISC-PANNS-mean/std, ISC-PASST-mean/std
+IB-Score, DeSync
+```
+
+This command runs in a subprocess by design. It does not import av-benchmark,
+alter CUDA/PyTorch packages, or register metrics in ordinary FastVideo
+generation and evaluation processes.
 
 ## Out of scope (follow-up PRs)
 

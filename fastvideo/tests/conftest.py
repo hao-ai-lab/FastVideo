@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
+import os
 
 import pytest
 
 import torch
 import numpy as np
 
+from fastvideo import envs
 from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel, cleanup_dist_env_and_memory)
+from fastvideo.utils import get_open_port
 
 
 @pytest.fixture(scope="function")
@@ -18,10 +21,18 @@ def distributed_setup():
     """
     torch.manual_seed(42)
     np.random.seed(42)
-    maybe_init_distributed_environment_and_model_parallel(1, 1)
-    yield
-
-    cleanup_dist_env_and_memory()
+    with contextlib.ExitStack() as stack:
+        # The env:// rendezvous needs these outside the CI runner. Keep values the
+        # launcher provides; otherwise use a fresh port per test and restore on exit.
+        if os.environ.get("MASTER_ADDR") is None:
+            stack.enter_context(envs.override_external("MASTER_ADDR", "127.0.0.1"))
+        if os.environ.get("MASTER_PORT") is None:
+            stack.enter_context(envs.override_external("MASTER_PORT", str(get_open_port())))
+        maybe_init_distributed_environment_and_model_parallel(1, 1)
+        try:
+            yield
+        finally:
+            cleanup_dist_env_and_memory()
 
 
 @pytest.fixture

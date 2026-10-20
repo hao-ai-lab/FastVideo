@@ -23,7 +23,9 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "crush-smol_processed_
 
 # training
 NUM_GPUS_PER_NODE_TRAINING = "4"
-TRAINING_ENTRY_FILE_PATH = "fastvideo/training/wan_distillation_pipeline.py"
+TRAINING_ENTRY_FILE_PATH = "fastvideo/training/runner.py"
+TRAINING_PIPELINE_CLASS = "WanDistillationPipeline"
+TRAINING_PIPELINE_MODULE = "fastvideo.training.wan_distillation_pipeline"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
 LOCAL_VALIDATION_DATASET_FILE = "examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
@@ -117,6 +119,10 @@ def run_training():
         "--nproc_per_node",
         NUM_GPUS_PER_NODE_TRAINING,
         TRAINING_ENTRY_FILE_PATH,
+        "--pipeline-class",
+        TRAINING_PIPELINE_CLASS,
+        "--pipeline-module",
+        TRAINING_PIPELINE_MODULE,
         "--model_path",
         MODEL_PATH,
         "--inference_mode",

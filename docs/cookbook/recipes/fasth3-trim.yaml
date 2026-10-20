@@ -1,0 +1,51 @@
+title: FastH3 Trim
+summary: Eight-step video and audio from the released NVFP4 checkpoint.
+guide: docs/getting_started/installation/spark_performance.md
+deployments:
+  spark-rest:
+    label: DGX Spark REST
+    runtime: fastvideo-cuda-rest
+    workload: t2v
+    defaults: examples/serving/openai_fasth3_trim_spark.yaml
+    env:
+      FASTVIDEO_MINIMAX_H3_FUSIONS: all
+      FASTVIDEO_NVFP4_MM_BACKEND: cutlass
+      FASTVIDEO_H3_VAE_TILE_BATCH: "1"
+      FASTVIDEO_VSA_TRITON: "1"
+      FASTVIDEO_VSA_PTX_BLACKWELL: "0"
+      FASTVIDEO_FA4: "0"
+      FASTVIDEO_ATTENTION_BACKEND: VIDEO_SPARSE_ATTN_H3
+      FASTVIDEO_STAGE_LOGGING: "1"
+    requirements:
+      - Install FastVideo using the DGX Spark guide before running these commands.
+      - Based on the released one-Spark inference recipe. This serving adaptation and edited hardware combinations have not been GPU-validated.
+      - The checkpoint includes NVFP4 weights and encoder, a lightweight video VAE, and its trained eight-forward schedule. No local CompactH3 assembly is needed.
+    options:
+      - server.*
+      - generator.engine.num_gpus
+      - generator.engine.parallelism.tp_size
+      - generator.engine.parallelism.sp_size
+      - generator.engine.offload.text_encoder
+      - generator.engine.offload.vae
+      - default_request.prompt
+      - default_request.sampling.num_frames
+      - default_request.sampling.height
+      - default_request.sampling.width
+      - default_request.sampling.seed
+    overrides:
+      default_request.prompt:
+        title: Prompt
+        type: string
+        minLength: 1
+      default_request.sampling.num_frames:
+        enum: [124, 243, 345]
+        default: 124
+        description: Native H3 frame counts. Hardware fit has not been verified.
+      default_request.sampling.height:
+        minimum: 32
+        multipleOf: 32
+        default: 480
+      default_request.sampling.width:
+        minimum: 32
+        multipleOf: 32
+        default: 832

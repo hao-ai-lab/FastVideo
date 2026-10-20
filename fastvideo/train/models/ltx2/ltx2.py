@@ -34,15 +34,16 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 
 import fastvideo.envs as envs
+from fastvideo.train.utils.negative_prompt import encode_negative_prompt
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines import ForwardBatch, TrainingBatch
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.training.activation_checkpoint import (
-    apply_activation_checkpointing, )
 
 from fastvideo.train.models.wan.wan import WanModel
+from fastvideo.train.utils.activation_checkpoint import (
+    apply_activation_checkpointing, )
 from fastvideo.train.utils.module_state import (
     apply_trainable, )
 from fastvideo.train.utils.moduleloader import (
@@ -77,6 +78,27 @@ _SIGMA_Z_HI = 3.0902
 # metadata so training RoPE still matches validation inference.
 _DEFAULT_ROPE_FPS = 24.0
 
+LTX2_UNCONDITIONAL_PROMPT = ""
+
+
+def _resolve_unconditional_prompt(model_path: str) -> str:
+    """The prompt LTX-2 inference feeds its CFG unconditional branch.
+
+    Mirrors ``WanModel.ensure_negative_conditioning``: the unconditional
+    branch must match what the sampler actually feeds at inference, which
+    is the checkpoint preset's ``negative_prompt`` — empty for the
+    distilled presets (``negative_prompt=""``, guidance 1.0) and the long
+    quality-negative prompt for the base presets that run CFG
+    (``LTX2_BASE`` / ``LTX2_3_BASE``). When *model_path* resolves to no
+    preset, ``SamplingParam.from_pretrained`` falls back to its default
+    ``negative_prompt`` — the same fallback the sampler's default
+    ``SamplingParam`` uses — so training and inference stay consistent.
+    """
+    from fastvideo.api.sampling_param import SamplingParam
+
+    negative_prompt = SamplingParam.from_pretrained(model_path).negative_prompt
+    return negative_prompt if negative_prompt else LTX2_UNCONDITIONAL_PROMPT
+
 
 class LTX2Model(WanModel):
     """LTX-2 per-role model for the modular trainer."""
@@ -105,12 +127,7 @@ class LTX2Model(WanModel):
                                       "and loss plumbing.")
 
         cfg_rate = float(getattr(training_config.data, "training_cfg_rate", 0.0) or 0.0)
-        if cfg_rate > 0.0:
-            raise NotImplementedError("LTX2Model only supports training_cfg_rate=0. CFG dropout "
-                                      "zeroes the post-connector text embeddings, which is not "
-                                      "what LTX-2 inference uses as the unconditional input "
-                                      "(an empty prompt encoded through Gemma + connector). Set "
-                                      "training.data.training_cfg_rate: 0.0.")
+        self._training_cfg_rate = cfg_rate
 
         self._timestep_uniform_prob = float(timestep_uniform_prob)
         self._rope_fps: float = _DEFAULT_ROPE_FPS
@@ -134,10 +151,9 @@ class LTX2Model(WanModel):
         if trainable:
             self._freeze_audio_parameters()
 
-        # No negative-prompt cache: cfg_rate is forced to 0 above and
-        # loading Gemma (~23GB) on every rank just for an unused
-        # negative embedding is wasteful.
-        self.set_requires_negative_conditioning(False)
+        # Gemma is ~23GB per rank, so only pay for the unconditional
+        # embedding when CFG dropout is actually enabled.
+        self.set_requires_negative_conditioning(cfg_rate > 0.0)
 
     # ------------------------------------------------------------------
     # Loading
@@ -163,18 +179,13 @@ class LTX2Model(WanModel):
             transformer_override_safetensor=(transformer_override_safetensor),
             attention_backend=attention_backend,
         )
-        ckpt_type = (enable_gradient_checkpointing_type or getattr(
-            getattr(training_config, "model", None),
-            "enable_gradient_checkpointing_type",
-            None,
-        ))
-        if trainable and ckpt_type:
+        if trainable and enable_gradient_checkpointing_type:
             # LTX-2 nests transformer_blocks under ``.model``; applying
             # checkpointing at the wrapper level raises because no block
             # list is found there.
             transformer.model = apply_activation_checkpointing(
                 transformer.model,
-                checkpointing_type=ckpt_type,
+                checkpointing_type=enable_gradient_checkpointing_type,
             )
         if self._enable_lora_if_configured(transformer):
             return transformer
@@ -197,9 +208,38 @@ class LTX2Model(WanModel):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def _dataloader_cfg_rate(self) -> float | None:
+        # CFG dropout is performed in ``prepare_batch`` via
+        # ``_apply_cfg_dropout``, which swaps in the cached unconditional
+        # embedding. The shared parquet collate's zeroing drop must stay
+        # off here: stacking both would leave an independent ~p*(1-p) of
+        # rows training against an all-zero text embedding.
+        return 0.0
+
     def ensure_negative_conditioning(self) -> None:
-        raise NotImplementedError("LTX2Model does not implement negative conditioning; "
-                                  "training_cfg_rate must stay 0.")
+        """Cache the unconditional conditioning used by CFG dropout.
+
+        LTX-2 inference builds its CFG unconditional branch from the
+        checkpoint preset's ``negative_prompt`` encoded through Gemma +
+        the Embeddings1D connector — empty for the distilled presets, the
+        preset's quality-negative prompt for the base presets that run
+        CFG — so the dropped samples have to carry that embedding rather
+        than zeros. ``LTX2GemmaTextEncoderModel`` owns the connector,
+        which means the shared ``encode_negative_prompt`` helper already
+        produces the post-connector tensor.
+        """
+        if self.negative_prompt_embeds is not None:  # type: ignore[has-type]
+            return
+
+        assert self.training_config is not None
+        embeds, mask = encode_negative_prompt(
+            self.training_config,
+            prompt=_resolve_unconditional_prompt(self.training_config.model_path),
+            device=self.device,
+            dtype=self._get_training_dtype(),
+        )
+        self.negative_prompt_embeds = embeds
+        self.negative_prompt_attention_mask = mask
 
     @torch.no_grad()
     def decode_latents(
@@ -229,6 +269,51 @@ class LTX2Model(WanModel):
     # ------------------------------------------------------------------
     # Runtime primitives
     # ------------------------------------------------------------------
+
+    def _apply_cfg_dropout(
+        self,
+        encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        *,
+        generator: torch.Generator,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Replace a fraction of the batch with the unconditional embedding.
+
+        The shared parquet path drops text conditioning by zeroing the
+        stored embedding. For LTX-2 that trains an unconditional branch the
+        sampler never sees, so the drop is done here instead and swaps in
+        the cached empty-prompt embedding.
+        """
+        if self._training_cfg_rate <= 0.0:
+            return encoder_hidden_states, encoder_attention_mask
+
+        self.ensure_negative_conditioning()
+        neg_embeds = self.negative_prompt_embeds
+        neg_mask = self.negative_prompt_attention_mask
+        if neg_embeds is None or neg_mask is None:
+            raise RuntimeError("ensure_negative_conditioning() did not populate the "
+                               "LTX-2 unconditional embedding")
+
+        batch_size = encoder_hidden_states.shape[0]
+        keep = torch.rand(batch_size, generator=generator, device=generator.device)
+        drop = (keep < self._training_cfg_rate).to(encoder_hidden_states.device)
+        if not bool(drop.any()):
+            return encoder_hidden_states, encoder_attention_mask
+
+        embeds = encoder_hidden_states.clone()
+        mask = encoder_attention_mask.clone()
+        neg_embeds = neg_embeds.to(device=embeds.device, dtype=embeds.dtype)
+        neg_mask = neg_mask.to(device=mask.device, dtype=mask.dtype)
+        if (neg_embeds.shape[1] != embeds.shape[1] or neg_mask.shape[1] != mask.shape[1]):
+            raise ValueError("LTX-2 unconditional embedding length does not match the batch "
+                             f"text length: unconditional {tuple(neg_embeds.shape)} / "
+                             f"{tuple(neg_mask.shape)} vs batch {tuple(embeds.shape)} / "
+                             f"{tuple(mask.shape)}. The dataset was likely preprocessed with a "
+                             "different text_len than the checkpoint config used for training.")
+        for idx in torch.nonzero(drop, as_tuple=False).flatten().tolist():
+            embeds[idx] = neg_embeds[0]
+            mask[idx] = neg_mask[0]
+        return embeds, mask
 
     def prepare_batch(
         self,
@@ -282,6 +367,12 @@ class LTX2Model(WanModel):
                              f"{latents_source!r}")
 
         self._check_text_embedding_dim(encoder_hidden_states)
+
+        encoder_hidden_states, encoder_attention_mask = (self._apply_cfg_dropout(
+            encoder_hidden_states,
+            encoder_attention_mask,
+            generator=generator,
+        ))
 
         # LTX-2 VAE encode() already applies per-channel normalization
         # (scaling_factor is 1.0); latents are used as stored.

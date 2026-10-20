@@ -56,7 +56,7 @@ pytest tests/ -v                                  # Top-level repo tests (differ
 python fastvideo/tests/ssim/ci_runner.py          # Four-GPU Slurm-style SSIM scheduler
 ```
 
-`tests/local_tests/` (top-level) holds component checks that need a local
+`tests/local_tests/` (top-level) holds component and behavior checks that need a local
 working tree but are not part of the package suite.
 
 ## Conventions

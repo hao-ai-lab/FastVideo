@@ -1,7 +1,11 @@
 # Profiling FastVideo
 
-!!! warning
-    Profiling is only intended for FastVideo developers and maintainers to understand the proportion of time spent in different parts of the codebase. **FastVideo end-users should never turn on profiling** as it will significantly slow down inference.
+For GB200 sequence-parallel transport tuning and its long-training memory
+policy, see [Ulysses performance](ulysses_performance.md).
+
+:::warning
+Profiling is only intended for FastVideo developers and maintainers to understand the proportion of time spent in different parts of the codebase. **FastVideo end-users should never turn on profiling** as it will significantly slow down inference.
+:::
 
 ## Profiling with PyTorch
 
@@ -44,7 +48,7 @@ Additional knobs:
 - `FASTVIDEO_TORCH_PROFILER_WITH_STACK`
 - `FASTVIDEO_TORCH_PROFILER_WITH_FLOPS`
 
-Traces can be visualized using <https://ui.perfetto.dev/>.
+Traces can be visualized using [https://ui.perfetto.dev/](https://ui.perfetto.dev/).
 
 ### Best Practices
 

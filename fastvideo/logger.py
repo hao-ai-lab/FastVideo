@@ -74,7 +74,6 @@ def _print_warning_once(logger: Logger, msg: str) -> None:
     logger.warning(msg, stacklevel=2)
 
 
-# TODO(will): add env variable to control this process-aware logging behavior
 def _info(logger: Logger,
           msg: object,
           *args: Any,
@@ -82,10 +81,10 @@ def _info(logger: Logger,
           local_main_process_only: bool = True,
           **kwargs: Any) -> None:
     """Process-aware INFO level logging function.
-    
-    This function controls logging behavior based on the process rank, allowing for 
+
+    This function controls logging behavior based on the process rank, allowing for
     selective logging from specific processes in a distributed environment.
-    
+
     Args:
         logger: The logger instance to use for logging
         msg: The message format string to log
@@ -94,13 +93,22 @@ def _info(logger: Logger,
         local_main_process_only: If True, only log if this is the local main process (LOCAL_RANK=0)
         **kwargs: Additional keyword arguments to pass to the logger.log method
             - stacklevel: Defaults to 2 to show the original caller's location
-    
+
     Note:
-        - When both main_process_only and local_main_process_only are True, 
+        - When both main_process_only and local_main_process_only are True,
           the message will be logged only if both conditions are met
         - When both are False, the message will be logged from all processes
         - By default, only logs from processes with LOCAL_RANK=0
+        - Setting the FASTVIDEO_LOG_ALL_PROCESSES env variable to 1 overrides the
+          process-aware behavior entirely and logs from every process. The variable
+          is read at call time, so it can be set after importing fastvideo.
     """
+    # Override the process-aware filtering
+    if envs.FASTVIDEO_LOG_ALL_PROCESSES.get():
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
+        return
+
     is_distributed = int(os.environ.get("WORLD_SIZE", 1)) > 1
     try:
         local_rank = int(os.environ["LOCAL_RANK"])
@@ -113,7 +121,8 @@ def _info(logger: Logger,
     is_local_main_process = local_rank == 0
 
     if (main_process_only and is_main_process) or (local_main_process_only and is_local_main_process):
-        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
 
     global _warned_local_main_process, _warned_main_process
 
@@ -135,7 +144,8 @@ def _info(logger: Logger,
             _warned_main_process = True
 
     if not main_process_only and not local_main_process_only:
-        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
+        kwargs.setdefault("stacklevel", 2)
+        logger.log(logging.INFO, msg, *args, **kwargs)
 
 
 class _FastvideoLogger(Logger):

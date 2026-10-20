@@ -17,6 +17,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  DEFAULT_GENERATION_MODE,
+  GENERATION_MODES,
+  getGenerationMode,
+  isGenerationMode,
+  type GenerationMode,
+} from '@/lib/generationMode';
 
 interface DevtoolsComposerProps {
   connected?: boolean;
@@ -37,6 +44,10 @@ interface DevtoolsComposerProps {
   loopGenerationEnabled?: boolean;
   curatedPromptLimit?: number;
   maxCuratedPromptCount?: number;
+  generationMode?: GenerationMode;
+  supportedGenerationModes?: readonly GenerationMode[];
+  conditioningPanel?: React.ReactNode;
+  onGenerationModeChange?: (mode: GenerationMode) => void;
   rewriteWindowMode?: boolean;
   rewritingSeedPrompts?: boolean;
   autoExtensionTimeoutHint?: string;
@@ -74,6 +85,10 @@ export default function DevtoolsComposer({
   loopGenerationEnabled = false,
   curatedPromptLimit = 0,
   maxCuratedPromptCount = 0,
+  generationMode = DEFAULT_GENERATION_MODE,
+  supportedGenerationModes = GENERATION_MODES.map((mode) => mode.id),
+  conditioningPanel,
+  onGenerationModeChange = () => {},
   rewriteWindowMode = false,
   rewritingSeedPrompts = false,
   autoExtensionTimeoutHint = '',
@@ -92,6 +107,7 @@ export default function DevtoolsComposer({
   onSpeechInterimChange,
 }: DevtoolsComposerProps) {
   const [sttBusy, setSttBusy] = useState(false);
+  const selectedGenerationMode = getGenerationMode(generationMode);
   const submitButtonLabel = useMemo(
     () =>
       rewriteWindowMode
@@ -110,7 +126,8 @@ export default function DevtoolsComposer({
   );
 
   return (
-    <section>
+    <section className="space-y-4">
+      {conditioningPanel}
       <Card>
         <CardContent className="space-y-5 p-5">
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -285,6 +302,48 @@ export default function DevtoolsComposer({
               </div>
 
               <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="devtools-generation-mode">
+                    Generation mode
+                  </Label>
+                  <Select
+                    value={generationMode}
+                    disabled={sessionStarted}
+                    onValueChange={(value) => {
+                      if (isGenerationMode(value)) {
+                        onGenerationModeChange(value);
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      id="devtools-generation-mode"
+                      aria-label="Generation mode"
+                      title={selectedGenerationMode.name}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GENERATION_MODES.map((mode) => (
+                        <SelectItem
+                          key={mode.id}
+                          value={mode.id}
+                          disabled={!supportedGenerationModes.includes(mode.id)}
+                          title={
+                            supportedGenerationModes.includes(mode.id)
+                              ? mode.name
+                              : `${mode.name} (unavailable on this runtime)`
+                          }
+                        >
+                          {mode.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-sm text-muted-foreground">
+                    {selectedGenerationMode.description}
+                  </p>
+                </div>
+
                 <div className="flex items-start gap-3">
                   <Checkbox
                     id="devtools-enhance-prompts"

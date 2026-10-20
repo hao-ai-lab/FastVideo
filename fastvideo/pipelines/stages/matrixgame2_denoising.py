@@ -362,6 +362,9 @@ class MatrixGame2CausalDenoisingStage(DenoisingStage):
         noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
 
         for i, t_cur in enumerate(timesteps):
+            # Stop if interrupted
+            if getattr(self, "interrupt", False):
+                break
             if ctx.boundary_timestep is not None and t_cur < ctx.boundary_timestep:
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
             else:

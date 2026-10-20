@@ -12,6 +12,7 @@ from fastvideo import envs
 from fastvideo.logger import init_logger
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.checkpoint import _RoleModuleContainer
+from fastvideo.train.utils.optimizer import seed_adamw_parameter_state
 from fastvideo.training.checkpointing_utils import (
     ModelWrapper,
     OptimizerWrapper,
@@ -189,11 +190,7 @@ class TrainingMethod(torch.nn.Module, ABC):
                         continue
                     if len(opt.state.get(p, {})) > 0:
                         continue
-                    opt.state[p] = {
-                        "step": torch.tensor(0.0),
-                        "exp_avg": torch.zeros_like(p),
-                        "exp_avg_sq": torch.zeros_like(p),
-                    }
+                    seed_adamw_parameter_state(opt, p)
 
     # -- Shared hooks (override in subclasses as needed) --
 

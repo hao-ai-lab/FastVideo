@@ -60,7 +60,6 @@ SLURM_LANES = [
 # reason; remove the entry when the directory gets wired into a lane.
 # State as found on 2026-07-05 — these SHOULD shrink over time, not grow.
 ALLOWLIST = {
-    "attention": "no lane yet — GPU attention-backend tests, run manually",
     "audio": "no lane yet — audio encoder tests, run manually",
     "distributed": "no lane yet — multi-GPU torchrun tests, run manually",
     "hooks": "no lane yet — run manually",
@@ -145,23 +144,98 @@ def test_all_gpu_ci_routes_use_the_trusted_slurm_dispatcher():
 
 def test_merge_comment_has_one_change_aware_trigger_path():
     slash_commands = (REPO_ROOT / ".github/workflows/ci-slash-commands.yml").read_text()
-    merge_job = slash_commands.split("  parse-command:", maxsplit=1)[0]
+    merge_jobs = slash_commands.split("  parse-command:", maxsplit=1)[0]
     ready_workflow = (REPO_ROOT / ".github/workflows/ci-trigger-full-suite.yml").read_text()
 
-    assert "labels: ['ready']" in merge_job
-    assert "api.buildkite.com" not in merge_job
-    assert "BUILDKITE_API_TOKEN" not in merge_job
+    assert "labels: ['ready']" in merge_jobs
+    assert "removeLabel" not in merge_jobs
+    assert "continue-on-error: true" in merge_jobs
+    assert "needs: handle-merge" in merge_jobs
+    assert "if: needs.handle-merge.result == 'success'" in merge_jobs
+    assert "uses: ./.github/workflows/ci-trigger-full-suite.yml" in merge_jobs
+    assert "pr_number: ${{ github.event.issue.number }}" in merge_jobs
+    assert "BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}" in merge_jobs
+    assert "actions: write" not in merge_jobs
+    assert "api.buildkite.com" not in merge_jobs
+    assert "workflow_call:" in ready_workflow
+    # Both entry points share one concurrency group, and the newest trigger wins:
+    # a `/merge` call must not queue a second serialized gate run. The group is
+    # job-level so an unrelated `labeled` event (which skips the guarded job)
+    # cannot cancel an in-flight gate and then skip its replacement.
+    workflow_header = ready_workflow.split("\njobs:", maxsplit=1)[0]
+    assert "concurrency:" not in workflow_header
+    trigger_job = ready_workflow.split("\n  trigger:", maxsplit=1)[1]
+    assert "concurrency:" in trigger_job
+    assert "group: merge-gate-${{ inputs.pr_number || github.event.pull_request.number }}" in trigger_job
+    assert "cancel-in-progress: true" in trigger_job
+    assert "BUILDKITE_API_TOKEN:\n        required: true" in ready_workflow
+    assert "CALLED_PR_NUMBER: ${{ inputs.pr_number }}" in ready_workflow
+    assert "Number.isSafeInteger(prNumber)" in ready_workflow
+    assert "pull_number: prNumber" in ready_workflow
+    assert "pr.state !== 'open'" in ready_workflow
+    assert "pr.base.repo.full_name !== context.payload.repository.full_name" in ready_workflow
+    assert "pr.base.ref !== context.payload.repository.default_branch" in ready_workflow
+    assert "core.setOutput('head_sha', pr.head.sha)" in ready_workflow
+    assert "core.setOutput('base_sha', pr.base.sha)" in ready_workflow
     assert "api.buildkite.com" in ready_workflow
     assert 'jq -r --arg pr_number "$PR_NUMBER"' in ready_workflow
     assert '.env.PR_NUMBER? == $pr_number' in ready_workflow
     assert 'TEST_SCOPE: "merge"' in ready_workflow
     assert 'FULL_SUITE: "true"' in ready_workflow
     assert "plan_merge_ci.py" in ready_workflow
-    assert "github.event.pull_request.base.sha" in ready_workflow
+    assert "ref: ${{ steps.check.outputs.base_sha }}" in ready_workflow
+    assert "PR_SHA: ${{ steps.check.outputs.head_sha }}" in ready_workflow
+    assert "PR_NUMBER: ${{ steps.check.outputs.pr_number }}" in ready_workflow
     assert "MERGE_TEST_PLAN" in ready_workflow
     assert "MERGE_GOLDEN_TESTS" in ready_workflow
     assert "MERGE_SSIM_TESTS" in ready_workflow
     assert "__FASTVIDEO_CI_PLAN_ALL__" in ready_workflow
+    downstream_steps = ready_workflow.split("      - name: Cancel previous Buildkite builds", maxsplit=1)[1]
+    assert "github.event.pull_request" not in downstream_steps
+
+
+def test_merge_gate_buildkite_cancellation_is_best_effort_and_strict():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci-trigger-full-suite.yml").read_text())
+    steps = workflow["jobs"]["trigger"]["steps"]
+    cancel_step = next(step for step in steps if step.get("name") == "Cancel previous Buildkite builds")
+    trigger_step = next(step for step in steps if step.get("name") == "Trigger Buildkite merge gate")
+    cancel_script = cancel_step["run"]
+
+    # Stale-build cleanup is best effort; creating the replacement gate remains
+    # a hard failure so merge protection can never pass without a test build.
+    assert cancel_step["continue-on-error"] is True
+    assert cancel_step["timeout-minutes"] == 3
+    assert trigger_step.get("continue-on-error") is not True
+    assert "curl -sS --fail-with-body -X POST" in trigger_step["run"]
+
+    assert cancel_script.splitlines()[0] == "set -euo pipefail"
+    assert cancel_script.count("--connect-timeout 5") == 2
+    assert cancel_script.count("--max-time 20") == 2
+    assert "curl -sS --fail-with-body --connect-timeout 5 --max-time 20 --get" in cancel_script
+    assert cancel_script.count('--data-urlencode "state[]=running"') == 1
+    assert cancel_script.count('--data-urlencode "state[]=scheduled"') == 1
+    assert cancel_script.count('--data-urlencode "state[]=failing"') == 1
+    assert cancel_script.count('--data-urlencode "exclude_jobs=true"') == 1
+    assert cancel_script.count('--data-urlencode "exclude_pipeline=true"') == 1
+    assert 'state=running,scheduled' not in cancel_script
+
+    # Only a validated array of build records can reach the URL construction.
+    assert 'if type != "array" then false' in cancel_script
+    assert 'if type != "object" then false' in cancel_script
+    assert 'if type == "number" then . > 0 and floor == .' in cancel_script
+    assert 'if ($env | type) != "object" then false' in cancel_script
+    assert '$env.TEST_SCOPE?' in cancel_script
+    assert '$env.PR_NUMBER?' in cancel_script
+
+    # API bodies are kept out of annotations, every cancellation is checked,
+    # and one failure does not stop attempts for the remaining build numbers.
+    assert '--output "$response_file"' in cancel_script
+    assert 'cat "$response_file"' not in cancel_script
+    assert ("if ! curl -sS --fail-with-body --connect-timeout 5 --max-time 20 "
+            "-o /dev/null -X PUT") in cancel_script
+    assert "cancellation_failed=1" in cancel_script
+    assert cancel_script.index("cancellation_failed=1") < cancel_script.index('done < "$builds_file"')
+    assert cancel_script.index('done < "$builds_file"') < cancel_script.index("if (( cancellation_failed != 0 ))")
 
 
 def test_full_ssim_has_a_weekly_slurm_schedule():
@@ -173,6 +247,103 @@ def test_full_ssim_has_a_weekly_slurm_schedule():
     assert 'TEST_TYPE: "ssim"' in workflow
     assert "modal" not in workflow.lower()
     assert 'build.env("TEST_SCOPE") == "scheduled"' in str(ssim_step["if"])
+
+
+def test_performance_trigger_rejects_head_and_sends_a_pinned_direct_build():
+    import json
+    import os
+    import subprocess
+    import tempfile
+
+    workflow = yaml.safe_load((REPO_ROOT / '.github/workflows/ci-scheduled-performance.yml').read_text())
+    job = workflow['jobs']['trigger']
+    assert "github.repository == 'hao-ai-lab/FastVideo'" in job['if']
+    assert "github.ref == 'refs/heads/main'" in job['if']
+    step = job['steps'][-1]
+    assert step['env']['SOURCE_SHA'] == '${{ github.sha }}'
+    with tempfile.TemporaryDirectory() as root:
+        curl = Path(root) / 'curl'
+        curl.write_text('#!/bin/bash\nwhile [[ $# -gt 0 ]]; do\n'
+                        '  if [[ "$1" == --data-raw ]]; then printf "%s" "$2"; exit 0; fi\n'
+                        '  shift\ndone\nexit 1\n')
+        curl.chmod(0o755)
+        env = {
+            'PATH': root + os.pathsep + os.environ['PATH'],
+            'BUILDKITE_API_TOKEN': 'test-only',
+            'SOURCE_BRANCH': 'main',
+            'BK_ORG': 'fastvideo',
+            'BK_PIPELINE': step['env']['BK_PIPELINE'],
+        }
+        for commit in ('HEAD', 'abc123', 'g' * 40, 'a' * 40):
+            env['SOURCE_SHA'] = commit
+            result = subprocess.run(['bash', '-c', step['run']], env=env, text=True, capture_output=True)
+            if commit != 'a' * 40:
+                assert result.returncode != 0
+                assert not result.stdout
+                continue
+            assert result.returncode == 0, result.stderr
+            payload = json.loads(result.stdout)
+            assert payload['commit'] == commit
+            assert payload['branch'] == 'main'
+            assert payload['env']['TEST_TYPE'] == 'performance'
+            assert payload['env']['TEST_SCOPE'] == 'direct'
+            assert payload['env']['FULL_SUITE'] == 'false'
+            assert payload['env']['PR_NUMBER'] == 'false'
+
+
+def test_weekly_performance_api_build_keeps_scheduled_baseline_policy():
+    import os
+    import subprocess
+    import tempfile
+
+    lane = (REPO_ROOT / '.buildkite/scripts/lanes/performance.sh').read_text()
+    lane = lane.replace('export PERF_REPORTS_DIR=/workspace/artifacts/performance',
+                        'export PERF_REPORTS_DIR="$TEST_REPORTS_DIR"')
+    cases = (
+        ('main', 'api', 'fastvideo-performance-lane', 'direct', 'false', 'scheduled_main', 'always'),
+        ('main', 'schedule', 'fastvideo-performance-lane', 'direct', 'false', 'scheduled_main', 'always'),
+        ('main', 'api', 'ci', 'full', 'false', 'scheduled_main', 'always'),
+        ('main', 'api', 'ci', 'direct', 'false', 'unknown', 'pass'),
+        ('feature', 'api', 'fastvideo-performance-lane', 'direct', 'false', 'unknown', 'pass'),
+        ('main', 'api', 'fastvideo-performance-lane', 'direct', '1958', 'pr', 'never'),
+    )
+    with tempfile.TemporaryDirectory() as root:
+        directory = Path(root)
+        mocks = {
+            'nvidia-smi': '#!/bin/sh\nexit 0\n',
+            'pytest': '#!/bin/sh\nexit "$TEST_PYTEST_RC"\n',
+            'python': '#!/bin/sh\nprintf "%s|%s|%s|%s\\n" "$1" "$PERF_RUN_SOURCE" '
+            '"$PERF_UPLOAD_POLICY" "${PERF_PYTEST_RC:-}" >> "$TEST_CALLS_FILE"\n',
+        }
+        for name, contents in mocks.items():
+            executable = directory / name
+            executable.write_text(contents)
+            executable.chmod(0o755)
+        calls = directory / 'calls.txt'
+        for branch, source, pipeline, scope, pr, run_source, policy in cases:
+            for pytest_rc in (0, 1):
+                calls.unlink(missing_ok=True)
+                env = {
+                    'PATH': root + os.pathsep + os.environ['PATH'],
+                    'BUILDKITE_BRANCH': branch,
+                    'BUILDKITE_SOURCE': source,
+                    'BUILDKITE_PIPELINE_SLUG': pipeline,
+                    'BUILDKITE_PULL_REQUEST': pr,
+                    'TEST_SCOPE': scope,
+                    'TEST_PYTEST_RC': str(pytest_rc),
+                    'TEST_CALLS_FILE': str(calls),
+                    'TEST_REPORTS_DIR': str(directory / 'reports'),
+                }
+                result = subprocess.run(['bash', '-c', lane], cwd=root, env=env, text=True, capture_output=True)
+                assert result.returncode == pytest_rc, result.stderr
+                records = [line.split('|') for line in calls.read_text().splitlines()]
+                assert all(record[1:3] == [run_source, policy] for record in records)
+                comparisons = [record for record in records if record[0].endswith('/compare_baseline.py')]
+                if pytest_rc == 0 or policy == 'always':
+                    assert len(comparisons) == 1
+                    assert comparisons[0][3] == str(pytest_rc)
+                else:
+                    assert not comparisons
 
 
 def test_active_pipeline_has_no_modal_or_untrusted_compute_path():
@@ -286,3 +457,17 @@ def test_allowlist_entries_are_still_real_directories():
     # A stale allowlist hides regressions; entries must track reality.
     missing = [name for name in ALLOWLIST if name != "modal" and not (TESTS_ROOT / name).is_dir()]
     assert not missing, (f"Allowlisted directories no longer exist — remove them: {missing}")
+
+
+def test_arm64_chromium_filters_generation_mode_playback_but_keeps_uploads():
+    lane = (REPO_ROOT / '.buildkite/scripts/lanes/dreamverse.sh').read_text()
+    pattern = re.search(r"--grep-invert='([^']+)'", lane).group(1)
+    for mode in ('t2va', 'fl2va', 'ref2va'):
+        title = f'{mode} sends validated assets and plays a clearly labeled sample'
+        assert re.search(pattern, title), f'ARM64 Chromium cannot decode this playback test: {title}'
+    assert not re.search(pattern, "proxies a media upload larger than Next's default 10 MiB body limit")
+    assert not re.search(pattern, 'accepts a custom prompt and enters the streaming state')
+    arm_branch = lane.rsplit('if [[ $machine_arch =~ ^(aarch64|arm64)$ ]]; then', 1)[1].split('\nelse')[0]
+    firefox_command = re.search(r'npm run e2e(?:\\\n|[^\n])*', arm_branch).group(0)
+    assert '--project=firefox' in firefox_command
+    assert '--grep' not in firefox_command

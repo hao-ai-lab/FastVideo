@@ -227,7 +227,7 @@ class LTX2UpsampleStage(PipelineStage):
                     device=latents.device,
                     dtype=latents.dtype,
                 )
-                if noise_path:
+                if noise_path and fastvideo_args.is_output_rank:
                     self._save_noise(noise_path, noise)
             elif (patchifier is not None and patch_noise_shape is not None and video_shape is not None
                   and noise.shape == patch_noise_shape):
@@ -266,7 +266,7 @@ class LTX2UpsampleStage(PipelineStage):
                             device=audio_latents.device,
                             dtype=audio_latents.dtype,
                         )
-                        if audio_noise_path:
+                        if audio_noise_path and fastvideo_args.is_output_rank:
                             self._save_noise(audio_noise_path, audio_noise)
                     elif audio_noise.shape == audio_latents.shape:
                         audio_noise = audio_patchifier.patchify(audio_noise)
@@ -287,7 +287,7 @@ class LTX2UpsampleStage(PipelineStage):
                             device=audio_latents.device,
                             dtype=audio_latents.dtype,
                         )
-                        if audio_noise_path:
+                        if audio_noise_path and fastvideo_args.is_output_rank:
                             self._save_noise(audio_noise_path, audio_noise)
                     # Same noise mixing as video latents for the
                     # distilled refinement schedule.

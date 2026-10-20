@@ -105,6 +105,7 @@ class _FakeSlot:
         segment_idx: int,
         reset_conditioning: bool,
         image_path: str | None = None,
+        generation_inputs=None,
     ):
         self.calls.append({
             "client_id": client_id,

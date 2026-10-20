@@ -246,6 +246,9 @@ class MatrixGame3DenoisingStage(DenoisingStage):
                         (x_memory.shape[0], x_memory.shape[2] * x_memory.shape[3] * x_memory.shape[4] // 4))
             with self.progress_bar(total=len(timesteps)) as progress_bar:
                 for timestep in timesteps:
+                    # Stop if interrupted
+                    if getattr(self, "interrupt", False):
+                        break
                     latent_model_input = current_latents
                     if hasattr(self.scheduler, "scale_model_input"):
                         latent_model_input = self.scheduler.scale_model_input(latent_model_input, timestep)

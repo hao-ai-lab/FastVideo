@@ -82,6 +82,9 @@ surfaces:
       inference_torch_compile: "Regional inference compile opt-in currently carried through PipelineSelection.experimental rather than CompileConfig."
       vae_parallel_decode: "MiniMax-H3 sequence-parallel VAE decode opt-in; model-specific optimization not yet represented in the typed public schema."
       h3_sequential_load: "MiniMax-H3 sequential text-encoder then DiT/VAE load; model-specific optimization not yet represented in the typed public schema."
+      h3_vsa_fp4: "MiniMax-H3 native FP4 attention options carried through generator.pipeline.experimental.h3_vsa_fp4 rather than a dedicated typed component setting."
+      h3_encoder_split: "MiniMax-H3 Ray-only split that runs the Qwen3-VL text encoder on dedicated nodes and the DiT/VAE on the rest; model-specific optimization not yet represented in the typed public schema."
+      h3_encoder_nodes: "Leading node count that h3_encoder_split reserves for the MiniMax-H3 text encoder; model-specific optimization not yet represented in the typed public schema."
       video_decode_backend: "MiniMax-H3 video decoder selection (full VAE vs TAEH3 preview); model-specific optimization not yet represented in the typed public schema."
       taeh3_checkpoint: "Optional local TAEH3 safetensors path; model-specific optimization not yet represented in the typed public schema."
       taeh3_chunk_size: "TAEH3 temporal chunk length; model-specific optimization not yet represented in the typed public schema."
@@ -107,6 +110,9 @@ surfaces:
       moba_config: "Derived runtime config loaded from moba_config_path."
       model_paths: "Runtime bookkeeping."
       model_loaded: "Runtime bookkeeping."
+      h3_encoder_workers: "Runtime bookkeeping: MiniMax-H3 encoder-group worker count that the Ray executor derives from h3_encoder_nodes and placement."
+      regional_compile: "Training-loader switch the modular fastvideo/train moduleloader sets to compile repeated DiT blocks regionally; no CLI flag, and inference regional compile is inference_torch_compile."
+      enable_streaming_ipc_queues: "Executor plumbing; StreamingVideoGenerator sets it before workers spawn."
 
   pipeline_config_base:
     moved:
@@ -145,6 +151,15 @@ surfaces:
 
   pipeline_config_extensions:
     preset_owned:
+      audio_encoder_precision:
+        sources:
+          - fastvideo.configs.pipelines.wan.WanS2V14BConfig
+      motion_frames:
+        sources:
+          - fastvideo.configs.pipelines.wan.WanS2V14BConfig
+      clip_frames:
+        sources:
+          - fastvideo.configs.pipelines.wan.WanS2V14BConfig
       flux2_text_encoder_type:
         sources:
           - fastvideo.configs.pipelines.flux_2.Flux2PipelineConfig
@@ -205,9 +220,6 @@ surfaces:
         sources:
           - fastvideo.configs.pipelines.gen3c.Gen3CConfig
           - fastvideo.configs.pipelines.gen3c.Gen3CInferenceConfig
-      color_correction_strength:
-        sources:
-          - fastvideo.configs.pipelines.dreamx_world.DreamXWorld5BARPipelineConfig
       default_camera_rotation:
         sources:
           - fastvideo.configs.pipelines.gen3c.Gen3CConfig
@@ -282,11 +294,6 @@ surfaces:
         sources:
           - fastvideo.configs.pipelines.lingbotworld.LingBotWorldI2V480PConfig
           - fastvideo.configs.pipelines.lingbotworld.Wan2_2_I2V_A14B_Config
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionI2VConfig
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionI2V_A14B_Config
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2VConfig
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_14B_Config
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_1_3B_Config
           - fastvideo.configs.pipelines.wan.FastWan2_1_T2V_480P_Config
           - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
           - fastvideo.configs.pipelines.matrixgame2.MatrixGame2BaseI2V480PConfig
@@ -305,11 +312,6 @@ surfaces:
         sources:
           - fastvideo.configs.pipelines.lingbotworld.LingBotWorldI2V480PConfig
           - fastvideo.configs.pipelines.lingbotworld.Wan2_2_I2V_A14B_Config
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionI2VConfig
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionI2V_A14B_Config
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2VConfig
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_14B_Config
-          - fastvideo.configs.pipelines.turbodiffusion.TurboDiffusionT2V_1_3B_Config
           - fastvideo.configs.pipelines.wan.FastWan2_1_T2V_480P_Config
           - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
           - fastvideo.configs.pipelines.matrixgame2.MatrixGame2BaseI2V480PConfig
@@ -324,48 +326,21 @@ surfaces:
           - fastvideo.configs.pipelines.wan.WanI2V720PConfig
           - fastvideo.configs.pipelines.wan.WanT2V480PConfig
           - fastvideo.configs.pipelines.wan.WanT2V720PConfig
-      bsa_cdf_threshold:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      bsa_chunk_k:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      bsa_chunk_q:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      bsa_params:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      bsa_sparsity:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      enable_bsa:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      enable_kv_cache:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      enhance_hf:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      offload_kv_cache:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      t_thresh:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
-      use_distill:
-        sources: [fastvideo.configs.pipelines.longcat.LongCatT2V480PConfig, fastvideo.configs.pipelines.longcat.LongCatT2V704PConfig]
       scheduler_arch:
         sources:
           - fastvideo.configs.pipelines.sd35.SD35Config
-          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       text_encoder_archs:
         sources:
           - fastvideo.configs.pipelines.sd35.SD35Config
-          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       tokenizer_archs:
         sources:
           - fastvideo.configs.pipelines.sd35.SD35Config
-          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       transformer_arch:
         sources:
           - fastvideo.configs.pipelines.sd35.SD35Config
-          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       vae_arch:
         sources:
           - fastvideo.configs.pipelines.sd35.SD35Config
-          - fastvideo.configs.pipelines.zimage.ZImagePipelineConfig
       expand_timesteps:
         sources:
           - fastvideo.configs.pipelines.wan.FastWan2_2_TI2V_5B_Config
@@ -458,6 +433,14 @@ surfaces:
         sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
       video_txt_guidance_scale:
         sources: [fastvideo.pipelines.basic.magi_human.pipeline_configs.MagiHumanBaseConfig]
+      piflow_eps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      piflow_final_step_size_scale:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      piflow_num_policy_substeps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
+      sample_fps:
+        sources: [fastvideo.configs.pipelines.kandinsky6.Kandinsky6TI2VAConfig]
     compatibility_only:
       batch_size: "Gen3C inference-only tuning field pending typed batching design."
       gradient_checkpointing: "Gen3C inference-only compatibility field pending typed batching design."
@@ -472,8 +455,6 @@ surfaces:
       image_conditioning: "MagiHuman preset variant marker for reference-image conditioning."
       pdd_step_indices: "MiniMax-H3 PDD fine-grid partition; resolve_checkpoint_settings sets it from fastvideo_inference.json."
       ref_audio_offset: "MagiHuman internal data-proxy audio alignment offset."
-      scheduler_sigma_min: "Z-Image scheduler parity invariant; not part of the public typed inference API."
-      scheduler_use_reference_discrete_timesteps: "Z-Image scheduler parity invariant; not part of the public typed inference API."
       sr_local_attn_layers: "MagiHuman SR internal sparse-attention layer selection."
       text_offset: "MagiHuman internal data-proxy text alignment offset."
       vae_stride: "MagiHuman internal VAE/data-proxy stride setting."
@@ -481,6 +462,8 @@ surfaces:
       z_dim: "MagiHuman internal VAE latent channel setting."
       vocoder_config: "Legacy internal component config object."
       vocoder_precision: "Precision override pending dedicated component precision design."
+      audio_sample_rate: "Kandinsky6 audio-latent length constant (audio VAE sample rate); tied to the checkpoint, not a request knob."
+      audio_downsample_factor: "Kandinsky6 audio-latent length constant (audio VAE downsample factor); tied to the checkpoint, not a request knob."
 
   sampling_param_base:
     moved:
@@ -489,16 +472,20 @@ surfaces:
       last_image: request.inputs.last_image
       references: request.inputs.references
       video_path: request.inputs.video_path
+      pose_video_path: request.inputs.pose_video_path
+      face_video_path: request.inputs.face_video_path
+      background_video_path: request.inputs.background_video_path
+      mask_video_path: request.inputs.mask_video_path
+      animate_mode: request.inputs.animate_mode
       latents: request.inputs.latents
       audio_latents: request.inputs.audio_latents
+      audio_path: request.inputs.audio_path
       mouse_cond: request.inputs.mouse_cond
       keyboard_cond: request.inputs.keyboard_cond
       grid_sizes: request.inputs.grid_sizes
       pose: request.inputs.pose
       c2ws_plucker_emb: request.inputs.c2ws_plucker_emb
       action_path: request.inputs.action_path
-      refine_from: request.inputs.refine_from
-      stage1_video: request.inputs.stage1_video
       prompt: request.prompt
       negative_prompt: request.negative_prompt
       prompt_path: request.inputs.prompt_path
@@ -518,35 +505,35 @@ surfaces:
       guidance_scale: request.sampling.guidance_scale
       batch_cfg: request.sampling.batch_cfg
       guidance_scale_2: request.sampling.guidance_scale_2
-      cfg_normalization: request.sampling.cfg_normalization
-      cfg_truncation: request.sampling.cfg_truncation
       guidance_rescale: request.sampling.guidance_rescale
       use_embedded_guidance: request.sampling.use_embedded_guidance
       true_cfg_scale: request.sampling.true_cfg_scale
       boundary_ratio: request.sampling.boundary_ratio
       sigmas: request.sampling.sigmas
+      pyramid_num_inference_steps_list: request.sampling.pyramid_num_inference_steps_list
+      history_sizes: request.sampling.history_sizes
+      num_latent_frames_per_chunk: request.sampling.num_latent_frames_per_chunk
+      keep_first_frame: request.sampling.keep_first_frame
+      is_skip_first_chunk: request.sampling.is_skip_first_chunk
+      use_zero_init: request.sampling.use_zero_init
+      zero_steps: request.sampling.zero_steps
+      is_amplify_first_chunk: request.sampling.is_amplify_first_chunk
       enable_teacache: request.runtime.enable_teacache
       save_video: request.output.save_video
       return_frames: request.output.return_frames
+      return_samples: request.output.return_samples
       return_trajectory_latents: request.runtime.return_trajectory_latents
       return_trajectory_decoded: request.runtime.return_trajectory_decoded
       continuation_state: request.state
       return_continuation_state: request.output.return_state
     preset_owned:
       t_thresh: request.stage_overrides.refine.t_thresh
-      spatial_refine_only: request.stage_overrides.refine.spatial_refine_only
       num_cond_frames: request.stage_overrides.refine.num_cond_frames
       trajectory_type: request.extensions.gen3c.trajectory_type
       movement_distance: request.extensions.gen3c.movement_distance
       camera_rotation: request.extensions.gen3c.camera_rotation
       prompt_attention_mask: request.extensions.hyworld.prompt_attention_mask
       negative_attention_mask: request.extensions.hyworld.negative_attention_mask
-      camera_states: request.extensions.hunyuangamecraft.camera_states
-      camera_trajectory: request.extensions.hunyuangamecraft.camera_trajectory
-      action_list: request.extensions.hunyuangamecraft.action_list
-      action_speed_list: request.extensions.hunyuangamecraft.action_speed_list
-      gt_latents: request.extensions.hunyuangamecraft.gt_latents
-      conditioning_mask: request.extensions.hunyuangamecraft.conditioning_mask
       ltx2_cfg_scale_video: request.extensions.ltx2.cfg_scale_video
       ltx2_cfg_scale_audio: request.extensions.ltx2.cfg_scale_audio
       ltx2_modality_scale_video: request.extensions.ltx2.modality_scale_video
@@ -556,6 +543,7 @@ surfaces:
       ltx2_stg_scale_audio: request.extensions.ltx2.stg_scale_audio
       ltx2_stg_blocks_video: request.extensions.ltx2.stg_blocks_video
       ltx2_stg_blocks_audio: request.extensions.ltx2.stg_blocks_audio
+      ltx2_use_ancestral_sampler: request.extensions.ltx2.use_ancestral_sampler
       ltx2_images: request.extensions.ltx2.images
       ltx2_image_crf: request.stage_overrides.refine.image_crf
       ltx2_conditioning_latent_stage1: request.extensions.ltx2.conditioning_latent_stage1

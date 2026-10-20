@@ -690,8 +690,17 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder[torch.Tensor]):
         if (pixel_values_videos is None) != (video_grid_thw is None):
             raise ValueError("pixel_values_videos and video_grid_thw must be provided together")
 
+        stream_device = getattr(self, "_h3_encoder_layerwise_device", None)
+        if stream_device is not None and (pixel_values is not None or pixel_values_videos is not None):
+            raise ValueError("Layerwise H3 encoder currently supports text-only conditioning; "
+                             "disable FASTVIDEO_H3_ENCODER_LAYERWISE for visual references")
+
         input_ids = input_ids.unsqueeze(0)
-        inputs_embeds = self.language_model.embed_tokens(input_ids)
+        embedding_ids = input_ids.to("cpu") if stream_device is not None else input_ids
+        inputs_embeds = self.language_model.embed_tokens(embedding_ids)
+        if stream_device is not None:
+            inputs_embeds = inputs_embeds.to(stream_device)
+            input_ids = input_ids.to(stream_device)
 
         image_mask = None
         video_mask = None
@@ -745,6 +754,24 @@ class MiniMaxH3Qwen3VLConditioner(TextEncoder[torch.Tensor]):
         if hidden_states.ndim != 3 or hidden_states.shape[0] != 1:
             raise RuntimeError(f"MiniMax-H3 language model returned unexpected shape={tuple(hidden_states.shape)}")
         return hidden_states[0]
+
+    def prepare_layerwise_offload(self, device: torch.device) -> None:
+        """Stream language layers for text-only CUDA inference, retaining embeddings on CPU."""
+        if getattr(self, "_h3_encoder_layerwise_device", None) is not None:
+            return
+        if device.type != "cuda":
+            raise ValueError("Layerwise H3 encoder requires CUDA")
+        from fastvideo.distributed import get_tp_world_size
+        from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
+
+        if get_tp_world_size() != 1:
+            raise ValueError("Layerwise H3 encoder requires tensor parallel size 1")
+        self.to("cpu")
+        self.language_model.rotary_emb.to(device)
+        if self.language_model.norm is not None:
+            self.language_model.norm.to(device)
+        enable_layerwise_offload(self.language_model, resident_blocks=0, cyclic=False)
+        self._h3_encoder_layerwise_device = device
 
     def forward(
         self,

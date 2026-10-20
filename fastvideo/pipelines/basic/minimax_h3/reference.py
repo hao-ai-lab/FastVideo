@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import math
 from numbers import Integral, Real
@@ -74,14 +75,28 @@ class MiniMaxH3PreparedReference:
     num_audio_latents: int = 0
 
 
+def coerce_reference(reference: Any) -> MiniMaxH3Reference:
+    """One Ref2VA entry: a typed reference, a config mapping, or a bare media path.
+
+    A config file deserializes its request as plain data, so ``inputs.references``
+    reach here as mappings (or, from a hand-written list, as paths). Both mean the
+    same thing as a typed reference.
+    """
+    if isinstance(reference, MiniMaxH3Reference):
+        return reference
+    if isinstance(reference, Mapping):
+        return MiniMaxH3Reference(**reference)
+    if isinstance(reference, str | os.PathLike):
+        return MiniMaxH3Reference(source=str(reference))
+    raise TypeError(f"Ref2VA entries must be a MiniMaxH3Reference, a mapping or a path, got {reference!r}")
+
+
 def validate_references(references: list[Any]) -> list[MiniMaxH3Reference]:
     """Validate the ordered Ref2VA media list and its per-modality limits."""
     if not references:
         raise ValueError("MiniMax-H3 Ref2VA requires at least one reference.")
-    if not all(isinstance(reference, MiniMaxH3Reference) for reference in references):
-        raise TypeError("Every Ref2VA entry must be a MiniMaxH3Reference.")
 
-    typed = list(references)
+    typed = [coerce_reference(reference) for reference in references]
     counts = {
         media_type: sum(reference.media_type == media_type for reference in typed)
         for media_type in ("image", "video", "audio")
@@ -370,6 +385,7 @@ __all__ = [
     "MINIMAX_H3_QWEN_TEMPORAL_PATCH",
     "MINIMAX_H3_QWEN_VIDEO_SAMPLE_FPS",
     "MINIMAX_H3_REFERENCE_IMAGE_SHORT_EDGE",
+    "coerce_reference",
     "MiniMaxH3PreparedReference",
     "MiniMaxH3Reference",
     "decode_reference_audio",

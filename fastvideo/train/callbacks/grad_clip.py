@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from fastvideo.logger import init_logger
 from fastvideo.train.callbacks.callback import Callback
+from fastvideo.train.utils.lora import (
+    sync_replicated_lora_gradients, )
 from fastvideo.train.utils.optimizer import (
     clip_grad_norm_if_needed, )
 
@@ -42,11 +44,19 @@ class GradNormClipCallback(Callback):
         method: TrainingMethod,
         iteration: int = 0,
     ) -> None:
+        # LoRA parameters are attached after fully_shard, so FSDP never reduces
+        # them; average their replicated gradients on every rank before the
+        # norm is measured (a rank that skipped a layer still joins the
+        # collective, otherwise the norm -- and the clip coefficient -- would
+        # differ per rank).
+        targets = method.get_grad_clip_targets(iteration)
+        for module in targets.values():
+            sync_replicated_lora_gradients(module)
+
         max_norm = self._max_grad_norm
         if max_norm <= 0.0:
             return
 
-        targets = method.get_grad_clip_targets(iteration)
         tracker = getattr(method, "tracker", None)
 
         for name, module in targets.items():

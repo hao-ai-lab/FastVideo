@@ -48,9 +48,13 @@ namespace comm {
 namespace ulysses {
 
 constexpr int kUlyssesThreads = 512;
-// Deliberately modest: this is link-bandwidth bound, so a small grid leaves the
-// rest of the GPU free without costing throughput.
-constexpr int kMaxBlocks = 36;
+// Upper bound on the CTAs one launch may use, and therefore the number of NCCL
+// LSA barrier slots the host reserves when it creates devComm: the kernel
+// indexes its barrier by blockIdx.x, so this must cover the largest launch
+// (36 CTAs for the original entrypoint, 144 for the tuned GB200 plan). The
+// original 36-CTA grid is link-bandwidth bound and leaves the rest of the GPU
+// free without costing throughput.
+constexpr int kMaxBlocks = 144;
 
 // Shared movement body for the fused-transpose all-to-all (no barriers).
 //

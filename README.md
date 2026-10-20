@@ -9,6 +9,8 @@
 **FastVideo is a unified post-training and real-time inference framework for accelerated video generation.**
 
 ## NEWS
+- `2026/10/06`: FastH3 V2 now runs on a single consumer machine: NVIDIA RTX 5090, RTX 4090 and RTX PRO 6000 GPUs, DGX Spark and Apple Silicon. We also release [FastH3 Trim](https://huggingface.co/FastVideo/FastVideo-FastH3-Trim-8-Step-NVFP4), an experimental pruned model that is 4.2× smaller than base H3 and runs in as little as 8 GB of GPU memory. Get the [models](https://huggingface.co/collections/FastVideo/fastvideo-fasth3) and read the [Blog](https://haoailab.com/blogs/fasth3-rtx/).
+- `2026/10/06`: FastVideo now supports [Kandinsky 6](https://x.com/kandinskylab_ai/status/2107374635218055345) from Kandinsky Lab: text- and image-to-video with synchronized audio (base and 10-step distilled pi-Flow checkpoints) plus video super-resolution up to 4x. See the [Kandinsky 6 recipes](https://haoailab.com/FastVideo/cookbook/kandinsky6/).
 - `2026/09/15`: Release [FastH3 8-Step V2](https://huggingface.co/FastVideo/FastVideo-FastH3-8-Step-V2), an eight-forward data-free DMD2 checkpoint distilled from MiniMax-H3 with 80% Video Sparse Attention. Run it with `examples/inference/basic/basic_fasth3_8step.py` or the [FastH3 8-Step V2 recipe](https://haoailab.com/FastVideo/cookbook/minimax-h3/).
 - `2026/09/01`: FastH3 now runs locally on Apple Silicon through MLX and on NVIDIA DGX Spark through CUDA 13, including two-Spark inference. Follow the [FastH3 recipes](https://haoailab.com/FastVideo/cookbook/minimax-h3/) and read the [Blog](https://haoailab.com/blogs/fasth3-local/).
 - `2026/08/27`: [FastH3 Preview v1](https://haoailab.com/blogs/fasth3-preview/) is an open-weight 4-step sparse-distilled MiniMax-H3 model for synchronized video-and-audio generation, developed in collaboration with [Nuva Lab](https://nuvalab.ai/) and the [NVIDIA FastGen team](https://github.com/NVlabs/FastGen). Download the recommended [VSA / Data-Free weights](https://huggingface.co/FastVideo/FastVideo-FastH3-4-step-Preview-v1-VSA-DataFree), or see the [full FastH3 collection](https://huggingface.co/collections/FastVideo/fastvideo-fasth3).
@@ -151,6 +153,8 @@ def main():
 if __name__ == '__main__':
     main()
 ```
+
+`num_gpus=1` runs the worker in-process (weights load once, no extra Python process). On Colab/Kaggle-style machines with ~16GB host RAM, keep `num_gpus=1`; free-tier system memory does not grow with extra T4s, so `num_gpus>1` is likely to OOM.
 
 Run the script with:
 

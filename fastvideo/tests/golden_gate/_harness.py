@@ -74,7 +74,7 @@ def env_fingerprint(spec: GateSpec | str | None) -> dict[str, str]:
         "flash_attn": fa_version,
         "device_name": torch.cuda.get_device_name(0),
         "attention_backend": backend or "NONE",
-        "fastvideo_fa4": str(int(envs.FASTVIDEO_FA4.get())) if envs.FASTVIDEO_FA4.is_set() else "<unset>",
+        "fastvideo_fa4": str(int(envs.FASTVIDEO_FA4.get())),
         "tf32_matmul": str(torch.backends.cuda.matmul.allow_tf32),
         "tf32_cudnn": str(torch.backends.cudnn.allow_tf32),
     }
@@ -83,12 +83,17 @@ def env_fingerprint(spec: GateSpec | str | None) -> dict[str, str]:
         # part of the codec compute path. Keep torch/CUDA/cuDNN/device/TF32 pins.
         result.pop("flash_attn")
         result.pop("fastvideo_fa4")
-    elif not isinstance(spec, GateSpec):
-        # Tensor gates record the effective switch, so unset and "0" both record
-        # "0". Block gates record "<unset>" when FASTVIDEO_FA4 is unset, and "1"
-        # or "0" when it is set.
-        result["fastvideo_fa4"] = str(int(envs.FASTVIDEO_FA4.get()))
     return result
+
+
+def assert_env_fingerprint_matches(expected: dict[str, str], actual: dict[str, str]) -> None:
+    """Legacy block goldens recorded disabled FA4 as '<unset>'; compare its effective value."""
+    expected = dict(expected)
+    if expected.get("fastvideo_fa4") == "<unset>":
+        expected["fastvideo_fa4"] = "0"
+    mismatches = {key: (value, actual.get(key)) for key, value in expected.items() if actual.get(key) != value}
+    assert not mismatches, (f"environment changed since golden was minted — re-mint deliberately rather "
+                            f"than chasing bit drift. golden -> current: {mismatches}")
 
 
 def _component_dir(spec: GateSpec) -> Path:
@@ -228,12 +233,7 @@ def _run_block_against_golden(spec: GateSpec) -> None:
         )
 
     golden = torch.load(golden_path, weights_only=True)
-    mismatches = {
-        key: (value, meta["env"].get(key))
-        for key, value in golden["metadata"]["env"].items() if meta["env"].get(key) != value
-    }
-    assert not mismatches, (f"environment changed since golden was minted — re-mint deliberately rather "
-                            f"than chasing bit drift. golden -> current: {mismatches}")
+    assert_env_fingerprint_matches(golden["metadata"]["env"], meta["env"])
 
     drift = (out - golden["output"]).abs()
     print(f"golden-gate[{spec.name}] drift: max_abs={drift.max().item():.10f} "

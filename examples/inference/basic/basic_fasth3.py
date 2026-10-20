@@ -20,6 +20,7 @@ import importlib.util
 import os
 import statistics
 import time
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -79,7 +80,7 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--num-gpus", type=int, default=4)
     parser.add_argument(
         "--execution-backend",
-        choices=("mp", "ray"),
+        choices=("mp", "uni", "ray"),
         default=None,
         help="mp for one node; ray for a Ray cluster (two DGX Sparks). "
         "Default: ray when RAY_ADDRESS is set, otherwise mp",
@@ -94,14 +95,27 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
                         default=64,
                         help="VSA-H3 tile size; 64 is the checkpoint's trained and measured geometry")
     parser.add_argument("--vsa-kernel",
-                        choices=("triton", "sm100a"),
-                        default="sm100a",
-                        help="tile-64 sparse kernel; sm100a is the measured GB200 route and requires a compatible "
-                        "fastvideo-kernel build")
+                        choices=("triton", "ptx_blackwell", "tk", "sm100a"),
+                        default="ptx_blackwell",
+                        help="tile-64 sparse kernel; ptx_blackwell requires a compatible fastvideo-kernel build; "
+                        "tk keeps the ptx_blackwell route off and requires the ThunderKittens sm_90a extension, "
+                        "which fastvideo-kernel already picks on sm_90 whenever it is built")
     parser.add_argument("--fa4",
                         action=argparse.BooleanOptionalAction,
                         default=True,
                         help="use FA4 for eligible non-VSA attention paths")
+    parser.add_argument("--text-encoder-weights",
+                        default=None,
+                        help="separate text-encoder checkpoint, e.g. the block-FP8 encoder written by "
+                        "scripts/checkpoint_conversion/quantize_minimax_h3_text_encoder_fp8.py")
+    parser.add_argument("--offload-text-encoder",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="offload the text encoder between requests (disable to keep it resident)")
+    parser.add_argument("--offload-vae",
+                        action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="offload the VAE between requests (disable to keep it resident)")
     parser.add_argument("--h3-fusions",
                         action=argparse.BooleanOptionalAction,
                         default=None,
@@ -161,6 +175,9 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("--vsa-sparsity must be in [0, 1)")
     if args.compile_mode is not None and args.inference_torch_compile:
         parser.error("--compile-mode cannot be combined with regional compile; pass --no-inference-torch-compile")
+    if args.vsa_kernel == "sm100a":
+        warnings.warn("--vsa-kernel sm100a is deprecated; use --vsa-kernel ptx_blackwell", FutureWarning, stacklevel=2)
+        args.vsa_kernel = "ptx_blackwell"
     return args
 
 
@@ -190,7 +207,8 @@ def profile_environment(args: argparse.Namespace) -> dict[str, str | None]:
     use_vsa = _uses_vsa(args)
     return {
         "FASTVIDEO_ATTENTION_BACKEND": "VIDEO_SPARSE_ATTN_H3" if use_vsa else "FLASH_ATTN",
-        "FASTVIDEO_VSA_SM100A": "1" if use_vsa and args.vsa_kernel == "sm100a" else "0",
+        "FASTVIDEO_VSA_PTX_BLACKWELL": "1" if use_vsa and args.vsa_kernel == "ptx_blackwell" else "0",
+        "FASTVIDEO_VSA_TK": "1" if use_vsa and args.vsa_kernel == "tk" else "0",
         "FASTVIDEO_VSA_CUTEDSL": "0",
         # A non-empty output path enables the diagnostic probe.
         "FASTVIDEO_H3_VSA_PROBE": None,
@@ -225,12 +243,21 @@ def _fa4_is_installed() -> bool:
         return False
 
 
-def _sm100a_kernel_is_installed() -> bool:
+def _ptx_blackwell_kernel_is_installed() -> bool:
     try:
-        from fastvideo_kernel import block_sparse_attn_sm100a
+        from fastvideo_kernel import block_sparse_attn_ptx_blackwell
     except ImportError:
         return False
-    return bool(getattr(block_sparse_attn_sm100a, "_HAS_VSA_SM100A", False))
+    return bool(getattr(block_sparse_attn_ptx_blackwell, "_HAS_VSA_PTX_BLACKWELL", False))
+
+
+def _sm90_kernel_is_installed() -> bool:
+    try:
+        from fastvideo_kernel.block_sparse_attn import _get_sm90_ops
+    except ImportError:
+        return False
+    forward, backward = _get_sm90_ops()
+    return forward is not None and backward is not None
 
 
 def validate_profile_dependencies(args: argparse.Namespace) -> None:
@@ -239,11 +266,16 @@ def validate_profile_dependencies(args: argparse.Namespace) -> None:
         raise RuntimeError(
             "FastH3's FA4 profile requires the pinned flash-attn-4 package. Install it with "
             "`UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"`, or pass --no-fa4.")
-    if _uses_vsa(args) and args.vsa_kernel == "sm100a" and not _sm100a_kernel_is_installed():
+    if _uses_vsa(args) and args.vsa_kernel == "ptx_blackwell" and not _ptx_blackwell_kernel_is_installed():
         raise RuntimeError(
-            "FastH3's sm100a profile requires fastvideo-kernel 0.3.4 built with the Blackwell VSA extension. "
+            "FastH3's ptx_blackwell profile requires fastvideo-kernel 0.3.4 built with the Blackwell VSA extension. "
             "Install this checkout with `UV_TORCH_BACKEND=cu130 uv pip install -e \".[fasth3]\"` (or run "
             "`cd fastvideo-kernel && ./build.sh`), or pass --vsa-kernel triton.")
+    if _uses_vsa(args) and args.vsa_kernel == "tk" and not _sm90_kernel_is_installed():
+        raise RuntimeError(
+            "FastH3's tk profile requires fastvideo-kernel built with the ThunderKittens sm_90a extension "
+            "(`cd fastvideo-kernel && CMAKE_ARGS='-DFASTVIDEO_KERNEL_BUILD_TK=ON' ./build.sh`), or pass "
+            "--vsa-kernel triton.")
 
 
 def _execution_backend(args: argparse.Namespace) -> str:
@@ -277,6 +309,7 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
             components=ComponentConfig(
                 lora_path=getattr(args, "lora_path", None),
                 lora_strength=float(getattr(args, "lora_strength", 1.0)),
+                text_encoder_weights=getattr(args, "text_encoder_weights", None),
             ),
             experimental=experimental,
         ),
@@ -288,8 +321,8 @@ def build_generator_config(args: argparse.Namespace) -> GeneratorConfig:
             offload=OffloadConfig(
                 dit=False,
                 dit_layerwise=False,
-                text_encoder=True,
-                vae=True,
+                text_encoder=args.offload_text_encoder,
+                vae=args.offload_vae,
                 pin_cpu_memory=args.pin_cpu_memory,
                 lazy_module_load=args.lazy_module_load,
             ),
@@ -383,6 +416,11 @@ def run(args: argparse.Namespace) -> list[float]:
             generation_time = getattr(result, "generation_time", None)
             if generation_time is not None:
                 print(f"Generation time: {float(generation_time):.3f}s")
+            # Worker-lifetime allocator high-water mark: torch never resets it
+            # between generations, so it includes model load and every prior run.
+            peak_memory_mb = getattr(result, "peak_memory_mb", None)
+            if peak_memory_mb is not None:
+                print(f"Peak memory: {float(peak_memory_mb):.1f} MB")
             denoise_time = _denoise_seconds(result)
             if denoise_time is not None:
                 measured_denoise_times.append(denoise_time)

@@ -288,6 +288,11 @@ FASTVIDEO_WORKER_MULTIPROC_METHOD = EnvChoice("spawn",
                                               choices=("spawn", "fork", "forkserver"),
                                               category="distributed",
                                               doc="Multiprocessing start method for worker processes.")
+FASTVIDEO_EXTERNAL_LAUNCHER = EnvBool(
+    False,
+    category="distributed",
+    doc="With the default mp backend, offline inference runs SPMD under torchrun or srun: each launched process is "
+    "one worker joining the env:// rendezvous. All ranks must call generate() together; world rank 0 owns outputs.")
 FASTVIDEO_ULYSSES_A2A = EnvChoice(
     "off",
     choices=("off", "auto"),
@@ -295,6 +300,15 @@ FASTVIDEO_ULYSSES_A2A = EnvChoice(
     doc="Sequence-parallel all-to-all backend. off uses the NCCL path in DistributedAutograd.AllToAll4D. auto uses "
     "the fused NVLink kernel when the group is a load-store accessible mesh of 2, 4, 6, or 8 ranks in eager "
     "execution, and the NCCL path otherwise.")
+# Keep the original long-training transport by default. Opt into bounded
+# chunks after validating the training recipe's activation memory budget.
+FASTVIDEO_ULYSSES_A2A_LONG_TRAINING = EnvChoice(
+    "auto",
+    choices=("auto", "chunked"),
+    category="distributed",
+    doc="Fused Ulysses all-to-all policy for grad-enabled calls whose window exceeds the long-training plane limit. "
+    "auto keeps the original unchunked transport. chunked uses bounded chunks; validate the recipe's activation "
+    "memory first.")
 
 # ================== Logging ==================
 
@@ -307,6 +321,12 @@ FASTVIDEO_LOGGING_CONFIG_PATH = EnvStr(None, category="logging", doc="Path to a 
 FASTVIDEO_LOGGING_LEVEL = EnvStr("INFO", category="logging", doc="Default logging level.")
 FASTVIDEO_LOGGING_PREFIX = EnvStr("", category="logging", doc="Prefix prepended to every log message.")
 FASTVIDEO_STAGE_LOGGING = EnvBool(False, category="logging", doc="Log the time that each pipeline stage takes.")
+FASTVIDEO_LOG_ALL_PROCESSES = EnvBool(
+    False,
+    category="logging",
+    doc="logger.info logs from every process, ignoring the default local-main-process filter and the "
+    "main_process_only and local_main_process_only arguments. Read at each call, so it can be set after "
+    "importing fastvideo. Useful for debugging distributed runs.")
 
 # ================== Attention ==================
 
@@ -326,16 +346,28 @@ FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN = EnvBool(
     category="attention",
     doc="MiniMax-H3 dense DiT self-attention uses the FlashAttention-4 packed-varlen entry point. This changes the "
     "floating-point reduction order, so it is an inference-only opt-in.")
-FASTVIDEO_VSA_SM100A = EnvBool(
+FASTVIDEO_VSA_PTX_BLACKWELL = EnvBool(
     False,
     category="attention",
-    doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a) kernel. "
-    "fastvideo-kernel reads the same variable with the same rule.")
+    doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a / sm_103a) kernel. "
+    "fastvideo-kernel reads the same variable with the same rule.",
+    deprecated_names=("FASTVIDEO_VSA_SM100A", ))
+FASTVIDEO_VSA_TRITON = EnvBool(
+    False,
+    category="attention",
+    doc="Force the Triton MiniMax-H3 sparse attention kernel. fastvideo-kernel reads the same variable.")
 FASTVIDEO_NVFP4_FA4 = EnvBool(
     False,
     category="attention",
     doc="FlashAttention-4 quantizes Q and K to NVFP4. An explicit nvfp4_fa4 attention implementation argument "
     "takes precedence.")
+FASTVIDEO_FA4_PV_MODE = EnvChoice(
+    "bf16",
+    choices=("bf16", "fp8"),
+    category="attention",
+    doc="V dtype on the NVFP4 FlashAttention-4 path (FLASH_ATTN with nvfp4_fa4, ATTN_QAT_INFER on sm_100a/sm_103a): "
+    "bf16 keeps V in BF16; fp8 casts V to float8 e4m3 without scaling. An explicit fa4_pv_mode attention "
+    "implementation argument takes precedence.")
 FASTVIDEO_DISABLE_ATTENTION_COMPILE = EnvBool(
     True,
     category="attention",
@@ -347,6 +379,11 @@ FASTVIDEO_MLX_WINDOW = EnvInt(0,
 FASTVIDEO_MLX_WINDOW_SINK = EnvInt(0,
                                    category="attention",
                                    doc="Number of sink tokens that MLX windowed attention always attends to.")
+FASTVIDEO_DISABLE_VSA64_FUSED_LAYOUT = EnvBool(
+    False,
+    category="attention",
+    doc="VIDEO_SPARSE_ATTN keeps the original tile scatter and BSHD->BHSD transposes instead of the fused Triton "
+    "layout kernel that no-grad SM100 BF16 head_dim-128 forwards with 64-token tiles use by default.")
 
 # ================== Performance ==================
 
@@ -372,12 +409,30 @@ FASTVIDEO_VAE_PARALLEL_DECODE_STRATEGY = EnvStr(
     None,
     category="performance",
     doc="Collective that moves chunks in parallel VAE decode: gather (used when unset) or all_gather.")
+# MiniMax-H3 component-level pipeline parallel: dedicate the first
+# FASTVIDEO_H3_ENCODER_NODES nodes to the Qwen3-VL text encoder so the
+# denoising ranks never load it (720p needs the ~48 GiB headroom on GB10).
+FASTVIDEO_H3_ENCODER_SPLIT = EnvBool(
+    False,
+    category="distributed",
+    doc="MiniMax-H3 runs the Qwen3-VL text encoder on a dedicated group of nodes, so the denoising ranks never "
+    "load it. Same as FastVideoArgs.h3_encoder_split=True.")
+FASTVIDEO_H3_ENCODER_NODES = EnvInt(1,
+                                    category="distributed",
+                                    doc="Number of leading nodes that FASTVIDEO_H3_ENCODER_SPLIT dedicates to the "
+                                    "MiniMax-H3 text encoder. Values below 1 count as 1.")
 # Adapted from the NVlabs/Sana Sol-Engine implementation.
 FASTVIDEO_MINIMAX_H3_FUSIONS = EnvStr(
     "",
     category="performance",
     doc="MiniMax-H3 inference-only Triton fusions: all, 1, or a comma-separated subset of "
     "modulate,qknorm_rope,swiglu. Empty, 0, or none keeps the eager implementation.")
+FASTVIDEO_MINIMAX_H3_EXACT_KERNELS = EnvStr(
+    "",
+    category="performance",
+    doc="MiniMax-H3 inference-only Triton kernels that reproduce the eager output bit for bit: all, 1, or a "
+    "comma-separated subset of rope,modulate,swiglu. An op whose FASTVIDEO_MINIMAX_H3_FUSIONS fusion is on keeps "
+    "the fusion. Empty, 0, or none keeps the eager implementation.")
 FASTVIDEO_FSDP2_AUTOWRAP = EnvBool(False,
                                    category="performance",
                                    doc="FSDP2 shards modules by parameter count instead of the model's shard "
@@ -404,6 +459,17 @@ FASTVIDEO_FLUX2_DISABLE_BF16_REDUCED_PRECISION_REDUCTION = EnvBool(
     category="performance",
     doc="Flux denoising disables reduced-precision reductions in bf16 matmuls, which tightens accumulation for "
     "the 4-step Klein model.")
+FASTVIDEO_ENABLE_FUSED_NORM = EnvBool(
+    False,
+    category="performance",
+    doc="Opt into Wan's inference-only Triton residual + LayerNorm + modulation fusion. "
+    "Its reduction order changes numerical outputs; the default keeps eager reference compatibility.")
+# Global kill switch for the opt-in, inference-only Triton fusion in
+# fastvideo/layers/triton_fused_norm.py, for debugging numerics or Triton issues.
+FASTVIDEO_DISABLE_FUSED_NORM = EnvBool(False,
+                                       category="performance",
+                                       doc="Turn off the Triton-fused residual + LayerNorm + modulate inference "
+                                       "path that Wan blocks opt into, and use the eager path.")
 
 # ================== Output encoding ==================
 
@@ -516,8 +582,213 @@ FASTVIDEO_FAD_REF_FEATURES = EnvStr(None,
                                     category="eval",
                                     doc="Cached reference-feature file for the audio Frechet distance metric.")
 
+# ================== MiniMax-H3 single-GPU switches ==================
+
+FASTVIDEO_H3_VSA_FP4 = EnvBool(False,
+                               category="attention",
+                               doc="Run MiniMax-H3 VSA attention on the block-sparse SageAttention3 FP4 kernel "
+                               "(sm_120 or GB10 sm_121, no-grad, eager inference).")
+FASTVIDEO_H3_VSA_FP4_PREFIX = EnvChoice(
+    "",
+    choices=("", "fp8", "bf16"),
+    category="attention",
+    doc="Prefix split for the FP4 sparse attention kernel: keep the dense prefix query tiles (text, "
+    "reference and audio rows) off the FP4 kernel and run those rows densely with fp8 or bf16 Q/K and "
+    "bf16 P.V, while video query tiles stay on the FP4 kernel. The fp8 variant is the validated "
+    "training-time numerics and recovers most of the audio error that FP4 quantizes away. Use "
+    "64/128-token tiles. Empty keeps each row on the FP4 kernel.")
+FASTVIDEO_H3_VSA_FP4_PREFIX_STEPS = EnvInt(
+    -1,
+    category="attention",
+    doc="Number of leading denoising steps that use the FP4 prefix split (see "
+    "FASTVIDEO_H3_VSA_FP4_PREFIX). -1 applies it to every step; 0 disables it. Early steps set the "
+    "global structure, so a small value keeps most of the split's quality benefit for a fraction of "
+    "its cost.")
+FASTVIDEO_H3_VSA_FP4_TWO_LEVEL_P = EnvBool(
+    False,
+    category="attention",
+    doc="Quantize the FP4 attention probabilities with the two-level scheme the QAD student trained "
+    "with (rowmax-derived s_P1, then per-block s_P2) instead of the kernel's single-level default.")
+FASTVIDEO_H3_VSA_FP4_K_SMOOTH = EnvBool(
+    False,
+    category="attention",
+    doc="Subtract the per-head key mean before FP4 key quantization, matching the emulator and QAD "
+    "training numerics. Exact for the softmax; it only changes quantization error.")
+FASTVIDEO_H3_GATE_CHUNK_ROWS = EnvInt(
+    0,
+    category="performance",
+    doc="Rows per chunk when the VSA FP4 gate branch expands the pooled compression output back "
+    "to token rows. 0 keeps the single full-size index_select; a positive value caps the transient "
+    "at chunk_rows*heads*head_dim and is bit-identical.")
+FASTVIDEO_H3_VSA_FINE_ATTENTION = EnvChoice(
+    "",
+    choices=("", "emulator-mix8", "emulator-mixmx", "emulator-qk", "emulator-bf16"),
+    category="attention",
+    doc="Replace tile-128 fine attention, preserving VSA selection and compression, with the Triton "
+    "emulator of the sparse FP4 kernel: emulator-mix8 = NVFP4 Q/K video, per-token FP8 Q/K prefix; "
+    "emulator-mixmx = MXFP8 prefix; emulator-qk = NVFP4 Q/K everywhere; emulator-bf16 = unquantized "
+    "BF16. emulator-bf16 runs on any CUDA GPU. Nonempty overrides take priority over "
+    "FASTVIDEO_H3_VSA_FP4. Empty keeps the native route.")
+FASTVIDEO_H3_VSA_HEADS_FIRST_TILE = EnvBool(False,
+                                            category="performance",
+                                            doc="VSA-H3 64/128-token tiles: scatter rows straight into the heads-first "
+                                            "layout the sparse kernels read, removing their per-call transpose copy "
+                                            "of query, key and value. Bit-identical; no-grad, uncompiled CUDA only.")
+FASTVIDEO_H3_VSA_TILE_FIRST = EnvBool(False,
+                                      category="attention",
+                                      doc="Single-rank MiniMax-H3 VSA with one tile gather of the block input "
+                                      "instead of separate Q/K/V/gate scatters.")
+FASTVIDEO_H3_VSA_SM89_KERNEL = EnvChoice("original",
+                                         choices=("original", "bf16", "int8"),
+                                         category="attention",
+                                         doc="Fine-attention kernel for MiniMax-H3 VSA on sm_89: original, bf16, "
+                                         "or int8 (INT8 QK, BF16 PV).")
+FASTVIDEO_H3_SIM_SP_FP8 = EnvBool(False,
+                                  category="debug",
+                                  doc="Simulate the FP8 sequence-parallel exchange of the MiniMax-H3 FP4 VSA "
+                                  "path on one rank.")
+FASTVIDEO_H3_FFN_CHUNK_TOKENS = EnvInt(0,
+                                       category="performance",
+                                       doc="Inference-only MiniMax-H3 FFN token chunk size; 0 runs the FFN "
+                                       "unchunked.")
+FASTVIDEO_H3_FP8_ATTENTION = EnvBool(False,
+                                     category="performance",
+                                     doc="With NVFP4 layer_profile h3_dit_ffn, run MiniMax-H3 attention "
+                                     "projections in FP8.")
+FASTVIDEO_H3_FP8_GRANULARITY = EnvChoice("tensor",
+                                         choices=("tensor", "channel"),
+                                         category="performance",
+                                         doc="FP8 scaling granularity for FASTVIDEO_H3_FP8_ATTENTION.")
+FASTVIDEO_LORA_SIDE_BRANCH = EnvBool(False,
+                                     category="performance",
+                                     doc="Apply inference LoRA adapters as a bf16 side branch next to every "
+                                     "target linear instead of merging them, so the adapter strength can change "
+                                     "at runtime. Packed NVFP4 or FP8 linears without their original dense "
+                                     "weight always use the side branch.")
+FASTVIDEO_NVFP4_MM_BACKEND = EnvStr("auto",
+                                    category="performance",
+                                    doc="FlashInfer mm_fp4 backend for NVFP4 linears, e.g. auto or cutlass.")
+FASTVIDEO_NVFP4_MM_ROW_SPLIT = EnvChoice(
+    "off",
+    choices=("off", "table", "auto"),
+    category="performance",
+    doc="Run large cuDNN NVFP4 GEMMs over row chunks where its plan heuristic is slow: off, table (fixed "
+    "per-shape chunk counts) or auto (time 1/2/4 chunks once per shape; not deterministic across runs).")
+FASTVIDEO_NVFP4_ACT_AMAX = EnvPath(None,
+                                   category="performance",
+                                   doc="JSON of calibrated NVFP4 input amax per linear, keyed b<block>.<sub> or "
+                                   "full prefix; sets a static activation scale.")
+FASTVIDEO_NVFP4_DYNAMIC_ACT = EnvStr("",
+                                     category="performance",
+                                     doc="NVFP4 linears that derive the activation scale per call: all, or "
+                                     "comma-separated layer-name suffixes such as ff.fc_out.")
+FASTVIDEO_H3_ADALN_CACHE = EnvBool(False,
+                                   category="performance",
+                                   doc="Cache MiniMax-H3 AdaLN modulation per timestep instead of keeping the "
+                                   "projection weights resident.")
+FASTVIDEO_H3_ADALN_TABLE = EnvPath(None,
+                                   category="performance",
+                                   doc="Precomputed MiniMax-H3 AdaLN modulation table; enables the cache and "
+                                   "skips loading the AdaLN projection weights.")
+FASTVIDEO_H3_ADALN_DUMP = EnvPath(None,
+                                  category="debug",
+                                  doc="Write the MiniMax-H3 AdaLN modulation table to this path while sampling.")
+FASTVIDEO_H3_SPLICE_TRANSFORMER = EnvPath(None,
+                                          category="eval",
+                                          doc="Second MiniMax-H3 transformer that runs the late DMD steps "
+                                          "(checkpoint step-splice evaluation).")
+FASTVIDEO_H3_SPLICE_FROM_STEP = EnvInt(4,
+                                       category="eval",
+                                       doc="First denoising step run by FASTVIDEO_H3_SPLICE_TRANSFORMER.")
+FASTVIDEO_H3_ENCODER_LAYERWISE = EnvBool(False,
+                                         category="performance",
+                                         doc="Stream MiniMax-H3 text-encoder language layers through exact-size "
+                                         "pinned host memory (text-only prompts).")
+FASTVIDEO_H3_ENCODER_FUSED_DEQUANT = EnvBool(False,
+                                             category="performance",
+                                             doc="Expand the serialized NVFP4 MiniMax-H3 text encoder with one "
+                                             "fused Triton pass on GPUs without FP4 GEMM.")
+FASTVIDEO_H3_VAE_TILE_BATCH = EnvInt(1,
+                                     category="performance",
+                                     doc="Spatial tiles per MiniMax-H3 video VAE decoder call; 1 decodes per "
+                                     "tile.")
+FASTVIDEO_H3_REF2VA_MEMO_ENTRIES = EnvInt(0,
+                                          category="performance",
+                                          doc="Entries in each content-keyed MiniMax-H3 memo of reference encodes "
+                                          "(Qwen3-VL Ref2VA presentation, VAE keyframe latents); repeat "
+                                          "references are reused exactly. 0 disables.")
+FASTVIDEO_H3_VAE_TILE_PARALLEL = EnvBool(False,
+                                         category="performance",
+                                         doc="Split MiniMax-H3 VAE spatial tiles (not only temporal chunks) across "
+                                         "the sequence-parallel ranks in the parallel decode and keyframe encode; "
+                                         "bitwise equal to the serial path.")
+FASTVIDEO_H3_VAE_NVFP4_FUSED = EnvBool(True,
+                                       category="performance",
+                                       doc="Run NVFP4 MiniMax-H3 VAE decoder blocks through the bit-exact fused "
+                                       "Triton kernels at inference.")
+FASTVIDEO_H3_VAE_NVFP4_CUDA_GRAPH = EnvBool(True,
+                                            category="performance",
+                                            doc="Replay small fused NVFP4 MiniMax-H3 VAE decoder calls (at most "
+                                            "four 1797-token tiles) as per-shape CUDA graphs.")
+FASTVIDEO_H3_VAE_NVFP4_DECODER = EnvPath(None,
+                                         category="performance",
+                                         doc="Exported NVFP4 MiniMax-H3 video decoder (.pt, or .safetensors with "
+                                         "bf16 masters or pre-packed NVFP4 weights) that replaces the VAE decoder "
+                                         "at load; skips the INT8 ConvRot overlay.")
+FASTVIDEO_H3_VAE_INT8_OVERLAY = EnvBool(True,
+                                        category="performance",
+                                        doc="Apply the INT8 ConvRot decoder overlay when the MiniMax-H3 VAE folder "
+                                        "ships one; 0 decodes with the dense weights.")
+FASTVIDEO_H3_VAE_INT8_SHARED_QKV = EnvBool(False,
+                                           category="performance",
+                                           doc="Share the INT8 activation rotation and quantization across the "
+                                           "MiniMax-H3 VAE Q/K/V projections.")
+FASTVIDEO_H3_VAE_INT8_TRANSPOSE_VIEW = EnvBool(False,
+                                               category="performance",
+                                               doc="Use transposed weight views in the MiniMax-H3 VAE INT8 "
+                                               "projections.")
+FASTVIDEO_H3_VAE_INT8_FUSED_DEQUANT = EnvBool(False,
+                                              category="performance",
+                                              doc="Fused dequantization epilogue for the MiniMax-H3 VAE INT8 "
+                                              "projections.")
+FASTVIDEO_H3_PINNED_SWAP = EnvBool(True,
+                                   category="performance",
+                                   doc="Swap offloaded MiniMax-H3 modules through exact-size pinned host "
+                                   "arenas.")
+FASTVIDEO_H3_PARK_MODULES = EnvStr(None,
+                                   category="performance",
+                                   doc="Comma-separated MiniMax-H3 denoise modules parked on the host while the "
+                                   "text encoder runs, e.g. vae,audio_vae.")
+FASTVIDEO_LAYERWISE_OFFLOAD_BUFFERS = EnvBool(False,
+                                              category="performance",
+                                              doc="Layerwise offload also streams large buffers such as packed "
+                                              "FP4/FP8 weights.")
+FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS = EnvInt(0,
+                                             category="performance",
+                                             doc="Keep the first N layerwise-offloaded blocks resident on the "
+                                             "GPU.")
+FASTVIDEO_H3_SP_PROFILE = EnvBool(False,
+                                  category="profiling",
+                                  doc="CUDA-event spans per stage over one MiniMax-H3 FP4 VSA DiT forward.")
+FASTVIDEO_H3_CAPTURE_QKV = EnvPath(None,
+                                   category="debug",
+                                   doc="Directory for captured real MiniMax-H3 Q/K/V attention inputs.")
+FASTVIDEO_CUDA_MEMORY_CAP_GIB = EnvFloat(0.0,
+                                         category="debug",
+                                         doc="Cap this process's CUDA allocator at this many GiB to emulate a "
+                                         "smaller GPU; 0 leaves it uncapped.")
+FASTVIDEO_MEMORY_REPORT = EnvBool(False,
+                                  category="debug",
+                                  doc="Log bytes held per pipeline component by device and dtype after "
+                                  "loading.")
+
 # ================== Tests ==================
 
+FASTVIDEO_TEST_WAN_S2V_MODEL_PATH = EnvPath(None,
+                                            category="test",
+                                            doc="Wan2.2-S2V-14B weights for test_wan_s2v.py; unset means "
+                                            "official_weights/Wan2.2-S2V-14B in the repository.",
+                                            deprecated_names=("WAN_S2V_MODEL_PATH", ))
 FASTVIDEO_TEST_LTX2_OVERFIT_DATA_DIR = EnvStr("data/cats",
                                               category="test",
                                               doc="Raw data directory for preprocess_ltx2_overfit.py.",
@@ -550,6 +821,12 @@ FASTVIDEO_TEST_KANDINSKY5_OVERFIT_OUTPUT_DIR = EnvStr("data/kandinsky5_overfit_p
                                                       category="test",
                                                       doc="Output directory for preprocess_kandinsky5_overfit.py.",
                                                       deprecated_names=("KANDINSKY5_OVERFIT_OUTPUT_DIR", ))
+FASTVIDEO_TEST_HUNYUAN15_OVERFIT_DATA_DIR = EnvStr("data/hunyuan15_overfit",
+                                                   category="test",
+                                                   doc="Raw data directory for preprocess_hunyuan15_overfit.py.")
+FASTVIDEO_TEST_HUNYUAN15_OVERFIT_OUTPUT_DIR = EnvStr("data/hunyuan15_overfit_preprocessed",
+                                                     category="test",
+                                                     doc="Output directory for preprocess_hunyuan15_overfit.py.")
 
 # Switches and paths that only tests read. Each old name stays readable, with a
 # warning, until the next minor release.
@@ -600,14 +877,6 @@ FASTVIDEO_TEST_GRADNORM_UPDATE = EnvBool(False,
                                          category="test",
                                          doc="Gradient-norm regression tests update their references.",
                                          deprecated_names=("FASTVIDEO_GRADNORM_UPDATE", ))
-FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH = EnvStr("FastVideo/DreamX-World-5B-Cam-Diffusers",
-                                                     category="test",
-                                                     doc="Model for the DreamX-World camera SSIM test.",
-                                                     deprecated_names=("DREAMX_WORLD_SSIM_MODEL_PATH", ))
-FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH = EnvStr("FastVideo/DreamX-World-5B-Diffusers",
-                                                        category="test",
-                                                        doc="Model for the DreamX-World autoregressive SSIM test.",
-                                                        deprecated_names=("DREAMX_WORLD_AR_SSIM_MODEL_PATH", ))
 FASTVIDEO_TEST_FLUX_T2I_MODEL_DIR = EnvStr("black-forest-labs/FLUX.1-dev",
                                            category="test",
                                            doc="Model for the Flux text-to-image SSIM test.",
@@ -616,10 +885,6 @@ FASTVIDEO_TEST_FLUX_TRANSFORMER_PATH = EnvStr(None,
                                               category="test",
                                               doc="Local Flux transformer for the Flux transformer test.",
                                               deprecated_names=("FLUX_TRANSFORMER_PATH", ))
-FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH = EnvStr("FastVideo/HunyuanGameCraft-Diffusers",
-                                             category="test",
-                                             doc="Model for the HunyuanGameCraft SSIM test.",
-                                             deprecated_names=("GAMECRAFT_MODEL_PATH", ))
 FASTVIDEO_TEST_GEN3C_MODEL_PATH = EnvStr("FastVideo/GEN3C-Cosmos-7B-Diffusers",
                                          category="test",
                                          doc="Model for the GEN3C SSIM test.",
@@ -628,14 +893,6 @@ FASTVIDEO_TEST_GEN3C_IMAGE_PATH = EnvStr(None,
                                          category="test",
                                          doc="Input image for the GEN3C SSIM test.",
                                          deprecated_names=("GEN3C_TEST_IMAGE_PATH", ))
-FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR = EnvStr(None,
-                                                    category="test",
-                                                    doc="Local official GLM-Image weights for the GLM-Image SSIM test.",
-                                                    deprecated_names=("GLM_IMAGE_LOCAL_WEIGHTS_DIR", ))
-FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR = EnvStr(None,
-                                            category="test",
-                                            doc="Model for the GLM-Image SSIM test.",
-                                            deprecated_names=("GLM_IMAGE_MODEL_DIR", ))
 FASTVIDEO_TEST_KANDINSKY5_E2E_NUM_GPUS = EnvInt(1,
                                                 category="test",
                                                 doc="GPUs for the Kandinsky5 nightly end-to-end overfit test.",
@@ -645,10 +902,6 @@ FASTVIDEO_TEST_KANDINSKY5_E2E_WRITE_REFERENCE = EnvBool(
     category="test",
     doc="The Kandinsky5 nightly end-to-end test writes a missing reference video.",
     deprecated_names=("KANDINSKY5_E2E_WRITE_REFERENCE", ))
-FASTVIDEO_TEST_LONGCAT_MODEL_ROOT = EnvStr(None,
-                                           category="test",
-                                           doc="Local LongCat-Video checkpoint for the golden-gate test.",
-                                           deprecated_names=("LONGCAT_MODEL_ROOT", ))
 FASTVIDEO_TEST_MINIMAX_H3_GATE_GOLDEN_DIR = EnvStr(None,
                                                    category="test",
                                                    doc="Local directory of MiniMax-H3 golden-gate tensors.",
@@ -691,14 +944,11 @@ FASTVIDEO_TEST_TAEH3_REFERENCE_DIR = EnvStr(None,
                                             category="test",
                                             doc="Upstream taehv checkout for the MLX TAEH3 parity test.",
                                             deprecated_names=("TAEH3_REFERENCE_DIR", ))
-FASTVIDEO_TEST_ZIMAGE_MODEL_DIR = EnvStr("Tongyi-MAI/Z-Image-Turbo",
-                                         category="test",
-                                         doc="Model for the Z-Image SSIM test.",
-                                         deprecated_names=("ZIMAGE_MODEL_DIR", ))
-FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION = EnvStr("f332072aa78be7aecdf3ee76d5c247082da564a6",
-                                              category="test",
-                                              doc="Hugging Face revision of the Z-Image model for its SSIM test.",
-                                              deprecated_names=("ZIMAGE_MODEL_REVISION", ))
+FASTVIDEO_TEST_WAN_ANIMATE_MODEL_DIR = EnvStr(
+    None,
+    category="test",
+    doc="Local Wan2.2-Animate-14B checkpoint for the Wan-Animate weight tests.",
+    deprecated_names=("WAN_ANIMATE_MODEL_PATH", ))
 
 # Variables that FastVideo no longer reads. Setting one logs a warning; delete
 # the entries in the next minor release.
@@ -710,6 +960,22 @@ DEPRECATED_VARIABLES = {
     "FASTVIDEO_SERVER_DEV_MODE": "no code reads it",
     "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE": "no code reads it",
     "FASTVIDEO_TRACE_FUNCTION": "no code reads it",
+    "FASTVIDEO_TEST_DREAMX_WORLD_SSIM_MODEL_PATH": "DreamX World was removed",
+    "DREAMX_WORLD_SSIM_MODEL_PATH": "DreamX World was removed",
+    "FASTVIDEO_TEST_DREAMX_WORLD_AR_SSIM_MODEL_PATH": "DreamX World was removed",
+    "DREAMX_WORLD_AR_SSIM_MODEL_PATH": "DreamX World was removed",
+    "FASTVIDEO_TEST_GAMECRAFT_MODEL_PATH": "HunyuanGameCraft was removed",
+    "GAMECRAFT_MODEL_PATH": "HunyuanGameCraft was removed",
+    "FASTVIDEO_TEST_GLM_IMAGE_LOCAL_WEIGHTS_DIR": "GLM-Image was removed",
+    "GLM_IMAGE_LOCAL_WEIGHTS_DIR": "GLM-Image was removed",
+    "FASTVIDEO_TEST_GLM_IMAGE_MODEL_DIR": "GLM-Image was removed",
+    "GLM_IMAGE_MODEL_DIR": "GLM-Image was removed",
+    "FASTVIDEO_TEST_LONGCAT_MODEL_ROOT": "LongCat was removed",
+    "LONGCAT_MODEL_ROOT": "LongCat was removed",
+    "FASTVIDEO_TEST_ZIMAGE_MODEL_DIR": "Z-Image was removed",
+    "ZIMAGE_MODEL_DIR": "Z-Image was removed",
+    "FASTVIDEO_TEST_ZIMAGE_MODEL_REVISION": "Z-Image was removed",
+    "ZIMAGE_MODEL_REVISION": "Z-Image was removed",
 }
 
 

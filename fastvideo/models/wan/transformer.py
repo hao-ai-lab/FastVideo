@@ -30,6 +30,129 @@ from fastvideo.distributed.parallel_state import get_sp_world_size
 logger = init_logger(__name__)
 
 
+@torch.library.custom_op(
+    "fastvideo::_wan_modulation_forward",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _wan_modulation_forward(
+    scale_shift_table: torch.Tensor,
+    temb: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Keep Wan modulation gradients outside Inductor's fused reductions.
+
+    The six cloned outputs are intentional: custom operators may not return
+    aliased views, and keeping the outputs distinct prevents AOTAutograd from
+    reassembling their gradients inside the compiled block backward.
+    """
+    if temb.dim() == 4:
+        modulation = scale_shift_table.unsqueeze(0).float() + temb.float()
+        chunk_dim = 2
+    else:
+        modulation = scale_shift_table.float() + temb.float()
+        chunk_dim = 1
+    return tuple(chunk.clone() for chunk in modulation.chunk(6, dim=chunk_dim))  # type: ignore[return-value]
+
+
+@torch.library.register_fake("fastvideo::_wan_modulation_forward")
+def _wan_modulation_forward_fake(
+    scale_shift_table: torch.Tensor,
+    temb: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    if temb.dim() == 4:
+        shape = (*temb.shape[:2], 1, temb.shape[-1])
+    else:
+        shape = (temb.shape[0], 1, temb.shape[-1])
+    return tuple(temb.new_empty(shape, dtype=torch.float32) for _ in range(6))  # type: ignore[return-value]
+
+
+@torch.library.custom_op(
+    "fastvideo::_wan_modulation_backward",
+    mutates_args=(),
+    device_types="cuda",
+)
+def _wan_modulation_backward_op(
+    grad_shift_msa: torch.Tensor,
+    grad_scale_msa: torch.Tensor,
+    grad_gate_msa: torch.Tensor,
+    grad_c_shift_msa: torch.Tensor,
+    grad_c_scale_msa: torch.Tensor,
+    grad_c_gate_msa: torch.Tensor,
+    scale_shift_table: torch.Tensor,
+    temb: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    chunk_dim = 2 if temb.dim() == 4 else 1
+    chunk_shape = ((*temb.shape[:2], 1, temb.shape[-1])
+                   if temb.dim() == 4 else (temb.shape[0], 1, temb.shape[-1]))
+    grad_modulation = torch.cat(
+        tuple(grad.reshape(chunk_shape) for grad in (
+            grad_shift_msa,
+            grad_scale_msa,
+            grad_gate_msa,
+            grad_c_shift_msa,
+            grad_c_scale_msa,
+            grad_c_gate_msa,
+        )),
+        dim=chunk_dim,
+    )
+    grad_scale_shift = grad_modulation.sum_to_size(scale_shift_table.shape)
+    return (
+        grad_scale_shift.to(scale_shift_table.dtype).clone(),
+        grad_modulation.to(temb.dtype).clone(),
+    )
+
+
+@torch.library.register_fake("fastvideo::_wan_modulation_backward")
+def _wan_modulation_backward_fake(
+    grad_shift_msa: torch.Tensor,
+    grad_scale_msa: torch.Tensor,
+    grad_gate_msa: torch.Tensor,
+    grad_c_shift_msa: torch.Tensor,
+    grad_c_scale_msa: torch.Tensor,
+    grad_c_gate_msa: torch.Tensor,
+    scale_shift_table: torch.Tensor,
+    temb: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    del grad_shift_msa, grad_scale_msa, grad_gate_msa
+    del grad_c_shift_msa, grad_c_scale_msa, grad_c_gate_msa
+    return torch.empty_like(scale_shift_table), torch.empty_like(temb)
+
+
+def _wan_modulation_setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output) -> None:
+    del output
+    scale_shift_table, temb = inputs
+    ctx.save_for_backward(scale_shift_table, temb)
+
+
+def _wan_modulation_backward(
+    ctx: torch.autograd.function.FunctionCtx,
+    grad_shift_msa: torch.Tensor,
+    grad_scale_msa: torch.Tensor,
+    grad_gate_msa: torch.Tensor,
+    grad_c_shift_msa: torch.Tensor,
+    grad_c_scale_msa: torch.Tensor,
+    grad_c_gate_msa: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    scale_shift_table, temb = ctx.saved_tensors
+    return torch.ops.fastvideo._wan_modulation_backward(
+        grad_shift_msa,
+        grad_scale_msa,
+        grad_gate_msa,
+        grad_c_shift_msa,
+        grad_c_scale_msa,
+        grad_c_gate_msa,
+        scale_shift_table,
+        temb,
+    )
+
+
+torch.library.register_autograd(
+    "fastvideo::_wan_modulation_forward",
+    _wan_modulation_backward,
+    setup_context=_wan_modulation_setup_context,
+)
+
+
 class WanImageEmbedding(torch.nn.Module):
 
     def __init__(self, in_features: int, out_features: int):
@@ -172,7 +295,8 @@ class WanSelfAttention(nn.Module):
                                    softmax_scale=None,
                                    causal=False,
                                    supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
-                                                                 AttentionBackendEnum.TORCH_SDPA))
+                                                                 AttentionBackendEnum.TORCH_SDPA,
+                                                                 AttentionBackendEnum.ATTN_QAT_INFER))
 
     def forward(self, x: torch.Tensor, context: torch.Tensor, context_lens: int):
         r"""
@@ -326,7 +450,8 @@ class WanTransformerBlock(nn.Module):
                                                                         eps=eps,
                                                                         elementwise_affine=True,
                                                                         dtype=torch.float32,
-                                                                        compute_dtype=torch.float32)
+                                                                        compute_dtype=torch.float32,
+                                                                        fuse_inference=True)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -350,7 +475,8 @@ class WanTransformerBlock(nn.Module):
                                                                          eps=eps,
                                                                          elementwise_affine=False,
                                                                          dtype=torch.float32,
-                                                                         compute_dtype=torch.float32)
+                                                                         compute_dtype=torch.float32,
+                                                                         fuse_inference=True)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
@@ -372,7 +498,17 @@ class WanTransformerBlock(nn.Module):
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
 
-        if temb.dim() == 4:
+        if hidden_states.is_cuda and torch.compiler.is_compiling():
+            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
+                torch.ops.fastvideo._wan_modulation_forward(self.scale_shift_table, temb))
+            if temb.dim() == 4:
+                shift_msa = shift_msa.squeeze(2)
+                scale_msa = scale_msa.squeeze(2)
+                gate_msa = gate_msa.squeeze(2)
+                c_shift_msa = c_shift_msa.squeeze(2)
+                c_scale_msa = c_scale_msa.squeeze(2)
+                c_gate_msa = c_gate_msa.squeeze(2)
+        elif temb.dim() == 4:
             # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
                 self.scale_shift_table.unsqueeze(0) + temb.float()).chunk(6, dim=2)
@@ -415,9 +551,10 @@ class WanTransformerBlock(nn.Module):
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa,
-                                                                         null_shift, null_scale)
+        # Norm-only site: shift/scale=None skips the identity modulation
+        # (normalized * 1.0 + 0) that two full-tensor passes used to compute.
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa, None,
+                                                                         None)
         norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
@@ -485,7 +622,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                                                         eps=eps,
                                                                         elementwise_affine=True,
                                                                         dtype=torch.float32,
-                                                                        compute_dtype=torch.float32)
+                                                                        compute_dtype=torch.float32,
+                                                                        fuse_inference=True)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -509,7 +647,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                                                          eps=eps,
                                                                          elementwise_affine=False,
                                                                          dtype=torch.float32,
-                                                                         compute_dtype=torch.float32)
+                                                                         compute_dtype=torch.float32,
+                                                                         fuse_inference=True)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
@@ -530,8 +669,12 @@ class WanTransformerBlock_VSA(nn.Module):
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
-        e = self.scale_shift_table + temb.float()
-        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=1)
+        if hidden_states.is_cuda and torch.compiler.is_compiling():
+            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
+                torch.ops.fastvideo._wan_modulation_forward(self.scale_shift_table, temb))
+        else:
+            e = self.scale_shift_table + temb.float()
+            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=1)
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
@@ -563,9 +706,10 @@ class WanTransformerBlock_VSA(nn.Module):
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa,
-                                                                         null_shift, null_scale)
+        # Norm-only site: shift/scale=None skips the identity modulation
+        # (normalized * 1.0 + 0) that two full-tensor passes used to compute.
+        norm_hidden_states, hidden_states = self.self_attn_residual_norm(hidden_states, attn_output, gate_msa, None,
+                                                                         None)
         norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention

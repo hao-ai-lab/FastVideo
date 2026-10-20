@@ -25,5 +25,6 @@ default_request:
     num_frames: 81
     height: 720
     width: 1280
+    fps: 16
   output:
     return_frames: false

@@ -18,6 +18,8 @@ class DistributedConfig:
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     pin_cpu_memory: bool = False
+    # Keep this last so existing positional construction remains compatible.
+    strategy: str = "fsdp"
 
 
 @dataclass(slots=True)
@@ -38,12 +40,18 @@ class DataConfig:
 class OptimizerConfig:
     learning_rate: float = 0.0
     betas: tuple[float, float] = (0.9, 0.999)
+    eps: float = 1e-8
     weight_decay: float = 0.0
     lr_scheduler: str = "constant"
     lr_warmup_steps: int = 0
     lr_num_cycles: int = 0
     lr_power: float = 0.0
     min_lr_ratio: float = 0.5
+    lr_milestones: tuple[int, ...] = ()
+    lr_gamma: float = 0.1
+    # ``False`` preserves PyTorch's existing optimizer selection. When true,
+    # FastVideo explicitly requests CUDA fused AdamW.
+    fused: bool = False
 
 
 @dataclass(slots=True)
@@ -69,6 +77,16 @@ class TrackerConfig:
 
 
 @dataclass(slots=True)
+class PerformanceConfig:
+    """Low-overhead per-step training performance metrics."""
+
+    enabled: bool = True
+    # Dense BF16 tensor-core peak for one GPU. When unset, known NVIDIA
+    # accelerators are inferred from their device name.
+    peak_tflops_per_gpu: float | None = None
+
+
+@dataclass(slots=True)
 class ModelTrainingConfig:
     weighting_scheme: str = "uniform"
     logit_mean: float = 0.0
@@ -77,6 +95,13 @@ class ModelTrainingConfig:
     precondition_outputs: bool = False
     moba_config: dict = field(default_factory=dict)
     enable_gradient_checkpointing_type: str | None = None
+    # Loader-level regional compile of the repeated DiT blocks.
+    enable_torch_compile: bool = False
+    # Compile the model adapter's tensor-only training forward. This is
+    # separate from loader-level model compilation and defaults off.
+    compile_train_fn: bool = False
+    # torch.compile kwargs shared by both compile options above.
+    torch_compile_kwargs: dict = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -87,6 +112,7 @@ class TrainingConfig:
     loop: TrainingLoopConfig = field(default_factory=TrainingLoopConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
+    performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     vsa_sparsity: float = 0.0
     # Reuse the per-step padded VSA tile buffer across attention layers.
     # Defaults to False for training: under full activation checkpointing the

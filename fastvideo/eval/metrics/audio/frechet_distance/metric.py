@@ -47,7 +47,13 @@ def _frechet_distance(mu1: np.ndarray,
     sigma2 = sigma2 + eps * np.eye(sigma2.shape[0])
 
     diff = mu1 - mu2
-    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    covariance_product = sigma1.dot(sigma2)
+    try:
+        # SciPy < 1.18 returns ``(root, error_estimate)`` with disp=False.
+        covmean, _ = linalg.sqrtm(covariance_product, disp=False)
+    except TypeError:
+        # SciPy 1.18 removed ``disp`` and now returns only the matrix root.
+        covmean = linalg.sqrtm(covariance_product)
     if np.iscomplexobj(covmean):
         if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
             raise ValueError(f"imaginary component {np.max(np.abs(covmean.imag))}")
@@ -108,6 +114,7 @@ class FrechetAudioDistanceMetric(BaseMetric):
     def setup(self) -> None:
         if self._model is None:
             from hear21passt.base import get_basic_model
+
             model = get_basic_model(mode="all")
             model.eval()
             model = model.to(self.device)
@@ -127,13 +134,11 @@ class FrechetAudioDistanceMetric(BaseMetric):
             ref = ref.numpy()
         ref = np.asarray(ref)
         if ref.ndim != 2 or ref.shape[1] != PASST_EMBED_DIM:
-            raise ValueError(f"Expected a 2-D tensor of shape (N, {PASST_EMBED_DIM}) "
-                             f"at {path}; got shape {ref.shape}.")
+            raise ValueError(f"Expected a 2-D tensor of shape (N, {PASST_EMBED_DIM}) at {path}; got shape {ref.shape}.")
         finite = np.isfinite(ref).all(axis=1)
         ref = ref[finite]
         if ref.shape[0] < 2:
-            raise ValueError(f"Cached reference features at {path} have only "
-                             f"{ref.shape[0]} finite rows; need >= 2.")
+            raise ValueError(f"Cached reference features at {path} have only {ref.shape[0]} finite rows; need >= 2.")
         self._cached_ref_mu = ref.mean(axis=0)
         self._cached_ref_sigma = np.cov(ref, rowvar=False)
         self._n_cached_ref = int(ref.shape[0])
@@ -209,8 +214,7 @@ class FrechetAudioDistanceMetric(BaseMetric):
                 name=self.name,
                 score=None,
                 details={
-                    "skipped": f"FAD needs >=2 finite-embed gen samples "
-                    f"(got {n_gen} valid of {len(self._gen_buf)})",
+                    "skipped": f"FAD needs >=2 finite-embed gen samples (got {n_gen} valid of {len(self._gen_buf)})",
                     "n_gen": n_gen,
                     "n_ref": n_ref,
                     "n_gen_dropped_nonfinite": n_gen_dropped,
