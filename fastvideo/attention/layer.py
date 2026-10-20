@@ -98,7 +98,6 @@ class DistributedAttention(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.backend = backend_name_to_enum(attn_backend.get_name())
         self.dtype = dtype
-        self.causal = causal
 
         if get_ring_size() > 1 and type(self).forward is not DistributedAttention.forward:
             raise NotImplementedError(f"Ring Attention is not implemented for {type(self).__name__}, which overrides "
