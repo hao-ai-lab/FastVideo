@@ -213,7 +213,7 @@ def _pdd_method_config(**overrides: Any) -> dict[str, Any]:
 def _dmd_method_config(**overrides: Any) -> dict[str, Any]:
     config: dict[str, Any] = {
         "rollout_mode": "simulate",
-        "generator_update_interval": 1,
+        "generator_update_interval": 5,
         "real_score_guidance_scale": 1.0,
         "min_timestep_ratio": 0.02,
         "max_timestep_ratio": 0.98,
@@ -504,7 +504,7 @@ def test_dmpdd_student_step_uses_the_full_tail_and_carries_one_block() -> None:
     student = method.student
     fine_grid = student.pdd_fine_grid(torch.device("cpu"))
 
-    loss_map, outputs, metrics = method.single_train_step(_raw_batch(), iteration=1)
+    loss_map, outputs, metrics = method.single_train_step(_raw_batch(), iteration=5)
 
     assert metrics["update_student"] == 1.0
     assert metrics["rollout_step"] == 0.0
@@ -561,10 +561,20 @@ def test_dmpdd_carry_walks_the_highest_nfe_grid_and_clears_after_the_last_rung()
     assert method._pdd_carry.slots[0]["rung"] == 1
 
 
+def test_student_export_contract_samples_the_balanced_highest_nfe_partition() -> None:
+    method = _build(DMPDDMethod, _dmd_method_config(block_size_max=4))
+    requested = []
+    method.student.inference_contract = lambda *, pdd_step_indices: requested.append(pdd_step_indices) or {"ok": 1}
+    assert method.inference_checkpoint_contract("student") == {"ok": 1}
+    # pdd_steps=8 with block_size_min=2: four fused blocks, as validation samples four steps.
+    assert requested == [[0, 2, 4, 6, 8]]
+    assert method.inference_checkpoint_contract("critic") is None
+
+
 def test_dmpdd_data_latent_mode_carries_nothing() -> None:
     method = _build(DMPDDMethod, _dmd_method_config(rollout_mode="data_latent", block_size_max=4), data_type="t2va")
     assert method._pdd_carry is None
-    loss_map, outputs, metrics = method.single_train_step(_raw_batch(), iteration=1)
+    loss_map, outputs, metrics = method.single_train_step(_raw_batch(), iteration=5)
     assert method.student.prepare_calls == ["data"]
     assert metrics["pdd_block_start"] in {0.0, 2.0, 4.0, 6.0}
     assert torch.isfinite(loss_map["total_loss"])
@@ -578,6 +588,9 @@ def test_dmpdd_configuration_guards() -> None:
             DMPDDMethod,
             _dmd_method_config(block_size_min=3, block_size_max=3, student_grid_indices={3: [0, 1, 2, 8]}),
         )
+    with pytest.raises(ValueError, match="generator_update_interval must be at least 2"):
+        # DMD2 reads 1 as "update both roles"; DMPDD would never train its critic.
+        _build(DMPDDMethod, _dmd_method_config(block_size_max=4, generator_update_interval=1))
     with pytest.raises(ValueError, match="Carried DMPDDMethod cannot cover every student rung"):
         # Four carried rungs with a student interval of 4 leave three phases untrained.
         _build(DMPDDMethod, _dmd_method_config(block_size_max=4, generator_update_interval=4))

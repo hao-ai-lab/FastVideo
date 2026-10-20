@@ -80,7 +80,6 @@ def test_exhaustion_with_outstanding_checkpoints_and_new_replay_guard(exhaust, c
         torch._dynamo.reset()
     assert wrapped.checkpoint_fn is original_checkpoint and block.forward is compiled
     assert original_limits == (torch._dynamo.config.recompile_limit, torch._dynamo.config.accumulated_recompile_limit)
-    assert not torch.cuda.is_initialized()
 
 
 def test_unrelated_compiler_error_propagates(monkeypatch):

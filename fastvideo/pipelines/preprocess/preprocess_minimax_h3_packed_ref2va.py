@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import math
 from numbers import Integral
 from pathlib import Path
 import shutil
@@ -25,6 +26,7 @@ from fastvideo.dataset.dataloader.record_schema import ref2va_record_creator
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_ref2va
 from fastvideo.dataset.utils import collate_rows_from_parquet_schema
 from fastvideo.pipelines.basic.minimax_h3.packing import (
+    MINIMAX_H3_AUDIO_LATENTS_PER_SECOND,
     MINIMAX_H3_FPS,
     MINIMAX_H3_KEYFRAME_ENCODE_SEED,
     audio_latent_num_frames,
@@ -44,6 +46,9 @@ from fastvideo.pipelines.basic.minimax_h3.reference import (
 )
 from fastvideo.pipelines.preprocess import preprocess_minimax_h3_ref2va as encoding
 from fastvideo.utils import verify_model_config_and_directory
+
+# Source audio kept past the clip end so resampling edge effects fall outside it.
+_RESAMPLE_MARGIN_SECONDS = 0.1
 
 
 @dataclass(frozen=True)
@@ -114,13 +119,25 @@ def load_target_media(path: Path, geometry: TargetGeometry) -> tuple[np.ndarray,
     if soundtrack is None:
         raise ValueError(f"Target {path} requires a synchronized soundtrack")
     waveform, source_rate = soundtrack
+    duration = geometry.num_frames / MINIMAX_H3_FPS
+    # Resample a little past the clip and cut at the VAE rate: cutting at the
+    # source rate first floors twice and loses a sample at some rates, and the
+    # margin keeps resampling edge effects out of the clip.
     waveform = prepare_reference_waveform(waveform,
                                           source_rate,
                                           encoding.AUDIO_SAMPLE_RATE,
-                                          max_duration=geometry.num_frames / MINIMAX_H3_FPS)
-    expected_samples = int(geometry.num_frames / MINIMAX_H3_FPS * encoding.AUDIO_SAMPLE_RATE)
-    if waveform.shape[-1] < expected_samples:
+                                          max_duration=duration + _RESAMPLE_MARGIN_SECONDS)
+    # The audio VAE pads to whole latents. Never hand it more audio than the
+    # clip's audio_latent_num_frames covers, which would add one latent.
+    samples_per_latent = encoding.AUDIO_SAMPLE_RATE // MINIMAX_H3_AUDIO_LATENTS_PER_SECOND
+    expected_samples = min(int(duration * encoding.AUDIO_SAMPLE_RATE),
+                           audio_latent_num_frames(geometry.num_frames) * samples_per_latent)
+    shortfall = expected_samples - waveform.shape[-1]
+    if shortfall > math.ceil(encoding.AUDIO_SAMPLE_RATE / source_rate):
         raise ValueError(f"Target soundtrack is shorter than the requested {geometry.num_frames} frames")
+    if shortfall > 0:
+        # Less than one source sample short: a rounding artifact, not missing audio.
+        waveform = torch.nn.functional.pad(waveform, (0, shortfall))
     return frames, waveform[:, :expected_samples]
 
 

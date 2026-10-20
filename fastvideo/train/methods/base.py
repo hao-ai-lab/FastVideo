@@ -44,6 +44,11 @@ class TrainingMethod(torch.nn.Module, ABC):
     # Shared CUDA RNG generator (initialized in on_train_start).
     cuda_generator: torch.Generator | None = None
 
+    # Methods whose updates bf16/fp16 parameter storage would silently round
+    # away set this; the trainer then refuses low-precision trainable masters
+    # unless training.model.allow_low_precision_master_weights opts in.
+    requires_fp32_master_weights: bool = False
+
     def __init__(
         self,
         *,

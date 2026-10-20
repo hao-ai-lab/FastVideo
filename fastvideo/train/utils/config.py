@@ -483,6 +483,10 @@ def _build_training_config(
         raise ValueError("training.checkpoint.inference_checkpoint_dtype must be one of "
                          "['bfloat16', 'float16', 'float32'], got "
                          f"{inference_checkpoint_dtype!r}")
+    inference_base_model_revision = ck.get("inference_base_model_revision")
+    if inference_base_model_revision is not None:
+        from fastvideo.configs.pipelines.minimax_h3 import parse_base_model_revision
+        parse_base_model_revision(inference_base_model_revision)
     require_complete_training_checkpoint = require_bool(
         ck,
         "require_complete_training_checkpoint",
@@ -563,6 +567,7 @@ def _build_training_config(
             save_inference_checkpoint_on_validation=save_inference_checkpoint_on_validation,
             inference_checkpoint_role=inference_checkpoint_role or "student",
             inference_checkpoint_dtype=inference_checkpoint_dtype,
+            inference_base_model_revision=inference_base_model_revision,
             inference_checkpoints_total_limit=ck.get("inference_checkpoints_total_limit", 0),
             training_state_checkpointing_steps=int(ck.get("training_state_checkpointing_steps", 0) or 0),
             require_complete_training_checkpoint=require_complete_training_checkpoint,

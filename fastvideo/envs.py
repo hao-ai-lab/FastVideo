@@ -349,7 +349,8 @@ FASTVIDEO_MINIMAX_H3_FA4_PACKED_VARLEN = EnvBool(
 FASTVIDEO_VSA_PTX_BLACKWELL = EnvBool(
     False,
     category="attention",
-    doc="VIDEO_SPARSE_ATTN_H3 sends no-grad tile-64 forwards to the data-center Blackwell (sm_100a / sm_103a) kernel. "
+    doc="VIDEO_SPARSE_ATTN_H3 sends tile-64 forwards to the data-center Blackwell (sm_100a / sm_103a) kernel; "
+    "grad-tracking forwards need its autograd operator, else Triton. "
     "fastvideo-kernel reads the same variable with the same rule.",
     deprecated_names=("FASTVIDEO_VSA_SM100A", ))
 FASTVIDEO_VSA_TRITON = EnvBool(

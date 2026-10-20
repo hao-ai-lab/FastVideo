@@ -67,6 +67,35 @@ def test_target_media_preserves_pair_duration_and_resizes(monkeypatch):
         prep.load_target_media(Path('unused'), geometry)
 
 
+def _target_audio(monkeypatch, num_frames, waveform, source_rate):
+    frames = np.zeros((num_frames, 32, 64, 3), dtype=np.uint8)
+    monkeypatch.setattr(prep, 'decode_reference_video', lambda _: (frames, 24.0, (waveform, source_rate)))
+    return prep.load_target_media(Path('unused'), prep.TargetGeometry(64, 32, num_frames))[1]
+
+
+@pytest.mark.parametrize('source_rate', [8000, 11025, 16000, 44100, 48000])
+def test_long_soundtrack_at_any_rate_covers_the_default_clip(monkeypatch, source_rate):
+    # Cutting at the source rate before resampling used to leave these one sample short.
+    audio = _target_audio(monkeypatch, 124, torch.randn(1, 16 * source_rate), source_rate)
+    assert audio.shape == (2, int(124 / 24 * 32000))
+
+
+@pytest.mark.parametrize('num_frames', [56, 107, 158, 209])
+def test_target_audio_spans_exactly_its_latent_count(monkeypatch, num_frames):
+    # nf % 3 == 2: the clip's samples run past its last whole latent, which the
+    # hop-800 audio VAE would pad into one extra latent.
+    audio = _target_audio(monkeypatch, num_frames, torch.randn(1, 16 * 32000), 32000)
+    assert audio.shape[-1] == prep.audio_latent_num_frames(num_frames) * 800
+
+
+def test_sub_sample_rounding_shortfall_is_padded_but_short_audio_is_rejected(monkeypatch):
+    clip_samples_16k = int(124 / 24 * 16000)  # floors 82666.67
+    audio = _target_audio(monkeypatch, 124, torch.ones(1, clip_samples_16k), 16000)
+    assert audio.shape == (2, int(124 / 24 * 32000))
+    with pytest.raises(ValueError, match='shorter'):
+        _target_audio(monkeypatch, 124, torch.ones(1, clip_samples_16k - 2), 16000)
+
+
 def setup_encoder(tmp_path, monkeypatch):
     path = manifest(tmp_path)
     model = tmp_path / 'model'

@@ -118,6 +118,12 @@ class CheckpointConfig:
 
     inference_checkpoint_dtype: str = "bfloat16"
 
+    # ``hf://<repo id>@<revision>`` of the base MiniMax-H3 snapshot whose text
+    # encoder and VAEs a FastH3 PDD student export reuses; its
+    # fastvideo_inference.json records it. Unset, it comes from a PDD
+    # initialization checkpoint's file or an init_from in the Hugging Face cache.
+    inference_base_model_revision: str | None = None
+
     # Opt in to resumable checkpoints published only after DCP state and every
     # rank's RNG snapshot are complete. False keeps legacy checkpoints usable.
     require_complete_training_checkpoint: bool = False
@@ -180,9 +186,10 @@ class ModelTrainingConfig:
     # Optimizer steps applied to bf16/fp16 parameter storage round away
     # updates smaller than ~half an ulp of each weight's magnitude —
     # O(1)-magnitude parameters (norm gains) freeze entirely at typical
-    # distillation LRs. The trainer refuses to start unless master weights
-    # are fp32 (training.dit_precision: fp32) or this explicit opt-in
-    # acknowledges the effect (memory-constrained topologies).
+    # distillation LRs. For methods that declare it (PDD and DMPDD), the
+    # trainer refuses to start unless trainable master weights are fp32
+    # (training.dit_precision: fp32) or this explicit opt-in acknowledges the
+    # effect (memory-constrained topologies).
     allow_low_precision_master_weights: bool = False
 
     minimax_h3_student_compile: Literal["off", "grad_only_full_block"] = "off"

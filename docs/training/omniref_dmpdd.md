@@ -51,7 +51,9 @@ The effective batch size is `(world_size / sp_size) × train_batch_size ×
 gradient_accumulation_steps`. Keep FP32 master weights; normal mixed-precision groups
 compute in BF16 while declared precision-sensitive groups retain FP32 computation.
 
-The example alternates four critic updates with one student update. The student uses
+The example alternates four critic updates with one student update. Each iteration
+updates exactly one role, so `generator_update_interval` must be at least 2; unlike
+DMD2, an interval of 1 would never train the critic. The student uses
 a 32-head fine grid, integrates the remaining tail for the distribution-matching
 objective and applies a teacher-supervised PDD head loss with weight 0.3. Sampling
 uses eight local blocks of four heads. Teacher and critic guidance are 2; critic
@@ -100,13 +102,29 @@ Export a deployable student from a saved checkpoint using the existing converter
 python -m fastvideo.train.entrypoint.dcp_to_diffusers \
   --checkpoint /outputs/h3-dmpdd/checkpoint-100 \
   --output-dir /models/h3-dmpdd-student \
-  --role student --verify
+  --role student --verify \
+  --base-model-revision hf://MiniMaxAI/MiniMax-H3@<revision>
 ```
 
 The converter loads/reshards the role on a GPU; ensure it has enough memory for the
 full model. The export records the widened PDD architecture in the component config.
 The CPU streaming export utilities also support model-declared shapes and independent
 inference checkpoint retention. Model-only exports cannot resume optimizer training.
+
+Both export paths write `fastvideo_inference.json`, the sampling contract the FastH3
+Ref2VA pipeline reads: the balanced partition of the student's finest trained grid
+(`pdd_steps / block_size_min` fused blocks, eight for the example), its scheduler
+shifts and its VSA settings. The contract names the base snapshot whose text encoder
+and VAEs the export reuses. It comes from `training.checkpoint.inference_base_model_revision`
+(or `--base-model-revision`), from a PDD initialization checkpoint's own contract, or
+from an `init_from` inside the Hugging Face cache; set it explicitly for a local copy.
+That pipeline samples only sparse `VIDEO_SPARSE_ATTN_H3` students, so other students
+export without a contract. A student trained with `video_scheduler_shift` or
+`audio_scheduler_shift` values that differ from its `init_from` scheduler configs is
+refused at export, because inference samples with those configs.
+
+In-training validation samples a PDD student with the balanced partition for each
+`sampling_steps` value and, for sparse Ref2VA runs, the training reference keep rate.
 
 No validation dataset is bundled. Evaluate your own held-out records and generated
 media before relying on a newly initialized or distilled checkpoint. CPU regression

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from fastvideo import envs
 from fastvideo.configs.models.dits.minimax_h3 import MiniMaxH3ArchConfig, MiniMaxH3Config
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
 from fastvideo.layers.pdd import PDDModalitySchedule, PDDReplicatedLinear
@@ -214,24 +215,14 @@ def _init_parameters(transformer: torch.nn.Module) -> None:
                 parameter.copy_(torch.randn(parameter.shape, generator=generator) * 0.05)
 
 
-def test_pdd_plugin_heads_and_fused_forward_agree(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fastvideo.distributed import (
-        cleanup_dist_env_and_memory,
-        maybe_init_distributed_environment_and_model_parallel,
-    )
-
-    device = _device()
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="MiniMax H3 attention layers require a CUDA device for a real forward")
+def test_pdd_plugin_heads_and_fused_forward_agree(monkeypatch: pytest.MonkeyPatch, env_overrides,
+                                                  distributed_setup) -> None:
     # H3's attention layers read the sequence-parallel group even at world
-    # size one, so run the forward inside a single-process 1x1 environment.
-    for name, value in (("MASTER_ADDR", "127.0.0.1"), ("MASTER_PORT", "29677"), ("RANK", "0"), ("WORLD_SIZE", "1"),
-                        ("LOCAL_RANK", "0")):
-        monkeypatch.setenv(name, value)
-    maybe_init_distributed_environment_and_model_parallel(1, 1)
-    try:
-        _run_heads_and_fused_forward_check(monkeypatch, device)
-    finally:
-        cleanup_dist_env_and_memory()
+    # size one, so the forward runs inside distributed_setup's 1x1 environment.
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
+    _run_heads_and_fused_forward_check(monkeypatch, _device())
 
 
 def _run_heads_and_fused_forward_check(monkeypatch: pytest.MonkeyPatch, device: torch.device) -> None:

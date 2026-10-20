@@ -141,11 +141,6 @@ class MiniMaxH3Model(ModelBase):
             raise ValueError(f"{type(self).__name__} requires training.data.preprocessed_data_type "
                              f"to be one of {{{allowed_data}}}, got {data_type!r}")
 
-        if self._lora_config is not None and self._lora_config.enable:
-            # Preserve the released LoRA training dtype policy. Full-weight
-            # roles retain the model's FP32 projection groups.
-            training_config.pipeline_config.dit_config.uniform_parameter_dtype = True
-
         self._init_from = str(init_from)
         self.training_config = training_config
         self.transformer = self._load_transformer(
@@ -204,15 +199,21 @@ class MiniMaxH3Model(ModelBase):
         """Load H3 through the training FSDP loader and apply block checkpointing."""
         training_config = self.training_config
         arch_overrides = self._dit_arch_overrides()
-        if arch_overrides:
-            # Only this role sees the overrides; the shared config keeps the
-            # released architecture for the other roles and validation.
+        lora_enabled = self._lora_config is not None and self._lora_config.enable
+        if arch_overrides or lora_enabled:
+            # Only this role sees these settings; the shared config keeps the
+            # released architecture and dtype policy for the other roles and
+            # validation, whatever order the roles load in.
             pipeline_config = copy.deepcopy(training_config.pipeline_config)
             for name, value in arch_overrides.items():
                 setattr(pipeline_config.dit_config.arch_config, name, value)
+            if lora_enabled:
+                # Preserve the released LoRA training dtype policy. Full-weight
+                # roles retain the model's FP32 projection groups.
+                pipeline_config.dit_config.uniform_parameter_dtype = True
             training_config = dataclasses.replace(training_config, pipeline_config=pipeline_config)
         pre_fsdp_model_transform = None
-        if self._lora_config is not None and self._lora_config.enable:
+        if lora_enabled:
 
             def _prepare_lora(transformer: torch.nn.Module) -> None:
                 enabled = self._enable_lora_if_configured(
@@ -272,18 +273,25 @@ class MiniMaxH3Model(ModelBase):
                              "MiniMaxH3DMDModel")
         self.sp_group = get_sp_group()
         max_presentation_tokens = getattr(data_config, "max_presentation_tokens", None)
+        text_len: int | None = None
+        presentation_bound: int | None = None
         if max_presentation_tokens is None and not bool(getattr(data_config, "native_shape_bucketing", False)):
-            max_presentation_tokens = int(training_config.pipeline_config.text_encoder_configs[0].arch_config.text_len)
-        if (isinstance(max_presentation_tokens, bool) or not isinstance(max_presentation_tokens, Integral)
-                or int(max_presentation_tokens) <= 0):
+            # Unset keeps the fixed text-length contract of existing T2VA
+            # configs: crop/pad each prompt to the text encoder length rather
+            # than rejecting longer rows mid-run.
+            text_len = int(training_config.pipeline_config.text_encoder_configs[0].arch_config.text_len)
+        elif (isinstance(max_presentation_tokens, bool) or not isinstance(max_presentation_tokens, Integral)
+              or int(max_presentation_tokens) <= 0):
             raise ValueError("MiniMax H3 T2VA/text-only training requires training.data.max_presentation_tokens "
                              "to be a positive integer safety bound")
+        else:
+            presentation_bound = int(max_presentation_tokens)
         parquet_schema = (pyarrow_schema_text_only
                           if str(data_config.preprocessed_data_type) == "text_only" else pyarrow_schema_t2va)
         dataloader_kwargs: dict[str, Any] = {
-            "text_len": None,
+            "text_len": text_len,
             "parquet_schema": parquet_schema,
-            "max_presentation_tokens": int(max_presentation_tokens),
+            "max_presentation_tokens": presentation_bound,
         }
         if bool(getattr(packing, "enabled", False)):
             dataloader_kwargs["gradient_accumulation_steps"] = int(

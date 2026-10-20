@@ -24,6 +24,39 @@ if TYPE_CHECKING:
         TrainingConfig, )
 
 
+def _verify_master_weight_precision(method: TrainingMethod, tc: TrainingConfig) -> None:
+    """Refuse low-precision trainable masters for methods that require FP32.
+
+    Optimizer steps applied in-place to bf16/fp16 parameters round away
+    updates below ~half an ulp of each weight's magnitude; O(1)-magnitude
+    parameters (norm gains) freeze entirely at typical distillation learning
+    rates, and ``zeros_like``-allocated optimizer state inherits the same
+    starved dtype. FP32 sharded masters (``training.dit_precision: fp32``)
+    fix both; ordinary FSDP groups still compute in BF16.
+    """
+    if not getattr(method, "requires_fp32_master_weights", False):
+        return
+    if bool(getattr(tc.model, "allow_low_precision_master_weights", False)):
+        return
+    offenders: list[str] = []
+    for role, model in getattr(method, "_role_models", {}).items():
+        if not getattr(model, "_trainable", False):
+            continue
+        transformer = getattr(model, "transformer", None)
+        if transformer is None:
+            continue
+        for name, param in transformer.named_parameters():
+            if param.requires_grad and param.dtype != torch.float32:
+                offenders.append(f"{role}:{name} ({param.dtype})")
+                break
+    if offenders:
+        raise RuntimeError(f"{type(method).__name__} requires fp32 trainable master weights, got {offenders}. "
+                           "bf16/fp16 parameter storage silently rounds away optimizer updates below ~half an ulp "
+                           "per weight (norm-scale parameters freeze completely). Set training.dit_precision: fp32 "
+                           "(FP32 sharded masters; ordinary groups compute in BF16), or acknowledge the effect "
+                           "explicitly with training.model.allow_low_precision_master_weights: true.")
+
+
 def _coerce_log_scalar(
     value: Any,
     *,
@@ -129,6 +162,7 @@ class Trainer:
             self.performance_monitor.attach(getattr(method, "_role_models", {}), )
 
         method.set_tracker(self.tracker)
+        _verify_master_weight_precision(method, tc)
         method.on_train_start()
         self.callbacks.on_train_start(
             method,

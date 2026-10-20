@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from fastvideo import envs
 from fastvideo.models.schedulers.scheduling_minimax_h3 import MiniMaxH3Scheduler
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.tests.train.models.test_minimax_h3_pdd import (
@@ -18,10 +19,15 @@ from fastvideo.train.models.minimax_h3.minimax_h3_pdd import MiniMaxH3PDDModel
 from fastvideo.train.models.minimax_h3.minimax_h3_ref2v_pdd import MiniMaxH3Ref2VPDDModel
 
 
+@pytest.fixture(autouse=True)
+def _dense_attention_backend(env_overrides):
+    # Layers built outside a loader bind the environment's backend.
+    env_overrides.enter_context(envs.FASTVIDEO_ATTENTION_BACKEND.override("TORCH_SDPA"))
+
+
 def _cpu_model(monkeypatch, reference):
     import fastvideo.attention.layer as attention_layer
 
-    monkeypatch.setenv("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
     monkeypatch.setattr(attention_layer, "get_sp_parallel_rank", lambda: 0)
     monkeypatch.setattr(attention_layer, "get_sp_world_size", lambda: 1)
     monkeypatch.setattr(attention_layer, "sequence_model_parallel_all_to_all_4D", lambda tensor, **_: tensor)

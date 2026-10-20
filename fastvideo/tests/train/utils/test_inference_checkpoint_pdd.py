@@ -132,6 +132,74 @@ def test_export_widens_declared_shapes_and_records_config_overrides(tmp_path: Pa
         )
 
 
+def test_export_publishes_and_requires_the_declared_inference_contract(tmp_path: Path, base_model_dir: Path) -> None:
+    source = _save_dcp(tmp_path, {"proj.weight": torch.zeros(2 * _GRID, 2), "other": torch.ones(3)})
+    module = _WidenedModule()
+    contract = {"pdd_steps": _GRID, "pdd_step_indices": [0, 1, 2, 3]}
+    # A warm start's own contract describes the warm start, never the export.
+    (base_model_dir / "fastvideo_inference.json").write_text(json.dumps({"pdd_steps": 99}), encoding="utf-8")
+
+    def export(inference_contract):
+        return export_inference_checkpoint_from_dcp(
+            dcp_checkpoint=source,
+            output_dir=tmp_path / "run",
+            step=5,
+            module=module,
+            base_model_dir=base_model_dir,
+            dtype=torch.float32,
+            inference_contract=inference_contract,
+        )
+
+    exported = export(contract)
+    contract_path = exported / "fastvideo_inference.json"
+    assert not contract_path.is_symlink()
+    assert json.loads(contract_path.read_text(encoding="utf-8")) == contract
+    assert json.loads((base_model_dir / "fastvideo_inference.json").read_text(encoding="utf-8")) == {"pdd_steps": 99}
+    # Reuse is idempotent for the same contract and refused for another one.
+    assert export(contract) == exported
+    with pytest.raises(InferenceCheckpointExportError, match="differs from the requested one"):
+        export({**contract, "pdd_step_indices": [0, 3]})
+    contract_path.unlink()
+    with pytest.raises(InferenceCheckpointExportError, match="Missing or invalid inference contract"):
+        export(contract)
+
+
+def test_manager_exports_the_methods_inference_contract(tmp_path: Path, base_model_dir: Path) -> None:
+    from fastvideo.train.utils.checkpoint import CheckpointConfig, CheckpointManager
+
+    module = torch.nn.Module()
+    module.proj = torch.nn.Module()
+    module.proj.weight = torch.nn.Parameter(torch.ones(2 * _GRID, 2))
+    module.other = torch.nn.Parameter(torch.ones(3))
+    module.reverse_param_names_mapping = _WidenedModule().reverse_param_names_mapping
+    module.inference_export_expected_shape = _WidenedModule._expected_shape
+    module.inference_config_overrides = lambda: {"pdd_steps": _GRID}
+    contract = {"pdd_steps": _GRID}
+
+    class Method:
+
+        def inference_checkpoint_modules(self, role):
+            return {"transformer": module}
+
+        def inference_checkpoint_base_model_path(self, role):
+            return str(base_model_dir)
+
+        def inference_checkpoint_contract(self, role):
+            return contract
+
+    manager = CheckpointManager(method=Method(),
+                                dataloader=None,
+                                output_dir=str(tmp_path / "run"),
+                                config=CheckpointConfig(save_steps=0, keep_last=0, inference_dtype="float32"))
+    manager.save_inference(5)
+    exported = tmp_path / "run" / "inference" / "checkpoint-5"
+    assert json.loads((exported / "fastvideo_inference.json").read_text(encoding="utf-8")) == contract
+
+    contract = {"pdd_steps": 4}
+    with pytest.raises(RuntimeError, match="Existing inference checkpoint failed validation"):
+        manager.save_inference(5)
+
+
 def test_export_without_hooks_still_rejects_widened_tensors(tmp_path: Path, base_model_dir: Path) -> None:
     source = _save_dcp(tmp_path, {"proj.weight": torch.zeros(2 * _GRID, 2), "other": torch.ones(3)})
     with pytest.raises(InferenceCheckpointExportError, match="base transformer shape"):
@@ -184,6 +252,11 @@ def test_config_override_does_not_mutate_hard_linked_base(tmp_path):
     _apply_config_overrides(exported, {"pdd_steps": 32})
     assert json.loads(base.read_text()) == {"pdd_steps": 1}
     assert json.loads(exported.read_text()) == {"pdd_steps": 32}
+    # The replacement is published with an ordinary file's mode, not the
+    # owner-only mode of its temporary file.
+    umask = os.umask(0)
+    os.umask(umask)
+    assert exported.stat().st_mode & 0o777 == 0o666 & ~umask
 
 
 @pytest.mark.parametrize('mismatch', ['dtype', 'config', 'role', 'module'])

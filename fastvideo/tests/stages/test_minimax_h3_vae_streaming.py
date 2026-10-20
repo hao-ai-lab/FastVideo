@@ -22,12 +22,13 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 
 def _layout(rows: int, latent_shape: tuple[int, ...]) -> MiniMaxH3PackedLayout:
+    # A structurally valid video-only layout: every row is a real video token.
     empty = torch.empty(0, dtype=torch.long)
     return MiniMaxH3PackedLayout(
         sequence_length=rows,
-        position_ids=empty,
-        token_tags=empty,
-        video_indices=empty,
+        position_ids=torch.zeros(rows, 3, dtype=torch.long),
+        token_tags=torch.zeros(rows, dtype=torch.long),
+        video_indices=torch.arange(rows),
         audio_indices=empty,
         text_indices=empty,
         num_condition_video_rows=0,

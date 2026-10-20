@@ -307,6 +307,12 @@ class MiniMaxH3BasePipeline(LoRAPipeline, ComposedPipelineBase):
             shift = getattr(self.get_module(module_name), "shift", None)
             if shift is None or not math.isfinite(float(shift)) or float(shift) <= 0:
                 raise ValueError(f"MiniMax-H3 {modality} scheduler must expose a positive finite shift, got {shift}.")
+            # The pipeline-config shifts are modular-trainer clocks; sampling
+            # never applies them, so refuse a value the checkpoint contradicts.
+            requested = getattr(fastvideo_args.pipeline_config, f"{modality}_scheduler_shift", None)
+            if requested is not None and float(requested) != float(shift):
+                raise ValueError(f"MiniMax-H3 {modality}_scheduler_shift={requested} is a training setting; this "
+                                 f"checkpoint's {module_name}/scheduler_config.json samples with shift {shift}.")
         self._load_checkpoint_schedule(fastvideo_args)
         transformer = self.get_module("transformer")
         if transformer is not None:

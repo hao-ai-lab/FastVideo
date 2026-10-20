@@ -793,8 +793,12 @@ class PackedDMDMixin(DMD2Method):
         )
         if interval is None:
             interval = 5
-        if interval <= 0:
-            raise ValueError("method.generator_update_interval must be positive")
+        # Roles alternate exclusively: the student updates on every Nth
+        # iteration and the critic on all others. DMD2's interval 1 (both roles
+        # every step) would therefore never train the critic here.
+        if interval < 2:
+            raise ValueError("method.generator_update_interval must be at least 2: DMPDD updates only the critic "
+                             f"between student updates, got {interval}")
         return interval
 
     def _should_update_student(

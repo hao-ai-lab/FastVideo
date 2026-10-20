@@ -218,13 +218,15 @@ def _save_role_pretrained(
     module_names: list[str] | None = None,
     overwrite: bool = False,
     model: Any,
+    inference_contract: dict[str, Any] | None = None,
 ) -> str:
     """Export a role's modules into a diffusers-style model dir.
 
     Produces a ``model_path`` loadable by
     ``PipelineComponentLoader`` (``model_index.json``,
     ``transformer/``, ``vae/``, etc. copied from
-    ``base_model_path``).
+    ``base_model_path``). ``inference_contract`` becomes the export's
+    ``fastvideo_inference.json``.
     """
     import shutil
     from pathlib import Path
@@ -406,6 +408,18 @@ def _save_role_pretrained(
 
         _barrier()
 
+    if _rank() == 0:
+        from fastvideo.train.utils.inference_checkpoint import (INFERENCE_CONTRACT_FILE, replace_json_file)
+
+        contract_path = dst / INFERENCE_CONTRACT_FILE
+        if inference_contract is not None:
+            replace_json_file(contract_path, inference_contract)
+        elif contract_path.exists() or contract_path.is_symlink():
+            # A copied base contract describes the initialization checkpoint,
+            # not this export; drop only this export's link to it.
+            contract_path.unlink()
+    _barrier()
+
     return str(dst)
 
 
@@ -443,6 +457,7 @@ def convert(
     role: str = "student",
     overwrite: bool = False,
     verify: bool = False,
+    base_model_revision: str | None = None,
 ) -> str:
     """Load a DCP checkpoint and export as a diffusers model.
 
@@ -487,6 +502,10 @@ def convert(
         cfg = _run_config_from_raw(raw_config)
 
     tc = cfg.training
+    if base_model_revision is not None:
+        from fastvideo.configs.pipelines.minimax_h3 import parse_base_model_revision
+        parse_base_model_revision(base_model_revision)
+        tc.checkpoint.inference_base_model_revision = base_model_revision
 
     # -- Init distributed for the one-rank export process. DCP can reshard the
     # checkpoint, but full-state gathering still requires substantial memory.
@@ -528,12 +547,15 @@ def convert(
         base_model_path,
     )
     transformer_component = _transformer_component_name(model)
+    contract_hook = getattr(method, "inference_checkpoint_contract", None)
+    inference_contract = contract_hook(role) if callable(contract_hook) else None
     result = _save_role_pretrained(
         role=role,
         base_model_path=base_model_path,
         output_dir=output_dir,
         overwrite=overwrite,
         model=model,
+        inference_contract=inference_contract,
     )
     logger.info("Export complete: %s", result)
 
@@ -667,6 +689,14 @@ def main() -> None:
               "the exported directory to catch key-mapping bugs "
               "immediately."),
     )
+    parser.add_argument(
+        "--base-model-revision",
+        type=str,
+        default=None,
+        help=("hf://<repo id>@<revision> of the base MiniMax-H3 snapshot that a "
+              "FastH3 PDD student export's fastvideo_inference.json names; "
+              "overrides training.checkpoint.inference_base_model_revision."),
+    )
     args = parser.parse_args(sys.argv[1:])
 
     convert(
@@ -676,6 +706,7 @@ def main() -> None:
         role=args.role,
         overwrite=args.overwrite,
         verify=args.verify,
+        base_model_revision=args.base_model_revision,
     )
 
 

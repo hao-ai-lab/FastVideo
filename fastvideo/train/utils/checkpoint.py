@@ -497,6 +497,25 @@ class CheckpointManager:
         base_model_path = self.method.inference_checkpoint_base_model_path(role)
         checkpoint_dir = self._inference_checkpoint_dir(step)
 
+        # A method may declare the sampling contract its export must carry
+        # (FastH3 PDD students). Rank zero resolves it from checkpoint files;
+        # every rank then fails together when it cannot be built.
+        inference_contract: dict[str, Any] | None = None
+        contract_error: str | None = None
+        contract_hook = getattr(self.method, "inference_checkpoint_contract", None)
+        if callable(contract_hook):
+            if _rank() == 0:
+                try:
+                    inference_contract = contract_hook(role)
+                except Exception as error:
+                    contract_error = f"{type(error).__name__}: {error}"
+            if dist.is_available() and dist.is_initialized():
+                contract_payload: list[Any] = [inference_contract, contract_error]
+                dist.broadcast_object_list(contract_payload, src=0)
+                inference_contract, contract_error = contract_payload
+            if contract_error is not None:
+                raise RuntimeError(f"Cannot build the inference contract at step {step}: {contract_error}")
+
         already_complete: bool | None = None
         existing_error: str | None = None
         if _rank() == 0:
@@ -524,6 +543,7 @@ class CheckpointManager:
                     expected_config_overrides=config_overrides,
                     expected_role=role,
                     expected_module=module_name,
+                    expected_inference_contract=inference_contract,
                 )
                 already_complete = existing is not None
             except Exception as error:
@@ -594,11 +614,13 @@ class CheckpointManager:
                     dtype=str(self.config.inference_dtype),
                     step=step,
                     raw_config=self._raw_config,
+                    inference_contract=inference_contract,
                 )
                 if self.config.inference_checkpoints_total_limit:
                     validated = validate_complete_inference_checkpoint(checkpoint_dir,
                                                                        step=step,
-                                                                       expected_shape_override=shape_hook)
+                                                                       expected_shape_override=shape_hook,
+                                                                       expected_inference_contract=inference_contract)
                     if validated is None:
                         raise RuntimeError("Inference exporter did not publish a complete replacement")
             except Exception as error:  # propagate the rank-zero failure collectively

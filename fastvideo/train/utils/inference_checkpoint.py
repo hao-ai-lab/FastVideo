@@ -35,6 +35,8 @@ from torch.distributed.checkpoint import FileSystemReader
 
 DEFAULT_MAX_SHARD_SIZE_BYTES = 5 * 1024**3
 _FORMAT_VERSION = 1
+# The sampling contract a model may declare for its export (FastH3 PDD students).
+INFERENCE_CONTRACT_FILE = "fastvideo_inference.json"
 _ALLOWED_NATIVE_EXTRA_KEYS = (re.compile(r"(?:^|\.)attn\.to_gate_compress\.weight$"), )
 _CHECKPOINT_WRAPPER_SEGMENT = "_checkpoint_wrapped_module"
 _SAFETENSORS_FLOAT_DTYPES = frozenset({"F64", "F32", "F16", "BF16", "F8_E4M3", "F8_E5M2"})
@@ -161,12 +163,15 @@ def validate_complete_inference_checkpoint(
     expected_config_overrides: Mapping[str, Any] | None = None,
     expected_role: str | None = None,
     expected_module: str | None = None,
+    expected_inference_contract: Mapping[str, Any] | None = None,
 ) -> Path | None:
     """Validate a published inference checkpoint without loading its tensors.
 
     ``expected_shape_override`` maps a base-checkpoint tensor shape to the
     shape the exported model is expected to carry (PDD-widened heads); without
     it every exported tensor must match the base transformer exactly.
+    ``expected_inference_contract`` requires the checkpoint's own
+    ``fastvideo_inference.json`` to hold exactly that contract.
     """
     if not (path.exists() or path.is_symlink()):
         return None
@@ -232,6 +237,16 @@ def validate_complete_inference_checkpoint(
         if mismatches:
             raise InferenceCheckpointExportError(
                 f"Inference checkpoint component config overrides do not match: {mismatches}")
+    if expected_inference_contract is not None:
+        contract_path = path / INFERENCE_CONTRACT_FILE
+        if contract_path.is_symlink():
+            raise InferenceCheckpointExportError(f"Inference contract must belong to this checkpoint: {contract_path}")
+        try:
+            contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InferenceCheckpointExportError(f"Missing or invalid inference contract: {contract_path}") from exc
+        if contract != dict(expected_inference_contract):
+            raise InferenceCheckpointExportError(f"Inference contract differs from the requested one: {contract_path}")
     if not any((path / name).is_file() for name in ("model_index.json", "modular_model_index.json")):
         raise InferenceCheckpointExportError(f"Inference checkpoint is missing its model index: {path}")
     try:
@@ -616,7 +631,7 @@ def _prepare_model_layout(temp_dir: Path, base_model_dir: Path, module_name: str
 
     # Deployment receipts describe this export, not its initialization source.
     # Linking them here would let the later write corrupt a warm-start checkpoint.
-    reserved = {module_name, "metadata.json", ".complete", "fastvideo_inference.json", "export_manifest.json"}
+    reserved = {module_name, "metadata.json", ".complete", INFERENCE_CONTRACT_FILE, "export_manifest.json"}
     for entry in sorted(base_model_dir.iterdir(), key=lambda item: item.name):
         if entry.name in reserved or entry.name == ".cache" or entry.name.startswith(".git"):
             continue
@@ -634,24 +649,36 @@ def _apply_config_overrides(config_path: Path, overrides: Mapping[str, Any]) -> 
     if not isinstance(config, dict):
         raise InferenceCheckpointExportError(f"Exported component config must be a JSON object: {config_path}")
     config.update(overrides)
-    # Export layouts may hard-link the base config. Replace this directory
-    # entry instead of mutating the initialization checkpoint's inode.
+    replace_json_file(config_path, config)
+
+
+def replace_json_file(path: Path, payload: Mapping[str, Any]) -> None:
+    """Atomically publish *payload* as the JSON file at *path*.
+
+    Export layouts may hard-link or symlink base files. Replace this directory
+    entry instead of mutating the initialization checkpoint's inode.
+    """
     with tempfile.NamedTemporaryFile(mode="w",
                                      encoding="utf-8",
-                                     dir=config_path.parent,
-                                     prefix=".config-",
+                                     dir=path.parent,
+                                     prefix=f".{path.stem}-",
                                      suffix=".tmp",
                                      delete=False) as stream:
         temporary = Path(stream.name)
         try:
-            stream.write(json.dumps(config, indent=2, sort_keys=True) + "\n")
+            stream.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
             stream.flush()
+            # NamedTemporaryFile is owner-only; publish the file with the
+            # mode an ordinary write under this process's umask would give it.
+            umask = os.umask(0)
+            os.umask(umask)
+            os.fchmod(stream.fileno(), 0o666 & ~umask)
             os.fsync(stream.fileno())
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise
     try:
-        os.replace(temporary, config_path)
+        os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -747,13 +774,15 @@ def export_inference_checkpoint_from_dcp(
     dtype: torch.dtype | str = torch.bfloat16,
     max_shard_size_bytes: int = DEFAULT_MAX_SHARD_SIZE_BYTES,
     raw_config: Mapping[str, Any] | None = None,
+    inference_contract: Mapping[str, Any] | None = None,
 ) -> Path:
     """Export one role/module-only DCP as an immutable inference checkpoint.
 
     ``CheckpointManager`` is expected to call this function on rank 0 after a
     collective model-only DCP save has completed. ``dcp_checkpoint`` may name
     that DCP directory directly or its parent containing ``dcp/``. The source
-    is never modified or removed.
+    is never modified or removed. ``inference_contract`` is published as the
+    export's ``fastvideo_inference.json``.
 
     Floating tensors are cast into ``dtype`` in independent CPU buffers;
     integer and boolean tensors retain their source dtype. Parameter names are
@@ -793,6 +822,7 @@ def export_inference_checkpoint_from_dcp(
         expected_config_overrides=config_overrides,
         expected_role=role,
         expected_module=module_name,
+        expected_inference_contract=inference_contract,
     )
     if existing is not None:
         return existing
@@ -858,6 +888,8 @@ def export_inference_checkpoint_from_dcp(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        if inference_contract is not None:
+            replace_json_file(temp_dir / INFERENCE_CONTRACT_FILE, inference_contract)
         # Written last inside the private temp directory. The subsequent
         # same-filesystem rename publishes the complete tree in one operation.
         (temp_dir / ".complete").write_text("complete\n", encoding="utf-8")
@@ -869,6 +901,7 @@ def export_inference_checkpoint_from_dcp(
             expected_config_overrides=config_overrides,
             expected_role=role,
             expected_module=module_name,
+            expected_inference_contract=inference_contract,
         )
         try:
             temp_dir.rename(final_dir)
@@ -885,6 +918,7 @@ def export_inference_checkpoint_from_dcp(
         expected_config_overrides=config_overrides,
         expected_role=role,
         expected_module=module_name,
+        expected_inference_contract=inference_contract,
     )
     if validated is None:
         raise InferenceCheckpointExportError(f"Published inference checkpoint disappeared: {final_dir}")
@@ -901,6 +935,7 @@ def export_inference_checkpoint(
     dtype: torch.dtype | str,
     step: int,
     raw_config: Mapping[str, Any] | None = None,
+    inference_contract: Mapping[str, Any] | None = None,
 ) -> Path:
     """CheckpointManager adapter for one deployable role/module checkpoint.
 
@@ -938,14 +973,17 @@ def export_inference_checkpoint(
         module_name=module_name,
         dtype=dtype,
         raw_config=raw_config,
+        inference_contract=inference_contract,
     )
 
 
 __all__ = [
     "DEFAULT_MAX_SHARD_SIZE_BYTES",
+    "INFERENCE_CONTRACT_FILE",
     "InferenceCheckpointExportError",
     "UnsupportedMergedReverseMappingError",
     "export_inference_checkpoint",
     "export_inference_checkpoint_from_dcp",
+    "replace_json_file",
     "validate_complete_inference_checkpoint",
 ]

@@ -194,6 +194,10 @@ class PDDMethodMixin:
     pdd_steps: int
     _pdd_carry: TrajectoryCarry | None
 
+    # Distillation learning rates move the widened heads and norm gains by
+    # less than half a bf16 ulp; keep sharded FP32 masters.
+    requires_fp32_master_weights = True
+
     def _init_pdd(self, *, carried: bool, update_interval: int = 1) -> None:
         """Bind the PDD contract; with ``carried`` also build the trajectory carry.
 
@@ -236,7 +240,7 @@ class PDDMethodMixin:
         for num_steps in steps:
             if int(num_steps) in configured:
                 logger.warning(
-                    "student_grid_indices[%s] shapes training only; validation samples the balanced "
+                    "student_grid_indices[%s] shapes training only; validation and exports sample the balanced "
                     "%s-block partition", int(num_steps), int(num_steps))
             indices = pdd_student_step_indices(self.pdd_steps, int(num_steps), device=torch.device("cpu"))
             widest = int((indices[1:] - indices[:-1]).max())
@@ -300,6 +304,20 @@ class PDDMethodMixin:
             configured_indices=self.pdd_config.student_grid_indices,
             device=device,
         )
+
+    def inference_checkpoint_contract(self, role: str = "student") -> dict[str, Any] | None:
+        """The sampling contract a deployable export of *role* carries, or None.
+
+        A student export samples the balanced partition of its highest-NFE
+        grid (``pdd_steps / block_size_min`` fused blocks), as validation does
+        for the same step count; ``student_grid_indices`` shape training only.
+        """
+        contract = getattr(self.student, "inference_contract", None)
+        if role != "student" or not callable(contract):
+            return None
+        num_blocks = carried_step_count(self.pdd_steps, self.pdd_config.block_size_min)
+        indices = pdd_student_step_indices(self.pdd_steps, num_blocks, device=torch.device("cpu"))
+        return contract(pdd_step_indices=[int(index) for index in indices.tolist()])
 
     # -- teacher ----------------------------------------------------------------
 
