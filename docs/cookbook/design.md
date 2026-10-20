@@ -87,9 +87,9 @@ CommonJS exports:
 | `resolveConfig(catalog, edits = {})` | `config`, `yaml`, `argv`, `command`, `clientRequest`, `clientCommand`, optional `websocketUrl` |
 | `sampleRequest(metadata, config)` | `{body, command}` and optional `websocketUrl` for a native serving baseline |
 | `estimateMemory({config, workload, model, hardware, memoryBudgetGiB, partitionId, hostMemoryGb, headroom})` | Analytical one-device estimate with separate device and host budgets |
-| `assessCapacity({model, example, hardware, config, request, env, revisions, ...})` | `{status, evidence, measured, notes}` combining analysis and applicable evidence |
+| `assessCapacity({model, example, hardware, config, request, env, revisions, ...})` | `{status, basis, analytical, evidence, compatibility, notes}` combining analysis and applicable evidence |
 | `matchEvidence({model, example, config, request, env, hardware, revisions})` | `{applicable, unverified, rejected}` measured runs |
-| `recommendCapacity({models, hardware, task, request, env, revisions, limit})` | Measured/analytical fits with explicit unknown results |
+| `recommendCapacity({models, hardware, task, request, env, revisions, limit})` | Candidates with model/example, assessment, reasons, and lower-memory alternatives; unknown remains explicit |
 | `resolveExecution({model, config, env})` | Effective topology, offload, precision, attention, and unsupported switches |
 | `loadCapacityIndex(url, options)` | Promise of the model-summary index and resolved source URL |
 | `loadCapacityModel(index, id, options)` | Promise of one expanded model, examples, and reference runs |

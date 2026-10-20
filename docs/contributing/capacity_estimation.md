@@ -281,7 +281,7 @@ reported in `memory.budgetSource` and the result notes.
 
 `family` groups exact `variant` records, so board, form-factor, and capacity
 differences stay separate entries. `partitions` list selectable MIG/vGPU-style
-allocations; selecting one never inherits full-card capacity. `gpu_count`
+allocations; selecting one never silently inherits full-card capacity. `gpu_count`
 describes the device record and does not authorize summing GPUs into one pool.
 `host_memory` is host RAM for CPU offload, separate from dedicated VRAM and from
 unified memory. `aliases` preserve old links and search names; canonical IDs stay
@@ -328,6 +328,10 @@ Values keep authored aliases, normalized decimal `memory_gb`, optional
 `usable_memory_gb` / `host_memory_gb`, and normalized partition capacities.
 
 ## Optional successful-run evidence
+
+HTTP/OpenAPI schema compatibility is a separate contract; see
+[serving documentation](serving_documentation_contract.md). A capacity estimate
+and a completed generation do not establish HTTP client compatibility.
 
 Add records inline under the manifest's `capacity.reference_runs`. One completed
 generation is useful; benchmarking every configuration is unnecessary. Follow the

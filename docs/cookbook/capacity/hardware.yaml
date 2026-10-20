@@ -138,22 +138,24 @@ hardware:
     backend: cuda
     partitionable: true
     partitions:
-      - id: 1g.5gb
-        label: 1g.5gb
-        memory: { value: 5, unit: GB }
-      - id: 2g.10gb
-        label: 2g.10gb
+      - id: 1g.10gb
+        label: 1g.10gb
         memory: { value: 10, unit: GB }
-      - id: 3g.20gb
-        label: 3g.20gb
+      - id: 2g.20gb
+        label: 2g.20gb
         memory: { value: 20, unit: GB }
-      - id: 7g.40gb
-        label: 7g.40gb
+      - id: 3g.40gb
+        label: 3g.40gb
         memory: { value: 40, unit: GB }
+      - id: 7g.80gb
+        label: 7g.80gb
+        memory: { value: 80, unit: GB }
     supported_dtypes: [fp32, fp16, bf16]
     aliases: [a100]
     sources:
-      - url: https://www.nvidia.com/en-us/data-center/a100/
+      - url: https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/a100-80gb-datasheet-update-nvidia-us-1521051-r2-web.pdf
+        checked: 2026-10-19
+      - url: https://docs.nvidia.com/datacenter/tesla/mig-user-guide/latest/a100.html
         checked: 2026-10-19
 
   l40s-48gb:

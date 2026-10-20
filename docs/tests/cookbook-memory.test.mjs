@@ -17,7 +17,6 @@ const GIB = 1024 ** 3;
 const NO_OFFLOAD = { dit: false, dit_layerwise: false, text_encoder: false, vae: false };
 const FASTWAN_OFFLOAD = { dit: false, dit_layerwise: true, text_encoder: true, vae: false };
 
-/** Wan2.1 T2V 1.3B: correct ordinary-Wan transformer and UMT5-XXL counts, not FastWan's VSA model. */
 const DIT = 1_418_996_800;
 const DIT_BLOCKS = 1_393_221_120;
 const TEXT = 5_680_910_336;
@@ -198,6 +197,75 @@ test("startup, encoding, denoising and decoding keep only resident weights", () 
   close(result.requiredGiB, result.peakGiB * (1 + DEFAULT_HEADROOM.fraction) + DEFAULT_HEADROOM.reserveGiB);
 });
 
+test("layerwise resident blocks stay on the device outside denoising", () => {
+  const result = estimate({ env: { FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS: "4" } });
+  const outside = gib(DIT - DIT_BLOCKS, "bf16");
+  const blocks = gib(DIT_BLOCKS, "bf16");
+  assertWeights(result, {
+    encoding: gib(TEXT, "fp32") + outside + (blocks * 4) / 30 + gib(VAE, "fp32"),
+    denoising: outside + (blocks * 6) / 30 + gib(VAE, "fp32"),
+    decoding: outside + (blocks * 4) / 30 + gib(VAE, "fp32"),
+  });
+  assert.equal(result.execution.layerwise_resident_blocks, 4);
+});
+
+test("unified memory disables native CPU offload before counting weights", () => {
+  const unified = {
+    id: "unified",
+    name: "Fixture unified device",
+    memory: { type: "unified", nominal: { value: 128, unit: "GB" } },
+    backend: "cuda",
+    supported_dtypes: ["fp32", "fp16", "bf16"],
+  };
+  const result = estimate({
+    hardware: unified,
+    config: config({
+      offload: {
+        dit: true,
+        dit_layerwise: true,
+        text_encoder: true,
+        image_encoder: true,
+        vae: true,
+        lazy_module_load: false,
+      },
+    }),
+  });
+  assert.equal(result.status, "fits");
+  assert.deepEqual(result.execution.offload, {
+    dit: false,
+    dit_layerwise: false,
+    text_encoder: false,
+    image_encoder: false,
+    vae: false,
+    lazy_module_load: false,
+  });
+  assertWeights(result, {
+    startup: gib(DIT, "bf16") + gib(TEXT, "fp32") + gib(VAE, "fp32"),
+    encoding: gib(DIT, "bf16") + gib(TEXT, "fp32") + gib(VAE, "fp32"),
+    denoising: gib(DIT, "bf16") + gib(TEXT, "fp32") + gib(VAE, "fp32"),
+    decoding: gib(DIT, "bf16") + gib(TEXT, "fp32") + gib(VAE, "fp32"),
+  });
+  assert.ok(result.notes.some((note) => /offload is disabled/i.test(note)));
+});
+
+test("a disabled VAE feature cache returns unknown", () => {
+  const result = estimate({
+    config: config({ pipeline: { experimental: { "vae_config.use_feature_cache": false } } }),
+  });
+  assert.equal(result.status, "unknown");
+  assert.match(result.reason, /feature caching/i);
+});
+
+test("layerwise offload requires block counts", () => {
+  const model = wanModel((item) => {
+    delete item.components.transformer.block_count;
+    delete item.components.transformer.block_parameter_count;
+  });
+  const result = estimate({ model });
+  assert.equal(result.status, "unknown");
+  assert.match(result.reason, /block counts/i);
+});
+
 test("a 24 GB device does not fit the fp32 UMT5 encoding phase", () => {
   const result = estimate({ hardware: hardware({ memory_gb: 24 }) });
   assert.equal(result.status, "exceeds");
@@ -205,14 +273,14 @@ test("a 24 GB device does not fit the fp32 UMT5 encoding phase", () => {
   close(result.capacityGiB, 24e9 / GIB);
 });
 
-test("whole-model DiT offload frees the transformer outside denoising", () => {
+test("whole-model DiT offload keeps the transformer on the device in every phase", () => {
   const result = estimate({
     config: config({ offload: { dit: true, dit_layerwise: false, text_encoder: true, vae: false } }),
   });
   assertWeights(result, {
-    encoding: gib(TEXT, "fp32") + gib(VAE, "fp32"),
+    encoding: gib(DIT, "bf16") + gib(TEXT, "fp32") + gib(VAE, "fp32"),
     denoising: gib(DIT, "bf16") + gib(VAE, "fp32"),
-    decoding: gib(VAE, "fp32"),
+    decoding: gib(DIT, "bf16") + gib(VAE, "fp32"),
   });
 });
 
@@ -402,6 +470,74 @@ test("measured evidence on the full card does not apply to a selected partition"
   assert.equal(partitionedRun.status, "exceeds");
 });
 
+test("matchEvidence uses the example environment when the caller omits env", () => {
+  const base = config({ engine: { compile: { enabled: false } } });
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const model = wanModel((item) => (item.reference_runs = [referenceRun(base)]));
+  const match = matchEvidence({
+    model,
+    example: example(base, env),
+    config: base,
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(match.applicable.length, 1);
+});
+
+test("a request-only measurement cannot establish an overall device fit", () => {
+  const base = config({ engine: { compile: { enabled: false } } });
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const run = referenceRun(base, { peak: 20 });
+  delete run.memory.per_gpu[0].startup_peak;
+  const model = wanModel((item) => (item.reference_runs = [run]));
+  const result = assessCapacity({
+    model,
+    example: example(base, env),
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+  });
+  assert.equal(result.basis, "measured");
+  assert.equal(result.status, "unknown");
+  assert.match(result.reason, /Startup peak/i);
+});
+
+test("a measured device fit does not override a host-memory failure", () => {
+  const base = config({ engine: { compile: { enabled: false } } });
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const model = wanModel((item) => (item.reference_runs = [referenceRun(base, { peak: 20 })]));
+  const result = assessCapacity({
+    model,
+    example: example(base, env),
+    hardware: hardware({ id: "test-80gb" }),
+    revisions: REVISIONS,
+    hostMemoryGb: 8,
+  });
+  assert.equal(result.basis, "measured");
+  assert.equal(result.deviceStatus, "fits");
+  assert.equal(result.status, "exceeds");
+  assert.equal(result.host.status, "exceeds");
+});
+
+test("measured fits use every applicable run rather than catalog order", () => {
+  const base = config({ engine: { compile: { enabled: false } } });
+  const env = { FASTVIDEO_ATTENTION_BACKEND: "FLASH_ATTN" };
+  const first = referenceRun(base, { peak: 20 });
+  const second = referenceRun(base, { peak: 30 });
+  second.id = "run-2";
+  const model = wanModel((item) => (item.reference_runs = [first, second]));
+  const result = assessCapacity({
+    model,
+    example: example(base, env),
+    hardware: hardware({ id: "test-80gb", memory_gb: 25 }),
+    revisions: REVISIONS,
+  });
+  assert.equal(result.basis, "measured");
+  assert.equal(result.status, "exceeds");
+  close(result.peakGiB, 30);
+  assert.equal(result.run, "run-2");
+  assert.deepEqual(result.runs, ["run-1", "run-2"]);
+});
+
 test("unified memory uses an explicit application budget and never nominal capacity", () => {
   const spark = {
     id: "spark-128",
@@ -441,6 +577,45 @@ test("a selected partition never inherits the full device capacity", () => {
   assert.equal(estimate({ hardware: partitioned, partitionId: "missing" }).status, "unknown");
 });
 
+test("a selected partition is capped by the smaller application budget", () => {
+  const partitioned = hardware({
+    id: "h100",
+    memory_gb: 80,
+    partitions: [{ id: "3g.40gb", label: "3g.40gb", memory: { value: 40, unit: "GB" } }],
+  });
+  const result = estimate({ hardware: partitioned, partitionId: "3g.40gb", memoryBudgetGiB: 16 });
+  assert.equal(result.capacityGiB, 16);
+  assert.equal(result.memory.budgetGiB, 16);
+  assert.match(result.notes.join(" "), /smaller than/i);
+  const allocation = estimate({ hardware: hardware({ memory_gb: 80 }), allocationMemoryGb: 40, memoryBudgetGiB: 16 });
+  assert.equal(allocation.capacityGiB, 16);
+  assert.equal(allocation.memory.partition, null);
+});
+
+test("custom hardware normalizes authored partition, nominal and host quantities", () => {
+  const custom = {
+    id: "custom",
+    name: "Custom partitioned device",
+    custom: true,
+    memory: { type: "dedicated", nominal: { value: 80, unit: "GB" } },
+    partitions: [{ id: "slice", label: "slice", memory: { value: 20, unit: "GB" } }],
+    host_memory: { value: 64, unit: "GB" },
+    backend: "cuda",
+    supported_dtypes: ["fp32", "fp16", "bf16"],
+  };
+  const result = estimate({ hardware: custom, partitionId: "slice" });
+  close(result.capacityGiB, (20 * 1e9) / GIB);
+  close(result.host.capacityGiB, (64 * 1e9) / GIB);
+  assert.notEqual(result.status, "unknown");
+  assert.equal(
+    estimate({
+      hardware: { ...custom, partitions: [{ id: "bad", label: "bad" }] },
+      partitionId: "bad",
+    }).status,
+    "unknown",
+  );
+});
+
 test("custom hardware uses an explicit memory type and capacity", () => {
   const custom = {
     id: "custom",
@@ -475,6 +650,11 @@ test("host memory for offload is separate from device memory", () => {
   const sufficient = estimate({ hardware: hardware({ memory_gb: 80, host_memory_gb: 64 }) });
   assert.equal(sufficient.status, "fits");
   assert.equal(sufficient.host.status, "fits");
+  const override = estimate({ hardware: hardware({ memory_gb: 80, host_memory_gb: 8 }), hostMemoryGb: 24 });
+  const authored = estimate({ hardware: hardware({ memory_gb: 80, host_memory_gb: 24 }) });
+  close(override.host.capacityGiB, (24 * 1e9) / GIB);
+  close(override.host.capacityGiB, authored.host.capacityGiB);
+  assert.equal(override.host.status, "exceeds");
   const unknown = estimate({ hardware: hardware({ memory_gb: 80 }) });
   assert.equal(unknown.status, "fits");
   assert.equal(unknown.host.status, "unknown");
@@ -643,6 +823,24 @@ test("a lower-memory alternative reports concrete native edits and their new sta
     assert.ok(
       alternative.changes.every(
         (change) => change.path.startsWith("default_request.sampling.") || change.path === "generator.engine.offload",
+      ),
+    );
+    assert.equal(typeof alternative.required_gib, "number");
+  }
+
+  const request = { sampling: { num_frames: 121, height: 720, width: 1280 } };
+  const [requestCandidate] = recommendCapacity({
+    models: [model],
+    hardware: hardware({ id: "test-24gb", memory_gb: 24 }),
+    task: "t2v",
+    request,
+  });
+  assert.equal(requestCandidate.assessment.status, "exceeds");
+  assert.ok(requestCandidate.lower_memory.length > 0);
+  for (const alternative of requestCandidate.lower_memory) {
+    assert.ok(
+      alternative.changes.every(
+        (change) => change.path.startsWith("request.sampling.") || change.path === "generator.engine.offload",
       ),
     );
     assert.equal(typeof alternative.required_gib, "number");

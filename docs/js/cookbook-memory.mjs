@@ -177,6 +177,8 @@ export function resolveExecution({ model, config, env = {} }) {
   const offload = { ...OFFLOAD_DEFAULTS, ...engine.offload };
   const quantization = isObject(engine.quantization) ? engine.quantization : {};
   const attentionBackend = typeof env.FASTVIDEO_ATTENTION_BACKEND === "string" ? env.FASTVIDEO_ATTENTION_BACKEND : null;
+  const residentBlocks = Number.parseInt(env.FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS ?? "0", 10);
+  const layerwiseResidentBlocks = Number.isInteger(residentBlocks) && residentBlocks >= 0 ? residentBlocks : 0;
   const vsa =
     (attentionBackend && attentionBackend.includes("SPARSE")) ||
     Object.keys(experimental).some((key) => key.startsWith("VSA_")) ||
@@ -195,6 +197,8 @@ export function resolveExecution({ model, config, env = {} }) {
       engine.compile?.vae_enabled === true,
     quantization,
     attentionBackend,
+    layerwise_resident_blocks: layerwiseResidentBlocks,
+    vae_feature_cache: experimental["vae_config.use_feature_cache"] !== false,
     vsa,
     vae_tiling: typeof pipeline.vae_tiling === "boolean" ? pipeline.vae_tiling : (defaults.vae_tiling ?? false),
     vae_sp: pipeline.vae_sp === true,
@@ -245,11 +249,12 @@ function residentBytes(component, phase, execution, bytes) {
     const blocks = component.block_parameter_count * bytes.perWeight;
     const outside = full - blocks;
     if (execution.offload.dit_layerwise) {
-      if (phase !== "denoising") return outside;
-      const share = component.block_count ? Math.min(1, STREAMED_BLOCKS / component.block_count) : 1;
+      const resident = execution.layerwise_resident_blocks ?? 0;
+      const share = component.block_count
+        ? Math.min(1, (phase === "denoising" ? resident + STREAMED_BLOCKS : resident) / component.block_count)
+        : 1;
       return outside + blocks * share;
     }
-    if (execution.offload.dit) return phase === "denoising" ? full : 0;
     return full;
   }
   const offloaded = execution.offload[offloadFlag(component.role)];
@@ -308,7 +313,8 @@ function quantityGiB(quantity) {
 /**
  * Normalize catalog or custom hardware. Catalog capacities are nominal; a dedicated
  * device uses its nominal (or selected partition) capacity, while a unified device
- * requires an explicit application budget and never exposes system memory as VRAM.
+ * uses an explicit application budget or a labeled 75% default and never exposes
+ * system memory as dedicated VRAM.
  */
 export function normalizeHardware(hardware, { memoryBudgetGiB, allocationMemoryGb, partitionId } = {}) {
   if (!isObject(hardware)) return null;
@@ -326,7 +332,10 @@ export function normalizeHardware(hardware, { memoryBudgetGiB, allocationMemoryG
   if (partitionId !== undefined) {
     partition = (hardware.partitions ?? []).find((item) => item.id === partitionId);
     if (!partition) return null;
-    allocationGiB = Number.isFinite(partition.memory_gb) ? (partition.memory_gb * 1e9) / GIB : null;
+    allocationGiB =
+      quantityGiB(partition.memory) ??
+      (Number.isFinite(partition.memory_gb) ? (partition.memory_gb * 1e9) / GIB : null);
+    if (!(allocationGiB > 0)) return null;
   }
   const catalogUsableGiB = memory?.usable
     ? quantityGiB(memory.usable)
@@ -341,8 +350,10 @@ export function normalizeHardware(hardware, { memoryBudgetGiB, allocationMemoryG
   if (budgetGiB !== null && !(budgetGiB > 0)) return null;
   if (budgetGiB !== null && budgetGiB > nominalGiB) return null;
   if (allocationGiB !== null && allocationGiB > nominalGiB) return null;
-  const hostGiB = Number.isFinite(hardware.host_memory_gb) ? (hardware.host_memory_gb * 1e9) / GIB : null;
-  const capacity = allocationGiB ?? budgetGiB ?? nominalGiB;
+  const hostGiB =
+    quantityGiB(hardware.host_memory) ??
+    (Number.isFinite(hardware.host_memory_gb) ? (hardware.host_memory_gb * 1e9) / GIB : null);
+  const capacity = Math.min(allocationGiB ?? nominalGiB, budgetGiB ?? nominalGiB);
   return {
     ...hardware,
     id: hardware.id ?? (hardware.custom ? "custom" : "unknown"),
@@ -370,6 +381,21 @@ export function normalizeHardware(hardware, { memoryBudgetGiB, allocationMemoryG
   };
 }
 
+function applyUnifiedMemoryPolicy(execution, device) {
+  if (device?.memoryType !== "unified") return execution;
+  return {
+    ...execution,
+    offload: {
+      ...execution.offload,
+      dit: false,
+      dit_layerwise: false,
+      text_encoder: false,
+      image_encoder: false,
+      vae: false,
+    },
+  };
+}
+
 function checkCoverage({ workload, model, device, execution, sampling, components }) {
   const unknown = (reason) => ({ status: "unknown", reason });
   if (!device) return unknown("Select a catalogued hardware variant or enter a custom device with capacity.");
@@ -387,6 +413,9 @@ function checkCoverage({ workload, model, device, execution, sampling, component
   if (execution.vsa) return unknown("VSA workspace is not modeled; a successful run alone is not a fit.");
   if (execution.compile) return unknown("torch.compile buffers are not modeled yet.");
   if (execution.vae_sp) return unknown("Parallel VAE decode is not modeled yet.");
+  if (execution.vae_feature_cache === false) {
+    return unknown("VAE feature caching is disabled; the full-clip decode path is not modeled.");
+  }
   if (execution.quantization.transformer_quant) {
     return unknown("Transformer quantization needs an explicit quantized parameter count.");
   }
@@ -426,6 +455,16 @@ function checkCoverage({ workload, model, device, execution, sampling, component
         !(isCount(component.block_count) && isCount(component.block_parameter_count))),
   );
   if (uncounted) return unknown(`The ${uncounted.role} parameter counts are incomplete.`);
+  if (execution.offload.dit_layerwise) {
+    const missingBlocks = components.find(
+      (component) =>
+        component.role.startsWith("transformer") &&
+        (!isCount(component.block_count) || !isCount(component.block_parameter_count)),
+    );
+    if (missingBlocks) {
+      return unknown(`Layerwise offload needs block counts for ${missingBlocks.role}.`);
+    }
+  }
   const unsized = components.find((component) => {
     const storage = componentPrecision(component, execution);
     const activation = componentActivationPrecision(component, execution);
@@ -479,10 +518,11 @@ export function estimateMemory({
   partitionId,
   hostMemoryGb,
 }) {
-  const execution = resolveExecution({ model, config, env });
+  const resolvedExecution = resolveExecution({ model, config, env });
   const sampling = request?.sampling ?? config.default_request?.sampling ?? {};
   const components = normalizeComponents(model);
   const device = normalizeHardware(hardware, { memoryBudgetGiB, allocationMemoryGb, partitionId });
+  const execution = applyUnifiedMemoryPolicy(resolvedExecution, device);
   const gap = checkCoverage({
     workload: workload ?? execution.workload,
     model,
@@ -529,7 +569,11 @@ export function estimateMemory({
   const capacity = device.capacityGiB;
   const hostRequiredGiB = device.memoryType === "unified" ? 0 : hostRequirement(components, bytes, execution);
   const hostCapacityGiB =
-    device.memoryType === "unified" ? null : Number.isFinite(hostMemoryGb) ? hostMemoryGb : device.hostGiB;
+    device.memoryType === "unified"
+      ? null
+      : Number.isFinite(hostMemoryGb)
+        ? (hostMemoryGb * 1e9) / GIB
+        : device.hostGiB;
   const host =
     device.memoryType === "unified"
       ? { requiredGiB: 0, capacityGiB: null, status: "shared" }
@@ -558,9 +602,16 @@ export function estimateMemory({
       );
     }
   }
+  if (device.allocationGiB !== null && device.budgetGiB !== null && device.budgetGiB < device.allocationGiB) {
+    notes.push(
+      `The ${device.budgetGiB.toFixed(1)} GiB application budget is smaller than the ${device.allocationGiB.toFixed(1)} GiB allocation.`,
+    );
+  }
   if (device.partition) {
     notes.push(
-      `Using the ${device.partition.label} partition; the full ${device.nominalGiB.toFixed(1)} GiB is not available.`,
+      device.allocationGiB < device.nominalGiB
+        ? `Using the ${device.partition.label} partition; the full ${device.nominalGiB.toFixed(1)} GiB is not available.`
+        : `Using the ${device.partition.label} partition, which spans the full ${device.nominalGiB.toFixed(1)} GiB.`,
     );
   } else if (device.allocationGiB !== null) {
     notes.push(
@@ -572,6 +623,12 @@ export function estimateMemory({
     notes.push("Weight-format support is not cataloged; the estimate assumes fp32, fp16, or bf16 storage.");
   }
   if (execution.vae_tiling) notes.push("Decode memory assumes untiled VAE decoding; tiling may lower it.");
+  if (
+    device.memoryType === "unified" &&
+    ["dit", "dit_layerwise", "text_encoder", "image_encoder", "vae"].some((key) => resolvedExecution.offload[key])
+  ) {
+    notes.push("CPU offload is disabled on unified memory; selected components share one memory pool.");
+  }
   if (host.status === "unknown") {
     notes.push(`Host memory for offload is not specified; ${hostRequiredGiB.toFixed(1)} GiB is needed.`);
   } else if (host.status === "exceeds") {
@@ -608,6 +665,7 @@ export function estimateMemory({
       precision: execution.precision,
       attentionBackend: execution.attentionBackend,
       vae_tiling: execution.vae_tiling,
+      layerwise_resident_blocks: execution.layerwise_resident_blocks,
     },
     notes,
   };
@@ -733,7 +791,7 @@ function revisionDifferences(recorded = {}, current) {
  * Match completed-run evidence to the current deployment, configuration, request, environment and
  * hardware. Non-memory settings (server port, prompt, seed, fps) do not invalidate evidence.
  */
-export function matchEvidence({ model, example, config, request, env = {}, hardware, revisions } = {}) {
+export function matchEvidence({ model, example, config, request, env = example?.env ?? {}, hardware, revisions } = {}) {
   const applicable = [];
   const unverified = [];
   const rejected = [];
@@ -826,22 +884,50 @@ export function matchEvidence({ model, example, config, request, env = {}, hardw
 function measuredDevicePeak(evidence, device) {
   const capacity = device?.capacityGiB;
   if (!(capacity > 0)) return null;
+  const measurements = [];
   for (const run of evidence.applicable) {
-    if (run.memory?.scope !== "device") continue;
-    const peaks = run.memory.per_gpu.map((gpu) => Math.max(gpu.request_peak, gpu.startup_peak ?? 0));
-    const peak = Math.max(...peaks);
-    return {
-      status: peak <= capacity ? "fits" : "exceeds",
-      basis: "measured",
-      peakGiB: peak,
-      capacityGiB: capacity,
+    if (run.memory?.scope !== "device" || !Array.isArray(run.memory.per_gpu) || !run.memory.per_gpu.length) continue;
+    const startupMeasured = run.memory.per_gpu.every((gpu) => Number.isFinite(gpu.startup_peak));
+    const requestPeak = Math.max(...run.memory.per_gpu.map((gpu) => gpu.request_peak));
+    const peak = Math.max(
+      requestPeak,
+      ...run.memory.per_gpu.map((gpu) => (Number.isFinite(gpu.startup_peak) ? gpu.startup_peak : 0)),
+    );
+    measurements.push({
       run: run.id,
       metric: run.memory.metric,
       scope: run.memory.scope,
       execution: run.execution,
+      requestPeak,
+      peak,
+      startupMeasured,
+    });
+  }
+  if (!measurements.length) return null;
+  const highest = measurements.reduce((best, item) => (item.peak > best.peak ? item : best));
+  const base = {
+    basis: "measured",
+    peakGiB: highest.peak,
+    capacityGiB: capacity,
+    run: highest.run,
+    runs: measurements.map((item) => item.run),
+    metric: highest.metric,
+    scope: highest.scope,
+    execution: highest.execution,
+  };
+  const unmeasured = measurements.filter((item) => !item.startupMeasured);
+  if (unmeasured.length) {
+    return {
+      ...base,
+      status: "unknown",
+      reason: `Startup peak was not measured for ${unmeasured.map((item) => item.run).join(", ")}; a request-only peak cannot establish device fit.`,
     };
   }
-  return null;
+  return {
+    ...base,
+    status: highest.peak <= capacity ? "fits" : "exceeds",
+    spreadGiB: Math.max(...measurements.map((item) => item.peak)) - Math.min(...measurements.map((item) => item.peak)),
+  };
 }
 
 /**
@@ -894,8 +980,14 @@ export function assessCapacity({
       ? "completed_unverified_revision"
       : "unverified";
   if (measured) {
+    const hostFailure = analytical.host?.status === "exceeds";
     return {
       ...measured,
+      status: hostFailure ? "exceeds" : measured.status,
+      deviceStatus: measured.status,
+      reason: hostFailure
+        ? `Host memory for offload exceeds the ${analytical.host.capacityGiB.toFixed(1)} GiB available.`
+        : measured.reason,
       analytical,
       evidence,
       compatibility,
@@ -904,10 +996,13 @@ export function assessCapacity({
       host: analytical.host ?? null,
       notes: [
         `Measured ${measured.metric} (${measured.scope}) on ${analytical.hardware?.name ?? hardware?.name ?? "the selected device"} for run ${measured.run}.`,
+        hostFailure
+          ? `Host memory for offload exceeds the ${analytical.host.capacityGiB.toFixed(1)} GiB available; a device measurement does not establish host fit.`
+          : null,
         analytical.status === "unknown"
           ? `Analytical coverage remains unknown: ${analytical.reason}`
           : "The analytical estimate is retained for comparison.",
-      ],
+      ].filter(Boolean),
     };
   }
   return {
@@ -928,36 +1023,53 @@ export function assessCapacity({
   };
 }
 
-function lowerMemoryConfigs({ model, example, hardware, config, env, revisions, headroom }) {
+function lowerMemoryConfigs({ model, example, hardware, config, request, env, revisions, headroom }) {
   const alternatives = [];
-  const sampling = config.default_request?.sampling ?? {};
-  const assess = (changes, path, value) => {
+  const sampling = request?.sampling ?? config.default_request?.sampling ?? {};
+  const assess = (mutate, edit) => {
     const changed = structuredClone(config);
-    for (const [key, nested] of Object.entries(changes)) {
-      const parts = key.split(".");
-      let cursor = changed;
-      for (const part of parts.slice(0, -1)) cursor = cursor[part] ??= {};
-      cursor[parts.at(-1)] = nested;
-    }
-    const result = assessCapacity({ model, example, hardware, config: changed, env, revisions, headroom });
+    const changedRequest = request ? structuredClone(request) : undefined;
+    mutate(changed, changedRequest);
+    const result = assessCapacity({
+      model,
+      example,
+      hardware,
+      config: changed,
+      request: changedRequest,
+      env,
+      revisions,
+      headroom,
+    });
     alternatives.push({
-      changes: [{ path, value }],
+      changes: [edit],
       status: result.status,
       basis: result.basis ?? null,
       required_gib: result.requiredGiB ?? null,
       reason: result.reason ?? null,
     });
   };
+  const samplingChange = (key, value) =>
+    assess(
+      (changed, changedRequest) => {
+        if (changedRequest) {
+          changedRequest.sampling = { ...sampling, [key]: value };
+        } else {
+          changed.default_request = {
+            ...(changed.default_request ?? {}),
+            sampling: { ...sampling, [key]: value },
+          };
+        }
+      },
+      { path: request ? `request.sampling.${key}` : `default_request.sampling.${key}`, value },
+    );
   if (isCount(sampling.num_frames) && sampling.num_frames > 1) {
     const frames = Math.max(1, Math.floor((sampling.num_frames - 1) / 2) + 1);
-    if (frames < sampling.num_frames)
-      assess({ "default_request.sampling.num_frames": frames }, "default_request.sampling.num_frames", frames);
+    if (frames < sampling.num_frames) samplingChange("num_frames", frames);
   }
   for (const key of ["height", "width"]) {
     if (isCount(sampling[key]) && sampling[key] > 16) {
       const value = Math.max(16, Math.floor(sampling[key] / 2 / 16) * 16);
-      if (value < sampling[key])
-        assess({ [`default_request.sampling.${key}`]: value }, `default_request.sampling.${key}`, value);
+      if (value < sampling[key]) samplingChange(key, value);
     }
   }
   const offload = config.generator?.engine?.offload ?? {};
@@ -966,11 +1078,20 @@ function lowerMemoryConfigs({ model, example, hardware, config, env, revisions, 
     if (offload[key] === false) changes[`generator.engine.offload.${key}`] = true;
   }
   if (Object.keys(changes).length) {
-    assess(changes, "generator.engine.offload", changes);
+    assess(
+      (changed) => {
+        for (const [key, value] of Object.entries(changes)) {
+          const parts = key.split(".");
+          let cursor = changed;
+          for (const part of parts.slice(0, -1)) cursor = cursor[part] ??= {};
+          cursor[parts.at(-1)] = value;
+        }
+      },
+      { path: "generator.engine.offload", value: changes },
+    );
   }
   return alternatives;
 }
-
 /**
  * Rank maintained examples for one hardware/task choice. Ranking uses measured evidence first, then
  * analytical memory fit. No speed or quality ordering is inferred from memory estimates.
@@ -1036,6 +1157,7 @@ export function recommendCapacity({ models, hardware, task, request, env, revisi
             example,
             hardware,
             config: example.base_config,
+            request,
             env: env ?? example.env,
             revisions,
             headroom,

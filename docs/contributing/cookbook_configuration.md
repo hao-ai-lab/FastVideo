@@ -379,9 +379,10 @@ capacity:
 The hardware lookup is versioned and source-backed; see the
 [capacity guide](capacity_estimation.md#hardware-catalog). Dedicated memory uses
 nominal or selected-partition capacity. Unified memory is shared with the CPU and
-OS, so the estimator requires `memoryBudgetGiB` (or a catalogued `memory.usable`
-policy) and never treats nominal system memory as VRAM. `host_memory` and
-`hostMemoryGb` describe separate host RAM for CPU offload; the result reports a
+OS, so the estimator uses `memoryBudgetGiB`, a catalogued `memory.usable` policy,
+or a labeled 75% default, and never treats nominal system memory as VRAM.
+`host_memory` and `hostMemoryGb` describe separate host RAM for CPU offload; the
+result reports a
 host requirement and status independently from device fit. Custom devices use
 the same fields and should set `custom: true`; they are not catalog-verified.
 
@@ -392,16 +393,23 @@ Offload follows the native runtime:
 - An offloaded component leaves the device outside its own phase and is complete
   during it. Layerwise DiT offload and FSDP text-encoder offload instead keep
   the weights outside the blocks plus two blocks.
-- Without FSDP, whole-model DiT offload leaves the transformer on the device.
+- Without FSDP, whole-model DiT offload leaves the transformer on the device in
+  every request phase, not only denoising.
+- `FASTVIDEO_LAYERWISE_RESIDENT_BLOCKS` keeps that many transformer blocks on
+  the device; the estimate counts them in addition to two streamed blocks during
+  denoising and as resident outside it.
+- Unified-memory CUDA devices disable every CPU-offload flag at runtime; the
+  estimate applies that policy instead of subtracting offloaded weights.
 - Packed NVFP4 weights are buffers, so layerwise offload keeps them resident.
 - `lazy_module_load` defers only the components a pipeline lists in
   `_lazy_module_names`. Wan lists none, so the switch changes nothing.
 
 Multiple GPUs, FSDP, VSA, compilation, quantization, lazy loading, image-to-video,
 more than one video per prompt, missing parameter counts, and unsupported
-attention backends return `unknown`. Unified memory without an application
-budget also returns `unknown`. With VAE tiling enabled, a note says the decode
-estimate assumes untiled decoding.
+attention backends return `unknown`. A disabled VAE feature cache also returns
+`unknown` because the full-clip decode path has no rule. Unified memory without
+an application budget uses the labeled 75% default. With VAE tiling enabled, a
+note says the decode estimate assumes untiled decoding.
 
 `WAN_RULE` holds the uncalibrated tensor counts. To calibrate them, run with
 `FASTVIDEO_STAGE_LOGGING=1`: each stage then records `peak_allocated_mb` and
